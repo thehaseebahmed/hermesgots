@@ -11,13 +11,15 @@ import {
   type ModelChoice,
   type Profile,
 } from "@/lib/db"
+import { labelOf } from "@/lib/bot-name"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { byName } from "@/lib/compare"
-import { oneLine } from "@/lib/words"
+import { plainLine } from "@/lib/words"
 import { withDir, type Sort, type SortKey } from "@/lib/sort"
 import { useStoredSort } from "@/lib/use-sort"
 import { isUnread } from "@/lib/session-work"
 import { useReadMarks } from "@/lib/read-marks"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { useWaiting } from "@/lib/waiting"
 import { BOT_CHATS, waitsOnUser } from "@/lib/chat-list"
 
@@ -44,6 +46,8 @@ export function useNow() {
 
 export interface BotSummary {
   bot: Profile
+  /** What the row calls it: the host it answers at (ADR 0148). */
+  label: string
   latest?: Conversation
   /** The newest chat's latest message, cut to a line. */
   preview?: string
@@ -68,7 +72,7 @@ export function useBotSort(): [Sort<BotSort>, (sort: Sort<BotSort>) => void] {
 const active = (summary: BotSummary) => summary.latest?.updatedAt ?? -Infinity
 const byRecent = (a: BotSummary, b: BotSummary) => active(a) - active(b)
 const byAdded = (a: BotSummary, b: BotSummary) => a.bot.createdAt - b.bot.createdAt
-const byBotName = (a: BotSummary, b: BotSummary) => byName(a.bot.name, b.bot.name)
+const byBotName = (a: BotSummary, b: BotSummary) => byName(a.label, b.label)
 
 /**
  * `recent`: the newest chat first, bots without one last. `waiting`: the most chats waiting on the
@@ -117,14 +121,16 @@ export function useBotSummaries(): BotSummary[] | undefined {
         const preview = newestChat?.routine
           ? newestChat.line
           : words
-            ? oneLine(words.content)
+            ? plainLine(words.content)
             : undefined
         return { bot, chats, local, preview }
       }),
     )
   }, [])
+  const labels = useBotLabels()
   return rows?.map(({ bot, chats, local, preview }) => ({
     bot,
+    label: labelOf(labels, bot),
     latest: chats[0],
     preview,
     waiting: chats.filter((c) => local.has(c.id) || live[c.hermesSessionId]).length,

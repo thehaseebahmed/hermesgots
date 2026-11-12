@@ -73,3 +73,19 @@ test("the menu offers the skills the bot can run, and none it can't", async () =
     assert.equal(offered("/browse"), false, "and neither is one that doesn't load")
   })
 })
+
+test("the row the cursor is on is the one the field points at", async () => {
+  await seedChat({ id: "c2", profile: bot })
+  await db.skills.clear()
+  host()
+  await mount(chatScreen("c2"), async () => {
+    await until(async () => Boolean(field()), "the composer")
+    await type(field(), "/")
+    await until(async () => offered("/log-triage"), "the menu")
+    const named = field()?.getAttribute("aria-activedescendant")
+    assert.ok(named, "the field names the option the cursor is on")
+    const pointed = document.getElementById(named)
+    assert.equal(pointed?.getAttribute("role"), "option", "and the name resolves to an option")
+    assert.equal(pointed?.getAttribute("aria-selected"), "true", "the one the cursor is on")
+  })
+})

@@ -21,6 +21,7 @@ import {
   titleOf,
   valueColour,
   valueOf,
+  writes,
 } from "./dictation-page-kit.tsx"
 
 test("the page draws every speech setting its host carries, in cards named for what they are", async () => {
@@ -176,7 +177,7 @@ test("a number that isn't one is refused before it is written", async () => {
       true,
       "Save waits for a number, and nothing is sent",
     )
-    assert.deepEqual(calls, [], "no write was made")
+    assert.deepEqual(writes(calls), [], "no write was made")
   })
 })
 
@@ -231,7 +232,7 @@ test("the Provider pick offers Local, and picking it writes the host's own name 
   )
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
     await click(row("stt.provider"))
-    const options = findAll('[data-pick-list="Provider"] > button')
+    const options = findAll('[data-pick-list="Provider"] li > button')
     assert.deepEqual(
       options.map((one) => titleOf(one)),
       ["Automatic", "Local", "Groq", "OpenAI", "ElevenLabs"],
@@ -271,7 +272,7 @@ test("a provider's page draws its own rows, and a pick writes that provider's ke
     )
     assert.equal(valueOf(row("stt.groq.language")), "Not set", "and a language nothing holds")
     await click(row("stt.groq.model"))
-    const options = findAll('[data-pick-list="Model"] > button')
+    const options = findAll('[data-pick-list="Model"] li > button')
     assert.deepEqual(
       options.map((one) => (one.textContent ?? "").trim()),
       ["whisper-large-v3-turbo", "whisper-large-v3"],

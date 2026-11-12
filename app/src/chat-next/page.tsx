@@ -618,6 +618,19 @@ const WAIT_READ_TRIES = 4
 const QUIET_RUN_MS = 1_500
 
 /** What a prompt drawn by the app is handed: the wait, and how to answer it. */
+/** How long the answered question holds the card's place while the host asks its call's next one. */
+const BETWEEN_MS = 5_000
+
+/**
+ * The card's key: a question one call put among several keeps one card across its prompts, so the
+ * next question slides in rather than the card being drawn again; anything else is its own prompt.
+ */
+function promptKey(waiting: Waiting, questions?: ClarifyQuestion[]): string {
+  if (waiting.kind !== "question" || !questions || questions.length < 2) return waiting.promptId
+  if (questionAt(questions, waiting.question) < 0) return waiting.promptId
+  return `call:${questions.map((one) => one.question).join("\u0000")}`
+}
+
 export interface PromptProps {
   waiting: Waiting
   /** The questions of the call the wait came out of, where the thread has read them. */
@@ -626,6 +639,8 @@ export interface PromptProps {
   answer: (value: string) => Promise<void>
   /** The tool the reply was running when it asked, where the host names none. */
   asker?: string
+  /** `waiting` is answered and the call's next question is still to be asked: nothing is sent. */
+  held?: boolean
 }
 
 /** What a composer drawn by the app is handed to drive the thread with. */
@@ -726,6 +741,14 @@ export function ChatNextThread({
   const store = useMemo(() => storeFor(database, session ?? ""), [database, session])
   const doing = useSyncExternalStore(store.subscribe, store.doing)
   const dispatch = useCallback((event: ThreadEvent) => void store.apply(event), [store])
+  // The question just answered holds the card's place until the call's next one is asked; a host
+  // that never asks it hands the place back to the composer after `BETWEEN_MS`.
+  const asking = doing.waiting ?? doing.between
+  useEffect(() => {
+    if (!doing.between) return
+    const lapse = setTimeout(() => dispatch({ type: "between-lapsed" }), BETWEEN_MS)
+    return () => clearTimeout(lapse)
+  }, [doing.between, dispatch])
   const rows = useLiveQuery(
     () => readRows(database, session ?? "", "live"),
     [database, session],
@@ -1604,6 +1627,7 @@ export function ChatNextThread({
       await respond({ server, key }, waiting, value)
       dispatch({
         type: "answered",
+        promptId: waiting.promptId,
         ...(waiting.kind === "question"
           ? {
               answer: {
@@ -1650,15 +1674,16 @@ export function ChatNextThread({
     ?.parts.findLast((part) => part.kind === "tools")
     ?.calls.at(-1)?.name
   const waitingCard =
-    doing.waiting && Prompt ? (
+    asking && Prompt ? (
       <Prompt
-        key={doing.waiting.promptId}
-        waiting={doing.waiting}
+        key={promptKey(asking, doing.questionSet)}
+        waiting={asking}
         questions={doing.questionSet}
         asker={asker}
+        held={!doing.waiting}
         answer={async (value) => {
-          const asked = doing.waiting as Waiting
-          await answer(asked, value)
+          if (!doing.waiting) return
+          await answer(doing.waiting, value)
         }}
       />
     ) : doing.waiting?.kind === "question" ? (

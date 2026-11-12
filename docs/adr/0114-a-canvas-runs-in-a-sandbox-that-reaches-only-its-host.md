@@ -24,7 +24,9 @@ host is the only door out of it:
 - **Libraries:** a vetted set (a chart library, a date library, icons and Tailwind) ships in the app
   bundle and is inlined at render, so the page needs no CDN. This also keeps minified third-party code
   out of `plugin/`, which Hermes's install scanner reads file by file. Chart.js, Day.js and lucide
-  answer an empty `<script data-canvas-lib="NAME">`; a name the app doesn't carry is dropped. Tailwind
+  answer an empty `<script data-canvas-lib="NAME">`; the set has since widened to a catalogue the
+  host refuses an unknown name by ([ADR 0147](0147-a-canvas-carries-a-catalogue-of-libraries.md)).
+  Tailwind
   is not inlined as a runtime: the page's classes are compiled in the app with Tailwind v4's own
   `compile()`, over the app's tokens as the theme, and the result is injected as plain CSS. The base
   is Tailwind's own stylesheet, preflight included, so a canvas that uses utilities behaves as a

@@ -146,11 +146,11 @@ const rowText = (id: string) => wordsOf(row(id))
 const accent = (id: string) => row(id)?.querySelector(".text-primary")?.textContent ?? null
 /** A model a model pick offers, in the sheet it opened. */
 const modelOption = (name: string) =>
-  findAll("[aria-pressed]").find((one) => wordsOf(one) === name) ?? null
+  findAll("[role=radio]").find((one) => wordsOf(one) === name) ?? null
 /** Opens a setting's pick, and waits for the sheet it opens. */
 async function openPick(id: string) {
   await click(row(id))
-  await until(async () => Boolean(find("[aria-pressed]")), "the model pick")
+  await until(async () => Boolean(find("[role=radiogroup]")), "the model pick")
 }
 /** The chain's own screen: its rows, the button that removes one, and the way to add one. */
 const chain = () => find("[data-fallbacks]")
@@ -259,12 +259,12 @@ test("the model pick marks the model the page already shows as the value", async
     )
     await openPick("model")
     assert.equal(
-      modelOption("own-model")?.getAttribute("aria-pressed"),
+      modelOption("own-model")?.getAttribute("aria-checked"),
       "true",
       "the pick ticks the row the page is already running",
     )
     assert.equal(
-      modelOption("cheap-model")?.getAttribute("aria-pressed"),
+      modelOption("cheap-model")?.getAttribute("aria-checked"),
       "false",
       "and marks no other row",
     )
@@ -334,7 +334,7 @@ test("picking a model for a new fallback writes the chain", async () => {
   await mount(page("/settings/bots/bot-1/general/fallback_providers"), async () => {
     await drawn()
     await click(await addReady())
-    await until(async () => Boolean(find("[aria-pressed]")), "the model pick")
+    await until(async () => Boolean(find("[role=radiogroup]")), "the model pick")
     assert.ok(modelOption("cheap-model"), "the host's models, in a sheet")
     await click(modelOption("cheap-model"))
 
@@ -386,7 +386,7 @@ test("picking a model on the Models page writes it to the bot", async () => {
       "cheap-model",
       "the pick lands on the bot",
     )
-    await until(async () => !find("[aria-pressed]"), "the sheet to close behind the pick")
+    await until(async () => !find("[role=radiogroup]"), "the sheet to close behind the pick")
     assert.equal(accent("model"), "cheap-model", "and the row shows the model it now runs")
   })
 })

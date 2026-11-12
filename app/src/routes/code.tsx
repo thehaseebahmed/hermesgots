@@ -7,15 +7,15 @@ import {
   FolderIcon,
   GitPullRequestArrowIcon,
   LockIcon,
-  MenuIcon,
   PlusIcon,
   SearchIcon,
 } from "lucide-react"
 import { Navigate, useNavigate } from "react-router"
 
 import { prLabel, prLook } from "@/components/chat/pr-look"
-import { useOpenDrawer } from "@/components/drawer-context"
-import { ItemGroup, ItemRow, pinnedLine, SearchField } from "@/components/item-list"
+import { ChatHeader } from "@/components/chat/chat-header"
+import { ItemGroup, ItemRow, pinnedLine } from "@/components/item-list"
+import { SearchField } from "@/components/search-field"
 import { NewSessionPopup, type SessionTarget } from "@/components/new-session"
 import { SortMenu } from "@/components/sort-menu"
 import { Badge } from "@/components/ui/badge"
@@ -142,7 +142,6 @@ function useCodeSort(): [Sort<CodeSort>, (sort: Sort<CodeSort>) => void] {
 }
 
 function CodeList({ pane }: { pane?: FeaturePane }) {
-  const openDrawer = useOpenDrawer()
   const navigate = useNavigate()
   const { root } = useNav()
   const listed = useProjectSessions()
@@ -323,34 +322,30 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
         } as CSSProperties
       }
     >
-      <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[var(--list-header-pt)] pb-3 backdrop-blur">
-        <div className="mx-auto flex max-w-2xl items-center gap-2">
-          <Button
-            variant="outline"
-            size="icon-lg"
-            className="size-11 rounded-full md:hidden"
-            onClick={openDrawer}
-            aria-label="Open conversations"
-          >
-            <MenuIcon />
-          </Button>
-          <h1 className="min-w-0 flex-1 truncate text-xl font-semibold tracking-tight">Code</h1>
-          <Button
-            ref={searchToggle}
-            variant="ghost"
-            size="icon-lg"
-            className="size-11 rounded-full text-muted-foreground"
-            onClick={() => (searching ? closeSearch() : openSearch())}
-            aria-label="Search"
-            aria-expanded={searching}
-            aria-controls={searching ? SEARCH_FIELD_ID : undefined}
-            data-search-toggle
-          >
-            <SearchIcon />
-          </Button>
-          <SortMenu by="sessions" options={CODE_SORTS} value={sort} onSort={setSort} compact />
-        </div>
-      </header>
+      <ChatHeader
+        pinned
+        heading
+        showBot={false}
+        title="Code"
+        actions={
+          <>
+            <Button
+              ref={searchToggle}
+              variant="ghost"
+              size="icon-lg"
+              className="size-11 rounded-full text-muted-foreground"
+              onClick={() => (searching ? closeSearch() : openSearch())}
+              aria-label="Search"
+              aria-expanded={searching}
+              aria-controls={searching ? SEARCH_FIELD_ID : undefined}
+              data-search-toggle
+            >
+              <SearchIcon />
+            </Button>
+            <SortMenu by="sessions" options={CODE_SORTS} value={sort} onSort={setSort} compact />
+          </>
+        }
+      />
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
         {(searching || showChips) && (

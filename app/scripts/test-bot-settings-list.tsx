@@ -5,7 +5,7 @@
  * that land on General instead, the segments that named pages before the list landing on the pages
  * that took their place, a fourth segment that names nothing landing on the page it was asked under,
  * the out-of-date banner leading the list, a row pushing its page on a phone and swapping the pane
- * beside the list on a laptop, the header's trash named for the bot it deletes, and each page still
+ * beside the list on a laptop, the list ending on the button that deletes the bot, and each page still
  * holding what its tab held — values that open their edits.
  */
 import assert from "node:assert/strict"
@@ -60,11 +60,11 @@ const settings = (entry: string) => (
  * A bot of this test's own: what a connection's plugin answered is remembered for the page, so each
  * test names its own host and no answer leaks into the next.
  */
-async function seed(name: string, features: string[] | "away", patch = {}) {
+async function seed(name: string, features: string[] | "away", patch = {}, host = {}) {
   await seedSettings()
   await db.profiles.clear()
   await db.profiles.put(botProfile(name, patch))
-  mediaHost({ features, general: GENERAL })
+  mediaHost({ features, general: GENERAL, ...host })
 }
 
 const rows = () => findAll("[data-bot-page]").map((row) => row.getAttribute("data-bot-page"))
@@ -160,11 +160,17 @@ test("the bot's page is what the bot is under Bot, then every setting in one car
       /^Mute notifications/,
       "the bot's switches lead its card",
     )
-    assert.deepEqual(titles(), ["A bot"], "the list screen is named after the bot")
-    assert.ok(
-      find('header button[aria-label="Delete A bot"]'),
-      "and its header carries the trash named for the bot it deletes",
+    assert.deepEqual(
+      titles(),
+      ["list-order"],
+      "the list screen is named by the host the fixture answers at",
     )
+    const control = findAll("button").find((one) => wordsOf(one) === "Delete bot")
+    assert.ok(
+      control?.closest("[data-bot-settings-list]"),
+      "the list carries one Delete bot, inside its own column",
+    )
+    assert.equal(control?.closest("header"), null, "and none in the screen's header")
   })
 })
 
@@ -239,7 +245,7 @@ test("a fourth segment under a page with no sub-screens lands on the page too", 
 })
 
 test("an out-of-date plugin's banner leads the list, in the words the design settled", async () => {
-  await seed("banner-outdated", ALL, { pluginVersion: "0.1.0" })
+  await seed("banner-outdated", ALL, { pluginVersion: "0.1.0" }, { version: "0.1.0" })
   await mount(settings("/settings/bots/bot-1"), async () => {
     const list = find("[data-bot-settings-list]")
     assert.equal(
@@ -252,7 +258,12 @@ test("an out-of-date plugin's banner leads the list, in the words the design set
 })
 
 test("a plugin that isn't out of date has no banner over the list", async () => {
-  await seed("banner-current", ALL, { pluginVersion: MIN_PLUGIN_VERSION })
+  await seed(
+    "banner-current",
+    ALL,
+    { pluginVersion: MIN_PLUGIN_VERSION },
+    { version: MIN_PLUGIN_VERSION },
+  )
   await mount(settings("/settings/bots/bot-1"), async () => {
     assert.doesNotMatch(text(), /out of date/, "nothing says the plugin is old")
     assert.equal(rows().length, 8, "and the list is all there is")
@@ -270,13 +281,17 @@ test("a disabled bot has no banner, however old its plugin", async () => {
 test("on a phone a row pushes its page, and the page's back returns to the list", async () => {
   await seed("push", ALL)
   await mount(settings("/settings/bots/bot-1"), async () => {
-    assert.deepEqual(titles(), ["A bot"], "the list is a screen of its own")
+    assert.deepEqual(
+      titles(),
+      ["push"],
+      "the list is a screen of its own, named by the fixture's host",
+    )
     await click(row("models"))
     assert.equal(path(), "/settings/bots/bot-1/models", "the page has an address of its own")
     assert.deepEqual(titles(), ["Models"], "named for the page it opened")
     await click(back())
     assert.equal(path(), "/settings/bots/bot-1", "back returns to the list")
-    assert.deepEqual(titles(), ["A bot"], "which is named for the bot")
+    assert.deepEqual(titles(), ["push"], "which the fixture's host names")
   })
 })
 
@@ -287,12 +302,12 @@ test(
     await mount(settings("/settings/bots/bot-1"), async () => {
       assert.ok(find("[data-bot-settings-list]"), "the list is the pane the menu was in")
       absent('a[href="/settings/appearance"]')
-      assert.deepEqual(titles(), ["A bot", "General"], "the bot's list beside General")
+      assert.deepEqual(titles(), ["wide", "General"], "the bot's list beside General")
 
       await click(row("models"))
       assert.equal(path(), "/settings/bots/bot-1/models", "the address carries the segment")
       assert.ok(find("[data-bot-settings-list]"), "the list stays where it was")
-      assert.deepEqual(titles(), ["A bot", "Models"], "and the pane beside it swapped")
+      assert.deepEqual(titles(), ["wide", "Models"], "and the pane beside it swapped")
       assert.match(
         text(),
         /The model a chat runs when it has no pick of its own/,
@@ -311,8 +326,8 @@ test("a page still holds what its page held, each setting over its value", async
   const CHAT = [...ALL, "delegation_model", "fallbacks"]
   await seed("pages", ALL, { hostId: "host-1" })
   await mount(settings("/settings/bots/bot-1"), async () => {
-    assert.deepEqual(titles(), ["A bot"], "the bot's own page")
-    for (const label of ["Enabled", "Name", "Image", "Test connection"])
+    assert.deepEqual(titles(), ["pages"], "the bot's own page, named by the fixture's host")
+    for (const label of ["Enabled", "Name", "Image", "Plugin"])
       assert.ok(text().includes(label), `it still has ${label}`)
     assert.ok(find('[data-setting="name"]'), "its Name is a value that opens its edit")
     absent('[data-setting="subagent-model"]', "and nothing of the Hermes side is forced on it")
@@ -340,7 +355,7 @@ test("a page's own edit is a screen the list's page pushes, with the list under 
     assert.equal(path(), "/settings/bots/bot-1/bot/name", "at an address of its own")
     await click(back())
     assert.equal(path(), "/settings/bots/bot-1", "and Back returns to the page it came from")
-    assert.deepEqual(titles(), ["A bot"], "which is named for the bot")
+    assert.deepEqual(titles(), ["pages-edit"], "which the fixture's host names")
   })
 
   // Every drill-in form says what it does, the host's own keys included.
@@ -387,7 +402,10 @@ test(
         "/settings/bots/bot-1",
         "the card closes onto the page it was opened over",
       )
-      assert.ok(missing('[role="alertdialog"]'), "with nothing asked: closing a pop-up is the whole of saying no")
+      assert.ok(
+        missing('[role="alertdialog"]'),
+        "with nothing asked: closing a pop-up is the whole of saying no",
+      )
       assert.equal((await db.profiles.get("bot-1"))?.name, "A bot", "and nothing was written")
     })
   }),

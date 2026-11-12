@@ -9,7 +9,9 @@ import {
   PencilIcon,
   PinIcon,
   PinOffIcon,
+  RotateCcwIcon,
   Trash2Icon,
+  TriangleAlertIcon,
 } from "lucide-react"
 import { useLocation, useParams } from "react-router"
 import { toast } from "sonner"
@@ -19,22 +21,14 @@ import { quietly } from "@/lib/report"
 import { AfkPopup, AFK_FEATURE } from "@/components/afk"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { PR_GROUPS } from "@/components/chat/pr-look"
-import { PrRow } from "@/components/chat/pr-pill"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
+import { PrRow } from "@/components/pr-row"
 import { LibraryTab } from "@/components/library"
 import { ProjectSettings } from "@/components/project-settings"
 import { ProjectUsageView } from "@/components/project-usage"
 import { RepoChips } from "@/components/repos"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import {
   DropdownMenu,
@@ -61,8 +55,8 @@ import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { useProjectsPane, useRememberOpened } from "@/lib/pane"
 import { usePoll } from "@/lib/poll"
-import { deleteProject, updateProject, type HermesProject } from "@/lib/hermes"
-import { readProjects, useProjects } from "@/lib/projects"
+import { deleteProject, retryProject, updateProject, type HermesProject } from "@/lib/hermes"
+import { readProjects, useProjects, cloneLine, CLONE_FAILED, makingProject } from "@/lib/projects"
 import { projectRepos } from "@/lib/workspace"
 import { BackButton } from "@/components/back-button"
 
@@ -73,10 +67,11 @@ import { BackButton } from "@/components/back-button"
 export function ProjectPage() {
   const { profileId = "", projectId = "" } = useParams()
   const beside = Boolean(useProjectsPane())
-  const { up } = useNav()
-  const back = useCallback(() => up("/projects"), [up])
-  // Beside the list a project is the top-level screen, so back leaves the app.
-  useEffect(() => (beside ? undefined : setBackGuard(() => (back(), true))), [back, beside])
+  const { up, back } = useNav()
+  const leave = useCallback(() => up("/projects"), [up])
+  // Beside the list a project is the top-level screen, so the press is the app's where nothing
+  // stands behind it. The control above still steps to the list, wherever this screen was opened.
+  useEffect(() => (beside ? undefined : setBackGuard(back())), [back, beside])
   const passed = (useLocation().state as { project?: HermesProject } | null)?.project
   const profile = useLiveQuery(() => db.profiles.get(profileId), [profileId])
   const baseUrl = profile?.baseUrl
@@ -100,7 +95,7 @@ export function ProjectPage() {
   // AFK's own row exists only where the Bot's plugin can read a project's tasks.
   const afk = usePluginFeatureOn(server, AFK_FEATURE)
   const projectChanges = useChanges("projects", profile)
-  const changing = project?.folders.some((f) => f.status === "cloning" || f.status === "removing")
+  const changing = Boolean(project && makingProject(project))
 
   useEffect(() => {
     if (!server) return
@@ -136,11 +131,14 @@ export function ProjectPage() {
     .join(" · ")
 
   const act = async (action: () => Promise<void>, fallback: string) => {
+    setBusy(true)
     try {
       await action()
       reload()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : fallback)
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -154,12 +152,16 @@ export function ProjectPage() {
         await deleteConversation(c.id)
       }
       setDeleting(false)
-      back()
+      leave()
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Couldn't delete the project.")
     } finally {
       setBusy(false)
     }
+  }
+
+  const retry = () => {
+    if (profile) void act(() => retryProject(profile, projectId), "Couldn't retry the project.")
   }
 
   const ready = profile && project?.status === "ready"
@@ -171,7 +173,7 @@ export function ProjectPage() {
         title={project?.name ?? ""}
         subtitle={subtitle}
         showBot={false}
-        leading={beside ? null : <BackButton label="Back to Projects" onClick={back} />}
+        leading={beside ? null : <BackButton label="Back to Projects" onClick={leave} />}
         actions={
           ready && (
             <DropdownMenu>
@@ -249,58 +251,65 @@ export function ProjectPage() {
           <RepoChips repos={repos} />
         </div>
       )}
-      <Tabs value={tab} onValueChange={setTab} className="flex-1">
-        <TabsList>
-          <TabsTrigger value="library">Library</TabsTrigger>
-          <TabsTrigger value="prs">Pull requests</TabsTrigger>
-          <TabsTrigger value="usage">Usage</TabsTrigger>
-        </TabsList>
-        <TabsContent value="library" className="flex-1 overflow-y-auto">
-          {server && (
-            <div className="mx-auto w-full max-w-2xl">
-              <LibraryTab
-                config={server}
-                projectId={projectId}
-                titles={titles}
-                active={tab === "library"}
-              />
-            </div>
-          )}
-        </TabsContent>
-        <TabsContent value="prs" className="overflow-y-auto">
-          <div className="mx-auto w-full max-w-2xl px-4 py-6">
-            {sessions && prs.length === 0 ? (
-              <p className="px-1 text-sm text-muted-foreground">No pull requests yet.</p>
-            ) : (
-              <div className="flex flex-col gap-6">
-                {PR_GROUPS.map((group) => {
-                  const list = prs.filter((pr) => group.states.includes(pr.state))
-                  if (!list.length) return null
-                  return (
-                    <Group
-                      key={group.label}
-                      label={group.label}
-                      count={list.length}
-                      fold={group.fold}
-                    >
-                      {list.map((pr) => (
-                        <li key={prKey(pr)}>
-                          <PrRow pr={pr} />
-                        </li>
-                      ))}
-                    </Group>
-                  )
-                })}
+      {project && project.status !== "ready" ? (
+        <ProjectClone
+          project={project}
+          busy={busy}
+          onRetry={retry}
+          onDelete={() => setDeleting(true)}
+        />
+      ) : (
+        <Tabs value={tab} onValueChange={setTab} className="flex-1">
+          <TabsList>
+            <TabsTrigger value="library">Library</TabsTrigger>
+            <TabsTrigger value="prs">Pull requests</TabsTrigger>
+            <TabsTrigger value="usage">Usage</TabsTrigger>
+          </TabsList>
+          <TabsContent value="library" className="flex-1 overflow-y-auto">
+            {server && (
+              <div className="mx-auto w-full max-w-2xl">
+                <LibraryTab
+                  config={server}
+                  projectId={projectId}
+                  titles={titles}
+                  active={tab === "library"}
+                />
               </div>
             )}
-          </div>
-        </TabsContent>
-        <TabsContent value="usage" className="overflow-y-auto pt-4">
-          {server && project && tab === "usage" && (
-            <ProjectUsageView config={server} project={project} />
-          )}
-        </TabsContent>
-      </Tabs>
+          </TabsContent>
+          <TabsContent value="prs" className="overflow-y-auto">
+            <div className="mx-auto w-full max-w-2xl px-4 py-6">
+              {sessions && prs.length === 0 ? (
+                <p className="px-1 text-sm text-muted-foreground">No pull requests yet.</p>
+              ) : (
+                <div className="flex flex-col gap-6">
+                  {PR_GROUPS.map((group) => {
+                    const list = prs.filter((pr) => group.states.includes(pr.state))
+                    if (!list.length) return null
+                    return (
+                      <Group
+                        key={group.label}
+                        label={group.label}
+                        count={list.length}
+                        fold={group.fold}
+                      >
+                        {list.map((pr) => (
+                          <PrRow key={prKey(pr)} pr={pr} />
+                        ))}
+                      </Group>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+          </TabsContent>
+          <TabsContent value="usage" className="overflow-y-auto pt-4">
+            {server && project && tab === "usage" && (
+              <ProjectUsageView config={server} project={project} />
+            )}
+          </TabsContent>
+        </Tabs>
+      )}
 
       {ready && (
         <ProjectSettings
@@ -324,23 +333,78 @@ export function ProjectPage() {
         />
       )}
 
-      <AlertDialog open={deleting} onOpenChange={setDeleting}>
-        <AlertDialogContent size="sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this project?</AlertDialogTitle>
-            <AlertDialogDescription>
-              The project and its sessions are removed from this device. Its folders on the server
-              stay where they are, and Hermes keeps its own copy of the sessions.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" disabled={busy} onClick={() => void remove()}>
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDestructive
+        open={deleting}
+        onOpenChange={setDeleting}
+        title="Delete this project?"
+        description={
+          ready
+            ? "The project and its sessions are removed from this device. Its folders on the server stay where they are, and Hermes keeps its own copy of the sessions."
+            : "The project and the folders its clone made are removed from the server."
+        }
+        confirmLabel="Delete"
+        busy={busy}
+        onConfirm={remove}
+      />
+    </div>
+  )
+}
+
+function ProjectClone({
+  project,
+  busy,
+  onRetry,
+  onDelete,
+}: {
+  project: HermesProject
+  busy: boolean
+  onRetry: () => void
+  onDelete: () => void
+}) {
+  const failed = project.status === "failed"
+  return (
+    <div className="flex min-h-0 flex-1 overflow-y-auto p-6">
+      {/* `m-auto` rather than the column's own centring: a clone's error can be longer than the
+          screen, and a centred column scrolls its first lines out of reach. */}
+      <div className="m-auto flex w-full max-w-prose flex-col items-center gap-4 text-center">
+        <span
+          className={
+            failed
+              ? "flex size-16 items-center justify-center rounded-full bg-warning/15 text-warning"
+              : "flex size-16 items-center justify-center rounded-full bg-primary/10 text-primary"
+          }
+        >
+          {failed ? (
+            <TriangleAlertIcon className="size-8" aria-hidden />
+          ) : (
+            <Spinner className="size-8" />
+          )}
+        </span>
+        <h2 className="text-lg font-semibold tracking-tight">
+          {failed ? "Couldn't create this project" : cloneLine(project)}
+        </h2>
+        {failed && (
+          <p className="text-sm break-words whitespace-pre-wrap text-muted-foreground">
+            {project.error ?? CLONE_FAILED}
+          </p>
+        )}
+        {failed && (
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            <Button size="lg" className="h-12 rounded-full px-5" disabled={busy} onClick={onRetry}>
+              <RotateCcwIcon /> Retry
+            </Button>
+            <Button
+              variant="destructive"
+              size="lg"
+              className="h-12 rounded-full px-5"
+              disabled={busy}
+              onClick={onDelete}
+            >
+              <Trash2Icon /> Delete
+            </Button>
+          </div>
+        )}
+      </div>
     </div>
   )
 }

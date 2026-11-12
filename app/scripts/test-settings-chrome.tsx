@@ -451,11 +451,11 @@ const picked: string[] = []
 
 const FRUIT = ["apple", "apricot", "banana", "blackberry", "blueberry", "cherry", "date", "fig"]
 
-const options = (label: string) => findAll(`[data-pick-list="${label}"] > button`)
+const options = (label: string) => findAll(`[data-pick-list="${label}"] li > button`)
 /** The one option wearing the tick: the chosen one, marked without a radio's semantics. */
 const ticked = () => options("Fruit").find((row) => row.querySelector("svg"))
 
-test("a pick is a list of buttons, the chosen one ticked, searchable where it is long", async () => {
+test("a pick is a list of radios, the chosen one ticked, searchable where it is long", async () => {
   picked.length = 0
   await mount(
     <PickList

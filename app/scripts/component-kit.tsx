@@ -8,12 +8,14 @@ import assert from "node:assert/strict"
 import { act } from "react"
 import { createRoot } from "react-dom/client"
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, useNavigationType } from "react-router"
+import { toast } from "sonner"
 
 import { AfkPopup } from "@/components/afk"
 import { AppShell } from "@/components/app-shell"
 import { DEFAULT_SETTINGS, db, type Message, type Profile, type Settings } from "@/lib/db"
 import { fingerprintOf, orderOf } from "@/lib/dictation-log"
 import type { SessionMessage } from "@/lib/hermes"
+import { clearShare } from "@/lib/share"
 import { THINKING_WORD } from "@/lib/thinking"
 import { WAKE_PROMPT_FOOTER, WAKE_PROMPT_HEADER } from "@/lib/wake-prompt"
 import { ChatPage } from "@/routes/chat"
@@ -36,6 +38,19 @@ export function json(body: unknown, status = 200) {
     status,
     headers: { "content-type": "application/json" },
   })
+}
+
+/**
+ * A route a fake host refuses its first `times` reads, then answers: the counter every test that
+ * proves a retry needs, in one place rather than one per fake. Call it once per read; it answers the
+ * refusal to send, or nothing at all where this is the read that lands.
+ */
+export function refuseFirst(times: number, message: string, status = 500) {
+  let reads = 0
+  return () => {
+    reads += 1
+    return reads <= times ? json({ error: { message } }, status) : undefined
+  }
 }
 
 /**
@@ -459,6 +474,24 @@ export async function withReducedMotion(body: () => Promise<void>) {
 }
 
 /**
+ * The refusals a screen says out loud, collected from the toasts it shows, and the share left clear
+ * however the case ends — a case that threw halfway must not hand the next one a share to send.
+ */
+export async function withToasts(body: (said: string[]) => Promise<void>) {
+  const said: string[] = []
+  const original = toast.error
+  toast.error = ((message: unknown) => {
+    said.push(String(message))
+  }) as typeof toast.error
+  try {
+    await body(said)
+  } finally {
+    toast.error = original
+    clearShare()
+  }
+}
+
+/**
  * Records every landing a screen asks for (`scrollIntoView` with `block: "end"`), so a test can read
  * where it was sent. Restore it when the test is done.
  */
@@ -758,6 +791,7 @@ export const GENERAL: GeneralFixture = {
 export function mediaHost({
   host = "",
   features = ["attachments", "media", "media_url"],
+  version = null,
   fail = [],
   failure = 404,
   refusal,
@@ -771,6 +805,8 @@ export function mediaHost({
   host?: string
   /** What `info` advertises, or "away" for a host that didn't answer at all. */
   features?: string[] | "away"
+  /** The plugin version `info` names: null for a host that runs none, which is the default. */
+  version?: string | null
   /** Path suffixes the media route refuses. */
   fail?: string[]
   /** The status a refused path is answered with. */
@@ -803,7 +839,7 @@ export function mediaHost({
     if (url.pathname.endsWith("/plugins/gots/general"))
       return json({ object: "gots.general", general: general ?? null })
     if (url.pathname.endsWith("/plugins/gots/info"))
-      return features === "away" ? json({}, 503) : json({ name: "gots", features })
+      return features === "away" ? json({}, 503) : json({ name: "gots", features, version })
     if (url.pathname.endsWith("/plugins/gots/media/url")) {
       // The mint: a URL for one path, signed by the host and good for minutes. Nothing is read
       // into the app here — an <img> or a <video> draws from this URL itself.
@@ -900,6 +936,8 @@ export function afkHost({
   usageThreshold = null,
   thresholdRefusal = null,
   thresholdAnswer,
+  afkReadsRefused = 0,
+  holdAfk = null,
   hostProvider = "anthropic",
   windows = null,
   deciding = null,
@@ -932,6 +970,10 @@ export function afkHost({
   thresholdRefusal?: string | null
   /** What a threshold write answers with, where the host holds something other than what was asked. */
   thresholdAnswer?: number | null
+  /** How many of its bot-level `afk` reads this host refuses before it answers. */
+  afkReadsRefused?: number
+  /** A bot-level read that waits on this before it answers, so a case can read the tab mid-retry. */
+  holdAfk?: Promise<void> | null
   /** The provider the host reports as its main model, which is whose account the usage is read for. */
   hostProvider?: string
   /** The account's usage windows as the host answers them; null is a provider with no windows. */
@@ -965,6 +1007,10 @@ export function afkHost({
   let budget = pickBudget
   // The bot's threshold, the same way: what the host holds, and what a write leaves it at.
   let threshold = usageThreshold
+  const refuseAfk = refuseFirst(
+    afkReadsRefused,
+    "This bot's config.yaml can't be read right now.",
+  )
   const botAnswer = () => ({
     object: "gots.afk.bot",
     pick_budget: budget ?? 5,
@@ -1029,6 +1075,11 @@ export function afkHost({
       })
     // The bot's own AFK route, beside the project's: no project segment, one write of its own.
     if (url.pathname.endsWith("/plugins/gots/afk")) {
+      if (method === "GET") {
+        const refusal = refuseAfk()
+        if (refusal) return refusal
+        await holdAfk
+      }
       if (method === "POST" && typeof body?.pick_budget === "number") {
         if (budgetRefusal) return json({ error: { message: budgetRefusal } }, 400)
         budget = body.pick_budget

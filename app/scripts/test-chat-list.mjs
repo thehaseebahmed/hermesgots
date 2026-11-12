@@ -6,7 +6,14 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { chatAge, chatList, chatRowOf, orderChatRows } from "../src/lib/chat-list.ts"
+import {
+  chatAge,
+  chatList,
+  chatRowOf,
+  CHAT_FILTERS,
+  filterChatRows,
+  orderChatRows,
+} from "../src/lib/chat-list.ts"
 
 const HOUR = 3_600_000
 const DAY = 86_400_000
@@ -66,9 +73,9 @@ test("a row names the session its chat answers at, and whether a reply is still 
   assert.equal(routine.streaming, undefined)
 })
 
-test("a chat nothing has been said in keeps its own clock and draws no line", () => {
+test("a chat nothing has been said in says so, and keeps its own clock", () => {
   const row = chatRowOf(chat("a", 100))
-  assert.equal(row.line, undefined, "nothing said, nothing to preview")
+  assert.equal(row.line, "No messages yet", "nothing said yet, and the row says it rather than nothing")
   assert.equal(row.at, 100, "so the row is placed by when the chat was made")
 })
 
@@ -226,4 +233,103 @@ test("a row's age says how long ago today, and the date when that would not say 
   assert.ok(today.length > 0, "a message from this morning reads as a time")
   assert.notEqual(today, older, "a message from weeks ago does not read the same")
   assert.ok(older.includes("2026"), "it names the date, so the year is not guessed at")
+})
+
+test("a row's line is the first line of a message's words, with its markdown taken out", () => {
+  const cases = [
+    ["**Done** and *done*", "Done and done"],
+    ["`pnpm test` is green", "pnpm test is green"],
+    ["See [the pull request](https://example.test/1) for it", "See the pull request for it"],
+    ["# Plan\n\n**Step one**", "Plan"],
+    ["- a bullet", "a bullet"],
+    ["1. numbered", "numbered"],
+    ["> quoted", "quoted"],
+    ["~~gone~~ now", "gone now"],
+    ["a \\* b", "a * b"],
+    ["```ts\nconst x = 1\n```", "const x = 1"],
+    ["![a chart](chart.png) says", "a chart says"],
+    ["| a | b |\n| - | - |\n| 1 | 2 |", "a b"],
+  ]
+  for (const [text, words] of cases) {
+    assert.equal(chatRowOf(chat("c", 1), said(text, 2)).line, words, text)
+  }
+})
+
+test("a chat nothing has been said in says so, rather than drawing an empty line", () => {
+  assert.equal(chatRowOf(chat("c", 1), said("", 2)).line, "No messages yet")
+  assert.equal(chatRowOf(chat("c", 1)).line, "No messages yet")
+})
+
+/** A room's row, as the list reads one: its members' faces in place of a chat's icon. */
+const roomRow = (id, at, patch = {}) => ({
+  id,
+  title: `Room ${id}`,
+  at,
+  pinned: false,
+  room: { shown: ["a", "b"], more: 0 },
+  ...patch,
+})
+
+test("the three kinds of row partition the list, and each pill keeps its own", () => {
+  const rows = [
+    chatRowOf(chat("chat", 300)),
+    roomRow("room", 200),
+    chatRowOf(chat("run", 100, { routine: true })),
+  ]
+  const ids = (key) => filterChatRows(rows, key, {}).map((row) => row.id)
+  assert.deepEqual(ids("all"), ["chat", "room", "run"], "All keeps the list as it stands")
+  assert.deepEqual(ids("chats"), ["chat"], "a chat is neither a room nor a run")
+  assert.deepEqual(ids("rooms"), ["room"])
+  assert.deepEqual(ids("routines"), ["run"])
+  assert.equal(
+    ["chats", "rooms", "routines"].reduce((count, key) => count + ids(key).length, 0),
+    rows.length,
+    "and every row is exactly one of the three",
+  )
+})
+
+test("Unread is the mark a row's dot reads, so a device that has read nothing has none", () => {
+  const rows = [
+    chatRowOf(chat("newer", 300)),
+    chatRowOf(chat("older", 100)),
+    roomRow("unmarked", 300),
+  ]
+  assert.deepEqual(
+    filterChatRows(rows, "unread", { newer: 200, older: 400 }).map((row) => row.id),
+    ["newer"],
+    "activity newer than this device's mark is unread",
+  )
+  assert.deepEqual(
+    filterChatRows(rows, "unread", {}).map((row) => row.id),
+    [],
+    "and a row this device never opened has no mark to be newer than",
+  )
+})
+
+test("every pill says what it says when it keeps nothing", () => {
+  const said = Object.fromEntries(CHAT_FILTERS.map((entry) => [entry.key, entry.empty]))
+  assert.deepEqual(Object.keys(said), ["all", "unread", "chats", "rooms", "routines"])
+  for (const [key, empty] of Object.entries(said)) {
+    assert.ok(empty && empty.endsWith("."), `${key} has a sentence of its own`)
+  }
+  assert.equal(new Set(Object.values(said)).size, 5, "and no two pills say the same thing")
+  assert.equal(said.all, "No chats yet.", "All's is the list's own emptiness")
+})
+
+test("a filter narrows before the search, so a search inside a pill finds only that pill's rows", () => {
+  const rows = [
+    chatRowOf(chat("trip", 300, { title: "Trip to Lisbon" })),
+    roomRow("trip-room", 200, { title: "Trip room" }),
+    chatRowOf(chat("dinner", 100, { title: "Dinner" })),
+  ]
+  assert.deepEqual(
+    chatList(filterChatRows(rows, "rooms", {}), "trip").map((row) => row.id),
+    ["trip-room"],
+    "the room is the only row both keep",
+  )
+  assert.deepEqual(
+    chatList(filterChatRows(rows, "chats", {}), "trip").map((row) => row.id),
+    ["trip"],
+    "and a pill with rows the words do not find is the search's emptiness, not the pill's",
+  )
 })

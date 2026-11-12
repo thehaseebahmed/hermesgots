@@ -13,10 +13,10 @@ import {
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
   PlusIcon,
+  RotateCcwClockIcon,
   SearchIcon,
   ShieldAlertIcon,
   TelescopeIcon,
-  TimerIcon,
   TriangleAlertIcon,
   UserIcon,
 } from "lucide-react"
@@ -39,7 +39,7 @@ import { useCanMakeRoom, useRoomNeeds, type RoomNeedsRow } from "@/lib/room"
 import { roomMembersLine, roomNeedsOf } from "@/lib/rooms"
 import { useLegacyChat } from "@/lib/legacy-chat"
 import { useMeetingsEnabled } from "@/lib/meetings"
-import { useNav } from "@/lib/nav"
+import { opensAsRoot, useNav } from "@/lib/nav"
 import { useSyncState } from "@/lib/sync"
 import { BOT_SORTS, sortBots, useBotSort, useBotSummaries, useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
@@ -72,9 +72,7 @@ function RootLink({
       replace
       onClick={(event) => {
         onClick?.(event)
-        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-        event.preventDefault()
-        root(to)
+        opensAsRoot(() => root(to))(event)
       }}
       {...props}
     />
@@ -186,7 +184,10 @@ function Band({
   return (
     <>
       {!collapsed && (
-        <h2 id={`${name}-heading`} className="px-3 pt-1 pb-2 text-sm font-medium text-muted-foreground">
+        <h2
+          id={`${name}-heading`}
+          className="px-3 pt-1 pb-2 text-sm font-medium text-muted-foreground"
+        >
           {label}
         </h2>
       )}
@@ -372,14 +373,14 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
         </div>
       )}
       <ul className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>
-        {bots?.map(({ bot, latest, preview, waiting, unread }) => {
+        {bots?.map(({ bot, label, latest, preview, waiting, unread }) => {
           const age = latest?.updatedAt
           return (
             <li key={bot.id}>
               <RootLink
                 to={botChatsPath(bot.id)}
                 onClick={onNavigate}
-                aria-label={collapsed ? bot.name : undefined}
+                aria-label={collapsed ? label : undefined}
                 className={({ isActive }) =>
                   collapsed
                     ? railClass({ isActive: isActive || owner === bot.id })
@@ -403,7 +404,7 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
                 {!collapsed && (
                   <span className="min-w-0 flex-1">
                     <span className="flex items-baseline gap-2">
-                      <span className="min-w-0 flex-1 truncate font-medium">{bot.name}</span>
+                      <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
                       {bot.muted && (
                         <BellOffIcon
                           className="size-3.5 shrink-0 text-muted-foreground"
@@ -721,7 +722,7 @@ export function ConversationList({
               aria-label={collapsed ? "Routines" : undefined}
               className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
             >
-              <TimerIcon className="size-5 text-muted-foreground" />
+              <RotateCcwClockIcon className="size-5 text-muted-foreground" />
               {!collapsed && "Routines"}
             </RootLink>
           )}

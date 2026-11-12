@@ -21,8 +21,8 @@ groups its settings into Gots Specific Settings and Hermes Settings by ownership
 own host values and the app's own are Gots settings, and a knob on the bot's Hermes is a Hermes
 setting, named as the Hermes Dashboard names it. Settings rows read as a title over a subtitle that
 says what the setting is for — the triage model's explanation moves into its subtitle and its info
-icon goes — and deleting a bot is a trash icon at the top of the list behind a *Delete {name}?*
-confirmation.
+icon goes — and deleting a bot is a *Delete bot* button at the foot of the bot's own page, under the
+last card, behind a *Delete {name}?* confirmation.
 
 ## What this is not
 
@@ -50,8 +50,8 @@ confirmation.
    root list groups its rows the same way (General first, then the two groups) and carries no
    captions; each page captions its cards *Gots* and *Hermes* where both kinds exist, and General's
    profile card carries its own caption, *Bot Profile*, above its rows (ADR 0055).
-3. **Membership is settled page by page.** General: Gots = Enabled, Mute notifications, Bot Profile
-   (Name, Image, Test connection); Hermes = API base URL, Server key (the Subagent model moved to the Delegation page, ADR 0109). Chat: Gots =
+3. **Membership is settled page by page.** General: Gots = Enabled, Mute notifications, Plugin, Bot
+   Profile (Name, Image, Progress updates); Hermes = API base URL, Server key (the Subagent model moved to the Delegation page, ADR 0109). Chat: Gots =
    Triage model; Hermes = Model, Default model, Fallback providers. Coding: Gots = Away From
    Keyboard > Pick budget. Speech-to-text: Gots = Vocabulary, Cleanup model; Hermes = Speech model.
 4. **A Hermes setting is named as the Hermes Dashboard names it.** Two renames land: *API key* →
@@ -70,8 +70,9 @@ confirmation.
 7. **The plugin banner leads the list**, reading "This bot's plugin is out of date! Update it to
    v0.0.0 or newer." with the required version in place of v0.0.0 — at the top of the Settings > Bot
    list, so it stays visible in the persistent pane.
-8. **Delete is a trash icon in the list header** (the settings screen chrome gains a header action).
-   The dialog is titled *Delete {name}?* and states exactly what goes: for a linked bot, its host and
+8. **Delete is a *Delete bot* button at the foot of the bot's page**, under the last card and in the
+   page's own column, so the screen's header carries no action for it. The dialog is titled
+   *Delete {name}?* and states exactly what goes: for a linked bot, its host and
    any sibling bots on it, its chats staying on the Hermes server and coming back on re-linking; for
    an unlinked bot, the bot and its data leaving this device for good. Buttons Cancel and Delete
    (destructive); deleting lands on the Settings menu.
@@ -102,8 +103,8 @@ confirmation.
     sheet; it opens from a project's options menu, not from a settings row.
 16. **1024px stays the app's one breakpoint** for panes, pop-ups and these screens. Material's 840dp
     expansion point is recorded in ADR 0055 as a later, app-wide change rather than adopted here.
-17. **The list's trash stays**, and a page earns an overflow menu only where it needs more than one
-    action — none does today.
+17. **The bot's page keeps its delete**, at the foot of its column, and a page earns an overflow menu
+    only where it needs more than one action — none does today.
 
 ## Where it lives
 

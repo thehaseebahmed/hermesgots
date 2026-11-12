@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from "react"
-import { MessageCircleIcon, PlusIcon, SearchIcon, UsersIcon, XIcon } from "lucide-react"
+import { MessageCircleIcon, PlusIcon, UsersIcon, XIcon } from "lucide-react"
 
-import { SearchField } from "@/components/item-list"
+import { FootSearch } from "@/components/foot-search"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
-/** The field's own name, for the control that shows and hides it. */
-const CHATS_SEARCH_FIELD_ID = "chats-search"
+/**
+ * The field's own name, for the control that shows and hides it — and for the bar's field, which takes
+ * the same name because only one of the two is ever in the tree (ADR 0145).
+ */
+export const CHATS_SEARCH_FIELD_ID = "chats-search"
 
 /** The picks' own name, for the control that shows and hides them. */
 const PICKS_ID = "new-picks"
@@ -20,7 +23,8 @@ const PICKS_ID = "new-picks"
  * **The search is the foot's, at every width.** The circle becomes a field as tall as the button
  * beside it, in the same row, so nothing above the foot moves when it opens, and its ways out are
  * Escape and the muted X the button wears while the field is up — a press outside does not close it,
- * because the reader is typing in it.
+ * because the reader is typing in it. The surface itself is `FootSearch`'s, which the Skills tab wears
+ * too; what is here is the button that closes it and what the words narrow, both the screen's.
  *
  * **The button at the right is the pick itself** (ADR 0141): a `+` while it is closed, an X while its
  * two actions stand above it as pills — one line each, New chat nearest the thumb and New room above it
@@ -35,12 +39,15 @@ const PICKS_ID = "new-picks"
  */
 export function ListFoot({
   canMakeRoom,
+  searchable,
   query,
   onQueryChange,
   onNewChat,
   onNewRoom,
 }: {
   canMakeRoom: boolean
+  /** Whether the search is this bar's to offer: from the laptop width up the bar's own field holds it. */
+  searchable: boolean
   /** The words the list is narrowed by. The foot holds whether its field is up; the screen holds what
    * the field asked for, since the rows are the screen's. */
   query: string
@@ -52,33 +59,20 @@ export function ListFoot({
   // and no pair of booleans that could both be true (ADR 0141).
   const [surface, setSurface] = useState<"closed" | "picks" | "search">("closed")
   const open = surface === "picks"
-  const searching = surface === "search"
+  const searching = searchable && surface === "search"
   // The exit is one quiet fade, played while the pills are already inert: the class is what starts it,
   // and it is taken off again once it has run.
   const [hiding, setHiding] = useState(false)
-  const searchToggle = useRef<HTMLButtonElement>(null)
   const newToggle = useRef<HTMLButtonElement>(null)
-  const field = useRef<HTMLInputElement>(null)
 
   const closePicks = () => {
     setSurface("closed")
     window.requestAnimationFrame(() => newToggle.current?.focus())
   }
   const togglePicks = () => (open ? closePicks() : setSurface("picks"))
-  // Closing the field takes its words with it: a list narrowed by a query nobody can see reads as a
-  // list that lost rows.
-  const closeSearch = () => {
-    setSurface("closed")
-    onQueryChange("")
-    window.requestAnimationFrame(() => searchToggle.current?.focus())
-  }
-
-  // The field takes the focus as it takes the circle's place, and the circle takes it back when the
-  // field goes.
-  useEffect(() => {
-    if (!searching) return
-    window.requestAnimationFrame(() => field.current?.focus())
-  }, [searching])
+  // Putting the field away is all this does: `FootSearch` returns the focus to the circle and lets the
+  // words go, so closing by Escape and closing by this button are one path.
+  const closeSearch = () => setSurface("closed")
 
   useEffect(() => {
     if (open) {
@@ -104,38 +98,27 @@ export function ListFoot({
       data-slot="list-foot"
       className="pointer-events-none sticky bottom-0 z-20 mt-auto bg-gradient-to-t from-background via-background/90 to-transparent px-4 pt-6 pb-[max(1rem,env(safe-area-inset-bottom))]"
     >
-      <div className="mx-auto flex w-full max-w-2xl items-center justify-between gap-2">
-        {searching ? (
-          <div className="pointer-events-auto min-w-0 flex-1">
-            <SearchField
-              id={CHATS_SEARCH_FIELD_ID}
-              value={query}
-              // An empty field is a search that found everything, not a reason to shut: Escape and the
-              // X are the two ways this closes, so backspacing the last character — or the field's own
-              // clear control — keeps the focus and the keyboard where the reader is.
-              onChange={onQueryChange}
-              label="Search chats"
-              inputRef={field}
-              className="h-14 rounded-full bg-background text-base [&_input]:h-full"
-              onKeyDown={(event) => {
-                if (event.key === "Escape") closeSearch()
-              }}
-            />
-          </div>
-        ) : (
-          <Button
-            ref={searchToggle}
-            variant="outline"
-            size="icon-lg"
-            className="pointer-events-auto size-14 shrink-0 rounded-full bg-background shadow-lg"
-            // A keyboard reaches this while the picks are up, where a tap cannot; one state means the
-            // field simply takes their place.
-            onClick={() => setSurface("search")}
-            aria-label="Search"
-            data-search-toggle
-          >
-            <SearchIcon className="size-5" />
-          </Button>
+      <div
+        className={cn(
+          "mx-auto flex w-full max-w-2xl items-center gap-2",
+          // Where the bar holds the search, the New cluster is the row's only control and keeps its
+          // right edge, which is the slot a thumb finds it in at every width.
+          searchable ? "justify-between" : "justify-end",
+        )}
+      >
+        {searchable && (
+          <FootSearch
+            // The field's own state rather than whether this width offers one, so a reader who widens
+            // the window mid-search gets their words back on the way down: ADR 0145's move clears
+            // nothing of its own, and this component is unmounted while the bar holds the field.
+            open={surface === "search"}
+            onOpen={() => setSurface("search")}
+            onClose={closeSearch}
+            query={query}
+            onQueryChange={onQueryChange}
+            label="Search chats"
+            fieldId={CHATS_SEARCH_FIELD_ID}
+          />
         )}
 
         <div className="relative flex shrink-0 flex-col items-end">
@@ -198,7 +181,7 @@ export function ListFoot({
             data-search-close={searching || undefined}
             size="icon-lg"
             className={cn(
-              "pointer-events-auto relative z-10 size-14 shrink-0 rounded-full",
+              "pointer-events-auto relative z-10 size-11 shrink-0 rounded-full",
               searching ? "bg-muted text-foreground shadow-none hover:bg-muted/80" : "shadow-lg",
             )}
             onClick={() => (searching ? closeSearch() : togglePicks())}
@@ -208,8 +191,8 @@ export function ListFoot({
           >
             {/* transitions-dev's icon swap: both faces in one cell, the state picks which shows. */}
             <span aria-hidden className="t-icon-swap" data-state={searching || open ? "b" : "a"}>
-              <PlusIcon className="t-icon size-6" data-icon="a" />
-              <XIcon className="t-icon size-6" data-icon="b" />
+              <PlusIcon className="t-icon" data-icon="a" />
+              <XIcon className="t-icon" data-icon="b" />
             </span>
           </Button>
         </div>

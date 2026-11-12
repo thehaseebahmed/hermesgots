@@ -29,6 +29,9 @@ export const runId = () => Math.random().toString(36).slice(2, 8)
 /** The page's own words, in the order the app drew them. */
 export const drawn = (page) => page.evaluate(() => document.body.innerText)
 
+/** How deep in the browser's history the page stands: 0 is a press from leaving the app. */
+export const rung = (page) => page.evaluate(() => window.history.state?.idx ?? null)
+
 /** A user's words, long enough that a few turns fill a phone's pane. */
 export const long = (name, turns = 10) =>
   `${name}: ` + Array.from({ length: turns }, (_, i) => `The ${name}'s point ${i + 1}.`).join(" ")
@@ -219,6 +222,12 @@ export async function flow(
       ...(touch ? { hasTouch: true } : {}),
     }),
   )
+  // The bot's named host answers as the mock does: the request goes to `mock` with its path, and the
+  // browser keeps the address it asked for — the same protocol, so the address can be swapped.
+  await page.route(TEST_HOST, async (route) => {
+    const url = new URL(route.request().url())
+    await route.continue({ url: `${mock}${url.pathname}${url.search}` })
+  })
   // The component library mounts a devtools bunny of its own in a development build, in a root of
   // its own over the bottom-right of every page — where a screen's Send sits. Its own opt-out is
   // the flag it checks before mounting, so no flow has to click around a widget no user has.
@@ -265,6 +274,16 @@ export async function flow(
   }
 }
 
+/**
+ * The address a flow's bot answers at, as the app reads it. A bot is named by its host (ADR 0148),
+ * and a lane's port would land in every assertion about a row, so the mock is reached under a name
+ * of its own: every request to it is handed to the mock by `flow`.
+ */
+export const botHost = "http://test-bot.test"
+
+/** Any name under `.test` is a bot's host in a flow, and every one of them answers as the mock. */
+const TEST_HOST = /^http:\/\/[a-z0-9.-]+\.test\//
+
 const botPatch = (baseUrl) => ({
   baseUrl: `${baseUrl}/v1`,
   apiKey: "mock-key",
@@ -282,7 +301,7 @@ export async function setUpBot(page) {
     await db.profiles.update(profile.id, { ...patch, name: "Test bot" })
     await db.settings.put({ id: "settings", activeProfileId: profile.id, onboarded: true })
     return profile.id
-  }, botPatch(mock))
+  }, botPatch(botHost))
 }
 
 const hostAuth = { Authorization: "Bearer mock-key", "Content-Type": "application/json" }
@@ -366,8 +385,17 @@ export async function openChatNext({ page, seed }, { id, title }) {
   const chat = `${id}-${runId()}`
   await seed([{ id: chat, title }])
   await page.goto(`${app}/c/${chat}`)
-  await page.locator("[data-chat-next]").first().waitFor({ timeout: 20_000 })
+  // A bot's chat opens beside its Main, which draws first: until the chat's own pane is there and
+  // ready (an inert pane's field is no textbox at all), the last field on the page — the one `send`
+  // types into — is Main's.
+  await page
+    .locator('[data-chat-next][data-pane]:not([data-pane="main"]):not([inert])')
+    .last()
+    .waitFor({ timeout: 20_000 })
 }
+
+/** The chat `openChatNext` opened: its own pane, never the bot's Main drawn beside it. */
+export const chatPane = (page) => page.locator('[data-chat-next][data-pane]:not([data-pane="main"])').last()
 
 /** The button a question offers for `choice`. Anchored at the start of the label, which a
  * recommended first choice carries the badge after, so one label's start never matches inside
@@ -389,8 +417,9 @@ export async function answerWith(scope, { pick, type }) {
   const page = (await questionPage(scope).count()) ? questionPage(scope) : scope
   if (pick) await choiceButton(page, pick).first().click()
   else await page.getByPlaceholder("Type your answer").fill(type)
-  // Send is the card's, not the page's: the footer sits outside the pages.
-  await scope.getByRole("button", { name: "Send", exact: true }).click()
+  // Send is the card's, not the page's: the footer sits outside the pages — and never a composer's
+  // own Send, which a bot's Main beside the chat draws too.
+  await scope.locator("[data-slot=card]").getByRole("button", { name: "Send", exact: true }).click()
 }
 
 /** Answers the question the host asked with `choice`, and waits for the thread's card to read it. */

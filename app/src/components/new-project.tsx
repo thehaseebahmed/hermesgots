@@ -1,5 +1,6 @@
+import { SearchField } from "@/components/search-field"
 import { useEffect, useState } from "react"
-import { CheckIcon, CircleAlertIcon, LockIcon, PlusIcon, SearchIcon, XIcon } from "lucide-react"
+import { CheckIcon, CircleAlertIcon, LockIcon, PlusIcon, XIcon } from "lucide-react"
 
 import { Bot } from "@/components/bot"
 import { CopyBlock } from "@/components/copy-block"
@@ -7,7 +8,6 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { Button } from "@/components/ui/button"
 import { Field, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
 import {
   Select,
   SelectContent,
@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
+import { labelOf } from "@/lib/bot-name"
 import type { Profile } from "@/lib/db"
 import {
   createProject,
@@ -25,6 +26,7 @@ import {
   type GitHubRepo,
   type GitHubStatus,
 } from "@/lib/hermes"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { cn } from "@/lib/utils"
 
 const REPO_RE = /^[\w-]+\/[\w.-]+$/
@@ -89,6 +91,7 @@ function ProjectForm({
   const [query, setQuery] = useState("")
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const labels = useBotLabels()
 
   useEffect(() => {
     let cancelled = false
@@ -160,7 +163,7 @@ function ProjectForm({
             <FieldLabel htmlFor="project-bot">Bot</FieldLabel>
             <Select
               value={profile.id}
-              items={profiles.map((p) => ({ value: p.id, label: p.name }))}
+              items={profiles.map((p) => ({ value: p.id, label: labelOf(labels, p) }))}
               onValueChange={(value) => value && onPickBot(value)}
             >
               <SelectTrigger id="project-bot" className="h-11 w-full">
@@ -170,7 +173,7 @@ function ProjectForm({
                 {profiles.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
                     <Bot id={p.botId} className="size-5" />
-                    {p.name}
+                    {labelOf(labels, p)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -233,18 +236,12 @@ function ProjectForm({
             </p>
           ) : github.connected ? (
             <div className="flex flex-col gap-2">
-              <InputGroup className="h-11">
-                <InputGroupAddon>
-                  <SearchIcon />
-                </InputGroupAddon>
-                <InputGroupInput
-                  id="project-repo"
-                  placeholder={github.login ? `Search ${github.login}'s repositories` : "Search"}
-                  autoComplete="off"
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                />
-              </InputGroup>
+              <SearchField
+                id="project-repo"
+                label={github.login ? `Search ${github.login}'s repositories` : "Search"}
+                value={query}
+                onChange={setQuery}
+              />
               <ul className="flex max-h-64 flex-col overflow-y-auto rounded-2xl border p-1">
                 {!repos ? (
                   <li className="flex items-center gap-2 px-3 py-3 text-sm text-muted-foreground">

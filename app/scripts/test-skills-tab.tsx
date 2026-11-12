@@ -1,24 +1,32 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { useLiveQuery } from "dexie-react-hooks"
+import { useState } from "react"
 import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router"
 import { toast } from "sonner"
 
 import { BotSettingsPage } from "@/components/bot-settings"
 import { botSubOf } from "@/lib/bot-subs"
 import { botPageOf, botTabOf, type BotTab } from "@/lib/bot-tabs"
-import { db } from "@/lib/db"
+import { connectionKey } from "@/lib/connection"
+import { db, type Profile } from "@/lib/db"
+import { usePluginFeature } from "@/lib/features"
 import {
+  absentText,
   botProfile,
   click,
   find,
   findAll,
+  findText,
   json,
+  laptop,
   missing,
   mount,
   seedSettings,
   settle,
+  type,
   until,
+  wordsOf,
 } from "./component-kit.tsx"
 
 type Row = {
@@ -146,7 +154,7 @@ function host(
       return json({ object: "list", data: held.map((row) => ({ ...row })) })
     return json({}, 404)
   }
-  return { fetch: fetch as unknown as typeof globalThis.fetch, calls }
+  return { fetch: fetch as unknown as typeof globalThis.fetch, calls, held }
 }
 
 function LiveEditor() {
@@ -808,6 +816,51 @@ test("a category that reads on is cleared whole by a tap, and nothing beside it"
   })
 })
 
+/** A category of three, every one of them on, so a tap on its header has three rows to clear. */
+const ALL_ON: Row[] = [
+  { name: "ops-one", description: "One.", category: "ops", origin: "yours" },
+  { name: "ops-two", description: "Two.", category: "ops", origin: "yours" },
+  { name: "ops-three", description: "Three.", category: "ops", origin: "yours" },
+  { name: "lint", description: "Run the linters.", category: "quality", origin: "builtin" },
+]
+
+test(
+  "a category's header speaks for the whole category, even under typed words",
+  laptop(async () => {
+    const calls = await seed("skills-category-whole", ["skills", "skills_write"], ALL_ON)
+    await mount(editor("/settings/bots/bot-1/skills"), async () => {
+      await drawn()
+      assert.match(categoryOf("ops")?.textContent ?? "", /3 of 3 on/, "the whole category is on")
+      await type(searchSkills(), "one")
+      assert.deepEqual(drawnRows(), ["ops-one"], "the words leave one of its rows drawn")
+      assert.match(
+        categoryOf("ops")?.textContent ?? "",
+        /3 of 3 on/,
+        "the header still counts the whole category, not the row the words kept",
+      )
+      await click(categorySwitch("ops"))
+      await until(async () => posts(calls).length === 3, "the category's three writes")
+      assert.deepEqual(
+        posts(calls)
+          .map((call) => call.path)
+          .sort(),
+        [
+          "/api/plugins/gots/skills/ops-one/enabled",
+          "/api/plugins/gots/skills/ops-three/enabled",
+          "/api/plugins/gots/skills/ops-two/enabled",
+        ],
+        "every switchable skill of the category, not just the row the words kept",
+      )
+      await until(
+        async () => /0 of 3 on/.test(categoryOf("ops")?.textContent ?? ""),
+        "the count to follow the whole category",
+      )
+      assert.equal(on(categorySwitch("ops")), false, "the category ends off, as the switch shows")
+      assert.deepEqual(drawnRows(), ["ops-one"], "and the rows under it are still the words' own")
+    })
+  }),
+)
+
 test("a category that reads off is filled whole by a tap, and one that reads on is cleared", async () => {
   const calls = await seed("skills-category-fill", ["skills", "skills_write"], OFF)
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
@@ -977,5 +1030,329 @@ test("a Host with no view: the category and its rows toggle without opening anyt
     await until(async () => /Off/.test(row("ops-one")?.textContent ?? ""), "the row to say Off")
     assert.ok(missing("[data-skill-sheet]"), "and nothing opened")
     assert.equal(here(), "/settings/bots/bot-1/skills", "the tab keeps its address")
+  })
+})
+
+/**
+ * The pills above the sections, and the field over them: named by the group's own label rather than a
+ * bare button, because the search field is a group too once it holds words, with a clear button inside
+ * it. The tests that read either run at a laptop's width (`laptop`), where the tab draws the field over
+ * the pills; below it the words stand at the foot of the tab, which the last test in this file walks.
+ */
+const filterSkills = () => findAll('[role="group"][aria-label="Filter skills"] button')
+const pillWord = (label: string) => filterSkills().find((one) => wordsOf(one) === label) ?? null
+const searchSkills = () => find('input[aria-label="Search skills"]')
+/** Every skill row the tab draws, in the order it draws them, whatever section holds them. */
+const drawnRows = () => findAll("[data-skill]").map((one) => one.getAttribute("data-skill"))
+
+/** Every row the tab draws with All pressed, in the tab's own order: categories, then no category. */
+const EVERY_ROW = [
+  "browse",
+  "deploy",
+  "lint",
+  "pr-land",
+  "pr-review",
+  "journal",
+  "plan",
+  "stray",
+  "gots:notes",
+]
+
+test(
+  "the search and the pills narrow the tab, and the words narrow what the pill kept",
+  laptop(async () => {
+    await seed("skills-filter", ["skills"])
+    await mount(editor("/settings/bots/bot-1/skills"), async () => {
+      await drawn()
+      assert.ok(searchSkills(), "the tab has a field for its words")
+      assert.deepEqual(
+        filterSkills().map(wordsOf),
+        ["All", "ops", "plugin", "quality", "review"],
+        "All, then every category the tab holds, alphabetically",
+      )
+      assert.equal(
+        pillWord("All")?.getAttribute("aria-pressed"),
+        "true",
+        "All is what the tab opens on",
+      )
+      assert.deepEqual(drawnRows(), EVERY_ROW, "and All keeps every row, in the tab's own order")
+
+      await click(pillWord("review"))
+      assert.deepEqual(
+        drawnRows(),
+        ["pr-land", "pr-review"],
+        "the category's own rows, and only them",
+      )
+      assert.deepEqual(captions(), [], "no caption stands over a section the pill emptied")
+      assert.equal(
+        pillWord("review")?.getAttribute("aria-pressed"),
+        "true",
+        "the pill reads pressed",
+      )
+
+      await click(pillWord("All"))
+      assert.deepEqual(drawnRows(), EVERY_ROW, "All restores every row")
+
+      await click(pillWord("review"))
+      await type(searchSkills(), "re")
+      assert.deepEqual(
+        drawnRows(),
+        ["pr-land", "pr-review"],
+        "the matcher's best match first is not the tab's order: the category sorts its rows by name",
+      )
+      await type(searchSkills(), "land")
+      assert.deepEqual(drawnRows(), ["pr-land"], "the words narrow what the pill kept")
+      await type(searchSkills(), "linters")
+      assert.deepEqual(drawnRows(), [], "a word the pill's skills don't answer keeps nothing")
+      assert.equal(
+        wordsOf(findText("p", "No skills match.")),
+        "No skills match.",
+        "and the search says so",
+      )
+      await type(searchSkills(), "")
+      assert.deepEqual(
+        drawnRows(),
+        ["pr-land", "pr-review"],
+        "emptying the words leaves the pill's rows",
+      )
+
+      await click(pillWord("All"))
+      assert.ok(row("plan"), "All keeps the skill with no category")
+      for (const category of filterSkills().map(wordsOf).slice(1)) {
+        await click(pillWord(category))
+        assert.ok(missing('[data-skill="plan"]'), `${category} keeps no skill without a category`)
+      }
+      assert.equal(
+        filterSkills().some((one) => wordsOf(one) === "No category"),
+        false,
+        "and no pill stands for the group that has none",
+      )
+    })
+  }),
+)
+
+/** A bot whose skills name no category at all, so there is nothing for a pill to keep. */
+const UNCATEGORISED: Row[] = [
+  { name: "plan", description: "Write a plan first.", category: null, origin: "yours" },
+  { name: "journal", description: "Keep a note.", category: "", origin: "yours" },
+]
+
+/** A second bot's own list: no review category, and no row the first bot's words kept. */
+const SECOND_BOT: Row[] = [
+  { name: "lint", description: "Run the linters.", category: "quality", origin: "builtin" },
+  { name: "ops-one", description: "One.", category: "ops", origin: "yours" },
+]
+
+test(
+  "a bot whose skills hold no category draws no pill row",
+  laptop(async () => {
+    await seed("skills-filter-nocategory", ["skills"], UNCATEGORISED)
+    await mount(editor("/settings/bots/bot-1/skills"), async () => {
+      await drawn()
+      assert.ok(
+        missing('[role="group"][aria-label="Filter skills"]'),
+        "a row of All alone is decoration, so it isn't drawn",
+      )
+      assert.ok(searchSkills(), "the words are still worth a field")
+      assert.deepEqual(drawnRows(), ["journal", "plan"], "and every row is there")
+    })
+  }),
+)
+
+test("a pressed category that leaves the tab hands the press back to All", async () => {
+  await seed("skills-filter-gone", ["skills", "skills_view", "skills_remove"], ORIGINS)
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    await click(pillWord("review"))
+    assert.deepEqual(drawnRows(), ["pr-land", "pr-review"], "the category's own rows")
+    for (const name of ["pr-review", "pr-land"]) {
+      await openNote(name)
+      await click(removeButton())
+      await click(alertButton("Remove"))
+      await until(async () => row(name) === null, `${name} to leave the tab`)
+    }
+    assert.equal(pillWord("review"), null, "the category has no pill left to press")
+    assert.equal(
+      pillWord("All")?.getAttribute("aria-pressed"),
+      "true",
+      "so the press is All's again",
+    )
+    assert.deepEqual(drawnRows(), ["lint", "gots:notes"], "and the tab draws what All keeps")
+  })
+})
+
+test("a category that comes back is not pressed again without a tap", async () => {
+  await seedSettings()
+  await db.profiles.clear()
+  await db.skills.clear()
+  const profile = botProfile("skills-filter-back")
+  await db.profiles.put(profile)
+  // The device's copy draws the tab while the host's own read is still out, so a slow read can land
+  // after the removals the way a real host's does.
+  await db.skills.put({
+    id: connectionKey({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }),
+    skills: ORIGINS,
+  })
+  const server = host(["skills", "skills_view", "skills_remove"], ORIGINS)
+  let release: () => void = () => {}
+  const answered = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let reads = 0
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input))
+    const method = (init?.method ?? "GET").toUpperCase()
+    if (url.pathname.endsWith("/api/plugins/gots/skills") && method === "GET" && reads++ === 0)
+      await answered
+    return server.fetch(input, init)
+  }) as unknown as typeof globalThis.fetch
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    await click(pillWord("review"))
+    assert.deepEqual(drawnRows(), ["pr-land", "pr-review"], "the category's own rows")
+    for (const name of ["pr-review", "pr-land"]) {
+      await openNote(name)
+      await click(removeButton())
+      await click(alertButton("Remove"))
+      await until(async () => row(name) === null, `${name} to leave the tab`)
+    }
+    assert.equal(pillWord("review"), null, "the category has no pill left to press")
+    assert.equal(pillWord("All")?.getAttribute("aria-pressed"), "true", "so the press is All's")
+
+    // The host's read comes back with a review skill on the bot again.
+    server.held.push({ ...ORIGINS[0] })
+    release()
+    await until(async () => pillWord("review") !== null, "the category's pill to come back")
+    assert.equal(pillWord("All")?.getAttribute("aria-pressed"), "true", "All keeps the press")
+    assert.equal(
+      pillWord("review")?.getAttribute("aria-pressed"),
+      "false",
+      "and the category that came back is not pressed by itself",
+    )
+    assert.deepEqual(
+      drawnRows(),
+      ["lint", "pr-review", "gots:notes"],
+      "every row the list holds is drawn",
+    )
+  })
+})
+
+test(
+  "a press and its words do not cross to another bot",
+  laptop(async () => {
+    await seedSettings()
+    await db.profiles.clear()
+    await db.skills.clear()
+    const first = botProfile("first-bot", { id: "bot-1" })
+    const second = botProfile("second-bot", { id: "bot-2", name: "B bot" })
+    await db.profiles.bulkPut([first, second])
+    const one = host(["skills"])
+    const two = host(["skills"], SECOND_BOT)
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+      /second-bot\.test/.test(String(input))
+        ? two.fetch(input, init)
+        : one.fetch(input, init)) as unknown as typeof globalThis.fetch
+
+    /** The second bot's answer, read before its page opens, as the settings list reads every bot's. */
+    function Warm() {
+      const answer = usePluginFeature(second, "skills")
+      return <span data-warm={answer} />
+    }
+
+    /** The page, with the bot beneath it swapped the way the route's own param swaps it. */
+    function Switched() {
+      const [profile, setProfile] = useState<Profile>(first)
+      return (
+        <>
+          <button type="button" onClick={() => setProfile(second)}>
+            To the other bot
+          </button>
+          <BotSettingsPage profile={profile} tab="skills" />
+        </>
+      )
+    }
+
+    await mount(
+      <MemoryRouter>
+        <Warm />
+        <Switched />
+      </MemoryRouter>,
+      async () => {
+        await until(
+          async () => find("[data-warm]")?.getAttribute("data-warm") === "yes",
+          "the other bot's features",
+        )
+        await drawn()
+        await click(pillWord("review"))
+        await type(searchSkills(), "land")
+        assert.deepEqual(drawnRows(), ["pr-land"], "one row kept on the first bot")
+        await click(
+          findAll("button").find((control) => wordsOf(control) === "To the other bot") ?? null,
+        )
+        // The second bot's list is on screen once its field is drawn and the first bot's pill is gone.
+        await until(
+          async () => searchSkills() !== null && pillWord("review") === null,
+          "the second bot's skills",
+        )
+        assert.equal(
+          pillWord("All")?.getAttribute("aria-pressed"),
+          "true",
+          "the other bot opens on All",
+        )
+        assert.equal(searchSkills()?.value, "", "with a field the first bot's words never reached")
+        assert.deepEqual(drawnRows(), ["ops-one", "lint"], "and every row it holds")
+        absentText("p", "No skills match.")
+      },
+    )
+  }),
+)
+
+test(
+  "a bot with no skill at all is still given the field, and told nothing of a search",
+  laptop(async () => {
+    await seed("skills-filter-empty", ["skills"], [])
+    await mount(editor("/settings/bots/bot-1/skills"), async () => {
+      await drawn()
+      assert.ok(searchSkills(), "the field is drawn whether or not the bot has a skill to narrow")
+      absentText("p", "No skills match.")
+      assert.deepEqual(drawnRows(), [], "and there is no row to list")
+    })
+  }),
+)
+
+/**
+ * The tab's search below a laptop's width, which is where every screen but a laptop's stands: no field
+ * over the sections, a circle at the foot of the tab's scroll that becomes one, the words narrowing the
+ * rows the tab draws, and closing it giving every row back — one of the two facts the foot keeps, the
+ * other being that the words are the tab's own `query`. The suite's window is narrower than any laptop
+ * (`scripts/component-hooks.mjs`), so this is the narrow arrangement without asking for it; the
+ * `laptop(...)` bodies above are the other one.
+ */
+test("below a laptop's width the words stand at the foot, and closing them brings every row back", async () => {
+  await seed("skills-foot", ["skills"])
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    assert.ok(missing('input[aria-label="Search skills"]'), "no field stands over the sections")
+    const toggle = find("[data-skills-foot] [data-search-toggle]")
+    assert.ok(toggle, "the foot holds a circle instead")
+    assert.equal(toggle.getAttribute("aria-label"), "Search", "named for what it opens")
+
+    await click(toggle)
+    await until(
+      async () => find('[data-skills-foot] input[aria-label="Search skills"]') !== null,
+      "the foot's field",
+    )
+
+    await type(searchSkills(), "linters")
+    assert.deepEqual(drawnRows(), ["lint"], "the words narrow the rows")
+
+    await click(find("[data-skills-foot] [data-search-close]"))
+    await until(async () => searchSkills() === null, "the field put away")
+    assert.ok(find("[data-skills-foot] [data-search-toggle]"), "the circle is back in its place")
+    assert.deepEqual(drawnRows(), EVERY_ROW, "and every row is drawn again")
+
+    await click(find("[data-skills-foot] [data-search-toggle]"))
+    await until(async () => searchSkills() !== null, "the field again")
+    assert.equal(searchSkills()?.value, "", "the words went with the field that held them")
   })
 })

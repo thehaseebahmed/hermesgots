@@ -119,6 +119,8 @@ interface Host {
   at?: number
   /** The canvas a start answers, which is the record alone: a bot writes no page with it. */
   created?: string
+  /** The page the one-canvas read answers with, where a case needs one this file's own is not. */
+  page?: string
 }
 
 /**
@@ -168,15 +170,22 @@ function serveCanvases(host: Host) {
     const one = /\/canvases\/([^/]+)$/.exec(url.pathname)
     if (one) {
       host.reads!.push(url.pathname)
-      // A held read answers the documents the host had when it was asked, as a slow read would.
-      const asked = host.docs
+      // A case may hand the screen a page of its own — one that asks for a library this file's page
+      // does not — and the version it draws is that page: the host answers the record it holds.
+      const answer = (docs: CanvasDoc[] | undefined) => {
+        const canvas = canvasAt(host.version, one[1], docs)
+        if (host.page) canvas.html = host.page
+        return json({ object: "gots.canvas", canvas })
+      }
       if (host.hold) {
         const held = host.hold
         host.hold = undefined
+        // A held read answers the documents the host had when it was asked, as a slow read would.
+        const asked = host.docs
         await held()
-        return json({ object: "gots.canvas", canvas: canvasAt(host.version, one[1], asked) })
+        return answer(asked)
       }
-      return json({ object: "gots.canvas", canvas: canvasAt(host.version, one[1], host.docs) })
+      return answer(host.docs)
     }
     if (/\/canvases$/.test(url.pathname) && init?.method === "POST") {
       // A start: the record alone, which is a canvas the bot has written no version of yet — its
@@ -390,20 +399,63 @@ test(
         await until(() => Boolean(find('button[aria-label="Undo"]')), "the Undo the version offers")
         const actions = find('[data-slot="header-actions"]')
         assert.ok(actions, "the row's actions")
-        for (const label of ["Undo", "Canvas options"]) {
-          const button = actions.querySelector(`button[aria-label="${label}"]`)
-          assert.ok(button, `${label} is one of the row's actions`)
-          for (const look of [
-            "border-border",
-            "bg-background/80",
-            "backdrop-blur",
-            "rounded-full",
-          ]) {
-            assert.ok(button.className.includes(look), `${label} wears the Project's ${look}`)
-          }
+        const button = actions.querySelector('button[aria-label="Undo"]')
+        assert.ok(button, "Undo is one of the row's actions")
+        for (const look of ["border-border", "bg-background/80", "backdrop-blur", "rounded-full"]) {
+          assert.ok(button.className.includes(look), `Undo wears the Project's ${look}`)
         }
+        assert.ok(
+          missing('button[aria-label="Canvas options"]'),
+          "no ellipsis offers the canvas's options",
+        )
       },
     )
+  }),
+)
+
+test(
+  "a tap on the canvas's header opens its options, and no header offers an ellipsis",
+  atWidth(390, async () => {
+    serveCanvases({ version: 3, undos: 0 })
+    await seedCanvasChat(CANVAS.id)
+    const press = async (where: string) => {
+      await until(
+        () => find('[data-slot="header-title"]')?.textContent === CANVAS.title,
+        "the canvas's title in the shared header",
+      )
+      const heading = find('[data-slot="header-title"]')
+      assert.equal(heading?.tagName, "H1", "the canvas's title is the screen's heading")
+      const control = heading!.querySelector("button")
+      assert.ok(control, "the heading carries the control that opens the options")
+      assert.equal(control!.getAttribute("type"), "button", "a button, whose role is button")
+      assert.ok(control!.hasAttribute("data-canvas-options-open"), "and the screen's own hook")
+      assert.equal(control!.getAttribute("aria-haspopup"), "dialog", "it opens a dialog")
+      assert.equal(control!.getAttribute("aria-expanded"), "false", "closed, and it says so")
+      assert.ok(
+        control!.className.includes("min-h-11"),
+        "tall enough for a thumb, where the ellipsis was (min-h-11)",
+      )
+      assert.ok(
+        control!.classList.contains("w-full"),
+        "and as wide as the middle slot gives it, so no press on the title line is dead (w-full)",
+      )
+      assert.ok(missing('button[aria-label="Canvas options"]'), "the header offers no ellipsis")
+      await click(control)
+      await until(() => Boolean(find("[data-canvas-options]")), `${where} options to open`)
+      assert.equal(
+        find("[data-canvas-options-open]")?.getAttribute("aria-expanded"),
+        "true",
+        "and it says they are open",
+      )
+    }
+    await drawCanvas([`/canvas/${CANVAS.id}`], async () => {
+      await until(() => Boolean(find("iframe[data-canvas-frame]")), "the page to draw")
+      await press("the page screen's")
+    })
+    await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
+      await until(() => Boolean(composerField()), "the edit screen to draw")
+      await press("the edit screen's")
+    })
   }),
 )
 
@@ -557,6 +609,43 @@ test(
 )
 
 test(
+  "a wide screen puts the header and the chat in the left lane, and the page beside them",
+  atWidth(1440, async () => {
+    // The structure a DOM without layout can see; the pixels are `pnpm e2e canvas`'s wide pass. The
+    // head and the chat share one column, that column is the page's previous sibling, and the frame
+    // is drawn beside it rather than inside it — which is the shape a header spanning both panes
+    // cannot have, whatever it measures.
+    serveCanvases({ version: 3, undos: 0 })
+    await seedCanvasChat(CANVAS.id)
+    await drawCanvas([`/canvas/${CANVAS.id}`], async () => {
+      await until(() => Boolean(find("iframe[data-canvas-frame]")), "the page to draw")
+      const lane = find("[data-canvas-lane]")
+      const page = find("[data-canvas-page]")
+      assert.ok(lane, "the wide screen draws the chat's lane as a column of its own")
+      assert.ok(page, "and the page as the column beside it")
+      const head = find("header")
+      const field = composerField()
+      assert.ok(head && lane!.contains(head), "the canvas's head is drawn in the lane")
+      assert.ok(field && lane!.contains(field), "and the chat's field under it, in that same column")
+      assert.equal(lane!.nextElementSibling, page, "the lane is the page's previous sibling")
+      assert.ok(
+        !lane!.contains(find("iframe[data-canvas-frame]")),
+        "the frame is the page's, not the lane's",
+      )
+      assert.ok(!page!.contains(head), "the page column carries no header of its own")
+      assert.ok(
+        head!.compareDocumentPosition(field!) & Node.DOCUMENT_POSITION_FOLLOWING,
+        "the head is drawn before the chat's field",
+      )
+      assert.ok(
+        lane!.compareDocumentPosition(page!) & Node.DOCUMENT_POSITION_FOLLOWING,
+        "and the lane before the page",
+      )
+    })
+  }),
+)
+
+test(
   "the flip draws the page even when the list is the screen behind it",
   atWidth(390, async () => {
     // A canvas the list made opens on its edit screen with the list behind it, and so does one whose
@@ -639,6 +728,32 @@ test(
     await drawCanvas(["/canvas/c8"], async () => {
       await until(() => /This canvas is gone/.test(text()), "the gone sentence")
       assert.ok(missing("[data-canvas-flip]"), "and no Edit for a canvas that isn't there")
+    })
+  }),
+)
+
+test(
+  "a canvas the host called gone keeps its options once its list names a record",
+  atWidth(390, async () => {
+    const GONE_ID = "c3"
+    const host: Host = { version: 3, undos: 0, listed: [] }
+    serveCanvases(host)
+    await seedCanvasChat(GONE_ID)
+    // No record anywhere: the address is called gone, and there is nothing to manage.
+    await drawCanvas([`/canvas/${GONE_ID}`], async () => {
+      await until(() => /This canvas is gone/.test(text()), "the gone sentence")
+      assert.ok(missing("[data-canvas-options-open]"), "no record, so no control to open them with")
+    })
+    // The host answered gone for the record, and its list names one all the same: a record exists to
+    // rename, pin, archive or delete, so the body's sentence is not the whole of what the header knows.
+    host.listed = [GONE_ID]
+    await refreshCanvases()
+    await drawCanvas([`/canvas/${GONE_ID}`], async () => {
+      await until(() => /This canvas is gone/.test(text()), "the gone sentence")
+      const control = find("[data-canvas-options-open]")
+      assert.ok(control, "a record's options are still offered")
+      await click(control)
+      await until(() => Boolean(find("[data-canvas-options]")), "the options to open")
     })
   }),
 )
@@ -1093,8 +1208,8 @@ test(
     try {
       await drawCanvas(["/canvas/c9/edit"], async () => {
         await until(() => Boolean(composerField()), "the chat to draw")
-        const menu = find('[aria-label="Canvas options"]')
-        assert.ok(menu, "the edit screen offers the options menu")
+        const menu = find("[data-canvas-options-open]")
+        assert.ok(menu, "the edit screen's header opens the options")
         await click(menu)
         await until(() => Boolean(findText("button", "Delete canvas")), "the options to open")
         await click(findText("button", "Delete canvas"))
@@ -1126,7 +1241,7 @@ test(
     try {
       await drawCanvas(["/canvas/c7", "/canvas/c7/edit"], async () => {
         await until(() => Boolean(composerField()), "the edit screen to draw")
-        await click(find('[aria-label="Canvas options"]'))
+        await click(find("[data-canvas-options-open]"))
         await until(() => Boolean(findText("button", "Delete canvas")), "the options to open")
         await click(findText("button", "Delete canvas"))
         await until(() => Boolean(document.querySelector('[role="alertdialog"]')), "the question")
@@ -1240,9 +1355,15 @@ test(
     await drawCanvas(["/canvas/c5/edit"], async () => {
       await until(() => /This canvas is gone/.test(text()), "the gone sentence")
       assert.ok(missing('[data-canvas-flip="preview"]'), "with nothing to flip to")
+      assert.equal(find('[data-slot="header-title"]')?.tagName, "H1", "the title is still the heading")
       assert.ok(
-        missing('[aria-label="Canvas options"]'),
-        "and no options for a canvas that isn't there",
+        missing("[data-canvas-options-open]"),
+        "and no control for a canvas that isn't there",
+      )
+      assert.equal(
+        find('[data-slot="header-title"]')?.querySelector("button"),
+        null,
+        "the heading carries no button",
       )
     })
     assert.deepEqual(pageReads(host), [], "said from the list alone")
@@ -1506,3 +1627,80 @@ test(
     )
   }),
 )
+
+test(
+  "a page asking for leaflet draws its script, its stylesheet and its markers",
+  atWidth(390, async () => {
+    // Leaflet is the one library a page is handed more than a source: its stylesheet names its
+    // images relative to itself, which a srcdoc page resolves nowhere, and its default marker's
+    // images are named by its JavaScript rather than by its CSS. So the page draws leaflet's
+    // stylesheet in its head, the setup right after the source, and every marker image as a `data:`
+    // URI — which is what `img-src data:` already allows.
+    const page = PAGE.replace(
+      "<title>Tip</title>",
+      '<title>Tip</title>\n    <script data-canvas-lib="leaflet"></script>',
+    ).replace("<h1>Tip</h1>", '<h1>Tip</h1>\n    <div id="map" style="height: 240px"></div>')
+    serveCanvases({ version: 3, undos: 0, page })
+    await seedCanvasChat(CANVAS.id)
+    try {
+      await mount(
+        <MemoryRouter initialEntries={[`/canvas/${CANVAS.id}`]}>
+          <Routes>
+            <Route path="/canvas/:id" element={<CanvasView />} />
+          </Routes>
+        </MemoryRouter>,
+        async () => {
+          await until(
+            () => Boolean(document.querySelector("iframe[data-canvas-frame]")),
+            "the frame to draw",
+          )
+          const srcdoc =
+            document.querySelector("iframe[data-canvas-frame]")!.getAttribute("srcdoc") ?? ""
+          // The ask is answered where the page put it, with leaflet's own source…
+          assert.match(srcdoc, /window\.L=/, "leaflet's source takes the ask's place")
+          assert.equal(srcdoc.includes("data-canvas-lib"), false, "and no ask is left behind")
+          // …its stylesheet hoisted into the head, with every image a data: URI…
+          const head = srcdoc.slice(srcdoc.indexOf("<head"), srcdoc.indexOf("</head>"))
+          assert.match(head, /\.leaflet-container\b/, "leaflet's stylesheet is in the head")
+          assert.equal(
+            (head.match(/url\("data:image\/png;base64,/g) ?? []).length,
+            3,
+            "the stylesheet's three images are data: URIs",
+          )
+          assert.equal(/url\(images\//.test(srcdoc), false, "no relative image URL survives")
+          assert.ok(
+            head.indexOf(".leaflet-container") > head.indexOf("color-scheme"),
+            "after the theme and the compiled classes",
+          )
+          assert.ok(
+            head.indexOf(".leaflet-container") < head.indexOf("<title>Tip</title>"),
+            "and before anything the page wrote, so the page's own style still wins",
+          )
+          // …and the default marker pointed at data: URIs of the same kind, right after the source.
+          const setup = srcdoc.indexOf("L.Icon.Default.mergeOptions")
+          assert.ok(setup > 0, "the setup prelude is in the document")
+          assert.match(
+            srcdoc.slice(setup),
+            /^L\.Icon\.Default\.mergeOptions\(\{iconUrl:"data:image\/png;base64,[^"]+",iconRetinaUrl:"data:image\/png;base64,[^"]+",shadowUrl:"data:image\/png;base64,[^"]+"\}\)/,
+            "the default marker's icon, retina image and shadow are data: URIs",
+          )
+          const opens = srcdoc.lastIndexOf("</script><script>", setup)
+          assert.ok(
+            opens > srcdoc.indexOf("window.L="),
+            "the setup's script opens where the source's ends",
+          )
+          assert.match(
+            srcdoc.slice(opens + "</script><script>".length, setup),
+            /^\/\*[^<]*$/,
+            "and nothing but the setup's own words sits between the source and the call",
+          )
+        },
+      )
+    } finally {
+      // The store outlives a test: the rest of the file draws c1 at the version the host holds.
+      serveCanvases({ version: 3, undos: 0 })
+      await refreshCanvas(CANVAS.id)
+    }
+  }),
+)
+

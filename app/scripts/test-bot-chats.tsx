@@ -10,23 +10,30 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { act } from "react"
-import { MemoryRouter, Route, Routes } from "react-router"
+import { MemoryRouter, Route, Routes, type InitialEntry } from "react-router"
 
-import { BotChatsPage } from "@/routes/bot-chats"
+import { Home } from "@/App"
+import { BotChatsPage, BotChatsPane } from "@/routes/bot-chats"
 import { BOT_CHATS } from "@/lib/chat-list"
-import { db, deleteConversation, type Message } from "@/lib/db"
+import { db, deleteConversation, getSettings, type Message } from "@/lib/db"
+import { pressBack } from "@/lib/native"
 import { markRead } from "@/lib/read-marks"
 import {
+  Nav,
   Path,
   absent,
+  atDepth,
+  atWidth,
   botProfile,
   click,
   find,
   findAll,
   findText,
   json,
+  laptop,
   missing,
   mount,
+  nav,
   path,
   seedSettings,
   settle,
@@ -36,6 +43,17 @@ import {
 } from "./component-kit.tsx"
 
 const bot = botProfile("bot-chats", { id: "bot-1", name: "Mainly", hermesProfile: "default" })
+/** What the app calls it: the host it answers at, never the name its host sealed (ADR 0148). */
+const LABEL = "bot-chats"
+
+/**
+ * A filter pill, by the word it wears. Named by its group rather than by `header [role="group"] button`,
+ * because the bar's own search field is a group too once it holds words, with a clear button in it.
+ */
+const filterPill = (label: string) =>
+  findAll('[role="group"][aria-label="Filter chats"] button').find(
+    (one) => (one.textContent ?? "").trim() === label,
+  ) ?? null
 
 /** What this bot's Host says its plugin offers: a room may be made where the Host advertises it. */
 let offers = ["chats", "rooms", "rooms_write"]
@@ -61,6 +79,8 @@ interface Seed {
   streaming?: boolean
   /** The run a routine's delivery is: the marker and the line the record itself carries (G4). */
   routine?: { line: string }
+  /** The room this row is: the Host's record, with this bot seated in it. */
+  room?: boolean
 }
 
 function message(chat: string, content: string, at: number, patch: Partial<Message> = {}): Message {
@@ -97,6 +117,9 @@ async function seed(
       updatedAt: one.at,
       changedAt: one.at,
       ...(one.routine ? { routine: true, line: one.routine.line } : {}),
+      ...(one.room
+        ? { room: { id: `room-${one.id}`, members: [{ profile: "default", displayName: "Mainly" }] } }
+        : {}),
     })),
   )
   await db.messages.bulkPut(
@@ -148,13 +171,16 @@ const rowOf = (id: string) => find(`ul a[href="/c/${id}"]`)
 const dotted = (id: string) => Boolean(rowOf(id)?.querySelector("[data-unread]"))
 /** The picture a row wears where its title starts: its own icon, never the bot's face. */
 const iconOf = (id: string) =>
-  rowOf(id)?.querySelector("svg.lucide-timer, svg.lucide-message-circle, svg.lucide-circle-alert")
+  rowOf(id)?.querySelector(
+    "svg.lucide-rotate-ccw-clock, svg.lucide-message-circle, svg.lucide-circle-alert",
+  )
 /** The disc a row's icon stands in, which is where a list picks its tone. */
 const discOf = (id: string) => rowOf(id)?.querySelector('[data-slot="row-mark"] span.rounded-full')
 
-const screen = (entry = `/b/${bot.id}`) => (
+const screen = (entry: InitialEntry = `/b/${bot.id}`) => (
   <MemoryRouter initialEntries={[entry]}>
     <Path />
+    <Nav />
     <Routes>
       <Route path="b/:profileId" element={<BotChatsPage />} />
       <Route path="c/:id" element={<p data-chat />} />
@@ -162,6 +188,32 @@ const screen = (entry = `/b/${bot.id}`) => (
     </Routes>
   </MemoryRouter>
 )
+
+test("Home is the active bot's screen: `/` sends the reader to its list", async () => {
+  // A bot with nothing to open, so the address `/` lands on is the list itself rather than the chat
+  // the landing would send the reader on to: the door, seen without another screen answering for it.
+  await seed([])
+  await mount(
+    <MemoryRouter initialEntries={["/"]}>
+      <Path />
+      <Nav />
+      <Routes>
+        <Route index element={<Home />} />
+        <Route path="b/:profileId" element={<BotChatsPage />} />
+      </Routes>
+    </MemoryRouter>,
+    async () => {
+      await until(async () => path() === `/b/${bot.id}`, "the active bot's address")
+      await until(async () => Boolean(findText('[data-slot="header-title"]', LABEL)), "its list")
+      assert.equal(rowIds().length, 0, "the list a bot with no chats draws")
+      assert.equal(
+        nav(),
+        `REPLACE:/b/${bot.id}`,
+        "and `/` is replaced by it rather than left behind the reader",
+      )
+    },
+  )
+})
 
 test("a bot's screen lists the chats it holds, its pinned one first and then by what was last said", async () => {
   await seed([
@@ -349,7 +401,7 @@ test("a routine's delivery is a row of its own, with the routine's icon and the 
       "and its age comes from the record's own clock",
     )
     assert.ok(
-      iconOf("routine-job-1-cron_9")?.classList.contains("lucide-timer"),
+      iconOf("routine-job-1-cron_9")?.classList.contains("lucide-rotate-ccw-clock"),
       "the row wears the routine's icon",
     )
     assert.ok(
@@ -362,6 +414,30 @@ test("a routine's delivery is a row of its own, with the routine's icon and the 
       "a run waits on nobody: nothing can be answered in it",
     )
   })
+})
+
+test("the list answers the press with the step behind it, and leaves the app its own", async () => {
+  await seed([{ id: "quiet", title: "An old chat", at: 100 }])
+  const stepped = atDepth(1)
+  try {
+    await mount(screen(), async () => {
+      await until(async () => rowIds().length === 1, "the bot's chats")
+      assert.equal(pressBack(), "screen", "a list something opened answers the press")
+      assert.deepEqual(stepped.backs, [1], "with the one step back to whatever opened it")
+    })
+  } finally {
+    stepped.restore()
+  }
+  const entry = atDepth(0)
+  try {
+    await mount(screen(), async () => {
+      await until(async () => rowIds().length === 1, "the bot's chats")
+      assert.equal(pressBack(), "app", "and at the app's first entry the press is the app's")
+      assert.deepEqual(entry.backs, [], "with nothing behind it to step to")
+    })
+  } finally {
+    entry.restore()
+  }
 })
 
 test("the list holds every chat the bot has, so a pin and a chat past the bound are both reachable", async () => {
@@ -420,7 +496,7 @@ test("a row deleted here is not resurrected by a record written ahead of this de
   )
 })
 
-test("the header's title is the bot's name, and it is the way to its settings", async () => {
+test("the header's title is the host the bot answers at, and it is the way to its settings", async () => {
   await seed([{ id: "a", title: "A chat", at: 100, said: "Hello" }])
   await mount(screen(), async () => {
     await until(
@@ -429,12 +505,12 @@ test("the header's title is the bot's name, and it is the way to its settings", 
     )
     const title = find('a[href="/settings/bots/bot-1"]')
     assert.ok(title, "the title leads to Bot settings")
-    assert.equal(wordsOf(title), "Mainly", "and it is the bot's own name")
-    assert.equal(find("h1")?.textContent, "Mainly", "the heading the screen is known by")
+    assert.equal(wordsOf(title), LABEL, "and it is the host it answers at")
+    assert.equal(find("h1")?.textContent, LABEL, "the heading the screen is known by")
     assert.equal(
-      findAll("header button").length,
+      findAll('[data-slot="header-row"] button').length,
       1,
-      "the drawer alone: no '...' and no list control, and the search has left for the foot",
+      "the drawer alone in the bar's row: no '...' and no list control, and the search has left for the foot",
     )
     absent("header [data-search-toggle]", "nothing of the search is in the header")
     assert.equal(
@@ -628,6 +704,47 @@ test("the picks' New chat makes a chat of this bot's, and their New room opens t
   })
 })
 
+test("a pick in a bot's list opens the chat as the app's only entry", async () => {
+  // The list the pick leaves behind is the session history's, which a screen drawn without one cannot
+  // walk: `scripts/e2e/bot-chats` holds the step back through the list and the chat under it, and this
+  // holds the move the row makes at the app's entry — the list's own entry, replaced by the chat's.
+  await seed([
+    { id: "a", title: "A chat", at: 100, said: "Hello" },
+    { id: "b", title: "Another", at: 200, said: "Hi" },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 2, "the bot's chats")
+    await click(rowOf("b"))
+    await until(async () => path() === "/c/b", "the chat it picked")
+    assert.equal(nav(), "REPLACE:/c/b", "the chat takes the list's entry, nothing of it left behind")
+  })
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 2, "the bot's chats")
+    await click(find("[data-new-menu]"))
+    await until(async () => picksOpen(), "the picks")
+    await click(newRow("New chat"))
+    await until(async () => path() !== `/b/${bot.id}`, "the chat it made")
+    assert.ok(nav().startsWith("REPLACE:/c/"), "and the foot's New chat takes it too")
+  })
+})
+
+test("a list a chat opens marks no row, where a list beside a chat marks the one it draws", async () => {
+  await seed([
+    { id: "a", title: "A chat", at: 100, said: "Hello" },
+    { id: "b", title: "Another", at: 200, said: "Hi" },
+  ])
+  // The list a chat's own control opens names the chat it covers, and that chat is not open beside it:
+  // the mark a row carries for "this is the one drawn here" would say something untrue.
+  await mount(screen({ pathname: `/b/${bot.id}`, state: { open: "a" } }), async () => {
+    await until(async () => rowIds().length === 2, "the bot's chats")
+    assert.equal(
+      findAll("ul a[aria-current]").length,
+      0,
+      "no row of the list a chat opened is marked as the one open",
+    )
+  })
+})
+
 test("a Host that cannot make a room offers no row for one", async () => {
   // A Host of its own, so the answer about rooms is that Host's and no other case's remembered one.
   const plain = botProfile("bot-chats-no-rooms", {
@@ -703,3 +820,117 @@ function picksOpen() {
   const picks = find("[data-picks]")
   return picks?.getAttribute("aria-hidden") === "false" && !picks.hasAttribute("inert")
 }
+
+test("the pills narrow the rows to the kind each names, and say what their emptiness is", async () => {
+  // One room, one unread chat, one read chat: the three kinds the pills name, and the dot's own answer
+  // for Unread — a row this device never opened has no mark to be newer than.
+  await seed([
+    { id: "trip", title: "Trip to Lisbon", at: 300, said: "Booked the flights" },
+    { id: "dinner", title: "Dinner", at: 200, said: "We said eight" },
+    { id: "planning", title: "Planning", at: 150, said: "All aboard", room: true },
+  ])
+  markRead("trip", 100)
+  markRead("dinner", 250)
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 3, "the list")
+    const pills = () => findAll('[role="group"][aria-label="Filter chats"] button')
+    assert.deepEqual(
+      pills().map((one) => (one.textContent ?? "").trim()),
+      ["All", "Unread", "Chats", "Rooms", "Routines"],
+      "the five pills, in the rule's own order",
+    )
+    assert.equal(filterPill("All")?.getAttribute("aria-pressed"), "true", "All is what the list opens on")
+
+    await click(filterPill("Unread"))
+    assert.deepEqual(rowIds(), ["trip"], "Unread keeps the rows that wear this device's dot")
+    await click(filterPill("Chats"))
+    assert.deepEqual(rowIds(), ["trip", "dinner"], "Chats is a row that is neither a room nor a run")
+    await click(filterPill("Rooms"))
+    assert.deepEqual(rowIds(), ["planning"], "Rooms is the room's own row")
+    await click(filterPill("Routines"))
+    assert.deepEqual(rowIds(), [], "no routine has delivered here")
+    assert.ok(findText("p", "No routines."), "so the pill says what its emptiness is, in its own words")
+
+    // A search inside a pill that holds rows is the search's emptiness, not the pill's.
+    await click(filterPill("Rooms"))
+    await click(find("[data-search-toggle]"))
+    await until(async () => Boolean(find("#chats-search")), "the foot's field")
+    await type(find("#chats-search"), "lisbon")
+    assert.deepEqual(rowIds(), [], "the pill keeps the room, and the words find nothing in it")
+    assert.ok(findText("p", "No chats match."), "which is the search's sentence")
+  })
+})
+
+/**
+ * The list as the shell draws it at the laptop width, where the screen is the pane's list: the page
+ * itself answers "No chat open" there, and the list beside the chat is the same component.
+ */
+const listPane = () => (
+  <MemoryRouter initialEntries={[`/b/${bot.id}`]}>
+    <Nav />
+    <BotChatsPane pane={{ profileId: bot.id, open: true }} />
+  </MemoryRouter>
+)
+
+test(
+  "from the laptop width the search stands in the bar, above the pills, and the foot has no circle",
+  laptop(async () => {
+    await seed([
+      { id: "a", title: "A chat", at: 100, said: "Hello there" },
+      { id: "b", title: "Another", at: 90, said: "Other words" },
+    ])
+    await mount(listPane(), async () => {
+      await until(async () => rowIds().length === 2, "the list")
+      assert.equal(missing("[data-search-toggle]"), true, "the foot's circle is gone")
+      const field = find("header #chats-search")
+      const pills = find('header [role="group"][aria-label="Filter chats"]')
+      const rows = find("ul")
+      assert.ok(field && pills && rows, "the field, the pills and the rows are all on screen")
+      assert.ok(
+        field!.compareDocumentPosition(pills!) & Node.DOCUMENT_POSITION_FOLLOWING,
+        "the field stands above the pills",
+      )
+      assert.ok(
+        pills!.compareDocumentPosition(rows!) & Node.DOCUMENT_POSITION_FOLLOWING,
+        "and the pills above the rows",
+      )
+      assert.equal(findAll("#chats-search").length, 1, "one field, never two")
+      await type(field, "another")
+      assert.deepEqual(rowIds(), ["b"], "and it narrows the rows where it stands")
+    })
+  }),
+)
+
+test(
+  "below the laptop width the search is still the foot's, and the bar holds no field",
+  atWidth(1024, async () => {
+    await seed([{ id: "a", title: "A chat", at: 100, said: "Hello there" }])
+    await mount(screen(), async () => {
+      await until(async () => rowIds().length === 1, "the list")
+      assert.equal(missing("[data-search-toggle]"), false, "the circle is in the foot")
+      assert.equal(missing("header #chats-search"), true, "and the bar holds no field")
+    })
+  }),
+)
+
+test("the filter a device kept is the one its list opens on", async () => {
+  await seed([
+    { id: "trip", title: "Trip to Lisbon", at: 300, said: "Booked the flights" },
+    { id: "planning", title: "Planning", at: 150, said: "All aboard", room: true },
+  ])
+  // A device that has never chosen: the ground the first visit stands on.
+  await seedSettings({ developer: true, activeProfileId: bot.id })
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 2, "the list")
+    assert.equal(filterPill("All")?.getAttribute("aria-pressed"), "true", "a device that never chose opens on All")
+    await click(filterPill("Rooms"))
+    assert.deepEqual(rowIds(), ["planning"], "the press narrows the rows")
+    assert.equal((await getSettings()).chatFilter, "rooms", "and is what this device keeps")
+  })
+  // The next visit is the pill it left, not the ground.
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 1, "the list opened on the pill this device kept")
+    assert.deepEqual(rowIds(), ["planning"], "the rows it keeps")
+    assert.equal(filterPill("Rooms")?.getAttribute("aria-pressed"), "true", "with Rooms pressed")
+  })
+})

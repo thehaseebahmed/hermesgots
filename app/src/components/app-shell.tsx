@@ -1,6 +1,8 @@
 import {
   lazy,
   Suspense,
+  useCallback,
+  useEffect,
   useLayoutEffect,
   useRef,
   useState,
@@ -26,6 +28,7 @@ import {
   useProjectsPane,
   useResearchPane,
 } from "@/lib/pane"
+import { setMenuOpener } from "@/lib/native"
 import { useSidebarCollapsed } from "@/lib/sidebar"
 import { useLegacyChat } from "@/lib/legacy-chat"
 import { cn } from "@/lib/utils"
@@ -193,6 +196,10 @@ export function AppShell({ children }: { children?: ReactNode }) {
   useBubbleMirror()
   useBubbleTakeaways()
   const [open, setOpen] = useState(false)
+  const openDrawer = useCallback(() => setOpen(true), [])
+  // The drawer is the phone's menu: where the sidebar stands, the menu is already on screen, so the
+  // press at the app's edge offers nothing rather than a sheet over a list that is already there.
+  useEffect(() => (wide ? undefined : setMenuOpener(openDrawer)), [openDrawer, wide])
   const [collapsed, toggleCollapsed] = useSidebarCollapsed()
   const { pathname } = useLocation()
   const main = useRef<HTMLElement>(null)
@@ -242,7 +249,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
   return (
     <BreakReminderProvider>
       <KeyboardShortcuts />
-      <DrawerContext.Provider value={() => setOpen(true)}>
+      <DrawerContext.Provider value={openDrawer}>
         <div className="flex h-dvh overflow-hidden bg-background">
           {/* Not mounted on phones, where the drawer holds the list, so its queries don't run twice. */}
           {wide && (

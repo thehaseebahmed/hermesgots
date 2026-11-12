@@ -6,6 +6,7 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
+import { act, useEffect, useState } from "react"
 
 import { QuestionCard } from "@/components/chat/question-card"
 import type { ClarifyAnswers, ClarifyQuestion, Message } from "@/lib/db"
@@ -173,7 +174,7 @@ test("an open-ended question is its own answer, with no choices to pick", async 
   )
 })
 
-test("a host that asks one question at a time draws the whole ask, and only the page it asks answers", async () => {
+test("a host that asks one question at a time draws the whole ask, and only the page it asks is sent", async () => {
   answered()
   await mount(
     <QuestionCard
@@ -194,12 +195,12 @@ test("a host that asks one question at a time draws the whole ask, and only the 
       assert.equal(
         (findText("[data-slot=button]", "staging") as HTMLButtonElement).disabled,
         true,
-        "a question the host is not on yet cannot be answered",
+        "a question the host has already taken is answered and stays so",
       )
       assert.equal(
         (findText("[data-slot=button]", "Platform") as HTMLButtonElement).disabled,
-        true,
-        "nor one it has not reached at all",
+        false,
+        "one the host has yet to ask can be chosen ahead",
       )
       assert.equal(arrow("Next question")?.disabled, false, "the arrows still read the whole ask")
 
@@ -209,6 +210,63 @@ test("a host that asks one question at a time draws the whole ask, and only the 
       assert.deepEqual(answers, [{ q1: "rename it" }], "only the question asked is answered")
     },
   )
+})
+
+test("a question chosen ahead is held until the host asks it, and nothing is sent or skipped from its page", async () => {
+  answered()
+  const ask = [
+    { id: "q0", question: "Which environment?", choices: ["staging", "production"] },
+    { id: "q1", question: "Who reviews it?", choices: ["Platform", "Product"] },
+  ]
+  let ask1: (id: string) => void = () => {}
+  function Host() {
+    const [asked, setAsked] = useState("q0")
+    useEffect(() => {
+      ask1 = setAsked
+    }, [])
+    return (
+      <QuestionCard
+        message={message(ask)}
+        askedId={asked}
+        onAnswer={async (given) => {
+          answers.push(given)
+        }}
+      />
+    )
+  }
+  await mount(<Host />, async () => {
+    const row = pagesRow()
+    await settle()
+    await click(arrow("Next question"))
+    row.scrollLeft = 320
+    row.dispatchEvent(new Event("scroll"))
+    await settle()
+    assert.match(text(), /2 of 2/)
+    await click(findText("[data-slot=button]", "Product"))
+    assert.equal(
+      (findText("[data-slot=button]", "Send") as HTMLButtonElement).disabled,
+      true,
+      "Send is for the question the host asked, not this one",
+    )
+    assert.equal(
+      (findText("[data-slot=button]", "Skip") as HTMLButtonElement).disabled,
+      true,
+      "and Skip would skip that question, not this one",
+    )
+    assert.deepEqual(answers, [], "nothing went")
+
+    await act(async () => ask1("q1"))
+    await settle()
+    assert.match(text(), /2 of 2/)
+    assert.equal(
+      (findText("[data-slot=button]", "Send") as HTMLButtonElement).disabled,
+      false,
+      "asked now, the choice made ahead is ready to send",
+    )
+    await click(findText("[data-slot=button]", "Send"))
+    await settle()
+    assert.deepEqual(answers, [{ q1: "Product" }])
+  })
 })
 
 test("the card opens on the page the host asks, not on the first of the ask", async () => {
@@ -230,4 +288,100 @@ test("the card opens on the page the host asks, not on the first of the ask", as
       )
     },
   )
+})
+
+test("a card opened on a later page lands on it, rather than scrolling up from the first", async () => {
+  // A host asks a call's questions one prompt at a time and the card is drawn again for each: an
+  // animated scroll from the first page reads every page it passes, and the count flashes back.
+  const scrolls: ScrollBehavior[] = []
+  const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth")
+  const scrollTo = HTMLElement.prototype.scrollTo
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", { configurable: true, get: () => 320 })
+  HTMLElement.prototype.scrollTo = function (this: HTMLElement, options?: ScrollToOptions | number) {
+    const given = typeof options === "object" ? options : {}
+    scrolls.push(given.behavior ?? "auto")
+    this.scrollLeft = Number(given.left ?? 0)
+    this.dispatchEvent(new Event("scroll"))
+  } as typeof HTMLElement.prototype.scrollTo
+  try {
+    const ask = [
+      { id: "q0", question: "Which environment?", choices: ["staging", "production"] },
+      { id: "q1", question: "Which services?", choices: ["api", "worker"] },
+      { id: "q2", question: "Who reviews it?", choices: ["Platform", "Product"] },
+    ]
+    await mount(
+      <QuestionCard message={message(ask)} askedId="q2" onAnswer={async () => {}} />,
+      async () => {
+        await settle()
+        assert.ok(scrolls.length > 0, "the row is moved to the asked page")
+        assert.notEqual(scrolls[0], "smooth", "the first move is a landing, not an animation")
+        assert.match(text(), /3 of 3/)
+      },
+    )
+  } finally {
+    if (width) Object.defineProperty(HTMLElement.prototype, "clientWidth", width)
+    HTMLElement.prototype.scrollTo = scrollTo
+  }
+})
+
+test("a card the host moves to its next question reads only that page, not the pages it slides past", async () => {
+  // One card is kept across a call's prompts, so the next question slides in: a slide's scroll
+  // passes the page it left, and a count read off that would flash back before it lands.
+  const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientWidth")
+  const scrollTo = HTMLElement.prototype.scrollTo
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+    configurable: true,
+    get: () => 320,
+  })
+  HTMLElement.prototype.scrollTo = function (
+    this: HTMLElement,
+    options?: ScrollToOptions | number,
+  ) {
+    const given = typeof options === "object" ? options : {}
+    const target = Number(given.left ?? 0)
+    if (given.behavior !== "smooth") {
+      this.scrollLeft = target
+      this.dispatchEvent(new Event("scroll"))
+      return
+    }
+    // A slide: a frame still at the page it left, then the page it lands on.
+    this.dispatchEvent(new Event("scroll"))
+    setTimeout(() => {
+      this.scrollLeft = target
+      this.dispatchEvent(new Event("scroll"))
+    }, 40)
+  } as typeof HTMLElement.prototype.scrollTo
+  const ask = [
+    { id: "q0", question: "Which environment?", choices: ["staging", "production"] },
+    { id: "q1", question: "Which services?", choices: ["api", "worker"] },
+    { id: "q2", question: "Who reviews it?", choices: ["Platform", "Product"] },
+  ]
+  let moveTo: (id: string) => void = () => {}
+  function Host() {
+    const [asked, setAsked] = useState("q0")
+    useEffect(() => {
+      moveTo = setAsked
+    }, [])
+    return <QuestionCard message={message(ask)} askedId={asked} onAnswer={async () => {}} />
+  }
+  try {
+    await mount(<Host />, async () => {
+      await settle()
+      assert.match(text(), /1 of 3/)
+      const counts: string[] = []
+      const observer = new MutationObserver(() => {
+        const count = text().match(/\d of 3/)?.[0]
+        if (count && counts.at(-1) !== count) counts.push(count)
+      })
+      observer.observe(document.body, { subtree: true, childList: true, characterData: true })
+      await act(async () => moveTo("q1"))
+      await new Promise((done) => setTimeout(done, 120))
+      await settle()
+      observer.disconnect()
+      assert.deepEqual(counts, ["2 of 3"], "the count goes straight to the asked page")
+    })
+  } finally {
+    if (width) Object.defineProperty(HTMLElement.prototype, "clientWidth", width)
+    HTMLElement.prototype.scrollTo = scrollTo
+  }
 })

@@ -1,14 +1,22 @@
 // A canvas on a phone, end to end: the page its bot writes and the chat it is edited in, each on a
 // screen of its own with one flip between them — a canvas made from a prompt opens on its chat
-// while the bot builds, Preview appears with the first version and draws the page, a box ticked on
-// the page is kept by the host, an edit sent from the chat lands as a new version, Preview is where
-// Undo is pressed, a page that asks to leave is refused and drawn again, and the chat's Point row
-// sends the reader to the page and takes the element they tap back as the field's chip. A browser is
-// the tier that holds it: the page is a sandboxed `srcdoc` document with an opaque origin of its own,
-// the refusal of an outside navigation is the browser's own policy, the outline and the tap that
-// answer a point are that document's own script, and the versions land from the mock's clock rather
-// than a component test's single step.
-import { app, assert, flow, pass, SEND_CHORD } from "./lib.mjs"
+// while the bot builds, Preview appears with the first version and draws the page, its head's asks
+// for Chart.js and d3 answered so both libraries run inside the frame (the drawn page a refactor
+// has to leave as it was), a box ticked on the page is kept by the host, an edit sent from the chat
+// lands as a new version, Preview is where Undo is pressed, a page that asks to leave is refused
+// and drawn again, and the chat's Point row sends the reader to the page and takes the element
+// they tap back as the field's chip — and a visit costs only what its page asked: a page that asks
+// for no library fetches none of one, and one that asks for three fetches each of those chunks once.
+// A wide screen is the same canvas in two panes, and only boxes say where they are: no DOM without
+// layout can measure which pane a header spans.
+
+// A browser is the tier that holds it: the page is a sandboxed `srcdoc` document with an opaque
+// origin of its own, the refusal of an outside navigation is the browser's own policy, the outline
+// and the tap that answer a point are that document's own script, a library's source is a chunk
+// only the browser runs (the component tier loads the sources, but no page makes a request), what a visit
+// fetches is the browser's own request log rather than anything the build's output says, and the
+// versions land from the mock's clock rather than a component test's single step.
+import { app, assert, flow, mockJson, pass, SEND_CHORD, settled } from "./lib.mjs"
 
 const PROMPT = "A checklist for the deck"
 const EDIT = "Make it say the deck is done."
@@ -62,8 +70,29 @@ await flow(
       false,
       "the page opens with its box unticked",
     )
+    // The page asks for Chart.js by name, and the source it asked for is in the document where the
+    // ask stood: a page drawn from the bundle's copies and one drawn from a source fetched for its
+    // ask are the same page, which is the leg that makes the fetch a refactor rather than a change.
+    assert.equal(
+      await frame()
+        .locator("body")
+        .evaluate(() => typeof window.Chart),
+      "function",
+      "the page's ask for chart drew Chart.js inside the frame",
+    )
+    // And a second ask in the same head is a second library, fetched as its own chunk: the page
+    // drew with `d3.select`, so what arrived is the library and not only a name on `window`.
+    assert.equal(
+      await frame()
+        .locator("#value")
+        .evaluate((el) => el.getAttribute("data-drawn-by")),
+      "d3",
+      "the page's ask for d3 drew with d3.select inside the frame",
+    )
     await shot("preview-first")
     pass("the preview screen: Preview appears with the first version and draws the page")
+    pass("the preview screen: a page that asks for chart draws with Chart.js in the frame")
+    pass("the preview screen: a page that asks for d3 draws with d3.select in the frame")
 
     // The page's box is the canvas's own data, so the host is what keeps the tick.
     const [kept] = await Promise.all([
@@ -151,6 +180,39 @@ await flow(
     await shot("undone")
     pass("the preview screen: Undo draws the first version with the box still ticked")
 
+    // A gap only a browser can measure: the sheet's heading starts 16px below its drag handle.
+    await page.locator("[data-canvas-options-open]").click()
+    const optionsTitle = page.locator('[data-slot="sheet-title"]')
+    await optionsTitle.waitFor({ timeout: 10_000 })
+    await settled(page)
+    const gap = await page.evaluate(() => {
+      const popup = document.querySelector('[data-popup-form="sheet"]')
+      const handle = popup?.querySelector('[aria-label="Close"]')
+      const heading = document.querySelector('[data-slot="sheet-title"]')
+      const bottom = handle?.getBoundingClientRect().bottom ?? null
+      const top = heading?.getBoundingClientRect().top ?? null
+      return {
+        handle: bottom === null ? null : Math.round(bottom),
+        heading: top === null ? null : Math.round(top),
+        gap: bottom === null || top === null ? null : Math.round(top - bottom),
+      }
+    })
+    console.log(
+      `options sheet 390 — handle bottom ${gap.handle}, heading top ${gap.heading} ` +
+        `(gap ${gap.gap}px)`,
+    )
+    assert.equal(
+      gap.gap,
+      16,
+      `the sheet's heading clears the drag handle by 16px, not ${gap.gap} ` +
+        `(handle bottom ${gap.handle}, heading top ${gap.heading})`,
+    )
+    await shot("options-sheet")
+    // Shut again, so the legs after this one read the page and not a sheet laid over it.
+    await page.keyboard.press("Escape")
+    await optionsTitle.waitFor({ state: "detached", timeout: 10_000 })
+    pass("the preview screen: the options sheet's heading starts 16px below its drag handle")
+
     // Pointing is the phone's round trip: the edit screen draws no page, so its Point row sends the
     // reader to the page with pointing armed, and the tap that answers happens inside the sandboxed
     // document — the outline under the finger and the element's words are the page's own script
@@ -187,6 +249,289 @@ await flow(
     await page.getByRole("button", { name: "Remove the point on Deck checklist" }).click()
     await chip.waitFor({ state: "detached", timeout: 10_000 })
     pass("the edit screen: the chip's cross takes the point off the field")
+
+    // What a visit fetches is the page's own ask, and nothing else: the two canvases seeded here
+    // differ in nothing but the libraries their head names. The frame has been up since Preview
+    // first drew, so this window holds the visits and not the app's boot, and what is counted is
+    // the requests themselves — a library's source is one request of its own, `?raw` and `.js`,
+    // which only the canvas's sources are (the base stylesheet is `.css`, the demos' article `.md`).
+    const chunks = []
+    page.on("request", (request) => {
+      const { pathname } = new URL(request.url())
+      if (request.url().endsWith("?raw") && pathname.endsWith(".js")) {
+        chunks.push(pathname.split("/").pop())
+      }
+    })
+    const visit = async (fixture) => {
+      const { id: seeded } = await mockJson("/__mock/canvas", { fixture })
+      const from = chunks.length
+      await page.goto(`${app}/canvas/${seeded}`)
+      const drawn = frame().locator("#drawn")
+      // The frame is drawn only once the sources its page asked for are in hand, so a frame that
+      // is up is a fetch that is over: nothing arrives after this to be counted.
+      await drawn.waitFor({ timeout: 20_000 })
+      return { fetched: chunks.slice(from), drew: await drawn.innerText() }
+    }
+
+    const quiet = await visit("plain")
+    assert.deepEqual(
+      quiet.fetched,
+      [],
+      `a page that asks for no library fetches none of one, fetched ${quiet.fetched.join(", ")}`,
+    )
+    assert.equal(quiet.drew, "nothing", "and the page drew, from the platform alone")
+    await shot("no-libraries")
+    pass("the preview screen: a canvas that asks for no library fetches none of one")
+
+    const many = await visit("many")
+    assert.deepEqual(
+      [...many.fetched].sort(),
+      ["chart.umd.min.js", "d3.min.js", "dayjs.min.js"],
+      `a page that asks for three libraries fetches each of those chunks once, fetched ` +
+        `${many.fetched.join(", ") || "none"}`,
+    )
+    assert.equal(many.drew, "chart d3 date", "and the page drew with all three inside the frame")
+    await shot("three-libraries")
+    pass("the preview screen: a canvas that asks for three libraries fetches each chunk once")
   },
   { viewport: { width: 390, height: 844 }, touch: true },
+)
+
+const at = (box) => (box ? `${box.x},${box.y} ${box.width}×${box.height}` : "none")
+
+await flow(
+  "canvas-wide",
+  async ({ page, shot }) => {
+    await page.goto(`${app}/canvas`)
+    await page.getByRole("textbox", { name: "What the canvas should be" }).fill(PROMPT)
+    await page.getByRole("button", { name: "Make it", exact: true }).click()
+    // A wide screen has room for both panes, so a start lands on the canvas's own address and nothing
+    // forwards it to the chat's: the lane is already drawn there.
+    await page.waitForURL(/\/canvas\/c_[^/]+$/, { timeout: 20_000 })
+    await page.locator(FRAME).waitFor({ timeout: 40_000 })
+    await settled(page)
+    // One read of the screen, so no two boxes are measured a reflow apart.
+    const measured = await page.evaluate((selector) => {
+      const box = (node) => {
+        if (!node) return null
+        const { x, y, width, height, right, bottom } = node.getBoundingClientRect()
+        return {
+          x: Math.round(x),
+          y: Math.round(y),
+          width: Math.round(width),
+          height: Math.round(height),
+          right: Math.round(right),
+          bottom: Math.round(bottom),
+        }
+      }
+      const ownedLane = document.querySelector("[data-canvas-lane]")
+      const ownedPage = document.querySelector("[data-canvas-page]")
+      const frame = document.querySelector(selector)
+      // Where a screen draws no pane of its own, the chat's column is the one the frame's page isn't.
+      const head = document.querySelector("header")
+      const field = document.querySelector('textarea[aria-label="Message"]')
+      const control = document.querySelector("[data-canvas-options-open]")
+      const middle = document.querySelector('[data-slot="header-middle"]')
+      const pane = ownedPage ?? frame?.parentElement ?? null
+      const lane =
+        ownedLane ??
+        (pane
+          ? ([...(pane.parentElement?.children ?? [])].find((one) => one !== pane) ?? null)
+          : null)
+      return {
+        lane: box(lane),
+        page: box(pane),
+        head: box(head),
+        field: box(field),
+        control: box(control),
+        middle: box(middle),
+        frame: box(frame),
+        owned: Boolean(ownedLane && ownedPage),
+        laneHoldsHead: Boolean(lane && head && lane.contains(head)),
+        laneHoldsField: Boolean(lane && field && lane.contains(field)),
+        laneHoldsFrame: Boolean(lane && frame && lane.contains(frame)),
+        pageHoldsHead: Boolean(pane && head && pane.contains(head)),
+        pageHeaders: pane ? pane.querySelectorAll("header").length : 0,
+      }
+    }, FRAME)
+    console.log(
+      `wide 1440 — head ${at(measured.head)}, lane ${at(measured.lane)}, ` +
+        `page ${at(measured.page)}, frame ${at(measured.frame)}, chat ${at(measured.field)}, ` +
+        `title ${at(measured.control)} of the middle slot ${at(measured.middle)}`,
+    )
+
+    // Relationships rather than x values, so a wider screen moves both and neither claim breaks.
+    assert.ok(measured.lane && measured.page, "the wide screen draws two columns")
+    assert.ok(measured.laneHoldsHead, "the canvas's head stands in the chat's column, as its lane")
+    assert.ok(measured.laneHoldsField, "and the chat's field is drawn under it")
+    assert.equal(measured.laneHoldsFrame, false, "the frame is the page's, never the lane's")
+    assert.equal(measured.pageHoldsHead, false, "the page pane carries no header")
+    assert.equal(measured.pageHeaders, 0, "and draws none of its own")
+    assert.ok(
+      measured.lane.x < measured.page.x,
+      `the lane is the left pane (lane x=${measured.lane.x}, page x=${measured.page.x})`,
+    )
+    assert.ok(
+      Math.abs(measured.lane.right - measured.page.x) <= 1,
+      `the lane's right edge is the page's left edge (lane right=${measured.lane.right}, page x=${measured.page.x})`,
+    )
+    assert.ok(
+      Math.abs(measured.lane.width - 412) <= 1,
+      `the lane is the house's 412px list lane where there is room (${measured.lane.width})`,
+    )
+    assert.ok(
+      measured.page.width >= 412,
+      `the page is never narrower than the lane's floor (${measured.page.width})`,
+    )
+    assert.ok(
+      measured.head.right <= measured.lane.right + 1,
+      `the head spans the lane and no more (head right=${measured.head.right}, lane right=${measured.lane.right})`,
+    )
+    // The title's control fills the header's middle slot, so a press anywhere on the title line lands:
+    // at 1440 the five-word title leaves most of that line dead if the control is content-sized.
+    assert.ok(
+      measured.control && measured.middle,
+      `the wide screen draws the header's title control (control ${at(measured.control)}, middle ${at(measured.middle)})`,
+    )
+    assert.ok(
+      measured.control.width >= measured.middle.width * 0.8,
+      `the title control fills the middle slot it is drawn in (control ${measured.control.width}, ` +
+        `middle ${measured.middle.width})`,
+    )
+    // The page is the screen's full height, and the frame's top inset is what says the header moved out.
+    assert.ok(
+      measured.page.y <= 1,
+      `the page pane starts at the screen's top (${measured.page.y})`,
+    )
+    const inset = {
+      left: measured.frame.x - measured.page.x,
+      top: measured.frame.y - measured.page.y,
+      right: measured.page.right - measured.frame.right,
+      bottom: measured.page.bottom - measured.frame.bottom,
+    }
+    assert.deepEqual(
+      inset,
+      { left: 8, top: 8, right: 8, bottom: 8 },
+      "the frame keeps its 8px inset on all four sides of the page",
+    )
+    assert.equal(
+      measured.frame.width,
+      measured.page.width - 16,
+      `the frame keeps its 8px inset on both sides (frame ${measured.frame.width}, page ${measured.page.width})`,
+    )
+    assert.ok(
+      measured.frame.height >= measured.page.height - 2 * 8 - 1,
+      `and the pane's whole height less its gutters (${measured.frame.height} of ${measured.page.height})`,
+    )
+    assert.ok(
+      measured.owned,
+      "and the two panes are the screen's own, named for this flow ([data-canvas-lane], [data-canvas-page])",
+    )
+    await shot("wide-two-panes")
+    pass("a wide screen: the chat's lane is the left pane, and the page fills the right with no header")
+
+    // The scrollbar is the platform's own, and it is pinned here rather than styled: the page's
+    // document is grown past its own viewport, and what is read is what the app does NOT force —
+    // no `overflow` rule, no `scrollbar-gutter`, no reserved gutter. Nothing in the canvas path sets
+    // one (the screen, `canvas-document.ts` and the shell alike), so this is green on the code as it
+    // stands; its value is that whoever next tries to "fix" the scrollbar by hand meets a failure.
+    const scrolled = await page
+      .frameLocator(FRAME)
+      .locator("body")
+      .evaluate(() => {
+        document.body.style.minHeight = "3000px"
+        const root = getComputedStyle(document.documentElement)
+        return {
+          grown: document.documentElement.scrollHeight,
+          viewport: window.innerHeight,
+          overflowY: root.overflowY,
+          gutter: root.scrollbarGutter,
+          reserved: window.innerWidth - document.documentElement.clientWidth,
+        }
+      })
+    console.log(
+      `wide 1440 — frame document ${scrolled.grown}px in a ${scrolled.viewport}px viewport: ` +
+        `overflow-y ${scrolled.overflowY}, scrollbar-gutter ${scrolled.gutter}, ` +
+        `gutter reserved ${scrolled.reserved}px`,
+    )
+    assert.ok(
+      scrolled.grown > scrolled.viewport,
+      `the frame's document is grown past its viewport (${scrolled.grown} > ${scrolled.viewport})`,
+    )
+    assert.equal(
+      scrolled.overflowY,
+      "visible",
+      `the app forces no overflow on the page's document (overflow-y ${scrolled.overflowY})`,
+    )
+    assert.equal(
+      scrolled.gutter,
+      "auto",
+      `and no scrollbar-gutter either (scrollbar-gutter ${scrolled.gutter})`,
+    )
+    assert.equal(
+      scrolled.reserved,
+      0,
+      `the platform reserves no gutter of its own (${scrolled.reserved}px of ` +
+        `${scrolled.viewport}px viewport width)`,
+    )
+    pass("a wide screen: the page's document keeps the platform's own scrollbar, unstyled and unpinned")
+  },
+  { viewport: { width: 1440, height: 900 } },
+)
+
+
+await flow(
+  "canvas-narrow",
+  async ({ page, shot }) => {
+    await page.goto(`${app}/canvas`)
+    await page.getByRole("textbox", { name: "What the canvas should be" }).fill(PROMPT)
+    await page.getByRole("button", { name: "Make it", exact: true }).click()
+    await page.waitForURL(/\/canvas\/c_[^/]+$/, { timeout: 20_000 })
+    await page.locator(FRAME).waitFor({ timeout: 40_000 })
+    await settled(page)
+    const measured = await page.evaluate((selector) => {
+      const box = (node) => {
+        if (!node) return null
+        const { x, y, width, height, right } = node.getBoundingClientRect()
+        return {
+          x: Math.round(x),
+          y: Math.round(y),
+          width: Math.round(width),
+          height: Math.round(height),
+          right: Math.round(right),
+        }
+      }
+      const send = [...document.querySelectorAll("button")].find(
+        (one) => one.getAttribute("aria-label") === "Send",
+      )
+      return {
+        lane: box(document.querySelector("[data-canvas-lane]")),
+        page: box(document.querySelector("[data-canvas-page]")),
+        frame: box(document.querySelector(selector)),
+        send: box(send),
+      }
+    }, FRAME)
+    console.log(
+      `narrow 1024 — lane ${at(measured.lane)}, page ${at(measured.page)}, ` +
+        `frame ${at(measured.frame)}, send ${at(measured.send)}`,
+    )
+    assert.ok(measured.lane && measured.page, "1024 draws two columns")
+    assert.ok(
+      Math.abs(measured.lane.width - measured.page.width) <= 1,
+      `a row too narrow for 412 beside 412 splits evenly (lane ${measured.lane.width}, ` +
+        `page ${measured.page.width})`,
+    )
+    assert.ok(
+      measured.lane.width < 412,
+      `and the lane gives up the list lane's width to do it (${measured.lane.width})`,
+    )
+    assert.ok(
+      measured.send && measured.send.right <= measured.lane.right,
+      `the chat's Send stays inside the lane (send right ${measured.send?.right}, ` +
+        `lane right ${measured.lane.right})`,
+    )
+    await shot("narrow-even-split")
+    pass("a narrow screen: the two panes split the row evenly, and the composer fits its lane")
+  },
+  { viewport: { width: 1024, height: 900 } },
 )

@@ -10,7 +10,7 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
   const picker = page.getByRole("dialog")
   const pick = async (query, label) => {
     await picker.getByRole("textbox", { name: "Search models" }).fill(query)
-    await picker.getByRole("button", { name: label }).first().click()
+    await picker.getByRole("radio", { name: label }).first().click()
   }
   // The row is the control: no chevron, no button inside it (ADR 0055).
   const field = page.locator('[data-setting="subagent-model"]')
@@ -61,7 +61,7 @@ await flow("delegation-model", async ({ page, profileId, until, shot, held }) =>
   await field.getByText("openrouter/openai/gpt-5-mini").waitFor({ timeout: 15_000 })
 
   await field.click()
-  await picker.getByRole("button", { name: "Default model" }).first().click()
+  await picker.getByRole("radio", { name: "Default model" }).first().click()
   await until(async () => (await hosted()) === null, 10_000, "the host to clear the pick")
   await field.getByText("Default model").waitFor()
   assert.equal(writes.length, 2, "the clear is a write of its own")

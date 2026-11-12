@@ -14,7 +14,6 @@ import {
   HistoryIcon,
   ListChecksIcon,
   MessageCircleQuestionIcon,
-  MenuIcon,
   PencilIcon,
   PlusIcon,
   RotateCcwIcon,
@@ -27,12 +26,13 @@ import { toast } from "sonner"
 
 import { attempt } from "@/lib/attempt"
 import { Banner } from "@/components/banner"
+import { ChatHeader } from "@/components/chat/chat-header"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { Bot } from "@/components/bot"
 import { CompareBriefForm, CompareScopeForm, MemoCanvas, SourceKinds } from "@/components/compare"
 import { VerdictCanvas, VerifyBriefForm, VerifyScopeForm } from "@/components/verify"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ModelPicker, PICKER_HEIGHT } from "@/components/chat/model-picker"
-import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
 import { ItemGroup, ItemRow, ItemSearch } from "@/components/item-list"
 import { itemGroups } from "@/lib/item-groups"
@@ -47,16 +47,6 @@ import {
   QuizCanvas,
   StageStrip,
 } from "@/components/research"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -209,7 +199,6 @@ export function ResearchPane({ pane }: { pane: FeaturePane }) {
 }
 
 function ResearchHome({ ask, list }: { ask?: boolean; list?: FeaturePane }) {
-  const openDrawer = useOpenDrawer()
   const navigate = useNavigate()
   const { missions, unsupported } = useMissions()
   const profile = useLiveQuery(getActiveProfile, [])
@@ -240,23 +229,16 @@ function ResearchHome({ ask, list }: { ask?: boolean; list?: FeaturePane }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       {!ask && (
-        <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
-          <div className="mx-auto flex max-w-2xl items-center gap-3">
-            <Button
-              variant="outline"
-              size="icon-lg"
-              className="size-11 rounded-full md:hidden"
-              onClick={openDrawer}
-              aria-label="Open conversations"
-            >
-              <MenuIcon />
-            </Button>
-            <h1 className="flex flex-1 items-center gap-2 text-xl font-semibold tracking-tight">
-              Research
-              <ExperimentalBadge />
-            </h1>
-          </div>
-        </header>
+        <ChatHeader
+          pinned
+          heading
+          showBot={false}
+          title={
+            <>
+              Research <ExperimentalBadge />
+            </>
+          }
+        />
       )}
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-4 pt-4 pb-[max(2rem,env(safe-area-inset-bottom))] md:pt-10">
@@ -503,11 +485,12 @@ function Steps({ mission }: { mission: Mission }) {
 export function MissionPage() {
   const { id = "" } = useParams()
   const { mission, loaded } = useMission(id)
-  const { up } = useNav()
+  const { up, back } = useNav()
   const beside = Boolean(useResearchPane())
-  const back = useCallback(() => up("/research"), [up])
-  // Beside the list a mission is the top-level screen, so back leaves the app.
-  useEffect(() => (beside ? undefined : setBackGuard(() => (back(), true))), [back, beside])
+  const leave = useCallback(() => up("/research"), [up])
+  // Beside the list a mission is the top-level screen, so the press is the app's where nothing
+  // stands behind it. The control above still steps to the list, wherever this screen was opened.
+  useEffect(() => (beside ? undefined : setBackGuard(back())), [back, beside])
   useRememberOpened("research", mission?.id)
   useDismissPushes(mission?.id)
 
@@ -520,12 +503,12 @@ export function MissionPage() {
 
   const researching = !["brief", "scope"].includes(mission.stage)
   return researching ? (
-    <WorkView mission={mission} onBack={beside ? undefined : back} />
+    <WorkView mission={mission} onBack={beside ? undefined : leave} />
   ) : (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <MissionHeader
         mission={mission}
-        onBack={beside ? undefined : back}
+        onBack={beside ? undefined : leave}
         actions={<MissionMenu mission={mission} />}
       />
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
@@ -696,29 +679,17 @@ function MissionMenu({
           <RewritePicker mission={mission} onDone={() => setRewriting(false)} />
         </PopupContent>
       </Popup>
-      <AlertDialog open={confirming} onOpenChange={setConfirming}>
-        <AlertDialogContent size="sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this mission?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Its sources, claims and everything written from them go too.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={async () => {
-                setConfirming(false)
-                if (await attempt("delete the mission", () => deleteMission(mission)))
-                  navigate("/research", { replace: true })
-              }}
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDestructive
+        open={confirming}
+        onOpenChange={setConfirming}
+        title="Delete this mission?"
+        description="Its sources, claims and everything written from them go too."
+        confirmLabel="Delete"
+        onConfirm={async () => {
+          if (await attempt("delete the mission", () => deleteMission(mission)))
+            navigate("/research", { replace: true })
+        }}
+      />
     </>
   )
 }
@@ -777,18 +748,14 @@ function MissionHeader({
   const profile = useLiveQuery(() => db.profiles.get(mission.profileId), [mission.profileId])
   const by = [profile?.name, mission.researcher?.model].filter(Boolean).join(" · ")
   return (
-    <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
-      <div className="flex items-center gap-3">
-        {onBack && <BackButton label="Back to Research" onClick={onBack} />}
-        <div className="flex min-w-0 flex-1 flex-col">
-          <h1 className="truncate text-base font-semibold tracking-tight">{mission.title}</h1>
-          <p className="truncate text-xs text-muted-foreground">
-            {[type.name, by].filter(Boolean).join(" · ")}
-          </p>
-        </div>
-        {actions}
-      </div>
-    </header>
+    <ChatHeader
+      pinned
+      showBot={false}
+      leading={onBack ? <BackButton label="Back to Research" onClick={onBack} /> : undefined}
+      title={mission.title}
+      subtitle={[type.name, by].filter(Boolean).join(" · ")}
+      actions={actions}
+    />
   )
 }
 

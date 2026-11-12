@@ -5,14 +5,16 @@ import {
   BellOffIcon,
   CheckIcon,
   EllipsisIcon,
+  ListChecksIcon,
   PencilIcon,
   PinIcon,
   RotateCcwIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react"
+import { Link } from "react-router"
 import { Banner } from "@/components/banner"
-import { ConfirmDialog } from "@/components/chat/confirm-dialog"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { RenameDialog } from "@/components/chat/rename-dialog"
 import {
   ContextIcon,
@@ -21,7 +23,7 @@ import {
   UsageSheet,
   type ContextUsage,
 } from "@/components/chat/usage-sheet"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -54,7 +56,10 @@ import {
   resetsInText,
 } from "@/lib/provider-usage"
 import { setThreadMuted } from "@/lib/push"
+import { labelOf } from "@/lib/bot-name"
 import { quietly } from "@/lib/report"
+import { cn } from "@/lib/utils"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { closeSessionWork } from "@/lib/workspace"
 
 /**
@@ -221,17 +226,13 @@ export function LimitNotice({
   )
 }
 
-/**
- * The chat's header controls and what they open: the context ring and its usage sheet, and the
- * options menu — rename, pin, mute, resolve or reopen, discard and delete — with the dialogs they
- * ask in. Both chat screens draw it, a bot's Main among the chats it draws: Main carries the whole
- * of an ordinary chat's menu but Delete, since it is the bot's one chat that cannot go.
- */
 export function ChatActions({
   chat,
   profile,
   session,
   wide,
+  listPath,
+  unread,
   usage,
   providerUsage,
   usageOpen,
@@ -243,6 +244,10 @@ export function ChatActions({
   /** The chat as a project session, where it is one. */
   session?: Conversation
   wide: boolean
+  /** The bot's chats, where this chat has a list of its own that isn't already on screen beside it. */
+  listPath?: string
+  /** Whether anything else in that list waits unread on this device. */
+  unread?: boolean
   usage: ContextUsage
   providerUsage?: Profile["providerUsage"]
   /** The usage sheet, which the limit banner above the composer opens too. */
@@ -251,6 +256,7 @@ export function ChatActions({
   /** Where to go once the chat is gone. */
   onDeleted: () => void
 }) {
+  const labels = useBotLabels()
   const configured = Boolean(profile?.baseUrl.trim())
   const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -268,6 +274,24 @@ export function ChatActions({
       <div className="flex items-center gap-2">
         {wide && configured && (
           <ContextRing usage={usage} onClick={() => onUsageOpenChange(true)} />
+        )}
+        {listPath && (
+          <Link
+            to={listPath}
+            aria-label={`Chats with ${profile ? labelOf(labels, profile) : "the bot"}${unread ? ", unread chats" : ""}`}
+            className={cn(buttonVariants({ variant: "outline", size: "icon-lg" }), HEADER_BUTTON)}
+          >
+            <span className="relative flex items-center justify-center">
+              <ListChecksIcon />
+              {unread && (
+                <span
+                  data-unread
+                  aria-hidden
+                  className="absolute -top-1.5 -right-1.5 size-2.5 rounded-full bg-info ring-2 ring-background"
+                />
+              )}
+            </span>
+          </Link>
         )}
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -365,7 +389,7 @@ export function ChatActions({
         onSave={(name) => updateConversation(chat.id, { title: name, titleEdited: true })}
       />
 
-      <ConfirmDialog
+      <ConfirmDestructive
         open={deleting}
         onOpenChange={setDeleting}
         title={session ? "Delete this session?" : "Delete this chat?"}
@@ -374,7 +398,7 @@ export function ChatActions({
             ? "Its run stops and the host closes the session's work now: its worktrees are removed, unless one has uncommitted or unpushed changes, and its pull request is closed and its branch deleted on GitHub. It's removed from the app; Hermes keeps its own copy of the session."
             : "It's removed from this device. Hermes keeps its own copy of the session."
         }
-        confirm="Delete"
+        confirmLabel="Delete"
         onConfirm={async () => {
           if (session) closeSession()
           else stopMessage(chat.id)
@@ -385,12 +409,12 @@ export function ChatActions({
         }}
       />
 
-      <ConfirmDialog
+      <ConfirmDestructive
         open={discarding}
         onOpenChange={setDiscarding}
         title="Discard this session?"
         description="Its run stops and the host closes the session's work now: its worktrees are removed, unless one has uncommitted or unpushed changes, and its pull request is closed and its branch deleted on GitHub. The session moves to Discarded meanwhile."
-        confirm="Discard"
+        confirmLabel="Discard"
         onConfirm={async () => {
           if (!session) return
           closeSession()

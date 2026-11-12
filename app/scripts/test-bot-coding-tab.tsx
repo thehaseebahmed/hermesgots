@@ -25,10 +25,13 @@ import {
   click,
   find,
   findAll,
+  labelled,
   missing,
   mount,
   seedSettings,
   until,
+  watchNotes,
+  wordsOf,
 } from "./component-kit.tsx"
 
 function LiveEditor() {
@@ -224,6 +227,70 @@ test("a host that holds no pick budget reads as the default five", async () => {
   await mount(editor("/settings/bots/bot-1/coding"), async () => {
     assert.equal(shown(), "5 tasks", "the count the host would use where it holds none")
     assert.equal(botWrites(calls).length, 0, "and reading it wrote nothing")
+  })
+})
+
+test("a read the host refused says so, with a way to ask again, and the tap draws the budget", async () => {
+  const calls = await seed("coding-refused-read", ["afk", "afk_picks"], {
+    pickBudget: 3,
+    afkReadsRefused: 1,
+  })
+  const notes = watchNotes("pick budget")
+  await mount(editor("/settings/bots/bot-1/coding"), async () => {
+    const notice = '[data-bot-coding] [role="alert"]'
+    await until(async () => Boolean(find(notice)), "the refusal to be said")
+    assert.equal(
+      wordsOf(find(notice)),
+      "This bot's config.yaml can't be read right now.",
+      "the notice holds the host's own sentence, as every sibling hook does",
+    )
+    assert.equal(notes.count(), 1, "and the throw was noted for the console")
+
+    const retry = labelled(`${notice} button`, "Try again")
+    assert.ok(retry, "and one control offering to ask the same read again")
+    assert.equal(
+      retry.getAttribute("title"),
+      "Try again",
+      "an icon, so the words it is named are what a reader hears",
+    )
+    assert.equal(wordsOf(retry), "", "and no label is drawn beside it")
+    assert.equal(botReads(calls).length, 1, "the tab asked its own route once, and was refused")
+
+    await click(retry)
+    await until(async () => shown() === "3 tasks", "the budget the host answered")
+
+    assert.deepEqual(
+      botReads(calls).map((call) => call.method),
+      ["GET", "GET"],
+      "the tap asked the same route again, once",
+    )
+    assert.ok(missing(notice), "the notice goes with it")
+    notes.stop()
+  })
+})
+
+test("a retry still out keeps the stepper shut, so no budget the host never sent is written", async () => {
+  // The retry's read never answers: the tab is looked at in the one moment the old code opened the
+  // stepper over the default, and a tap there would have written five as the bot's real budget.
+  const calls = await seed("coding-retry-out", ["afk", "afk_picks"], {
+    pickBudget: 3,
+    afkReadsRefused: 1,
+    holdAfk: new Promise<void>(() => {}),
+  })
+  await mount(editor("/settings/bots/bot-1/coding"), async () => {
+    const notice = '[data-bot-coding] [role="alert"]'
+    await until(async () => Boolean(find(notice)), "the refusal to be said")
+
+    await click(labelled(`${notice} button`, "Try again"))
+
+    assert.equal(
+      step("Increase pick budget")?.hasAttribute("disabled"),
+      true,
+      "the stepper stays shut while the retry is out",
+    )
+    assert.equal(step("Decrease pick budget")?.hasAttribute("disabled"), true)
+    assert.equal(shown(), "5 tasks", "the default is drawn, not written")
+    assert.equal(botWrites(calls).length, 0, "and nothing was sent as the bot's budget")
   })
 })
 

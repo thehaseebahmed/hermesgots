@@ -8,6 +8,18 @@ Gots is a client for one Hermes Agent server: chat with your bots from a phone, 
 Who you are to Gots. Signed out means it has ended, and only a fresh sign-in brings it back.
 _Avoid_: login, account, user, "logged out"
 
+**Pick row**:
+One row of a list a pop-up offers — a model, a bot, a mode, a Prompt, a skill to run, a pull request, a setting's value. It is a control, not a list row: 44px at its shortest, one mark, a name, at most one muted line, and the one state its mode promises.
+_Avoid_: option row, list item, choice row
+
+**Pick group**:
+The list a pick row sits in, and the thing that says what its rows are: one of several, each on its own, a way out, or a cursor to run. A row outside one is a way out.
+_Avoid_: picker list, options list
+
+**Cursor**:
+The row a list's keyboard is on, which is not the row that is chosen. The `/` menu has a cursor and no choice; a settings pick has a choice and no cursor.
+_Avoid_: selection, highlight, focus
+
 **Identity**:
 The sign-in service an account session lives in. The Android app talks to it directly; the browser goes through the library.
 _Avoid_: auth server, login service, GoTrue
@@ -177,6 +189,10 @@ _Avoid_: repo skill, repository skill
 One skill's own panel, opened by its row: its SKILL.md, its linked files, and where it came from, with the host's Readiness and Setup where it has them. No URL of its own — it is about one skill, not a place.
 _Avoid_: skill page, skill detail screen, editor
 
+**Skill category**:
+The `category` a skill's SKILL.md frontmatter names — `review`, `devops`, `media` — which the Skills tab groups its rows by and names its **filters** after, alphabetically, with the skills that name none standing last under _No category_. A category held by both of the tab's sections is one category, so it gets one pill and keeps both sections' rows; a skill that names no category is under All alone.
+_Avoid_: group, folder, tag; section (the tab's sections are where a skill came from, not what it is about)
+
 **Usage window**:
 One thing a provider account can run out of, as that provider measures it: a period, which resets, or a balance, which doesn't.
 _Avoid_: quota, plan limit, usage bar
@@ -189,12 +205,20 @@ _Avoid_: alert, limit banner, usage warning
 One Hermes profile the user has linked to Gots: its own agent, skills and settings, reached at the host it runs on.
 _Avoid_: profile, agent, assistant
 
+**Bot's label**:
+What a list calls a bot, read off the host it answers at: `hermes.domain.com` is `hermes`, the domain part
+where two hosts share that short name (`domain` and `example`), the Hermes profile appended where one host
+holds several bots (`hermes/work`), and a bare host's port where it has one. Never stored, and never the name
+a host sealed for its default profile — every host calls that one "Hermes" (ADR 0148).
+_Avoid_: display name, nickname, bot name
+
 **Chat**:
-A bot's own conversation with you: one row of its list, drawn as a thread, and the screen its
-address opens. A bot's list holds every chat it has, so an older conversation is as reachable as the
-newest; a room and a routine's run are rows of the same list rather than chats, since one is shared
-with the bot's other members and the other is nobody's conversation. Main is a chat like any other:
-no mark, one place in the order, and the one chat that cannot be deleted.
+A bot's own conversation with you — where the app is: a bot's address lands in its chat, so the chat,
+not a list of them, is the screen the app opens on and the one a reload keeps the reader in. A bot's
+list holds every chat it has, so an older conversation is as reachable as the newest, and a chat's bar
+carries the way to that list; a room and a routine's run are rows of the same list rather than chats,
+since one is shared with the bot's other members and the other is nobody's conversation. Main is a
+chat like any other: no mark, one place in the order, and the one chat that cannot be deleted.
 _Avoid_: thread, Main, bot chat, "the bot's screen"
 
 **Blank chat**:
@@ -204,6 +228,10 @@ _Avoid_: new chat screen, draft chat, empty chat
 **Steer**:
 A message the user sends into a run already under way, drawn where it reached the agent: the user's own bubble, splitting the reply's work at that point, with "Steered" muted under it. The words are the user's, so the bubble is theirs; the caption is the one thing saying they arrived mid-run rather than as a new message.
 _Avoid_: interrupt, injection, mid-run message
+
+**Share sheet**:
+The screen another app's share opens in Gots: what arrived, a note the sender's own text opens, the bot it goes to, and a row to send it into. Its rows are the picked bot's chats, code sessions and the rooms its roster seats, touched in the last seven days and newest first — ten drawn, Show more for the rest of the week, twenty-five at most — while the search at its foot reaches everything the bot is in, not only what is older: every title it matches, the week's own rows and the ones past the twenty-five included, best match first. A room takes the message through its own store, as the room's composer does, rather than as a chat's turn.
+_Avoid_: share target, share dialog, share screen
 
 **Host**:
 The machine a bot's Hermes runs on: where its profiles, its MCP servers and the keys they use live.
@@ -398,12 +426,16 @@ The mark Gots leaves on a task it has claimed.
 _Avoid_: claimed, in-progress, assigned, taken
 
 **Bar**:
-A child screen's top bar: the leading control, the title, the line under it, the actions and the slot a screen pins with it, drawn by one component in two forms — floating over a thread, pinned in a list's scroll flow. Every icon control on it is a frosted outline circle.
+A child screen's top bar: the leading control, the title, the line under it, the actions and the slot a screen pins with it, drawn by one component in two forms — floating over a thread, pinned in a list's scroll flow. The leading control is the app's menu on a bot's chat, which is where the app is, so there is nothing behind it to go back to; it is a way back only where a screen was opened from another — a project session's "Back to Code", a bot's list's back to the chat it covers. Every icon control on it is a frosted outline circle.
 _Avoid_: topbar, navbar, toolbar, app bar, header
 
 **Foot**:
-The bar of floating controls a list keeps at the foot of its scroll, above the safe area, so a thumb reaches them: the chat list's search and its New cluster.
+The bar of floating controls a list keeps at the foot of its scroll, above the safe area, so a thumb reaches them. A bot's chat list keeps its New cluster there, and its search too on a phone and a tablet; from a laptop's width up the search stands in the **bar** instead, above the **filters**, and the foot holds the New cluster alone.
 _Avoid_: bottom bar, FAB row, dock
+
+**Filter**:
+One of the pills that narrow a list. A bot's chat list wears All, Unread, Chats, Rooms and Routines in the **bar** under its title row — under the search where there is one — and the one pressed is remembered on this device, with All what a device that never chose opens on; Chats is a row that is neither a room nor a routine's run, and Unread is the same mark this device's read dot reads. A bot's **Skills tab** wears All and its **skill categories** instead, drawn in the tab's own flow rather than pinned to a header, forgotten when the tab is left, and each one holding at least one skill by construction — so the tab's only "nothing here" is the search's. Either way a filter only narrows and never re-orders.
+_Avoid_: tab, segment, tag
 
 ## Rooms
 
@@ -610,8 +642,16 @@ _Avoid_: bot setting, server setting, config
 The value a Hermes setting runs at when the bot's host holds none of its own — the default Hermes itself was built with. A row shows it muted, and a reset returns the setting to it.
 _Avoid_: empty, blank, unset value, fallback
 
+**Gate read**:
+The one answer a bot's host gives about the Gots plugin on it — the version it runs and the features it offers — read once per connection and remembered, so every page of that bot's settings can draw the controls the plugin might withhold without asking again.
+_Avoid_: info call, feature probe, health check, connection test
+
+**Failed read**:
+A read a bot's settings page made that the host refused or that never landed, as against a host that answered without the thing asked for, which is an answer. Only a failed read can be asked again.
+_Avoid_: error state, read error, retryable failure
+
 **Bot page**:
-The screen Settings > Bot opens onto: what the bot is — its switches (Enabled where it is linked, Mute notifications, Test connection), then _Bot Profile_ (name, image, Progress updates), then _Hermes_ (its server's address and key, drawn only where the bot is unlinked) — and every setting page behind it in one card under _Settings_. It is the page a withheld page lands on, and the one screen that asks the bot's host for nothing.
+The screen Settings > Bot opens onto: what the bot is — its switches (Enabled where it is linked, Mute notifications), then _Plugin_ (the version its host runs), then _Bot Profile_ (name, image, Progress updates), then _Hermes_ (its server's address and key, drawn only where the bot is unlinked) — and every setting page behind it in one card under _Settings_. It is the page a withheld page lands on, and it asks its host nothing of its own: the version it reports rides the **Gate read** every page of that bot's settings already makes.
 _Avoid_: bot settings list, general old, bot overview
 
 **Delegation**:
@@ -695,6 +735,10 @@ _Avoid_: update, diff, override
 The page that shows every component the library offers — a live drawing, its source and its props. A reader's document, not the model's.
 _Avoid_: gallery, component gallery, library page, showcase
 
+**Diagram**:
+A closed `mermaid` fence in a reply's text, drawn as the picture it describes where the fence stood. It is drawn from a fence that already arrived: one still streaming, one set into a list and one mermaid cannot parse each stay the code they are. A tap opens it larger.
+_Avoid_: chart, graph, mermaid block, visual
+
 ## Canvases
 
 **Canvas**:
@@ -720,6 +764,18 @@ _Avoid_: revision, snapshot, draft
 **Canvas data**:
 What a canvas keeps for itself — the ticked boxes, the logged runs — stored on its host apart from its versions, so undoing an edit never loses it.
 _Avoid_: state, storage, store, database
+
+**Ask**:
+The empty `<script data-canvas-lib="NAME">` a page puts where it wants a library, which the app
+replaces with that library's source. A name the app doesn't carry leaves nothing, and a name the
+canvas's host doesn't carry refuses the write.
+_Avoid_: library tag, import, include, library request
+
+**Catalogue**:
+The libraries a canvas may ask for by name: the app's one list of them, holding each one's source,
+global, size and any stylesheet or setup, which the host's refusal list and the guide's library block
+are both generated from.
+_Avoid_: library list, manifest, registry, SDK list
 
 **Point**:
 Tapping an element of a canvas while editing it, so the message you send names that element.

@@ -2,6 +2,7 @@ import { MinusIcon, PlusIcon } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 
+import { Banner, Retry } from "@/components/banner"
 import { Segmented } from "@/components/segmented"
 import { Group, rowClass } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
@@ -14,11 +15,97 @@ import {
   getProviderUsage,
   setBotAfkPickBudget,
   setBotAfkUsageThreshold,
+  type HermesConfig,
   type UsageWindow,
 } from "@/lib/hermes"
+import { connectionKey } from "@/lib/connection"
 import { modelInfoFor } from "@/lib/model-info"
+import { seedsFromCache, useReadAttempt } from "@/lib/read-attempt"
 import { noteFailure } from "@/lib/report"
 import { cn } from "@/lib/utils"
+
+/**
+ * The bot's own AFK numbers, read once on the connection they live on: the budget it may hold across
+ * its projects at once, and the usage threshold it stops picking up at. Only this device's copy of
+ * the host's last answer is drawn until the read lands.
+ *
+ * `problem` is the host's own sentence where the read threw — the one way this read comes back
+ * empty-handed, since a host that answers without a budget draws the default it would itself use. A
+ * write answers the numbers the host now holds, so `keepBudget` and `keepThreshold` fold it in
+ * rather than reading again.
+ */
+function useBotAfk(config: HermesConfig) {
+  const [budget, setBudget] = useState<number | null>(null)
+  const [threshold, setThreshold] = useState<number | null>(null)
+  const [stale, setStale] = useState(false)
+  const [problem, setProblem] = useState<string>()
+  const { attempt, landed, landedThrew, release, retry, failed } = useReadAttempt(connectionKey(config))
+
+  // A host from before the route answers nothing, which is the reason the tab says it couldn't read
+  // it rather than drawing a number nobody wrote.
+  useEffect(() => {
+    let cancelled = false
+    let answered = false
+    // Only the first open seeds from this device's copy: a retry asks the host, and seeding again
+    // would put the copy back under the answer it is waiting for.
+    if (seedsFromCache(attempt))
+      void cachedHost<{ budget: number; threshold: number | null }>(config, "bot-afk").then(
+        (held) => {
+          if (cancelled || answered || !held) return
+          setBudget(held.budget)
+          setThreshold(held.threshold)
+          setStale(true)
+        },
+      )
+    void getBotAfk(config, AbortSignal.timeout(READ_TIMEOUT_MS))
+      .then((answer) => {
+        if (cancelled) return
+        answered = true
+        const next = answer.pickBudget ?? PICK_BUDGET.unset
+        setBudget(next)
+        setThreshold(answer.usageThreshold)
+        setStale(false)
+        // Only an answer clears the sentence: a retry still out is no answer, and the tab's controls
+        // must stay shut until one lands rather than opening over the default nobody was sent.
+        setProblem(undefined)
+        void keepHost(config, "bot-afk", { budget: next, threshold: answer.usageThreshold })
+        landed()
+      })
+      .catch((error: unknown) => {
+        noteFailure("Reading this bot's pick budget", error)
+        if (cancelled) return
+        setProblem(error instanceof Error ? error.message : "Couldn't read this bot's pick budget.")
+        landedThrew()
+      })
+    return () => {
+      cancelled = true
+      release(attempt)
+    }
+  }, [config, attempt, landed, release])
+
+  return {
+    budget,
+    threshold,
+    /** Whether the numbers drawn are this device's copy rather than the host's own answer. */
+    stale,
+    /** The host's own sentence where its pick budget couldn't be read. */
+    problem,
+    /** The budget a write answered, with the threshold the tab already holds. */
+    keepBudget: (next: number) => {
+      setBudget(next)
+      void keepHost(config, "bot-afk", { budget: next, threshold })
+    },
+    /** The threshold a write answered, with the budget the tab already holds. */
+    keepThreshold: (next: number | null) => {
+      setThreshold(next)
+      void keepHost(config, "bot-afk", { budget: budget ?? PICK_BUDGET.unset, threshold: next })
+    },
+    /** The same read, asked again — and nothing at all where the last one did not throw. */
+    retry,
+    /** Whether the last read threw: the one fact that shuts the tab's own controls. */
+    failed,
+  }
+}
 
 /**
  * The Coding page: how a bot works when it is left alone, over every project it serves rather than
@@ -51,11 +138,13 @@ export function CodingTab({ profile }: { profile: Profile }) {
     () => ({ baseUrl: profile.baseUrl, apiKey: profile.apiKey }),
     [profile.baseUrl, profile.apiKey],
   )
-  const [budget, setBudget] = useState<number | null>(null)
-  const [threshold, setThreshold] = useState<number | null>(null)
-  const [failed, setFailed] = useState(false)
-  // Only this device's copy of the host's last answer is drawn: the controls are shut until it lands.
-  const [stale, setStale] = useState(false)
+  const afk = useBotAfk(config)
+  const { budget, threshold, stale, problem } = afk
+  // The read threw: the tab says what the host said and its controls stay shut. `retry` is that
+  // fact — it exists only while the last landing threw, so a retry still out keeps them shut rather
+  // than opening over a default nobody was sent. `stale` is the other reason they do: the numbers
+  // drawn are this device's copy until the host's own lands.
+  const failed = afk.failed
   // The count a write is carrying until its answer lands: a refused one drops it, so nothing on the
   // tab reads as saved that the host never kept.
   const [draft, setDraft] = useState<number | null>(null)
@@ -64,38 +153,6 @@ export function CodingTab({ profile }: { profile: Profile }) {
   // The window the host judged deciding, once it has answered. The host's own window, kept whole, so
   // a field it gains later is here too.
   const [deciding, setDeciding] = useState<UsageWindow | null>(null)
-
-  // A host from before the route answers nothing, which is the reason the tab says it couldn't read
-  // it rather than drawing a number nobody wrote.
-  useEffect(() => {
-    let cancelled = false
-    let landed = false
-    setFailed(false)
-    void cachedHost<{ budget: number; threshold: number | null }>(config, "bot-afk").then(
-      (held) => {
-        if (cancelled || landed || !held) return
-        setBudget(held.budget)
-        setThreshold(held.threshold)
-        setStale(true)
-      },
-    )
-    void getBotAfk(config, AbortSignal.timeout(READ_TIMEOUT_MS))
-      .then((answer) => {
-        if (cancelled) return
-        landed = true
-        const next = answer.pickBudget ?? PICK_BUDGET.unset
-        setBudget(next)
-        setThreshold(answer.usageThreshold)
-        setStale(false)
-        void keepHost(config, "bot-afk", { budget: next, threshold: answer.usageThreshold })
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [config])
 
   const remembered = profile.hostModel?.provider
   const judging = threshold !== null
@@ -165,11 +222,7 @@ export function CodingTab({ profile }: { profile: Profile }) {
     setSaving(true)
     try {
       const answer = await setBotAfkPickBudget(config, next)
-      setBudget(answer.pickBudget ?? next)
-      void keepHost(config, "bot-afk", {
-        budget: answer.pickBudget ?? next,
-        threshold,
-      })
+      afk.keepBudget(answer.pickBudget ?? next)
     } catch (failure) {
       toast.error(failure instanceof Error ? failure.message : "Couldn't save that pick budget.")
     } finally {
@@ -185,11 +238,7 @@ export function CodingTab({ profile }: { profile: Profile }) {
     setSaving(true)
     try {
       const answer = await setBotAfkUsageThreshold(config, next)
-      setThreshold(answer.usageThreshold)
-      void keepHost(config, "bot-afk", {
-        budget: budget ?? PICK_BUDGET.unset,
-        threshold: answer.usageThreshold,
-      })
+      afk.keepThreshold(answer.usageThreshold)
       // Off draws no figure, and the window behind it is no longer this bot's to show: the next
       // threshold set reads the account again.
       if ((answer.usageThreshold ?? null) === null) setDeciding(null)
@@ -205,6 +254,11 @@ export function CodingTab({ profile }: { profile: Profile }) {
 
   return (
     <div className="flex flex-col gap-4" data-bot-coding>
+      {problem && (
+        <Banner tone="warning" action={afk.retry && <Retry onRetry={afk.retry} />}>
+          {problem}
+        </Banner>
+      )}
       <Group>
         <div className={cn(rowClass, "items-start gap-3")} aria-busy={saving || stale || undefined}>
           <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-0.5">
@@ -241,11 +295,6 @@ export function CodingTab({ profile }: { profile: Profile }) {
             </Button>
           </div>
         </div>
-        {failed && (
-          <p className={cn(rowClass, "text-sm text-muted-foreground")}>
-            Couldn't read this bot's pick budget.
-          </p>
-        )}
       </Group>
       <Group>
         <div className="flex flex-col gap-3 px-4 py-3" aria-busy={saving || stale || undefined}>

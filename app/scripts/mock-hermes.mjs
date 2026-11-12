@@ -50,6 +50,9 @@
 // default); it is noted into the events ledger like the plugin's watcher notes it (stream.py), so a
 // stream that was away replays it from its cursor. POST /__mock/events closes the open change
 // streams, as a connection dying does; a flow holds the next one back with page.route.
+// Say "draw a diagram" and the reply's mermaid fence is held open, its closer released by one POST
+// /__mock/diagram and the words after it by a second: the code-before-frame state is one a flow
+// reads rather than one it has to be quick enough to see.
 // Sessions are keyed by X-Hermes-Session-Id when a key is sent,
 // and their transcripts page back from GET /api/sessions/{id}/messages?order=latest&limit&offset.
 // Say "plan" and the agent keeps a todo list with its todo_list tool as it works, which the plugin's
@@ -174,7 +177,7 @@ import { tmpdir } from "node:os"
 import { basename, extname, join } from "node:path"
 
 import { handleMeetings } from "./mock-meetings.mjs"
-import { createCanvasStore, editCanvasSession, handleCanvas } from "./mock-canvas.mjs"
+import { createCanvasStore, editCanvasSession, handleCanvas, seedCanvas } from "./mock-canvas.mjs"
 import { createRoomStore, handleRooms, roomRecords } from "./mock-rooms.mjs"
 import { handleResearch } from "./mock-research.mjs"
 import { durableUserRow } from "./host-row.mjs"
@@ -534,7 +537,9 @@ const PLUGIN = process.env.MOCK_NO_PLUGIN !== "1"
 const RESEARCH = process.env.MOCK_RESEARCH !== "0"
 const RESEARCH_WRITERS = process.env.MOCK_RESEARCH_WRITERS !== "off"
 // Canvases (mock-canvas.mjs); MOCK_CANVAS=0 serves a plugin from before them, so their routes 404
-// and `canvas` is missing from the features.
+// and `canvas` is missing from the features. POST /__mock/canvas { fixture } seeds one of
+// mock-canvas.mjs's pages at its first version, so a flow can visit a page whose asks it knows
+// without a bot writing it: `plain` asks for no library, `many` for chart, d3 and Day.js.
 const CANVAS = process.env.MOCK_CANVAS !== "0"
 const CANVASES = createCanvasStore()
 // Rooms (mock-rooms.mjs): MOCK_ROOMS=0 is a plugin whose host has no room driver, so its routes 404,
@@ -1886,6 +1891,42 @@ const OPENUI_MAP = [
   "```",
 ].join("\n")
 
+const DIAGRAM_INTRO = "Here's the flow as a diagram.\n\n"
+// The fence's opener and body. Its closer is held back by `diagramGate` until a flow lets it go, so
+// the reply stands with a diagram arriving as the code it is — no frame, nothing fetched — for as
+// long as the flow needs to read that state, rather than for as long as the mock's pace holds it.
+const DIAGRAM_FENCE = [
+  "```mermaid",
+  "flowchart LR",
+  "  Fence[The fence arrives] -->|at the margin| Closed[Closed, so it draws]",
+  "  Closed -->|a tap| Sheet[Filled, at its own width]",
+  "  Closed -->|a flip| Again[Drawn again, in the other mode]",
+].join("\n")
+const DIAGRAM_CLOSE = "```"
+const DIAGRAM_OUTRO = "\n\nThat's every step the app takes, from the fence to the picture."
+
+// The diagram turn's two gates (POST /__mock/diagram): releases asked for ahead of the turn are
+// latched, so a flow never has to beat the stream to the gate it means to open.
+let diagramReleased = 0
+const diagramWaiting = []
+
+function diagramGate() {
+  if (diagramReleased > 0) {
+    diagramReleased -= 1
+    return Promise.resolve()
+  }
+  return new Promise((resolve) => diagramWaiting.push(resolve))
+}
+
+const DIAGRAM_BROKEN = [
+  "Here's that flow as a diagram, as far as I got with it.\n\n",
+  "```mermaid",
+  "flowchart TD",
+  "  Request --> Parse",
+  "  Parse -->",
+  "```",
+].join("\n")
+
 /**
  * One of the calls a "think out loud" turn makes between its reasoning stretches: a look at the
  * disk. It goes out on whichever wire the turn is on — a completion's `hermes.tool.progress` frames or
@@ -2967,6 +3008,18 @@ async function playTurn(req, body, last, out) {
     }
   } else if (/routine message/i.test(last)) {
     await say("I'll watch the tide and tell you when it turns.")
+  } else if (/\bdraw a diagram that (?:will not|won't) parse\b/i.test(last)) {
+    await say(DIAGRAM_BROKEN, 40)
+  } else if (/\bdraw a diagram\b/i.test(last)) {
+    await say(DIAGRAM_INTRO, 40)
+    await say(`${DIAGRAM_FENCE}\n`, 90)
+    // Held with the fence open: what the flow reads off the screen is the state it means to assert.
+    await diagramGate()
+    await say(DIAGRAM_CLOSE, 40)
+    // Held again with the frame drawn and the reply unfinished, so the flow can tell that the frame
+    // stood while more words were still coming rather than after them.
+    await diagramGate()
+    await say(DIAGRAM_OUTRO, 40)
   } else if (/image|chart/i.test(last)) {
     await say(
       "Here's the chart:\n\n" +
@@ -3106,6 +3159,11 @@ async function streamCompletion(req, res, body) {
 // question, a `prompt_id` and never the plugin's `clarify_id` or `questions`, so a screen that only
 // knows the plugin's batch shape sees nothing and one that reads prompts draws a single question.
 const LIVE_CLARIFY = process.env.MOCK_LIVE_CLARIFY === "1"
+// Hermes 0.23.1 words a question asked off its own local viewers with a newline and a localized
+// hint after it (`gateway.clarify.skip_hint`), and settles an answer and raises the call's next
+// question on the run's stream before the answer's own response is written. Both are this mode's.
+const SKIP_HINT = '\nReply "skip" to skip this question.'
+const CLARIFY_REPLY_MS = 100
 const runs = new Map()
 // Sessions a finished subagent still owes a wake turn to — `waking` on runs/live, what the plugin
 // reports between a turn ending and its wake turn starting, so no screen reads the session at rest
@@ -3887,7 +3945,7 @@ function startRun(req, body, options = {}) {
           timestamp: Date.now() / 1000,
           prompt_id: `${clarify_id}-${at}`,
           execution_generation: 0,
-          question: question.question,
+          question: LIVE_CLARIFY ? question.question + SKIP_HINT : question.question,
           choices: question.choices ?? [],
           multi_select: Boolean(question.multi_select),
         }
@@ -3909,7 +3967,9 @@ function startRun(req, body, options = {}) {
           outcome = settled.outcome
           break
         }
-        answers[question.id] = settled.answer || null
+        // Hermes reads the word "skip" as a question skipped, as it does an answer with no words.
+        const said = (settled.answer ?? "").trim()
+        answers[question.id] = !said || said.toLowerCase() === "skip" ? null : settled.answer
         push("clarify.settled", { prompt_id: run.clarify.prompt_id, execution_generation: 0 })
       }
       pendingClarifies.delete(id)
@@ -5628,6 +5688,7 @@ http
           error: { message: `Run has no pending question: ${request_id ?? ""}` },
         })
       pending({ answer: typeof answer === "string" ? answer : String(answer ?? "") })
+      if (LIVE_CLARIFY) await sleep(CLARIFY_REPLY_MS)
       return json(res, 200, {
         object: "hermes.clarify_response",
         run_id: runClarifyRoute[1],
@@ -6092,6 +6153,14 @@ http
       }
       return json(res, 200, { ok: true })
     }
+    if (url.pathname === "/__mock/canvas" && req.method === "POST") {
+      // A canvas a flow can visit without a bot having written it: the page is the fixture's, so
+      // what the visit fetches is the asks that page carries and nothing else.
+      const { fixture } = await readBody(req)
+      const seeded = seedCanvas(CANVASES, fixture)
+      if (!seeded) return json(res, 404, { error: { message: `the mock has no canvas ${fixture}` } })
+      return json(res, 200, { object: "gots.canvas", id: seeded.id })
+    }
     if (url.pathname === "/__mock/skills" && req.method === "POST") {
       skillSwitched.clear()
       skillRemoved.clear()
@@ -6173,6 +6242,15 @@ http
       const wait = Number(ms)
       titleDelayMs = Number.isFinite(wait) && wait >= 0 ? wait : TITLE_DELAY_MS
       return json(res, 200, { ok: true, ms: titleDelayMs })
+    }
+    // Dev only: POST lets the diagram reply past one of its two gates — the fence's closer, then the
+    // words after it — so a flow reads the states it asserts instead of racing the stream's pace.
+    // A release asked for before the turn reaches a gate is latched for it.
+    if (url.pathname === "/__mock/diagram" && req.method === "POST") {
+      const next = diagramWaiting.shift()
+      if (next) next()
+      else diagramReleased += 1
+      return json(res, 200, { ok: true, waiting: diagramWaiting.length })
     }
     // Dev only: POST closes every open change stream, as a connection dying does. The changes are
     // logged all the same, so a stream that opens again replays them from the client's own cursor;

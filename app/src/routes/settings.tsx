@@ -1,3 +1,4 @@
+import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTheme } from "next-themes"
@@ -27,6 +28,7 @@ import {
   MessageSquareTextIcon,
   PaletteIcon,
   PlusIcon,
+  RotateCcwClockIcon,
   SmartphoneIcon,
   TrophyIcon,
   TelescopeIcon,
@@ -41,6 +43,8 @@ import { AccountSettings } from "@/components/account-settings"
 import { BackButton } from "@/components/back-button"
 import { CommunitySettings } from "@/components/community-settings"
 import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
+import { labelOf } from "@/lib/bot-name"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import type { BotSub } from "@/lib/bot-subs"
 import { botPageOf, botPath, botTabOf, botTabPath, type BotPage, type BotTab } from "@/lib/bot-tabs"
 import { botSubOf, botSubPath } from "@/lib/bot-subs"
@@ -66,17 +70,6 @@ import {
 import { useOpenDrawer } from "@/components/drawer-context"
 import { DeviceStateSheet } from "@/components/device-state"
 import { FeedbackSheet } from "@/components/feedback"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -143,14 +136,15 @@ const MenuContext = createContext<{ active?: string; replace: boolean }>({ repla
 export function SettingsPage() {
   const { section, botId, tab, sub, leaf } = useParams()
   const large = useLarge()
-  const { up, step, root } = useNav()
+  const { up, back, root } = useNav()
   const { account } = useSyncState()
   const profiles = useLiveQuery(listProfiles, [])
   // The bots live on the menu itself now, so /settings/bots without a bot is the menu.
   const screen = section === "bots" && !botId ? undefined : section
   const separate = !large && Boolean(screen)
   const bot = botId ? profiles?.find((p) => p.id === botId) : undefined
-  const canDelete = (profiles?.length ?? 0) > 1
+  // The bot's own screens are titled as the menu's row and the sidebar name it (ADR 0148).
+  const labels = useBotLabels()
   // One reading of the URL's third segment, so nothing downstream narrows it again with a cast.
   const botTab = botTabOf(tab)
   const page = botTab ? botPageOf(botTab) : undefined
@@ -168,17 +162,17 @@ export function SettingsPage() {
     if (separate && botScreen && botTab) return
     // The menu itself is a screen a chat can open, and from `lg` so is a section; each steps back to
     // whatever opened it, and the drawer's own menu — the first entry — leaves the press to the app.
-    if (!separate && !botScreen) return setBackGuard(step("/settings"))
-    const back = botSub
+    if (!separate && !botScreen) return setBackGuard(back())
+    const parent = botSub
       ? botTabPath(botId!, botTab!)
       : botId && botTab
         ? botPath(botId)
         : "/settings"
     return setBackGuard(() => {
-      up(back)
+      up(parent)
       return true
     })
-  }, [separate, botScreen, up, section, botId, botTab, botSub])
+  }, [separate, botScreen, up, back, section, botId, botTab, botSub])
 
   if (section && section !== "bots" && !SECTIONS[section])
     return <Navigate to="/settings" replace />
@@ -205,7 +199,11 @@ export function SettingsPage() {
       return page ? (
         <BotPageScreen profile={bot} page={page} sub={botSub} />
       ) : (
-        <BotListScreen profile={bot} canDelete={canDelete} onDeleted={() => root("/settings")} />
+        <BotListScreen
+          profile={bot}
+          label={labelOf(labels, bot)}
+          onDeleted={() => root("/settings")}
+        />
       )
     }
     return screen ? <SectionScreen section={screen} /> : <MenuScreen profiles={profiles} />
@@ -217,16 +215,11 @@ export function SettingsPage() {
     return (
       <div className="flex min-h-0 flex-1">
         <Screen
-          title={bot.name}
+          title={labelOf(labels, bot)}
           className="w-90 flex-none border-r min-[1200px]:w-103"
           leading={<BackButton label="Back" onClick={() => up("/settings")} />}
         >
-          <BotSettingsList
-            profile={bot}
-            replace
-            canDelete={canDelete}
-            onDeleted={() => root("/settings")}
-          />
+          <BotSettingsList profile={bot} replace onDeleted={() => root("/settings")} />
         </Screen>
         <Screen
           key={botTab ?? "bot"}
@@ -268,20 +261,17 @@ export function SettingsPage() {
 /** A bot's settings as pushed screens: the list, and a page over it. */
 function BotListScreen({
   profile,
-  canDelete,
+  label,
   onDeleted,
 }: {
   profile: Profile
-  canDelete: boolean
+  label: string
   onDeleted: () => void
 }) {
   const { up } = useNav()
   return (
-    <Screen
-      title={profile.name}
-      leading={<BackButton label="Back" onClick={() => up("/settings")} />}
-    >
-      <BotSettingsList profile={profile} canDelete={canDelete} onDeleted={onDeleted} />
+    <Screen title={label} leading={<BackButton label="Back" onClick={() => up("/settings")} />}>
+      <BotSettingsList profile={profile} onDeleted={onDeleted} />
     </Screen>
   )
 }
@@ -304,7 +294,10 @@ function BotPageScreen({ profile, page, sub }: { profile: Profile; page: BotPage
     [guard.back],
   )
   return (
-    <Screen title={sub?.title ?? page.title} leading={<BackButton label="Back" onClick={guard.back} />}>
+    <Screen
+      title={sub?.title ?? page.title}
+      leading={<BackButton label="Back" onClick={guard.back} />}
+    >
       <BotSettingsPage profile={profile} tab={page.segment} sub={sub} />
       {guard.dialog}
     </Screen>
@@ -338,6 +331,7 @@ function MenuScreen({
   const { registryError } = useSyncState()
   const { theme } = useTheme()
   const [params, setParams] = useSearchParams()
+  const labels = useBotLabels()
   const linking = params.get("link") === "1"
   const setLinking = (open: boolean) =>
     setParams(open ? { link: "1" } : {}, { replace: true, state: { quiet: true } })
@@ -362,7 +356,7 @@ function MenuScreen({
       {registryError && <Banner tone="error">Couldn't refresh bots. {registryError}</Banner>}
       <Group>
         {profiles?.map((profile) => (
-          <BotRow key={profile.id} profile={profile} />
+          <BotRow key={profile.id} profile={profile} label={labelOf(labels, profile)} />
         ))}
         <LinkBotRow onLink={() => setLinking(true)} />
       </Group>
@@ -386,8 +380,8 @@ function MenuScreen({
   )
 }
 
-/** A bot in the menu: its connectivity dot, then the bot itself, then its name. */
-function BotRow({ profile }: { profile: Profile }) {
+/** A bot in the menu: its connectivity dot, then the bot itself, then the host it answers at. */
+function BotRow({ profile, label }: { profile: Profile; label: string }) {
   const now = useNow()
   const online = presence(profile, now)
   return (
@@ -404,7 +398,7 @@ function BotRow({ profile }: { profile: Profile }) {
           />
         </>
       }
-      title={profile.name}
+      title={label}
       subtitle={botStatus(profile, now)}
     />
   )
@@ -541,7 +535,7 @@ const CATEGORY_ICONS: Record<PushCategory, LucideIcon> = {
 const FEATURE_ICONS: Record<PushFeature, LucideIcon> = {
   chats: MessagesSquareIcon,
   code: CodeXmlIcon,
-  routines: TimerIcon,
+  routines: RotateCcwClockIcon,
   research: TelescopeIcon,
   meetings: AudioLinesIcon,
 }
@@ -630,6 +624,7 @@ const LIVE_LABELS: Record<LiveStatus, { label: string; detail: string }> = {
 
 export function DeveloperSettings() {
   const bots = useLiveQuery(listProfiles, [])
+  const labels = useBotLabels()
   const settings = useLiveQuery(getSettings, [])
   // Two counts off the store's own indexes, never the whole table read to filter it in JS.
   const log = useLiveQuery(async () => {
@@ -694,7 +689,7 @@ export function DeveloperSettings() {
           />
         )}
         {bots?.map((bot) => (
-          <LiveRow key={bot.id} bot={bot} />
+          <LiveRow key={bot.id} bot={bot} title={labelOf(labels, bot)} />
         ))}
       </Group>
       <Group>
@@ -756,12 +751,12 @@ function SyncServerRow() {
   )
 }
 
-function LiveRow({ bot }: { bot: Profile }) {
+function LiveRow({ bot, title }: { bot: Profile; title: string }) {
   const status = useLiveStatus(bot)
   const { label, detail } = LIVE_LABELS[status]
   return (
     <div className={rowClass}>
-      <RowText title={bot.name} subtitle={detail} />
+      <RowText title={title} subtitle={detail} />
       <span
         className={cn("text-sm", status === "push" ? "text-foreground" : "text-muted-foreground")}
       >
@@ -884,34 +879,21 @@ function DataSettings() {
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <AlertDialog open={clearing} onOpenChange={setClearing}>
-          <AlertDialogTrigger render={<Button variant="destructive" />}>
-            Clear local data
-          </AlertDialogTrigger>
-          <AlertDialogContent size="sm">
-            <AlertDialogHeader>
-              <AlertDialogTitle>Clear everything?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Deletes all bots, chats and settings stored in this browser. Sessions on your Hermes
-                server are untouched.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction
-                variant="destructive"
-                onClick={async () => {
-                  await clearAllData()
-                  forgetLocalKey()
-                  setClearing(false)
-                  toast.success("Local data cleared")
-                }}
-              >
-                Clear
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        <Button variant="destructive" onClick={() => setClearing(true)}>
+          Clear local data
+        </Button>
+        <ConfirmDestructive
+          open={clearing}
+          onOpenChange={setClearing}
+          title="Clear everything?"
+          description="Deletes all bots, chats and settings stored in this browser. Sessions on your Hermes server are untouched."
+          confirmLabel="Clear"
+          onConfirm={async () => {
+            await clearAllData()
+            forgetLocalKey()
+            toast.success("Local data cleared")
+          }}
+        />
       </CardContent>
     </Card>
   )

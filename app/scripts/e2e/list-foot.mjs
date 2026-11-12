@@ -29,6 +29,16 @@ async function drive({ page, profileId, until, shot }) {
   const fab = await page.locator(NEW).boundingBox()
   const foot = await page.locator(FOOT).boundingBox()
   assert.ok(fab && foot, "the button stands on the foot's bar")
+  // The foot's controls are the bar's controls: the same 44px circles the bar's routines link wears,
+  // so one size serves a thumb at the top of the screen and at the bottom (ADR 0145).
+  const routines = await page.locator('header a[aria-label="Routines"]').boundingBox()
+  assert.ok(routines, "the bar's own circle, for the foot's to be measured against")
+  assert.equal(Math.round(fab.width), 44, `the foot's button is 44 wide (${fab.width})`)
+  assert.equal(Math.round(fab.height), 44, `and 44 tall (${fab.height})`)
+  assert.ok(
+    Math.abs(fab.width - routines.width) <= 1 && Math.abs(fab.height - routines.height) <= 1,
+    `and the box the bar's circle wears (${fab.width}×${fab.height} against ${routines.width}×${routines.height})`,
+  )
   assert.equal(await page.locator("#chats-search").count(), 0, "no field until it is asked for")
   await shot("closed")
 
@@ -141,6 +151,102 @@ async function drive({ page, profileId, until, shot }) {
   assert.equal(await page.locator("#chats-search").inputValue(), "", "and it is empty")
 }
 
+/**
+ * From the laptop width the foot holds no search at all: the field stands in the bar, above the pills,
+ * and the foot keeps the New pick alone at its right edge. All of it is geometry — where the field sits
+ * against the bar, the pills and the first row — so it is measured here rather than in a DOM without
+ * layout (ADR 0019).
+ */
+async function driveLaptop({ page, profileId, until, shot }) {
+  await page.goto(`${app}/b/${profileId}`)
+  await until(async () => (await page.locator(NEW).count()) === 1, 30_000, "the foot's button")
+  assert.equal(
+    await page.locator("[data-search-toggle]").count(),
+    0,
+    "the foot has no search circle: the bar holds the field",
+  )
+  // The sidebar keeps a field of its own at this width, so the bar's is the one holding the list's id.
+  const field = page.locator('[data-slot="input-group"]:has(#chats-search)')
+  await until(async () => (await field.count()) === 1, 10_000, "the bar's field")
+  const bar = await page.locator("header").first().boundingBox()
+  const fieldBox = await field.boundingBox()
+  const pills = await page.locator('[role="group"][aria-label="Filter chats"]').boundingBox()
+  assert.ok(bar && fieldBox && pills, "the bar, its field and the pills are drawn")
+  assert.equal(Math.round(fieldBox.height), 44, `the field is the bar's own height (${fieldBox.height})`)
+  assert.ok(
+    fieldBox.y >= bar.y - 0.5 && fieldBox.y + fieldBox.height <= bar.y + bar.height + 0.5,
+    "and stands inside the bar, not under it",
+  )
+  assert.ok(
+    pills.y >= fieldBox.y + fieldBox.height - 0.5,
+    `the pills stand under the field (${pills.y} against ${fieldBox.y + fieldBox.height})`,
+  )
+  const first = await page.locator('ul a[href^="/c/"]').first().boundingBox()
+  if (first) {
+    assert.ok(
+      first.y >= pills.y + pills.height - 0.5,
+      `and the rows under the pills (${first.y} against ${pills.y + pills.height})`,
+    )
+  }
+  const fab = await page.locator(NEW).boundingBox()
+  const foot = await page.locator(FOOT).boundingBox()
+  assert.ok(fab && foot, "the New pick stands on the foot's bar")
+  assert.equal(
+    await page.locator(`${FOOT} ${NEW}`).count(),
+    1,
+    "the foot holds its one round control, with no search beside it",
+  )
+  assert.equal(
+    await page.locator(`${FOOT} [data-search-toggle]`).count(),
+    0,
+    "and nothing of a search in it",
+  )
+  assert.ok(
+    Math.abs(fab.x + fab.width - (foot.x + foot.width - 16)) <= 1,
+    "and keeps the foot's right edge, where the thumb found it",
+  )
+  await shot("bar")
+  await page.locator(NEW).click()
+  await until(() => picksOpen(page), 5_000, "the picks still rise above it")
+  await shot("laptop")
+}
+
+/**
+ * A reader searching at a tablet's width widens the window: the bar takes the field over, and there is
+ * ever only one of them. A live resize is the browser's own event, so no DOM without layout hears it
+ * (ADR 0019). The words they typed do not cross with it: at this width the shell hands the list to its
+ * pane, so the list is mounted afresh — the same remount a reader gets today by widening a window at a
+ * bot's list, and the reason ADR 0145 says the field moves rather than the query surviving.
+ */
+async function driveCrossing({ page, profileId, until }) {
+  await page.setViewportSize({ width: 1024, height: 768 })
+  await page.goto(`${app}/b/${profileId}`)
+  await until(
+    async () => (await page.locator("[data-search-toggle]").count()) === 1,
+    30_000,
+    "the foot's circle",
+  )
+  await page.locator("[data-search-toggle]").click()
+  await until(async () => (await page.locator("#chats-search").count()) === 1, 5_000, "the foot's field")
+  await page.locator("#chats-search").fill("zzz-not-a-chat")
+  await page.setViewportSize({ width: 1280, height: 900 })
+  // The field moving is the sign the screen has taken the width in: the foot's has gone and the bar's
+  // stands in the header, one of the two and never both.
+  await until(
+    async () =>
+      (await page.locator('header [data-slot="input-group"]:has(#chats-search)').count()) === 1,
+    5_000,
+    "the bar to take the search over",
+  )
+  assert.equal(await page.locator("#chats-search").count(), 1, "one field, not two")
+  assert.equal(await page.locator("[data-search-toggle]").count(), 0, "with no circle left in the foot")
+  assert.equal(
+    await page.locator("#chats-search").inputValue(),
+    "",
+    "and the list is mounted afresh: the shell handed it to its pane, so the typed words went with the mount",
+  )
+}
+
 // Both widths, and the phone in the dark as well: the foot's surfaces are theme tokens, and a muted X
 // that reads as disabled on one theme is the risk the plan names.
 for (const { width, dark } of [
@@ -155,4 +261,16 @@ for (const { width, dark } of [
   })
 }
 
-pass("the foot's New opens two pills above its button, and its search becomes a bar as tall as it")
+// The laptop's own arrangement: the field in the bar, the pills under it, and the foot down to one
+// control (ADR 0145).
+for (const dark of [false, true]) {
+  await flow(`list-foot-laptop${dark ? "-dark" : ""}`, driveLaptop, {
+    viewport: { width: 1280, height: 900 },
+    dark,
+  })
+}
+await flow("list-foot-crossing", driveCrossing, { viewport: { width: 1024, height: 768 } })
+
+pass(
+  "the foot's New opens two pills above its button, its search becomes a bar as tall as it on a phone and a tablet, and from a laptop the field stands in the bar above the pills",
+)

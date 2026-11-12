@@ -16,7 +16,6 @@ import {
   GitBranchIcon,
   ListIcon,
   MailIcon,
-  MenuIcon,
   MicIcon,
   PauseIcon,
   PlusIcon,
@@ -29,8 +28,9 @@ import {
 import { toast } from "sonner"
 
 import { Banner } from "@/components/banner"
+import { ChatHeader } from "@/components/chat/chat-header"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { Bot } from "@/components/bot"
-import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
 import { ItemGroup, ItemRow, ItemSearch } from "@/components/item-list"
 import { itemGroups } from "@/lib/item-groups"
@@ -146,28 +146,22 @@ function Header({
   actions,
   className,
 }: {
-  leading: ReactNode
+  leading?: ReactNode
   title: ReactNode
   subtitle?: ReactNode
   actions?: ReactNode
   className?: string
 }) {
   return (
-    <header
-      className={cn(
-        "sticky top-0 z-10 bg-background/80 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur",
-        className,
-      )}
-    >
-      <div className="mx-auto flex max-w-2xl items-center gap-3 px-4">
-        {leading}
-        <div className="flex min-w-0 flex-1 flex-col">
-          {title}
-          {subtitle && <div className="truncate text-xs text-muted-foreground">{subtitle}</div>}
-        </div>
-        {actions}
-      </div>
-    </header>
+    <ChatHeader
+      pinned
+      showBot={false}
+      leading={leading}
+      title={title}
+      subtitle={subtitle}
+      actions={actions}
+      className={className}
+    />
   )
 }
 
@@ -294,7 +288,6 @@ function Unfinished() {
 }
 
 function MeetingsList({ pane }: { pane?: PaneState }) {
-  const openDrawer = useOpenDrawer()
   const open = useSwap()
   const { meetings, loaded, unsupported } = useMeetings()
   const [adding, setAdding] = useState(false)
@@ -329,22 +322,11 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <Header
-        leading={
-          <Button
-            variant="outline"
-            size="icon-lg"
-            className="size-11 rounded-full md:hidden"
-            onClick={openDrawer}
-            aria-label="Open conversations"
-          >
-            <MenuIcon />
-          </Button>
-        }
         title={
-          <h1 className="flex items-center gap-2 text-xl font-semibold tracking-tight">
+          <>
             Meetings
             <ExperimentalBadge />
-          </h1>
+          </>
         }
       />
 
@@ -1002,10 +984,10 @@ function MeetingView() {
   const { id = "" } = useParams()
   const { meeting } = useMeeting(id)
   const navigate = useNavigate()
-  const { up } = useNav()
+  const { up, back } = useNav()
   const beside = Boolean(useMeetingsPane())
   const now = useNow()
-  const back = useCallback(() => up("/meetings"), [up])
+  const leave = useCallback(() => up("/meetings"), [up])
   const bots = useMeetingBots()
   const asks = usePluginFeatureOn(
     bots.find((b) => b.id === meeting?.profileId) ?? { baseUrl: "", apiKey: "" },
@@ -1025,8 +1007,9 @@ function MeetingView() {
   const [tab, setTab] = useState("notes")
   // The time a note cited, which the transcript tab opens at.
   const [focus, setFocus] = useState<number>()
-  // Beside the list a meeting is the top-level screen, so back leaves the app.
-  useEffect(() => (beside ? undefined : setBackGuard(() => (back(), true))), [back, beside])
+  // Beside the list a meeting is the top-level screen, so the press is the app's where nothing
+  // stands behind it. The control above still steps to the list, wherever this screen was opened.
+  useEffect(() => (beside ? undefined : setBackGuard(back())), [back, beside])
   useRememberOpened("meetings", meeting?.id)
 
   if (!meeting) return <Gone />
@@ -1046,10 +1029,8 @@ function MeetingView() {
     <div className="flex min-h-0 flex-1 flex-col">
       <div ref={scroller} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <Header
-          leading={beside ? null : <BackButton onClick={back} label="Back to Meetings" />}
-          title={
-            <h1 className="truncate text-base font-semibold tracking-tight">{meeting.title}</h1>
-          }
+          leading={beside ? null : <BackButton onClick={leave} label="Back to Meetings" />}
+          title={meeting.title}
           subtitle={[
             meeting.projectName,
             meeting.duration > 0 && length(meeting.duration),
@@ -1057,7 +1038,7 @@ function MeetingView() {
           ]
             .filter(Boolean)
             .join(" · ")}
-          actions={<MeetingMenu meeting={meeting} onRemoved={back} />}
+          actions={<MeetingMenu meeting={meeting} onRemoved={leave} />}
         />
         <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 pt-2 pb-8">
           {meeting.stage === "ready" && !isFailed(meeting) ? (
@@ -1144,26 +1125,20 @@ function MeetingMenu({ meeting, onRemoved }: { meeting: Meeting; onRemoved: () =
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      <AlertDialog open={confirming} onOpenChange={setConfirming}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete this meeting?</AlertDialogTitle>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={() =>
-                removeMeeting(meeting)
-                  .then(onRemoved)
-                  .catch((error) => toast.error(message(error, "Couldn't delete the meeting.")))
-              }
-            >
-              Delete
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDestructive
+        open={confirming}
+        onOpenChange={setConfirming}
+        title="Delete this meeting?"
+        description="Its transcript and everything written from it go too."
+        confirmLabel="Delete"
+        onConfirm={() =>
+          removeMeeting(meeting)
+            .then(onRemoved)
+            .catch((error) => {
+              toast.error(message(error, "Couldn't delete the meeting."))
+            })
+        }
+      />
     </>
   )
 }
@@ -1692,13 +1667,13 @@ function TopicScreen() {
 
 function TopicView({ meeting, notes, topic }: { meeting: Meeting; notes: Notes; topic: Topic }) {
   const navigate = useNavigate()
-  const { up } = useNav()
+  const { up, back } = useNav()
   const [params] = useSearchParams()
   const from = params.get("at")
   const [position, setPosition] = useState(() => (from === null ? undefined : Number(from)))
   const [tab, setTab] = useState(from === null ? "summary" : "transcript")
-  const back = useCallback(() => up(`/meetings/${meeting.id}`), [up, meeting.id])
-  useEffect(() => setBackGuard(() => (back(), true)), [back])
+  const leave = useCallback(() => up(`/meetings/${meeting.id}`), [up, meeting.id])
+  useEffect(() => setBackGuard(back()), [back])
 
   const index = notes.topics.indexOf(topic)
   const next = notes.topics[index + 1]
@@ -1719,8 +1694,8 @@ function TopicView({ meeting, notes, topic }: { meeting: Meeting; notes: Notes; 
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <Header
-          leading={<BackButton onClick={back} label={`Back to ${meeting.title}`} />}
-          title={<h1 className="truncate text-base font-semibold tracking-tight">{topic.title}</h1>}
+          leading={<BackButton onClick={leave} label={`Back to ${meeting.title}`} />}
+          title={topic.title}
           subtitle={`Topic ${index + 1} of ${notes.topics.length} · ${clock(topic.start)} to ${clock(topic.end)}`}
         />
         <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 pb-8">

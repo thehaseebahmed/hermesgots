@@ -1,5 +1,9 @@
 # A bot's foot opens its picks as pills, not the app's pop-up
 
+**Amended by [ADR 0145](0145-a-bots-list-searches-in-its-bar.md)** from the laptop width up: the foot
+draws no search there, and the field stands in the bar above the list's filter pills. Below that width
+this ADR's foot is unchanged.
+
 The app's pop-up is the sheet a one-tap pick opens from a button — a Material bottom sheet below
 1024px, a menu beside its anchor from there, decided with Haseeb on 2026-10-16 and drawn by
 `components/popup.tsx` — and a bot's chat list used it for the two things its foot can start: New chat

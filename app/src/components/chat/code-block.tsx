@@ -1,8 +1,9 @@
-import { useState } from "react"
+import type { HTMLAttributes, ReactNode, Ref } from "react"
 import { CheckIcon, CopyIcon } from "lucide-react"
 
 import { useMonoFace } from "@/components/chat/code-face"
 import { Button } from "@/components/ui/button"
+import { copyText, useCopied } from "@/lib/copied"
 import { cn } from "@/lib/utils"
 
 /**
@@ -21,10 +22,65 @@ export const PAINT: Record<Tone, { fill: string; chrome: string }> = {
 }
 
 /**
+ * The measure a source is read at, wherever it is drawn: the code block's `<pre>`, and the body a
+ * frame shows in place of a drawing that has yet to land. One constant, so the two cannot drift.
+ */
+export const SOURCE_MEASURE =
+  "px-4 pt-1 pb-4 text-[13px] leading-relaxed wrap-anywhere whitespace-pre-wrap"
+
+export function CodeFrame({
+  language,
+  code,
+  tone = "page",
+  className,
+  children,
+  ref,
+  ...root
+}: {
+  /** What the body is written in: the fence's own label in a reply, the call's tool in an approval. */
+  language?: string
+  /** The source the control copies, which is what the body draws. */
+  code: string
+  tone?: Tone
+  /** The frame's own spacing, where it stands in something that already spaces its children. */
+  className?: string
+  /** The plate itself, for a body that reads the surface it is about to draw on (a diagram). */
+  ref?: Ref<HTMLDivElement>
+  children: ReactNode
+} & Omit<HTMLAttributes<HTMLDivElement>, "className" | "children">) {
+  const { copied, noteCopied } = useCopied()
+
+  return (
+    <div
+      {...root}
+      ref={ref}
+      className={cn("my-3 overflow-hidden rounded-2xl", PAINT[tone].fill, className)}
+    >
+      <div
+        className={cn(
+          "flex items-center justify-between pt-1.5 pr-1.5 pl-4 text-xs",
+          PAINT[tone].chrome,
+        )}
+      >
+        <span>{language || "code"}</span>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={() => void copyText(code, noteCopied)}
+          aria-label={copied ? "Copied" : "Copy code"}
+        >
+          {copied ? <CheckIcon /> : <CopyIcon />}
+        </Button>
+      </div>
+      {children}
+    </div>
+  )
+}
+
+/**
  * A block of code anywhere the app draws one: a reply's fence, and the command an approval asks
  * about. One piece, so a command reads the same in a card as in the words it came from, and can be
- * taken away with the same press (ADR 0087). `language` names what the block is written in; it is
- * the fence's own label in a reply, and the call's tool in an approval.
+ * taken away with the same press (ADR 0087).
  */
 export function CodeBlock({
   language,
@@ -41,45 +97,19 @@ export function CodeBlock({
   /** The block's own spacing, where it stands in something that already spaces its children. */
   className?: string
 }) {
-  const [copied, setCopied] = useState(false)
   const mono = useMonoFace()
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(code)
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
-    } catch {
-      // Clipboard can be unavailable (insecure context); nothing useful to do.
-    }
-  }
 
   return (
-    <div data-md-code className={cn("my-3 overflow-hidden rounded-2xl", PAINT[tone].fill, className)}>
-      <div
-        className={cn(
-          "flex items-center justify-between pt-1.5 pr-1.5 pl-4 text-xs",
-          PAINT[tone].chrome,
-        )}
-      >
-        <span>{language || "code"}</span>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={copy}
-          aria-label={copied ? "Copied" : "Copy code"}
-        >
-          {copied ? <CheckIcon /> : <CopyIcon />}
-        </Button>
-      </div>
+    <CodeFrame data-md-code language={language} code={code} tone={tone} className={className}>
       <pre
         className={cn(
           mono,
-          "px-4 pt-1 pb-4 text-[13px] leading-relaxed wrap-anywhere whitespace-pre-wrap",
+          SOURCE_MEASURE,
           scrolling && "max-h-[30dvh] overflow-y-auto overscroll-contain",
         )}
       >
         <code>{code}</code>
       </pre>
-    </div>
+    </CodeFrame>
   )
 }

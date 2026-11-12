@@ -18,6 +18,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { connectionKey, serverConfig } from "@/lib/connection"
+import { useOnline } from "@/lib/online"
 import { cooldown, lacksRoute } from "@/lib/cooldown"
 import { cachedHost, keepHost } from "@/lib/host-cache"
 import {
@@ -56,6 +57,7 @@ import {
   type McpTools,
 } from "@/lib/hermes"
 import { usePoll } from "@/lib/poll"
+import { useReadAttempt } from "@/lib/read-attempt"
 import { noteFailure } from "@/lib/report"
 
 /**
@@ -336,7 +338,7 @@ export function useMcpCatalogue(server: McpServerConfig, active: boolean) {
  * One named thing read while its sheet is open — the shape both a server's block and a catalogue
  * entry's values take: opening the sheet is the whole trigger, the read is bounded by
  * `READ_TIMEOUT_MS` (a Host that accepted the connection and went quiet can't hold the sheet), an
- * answer for a different name is never handed back, and `reload` asks again after a flow wrote it.
+ * answer for a different name is never handed back, and `retry` asks again after a read that threw.
  */
 function useReadOnOpen<T extends { name: string }>(
   server: McpServerConfig,
@@ -350,10 +352,9 @@ function useReadOnOpen<T extends { name: string }>(
   noting: string,
 ) {
   const [value, setValue] = useState<T | undefined>(undefined)
-  const [failedFor, setFailedFor] = useState<string | undefined>(undefined)
-  const [attempt, setAttempt] = useState(0)
   const config = serverConfig(server)
   const key = config.baseUrl && config.apiKey ? connectionKey(config) : ""
+  const { attempt, landed, landedThrew, retry } = useReadAttempt(`${key}:${name ?? ""}`)
   usePoll(
     (signal) => {
       const bounded = AbortSignal.any([signal, AbortSignal.timeout(READ_TIMEOUT_MS)])
@@ -362,11 +363,11 @@ function useReadOnOpen<T extends { name: string }>(
         bounded,
         (found) => {
           setValue(found)
-          setFailedFor(undefined)
+          landed()
         },
         (error) => {
-          setFailedFor(name)
           noteFailure(noting, error)
+          landedThrew()
         },
       )
     },
@@ -374,16 +375,24 @@ function useReadOnOpen<T extends { name: string }>(
     [key, name, attempt],
     { active: active && Boolean(key) && Boolean(name), onShow: false },
   )
+  const online = useOnline()
   return {
     value: name !== undefined && value?.name === name ? value : undefined,
-    failed: name !== undefined && failedFor === name,
-    reload: () => setAttempt((count) => count + 1),
+    /**
+     * The same read, asked again, where it threw — the only way this read comes back empty-handed:
+     * a Host that answers without the thing asked for has answered, and asking again changes
+     * nothing. Offered only while the device has a network: this read runs on the app's own poll,
+     * which refuses to ask a host while there is none, so a control here would be one that could
+     * not do anything until the sheet was reopened. The tab says the read failed; the retry waits
+     * for a network to ask over.
+     */
+    retry: online ? retry : undefined,
   }
 }
 
 /**
  * One server's block: what the Config tab is built from, read when its sheet opens. Undefined until
- * a read lands; `failed` says the read came back an error, so the tab can say so rather than
+ * a read lands; `retry` asks the same read again where it threw, so the tab can say so rather than
  * standing there as an empty stub. Nothing is written by reading this.
  */
 export function useMcpServerDetail(
@@ -391,14 +400,14 @@ export function useMcpServerDetail(
   name: string | undefined,
   active: boolean,
 ) {
-  const { value, failed, reload } = useReadOnOpen(
+  const { value, retry } = useReadOnOpen(
     server,
     name,
     active,
     getMcpServer,
     "Reading a server's configuration",
   )
-  return { detail: value, failed, reload }
+  return { detail: value, retry }
 }
 
 /**
@@ -410,14 +419,14 @@ export function useMcpCatalogueEntry(
   name: string | undefined,
   active: boolean,
 ) {
-  const { value, failed } = useReadOnOpen(
+  const { value, retry } = useReadOnOpen(
     server,
     name,
     active,
     getMcpCatalogueEntry,
     "Reading a catalogue entry",
   )
-  return { entry: value, failed }
+  return { entry: value, retry }
 }
 
 /**

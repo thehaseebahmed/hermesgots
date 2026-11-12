@@ -9,6 +9,7 @@ import {
   answerQuestion,
   answerWith,
   assert,
+  chatPane,
   flow,
   openChatNext,
   pass,
@@ -42,7 +43,7 @@ for (const [width, dark] of [
       await choice.first().waitFor({ timeout: 30_000 })
       await settled(page)
 
-      const thread = page.locator("[aria-label=Messages]")
+      const thread = chatPane(page).locator("[aria-label=Messages]")
       const waiting = thread.getByText("Waiting for your answer", { exact: true })
       // The line is the call's, so it lands with the call a beat after the form.
       await waiting.waitFor({ timeout: 10_000 })
@@ -58,7 +59,10 @@ for (const [width, dark] of [
         "no card of the question's own in the thread",
       )
       assert.equal(
-        await page.locator("[data-slot=composer-slot]").getByText("Question", { exact: true }).count(),
+        await chatPane(page)
+          .locator("[data-slot=composer-slot]")
+          .getByText("Question", { exact: true })
+          .count(),
         1,
         "the form is in the composer slot",
       )
@@ -85,7 +89,7 @@ for (const [width, dark] of [
         .waitFor({ timeout: 30_000 })
       await settled(page)
 
-      const slot = page.locator("[data-slot=composer-slot]")
+      const slot = chatPane(page).locator("[data-slot=composer-slot]")
       const box = await slot.locator("[data-slot=card]").first().boundingBox()
       const screen = page.viewportSize()
       assert.ok(box, "the question is the composer's")

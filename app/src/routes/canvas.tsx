@@ -1,22 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { useLiveQuery } from "dexie-react-hooks"
 import {
-  CrosshairIcon,
-  EllipsisIcon,
-  FrameIcon,
-  MenuIcon,
-  PencilIcon,
-  Undo2Icon,
-} from "lucide-react"
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react"
+import { useLiveQuery } from "dexie-react-hooks"
+import { CrosshairIcon, FrameIcon, PencilIcon, Undo2Icon } from "lucide-react"
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router"
 
 import { ChatBody } from "@/chat-next/chat-body"
 import { BackButton } from "@/components/back-button"
-import {
-  CanvasConsentDialog,
-  CanvasOptions,
-  useCanvasConsent,
-} from "@/components/canvas-consent"
+import { CanvasConsentDialog, CanvasOptions, useCanvasConsent } from "@/components/canvas-consent"
 import { CanvasPointsProvider, type CanvasPoints } from "@/components/chat/canvas-points"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { useChatSurface } from "@/components/chat/chat-actions"
@@ -24,7 +21,6 @@ import { BotPicker } from "@/components/chat/bot-picker"
 import { Composer } from "@/components/chat/composer"
 import { PreviewerProvider } from "@/components/chat/previewer"
 import { UsageSheet } from "@/components/chat/usage-sheet"
-import { useOpenDrawer } from "@/components/drawer-context"
 import { ExperimentalBadge } from "@/components/experimental-badge"
 import { ItemGroup } from "@/components/item-list"
 import { setBackGuard } from "@/lib/native"
@@ -34,8 +30,15 @@ import { attempt } from "@/lib/attempt"
 import { awayLine } from "@/lib/away"
 import { bridgeHandler, pointWatch } from "@/lib/canvas-bridge"
 import { canvasCss, canvasCssKey } from "@/lib/canvas-css"
-import { canvasDocument, readScroll, themeTokens, type CanvasMode } from "@/lib/canvas-document"
-import { CANVAS_LIBRARIES } from "@/lib/canvas-libraries"
+import {
+  canvasDocument,
+  canvasLibraryPlan,
+  readScroll,
+  themeTokens,
+  type CanvasLibrarySource,
+  type CanvasMode,
+} from "@/lib/canvas-document"
+import { librarySource, loadLibraries } from "@/lib/canvas-library-sources"
 import { keepPoint, takePoint } from "@/lib/canvas-point-pick"
 import {
   callCanvasCall,
@@ -80,6 +83,19 @@ import { useNow } from "@/lib/threads"
 const TILES = "grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4"
 
 /**
+ * The lane a canvas reads in beside its page: the house's 412px list lane — the width the app already
+ * asks its text to read in — and never more than half the row, so a screen too narrow to hold 412
+ * beside 412 splits evenly instead of squeezing the page (or the chat's composer) to fit the lane.
+ */
+const LANE = "flex min-h-0 flex-col lg:w-103 lg:max-w-[50%] lg:shrink-0 lg:border-r"
+
+/** `min-h-0` lets the column shrink, so the chat's body scrolls and the column does not. */
+const CHAT_LANE = "flex min-h-0 flex-1 flex-col"
+
+/** What a page that asks for no library is drawn with: nothing, and no state to wait for. */
+const NO_LIBRARIES: Record<string, CanvasLibrarySource> = {}
+
+/**
  * A canvas in the list: the picture its bot put on it, or its own mark, over the name and where it
  * stands. A tile rather than a row, since what a reader picks from is a page — the picture is the
  * whole of what tells two canvases apart at a glance.
@@ -122,7 +138,6 @@ function CanvasTile({ canvas, now }: { canvas: Canvas; now: number }) {
  * every other surface already has, rather than a second copy of them kept here (ADR 0131).
  */
 export function CanvasPage() {
-  const openDrawer = useOpenDrawer()
   const navigate = useNavigate()
   const { visible, archived, loaded, unsupported } = useCanvases()
   const profile = useLiveQuery(getActiveProfile, [])
@@ -170,23 +185,16 @@ export function CanvasPage() {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
-        <div className="mx-auto flex max-w-2xl items-center gap-3">
-          <Button
-            variant="outline"
-            size="icon-lg"
-            className="size-11 rounded-full md:hidden"
-            onClick={openDrawer}
-            aria-label="Open conversations"
-          >
-            <MenuIcon />
-          </Button>
-          <h1 className="flex flex-1 items-center gap-2 text-xl font-semibold tracking-tight">
-            Canvas
-            <ExperimentalBadge />
-          </h1>
-        </div>
-      </header>
+      <ChatHeader
+        pinned
+        heading
+        showBot={false}
+        title={
+          <>
+            Canvas <ExperimentalBadge />
+          </>
+        }
+      />
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-4 pt-4 pb-[max(2rem,env(safe-area-inset-bottom))] md:pt-10">
         <section className="flex flex-col gap-3">
@@ -223,9 +231,7 @@ export function CanvasPage() {
 
         <section className="flex flex-col gap-4">
           {loaded && visible.length === 0 && archived.length === 0 && !blocked && (
-            <p className="py-8 text-center text-sm text-muted-foreground">
-              No canvases yet.
-            </p>
+            <p className="py-8 text-center text-sm text-muted-foreground">No canvases yet.</p>
           )}
           {visible.length > 0 && (
             <ul className={TILES} aria-label="Canvases">
@@ -270,6 +276,9 @@ const GONE = "This canvas is gone. Its bot doesn't hold one by that name."
 
 /** What both screens say of a canvas whose page isn't here and whose bot can't be asked for it. */
 const APART = "This canvas isn't on this device, and its bot isn't answering."
+
+/** The line both screens draw while the record they read has not landed. */
+const READING = "Reading the canvas…"
 
 /**
  * What both a canvas's screens say of a host this device can't reach, read one way for both: a device
@@ -343,14 +352,166 @@ function useCanvasManagement(id: string) {
 }
 
 /**
+ * The head both canvas screens wear (ADR 0130). A title the record hasn't answered for yet is still
+ * "Canvas", since the address may name one this device hasn't read.
+ */
+function CanvasHead({
+  canvas,
+  profile,
+  awayWords,
+  optionsOpen,
+  onOpenOptions,
+  leading,
+  actions,
+}: {
+  canvas: Canvas | undefined
+  profile: Profile | undefined
+  /** What a host this device can't reach is said in, from `useAway`. */
+  awayWords: string | undefined
+  /** Whether the canvas's options are on screen, which the title's control says it opens. */
+  optionsOpen: boolean
+  /** The title's press: the options' only door, on either screen (ADR 0130). */
+  onOpenOptions: () => void
+  leading: ReactNode
+  actions: ReactNode
+}) {
+  return (
+    <ChatHeader
+      className="relative pb-2"
+      // The subtitle is no part of this control: it carries the away sentence as a live region, and a
+      // live region inside a button becomes part of that button's name.
+      title={
+        canvas ? (
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            aria-expanded={optionsOpen}
+            data-canvas-options-open
+            onClick={onOpenOptions}
+            className="flex min-h-11 w-full min-w-0 items-center rounded-lg text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+          >
+            <span className="min-w-0 truncate">{canvas.title}</span>
+          </button>
+        ) : (
+          "Canvas"
+        )
+      }
+      subtitle={
+        <>
+          {profile && <span className="truncate">{profile.name}</span>}
+          {/* The first version is what makes there be a page, so it is also what the line can name. */}
+          {hasVersion(canvas) ? (
+            <>
+              <span aria-hidden>·</span>
+              <span className="shrink-0">v{canvas?.version}</span>
+            </>
+          ) : null}
+          {awayWords ? (
+            <>
+              <span aria-hidden>·</span>
+              <span role="status" data-canvas-offline className="shrink-0">
+                {awayWords}
+              </span>
+            </>
+          ) : null}
+        </>
+      }
+      showBot={false}
+      heading
+      leading={leading}
+      actions={actions}
+    />
+  )
+}
+
+type DrawnPage = { document?: string; error?: string } | null
+
+function CanvasPagePane({
+  canvas,
+  drawn,
+  escaped,
+  banner,
+  missing,
+  awayNow,
+  loaded,
+  html,
+  frameKey,
+  frameAgain,
+  shownDocument,
+  frame,
+  onFrameLoad,
+  onCancelPick,
+}: {
+  canvas: Canvas | undefined
+  drawn: DrawnPage
+  escaped: boolean
+  /** The address asked for a point to be picked, and this is the page it can be picked on. */
+  banner: boolean
+  missing: boolean
+  awayNow: boolean
+  loaded: boolean
+  html: string | undefined
+  frameKey: string
+  frameAgain: boolean
+  shownDocument: string
+  frame: RefObject<HTMLIFrameElement | null>
+  onFrameLoad: () => void
+  onCancelPick: () => void
+}) {
+  return (
+    <div
+      data-canvas-page
+      className="relative flex min-h-0 flex-1 flex-col px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:pt-2"
+    >
+      {banner ? (
+        <div
+          data-point-banner
+          className="mb-2 flex items-center gap-2 rounded-xl border bg-muted/60 py-1.5 pr-1.5 pl-3 text-sm"
+        >
+          <CrosshairIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+          <span className="flex-1">Tap an element on the page</span>
+          <Button variant="ghost" size="sm" className="h-9 rounded-lg" onClick={onCancelPick}>
+            Cancel
+          </Button>
+        </div>
+      ) : null}
+      {missing ? (
+        <p className="mx-auto max-w-2xl p-4 text-center text-sm text-muted-foreground">{GONE}</p>
+      ) : drawn?.error ? (
+        <p className="mx-auto max-w-2xl p-4 text-sm text-muted-foreground">{drawn.error}</p>
+      ) : escaped ? (
+        <p className="mx-auto max-w-2xl p-4 text-center text-sm text-muted-foreground">
+          This page keeps trying to leave. Open it again from its chat.
+        </p>
+      ) : drawn?.document ? (
+        <iframe
+          ref={frame}
+          key={frameAgain ? `${frameKey}:again` : frameKey}
+          title={canvas?.title ?? "Canvas"}
+          sandbox="allow-scripts"
+          srcDoc={shownDocument}
+          onLoad={onFrameLoad}
+          className="min-h-0 w-full flex-1 rounded-2xl border bg-background"
+          data-canvas-frame
+        />
+      ) : (
+        <p className="p-4 text-center text-sm text-muted-foreground">
+          {awayNow && !html ? APART : loaded && !html ? BUILDING_ACTIVITY : READING}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
  * One canvas, drawn from the version its record points at, with its chat beside it on a wide screen
  * and the header's Edit for the chat's own page on a phone.
  */
 export function CanvasView() {
   const { id = "" } = useParams()
-  const { up, step } = useNav()
+  const { up, back } = useNav()
   const navigate = useNavigate()
-  useEffect(() => setBackGuard(step("/canvas")), [step])
+  useEffect(() => setBackGuard(back()), [back])
   const { canvas, profile, missing, loaded, away } = useCanvas(id)
   const { awayNow, words: awayWords } = useAway(away)
   const dark = useDark()
@@ -397,18 +558,48 @@ export function CanvasView() {
     }
   }, [canvasId, version, html])
 
+  // The sources the page's own asks are answered with, kept with the page they were fetched for: a
+  // page drawn from another page's sources would be a page naming a library it never got. The asks
+  // are read off the markup, so a page asking for nothing fetches nothing at all, and no library is
+  // fetched for a page that never named it.
+  const plan = useMemo(() => (html ? canvasLibraryPlan(html) : []), [html])
+  const [sources, setSources] = useState<{
+    html: string
+    libraries: Record<string, CanvasLibrarySource>
+  } | null>(null)
+  // A page that asks for nothing has its sources already: drawing it must not wait on a fetch that
+  // has nothing to fetch, which is the common case and would otherwise paint the placeholder first.
+  const libraries =
+    sources && sources.html === html
+      ? sources.libraries
+      : html && plan.length === 0
+        ? NO_LIBRARIES
+        : null
+  useEffect(() => {
+    if (!html || plan.length === 0) return
+    let live = true
+    void loadLibraries(plan, librarySource).then((loaded) => {
+      if (live) setSources({ html, libraries: loaded })
+    })
+    return () => {
+      live = false
+    }
+  }, [html, plan])
+
   // The document at a position, built once for every draw: the reader's page, and the page drawn
   // again where they left it.
   const documentAt = useCallback(
     (scroll: number) => {
-      if (!html || css === null) return null
+      // Both halves have to be in hand before the frame is given anything: a page drawn with its
+      // classes missing, or with an ask still waiting on its source, is a page drawn twice.
+      if (!html || css === null || libraries === null) return null
       try {
         return {
           document: canvasDocument(html, {
             mode,
             tokens: themeTokens(readTheme()),
             css,
-            libraries: CANVAS_LIBRARIES,
+            libraries,
             scroll,
           }),
         }
@@ -416,9 +607,9 @@ export function CanvasView() {
         return { error: "This canvas can't be drawn: its document has no head." }
       }
     },
-    [html, mode, css],
+    [html, mode, css, libraries],
   )
-  const drawn = useMemo(
+  const drawn: DrawnPage = useMemo(
     // Where this canvas was left, read when the document is built and never per scroll: a scroll is
     // news for the next draw, not a reason to draw again.
     () => documentAt(scrollOf(id)),
@@ -442,6 +633,9 @@ export function CanvasView() {
   // one place: the options sheet, the page's own consent, and the delete.
   const { grant, update, remove } = useCanvasManagement(id)
   const consent = useCanvasConsent(grant)
+  // The banner is the phone's: a wide screen draws the chat beside the page, so nothing needs
+  // pointing here (ADR 0130) — and a canvas with no page has nothing to point at.
+  const banner = picking && versioned && !large && !missing
   // The bridge is registered once per canvas, so the ask is read through a ref: a new ask must not
   // re-register the listener under a running page. The device's copy is read at call time from the
   // store, so a read landing never re-registers it either.
@@ -577,134 +771,71 @@ export function CanvasView() {
   if (canvas && !versioned && !large) return <Navigate to={`/canvas/${id}/edit`} replace />
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      {/* A wide screen draws the chat beside the page, so there is nothing to flip to (ADR 0130),
-          and a canvas no bot holds has no chat to open: there is no Edit for either. */}
-      <ChatHeader
-        className="relative pb-2"
-        title={canvas?.title ?? "Canvas"}
-        subtitle={
-          <>
-            {profile && <span className="truncate">{profile.name}</span>}
-            {canvas?.version ? (
-              <>
-                <span aria-hidden>·</span>
-                <span className="shrink-0">v{canvas.version}</span>
-              </>
-            ) : null}
-            {awayWords ? (
-              <>
-                <span aria-hidden>·</span>
-                <span role="status" data-canvas-offline className="shrink-0">
-                  {awayWords}
-                </span>
-              </>
-            ) : null}
-          </>
-        }
-        showBot={false}
-        heading
-        leading={<BackButton label="All canvases" onClick={() => up("/canvas")} />}
-        actions={
-          <>
-            {canvas && !missing && !large ? (
-              <Button
-                variant="outline"
-                size="icon-lg"
-                className={HEADER_BUTTON}
-                data-canvas-flip="edit"
-                aria-label={FLIP.edit.label}
-                onClick={() => navigate(`/canvas/${id}/edit`)}
-              >
-                <PencilIcon />
-              </Button>
-            ) : null}
-            {/* A host that isn't answering can't be asked to walk the record back. */}
-            {canvas?.canUndo && !awayNow ? (
-              <Button
-                variant="outline"
-                size="icon-lg"
-                className={HEADER_BUTTON}
-                aria-label="Undo"
-                disabled={undoing}
-                onClick={() => void undoVersion()}
-              >
-                <Undo2Icon />
-              </Button>
-            ) : null}
-            {canvas ? (
-              <Button
-                variant="outline"
-                size="icon-lg"
-                className={HEADER_BUTTON}
-                aria-label="Canvas options"
-                onClick={() => setOptionsOpen(true)}
-              >
-                <EllipsisIcon />
-              </Button>
-            ) : null}
-          </>
-        }
-      />
-
-      <div className="flex min-h-0 flex-1">
-        <div className="relative flex min-h-0 flex-1 flex-col px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
-          {/* What the address asked for, said where the reader is looking: the page is armed, and one
-              tap on an element is the answer. The row is the page's own line, so the frame below it
-              keeps the whole of the rest of the screen. */}
-          {picking && versioned && !large && !missing ? (
-            <div
-              data-point-banner
-              className="mb-2 flex items-center gap-2 rounded-xl border bg-muted/60 py-1.5 pr-1.5 pl-3 text-sm"
-            >
-              <CrosshairIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-              <span className="flex-1">Tap an element on the page</span>
-              <Button variant="ghost" size="sm" className="h-9 rounded-lg" onClick={cancelPick}>
-                Cancel
-              </Button>
-            </div>
-          ) : null}
-          {missing ? (
-            <p className="mx-auto max-w-2xl p-4 text-center text-sm text-muted-foreground">{GONE}</p>
-          ) : drawn?.error ? (
-            <p className="mx-auto max-w-2xl p-4 text-sm text-muted-foreground">{drawn.error}</p>
-          ) : escaped ? (
-            <p className="mx-auto max-w-2xl p-4 text-center text-sm text-muted-foreground">
-              This page keeps trying to leave. Open it again from its chat.
-            </p>
-          ) : drawn?.document ? (
-            <iframe
-              ref={frame}
-              key={redrawn?.key === frameKey ? `${frameKey}:again` : frameKey}
-              title={canvas?.title ?? "Canvas"}
-              sandbox="allow-scripts"
-              srcDoc={shownDocument}
-              onLoad={frameLoaded}
-              className="min-h-0 w-full flex-1 rounded-2xl border bg-background"
-              data-canvas-frame
-            />
-          ) : (
-            <p className="p-4 text-center text-sm text-muted-foreground">
-              {awayNow && !html
-                ? APART
-                : loaded && !html
-                  ? BUILDING_ACTIVITY
-                  : "Reading the canvas…"}
-            </p>
-          )}
-        </div>
-        {/* The house's list lane: 412px, the width the app already asks its text to read in
-            (`w-103`, `LIST_LANE` in `components/app-shell.tsx`), with the page beside it never
-            narrower. */}
+    <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
+      {/* One column from 1024px: the canvas's head at its top and the chat under it, with the page in
+          the pane beside it — and below that, one pane, the head over the page, as it always was. The
+          head is the lane's, so the page a reader scrolls is the screen's full height. A wide screen
+          draws the chat there, so there is nothing to flip to (ADR 0130), and a canvas no bot holds has
+          no chat to open: there is no Edit for either. */}
+      <div data-canvas-lane className={LANE}>
+        <CanvasHead
+          canvas={canvas}
+          profile={profile}
+          awayWords={awayWords}
+          optionsOpen={optionsOpen}
+          onOpenOptions={() => setOptionsOpen(true)}
+          leading={<BackButton label="All canvases" onClick={() => up("/canvas")} />}
+          actions={
+            <>
+              {canvas && !missing && !large ? (
+                <Button
+                  variant="outline"
+                  size="icon-lg"
+                  className={HEADER_BUTTON}
+                  data-canvas-flip="edit"
+                  aria-label={FLIP.edit}
+                  onClick={() => navigate(`/canvas/${id}/edit`)}
+                >
+                  <PencilIcon />
+                </Button>
+              ) : null}
+              {/* A host that isn't answering can't be asked to walk the record back. */}
+              {canvas?.canUndo && !awayNow ? (
+                <Button
+                  variant="outline"
+                  size="icon-lg"
+                  className={HEADER_BUTTON}
+                  aria-label="Undo"
+                  disabled={undoing}
+                  onClick={() => void undoVersion()}
+                >
+                  <Undo2Icon />
+                </Button>
+              ) : null}
+            </>
+          }
+        />
         {large && (
-          <CanvasChat
-            canvas={canvas}
-            bot={profile}
-            points={points}
-            className="flex min-h-0 w-103 max-w-[calc(100%_-_412px)] shrink-0 flex-col border-l"
-          />
+          <CanvasChat canvas={canvas} bot={profile} points={points} className={CHAT_LANE} />
         )}
       </div>
+
+      <CanvasPagePane
+        canvas={canvas}
+        drawn={drawn}
+        escaped={escaped}
+        banner={banner}
+        missing={missing}
+        awayNow={awayNow}
+        loaded={loaded}
+        html={html}
+        frameKey={frameKey}
+        frameAgain={redrawn?.key === frameKey}
+        shownDocument={shownDocument}
+        frame={frame}
+        onFrameLoad={frameLoaded}
+        onCancelPick={cancelPick}
+      />
 
       <CanvasConsentDialog
         canvasTitle={canvas?.title ?? "Canvas"}
@@ -792,30 +923,12 @@ export function CanvasEdit() {
   if (large) return <Navigate to={`/canvas/${id}`} replace />
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <ChatHeader
-        className="relative pb-2"
-        title={canvas?.title ?? "Canvas"}
-        subtitle={
-          <>
-            {profile && <span className="truncate">{profile.name}</span>}
-            {canvas && hasVersion(canvas) ? (
-              <>
-                <span aria-hidden>·</span>
-                <span className="shrink-0">v{canvas.version}</span>
-              </>
-            ) : null}
-            {awayWords ? (
-              <>
-                <span aria-hidden>·</span>
-                <span role="status" data-canvas-offline className="shrink-0">
-                  {awayWords}
-                </span>
-              </>
-            ) : null}
-          </>
-        }
-        showBot={false}
-        heading
+      <CanvasHead
+        canvas={canvas}
+        profile={profile}
+        awayWords={awayWords}
+        optionsOpen={optionsOpen}
+        onOpenOptions={() => setOptionsOpen(true)}
         leading={
           // The list is where this screen's way back goes whether the record has landed or not:
           // while it is reading, that is the only screen there is to go to.
@@ -834,23 +947,12 @@ export function CanvasEdit() {
                 size="icon-lg"
                 className={HEADER_BUTTON}
                 data-canvas-flip="preview"
-                aria-label={FLIP.preview.label}
+                aria-label={FLIP.preview}
                 // A replace, never a push: the page is this screen's own other half, so flipping to
                 // it must not leave the chat behind for the next back press to land on.
                 onClick={() => navigate(`/canvas/${id}`, { replace: true })}
               >
                 <FrameIcon />
-              </Button>
-            ) : null}
-            {canvas ? (
-              <Button
-                variant="outline"
-                size="icon-lg"
-                className={HEADER_BUTTON}
-                aria-label="Canvas options"
-                onClick={() => setOptionsOpen(true)}
-              >
-                <EllipsisIcon />
               </Button>
             ) : null}
           </>
@@ -859,8 +961,7 @@ export function CanvasEdit() {
       {missing ? (
         <p className="p-4 text-center text-sm text-muted-foreground">{GONE}</p>
       ) : reading ? (
-        /* Nothing of the record has landed: the preview's own reading line, in its own place. */
-        <p className="p-4 text-center text-sm text-muted-foreground">Reading the canvas…</p>
+        <p className="p-4 text-center text-sm text-muted-foreground">{READING}</p>
       ) : loaded && !versioned ? (
         /* Nothing to preview is said honestly: the page is not drawn yet, in the same words the
            preview's empty frame uses — and a host that isn't answering is not a bot that is
@@ -874,7 +975,7 @@ export function CanvasEdit() {
         bot={profile}
         points={versioned ? points : undefined}
         reread={refreshCanvases}
-        className="flex min-h-0 flex-1 flex-col"
+        className={CHAT_LANE}
       />
       <CanvasOptions
         open={optionsOpen}
@@ -889,14 +990,10 @@ export function CanvasEdit() {
 }
 
 /**
- * The screen each flip goes to, as its control is labelled and drawn: one table rather than a pair
- * of ternaries, so a label and its icon cannot be read from two different answers.
+ * What each flip says, by the screen it goes to: `FLIP.edit` labels the page's door to the chat, and
+ * `FLIP.preview` the chat's door back to the page.
  */
-const FLIP = {
-  edit: { label: "Edit", Icon: PencilIcon },
-  preview: { label: "Preview", Icon: FrameIcon },
-} as const
-
+const FLIP = { edit: "Edit", preview: "Preview" } as const
 
 /**
  * A canvas's chat, as its screen draws it: the record the canvas names, the providers a canvas's

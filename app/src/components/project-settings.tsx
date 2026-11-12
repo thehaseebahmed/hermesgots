@@ -1,3 +1,5 @@
+import { ConfirmDestructive } from "@/components/confirm-destructive"
+import { SearchField } from "@/components/search-field"
 import { useEffect, useState, type ReactNode } from "react"
 import {
   CodeXmlIcon,
@@ -5,22 +7,11 @@ import {
   LockIcon,
   PlusIcon,
   RotateCcwIcon,
-  SearchIcon,
   XIcon,
 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import type { Profile } from "@/lib/db"
@@ -287,31 +278,20 @@ function SettingsForm({
         </Button>
       </div>
 
-      <AlertDialog open={confirming} onOpenChange={setConfirming}>
-        <AlertDialogContent size="sm">
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              Remove {dropping.length === 1 ? dropping[0] : `${dropping.length} repos`}?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              The server deletes its copy of {names.format(dropping)}, with any work in it that
-              isn't pushed. Sessions that used it can still be read, but not continued.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={() => {
-                setConfirming(false)
-                void save()
-              }}
-            >
-              Remove
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <ConfirmDestructive
+        open={confirming}
+        onOpenChange={setConfirming}
+        title={`Remove ${dropping.length === 1 ? dropping[0] : `${dropping.length} repos`}?`}
+        description={
+          <>
+            The server deletes its copy of {names.format(dropping)}, with any work in it that isn't
+            pushed. Sessions that used it can still be read, but not continued.
+          </>
+        }
+        confirmLabel="Remove"
+        busy={busy}
+        onConfirm={() => save()}
+      />
     </form>
   )
 }
@@ -469,18 +449,12 @@ function RepoPicker({
   )
   return (
     <div className="flex flex-col gap-2">
-      <div className="flex h-12 items-center gap-3 rounded-3xl bg-muted px-5">
-        <SearchIcon className="size-4 shrink-0 text-muted-foreground" />
-        <input
-          className="h-full min-w-0 flex-1 bg-transparent text-base outline-none"
-          placeholder={github.login ? `Search ${github.login}'s repositories` : "Search"}
-          autoComplete="off"
-          autoFocus
-          aria-label="Search repositories"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </div>
+      <SearchField
+        value={query}
+        onChange={setQuery}
+        label={github.login ? `Search ${github.login}'s repositories` : "Search"}
+        autoFocus
+      />
       <ul className="flex max-h-60 flex-col overflow-y-auto rounded-3xl border p-1">
         {!repos ? (
           <li className="flex items-center gap-2 px-4 py-3 text-sm text-muted-foreground">

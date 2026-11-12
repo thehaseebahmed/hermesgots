@@ -3,7 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { CheckIcon, PlusIcon, XIcon } from "lucide-react"
 import { useNavigate } from "react-router"
 
-import { Banner } from "@/components/banner"
+import { Banner, Retry } from "@/components/banner"
 import {
   Caption,
   FormActions,
@@ -125,13 +125,16 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
     )
   return (
     <div className="flex flex-col gap-4" data-bot-dictation>
-      {/* One notice for every write, and the host's own sentence where a read failed: the cached
-          copy under it may be older than it looks. */}
-      {speech.problem && (
-        <Banner tone="error">
-          <span role="alert">{speech.problem}</span>
+      {speech.readProblem && (
+        <Banner
+          tone="error"
+          action={speech.retry && <Retry onRetry={speech.retry} />}
+        >
+          {speech.readProblem}
         </Banner>
       )}
+      {/* A write's refusal has nothing a retry could re-run, so it draws no control. */}
+      {speech.problem && <Banner tone="error">{speech.problem}</Banner>}
 
       {/* A host that carries only the model draws the page it always had — no captions to name
           groups it doesn't have, the two Gots rows marked where they sit. */}

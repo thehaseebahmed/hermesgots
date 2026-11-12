@@ -25,6 +25,11 @@ dist-ssr
 *.sln
 *.sw?
 
+# The canvas's generated library sources: three's IIFE and Leaflet's inlined stylesheet and marker
+# setup, which `pnpm build:canvas-libraries` writes before a test or a build. 730 KB of minified
+# three is not a diff anyone reviews, and the build check is what proves the files are right.
+app/src/lib/generated/
+
 # Python
 __pycache__
 .astro

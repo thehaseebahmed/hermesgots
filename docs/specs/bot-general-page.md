@@ -46,9 +46,12 @@ defaults }`: each field as `{ key, kind, section, options?, searchable?, restart
    default in the muted tone. A list reads as its entries, a pick in its own words, a switch as its
    state.
 6. **General is gated on `general_page`**, and a withheld page lands on the bot's own page — the one
-   screen every bot has, which asks the host for nothing.
-7. **The bot's own rows lead the page** under the caption _Bot_: the switches, then _Bot Profile_
-   (name, image, Test connection), then _Hermes_ (address and key), each edit at
+   screen every bot has, which asks its host for nothing of its own: the version it reports rides the
+   `info` read every page of a bot's settings already makes (ADR 0143).
+7. **The bot's own rows lead the page** under the caption _Bot_: its switches (Enabled where the bot
+   is linked, Mute notifications), then _Plugin_ — the version the bot's host runs, a fact the page
+   reports rather than a setting that opens anything (ADR 0143) — then _Bot Profile_ (name, image,
+   Progress updates), then _Hermes_ (address and key), each edit at
    `/settings/bots/<id>/bot/<edit>`; the settings follow in one card under _Settings_ (ADR 0106).
 8. **An edit's actions are one bar** — Cancel, a hairline, Save, or Reset and Save where the form can
    clear its key, since going back is the cancel — and the field above it is a filled pill with its

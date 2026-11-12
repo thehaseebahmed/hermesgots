@@ -1,7 +1,6 @@
 import { useRef, useState, type ChangeEvent } from "react"
 import {
   CameraIcon,
-  CheckIcon,
   CrosshairIcon,
   FileUpIcon,
   ImageIcon,
@@ -10,6 +9,7 @@ import {
 } from "lucide-react"
 
 import { ModeIcon, ModeOptions, type ModeSettings } from "@/components/chat/mode-menu"
+import { PickGroup, PickRow } from "@/components/pick-row"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { pickRoad } from "@/lib/attachment-caps"
@@ -191,29 +191,20 @@ export function AttachMenu({
               {/* Named for what the rows are rather than for this one: the page is the first tool a
                   canvas's composer offers, and the group is where the next ones go. */}
               <h3 className="px-1 text-sm text-muted-foreground">Tools</h3>
-              <div className="flex flex-col overflow-hidden rounded-2xl bg-muted/60 p-1">
-                <button
-                  type="button"
-                  aria-pressed={point.armed}
-                  aria-label={point.armed ? "Tap an element on the page" : "Point at the page"}
-                  onClick={pickPoint}
-                  className={cn(
-                    "flex min-h-11 w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-[15px] transition-colors hover:bg-background/60 focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none",
-                    point.armed && "bg-background",
-                  )}
-                >
-                  <CrosshairIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                  <span className="flex min-w-0 flex-1 flex-col">
-                    <span>{point.armed ? "Tap an element on the page" : "Point at the page"}</span>
-                    <span className="text-sm text-muted-foreground">
-                      {point.armed
-                        ? "Waiting for your tap."
-                        : "Adds the element you tap to your message."}
-                    </span>
-                  </span>
-                  {point.armed && <CheckIcon className="size-4 shrink-0 text-primary" aria-hidden />}
-                </button>
-              </div>
+              <PickGroup mode="toggle" surface="plate" label="Tools">
+                <PickRow
+                  leading={<CrosshairIcon className="size-4 text-muted-foreground" aria-hidden />}
+                  title={point.armed ? "Tap an element on the page" : "Point at the page"}
+                  line={
+                    point.armed
+                      ? "Waiting for your tap."
+                      : "Adds the element you tap to your message."
+                  }
+                  selected={point.armed}
+                  label={point.armed ? "Tap an element on the page" : "Point at the page"}
+                  onPick={pickPoint}
+                />
+              </PickGroup>
             </section>
           )}
           {session && (

@@ -8,7 +8,7 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
-import { MemoryRouter, Route, Routes } from "react-router"
+import { MemoryRouter, Route, Routes, useLocation } from "react-router"
 
 import { ChatPage } from "@/routes/chat"
 import { db, type Conversation, type Message, type Profile } from "@/lib/db"
@@ -39,6 +39,8 @@ const ANSWER = "Checked the feeds: three things worth reading."
 const AT = 1_767_225_600_000
 
 const bot = botProfile("routine-chat", { name: "Mainly" })
+/** What the app calls it: the host it answers at, never the name its host sealed (ADR 0148). */
+const LABEL = "routine-chat"
 
 /** The run's transcript, as the host serves a session's rows. */
 const RUN_ROWS: SessionMessage[] = [
@@ -109,9 +111,16 @@ async function seed({
   await db.messages.bulkPut(messages.map((message) => ({ ...message, conversationId: rowOf() })))
 }
 
+/** Whether the entry on screen is one a screen marked as a step back onto a list. */
+const Listed = () => {
+  const state = useLocation().state as { listed?: boolean } | null
+  return <p data-listed>{String(Boolean(state?.listed))}</p>
+}
+
 const screen = (entry = `/c/${rowOf()}`) => (
   <MemoryRouter initialEntries={[entry]}>
     <Path />
+    <Listed />
     <Routes>
       <Route path="c/:id" element={<ChatPage slot="route" />} />
       <Route path="b/:profileId" element={<p data-list />} />
@@ -144,6 +153,11 @@ test("a routine's row opens its run read-only, under the header naming it", asyn
       TITLE,
       "the header names the routine that ran",
     )
+    assert.equal(
+      findAll('a[aria-label^="Chats with"]').length,
+      0,
+      "and the run's bar carries no list of its own: a run is not one of a bot's chats",
+    )
     assert.equal(findAll("textarea").length, 0, "and nothing here can be sent")
     const note = wordsOf(find("[data-slot=routine-note]"))
     assert.match(note, /read-only/i, "the composer's place says what this screen is")
@@ -168,11 +182,16 @@ test("the way back is the bot's list, not the chat the run was opened from", asy
   await mount(screen(), async () => {
     await until(async () => drew(ANSWER), "the run's own transcript")
     assert.ok(find("[data-slot=routine-note]"), "the run's own screen is what is on")
-    const back = find(`[aria-label="Back to ${bot.name}"]`)
+    const back = find(`[aria-label="Back to ${LABEL}"]`)
     assert.ok(back, "a control leads back")
     await click(back)
     await until(async () => path() === `/b/${bot.id}`, "the bot's list")
     absent("[data-slot=routine-note]", "and the run's screen is what was left")
+    assert.equal(
+      find("[data-listed]")?.textContent,
+      "true",
+      "and the entry it leaves says the reader stepped back onto the list",
+    )
   })
 })
 

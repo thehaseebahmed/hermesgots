@@ -115,10 +115,11 @@ export function PopupHeader({ className, children, ...props }: ComponentProps<ty
         // sheet has no close button (nor does a menu, dismissed by a press outside it).
         form === "drawer" && "pr-14",
         form === "menu" && "px-5 pt-4 pb-3",
-        // A sheet centres its whole header, as a Material bottom sheet does, and has the drag
-        // handle above the heading, so it takes no top padding. The heading centres itself in every
-        // form (PopupTitle), leaving a drawer's or menu's other header rows as they were.
-        sheet && "items-center pt-0 text-center",
+        // A sheet centres its whole header, as a Material bottom sheet does, and keeps 16px above
+        // the heading: at zero the heading's box begins at the drag handle's bottom edge, so it
+        // would sit against the handle it is dragged by. The heading centres itself in every form
+        // (PopupTitle), leaving a drawer's or menu's other header rows as they were.
+        sheet && "items-center pt-4 text-center",
         className,
       )}
       {...props}
@@ -134,16 +135,21 @@ function Scroll({
   children,
   dataSlot,
   scrollRef,
+  bothWays,
 }: {
   children: ReactNode
   dataSlot?: string
   scrollRef?: (node: HTMLDivElement | null) => void
+  bothWays?: boolean
 }) {
   return (
     <div
       ref={scrollRef}
       data-slot={dataSlot}
-      className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain"
+      className={cn(
+        "flex min-h-0 flex-1 flex-col overscroll-contain",
+        bothWays ? "overflow-auto" : "overflow-y-auto",
+      )}
     >
       {children}
     </div>
@@ -213,6 +219,7 @@ export function PopupContent({
   initialFocus,
   dataSlot,
   scrollRef,
+  bothWays,
 }: {
   className?: string
   /** A sheet's height that holds between views of its content (a picker's list, then a provider's
@@ -231,6 +238,9 @@ export function PopupContent({
   dataSlot?: string
   /** The pop-up's scroll box, handed to the one consumer that follows it — the thinking sheet. */
   scrollRef?: (node: HTMLDivElement | null) => void
+  /** A body holding more than a column of words — a drawing at the width it was made — pans both
+   * ways rather than down alone. */
+  bothWays?: boolean
 }) {
   const popup = useRef<HTMLDivElement>(null)
   const headerSeen = useRef(false)
@@ -281,7 +291,7 @@ export function PopupContent({
                 "max-h-[min(36rem,var(--available-height))]",
               )}
             >
-              <Scroll dataSlot={dataSlot} scrollRef={scrollRef}>
+              <Scroll dataSlot={dataSlot} scrollRef={scrollRef} bothWays={bothWays}>
                 {children}
               </Scroll>
             </Popover.Popup>
@@ -313,7 +323,7 @@ export function PopupContent({
               )}
             >
               <Drawer.Content className="flex min-h-0 flex-1 flex-col">
-                <Scroll dataSlot={dataSlot} scrollRef={scrollRef}>
+                <Scroll dataSlot={dataSlot} scrollRef={scrollRef} bothWays={bothWays}>
                   {children}
                 </Scroll>
               </Drawer.Content>
@@ -357,7 +367,7 @@ export function PopupContent({
               <span className="h-1 w-8 rounded-full bg-muted-foreground/60" />
             </Drawer.Close>
             <Drawer.Content className="flex min-h-0 flex-1 flex-col transition-opacity duration-300 group-data-nested-drawer-open/popup:opacity-0 group-data-nested-drawer-swiping/popup:opacity-100">
-              <Scroll dataSlot={dataSlot} scrollRef={scrollRef}>
+              <Scroll dataSlot={dataSlot} scrollRef={scrollRef} bothWays={bothWays}>
                 {children}
               </Scroll>
             </Drawer.Content>
