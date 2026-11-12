@@ -478,15 +478,27 @@ export async function withReducedMotion(body: () => Promise<void>) {
  * however the case ends — a case that threw halfway must not hand the next one a share to send.
  */
 export async function withToasts(body: (said: string[]) => Promise<void>) {
+  // Every tone, not only the error one: a screen may answer in passing as a note or a success, and a
+  // case asserting "nothing was said" has to be able to hear those as well.
   const said: string[] = []
-  const original = toast.error
-  toast.error = ((message: unknown) => {
-    said.push(String(message))
-  }) as typeof toast.error
+  const original = {
+    error: toast.error,
+    info: toast.info,
+    success: toast.success,
+    message: toast.message,
+  }
+  const take = () =>
+    ((message: unknown) => {
+      said.push(String(message))
+    }) as typeof toast.error
+  toast.error = take()
+  toast.info = take() as typeof toast.info
+  toast.success = take() as typeof toast.success
+  toast.message = take() as unknown as typeof toast.message
   try {
     await body(said)
   } finally {
-    toast.error = original
+    Object.assign(toast, original)
     clearShare()
   }
 }
