@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router"
 import { toast } from "sonner"
 
@@ -17,30 +17,29 @@ import {
   SwitchRow,
 } from "@/components/settings-chrome"
 import type { Profile } from "@/lib/db"
-import { filterByFuzzy } from "@/lib/fuzzy"
 import type { Skill } from "@/lib/hermes"
 import { useSkillFeatureAnswers, useSkills } from "@/lib/skills"
 import {
+  ALL_SKILLS_KEY,
   canRemove,
   categoryHeader,
   categoryWrites,
-  pillKeeps,
   skillHealth,
   skillPills,
   skillSections,
+  skillsKept,
   switchableControls,
   type CategoryHeader,
   type RowControls,
   type SkillGroup,
-  type SkillPill,
   type SkillSection,
 } from "@/lib/skills-tab"
 import { cn } from "@/lib/utils"
 import { botSubPath, type BotSub } from "@/lib/bot-subs"
 import { botTabPath } from "@/lib/bot-tabs"
 
-/** What a pill is picked by: the category it keeps, and null for All. */
-const pickedBy = (pill: SkillPill) => (pill.id === "all" ? null : pill.category)
+/** What a read that hasn't answered holds: one object, so a derivation over it isn't rebuilt. */
+const NO_SKILLS: Skill[] = []
 
 export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) {
   const answers = useSkillFeatureAnswers(profile)
@@ -52,9 +51,29 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
   const [pending, setPending] = useState(false)
   const [removing, setRemoving] = useState<string | null>(null)
   const [query, setQuery] = useState("")
-  // The category the reader pressed, or null for All. The tab's own state, never remembered beyond
-  // it: a remount (a different bot, another visit) opens on the whole list and an empty field.
-  const [chosen, setChosen] = useState<string | null>(null)
+  // The pill the reader pressed, by its key, and All's to begin with. The tab's own state, never
+  // remembered beyond it: a remount (a different bot, another visit) opens on the whole list and an
+  // empty field.
+  const [chosen, setChosen] = useState(ALL_SKILLS_KEY)
+  const skills = state.status === "ok" ? state.skills : NO_SKILLS
+  // The pill and the words narrow the list before it is grouped: the sections, their captions and a
+  // category's own count all describe what is drawn, so a caption can never stand over rows the
+  // filter dropped. One derivation, memorised the way the chat list memorises its own filter and
+  // search (`bot-chats.tsx`) — for the two screens to read alike, not for what a render costs.
+  const { pills, pressed, kept, sections } = useMemo(() => {
+    const pills = skillPills(skills)
+    // A pill's category can leave with the last skill in it, so the press falls back to All rather
+    // than to a key the row no longer offers, until the effect below hands the state back.
+    const pressed = pills.some((pill) => pill.key === chosen) ? chosen : ALL_SKILLS_KEY
+    const kept = skillsKept(skills, pressed, query)
+    return { pills, pressed, kept, sections: skillSections(kept) }
+  }, [skills, chosen, query])
+  // The press does not linger on a category that has gone: the tab already draws All, and this hands
+  // the state back too, so a category a later read brings back isn't pressed by a tap nobody made.
+  useEffect(() => {
+    if (chosen !== ALL_SKILLS_KEY && !pills.some((pill) => pill.key === chosen))
+      setChosen(ALL_SKILLS_KEY)
+  }, [chosen, pills])
   if (answer !== "yes") return null
   if (state.status === "loading") return null
 
@@ -140,53 +159,39 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
     )
   }
 
-  // The pill and the words narrow the list before it is grouped: the sections, their captions and a
-  // category's own count all describe what is drawn, so a caption can never stand over rows the
-  // filter dropped. A pill's category can leave with the last skill in it, so the press falls back to
-  // All rather than to a pill the row no longer offers.
-  const pills = skillPills(state.skills)
-  const picked = pills.find((pill) => pickedBy(pill) === chosen) ?? pills[0]
-  const kept = filterByFuzzy(pillKeeps(state.skills, picked), query, (skill) => [
-    skill.name,
-    skill.description ?? undefined,
-  ])
-  const sections = skillSections(kept)
+  // The only emptiness this tab words is the search's: a bot holding no skills draws the field over an
+  // empty tab and says nothing, since nothing was searched.
+  const missed = kept.length === 0 && query.trim() !== ""
 
   return (
     <div className="flex flex-col gap-4" data-skills-tab>
-      {state.skills.length > 0 && (
-        <>
-          <div className="flex flex-col gap-2">
-            <SearchField value={query} onChange={setQuery} label="Search skills" />
-            {pills.length > 1 && (
-              <ChipRow label="Filter skills">
-                {pills.map((pill) => (
-                  <Chip
-                    key={pickedBy(pill) ?? "all"}
-                    active={pill === picked}
-                    onClick={() => setChosen(pickedBy(pill))}
-                  >
-                    {pill.label}
-                  </Chip>
-                ))}
-              </ChipRow>
-            )}
-          </div>
-          {kept.length === 0 && (
-            <p className="py-8 text-center text-sm text-muted-foreground">No skills match.</p>
-          )}
-          {sections.map((section) => (
-            <Section
-              key={section.id}
-              section={section}
-              controls={controls}
-              onOpen={open}
-              onFlip={flip}
-              flipping={flipping}
-            />
-          ))}
-        </>
-      )}
+      <div className="flex flex-col gap-2">
+        <SearchField value={query} onChange={setQuery} label="Search skills" />
+        {pills.length > 1 && (
+          <ChipRow label="Filter skills">
+            {pills.map((pill) => (
+              <Chip
+                key={pill.key}
+                active={pill.key === pressed}
+                onClick={() => setChosen(pill.key)}
+              >
+                {pill.label}
+              </Chip>
+            ))}
+          </ChipRow>
+        )}
+      </div>
+      {missed && <p className="py-8 text-center text-sm text-muted-foreground">No skills match.</p>}
+      {sections.map((section) => (
+        <Section
+          key={section.id}
+          section={section}
+          controls={controls}
+          onOpen={open}
+          onFlip={flip}
+          flipping={flipping}
+        />
+      ))}
       {confirmation}
     </div>
   )

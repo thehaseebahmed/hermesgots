@@ -9,6 +9,7 @@ import { botSubOf } from "@/lib/bot-subs"
 import { botPageOf, botTabOf, type BotTab } from "@/lib/bot-tabs"
 import { db } from "@/lib/db"
 import {
+  absentText,
   botProfile,
   click,
   find,
@@ -993,6 +994,19 @@ const searchSkills = () => find('input[aria-label="Search skills"]')
 /** Every skill row the tab draws, in the order it draws them, whatever section holds them. */
 const drawnRows = () => findAll("[data-skill]").map((one) => one.getAttribute("data-skill"))
 
+/** Every row the tab draws with All pressed, in the tab's own order: categories, then no category. */
+const EVERY_ROW = [
+  "browse",
+  "deploy",
+  "lint",
+  "pr-land",
+  "pr-review",
+  "journal",
+  "plan",
+  "stray",
+  "gots:notes",
+]
+
 test("the search and the pills narrow the tab, and the words narrow what the pill kept", async () => {
   await seed("skills-filter", ["skills"])
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
@@ -1008,21 +1022,7 @@ test("the search and the pills narrow the tab, and the words narrow what the pil
       "true",
       "All is what the tab opens on",
     )
-    assert.deepEqual(
-      drawnRows(),
-      [
-        "browse",
-        "deploy",
-        "lint",
-        "pr-land",
-        "pr-review",
-        "journal",
-        "plan",
-        "stray",
-        "gots:notes",
-      ],
-      "and All keeps every row, in the tab's own order",
-    )
+    assert.deepEqual(drawnRows(), EVERY_ROW, "and All keeps every row, in the tab's own order")
 
     await click(pillWord("review"))
     assert.deepEqual(drawnRows(), ["pr-land", "pr-review"], "the category's own rows, and only them")
@@ -1030,7 +1030,7 @@ test("the search and the pills narrow the tab, and the words narrow what the pil
     assert.equal(pillWord("review")?.getAttribute("aria-pressed"), "true", "the pill reads pressed")
 
     await click(pillWord("All"))
-    assert.equal(drawnRows().length, 9, "All restores every row")
+    assert.deepEqual(drawnRows(), EVERY_ROW, "All restores every row")
 
     await click(pillWord("review"))
     await type(searchSkills(), "land")
@@ -1048,7 +1048,7 @@ test("the search and the pills narrow the tab, and the words narrow what the pil
     // A skill with no category is kept by All alone: a pill exists only for a category the tab holds.
     await click(pillWord("All"))
     assert.ok(row("plan"), "All keeps the skill with no category")
-    for (const category of ["ops", "plugin", "quality", "review"]) {
+    for (const category of filterSkills().map(wordsOf).slice(1)) {
       await click(pillWord(category))
       assert.ok(missing('[data-skill="plan"]'), `${category} keeps no skill without a category`)
     }
@@ -1076,5 +1076,34 @@ test("a bot whose skills hold no category draws no pill row", async () => {
     )
     assert.ok(searchSkills(), "the words are still worth a field")
     assert.deepEqual(drawnRows(), ["journal", "plan"], "and every row is there")
+  })
+})
+
+test("a pressed category that leaves the tab hands the press back to All", async () => {
+  await seed("skills-filter-gone", ["skills", "skills_view", "skills_remove"], ORIGINS)
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    await click(pillWord("review"))
+    assert.deepEqual(drawnRows(), ["pr-land", "pr-review"], "the category's own rows")
+    // The category goes with the last skill in it: its two skills are taken away, one note at a time.
+    for (const name of ["pr-review", "pr-land"]) {
+      await openNote(name)
+      await click(removeButton())
+      await click(alertButton("Remove"))
+      await until(async () => row(name) === null, `${name} to leave the tab`)
+    }
+    assert.equal(pillWord("review"), null, "the category has no pill left to press")
+    assert.equal(pillWord("All")?.getAttribute("aria-pressed"), "true", "so the press is All's again")
+    assert.deepEqual(drawnRows(), ["lint", "gots:notes"], "and the tab draws what All keeps")
+  })
+})
+
+test("a bot with no skill at all is still given the field, and told nothing of a search", async () => {
+  await seed("skills-filter-empty", ["skills"], [])
+  await mount(editor("/settings/bots/bot-1/skills"), async () => {
+    await drawn()
+    assert.ok(searchSkills(), "the field is drawn whether or not the bot has a skill to narrow")
+    absentText("p", "No skills match.")
+    assert.deepEqual(drawnRows(), [], "and there is no row to list")
   })
 })
