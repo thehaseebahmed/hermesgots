@@ -67,6 +67,9 @@ const run = async ({ page, profileId, shot }) => {
       pillBox.y + pillBox.height <= sectionBox.y + 1,
       `the pill row stands above the first section (${Math.round(pillBox.y + pillBox.height)}…${Math.round(sectionBox.y)})`,
     )
+    // The frame the controls are in: a reader who lands here sees this row before the flow scrolls
+    // any row into view.
+    await shot("controls")
 
     const captions = []
     for (const [id, title] of SECTIONS) {
