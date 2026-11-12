@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import type { MouseEvent, ReactNode } from "react"
 import { ChevronUpIcon, PinIcon } from "lucide-react"
 import { Link } from "react-router"
 
@@ -134,7 +134,13 @@ export function ItemRow({
   children?: ReactNode
   selected?: boolean
   onOpen?: () => void
-  link?: { to: string; replace?: boolean; state?: unknown }
+  link?: {
+    to: string
+    replace?: boolean
+    state?: unknown
+    /** The press the link answers itself, for a row that opens a top-level screen. */
+    onClick?: (event: MouseEvent<HTMLAnchorElement>) => void
+  }
 }) {
   const className = cn(
     "-mx-2 flex min-h-16 w-[calc(100%+1rem)] items-start gap-3 rounded-2xl px-2 py-3 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring",
@@ -204,6 +210,7 @@ export function ItemRow({
         to={link.to}
         replace={link.replace}
         state={link.state}
+        onClick={link.onClick}
         aria-current={selected ? "page" : undefined}
         className={className}
       >

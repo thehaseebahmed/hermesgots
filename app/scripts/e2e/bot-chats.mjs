@@ -26,6 +26,12 @@ await flow(
           row.getAttribute("href"),
         ),
       )
+    /** The chat's own control, and the list it opens with every row of it drawn. */
+    const openList = async (why) => {
+      await page.getByRole("link", { name: "Chats with Test bot" }).click()
+      await page.waitForURL(`**${list}`, { timeout: 20_000 })
+      await until(async () => (await rows()).length === expected.length, 20_000, why)
+    }
     const header = () =>
       page.evaluate(() => {
         const title = document.querySelector('[data-slot="header-title"]')
@@ -199,24 +205,20 @@ await flow(
     await page.locator(`main ul a[href="${chat}"]`).click()
     await page.waitForURL(`**${chat}`, { timeout: 20_000 })
     await until(async () => (await header()) === CHATS[1].title, 20_000, "the chat's own title")
-    assert.equal(await rung(page), 1, "the chat stands on the list it was opened from")
+    assert.equal(await rung(page), 0, "the chat picked becomes the app's only entry, the list gone")
     await shot("chat")
-    pass("a row opens its chat, on an address of its own")
+    pass("a row opens its chat as the app's only entry")
 
     const chatRung = await rung(page)
-    await page.getByRole("link", { name: "Chats with Test bot" }).click()
-    await page.waitForURL(`**${list}`, { timeout: 20_000 })
-    await until(async () => (await rows()).length === expected.length, 20_000, "the list again")
+    await openList("the list again")
     assert.equal(await rung(page), chatRung + 1, "the list stands a rung above the chat it covers")
     assert.equal(
-      await page.evaluate(
-        () => document.querySelector('main ul a[aria-current="page"]')?.getAttribute("href") ?? null,
-      ),
-      chat,
-      "with the chat's row marked as the one it covers",
+      await page.evaluate(() => document.querySelectorAll("main ul a[aria-current]").length),
+      0,
+      "and no row of it is marked as the one it covers, which is not open beside it",
     )
     await shot("list-over-chat")
-    pass("the chat's list control opens the bot's chats above it, the chat's row marked")
+    pass("the chat's list control opens the bot's chats above it, with no row marked")
 
     await back().click()
     await page.waitForURL(`**${chat}`, { timeout: 20_000 })
@@ -224,29 +226,43 @@ await flow(
     assert.equal(await rung(page), chatRung, "back on the rung the chat stands at, nothing left over")
     pass("back from the pushed list returns the chat it covers")
 
-    await page.getByRole("link", { name: "Chats with Test bot" }).click()
-    await page.waitForURL(`**${list}`, { timeout: 20_000 })
-    await until(async () => (await rows()).length === expected.length, 20_000, "the list once more")
-    const listRung = await rung(page)
-    await page.locator(`main ul a[href="/c/${CHATS[0].id}"]`).click()
-    await page.waitForURL(`**/c/${CHATS[0].id}`, { timeout: 20_000 })
+    // A chat picked from a list over a chat becomes the bot's chat on screen at the app's only entry:
+    // the list does not stand behind it, and neither does the chat the reader started in. So the
+    // picked chat is what the bot's own row opens, and it answers the press as any root chat does.
+    const picked = `/c/${CHATS[0].id}`
+    await openList("the list for the pick")
+    assert.equal(await rung(page), chatRung + 1, "the list stands a rung above the chat it covers")
+    await page.locator(`main ul a[href="${picked}"]`).click()
+    await page.waitForURL(`**${picked}`, { timeout: 20_000 })
     await until(async () => (await header()) === CHATS[0].title, 20_000, "the chat picked")
-    assert.equal(await rung(page), listRung, "the chat picked stands on the list's own rung")
-    assert.equal(await rung(page), chatRung + 1, "one above the chat the reader started in, not two")
+    assert.equal(
+      await rung(page),
+      0,
+      "the chat picked is the app's only entry, not a rung above the chat it replaced",
+    )
     await shot("picked")
-    pass("a row picked in a list over a chat takes the list's entry, not a rung of its own")
+    pass("a row picked in a list over a chat takes the app's only entry")
 
     await page.goBack()
-    await page.waitForURL(`**${chat}`, { timeout: 20_000 })
-    await until(async () => (await header()) === CHATS[1].title, 20_000, "the chat started in")
-    assert.equal(await rung(page), chatRung, "back on the chat the reader started in")
-    pass("back from the chat picked returns the chat the reader started in")
+    await until(async () => !here().startsWith("/"), 10_000, "the app to be left")
+    pass("back from the chat picked leaves the app, with nothing behind it")
+
+    // The chat picked is the one the bot opens from the menu, at the app's only entry.
+    await page.goForward()
+    await page.waitForURL(`**${picked}`, { timeout: 20_000 })
+    await until(async () => (await header()) === CHATS[0].title, 20_000, "the chat picked, back on screen")
+    await page.locator('aside a[href="/code"]').first().click()
+    await page.waitForURL("**/code", { timeout: 20_000 })
+    await page.locator(`aside a[href="${list}"]`).first().click()
+    await page.waitForURL(`**${picked}`, { timeout: 20_000 })
+    await until(async () => (await header()) === CHATS[0].title, 20_000, "the chat the bot was left in")
+    assert.equal(await rung(page), 0, "at the app's only entry, with nothing behind it")
+    await shot("returned")
+    pass("a bot's menu opens the chat picked from its list")
 
     // A room is not a chat of the bot's, so its row keeps its own screen above the list rather than
-    // taking the list's entry: the room's way back lands that list, not the chat behind it.
-    await page.getByRole("link", { name: "Chats with Test bot" }).click()
-    await page.waitForURL(`**${list}`, { timeout: 20_000 })
-    await until(async () => (await rows()).length === expected.length, 20_000, "the list for the room")
+    // taking the app's entry: the room's way back lands that list, not the chat behind it.
+    await openList("the list for the room")
     const roomRung = await rung(page)
     await page.locator(`main ul a[href="${roomRow}"]`).click()
     await page.waitForURL(`**${roomRow}`, { timeout: 20_000 })
@@ -256,37 +272,49 @@ await flow(
     assert.equal(await rung(page), roomRung, "and the room's own way back lands that list")
     pass("a room picked from a pushed list keeps the list as its way back")
 
+    // The chat the bot was left in is still the one picked, and a reload keeps the reader in it.
     await page.locator('aside a[href="/code"]').first().click()
     await page.waitForURL("**/code", { timeout: 20_000 })
     await page.locator(`aside a[href="${list}"]`).first().click()
-    await page.waitForURL(`**${chat}`, { timeout: 20_000 })
-    await until(async () => (await header()) === CHATS[1].title, 20_000, "the chat left open here")
+    await page.waitForURL(`**${picked}`, { timeout: 20_000 })
+    await until(async () => (await header()) === CHATS[0].title, 20_000, "the chat left open here")
     assert.equal(await rung(page), 0, "at the app's only entry, with nothing behind it")
-    await shot("returned")
-    pass("a bot opens the chat this device left it in, at the app's own entry")
 
     await page.reload()
-    await until(async () => (await header()) === CHATS[1].title, 30_000, "the chat after a reload")
-    assert.equal(here(), chat, "a reload keeps the chat it was on")
+    await until(async () => (await header()) === CHATS[0].title, 30_000, "the chat after a reload")
+    assert.equal(here(), picked, "a reload keeps the chat it was on")
     assert.equal(await rung(page), 0, "and the entry it stood on, the chat being the address")
     pass("a reload keeps the reader where they were")
 
-    await page.getByRole("link", { name: "Chats with Test bot" }).click()
-    await page.waitForURL(`**${list}`, { timeout: 20_000 })
-    await until(async () => (await rows()).length === expected.length, 20_000, "the list above it")
+    await openList("the list above it")
     assert.equal(await rung(page), 1, "the list stands a rung above the chat at the app's entry")
     await shot("list-over-root")
     pass("the chat at the app's entry opens its bot's chats above it")
 
     await back().click()
-    await page.waitForURL(`**${chat}`, { timeout: 20_000 })
-    await until(async () => (await header()) === CHATS[1].title, 20_000, "the chat it led back to")
+    await page.waitForURL(`**${picked}`, { timeout: 20_000 })
+    await until(async () => (await header()) === CHATS[0].title, 20_000, "the chat it led back to")
     assert.equal(await rung(page), 0, "back at the app's entry, nothing left over")
     pass("back from the pushed list returns the chat, at the app's entry")
 
+    // The foot's New chat is the same move from the same list: the list does not stand behind the new
+    // chat either, so it is the bot's chat on screen with the press a root chat answers.
+    await openList("the list for a new chat")
+    assert.equal(await rung(page), 1, "the list stands a rung above the chat at the app's entry")
+    await page.getByRole("button", { name: "New", exact: true }).click()
+    await page.getByRole("button", { name: "New chat", exact: true }).click()
+    await until(
+      async () => here().startsWith("/c/") && here() !== picked,
+      20_000,
+      "the chat the foot made",
+    )
+    assert.equal(await rung(page), 0, "the new chat is the app's only entry, the list gone")
+    await shot("new-chat")
+    pass("a chat started from a pushed list's foot takes the app's only entry")
+
     await page.goBack()
     await until(async () => !here().startsWith("/"), 10_000, "the app to be left")
-    pass("back from the chat at the app's entry leaves the app")
+    pass("back from the new chat at the app's entry leaves the app")
   },
   { viewport: { width: 1024, height: 900 } },
 )

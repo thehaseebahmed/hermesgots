@@ -6,11 +6,11 @@ import vm from "node:vm"
 import { BRIDGE_METHODS } from "../src/lib/canvas-bridge.ts"
 import {
   CANVAS_CSP,
-  LIBRARIES,
   SCROLL_MESSAGE,
   SUBMIT_IN_PLACE,
   TOKENS,
   canvasDocument,
+  canvasLibraryPlan,
   readScroll,
   themeTokens,
   themeVariables,
@@ -229,7 +229,7 @@ test("a named library is inlined and an unknown one dropped", () => {
   const html = canvasDocument(page, {
     mode: "light",
     tokens: LIGHT,
-    libraries: { chart: "window.Chart=function(){}" },
+    libraries: { chart: { script: "window.Chart=function(){}" } },
   })
   assert.match(html, /<script>window\.Chart=function\(\)\{\}<\/script>/, "the source is inlined")
   // The ask is a placeholder, not a hoist: the library lands where the page put it, which is what
@@ -241,7 +241,7 @@ test("a named library is inlined and an unknown one dropped", () => {
   const after = canvasDocument(late, {
     mode: "light",
     tokens: LIGHT,
-    libraries: { chart: "window.Chart=function(){}" },
+    libraries: { chart: { script: "window.Chart=function(){}" } },
   })
   assert.ok(
     after.indexOf("<h1>Tip</h1>") < after.indexOf("window.Chart"),
@@ -261,7 +261,7 @@ test("a named library is inlined and an unknown one dropped", () => {
       '<title>Tip</title>\n    <script data-canvas-lib="chart"></script>' +
         '<script data-canvas-lib="chart"></script>',
     ),
-    { mode: "light", tokens: LIGHT, libraries: { chart: "window.Chart=function(){}" } },
+    { mode: "light", tokens: LIGHT, libraries: { chart: { script: "window.Chart=function(){}" } } },
   )
   assert.equal(twice.split("window.Chart=function").length - 1, 1, "the source is inlined once")
   // An ask whose other attributes carry a `>` is still an ask: the tag is read, not its bytes.
@@ -270,9 +270,89 @@ test("a named library is inlined and an unknown one dropped", () => {
       "<title>Tip</title>",
       '<title>Tip</title>\n    <script data-x="a>b" data-canvas-lib="date"></script>',
     ),
-    { mode: "light", tokens: LIGHT, libraries: { date: "window.dayjs=function(){}" } },
+    { mode: "light", tokens: LIGHT, libraries: { date: { script: "window.dayjs=function(){}" } } },
   )
   assert.match(quoted, /<script>window\.dayjs=function\(\)\{\}<\/script>/, "a quoted `>` doesn't hide the ask")
+})
+
+// The one table of asks both parsers are held to: this suite and `plugin/tests/test_canvases.py` read
+// the same file, so the host can never refuse a tag the app would have answered.
+const LIBRARY_ASKS = JSON.parse(
+  readFileSync(new URL("../../plugin/tests/fixtures/canvas-library-asks.json", import.meta.url), "utf8"),
+)
+
+test("the app plans the same asks the host reads", () => {
+  // A page asks for a library with an empty `<script data-canvas-lib>`, and what counts as an ask is
+  // one grammar in two languages: an empty script, other attributes — a quoted `>` included — either
+  // quote style and extra whitespace are all asks; content in the script and a tag written in a
+  // comment are not. A name the app has no source for is still an ask: it is the host that refuses
+  // it, by that name.
+  assert.ok(LIBRARY_ASKS.cases.length > 0, "the table is a table")
+  for (const one of LIBRARY_ASKS.cases) {
+    assert.deepEqual(canvasLibraryPlan(one.html), one.asks, one.case)
+  }
+})
+
+test("a version stored before the host refused a name still draws", () => {
+  // Draw time is unchanged: an ask the app has no source for is dropped rather than left as a tag
+  // the page would parse as an empty script of its own, so a page a host no longer answers still
+  // opens and draws.
+  const stored = LIBRARY_ASKS.cases.filter((one) => one.stored)
+  assert.ok(stored.length > 0, "the table carries a stored version")
+  for (const one of stored) {
+    const html = canvasDocument(PAGE.replace("<h1>Tip</h1>", `<h1>Tip</h1>${one.html}`), {
+      mode: "light",
+      tokens: LIGHT,
+    })
+    assert.equal(html.includes("data-canvas-lib"), false, "the ask is dropped, not left to parse")
+    assert.ok(html.includes("<h1>Tip</h1>"), "the page still draws")
+  }
+})
+
+test("a library's stylesheet rides the head and its setup follows its source", () => {
+  // Leaflet's stylesheet names its images relative to itself, which a srcdoc page resolves nowhere,
+  // and its default marker is named by its JavaScript rather than its CSS. So a library may hand the
+  // page a stylesheet and a setup, and each has one place: the stylesheet in the head, after the
+  // theme and before the page's compiled classes — a floor under the page's own look — and the
+  // setup right after the source it belongs to.
+  const page = PAGE.replace(
+    "<title>Tip</title>",
+    '<title>Tip</title>\n    <script data-canvas-lib="leaflet"></script>',
+  ).replace("<h1>Tip</h1>", '<h1>Tip</h1>\n    <style>.mine{margin:0}</style>')
+  const leaflet = {
+    script: "window.L=function(){}",
+    css: '.leaflet-container{background:url("data:image/png;base64,AA")}',
+    setup: 'L.Icon.Default.mergeOptions({iconUrl:"data:image/png;base64,AA"})',
+  }
+  const html = canvasDocument(page, {
+    mode: "light",
+    tokens: LIGHT,
+    css: ".p-4{padding:1rem}",
+    libraries: { leaflet },
+  })
+  const head = headOf(html)
+  assert.ok(head.includes(leaflet.css), "the stylesheet is in the page's head")
+  // After the theme, and before the page's compiled classes, so the page still wins…
+  assert.ok(head.indexOf("--background") < head.indexOf(leaflet.css))
+  assert.ok(head.indexOf(leaflet.css) < head.indexOf(".p-4{padding:1rem}"))
+  // …and before anything the page wrote, so a stylesheet of the page's own still wins.
+  assert.ok(head.indexOf(leaflet.css) < head.indexOf("<title>Tip</title>"))
+  assert.ok(html.indexOf(leaflet.css) < html.indexOf('<style>.mine{margin:0}</style>'))
+  // The setup runs right after the source, where the page put the ask.
+  assert.ok(
+    html.includes(`<script>${leaflet.script}</script><script>${leaflet.setup}</script>`),
+    "the setup rides right after the source",
+  )
+  // A page that asks twice is given one copy of the library's stylesheet: CSS twice is bytes for
+  // nothing, and the second copy would only say what the first already does.
+  const twice = canvasDocument(
+    page.replace(
+      '<script data-canvas-lib="leaflet"></script>',
+      '<script data-canvas-lib="leaflet"></script><script data-canvas-lib="leaflet"></script>',
+    ),
+    { mode: "light", tokens: LIGHT, libraries: { leaflet } },
+  )
+  assert.equal((twice.split(leaflet.css).length - 1), 1, "the stylesheet is hoisted once")
 })
 
 test("bg-primary compiles to the token's variable", async () => {
@@ -359,15 +439,14 @@ test("the classes compiled are the ones the page's class attributes name", () =>
   ])
 })
 
-test("the canvas section names exactly the libraries and bridge methods the app has", () => {
-  // The guide is what a bot is told it may ask for, and the app is what answers: a name in one and
-  // not the other is a page that draws a hole where a library or a call should be. Over the host's
-  // 4,000-character section cap the section is dropped whole, so the guide's length is part of it.
+test("the canvas section names exactly the bridge methods the app answers", () => {
+  // The guide is what a bot is told it may call, and the app is what answers: a name in one and not
+  // the other is a page that draws a hole. The library names and the guide's length are the
+  // catalogue suite's (`test-canvas-catalogue.mjs` holds the artifact to a fresh render and to the
+  // generator's gate), so they are not asserted a second time here.
   const guide = readFileSync(new URL("../../plugin/canvas/prompt.txt", import.meta.url), "utf8")
   const named = (pattern) => [...new Set([...guide.matchAll(pattern)].map((match) => match[1]))]
-  assert.deepEqual(named(/data-canvas-lib="([a-z]+)"/g).sort(), [...LIBRARIES].sort())
   assert.deepEqual(named(/canvas\.data\.([a-z]+)/g).sort(), [...BRIDGE_METHODS].sort())
-  assert.ok(guide.length <= 4_000, `the guide is ${guide.length} characters, under the host's 4,000`)
 })
 
 test("the canvas section names the skills it can load", () => {
@@ -392,4 +471,34 @@ test("the app's own policy keeps a canvas's frame from navigating itself away", 
   // pins the one line the claim rests on.
   const page = readFileSync(new URL("../index.html", import.meta.url), "utf8")
   assert.match(page, /<meta http-equiv="Content-Security-Policy" content="frame-src 'self'" \/>/)
+})
+
+test("a page of unterminated openers is no page of asks, and is read at once", () => {
+  // The tag grammar is ambiguous enough that a backtracking pattern took minutes over this page,
+  // and the 256 KB cap admits it: a bot writing a broken loop must cost a reader a draw, not a
+  // frozen phone. The walk reads it once and finds nothing, since no opener ever closes.
+  const page = PAGE.replace("<h1>Tip</h1>", `<h1>Tip</h1>${"<script data-x=1 ".repeat(5000)}`)
+  const started = performance.now()
+  assert.deepEqual(canvasLibraryPlan(page), [])
+  assert.ok(performance.now() - started < 1000, "the page is read in well under a second")
+})
+
+test("a commented ask is no ask, and the ask under it still draws", () => {
+  // A bot that documents the tag in a comment above the one it makes is the page shape the shared
+  // fixture table exists for: the comment is no ask on either side, and the source lands where the
+  // page actually asked — not inside the comment, which would leave the page drawing a hole.
+  const page = PAGE.replace(
+    "<h1>Tip</h1>",
+    '<!-- docs: <script data-canvas-lib="chart"></script> -->\n    <h1>Tip</h1>\n    <script data-canvas-lib="chart"></script>',
+  )
+  assert.deepEqual(canvasLibraryPlan(page), ["chart"])
+  const html = canvasDocument(page, {
+    mode: "light",
+    tokens: LIGHT,
+    libraries: { chart: { script: "window.Chart=function(){}" } },
+  })
+  assert.ok(html.includes('<!-- docs: <script data-canvas-lib="chart"></script> -->'), "the comment stands as written")
+  const at = html.indexOf("window.Chart=function(){}")
+  assert.ok(at > html.indexOf("-->"), "the source takes the ask's place, after the comment")
+  assert.equal(html.split("data-canvas-lib").length - 1, 1, "only the comment still names one")
 })

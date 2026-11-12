@@ -10,7 +10,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { act } from "react"
-import { MemoryRouter, Route, Routes } from "react-router"
+import { MemoryRouter, Route, Routes, type InitialEntry } from "react-router"
 
 import { Home } from "@/App"
 import { BotChatsPage, BotChatsPane } from "@/routes/bot-chats"
@@ -175,7 +175,7 @@ const iconOf = (id: string) =>
 /** The disc a row's icon stands in, which is where a list picks its tone. */
 const discOf = (id: string) => rowOf(id)?.querySelector('[data-slot="row-mark"] span.rounded-full')
 
-const screen = (entry = `/b/${bot.id}`) => (
+const screen = (entry: InitialEntry = `/b/${bot.id}`) => (
   <MemoryRouter initialEntries={[entry]}>
     <Path />
     <Nav />
@@ -702,7 +702,10 @@ test("the picks' New chat makes a chat of this bot's, and their New room opens t
   })
 })
 
-test("a pick in a list that stands over a chat takes its entry, where a root list pushes", async () => {
+test("a pick in a bot's list opens the chat as the app's only entry", async () => {
+  // The list the pick leaves behind is the session history's, which a screen drawn without one cannot
+  // walk: `scripts/e2e/bot-chats` holds the step back through the list and the chat under it, and this
+  // holds the move the row makes at the app's entry — the list's own entry, replaced by the chat's.
   await seed([
     { id: "a", title: "A chat", at: 100, said: "Hello" },
     { id: "b", title: "Another", at: 200, said: "Hi" },
@@ -711,27 +714,33 @@ test("a pick in a list that stands over a chat takes its entry, where a root lis
     await until(async () => rowIds().length === 2, "the bot's chats")
     await click(rowOf("b"))
     await until(async () => path() === "/c/b", "the chat it picked")
-    assert.equal(nav(), "PUSH:/c/b", "a row of the root list pushes, so back returns to the list")
+    assert.equal(nav(), "REPLACE:/c/b", "the chat takes the list's entry, nothing of it left behind")
   })
-  const history = atDepth(1)
-  try {
-    await mount(screen(), async () => {
-      await until(async () => rowIds().length === 2, "the bot's chats")
-      await click(rowOf("b"))
-      await until(async () => path() === "/c/b", "the chat it picked")
-      assert.equal(nav(), "REPLACE:/c/b", "over a chat, the row takes the list's entry")
-    })
-    await mount(screen(), async () => {
-      await until(async () => rowIds().length === 2, "the bot's chats")
-      await click(find("[data-new-menu]"))
-      await until(async () => picksOpen(), "the picks")
-      await click(newRow("New chat"))
-      await until(async () => path() !== `/b/${bot.id}`, "the chat it made")
-      assert.ok(nav().startsWith("REPLACE:/c/"), "and so does the foot's New chat")
-    })
-  } finally {
-    history.restore()
-  }
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 2, "the bot's chats")
+    await click(find("[data-new-menu]"))
+    await until(async () => picksOpen(), "the picks")
+    await click(newRow("New chat"))
+    await until(async () => path() !== `/b/${bot.id}`, "the chat it made")
+    assert.ok(nav().startsWith("REPLACE:/c/"), "and the foot's New chat takes it too")
+  })
+})
+
+test("a list a chat opens marks no row, where a list beside a chat marks the one it draws", async () => {
+  await seed([
+    { id: "a", title: "A chat", at: 100, said: "Hello" },
+    { id: "b", title: "Another", at: 200, said: "Hi" },
+  ])
+  // The list a chat's own control opens names the chat it covers, and that chat is not open beside it:
+  // the mark a row carries for "this is the one drawn here" would say something untrue.
+  await mount(screen({ pathname: `/b/${bot.id}`, state: { open: "a" } }), async () => {
+    await until(async () => rowIds().length === 2, "the bot's chats")
+    assert.equal(
+      findAll("ul a[aria-current]").length,
+      0,
+      "no row of the list a chat opened is marked as the one open",
+    )
+  })
 })
 
 test("a Host that cannot make a room offers no row for one", async () => {

@@ -5,7 +5,7 @@
  * that land on General instead, the segments that named pages before the list landing on the pages
  * that took their place, a fourth segment that names nothing landing on the page it was asked under,
  * the out-of-date banner leading the list, a row pushing its page on a phone and swapping the pane
- * beside the list on a laptop, the header's trash named for the bot it deletes, and each page still
+ * beside the list on a laptop, the list ending on the button that deletes the bot, and each page still
  * holding what its tab held — values that open their edits.
  */
 import assert from "node:assert/strict"
@@ -60,11 +60,11 @@ const settings = (entry: string) => (
  * A bot of this test's own: what a connection's plugin answered is remembered for the page, so each
  * test names its own host and no answer leaks into the next.
  */
-async function seed(name: string, features: string[] | "away", patch = {}) {
+async function seed(name: string, features: string[] | "away", patch = {}, host = {}) {
   await seedSettings()
   await db.profiles.clear()
   await db.profiles.put(botProfile(name, patch))
-  mediaHost({ features, general: GENERAL })
+  mediaHost({ features, general: GENERAL, ...host })
 }
 
 const rows = () => findAll("[data-bot-page]").map((row) => row.getAttribute("data-bot-page"))
@@ -161,10 +161,12 @@ test("the bot's page is what the bot is under Bot, then every setting in one car
       "the bot's switches lead its card",
     )
     assert.deepEqual(titles(), ["A bot"], "the list screen is named after the bot")
+    const control = findAll("button").find((one) => wordsOf(one) === "Delete bot")
     assert.ok(
-      find('header button[aria-label="Delete A bot"]'),
-      "and its header carries the trash named for the bot it deletes",
+      control?.closest("[data-bot-settings-list]"),
+      "the list carries one Delete bot, inside its own column",
     )
+    assert.equal(control?.closest("header"), null, "and none in the screen's header")
   })
 })
 
@@ -239,7 +241,7 @@ test("a fourth segment under a page with no sub-screens lands on the page too", 
 })
 
 test("an out-of-date plugin's banner leads the list, in the words the design settled", async () => {
-  await seed("banner-outdated", ALL, { pluginVersion: "0.1.0" })
+  await seed("banner-outdated", ALL, { pluginVersion: "0.1.0" }, { version: "0.1.0" })
   await mount(settings("/settings/bots/bot-1"), async () => {
     const list = find("[data-bot-settings-list]")
     assert.equal(
@@ -252,7 +254,7 @@ test("an out-of-date plugin's banner leads the list, in the words the design set
 })
 
 test("a plugin that isn't out of date has no banner over the list", async () => {
-  await seed("banner-current", ALL, { pluginVersion: MIN_PLUGIN_VERSION })
+  await seed("banner-current", ALL, { pluginVersion: MIN_PLUGIN_VERSION }, { version: MIN_PLUGIN_VERSION })
   await mount(settings("/settings/bots/bot-1"), async () => {
     assert.doesNotMatch(text(), /out of date/, "nothing says the plugin is old")
     assert.equal(rows().length, 8, "and the list is all there is")
@@ -312,7 +314,7 @@ test("a page still holds what its page held, each setting over its value", async
   await seed("pages", ALL, { hostId: "host-1" })
   await mount(settings("/settings/bots/bot-1"), async () => {
     assert.deepEqual(titles(), ["A bot"], "the bot's own page")
-    for (const label of ["Enabled", "Name", "Image", "Test connection"])
+    for (const label of ["Enabled", "Name", "Image", "Plugin"])
       assert.ok(text().includes(label), `it still has ${label}`)
     assert.ok(find('[data-setting="name"]'), "its Name is a value that opens its edit")
     absent('[data-setting="subagent-model"]', "and nothing of the Hermes side is forced on it")

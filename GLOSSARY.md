@@ -631,8 +631,16 @@ _Avoid_: bot setting, server setting, config
 The value a Hermes setting runs at when the bot's host holds none of its own — the default Hermes itself was built with. A row shows it muted, and a reset returns the setting to it.
 _Avoid_: empty, blank, unset value, fallback
 
+**Gate read**:
+The one answer a bot's host gives about the Gots plugin on it — the version it runs and the features it offers — read once per connection and remembered, so every page of that bot's settings can draw the controls the plugin might withhold without asking again.
+_Avoid_: info call, feature probe, health check, connection test
+
+**Failed read**:
+A read a bot's settings page made that the host refused or that never landed, as against a host that answered without the thing asked for, which is an answer. Only a failed read can be asked again.
+_Avoid_: error state, read error, retryable failure
+
 **Bot page**:
-The screen Settings > Bot opens onto: what the bot is — its switches (Enabled where it is linked, Mute notifications, Test connection), then _Bot Profile_ (name, image, Progress updates), then _Hermes_ (its server's address and key, drawn only where the bot is unlinked) — and every setting page behind it in one card under _Settings_. It is the page a withheld page lands on, and the one screen that asks the bot's host for nothing.
+The screen Settings > Bot opens onto: what the bot is — its switches (Enabled where it is linked, Mute notifications), then _Plugin_ (the version its host runs), then _Bot Profile_ (name, image, Progress updates), then _Hermes_ (its server's address and key, drawn only where the bot is unlinked) — and every setting page behind it in one card under _Settings_. It is the page a withheld page lands on, and it asks its host nothing of its own: the version it reports rides the **Gate read** every page of that bot's settings already makes.
 _Avoid_: bot settings list, general old, bot overview
 
 **Delegation**:
@@ -745,6 +753,18 @@ _Avoid_: revision, snapshot, draft
 **Canvas data**:
 What a canvas keeps for itself — the ticked boxes, the logged runs — stored on its host apart from its versions, so undoing an edit never loses it.
 _Avoid_: state, storage, store, database
+
+**Ask**:
+The empty `<script data-canvas-lib="NAME">` a page puts where it wants a library, which the app
+replaces with that library's source. A name the app doesn't carry leaves nothing, and a name the
+canvas's host doesn't carry refuses the write.
+_Avoid_: library tag, import, include, library request
+
+**Catalogue**:
+The libraries a canvas may ask for by name: the app's one list of them, holding each one's source,
+global, size and any stylesheet or setup, which the host's refusal list and the guide's library block
+are both generated from.
+_Avoid_: library list, manifest, registry, SDK list
 
 **Point**:
 Tapping an element of a canvas while editing it, so the message you send names that element.

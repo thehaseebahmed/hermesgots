@@ -41,6 +41,19 @@ export function json(body: unknown, status = 200) {
 }
 
 /**
+ * A route a fake host refuses its first `times` reads, then answers: the counter every test that
+ * proves a retry needs, in one place rather than one per fake. Call it once per read; it answers the
+ * refusal to send, or nothing at all where this is the read that lands.
+ */
+export function refuseFirst(times: number, message: string, status = 500) {
+  let reads = 0
+  return () => {
+    reads += 1
+    return reads <= times ? json({ error: { message } }, status) : undefined
+  }
+}
+
+/**
  * Transcript rows for a session, each taking the next id and a time that follows it: a row, a call
  * and its result, and the two together. `reset` starts the ids over for the next case.
  */
@@ -778,6 +791,7 @@ export const GENERAL: GeneralFixture = {
 export function mediaHost({
   host = "",
   features = ["attachments", "media", "media_url"],
+  version = null,
   fail = [],
   failure = 404,
   refusal,
@@ -791,6 +805,8 @@ export function mediaHost({
   host?: string
   /** What `info` advertises, or "away" for a host that didn't answer at all. */
   features?: string[] | "away"
+  /** The plugin version `info` names: null for a host that runs none, which is the default. */
+  version?: string | null
   /** Path suffixes the media route refuses. */
   fail?: string[]
   /** The status a refused path is answered with. */
@@ -823,7 +839,7 @@ export function mediaHost({
     if (url.pathname.endsWith("/plugins/gots/general"))
       return json({ object: "gots.general", general: general ?? null })
     if (url.pathname.endsWith("/plugins/gots/info"))
-      return features === "away" ? json({}, 503) : json({ name: "gots", features })
+      return features === "away" ? json({}, 503) : json({ name: "gots", features, version })
     if (url.pathname.endsWith("/plugins/gots/media/url")) {
       // The mint: a URL for one path, signed by the host and good for minutes. Nothing is read
       // into the app here — an <img> or a <video> draws from this URL itself.
@@ -920,6 +936,8 @@ export function afkHost({
   usageThreshold = null,
   thresholdRefusal = null,
   thresholdAnswer,
+  afkReadsRefused = 0,
+  holdAfk = null,
   hostProvider = "anthropic",
   windows = null,
   deciding = null,
@@ -952,6 +970,10 @@ export function afkHost({
   thresholdRefusal?: string | null
   /** What a threshold write answers with, where the host holds something other than what was asked. */
   thresholdAnswer?: number | null
+  /** How many of its bot-level `afk` reads this host refuses before it answers. */
+  afkReadsRefused?: number
+  /** A bot-level read that waits on this before it answers, so a case can read the tab mid-retry. */
+  holdAfk?: Promise<void> | null
   /** The provider the host reports as its main model, which is whose account the usage is read for. */
   hostProvider?: string
   /** The account's usage windows as the host answers them; null is a provider with no windows. */
@@ -985,6 +1007,10 @@ export function afkHost({
   let budget = pickBudget
   // The bot's threshold, the same way: what the host holds, and what a write leaves it at.
   let threshold = usageThreshold
+  const refuseAfk = refuseFirst(
+    afkReadsRefused,
+    "This bot's config.yaml can't be read right now.",
+  )
   const botAnswer = () => ({
     object: "gots.afk.bot",
     pick_budget: budget ?? 5,
@@ -1049,6 +1075,11 @@ export function afkHost({
       })
     // The bot's own AFK route, beside the project's: no project segment, one write of its own.
     if (url.pathname.endsWith("/plugins/gots/afk")) {
+      if (method === "GET") {
+        const refusal = refuseAfk()
+        if (refusal) return refusal
+        await holdAfk
+      }
       if (method === "POST" && typeof body?.pick_budget === "number") {
         if (budgetRefusal) return json({ error: { message: budgetRefusal } }, 400)
         budget = body.pick_budget

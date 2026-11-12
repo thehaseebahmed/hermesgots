@@ -141,7 +141,6 @@ export function SettingsPage() {
   const screen = section === "bots" && !botId ? undefined : section
   const separate = !large && Boolean(screen)
   const bot = botId ? profiles?.find((p) => p.id === botId) : undefined
-  const canDelete = (profiles?.length ?? 0) > 1
   // One reading of the URL's third segment, so nothing downstream narrows it again with a cast.
   const botTab = botTabOf(tab)
   const page = botTab ? botPageOf(botTab) : undefined
@@ -196,7 +195,7 @@ export function SettingsPage() {
       return page ? (
         <BotPageScreen profile={bot} page={page} sub={botSub} />
       ) : (
-        <BotListScreen profile={bot} canDelete={canDelete} onDeleted={() => root("/settings")} />
+        <BotListScreen profile={bot} onDeleted={() => root("/settings")} />
       )
     }
     return screen ? <SectionScreen section={screen} /> : <MenuScreen profiles={profiles} />
@@ -212,12 +211,7 @@ export function SettingsPage() {
           className="w-90 flex-none border-r min-[1200px]:w-103"
           leading={<BackButton label="Back" onClick={() => up("/settings")} />}
         >
-          <BotSettingsList
-            profile={bot}
-            replace
-            canDelete={canDelete}
-            onDeleted={() => root("/settings")}
-          />
+          <BotSettingsList profile={bot} replace onDeleted={() => root("/settings")} />
         </Screen>
         <Screen
           key={botTab ?? "bot"}
@@ -257,22 +251,14 @@ export function SettingsPage() {
 }
 
 /** A bot's settings as pushed screens: the list, and a page over it. */
-function BotListScreen({
-  profile,
-  canDelete,
-  onDeleted,
-}: {
-  profile: Profile
-  canDelete: boolean
-  onDeleted: () => void
-}) {
+function BotListScreen({ profile, onDeleted }: { profile: Profile; onDeleted: () => void }) {
   const { up } = useNav()
   return (
     <Screen
       title={profile.name}
       leading={<BackButton label="Back" onClick={() => up("/settings")} />}
     >
-      <BotSettingsList profile={profile} canDelete={canDelete} onDeleted={onDeleted} />
+      <BotSettingsList profile={profile} onDeleted={onDeleted} />
     </Screen>
   )
 }

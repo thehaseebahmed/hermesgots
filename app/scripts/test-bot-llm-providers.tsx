@@ -34,13 +34,16 @@ import {
   findAll,
   findText,
   json,
+  labelled,
   missing,
   mount,
   path,
+  refuseFirst,
   seedSettings,
   text,
   type,
   until,
+  wordsOf,
 } from "./component-kit.tsx"
 
 type Provider = {
@@ -184,11 +187,17 @@ async function seed(
   features: string[],
   block: Block = BLOCK,
   runningOn = RUNNING_ON,
+  /** How many of its provider reads this host refuses before it answers with the block. */
+  { readsRefused = 0, noBlock = false }: { readsRefused?: number; noBlock?: boolean } = {},
 ) {
   await seedSettings()
   await db.profiles.clear()
   await db.profiles.put(botProfile(name))
   const asks: Asked[] = []
+  const refuseProviders = refuseFirst(
+    readsRefused,
+    "This bot's providers can't be read right now.",
+  )
   // The refusals this host answered, by the status and the code it sent: the endpoint its model
   // runs on is the plan's 409 under `endpoint_in_use`, and the page draws its sentence anyway.
   const refusals: { status: number; code: string }[] = []
@@ -239,8 +248,13 @@ async function seed(
           }
       return answered(current)
     }
-    if (pathname.endsWith("/plugins/gots/llm-providers") && method === "GET")
-      return json({ object: "gots.llm_providers", llm: current })
+    if (pathname.endsWith("/plugins/gots/llm-providers") && method === "GET") {
+      const refusal = refuseProviders()
+      if (refusal) return refusal
+      return json(
+        noBlock ? { object: "gots.llm_providers" } : { object: "gots.llm_providers", llm: current },
+      )
+    }
     const endpointRemoval = pathname.match(/\/plugins\/gots\/llm-providers\/endpoints\/([^/]+)$/)
     if (endpointRemoval && method === "DELETE") {
       // A custom endpoint removed (plugin/llm_providers.py): the address names it, and the model
@@ -388,6 +402,68 @@ test("a provider with a key shows its first and last four, one without shows Not
       lines(providerRow("groq")),
       ["Groq", "Fast inference on Groq's hardware.", "Not set"],
       "and a provider with no key keeps its line, saying there is none",
+    )
+  })
+})
+
+test("a read the host refused says so, with a way to ask again, and the tap draws the providers", async () => {
+  const host = await seed("providers-refused-once", ["llm_providers"], BLOCK, RUNNING_ON, {
+    readsRefused: 1,
+  })
+  const reads = () =>
+    host.asks.filter(
+      (one) => one.method === "GET" && one.path.endsWith("/plugins/gots/llm-providers"),
+    )
+
+  await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
+    const notice = '[data-bot-llm-providers] [role="alert"]'
+    await until(async () => Boolean(find(notice)), "the refusal to be said")
+    assert.equal(
+      wordsOf(find(notice)),
+      "This bot's providers can't be read right now.",
+      "the notice holds the host's own sentence",
+    )
+
+    const retry = labelled(`${notice} button`, "Try again")
+    assert.ok(retry, "and one control offering to ask the same read again")
+    assert.equal(
+      retry.getAttribute("title"),
+      "Try again",
+      "an icon, so the words it is named are what a reader hears",
+    )
+    assert.equal(wordsOf(retry), "", "and no label is drawn beside it")
+    assert.equal(reads().length, 1, "the page asked its block once, and was refused")
+
+    await click(retry)
+    await until(async () => Boolean(providerRow("openai")), "the host's providers")
+
+    assert.deepEqual(
+      reads().map((one) => one.method),
+      ["GET", "GET"],
+      "the tap asked the same route again, once",
+    )
+    assert.ok(missing(notice), "the notice goes with it")
+    assert.equal(
+      valueOf(providerRow("openai")),
+      "sk-o...c123",
+      "and the rows hold what the host gave",
+    )
+  })
+})
+
+test("a host that answers without its provider block says so, and offers no retry", async () => {
+  await seed("providers-no-block", ["llm_providers"], BLOCK, RUNNING_ON, { noBlock: true })
+  await mount(settings("/settings/bots/bot-1/llm-providers"), async () => {
+    const notice = '[data-bot-llm-providers] [role="alert"]'
+    await until(async () => Boolean(find(notice)), "the answer")
+    assert.equal(
+      wordsOf(find(notice)),
+      "This host doesn't list its LLM providers.",
+      "the notice says what the host answered",
+    )
+    assert.ok(
+      missing(`${notice} button`),
+      "and no control asks again a question the host already answered",
     )
   })
 })

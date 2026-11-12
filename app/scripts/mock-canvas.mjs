@@ -31,6 +31,10 @@ function page(prompt, title, version, edited) {
     <meta charset="utf-8">
     <title>${title}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- The page asks for two libraries by name, so the app has to answer each ask where it stands,
+         and each one is a source of its own rather than the same chunk. -->
+    <script data-canvas-lib="chart"></script>
+    <script data-canvas-lib="d3"></script>
     <style>
       body { margin: 0; padding: 24px; background: var(--background); color: var(--foreground);
              font-family: system-ui, sans-serif; }
@@ -68,6 +72,9 @@ function page(prompt, title, version, edited) {
       (function () {
         var value = document.getElementById("value");
         var show = function (n) { value.textContent = String(n); };
+        // The page's second ask, used rather than only defined: d3 draws on the element it was
+        // handed, so a page that asked for two libraries is drawn with both of them.
+        d3.select(value).attr("data-drawn-by", "d3");
         var store = window.canvas.data;
         // The count is the canvas's, not the page's: it opens at what the host kept, and each tap
         // is one write the app takes to the host.
@@ -120,6 +127,105 @@ function page(prompt, title, version, edited) {
     </script>
   </body>
 </html>`
+}
+
+/**
+ * The pages a flow seeds by name (`POST /__mock/canvas`), differing in nothing but the libraries
+ * their head asks for: what a visit fetches is the asks' own, so two of these compared are the
+ * page's cost and not the app's.
+ */
+const FIXTURES = {
+  // A page that asks for no library at all, drawn from the platform alone.
+  plain: { title: "No libraries", asks: [] },
+  // Three asks by name, each one used below, so what arrived is proved by what the page drew. Named
+  // for how many, not for one of them: `three` is itself a library a canvas may ask for.
+  many: { title: "Three libraries", asks: ["chart", "d3", "date"] },
+}
+
+/**
+ * A fixture's page: a heading, a line saying what it drew with, and one script tag per name it
+ * asks for. Every check is `typeof`, so a page drawn without a library it asked for still draws —
+ * it names the hole rather than throwing, which is what a request count has to be read beside.
+ */
+function fixturePage({ title, asks }) {
+  const head = asks.map((name) => `    <script data-canvas-lib="${name}"></script>`).join("\n")
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>${title}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+      body { margin: 0; padding: 24px; font-family: system-ui, sans-serif; }
+      h1 { margin: 0 0 8px; font-size: 20px; }
+    </style>
+${head}
+  </head>
+  <body>
+    <h1>${title}</h1>
+    <p id="drawn">nothing</p>
+    <script>
+      (function () {
+        var words = [];
+        if (typeof Chart === "function") words.push("chart");
+        if (typeof d3 === "object" && typeof d3.select === "function") {
+          d3.select("#drawn").attr("data-drawn-by", "d3");
+          words.push("d3");
+        }
+        if (typeof dayjs === "function") words.push("date");
+        document.getElementById("drawn").textContent = words.join(" ") || "nothing";
+      })();
+    </script>
+  </body>
+</html>`
+}
+
+/**
+ * A canvas's record, as the host keeps one: the same fields filled the same way whether a flow
+ * seeded the canvas or a chat asked for it, so a field added here reaches both.
+ */
+function newCanvas({ title, prompt, version, versions, tools }) {
+  const chatId = randomUUID()
+  const now = Date.now()
+  return {
+    id: `c_${randomUUID().slice(0, 8)}`,
+    title,
+    session_id: `gots-${chatId}`,
+    chat_id: chatId,
+    version,
+    pinned: false,
+    archived: false,
+    // Nothing until a version is written: a canvas still being built draws its own mark.
+    image: null,
+    at: now,
+    created_at: now,
+    versions,
+    docs: [],
+    tools,
+    grants: [],
+    prompt,
+  }
+}
+
+/**
+ * Seeds one fixture as a canvas at its first version, so a flow can open a page whose asks it
+ * knows without waiting for a bot to write one: the page is the fixture's and nothing else is.
+ */
+export function seedCanvas(store, name) {
+  const fixture = FIXTURES[name]
+  if (!fixture) return null
+  const canvas = newCanvas({
+    title: fixture.title,
+    prompt: fixture.title,
+    version: 1,
+    versions: [{ version: 1, html: fixturePage(fixture), tools: [] }],
+    tools: [],
+  })
+  store.canvases.set(canvas.id, canvas)
+  // By its session too, as the host indexes one: a flow that opens a seeded canvas's chat and sends
+  // an edit has to find the canvas it belongs to.
+  store.bySession?.set(canvas.session_id, canvas)
+  return canvas
 }
 
 export function createCanvasStore() {
@@ -431,32 +537,20 @@ export async function handleCanvas(
     {
       const prompt = typeof body?.prompt === "string" ? body.prompt.trim() : ""
       if (!prompt) return fail(400, "A canvas needs a prompt to build it from."), true
-      const now = Date.now()
       const title = titleOf(prompt)
       // The chat the canvas is edited in is the one `new_chats.open_thread` makes: an app-kind id, a
       // session named for it, the canvas's own name marked `titleEdited`, and `canvasId` so no list
       // or card ever draws it (canvases.py's `create`).
-      const chatId = randomUUID()
-      const canvas = {
-        id: `c_${randomUUID().slice(0, 8)}`,
+      const canvas = newCanvas({
         title,
-        session_id: `gots-${chatId}`,
-        chat_id: chatId,
+        prompt,
         version: 0,
-        pinned: false,
-        archived: false,
-        // Nothing until a version is written: a canvas still being built draws its own mark.
-        image: null,
-        at: now,
-        created_at: now,
         versions: [],
-        docs: [],
         // One declared tool, so the canvas's options have a row and a page that calls it (from a
         // devtools console, or a canvas someone edits) meets the consent dialog.
         tools: ["files.search"],
-        grants: [],
-        prompt,
-      }
+      })
+      const { chat_id: chatId } = canvas
       canvases.set(canvas.id, canvas)
       bySession.set(canvas.session_id, canvas)
       openChat?.({
@@ -466,7 +560,7 @@ export async function handleCanvas(
         title,
         canvasId: canvas.id,
         opener: prompt,
-        at: now,
+        at: canvas.at,
       })
       // The gap is what lets the screen draw version 0 — "your bot is building it" — before the
       // page lands, with room for a phone to raise its sheet in the meantime.

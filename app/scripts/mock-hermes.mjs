@@ -177,7 +177,7 @@ import { tmpdir } from "node:os"
 import { basename, extname, join } from "node:path"
 
 import { handleMeetings } from "./mock-meetings.mjs"
-import { createCanvasStore, editCanvasSession, handleCanvas } from "./mock-canvas.mjs"
+import { createCanvasStore, editCanvasSession, handleCanvas, seedCanvas } from "./mock-canvas.mjs"
 import { createRoomStore, handleRooms, roomRecords } from "./mock-rooms.mjs"
 import { handleResearch } from "./mock-research.mjs"
 import { durableUserRow } from "./host-row.mjs"
@@ -537,7 +537,9 @@ const PLUGIN = process.env.MOCK_NO_PLUGIN !== "1"
 const RESEARCH = process.env.MOCK_RESEARCH !== "0"
 const RESEARCH_WRITERS = process.env.MOCK_RESEARCH_WRITERS !== "off"
 // Canvases (mock-canvas.mjs); MOCK_CANVAS=0 serves a plugin from before them, so their routes 404
-// and `canvas` is missing from the features.
+// and `canvas` is missing from the features. POST /__mock/canvas { fixture } seeds one of
+// mock-canvas.mjs's pages at its first version, so a flow can visit a page whose asks it knows
+// without a bot writing it: `plain` asks for no library, `many` for chart, d3 and Day.js.
 const CANVAS = process.env.MOCK_CANVAS !== "0"
 const CANVASES = createCanvasStore()
 // Rooms (mock-rooms.mjs): MOCK_ROOMS=0 is a plugin whose host has no room driver, so its routes 404,
@@ -6144,6 +6146,14 @@ http
         afkStalled.set(projectId, reason)
       }
       return json(res, 200, { ok: true })
+    }
+    if (url.pathname === "/__mock/canvas" && req.method === "POST") {
+      // A canvas a flow can visit without a bot having written it: the page is the fixture's, so
+      // what the visit fetches is the asks that page carries and nothing else.
+      const { fixture } = await readBody(req)
+      const seeded = seedCanvas(CANVASES, fixture)
+      if (!seeded) return json(res, 404, { error: { message: `the mock has no canvas ${fixture}` } })
+      return json(res, 200, { object: "gots.canvas", id: seeded.id })
     }
     if (url.pathname === "/__mock/skills" && req.method === "POST") {
       skillSwitched.clear()

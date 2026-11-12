@@ -26,10 +26,16 @@ export type PluginFeatureAnswer = "unknown" | "yes" | "no"
 /** A bot's server as these hooks take it: a profile, or a plugin beside one, or nothing yet. */
 export type PluginServer = Pick<HermesConfig, "baseUrl" | "apiKey"> | null | undefined
 
-// What each connection's plugin answered, whole: its feature names and the profiles it may seat in
-// a room (ADR 0128). Only an answer that names something is remembered, and the map is replaced
-// rather than mutated so a subscriber is handed a new value.
-const answered = createStore<ReadonlyMap<string, PluginInfo>>(new Map())
+/**
+ * One connection's answer, whole, and how this device came by it: `live` says a read took it from
+ * the Host in this session, as against the copy this device kept from an earlier open (ADR 0132).
+ * The two are stored together, so a render can never pair an answer with another one's provenance.
+ */
+type PluginAnswer = { info: PluginInfo; live: boolean }
+
+// What each connection's plugin answered (ADR 0128). Only an answer that names something is
+// remembered, and the map is replaced rather than mutated so a subscriber is handed a new value.
+const answered = createStore<ReadonlyMap<string, PluginAnswer>>(new Map())
 
 /**
  * The read each connection is on. A refresh bumps this, so a read that began before the refresh and
@@ -38,9 +44,6 @@ const answered = createStore<ReadonlyMap<string, PluginInfo>>(new Map())
  */
 const generations = new Map<string, number>()
 
-// The connections whose remembered answer came from the Host in this page, as against one this
-// device kept from an earlier open (ADR 0132): the latter draws at once and is read again.
-const confirmed = new Set<string>()
 const generationOf = (key: string) => generations.get(key) ?? 0
 
 /**
@@ -52,19 +55,18 @@ const worthKeeping = (info: PluginInfo) => info.features !== null || info.rooms.
 
 async function readAnswer(config: HermesConfig, reread = false) {
   const key = connectionKey(config)
-  if (!reread && confirmed.has(key)) return
+  if (!reread && answered.get().get(key)?.live) return
   const generation = generationOf(key)
   if (!answered.get().has(key))
     void cachedHost<PluginInfo>(config, "info").then((held) => {
       if (!held || answered.get().has(key) || generation !== generationOf(key)) return
-      answered.set(new Map(answered.get()).set(key, held))
+      answered.set(new Map(answered.get()).set(key, { info: held, live: false }))
     })
   const info = await getPluginAnswer(config)
   // No answer at all (the Host couldn't be read): nothing is remembered, so it is asked again.
   if (!info || !worthKeeping(info)) return
   if (generation !== generationOf(key)) return
-  confirmed.add(key)
-  answered.set(new Map(answered.get()).set(key, info))
+  answered.set(new Map(answered.get()).set(key, { info, live: true }))
   void keepHost(config, "info", info)
 }
 
@@ -82,7 +84,6 @@ export function refreshAnswer(server: PluginServer) {
   // with the roster the Host just refused.
   forgetPluginAnswer(config)
   generations.set(key, generationOf(key) + 1)
-  confirmed.delete(key)
   void readAnswer(config, true)
 }
 
@@ -96,16 +97,18 @@ function answer(known: PluginInfo | undefined, feature: string): PluginFeatureAn
  * What one connection answered, in one place: the guard on the key, the remembered value and the
  * poll that asks for it, so every question about a connection reads that one answer.
  */
-function useConnectionAnswer(server: PluginServer): PluginInfo | undefined {
+function useConnectionAnswer(server: PluginServer): {
+  held: PluginAnswer | undefined
+} {
   const config = serverConfig(server)
   const { baseUrl, apiKey } = config
   const key = baseUrl && apiKey ? connectionKey(config) : ""
-  const known = answered.use().get(key)
+  const held = answered.use().get(key)
   usePoll(() => void readAnswer(config), false, [baseUrl, apiKey], {
     active: Boolean(key),
     onShow: false,
   })
-  return known
+  return { held }
 }
 
 /**
@@ -117,9 +120,9 @@ export function usePluginFeatureAnswers<K extends string>(
   server: PluginServer,
   features: Record<K, string>,
 ): Record<K, PluginFeatureAnswer> {
-  const known = useConnectionAnswer(server)
+  const { held } = useConnectionAnswer(server)
   return Object.fromEntries(
-    (Object.keys(features) as K[]).map((name) => [name, answer(known, features[name])]),
+    (Object.keys(features) as K[]).map((name) => [name, answer(held?.info, features[name])]),
   ) as Record<K, PluginFeatureAnswer>
 }
 
@@ -140,8 +143,23 @@ export function usePluginFeatureOn(server: PluginServer, feature: string): boole
  * remembered answer as the features, keyed by the same connection: one read answers both.
  */
 export function useRoomSeatable(server: PluginServer): string[] | null | undefined {
-  const known = useConnectionAnswer(server)
-  return known === undefined ? undefined : known.rooms.seatable
+  const { held } = useConnectionAnswer(server)
+  return held === undefined ? undefined : held.info.rooms.seatable
+}
+
+/**
+ * The version the bot's plugin runs (`info`'s version), or **null** where its Host answered without
+ * one — no plugin there — and **undefined** while the read is still owed, so nothing is claimed
+ * before an answer lands. `fromHost` says the answer drawn came from a live read of the Host in this
+ * session rather than the copy this device kept from an earlier open (ADR 0132): only that answer is
+ * a fact about the Host, so only it may be written to the profile.
+ */
+export function usePluginVersion(
+  server: PluginServer,
+): { version: string | null; fromHost: boolean } | undefined {
+  const { held } = useConnectionAnswer(server)
+  if (held === undefined) return undefined
+  return { version: held.info.version, fromHost: held.live }
 }
 
 /**
@@ -170,11 +188,11 @@ export function usePluginAnswersByServer(servers: PluginServer[]): {
   )
   const features = (feature: string) => {
     const answers: Record<string, PluginFeatureAnswer> = {}
-    for (const key of keys) if (key) answers[key] = answer(held.get(key), feature)
+    for (const key of keys) if (key) answers[key] = answer(held.get(key)?.info, feature)
     return answers
   }
   const seats: Record<string, string[] | null | undefined> = {}
-  for (const key of keys) if (key) seats[key] = held.get(key)?.rooms.seatable
+  for (const key of keys) if (key) seats[key] = held.get(key)?.info.rooms.seatable
   return { features, seats }
 }
 
