@@ -44,9 +44,9 @@ above and no others.
 
 - A form's submit is cancelled in place: nothing navigates, so handle the click.
 - An `http(s)` link opens in the app on tap: use one when the reader should leave.
-- Nothing else loads from outside but an https image (`<img>`, `srcset`, `<picture>`): a `<script src>`,
-  CDN `<link>`, `http://` image, `<iframe>`, `<object>`, `<embed>`, `<base>`, meta refresh or
-  `url(https://…)` refuses the write whole. No `RTCPeerConnection`.
+- Remote images over https are allowed; nothing else loads from outside:
+  a `<script src>`, CDN `<link>`, `http://` image, `<iframe>`, `<object>`, `<embed>`, `<base>`, meta
+  refresh or `url(https://…)` refuses the write whole. No `RTCPeerConnection`.
 
 ## The document
 
