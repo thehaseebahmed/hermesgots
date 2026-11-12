@@ -11,7 +11,6 @@ import {
   XIcon,
 } from "lucide-react"
 import { Navigate } from "react-router"
-import { toast } from "sonner"
 
 import { HOST_WORK_MS, LIST_MS, SAFETY_MS } from "@/lib/freshness"
 import { Banner } from "@/components/banner"
@@ -35,6 +34,7 @@ import {
   type HermesConfig,
   type HermesProject,
 } from "@/lib/hermes"
+import { tell } from "@/lib/tell"
 import { folderName } from "@/lib/workspace"
 
 const DAY_MS = 86_400_000
@@ -284,7 +284,7 @@ function ProjectsList({ pane }: { pane?: FeaturePane }) {
         onOpenChange={setCreating}
         profiles={withPlugin}
         onCreated={(profile, name) => {
-          toast.success(`Creating ${name} on ${profile.name}`)
+          tell.success(`Creating ${name} on ${profile.name}`)
           refresh()
         }}
       />
@@ -371,7 +371,7 @@ function PendingItem({ row, onChanged }: { row: ProjectRow; onChanged: () => voi
     try {
       await action(profile, project.id)
     } catch (reason) {
-      toast.error(reason instanceof Error ? reason.message : "Couldn't update the project.")
+      tell.error(reason instanceof Error ? reason.message : "Couldn't update the project.")
     }
     setBusy(false)
     onChanged()

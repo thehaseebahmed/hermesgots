@@ -1,6 +1,5 @@
 import { useState } from "react"
 import { useNavigate } from "react-router"
-import { toast } from "sonner"
 
 import { SkillDetail } from "@/components/skill-detail-sheet"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
@@ -29,6 +28,7 @@ import {
   type SkillGroup,
   type SkillSection,
 } from "@/lib/skills-tab"
+import { tell } from "@/lib/tell"
 import { cn } from "@/lib/utils"
 import { botSubPath, type BotSub } from "@/lib/bot-subs"
 import { botTabPath } from "@/lib/bot-tabs"
@@ -50,7 +50,7 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
     try {
       await state.setEnabled(name, enabled)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't save that.")
+      tell.error(error instanceof Error ? error.message : "Couldn't save that.")
     } finally {
       setSaving(null)
     }
@@ -69,7 +69,7 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
     try {
       for (const name of names) await state.setEnabled(name, target)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't save that.")
+      tell.error(error instanceof Error ? error.message : "Couldn't save that.")
     } finally {
       setFlipping(null)
     }
@@ -83,7 +83,7 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
       navigate(botTabPath(profile.id, "skills"), { replace: true })
       setRemoving(null)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't remove that skill.")
+      tell.error(error instanceof Error ? error.message : "Couldn't remove that skill.")
       setRemoving(null)
     } finally {
       setPending(false)

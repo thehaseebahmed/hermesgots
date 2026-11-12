@@ -5,7 +5,6 @@ import {
   ChevronRightIcon,
   MessageCircleQuestionIcon,
 } from "lucide-react"
-import { toast } from "sonner"
 
 import { CARD } from "@/components/chat/session-cards"
 import { useCodeFace } from "@/components/chat/code-face"
@@ -17,6 +16,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { answerClarify } from "@/lib/chat"
 import { prefersReducedMotion } from "@/lib/media"
 import type { ClarifyAnswers, ClarifyQuestion, Message } from "@/lib/db"
+import { tell } from "@/lib/tell"
 import { cn } from "@/lib/utils"
 
 const OTHER = "\u0000other"
@@ -330,7 +330,7 @@ export function QuestionCard({
     try {
       await onAnswer(given)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't send your answer.")
+      tell.error(error instanceof Error ? error.message : "Couldn't send your answer.")
     } finally {
       setPending(false)
     }

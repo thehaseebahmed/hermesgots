@@ -28,4 +28,13 @@ public class ToastPlugin extends Plugin {
             call.resolve();
         });
     }
+
+    /** Takes the toast away where it is still up, as a press that has taken up the words does. */
+    @PluginMethod
+    public void hide(PluginCall call) {
+        getActivity().runOnUiThread(() -> {
+            Toast.cancel();
+            call.resolve();
+        });
+    }
 }

@@ -1,6 +1,5 @@
 import { useState } from "react"
 import { ShieldAlertIcon } from "lucide-react"
-import { toast } from "sonner"
 
 import { useCodeFace } from "@/components/chat/code-face"
 import { CodeBlock } from "@/components/chat/code-block"
@@ -9,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { answerApproval } from "@/lib/chat"
 import type { ApprovalChoice, Message } from "@/lib/db"
+import { tell } from "@/lib/tell"
 import { cn } from "@/lib/utils"
 
 const LABELS: Record<ApprovalChoice, string> = {
@@ -50,7 +50,7 @@ export function ApprovalCard({
     try {
       await onAnswer(choice)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't send your answer.")
+      tell.error(error instanceof Error ? error.message : "Couldn't send your answer.")
     } finally {
       setPending(null)
     }

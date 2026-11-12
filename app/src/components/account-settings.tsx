@@ -8,7 +8,6 @@ import {
   LogOutIcon,
   RefreshCwIcon,
 } from "lucide-react"
-import { toast } from "sonner"
 
 import { useCopiedCode } from "@/components/copied-code"
 import {
@@ -41,6 +40,7 @@ import {
   unlockSyncWithRecoveryCode,
   useSyncState,
 } from "@/lib/sync"
+import { tell } from "@/lib/tell"
 import { supportsPasskeys } from "@/lib/vault"
 
 function message(error: unknown) {
@@ -67,7 +67,7 @@ export function AccountSettings() {
     try {
       await action()
     } catch (error) {
-      toast.error(message(error))
+      tell.error(message(error))
     } finally {
       setBusy(false)
     }
@@ -163,7 +163,7 @@ export function AccountSettings() {
                       onClick={() =>
                         run(async () => {
                           await addPasskey()
-                          toast.success("Passkey added")
+                          tell.success("Passkey added")
                         })
                       }
                     >
@@ -204,7 +204,7 @@ export function AccountSettings() {
         onDone={() => {
           const confirm = rotation?.confirm
           setRotation(undefined)
-          if (confirm) void confirm().catch((error) => toast.error(message(error)))
+          if (confirm) void confirm().catch((error) => tell.error(message(error)))
         }}
       />
     </Card>
@@ -222,7 +222,7 @@ export function UnlockSync() {
     try {
       await action()
     } catch (error) {
-      toast.error(message(error))
+      tell.error(message(error))
     } finally {
       setBusy(false)
     }

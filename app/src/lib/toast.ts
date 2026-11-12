@@ -7,7 +7,7 @@
 const GAP = 8
 const STANDARD = "max(1rem, env(safe-area-inset-bottom))"
 
-export function placeToasts() {
+function placeToasts() {
   let bottom = 0
   for (const el of document.querySelectorAll("[data-toast-above]")) {
     const { top, height } = el.getBoundingClientRect()

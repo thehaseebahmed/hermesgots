@@ -37,7 +37,6 @@ import {
   UsersIcon,
   type LucideIcon,
 } from "lucide-react"
-import { toast } from "sonner"
 
 import { AccountSettings } from "@/components/account-settings"
 import { BackButton } from "@/components/back-button"
@@ -85,7 +84,8 @@ import { useDictationTotals } from "@/lib/dictations"
 import { useLiveStatus, type LiveStatus } from "@/lib/live"
 import { legacyChatOn } from "@/lib/legacy-chat"
 import { useLarge } from "@/lib/media"
-import { isNative, openNotificationSettings, setBackGuard } from "@/lib/native"
+import { openNotificationSettings, setBackGuard } from "@/lib/native"
+import { isNative } from "@/lib/platform"
 import { useNav } from "@/lib/nav"
 import {
   disablePush,
@@ -99,6 +99,7 @@ import {
 } from "@/lib/push"
 import type { PushCategory, PushFeature } from "@/lib/push-kinds"
 import { isOnline, presence, siteUrl } from "@/lib/registry"
+import { tell } from "@/lib/tell"
 import { themeLabel } from "@/lib/theme"
 import { forgetLocalKey, useSyncState } from "@/lib/sync"
 import { useNow } from "@/lib/threads"
@@ -411,13 +412,13 @@ function NotificationsRow() {
     try {
       if (!checked) return await disablePush()
       if ((await enablePush()) === "denied")
-        toast.error(
-          isNative
+        tell.error(
+          isNative()
             ? "Notifications are blocked in system settings"
             : "Notifications are blocked in your browser",
         )
     } catch (error) {
-      toast.error(
+      tell.error(
         error instanceof Error && error.message
           ? `Couldn't turn on notifications. ${error.message}`
           : "Couldn't turn on notifications",
@@ -433,7 +434,7 @@ function NotificationsRow() {
       title="Notifications"
       subtitle={
         permission === "denied"
-          ? isNative
+          ? isNative()
             ? "Blocked in system settings"
             : "Blocked in browser settings"
           : "A session needs you"
@@ -459,7 +460,7 @@ function CommunityRow() {
  */
 export function NotificationSettingsRow() {
   if (!pushAvailable()) return null
-  return isNative ? <SystemNotificationSettingsRow /> : <NotificationListRow />
+  return isNative() ? <SystemNotificationSettingsRow /> : <NotificationListRow />
 }
 
 /** Android: the phone's screen for this app, which the app can read but not draw. */
@@ -468,10 +469,10 @@ function SystemNotificationSettingsRow() {
     try {
       // A build too old to have the screen says nothing; one that refused says why.
       const refused = await openNotificationSettings()
-      if (refused) toast.error(refused)
+      if (refused) tell.error(refused)
     } catch (error) {
       // The call is made off the tap, so anything it throws must land here or be lost.
-      toast.error(
+      tell.error(
         error instanceof Error && error.message
           ? `Couldn't open notification settings. ${error.message}`
           : "Couldn't open notification settings",
@@ -530,7 +531,7 @@ const FEATURE_ICONS: Record<PushFeature, LucideIcon> = {
 function NotificationTypes() {
   const features = usePushFeatures()
   const failed = (error: unknown) =>
-    toast.error(
+    tell.error(
       error instanceof Error && error.message
         ? `Couldn't change that. ${error.message}`
         : "Couldn't change that",
@@ -583,7 +584,7 @@ function VersionLabel({ developer }: { developer: boolean }) {
     if (developer || taps.current.length < TAPS_TO_UNLOCK) return
     taps.current = []
     void saveSettings({ developer: true })
-    toast("Developer settings on")
+    tell.note("Developer settings on")
   }
   return (
     <button
@@ -646,7 +647,7 @@ export function DeveloperSettings() {
           onCheckedChange={(checked) => saveSettings({ meetings: checked })}
         />
       </Group>
-      {isNative && pushAvailable() && <TestPushRow />}
+      {isNative() && pushAvailable() && <TestPushRow />}
       <Group>
         <SyncServerRow />
         <DeviceStateRow />
@@ -701,9 +702,9 @@ function TestPushRow() {
     setBusy(true)
     try {
       await sendTestPush()
-      toast("Test notification sent")
+      tell.note("Test notification sent")
     } catch (error) {
-      toast.error(
+      tell.error(
         error instanceof Error && error.message
           ? `Couldn't send. ${error.message}`
           : "Couldn't send the test notification",
@@ -873,7 +874,7 @@ function DataSettings() {
           onConfirm={async () => {
             await clearAllData()
             forgetLocalKey()
-            toast.success("Local data cleared")
+            tell.success("Local data cleared")
           }}
         />
       </CardContent>

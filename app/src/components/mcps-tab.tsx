@@ -8,7 +8,6 @@ import {
   PlusIcon,
   ServerIcon,
 } from "lucide-react"
-import { toast } from "sonner"
 
 import { Banner, Retry } from "@/components/banner"
 import { ItemSearch } from "@/components/item-list"
@@ -64,6 +63,7 @@ import type {
   McpServerEdit,
   McpServerValue,
 } from "@/lib/hermes"
+import { tell } from "@/lib/tell"
 import { cn } from "@/lib/utils"
 import { botSubPath, type BotSub } from "@/lib/bot-subs"
 import { botTabPath } from "@/lib/bot-tabs"
@@ -162,7 +162,7 @@ export function McpsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) {
       // goes back to the page it was opened from rather than reporting it gone.
       if (detail) navigate(botTabPath(profile.id, "mcps"), { replace: true })
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't remove that.")
+      tell.error(error instanceof Error ? error.message : "Couldn't remove that.")
     } finally {
       setBusy(false)
     }
@@ -417,7 +417,7 @@ function ServerRow({
             try {
               await controls.onToggle(server.name, checked)
             } catch (error) {
-              toast.error(error instanceof Error ? error.message : "Couldn't save that.")
+              tell.error(error instanceof Error ? error.message : "Couldn't save that.")
             } finally {
               setSaving(false)
             }
@@ -809,9 +809,9 @@ function ConfigFields({
       const saved = await saveConfig(block.name, configEdit(draft, rows))
       if (saved) onSaved(saved)
       else setRows((current) => current.map((row) => ({ ...row, value: "" })))
-      toast.success("Saved.")
+      tell.success("Saved.")
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't save that.")
+      tell.error(error instanceof Error ? error.message : "Couldn't save that.")
     } finally {
       setSaving(false)
     }
@@ -998,7 +998,7 @@ function McpCatalogueSheet({
       setAdded((current) => [...current, entry.name])
       onOpenChange(false)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't add that.")
+      tell.error(error instanceof Error ? error.message : "Couldn't add that.")
     } finally {
       setInstalling(undefined)
     }
@@ -1133,7 +1133,7 @@ function McpEntryForm({
       await install(entry.name, collectedValues(entry.values, entered))
       onAdded()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't add that.")
+      tell.error(error instanceof Error ? error.message : "Couldn't add that.")
     } finally {
       setAdding(false)
     }
@@ -1255,7 +1255,7 @@ function CustomServerSheet({
       reset()
       onOpenChange(false)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't add that.")
+      tell.error(error instanceof Error ? error.message : "Couldn't add that.")
     } finally {
       setAdding(false)
     }
@@ -1397,7 +1397,7 @@ function ServerAccessSheet({
   useEffect(() => {
     if (!open || !flow || server.state !== "on") return
     onOpenChange(false)
-    toast.success("Access granted.")
+    tell.success("Access granted.")
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, flow, server.state])
 
@@ -1413,7 +1413,7 @@ function ServerAccessSheet({
       await deliver(server.name, address)
       setPasted("")
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "That address couldn't be used.")
+      tell.error(error instanceof Error ? error.message : "That address couldn't be used.")
     } finally {
       setSending(false)
     }

@@ -25,7 +25,6 @@ import {
   Trash2Icon,
   type LucideIcon,
 } from "lucide-react"
-import { toast } from "sonner"
 
 import { Banner } from "@/components/banner"
 import { ChatHeader } from "@/components/chat/chat-header"
@@ -123,6 +122,7 @@ import {
   type FeaturePane as PaneState,
 } from "@/lib/pane"
 import { createSignal } from "@/lib/store"
+import { tell } from "@/lib/tell"
 import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { Chip } from "@/components/chip"
@@ -257,7 +257,7 @@ function Unfinished() {
       void forgetRecording(recording.id)
       go(`/meetings/${meeting.id}`)
     } catch (error) {
-      toast.error(message(error, "Couldn't add the meeting."))
+      tell.error(message(error, "Couldn't add the meeting."))
     } finally {
       setSending(false)
     }
@@ -674,7 +674,7 @@ function UploadForm({ target, onAdded }: { target: Target; onAdded: () => void }
       return
     }
     if (file.size > MAX_TRANSCRIPT_BYTES) {
-      toast.error("That file is too big for a transcript.")
+      tell.error("That file is too big for a transcript.")
       return
     }
     setPicked({ file, text: await file.text() })
@@ -693,7 +693,7 @@ function UploadForm({ target, onAdded }: { target: Target; onAdded: () => void }
       onAdded()
       go(`/meetings/${meeting.id}`)
     } catch (error) {
-      toast.error(message(error, "Couldn't add the meeting."))
+      tell.error(message(error, "Couldn't add the meeting."))
     } finally {
       setBusy(false)
     }
@@ -759,7 +759,7 @@ function RecordForm({ target, onAdded }: { target: Target; onAdded: () => void }
         onAdded()
         go(`/meetings/${meeting.id}`)
       } catch (error) {
-        toast.error(
+        tell.error(
           message(error, "Couldn't add the meeting. The recording is kept on this device."),
         )
       } finally {
@@ -1107,8 +1107,8 @@ function MeetingMenu({ meeting, onRemoved }: { meeting: Meeting; onRemoved: () =
               onClick={() =>
                 navigator.clipboard
                   .writeText(toMarkdown(meeting))
-                  .then(() => toast("Notes copied"))
-                  .catch(() => toast.error("Couldn't copy the notes."))
+                  .then(() => tell.note("Notes copied"))
+                  .catch(() => tell.error("Couldn't copy the notes."))
               }
             >
               <ClipboardCopyIcon />
@@ -1135,7 +1135,7 @@ function MeetingMenu({ meeting, onRemoved }: { meeting: Meeting; onRemoved: () =
           removeMeeting(meeting)
             .then(onRemoved)
             .catch((error) => {
-              toast.error(message(error, "Couldn't delete the meeting."))
+              tell.error(message(error, "Couldn't delete the meeting."))
             })
         }
       />
@@ -1183,7 +1183,7 @@ function Working({ meeting }: { meeting: Meeting }) {
                 className="h-9 rounded-full"
                 onClick={() =>
                   retryMeeting(meeting).catch((error) =>
-                    toast.error(message(error, "Couldn't try again.")),
+                    tell.error(message(error, "Couldn't try again.")),
                   )
                 }
               >
@@ -1572,7 +1572,7 @@ function ActionRow({
       await flushDrafts()
       navigate(`/c/${session.id}`, { state: { project, code: true } })
     } catch (error) {
-      toast.error(message(error, "Couldn't start a session."))
+      tell.error(message(error, "Couldn't start a session."))
       setStarting(false)
     }
   }
@@ -1810,7 +1810,7 @@ function AskBar({ meeting }: { meeting: Meeting }) {
     setText("")
     askMeeting(meeting, question.trim()).catch((error) => {
       setText(question)
-      toast.error(message(error, "Couldn't ask."))
+      tell.error(message(error, "Couldn't ask."))
     })
   }
   return (

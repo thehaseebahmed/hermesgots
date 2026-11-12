@@ -309,7 +309,7 @@ test("the registration carries the phone's list, not the app's stored preference
 test("the app's own list is saved on the web alone", () => {
   const set = body("setCategories")
   assert.ok(set, "setCategories is in push.ts")
-  assert.match(set, /if \(isNative\) return/, "a phone reads its channels, so it stores no list")
+  assert.match(set, /if \(isNative\(\)\) return/, "a phone reads its channels, so it stores no list")
   assert.match(set, /syncPush\(\)/, "the web's bots are told with its subscription")
   assert.doesNotMatch(set, /syncCategories/, "and the phone's registration is never its business")
 })

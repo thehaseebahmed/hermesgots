@@ -7,7 +7,6 @@ import {
   SendHorizontalIcon,
   XIcon,
 } from "lucide-react"
-import { toast } from "sonner"
 
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { attachmentUrl } from "@/lib/attachment-url"
@@ -33,6 +32,7 @@ import { removeQueued, sendQueued } from "@/lib/chat"
 import type { Attachment, Message, ProgressReminder, ToolEvent } from "@/lib/db"
 import { compactionOf } from "@/lib/compactions"
 import type { Compaction } from "@/lib/hermes"
+import { tell } from "@/lib/tell"
 import type { FootLine } from "@/lib/thinking"
 import { describeActivity, formatCount, formatDuration, WAITING_FOR_APPROVAL } from "@/lib/format"
 import { NOT_SENT } from "@/lib/words"
@@ -388,7 +388,7 @@ function HeldActions({
           onClick={() => {
             if (onSend) return onSend(message)
             void sendQueued(message).catch((error) =>
-              toast.error(error instanceof Error ? error.message : "Couldn't send your message."),
+              tell.error(error instanceof Error ? error.message : "Couldn't send your message."),
             )
           }}
         >
@@ -404,7 +404,7 @@ function HeldActions({
         onClick={() => {
           if (onDismiss) return onDismiss(message)
           void removeQueued(message).catch((error) =>
-            toast.error(error instanceof Error ? error.message : "Couldn't remove your message."),
+            tell.error(error instanceof Error ? error.message : "Couldn't remove your message."),
           )
         }}
       >

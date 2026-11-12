@@ -10,7 +10,6 @@ import {
 } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Navigate, useLocation, useNavigate, useParams } from "react-router"
-import { toast } from "sonner"
 
 import {
   CATCH_UP_MS,
@@ -98,6 +97,7 @@ import { supportsSteer, type DelegatedAgent, type HermesProject } from "@/lib/he
 import { readProjects, useProjects } from "@/lib/projects"
 import { caughtUpWithin, loadEarlierHistory, reconcileHistory } from "@/lib/history"
 import { useLive, watchChat } from "@/lib/live"
+import { tell } from "@/lib/tell"
 import { useLiveRun, useLiveSubagents } from "@/lib/waiting"
 import { runFinished } from "@/lib/session-work"
 import { usePoll } from "@/lib/poll"
@@ -538,7 +538,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
     if (!id) return
     setLoadingEarlier(true)
     loadEarlierHistory(id)
-      .catch((error) => toast.error(error instanceof Error ? error.message : "Couldn't load more."))
+      .catch((error) => tell.error(error instanceof Error ? error.message : "Couldn't load more."))
       .finally(() => setLoadingEarlier(false))
   }, [id])
   /** The read that left the thread empty: what it was, and the facts the pane and the report keep. */
@@ -692,7 +692,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
       }, HOST_QUEUE_SETTLE_MS)
     } catch (error) {
       setFreed(false)
-      toast.error(error instanceof Error ? error.message : "Couldn't discard the lost turn.")
+      tell.error(error instanceof Error ? error.message : "Couldn't discard the lost turn.")
     } finally {
       setDiscarding(false)
     }
@@ -873,7 +873,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
       }).catch(() => {
         // A subagent the host declined says why on its own card; only a call that never landed has
         // nowhere to say it.
-        toast.error("Couldn't stop the subagents.")
+        tell.error("Couldn't stop the subagents.")
       })
     return true
   }, [id, agentsSource, hostStopsAll])
@@ -1000,7 +1000,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
         await Promise.race([reconcileHistory(id).catch(() => undefined), wait(1500)])
       await sendMessage(id, text, { attachments, at })
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't send your message.")
+      tell.error(error instanceof Error ? error.message : "Couldn't send your message.")
       throw error
     }
   }
@@ -1271,7 +1271,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
                 autoAvailable: tracked,
                 onMode: (mode) =>
                   setSessionMode(session.id, mode).catch((error) =>
-                    toast.error(
+                    tell.error(
                       error instanceof Error ? error.message : "Couldn't change the mode.",
                     ),
                   ),

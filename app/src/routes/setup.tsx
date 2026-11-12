@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useNavigate } from "react-router"
 import { FingerprintIcon, LogInIcon, TrophyIcon } from "lucide-react"
-import { toast } from "sonner"
 
 import { RecoveryCode, UnlockSync } from "@/components/account-settings"
 import { useCopiedCode } from "@/components/copied-code"
@@ -23,6 +22,7 @@ import {
   type PendingSetup,
   type SyncState,
 } from "@/lib/sync"
+import { tell } from "@/lib/tell"
 import { PrfUnsupportedError, supportsPasskeys } from "@/lib/vault"
 import { cn } from "@/lib/utils"
 
@@ -109,7 +109,7 @@ function SetupPage({
   }, [authed, setup, identity])
 
   const fail = (error: unknown) =>
-    toast.error(error instanceof Error ? error.message : "Something went wrong.")
+    tell.error(error instanceof Error ? error.message : "Something went wrong.")
 
   const turnOn = async () => {
     setBusy(true)
@@ -127,7 +127,7 @@ function SetupPage({
     setBusy(true)
     try {
       await setup.addPasskey()
-      toast.success("Passkey added")
+      tell.success("Passkey added")
     } catch (error) {
       // Backing out of the prompt, or an authenticator that can't do PRF, is a choice to go on
       // with the code alone rather than a failure of the step.
@@ -261,7 +261,7 @@ function CommunityStep({ onDone }: { onDone: () => void }) {
         setMe(on ? await joinCommunity() : await leaveCommunity())
       }
     } catch (error) {
-      toast.error(
+      tell.error(
         error instanceof Error && error.message
           ? error.message
           : "Couldn't change that. You can change it in Settings.",

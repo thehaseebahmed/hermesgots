@@ -4,7 +4,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { closeLines, closeToldKey, closeUntold } from "../src/lib/close-report.ts"
+import { closeLines, closeSay, closeToldKey, closeUntold } from "../src/lib/close-report.ts"
 
 const close = (facts = {}) => ({
   sessionId: "s-1",
@@ -67,4 +67,20 @@ test("a removal's own failure is told, even with nothing else to say", () => {
   assert.deepEqual(closeLines(close({ removed: false, error: "git refused to remove" })), [
     { tone: "error", text: "git refused to remove" },
   ])
+})
+
+test("a close with several things to say says them in one toast", () => {
+  const lines = [
+    { tone: "info", text: "Kept acme/app: it has uncommitted changes." },
+    { tone: "error", text: "acme/web: GitHub said no." },
+  ]
+  assert.deepEqual(closeSay(lines), {
+    tone: "error",
+    text: "Kept acme/app: it has uncommitted changes. acme/web: GitHub said no.",
+  })
+  assert.deepEqual(closeSay([{ tone: "info", text: "Kept acme/app." }]), {
+    tone: "info",
+    text: "Kept acme/app.",
+  })
+  assert.equal(closeSay([]), null, "a close with nothing to say says nothing")
 })

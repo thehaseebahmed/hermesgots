@@ -9,7 +9,6 @@ import {
   RotateCcwIcon,
   XIcon,
 } from "lucide-react"
-import { toast } from "sonner"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
@@ -26,6 +25,7 @@ import {
   type HermesProject,
   type HermesProjectFolder,
 } from "@/lib/hermes"
+import { tell } from "@/lib/tell"
 import { cn } from "@/lib/utils"
 
 const REPO_RE = /^[\w-]+\/[\w.-]+$/
@@ -151,7 +151,7 @@ function SettingsForm({
       onChanged()
       onClose()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't save the project.")
+      tell.error(error instanceof Error ? error.message : "Couldn't save the project.")
       onChanged()
     } finally {
       setBusy(false)
@@ -164,7 +164,7 @@ function SettingsForm({
       await action()
       onChanged()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : fallback)
+      tell.error(error instanceof Error ? error.message : fallback)
     } finally {
       setBusy(false)
     }

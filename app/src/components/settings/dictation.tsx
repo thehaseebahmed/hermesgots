@@ -6,7 +6,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CheckIcon, CopyIcon, Trash2Icon } from "lucide-react"
-import { toast } from "sonner"
 
 import { Bot } from "@/components/bot"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
@@ -59,6 +58,7 @@ import {
 import { formatDuration } from "@/lib/format"
 import { botModelLine, levelName, namedLevel, type SpeechSettings } from "@/lib/speech"
 import { READ_FAILED, getSpeech, useSpeech, type SpeechCheck } from "@/lib/host-speech"
+import { tell } from "@/lib/tell"
 import { cn } from "@/lib/utils"
 import { onReturn } from "@/lib/wake"
 
@@ -110,9 +110,9 @@ export function DictationSettings() {
     setClearing(true)
     try {
       const refused = await clearDictationLog(profiles ?? [])
-      if (refused.length) toast.error(`Couldn't clear ${refused.join(", ")}.`)
+      if (refused.length) tell.error(`Couldn't clear ${refused.join(", ")}.`)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't clear the history.")
+      tell.error(error instanceof Error ? error.message : "Couldn't clear the history.")
     } finally {
       setClearing(false)
       setConfirmed(false)
@@ -191,7 +191,7 @@ function HistoryTab({ profiles }: { profiles: Profile[] }) {
       setOpen(null)
       setConfirming(false)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't delete that dictation.")
+      tell.error(error instanceof Error ? error.message : "Couldn't delete that dictation.")
     } finally {
       setBusy(false)
     }
@@ -508,12 +508,12 @@ function BubbleCards() {
     // The microphone is the one grant the phone asks in place, so it is asked before the service: an
     // APK that started one without it would be refused by the system, not by the app.
     if (!(await requestBubbleMicrophone())) {
-      toast.error(REFUSED.microphone)
+      tell.error(REFUSED.microphone)
       await refresh()
       return
     }
     const started = await enableBubble()
-    if (!started.started) toast.error(REFUSED[started.reason ?? ""] ?? "The Bubble couldn't start.")
+    if (!started.started) tell.error(REFUSED[started.reason ?? ""] ?? "The Bubble couldn't start.")
     await refresh()
   }, [refresh])
 
@@ -533,7 +533,7 @@ function BubbleCards() {
         grant === "overlay" ? await openBubbleOverlay() : await openBubbleAccessibility()
       if (trouble) {
         setWaiting(undefined)
-        toast.error(trouble)
+        tell.error(trouble)
       }
     },
     [switchOn],
@@ -551,7 +551,7 @@ function BubbleCards() {
         if (!waiting) return
         setWaiting(undefined)
         if (!now?.[waiting]) {
-          toast.error(refusal(waiting))
+          tell.error(refusal(waiting))
           return
         }
         await ask(now)

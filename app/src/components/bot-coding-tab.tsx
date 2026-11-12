@@ -1,6 +1,5 @@
 import { MinusIcon, PlusIcon } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
-import { toast } from "sonner"
 
 import { Banner, Retry } from "@/components/banner"
 import { Segmented } from "@/components/segmented"
@@ -22,6 +21,7 @@ import { connectionKey } from "@/lib/connection"
 import { modelInfoFor } from "@/lib/model-info"
 import { seedsFromCache, useReadAttempt } from "@/lib/read-attempt"
 import { noteFailure } from "@/lib/report"
+import { tell } from "@/lib/tell"
 import { cn } from "@/lib/utils"
 
 /**
@@ -224,7 +224,7 @@ export function CodingTab({ profile }: { profile: Profile }) {
       const answer = await setBotAfkPickBudget(config, next)
       afk.keepBudget(answer.pickBudget ?? next)
     } catch (failure) {
-      toast.error(failure instanceof Error ? failure.message : "Couldn't save that pick budget.")
+      tell.error(failure instanceof Error ? failure.message : "Couldn't save that pick budget.")
     } finally {
       setDraft(null)
       setSaving(false)
@@ -243,7 +243,7 @@ export function CodingTab({ profile }: { profile: Profile }) {
       // threshold set reads the account again.
       if ((answer.usageThreshold ?? null) === null) setDeciding(null)
     } catch (failure) {
-      toast.error(
+      tell.error(
         failure instanceof Error ? failure.message : "Couldn't save that usage threshold.",
       )
     } finally {

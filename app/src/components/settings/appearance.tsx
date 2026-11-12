@@ -16,13 +16,13 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { useTheme } from "next-themes"
-import { toast } from "sonner"
 
 import { Group, RowText, SwitchRow, rowClass } from "@/components/settings-chrome"
 import { DEFAULT_SETTINGS, db, getActiveProfile, saveAppearance, saveSettings } from "@/lib/db"
 import { usePluginFeature, type PluginServer } from "@/lib/features"
 import { useHostRecord } from "@/lib/host-record"
 import { OPENUI_SWITCH, UNANSWERED_IS_ON } from "@/lib/openui-switch"
+import { tell } from "@/lib/tell"
 import { THEMES, type ThemeValue } from "@/lib/theme"
 import { cn } from "@/lib/utils"
 
@@ -58,7 +58,7 @@ function InterfaceSwitch({ server }: { server: PluginServer }) {
       disabled={!offered || saving}
       onCheckedChange={(on) => {
         void save(on).catch((error: unknown) =>
-          toast.error(error instanceof Error ? error.message : "Couldn't save that."),
+          tell.error(error instanceof Error ? error.message : "Couldn't save that."),
         )
       }}
     />

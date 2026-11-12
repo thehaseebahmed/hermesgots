@@ -15,7 +15,6 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { Link, useNavigate } from "react-router"
-import { toast } from "sonner"
 
 import { Banner, Retry } from "@/components/banner"
 import { Bot } from "@/components/bot"
@@ -97,6 +96,7 @@ import { seedsFromCache, useReadAttempt } from "@/lib/read-attempt"
 import { useReminders } from "@/lib/reminders"
 import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
 import { SKILL_FEATURES } from "@/lib/skills"
+import { tell } from "@/lib/tell"
 import { useNow } from "@/lib/threads"
 import { plural } from "@/lib/tools"
 import { cn } from "@/lib/utils"
@@ -173,7 +173,7 @@ function EnabledSetting({ profile }: { profile: Profile }) {
             if (next) await setActiveProfile(next.id)
           }
         } catch (error) {
-          toast.error(error instanceof Error ? error.message : "Couldn't save that.")
+          tell.error(error instanceof Error ? error.message : "Couldn't save that.")
         } finally {
           setSaving(false)
         }
@@ -232,7 +232,7 @@ function RemindersSetting({ profile }: { profile: Profile }) {
         value={value}
         onChange={(next) => {
           void save(next).catch((error: unknown) =>
-            toast.error(
+            tell.error(
               error instanceof Error ? error.message : "Couldn't save that reminder level.",
             ),
           )
@@ -288,7 +288,7 @@ function DeleteBotDialog({
           try {
             await removeHost(profile.hostId!)
           } catch (error) {
-            toast.error(error instanceof Error ? error.message : "Couldn't remove it.")
+            tell.error(error instanceof Error ? error.message : "Couldn't remove it.")
             return
           }
         } else {
@@ -536,7 +536,7 @@ function BotEditScreen({
           await updateProfile(profile.id, edit.patch(value))
           close()
         } catch (error) {
-          toast.error(error instanceof Error ? error.message : "Couldn't save that.")
+          tell.error(error instanceof Error ? error.message : "Couldn't save that.")
         }
       }}
       onCancel={close}
@@ -722,7 +722,7 @@ function GeneralPage({
         keep(next)
         return true
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Couldn't save that.")
+        tell.error(error instanceof Error ? error.message : "Couldn't save that.")
         return false
       } finally {
         setSaving(undefined)
@@ -1004,7 +1004,7 @@ function FieldForm({
       onSave={(text) => {
         const parsed = draftValue(field, text)
         if (!parsed.ok) {
-          toast.error(field.kind === "number" ? "That isn't a number." : "Couldn't save that.")
+          tell.error(field.kind === "number" ? "That isn't a number." : "Couldn't save that.")
           return
         }
         void onWrite(field.key, parsed.value).then((ok) => ok && onClose())
@@ -1167,7 +1167,7 @@ function FallbacksPage({ profile }: { profile: Profile }) {
 
   const write = (next: ModelChoice[]) =>
     void save(next).catch((error: unknown) => {
-      toast.error(error instanceof Error ? error.message : String(error))
+      tell.error(error instanceof Error ? error.message : String(error))
     })
 
   // Adding is the screen's own action, in its header: a row that added was a setting among settings,

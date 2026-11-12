@@ -8,7 +8,6 @@ import {
   RefreshCwIcon,
   RotateCwIcon,
 } from "lucide-react"
-import { toast } from "sonner"
 
 import { botChatsPath, botRoutinesPath } from "@/lib/bot-tabs"
 import { LIST_MS, SAFETY_MS } from "@/lib/freshness"
@@ -46,6 +45,7 @@ import { describeSchedule } from "@/lib/schedule"
 import { HermesError, controlCronJob, type CronJob } from "@/lib/hermes"
 import { HEADER_BUTTON } from "@/lib/layout"
 import { INSTALL_PLUGIN } from "@/lib/repo"
+import { tell } from "@/lib/tell"
 import { cn } from "@/lib/utils"
 
 /**
@@ -368,12 +368,12 @@ function JobCard({
     try {
       await controlCronJob(profile, job.id, action)
       const done = { pause: "Paused", resume: "Resumed", run: "Started" }[action]
-      toast.success(`${done} “${job.name}”`)
+      tell.success(`${done} “${job.name}”`)
       onChanged()
       // A manual run starts in the background; look again once it has had a moment.
       if (action === "run") setTimeout(onChanged, 5_000)
     } catch (error) {
-      toast.error(describeError(error))
+      tell.error(describeError(error))
     } finally {
       setPending(null)
     }

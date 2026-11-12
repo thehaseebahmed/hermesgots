@@ -1,4 +1,4 @@
-import { toast } from "sonner"
+import { tell } from "@/lib/tell"
 
 /** Runs an action, saying why when it fails. */
 export async function attempt(what: string, action: () => Promise<unknown>) {
@@ -6,7 +6,7 @@ export async function attempt(what: string, action: () => Promise<unknown>) {
     await action()
     return true
   } catch (error) {
-    toast.error(error instanceof Error ? error.message : `Couldn't ${what}.`)
+    tell.error(error instanceof Error ? error.message : `Couldn't ${what}.`)
     return false
   }
 }

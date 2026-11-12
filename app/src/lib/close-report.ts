@@ -32,8 +32,22 @@ export interface CloseReport {
 
 /** Something the user is told about a close: a toast, in the tone its news deserves. */
 export interface CloseLine {
+  /** A tone `lib/tell` has: the module stays import-free, and a tone it lacks fails to compile. */
   tone: "info" | "error"
   text: string
+}
+
+/**
+ * A close's lines as the one thing it says: every line's words, in the tone the worst of them
+ * deserves. One toast rather than a queue of them, since a phone shows one at a time and a close
+ * with three kept trees would otherwise take ten seconds to say.
+ */
+export function closeSay(lines: CloseLine[]): CloseLine | null {
+  if (!lines.length) return null
+  return {
+    tone: lines.some((line) => line.tone === "error") ? "error" : "info",
+    text: lines.map((line) => line.text).join(" "),
+  }
 }
 
 /** The mark a report is told against, for this bot and session. */

@@ -17,8 +17,6 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
-import { toast } from "sonner"
-
 import { Link } from "react-router"
 
 import { ModelPicker } from "@/components/chat/model-picker"
@@ -39,6 +37,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import type { ModelChoice, Profile } from "@/lib/db"
 import { useModelInfo } from "@/lib/model-info"
+import { tell } from "@/lib/tell"
 import { holdsUnsavedChanges, useUnsavedChanges } from "@/lib/unsaved"
 import { cn } from "@/lib/utils"
 
@@ -777,7 +776,7 @@ export function ModelPick({
           choice={choice}
           onChoose={(next) => {
             void Promise.resolve(onPick(next)).catch((error: unknown) => {
-              toast.error(error instanceof Error ? error.message : String(error))
+              tell.error(error instanceof Error ? error.message : String(error))
             })
             onClose()
           }}

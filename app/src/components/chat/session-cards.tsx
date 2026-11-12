@@ -10,7 +10,6 @@ import {
   TimerOffIcon,
   ZapIcon,
 } from "lucide-react"
-import { toast } from "sonner"
 
 import { StatusLine } from "@/components/chat/status-line"
 import { useCodeFace } from "@/components/chat/code-face"
@@ -31,6 +30,7 @@ import {
   rowLine,
   type PendingRow,
 } from "@/lib/pending"
+import { tell } from "@/lib/tell"
 import { cn } from "@/lib/utils"
 
 /**
@@ -70,7 +70,7 @@ export function PlanReadyCard({
     try {
       await action()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't update the session.")
+      tell.error(error instanceof Error ? error.message : "Couldn't update the session.")
     } finally {
       setPending(null)
     }
@@ -333,7 +333,7 @@ export function ClarifyCard({
     try {
       await (send ?? ((text: string) => sendMessage(conversationId, text)))(ASK_AGAIN)
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't ask that again.")
+      tell.error(error instanceof Error ? error.message : "Couldn't ask that again.")
     } finally {
       setAsking(false)
     }

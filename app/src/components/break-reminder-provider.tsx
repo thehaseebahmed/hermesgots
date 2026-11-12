@@ -16,7 +16,8 @@ import {
 import { Button } from "@/components/ui/button"
 import { DEFAULT_SETTINGS, getSettings } from "@/lib/db"
 import { ReminderClock, isEligibleReminderDevice } from "@/lib/break-reminders"
-import { isNative, minimizeAndroidApp } from "@/lib/native"
+import { minimizeAndroidApp } from "@/lib/native"
+import { isNative } from "@/lib/platform"
 
 const STORAGE_KEY = "gots:break-reminders"
 
@@ -123,7 +124,7 @@ export function BreakReminderProvider({ children }: { children: React.ReactNode 
   const activeRef = useRef(false)
   const visibleRef = useRef(document.visibilityState === "visible")
   const eligibleRef = useRef(false)
-  const android = isNative && Capacitor.getPlatform() === "android"
+  const android = isNative() && Capacitor.getPlatform() === "android"
 
   const reportActivity = useCallback((active: boolean) => {
     activeRef.current = active

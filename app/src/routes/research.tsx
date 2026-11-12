@@ -21,7 +21,6 @@ import {
   Trash2Icon,
   XIcon,
 } from "lucide-react"
-import { toast } from "sonner"
 
 import { attempt } from "@/lib/attempt"
 import { Banner } from "@/components/banner"
@@ -96,6 +95,7 @@ import {
   type OutputFormat,
   type Revision,
 } from "@/lib/research"
+import { tell } from "@/lib/tell"
 import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { BackButton } from "@/components/back-button"
@@ -314,7 +314,7 @@ function MissionTypes({
             role="radio"
             aria-checked={active}
             aria-disabled={!type.ready}
-            onClick={() => (type.ready ? onChange(type.id) : toast(`${type.name} is coming soon`))}
+            onClick={() => (type.ready ? onChange(type.id) : tell.note(`${type.name} is coming soon`))}
             className={cn(
               "flex min-h-11 shrink-0 items-center gap-2 rounded-full border px-3.5 text-sm transition-colors",
               active
@@ -574,8 +574,8 @@ function MissionMenu({
                 onClick={() =>
                   void navigator.clipboard
                     .writeText(toMarkdown(mission, format))
-                    .then(() => toast("Copied"))
-                    .catch(() => toast.error("Couldn't copy."))
+                    .then(() => tell.note("Copied"))
+                    .catch(() => tell.error("Couldn't copy."))
                 }
               >
                 <ClipboardCopyIcon />

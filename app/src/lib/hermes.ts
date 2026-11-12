@@ -27,7 +27,7 @@ import { pickFields } from "@/lib/model-pick"
 import type { ModelUsage } from "@/lib/pricing"
 import type { PendingInput, PendingQueue } from "@/lib/pending"
 import type { RoomEvent } from "@/lib/room-log"
-import { isNative } from "@/lib/native"
+import { isNative } from "@/lib/platform"
 import { ask, sawFrame, sawWords, sent, sentFrom } from "@/lib/net-watch"
 import type { Fingerprint, Totals } from "@/lib/dictation-log"
 import { promptEntry } from "@/lib/run-prompt"
@@ -196,7 +196,7 @@ async function request(url: string, init: RequestInit) {
 function networkHint(url: string) {
   const insecure = url.startsWith("http://")
   const local = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/)/.test(url)
-  if (insecure && !local && !isNative && window.location.protocol === "https:") {
+  if (insecure && !local && !isNative() && window.location.protocol === "https:") {
     return "Can't reach Hermes: this page is HTTPS, so the browser blocks plain-HTTP servers on other hosts. Put Hermes behind HTTPS (e.g. Tailscale Serve or a Cloudflare Tunnel)."
   }
   return `Can't reach Hermes. Check it's running and that API_SERVER_CORS_ORIGINS includes ${window.location.origin}.`

@@ -24,6 +24,7 @@ import { usePluginFeatureOn } from "@/lib/features"
 import { CHAT_IDLE_MS, CHAT_POLL_MS, READ_TIMEOUT_MS, SAFETY_MS } from "@/lib/freshness"
 import { onlineNow } from "@/lib/online"
 import { LOADING_ACTIVITY } from "@/lib/format"
+import { tell } from "@/lib/tell"
 import { NOT_SENT } from "@/lib/words"
 import { onSessionMoved, useLive } from "@/lib/live"
 import { knownLiveRun, useHostBusy, useLiveRunId, useLiveSubagents } from "@/lib/waiting"
@@ -37,7 +38,6 @@ import {
   type Unsent,
 } from "@/lib/db"
 import { randomId } from "@/lib/utils"
-import { toast } from "sonner"
 
 import { equal } from "@/lib/equal"
 import { progressRemindersShown } from "@/lib/progress-reminder"
@@ -958,7 +958,7 @@ export function ChatNextThread({
             // all leaves the words up.
             setMisses(0)
             const said = error instanceof Error ? error.message : String(error)
-            if (failureSaid.current !== said) toast.error(said)
+            if (failureSaid.current !== said) tell.error(said)
             failureSaid.current = said
             dispatch({ type: "read-failed" })
           }
@@ -1500,7 +1500,7 @@ export function ChatNextThread({
           : error instanceof Error
             ? error.message
             : String(error)
-      toast.error(said)
+      tell.error(said)
       dispatch({
         type: "unsent",
         row: { id, text: words, at, attachments: prepared?.sent ?? attachments },
@@ -1593,7 +1593,7 @@ export function ChatNextThread({
             if (!(error instanceof RunGone)) {
               // A refused stop leaves the run where it was, so it is not a turn that failed: the run
               // is read again now, and the button says Stop for it rather than waiting for a poll.
-              toast.error(error instanceof Error ? error.message : "Couldn't stop the run.")
+              tell.error(error instanceof Error ? error.message : "Couldn't stop the run.")
               void joinLive()
             }
             return false
@@ -1609,7 +1609,7 @@ export function ChatNextThread({
         }).then(
           (answer) => answer.rows.some((row) => row.stopped),
           (error) => {
-            toast.error(error instanceof Error ? error.message : "Couldn't stop the subagents.")
+            tell.error(error instanceof Error ? error.message : "Couldn't stop the subagents.")
             return false
           },
         ),

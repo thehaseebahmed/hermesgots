@@ -11,7 +11,6 @@ import {
   type ReactNode,
 } from "react"
 import { ArrowUpIcon, MicIcon, SquareIcon } from "lucide-react"
-import { toast } from "sonner"
 
 import { AttachMenu } from "@/components/chat/attach-menu"
 import { PointChip, useCanvasPoints } from "@/components/chat/canvas-points"
@@ -652,7 +651,7 @@ export function Composer({
     try {
       await dictation.retry()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't start the microphone.")
+      tell.error(error instanceof Error ? error.message : "Couldn't start the microphone.")
     }
   }
 
@@ -662,7 +661,7 @@ export function Composer({
     dictation
       .start(dictationAt.current)
       .catch((error: unknown) =>
-        toast.error(error instanceof Error ? error.message : "Couldn't start the microphone."),
+        tell.error(error instanceof Error ? error.message : "Couldn't start the microphone."),
       )
   }
 
