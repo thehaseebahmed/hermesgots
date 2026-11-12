@@ -870,6 +870,26 @@ _Avoid_: track, branch, side, researcher
 Which way a piece of evidence bears on a part: it supports it, refutes it, or is only context. The researcher records one and the judge gives one independently, and the evidence counts only where they agree.
 _Avoid_: position, polarity, sentiment, side
 
+**Literature review**:
+A research mission that answers what the research says about a question: the host searches a scholarly index, screens the papers against the user's criteria, reads what is open and extracts the same fields from each. It delivers a narrative review, and is never called systematic.
+_Avoid_: systematic review, lit search, paper summary
+
+**Inclusion criteria**:
+The short lines a paper must meet to be part of a literature review, each checkable from a title and an abstract; the user confirms them before anything is searched.
+_Avoid_: filters, rules, requirements
+
+**Funnel**:
+A literature review's counts, worked out by code: the papers found, screened, included, and excluded with the reason for each, plus the ones the cap left unreached. Found is always screened plus unreached, and screened is always included plus excluded.
+_Avoid_: stats, pipeline counts, PRISMA diagram
+
+**Evidence level**:
+How much of a paper the host read for a literature review: its full text, its abstract only, or its metadata only.
+_Avoid_: quality, rigour, confidence, depth
+
+**Quote check**:
+The code that keeps an extracted field of a paper only when the passage given for it is found in the text the host fetched; a field that fails it is dropped and counted.
+_Avoid_: cross-check, verification, fact check
+
 **Search trail**:
 The web searches each lane of a verify mission made, in the order it made them, kept so a reader can see where the evidence was looked for, and where it wasn't.
 _Avoid_: query log, search history, searches
