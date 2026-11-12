@@ -397,7 +397,13 @@ await flow(
         await until(
           async () => {
             const facts = await drawnFacts(page)
-            return facts.svg && facts.ink === facts.expected
+            if (!facts.svg || facts.ink !== facts.expected) return null
+            // mermaid removes the svg it drew by the id it was handed for the length of a render,
+            // and a mode change can leave a second render queued behind the first: the drawing is
+            // taken as landed only once it has stood unchanged across a beat.
+            await page.waitForTimeout(300)
+            const after = await drawnFacts(page)
+            return after.svg && after.ink === after.expected && after.width === facts.width
           },
           20_000,
           `the ${theme} drawing at ${at}`,
