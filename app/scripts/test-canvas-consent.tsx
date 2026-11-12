@@ -718,7 +718,7 @@ test(
 
       const classes = control.classList
       assert.ok(classes.contains("bg-destructive/10"), "over the 10% tint that act carries")
-      assert.ok(classes.contains("text-destructive"), "in the destructive ink")
+      assert.ok(classes.contains("text-destructive-ink"), "in the tone's ink, which reads on its tint")
       assert.ok(classes.contains("rounded-full"), "as the app's pill, not a red plate")
       const icon = control.querySelector('svg[data-icon="inline-start"]')
       assert.ok(icon, "with the trash at its lead")
