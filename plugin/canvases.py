@@ -273,16 +273,44 @@ def _libraries() -> Dict[str, Any]:
     return found
 
 
-# A page's ask for a library, as the app reads it (`LIBRARY_TAG` in `canvas-document.ts`): an empty
-# `<script>` naming one, with other attributes allowed on either side of the name — a quoted `>`
-# included — and either quote style. One grammar in two languages, held together by
+# A page's ask for a library, as the app reads it (`libraryAsks` in `canvas-document.ts`): an empty
+# `<script>` naming one, other attributes allowed on either side of the name — a quoted `>` included
+# — and either quote style. One grammar in two languages, held together by
 # `tests/fixtures/canvas-library-asks.json`, which both suites read: a host that refused a tag the
 # app would have answered would be the wrong failure.
-_LIBRARY_ASK = re.compile(
-    r"""<script\b(?:[^>"']|"[^"]*"|'[^']*')*?\bdata-canvas-lib\s*=\s*["']([^"']*)["']"""
-    r"""(?:[^>"']|"[^"]*"|'[^']*')*>\s*</script>""",
-    re.IGNORECASE,
+#
+# Read by walking the markup rather than by a backtracking pattern: the tag grammar is ambiguous
+# enough that a page of unterminated `<script` openers — which the 256 KB cap admits — took minutes
+# of a plugin thread, on every write.
+_ASK_ATTRIBUTE = re.compile(
+    r"""data-canvas-lib\s*=\s*(?:"([^"]*)"|'([^']*)')""", re.IGNORECASE
 )
+_ASK_BODY = re.compile(r"\s*</script\s*>", re.IGNORECASE)
+
+
+def _tag_end(markup: str, at: int) -> int:
+    """Where the tag opened at ``at`` closes: its first ``>`` outside a quoted value, or -1."""
+    quote = ""
+    for index in range(at, len(markup)):
+        character = markup[index]
+        if quote:
+            if character == quote:
+                quote = ""
+        elif character in "\"'":
+            quote = character
+        elif character == ">":
+            return index
+        elif character == "<":
+            return -1
+    return -1
+
+
+def _ask_name(tag: str) -> Optional[str]:
+    """The name a tag asks for, or None when it carries no quoted ``data-canvas-lib``."""
+    found = _ASK_ATTRIBUTE.search(tag)
+    if not found:
+        return None
+    return found.group(1) if found.group(1) is not None else found.group(2)
 
 
 def _library_asks(markup: str) -> List[str]:
@@ -292,7 +320,28 @@ def _library_asks(markup: str) -> List[str]:
     which cuts the same comments before it plans a page's sources. Only an empty ``<script>`` is an
     ask: a script with content in it is the page's own code, not a placeholder for a library.
     """
-    return _LIBRARY_ASK.findall(markup)
+    names: List[str] = []
+    lowered = markup.lower()
+    at = 0
+    while True:
+        start = lowered.find("<script", at)
+        if start == -1:
+            return names
+        after = start + len("<script")
+        # `<scriptx` is another tag's name, not a script's.
+        if after < len(markup) and markup[after] not in " \t\r\n/>":
+            at = after
+            continue
+        close = _tag_end(markup, after)
+        if close == -1:
+            return names
+        name = _ask_name(markup[start : close + 1])
+        body = _ASK_BODY.match(markup, close + 1) if name is not None else None
+        if body:
+            names.append(name)
+            at = body.end()
+            continue
+        at = close + 1
 
 
 def _and(names: List[str], quoted: bool = False) -> str:

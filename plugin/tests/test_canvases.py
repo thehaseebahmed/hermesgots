@@ -767,6 +767,15 @@ class LibraryTest(unittest.TestCase):
     def tearDown(self) -> None:
         canvases._LIBRARIES = None
 
+    def test_a_page_of_unterminated_openers_asks_for_nothing(self) -> None:
+        # The same page the app is held to (`test-canvas-document.mjs`): the tag grammar is
+        # ambiguous enough that a backtracking pattern held a plugin thread for minutes over it, and
+        # a write is a thread. The walk reads it once and finds no ask, since no opener closes.
+        page = "<script data-x=1 " * 5000
+        started = time.monotonic()
+        self.assertEqual(canvases._library_asks(page), [])
+        self.assertLess(time.monotonic() - started, 1.0)
+
     def test_the_host_reads_the_asks_the_app_reads(self) -> None:
         # One grammar, both sides: every case in the table — an empty ask, other attributes, a quoted
         # `>`, either quote style, whitespace, content and a comment — answers the same names here as

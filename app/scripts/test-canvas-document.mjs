@@ -472,6 +472,16 @@ test("the app's own policy keeps a canvas's frame from navigating itself away", 
   assert.match(page, /<meta http-equiv="Content-Security-Policy" content="frame-src 'self'" \/>/)
 })
 
+test("a page of unterminated openers is no page of asks, and is read at once", () => {
+  // The tag grammar is ambiguous enough that a backtracking pattern took minutes over this page,
+  // and the 256 KB cap admits it: a bot writing a broken loop must cost a reader a draw, not a
+  // frozen phone. The walk reads it once and finds nothing, since no opener ever closes.
+  const page = PAGE.replace("<h1>Tip</h1>", `<h1>Tip</h1>${"<script data-x=1 ".repeat(5000)}`)
+  const started = performance.now()
+  assert.deepEqual(canvasLibraryPlan(page), [])
+  assert.ok(performance.now() - started < 1000, "the page is read in well under a second")
+})
+
 test("a commented ask is no ask, and the ask under it still draws", () => {
   // A bot that documents the tag in a comment above the one it makes is the page shape the shared
   // fixture table exists for: the comment is no ask on either side, and the source lands where the

@@ -96,13 +96,67 @@ export function themeVariables(tokens: Record<string, string>, mode: CanvasMode)
   return `:root{${declared}color-scheme: ${mode};}`
 }
 
+/** One ask a page makes: the name it names, and the offsets its `<script>` fills. */
+interface LibraryAsk {
+  name: string
+  /** Where the ask's `<script>` opens. */
+  start: number
+  /** Just past its `</script>`. */
+  end: number
+}
+
 /**
- * A page's ask for a library, as the guide writes it: an empty script naming one. Other attributes
- * may ride the tag — quoted values included — and both quote styles count, since a bot writes
- * markup, not a spec.
+ * A page's asks, in the order it makes them, read in one walk over its markup: `<script`, the tag to
+ * its closing `>` — a `>` inside a quoted attribute is the quote's, not the tag's — the
+ * `data-canvas-lib` it carries, and an empty body right after it. A body with anything in it is the
+ * page's own script, not an ask.
+ *
+ * A walk rather than a regex on purpose: the tag grammar is ambiguous enough that a backtracking
+ * pattern took minutes over a page of unterminated `<script` openers, and the page cap admits that
+ * markup. The plan, the inline and the stylesheet all need one pass over the same page.
  */
-const LIBRARY_TAG =
-  /<script\b(?:[^>"']|"[^"]*"|'[^']*')*?\bdata-canvas-lib\s*=\s*["']([^"']*)["'](?:[^>"']|"[^"]*"|'[^']*')*>\s*<\/script>/gi
+function libraryAsks(html: string): LibraryAsk[] {
+  const asks: LibraryAsk[] = []
+  const opener = /<script(?=[\s/>])/gi
+  while (opener.exec(html)) {
+    const start = opener.lastIndex - "<script".length
+    const close = tagEnd(html, opener.lastIndex)
+    // No closing `>` before the document ends, or a `<` where a tag cannot be: this opener never
+    // closed, so nothing after it is a tag either.
+    if (close === -1) break
+    const name = askName(html.slice(start, close + 1))
+    if (name !== null) {
+      const body = /^\s*<\/script\s*>/i.exec(html.slice(close + 1))
+      if (body) asks.push({ name, start, end: close + 1 + body[0].length })
+    }
+    opener.lastIndex = close + 1
+  }
+  return asks
+}
+
+/** Where the tag opened at `at` closes: its first `>` outside a quoted value, or -1 for never. */
+function tagEnd(html: string, at: number): number {
+  let quote: string | null = null
+  for (let i = at; i < html.length; i += 1) {
+    const ch = html[i]
+    if (quote) {
+      if (ch === quote) quote = null
+    } else if (ch === '"' || ch === "'") {
+      quote = ch
+    } else if (ch === ">") {
+      return i
+    } else if (ch === "<") {
+      return -1
+    }
+  }
+  return -1
+}
+
+/** The name a tag asks for, or null when it carries no quoted `data-canvas-lib`. */
+function askName(tag: string): string | null {
+  const attribute = /data-canvas-lib\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(tag)
+  return attribute ? (attribute[1] ?? attribute[2] ?? null) : null
+}
 
 /**
  * The spans the page's comments cover, in the order they open: what a rule that works in offsets
@@ -123,23 +177,6 @@ function commentSpans(html: string): Array<[number, number]> {
 }
 
 /**
- * The document as its markup, with every comment cut out: a tag named in a comment is not a tag. The
- * host's scan reads a document the same way (`_markup` in `plugin/canvases.py`), and `findHead`
- * already reads the page's head this way, so an ask a bot wrote out in a comment is no ask on
- * either side — which is what `plugin/tests/fixtures/canvas-library-asks.json` holds both to.
- */
-function withoutComments(html: string): string {
-  const pieces: string[] = []
-  let at = 0
-  for (const [opened, end] of commentSpans(html)) {
-    pieces.push(html.slice(at, opened))
-    at = end
-  }
-  pieces.push(html.slice(at))
-  return pieces.join(" ")
-}
-
-/**
  * The names a page asks for, in the order it asks: what a caller fetches sources for before it can
  * draw anything, so a page that names no library costs no fetch and one that names three is read
  * once. A name is repeated where the page asks twice — the ask is what the page said, and the
@@ -147,8 +184,24 @@ function withoutComments(html: string): string {
  */
 export function canvasLibraryPlan(html: string): string[] {
   const names: string[] = []
-  for (const ask of withoutComments(html).matchAll(LIBRARY_TAG)) names.push(ask[1])
+  const seen = new Set<string>()
+  for (const ask of liveAsks(html))
+    if (!seen.has(ask.name)) {
+      seen.add(ask.name)
+      names.push(ask.name)
+    }
   return names
+}
+
+/** Whether an offset falls inside one of the page's comments. */
+function within(spans: ReadonlyArray<readonly [number, number]>, at: number): boolean {
+  return spans.some(([from, to]) => at >= from && at < to)
+}
+
+/** A page's asks that count — the ones no comment holds, in document order. */
+function liveAsks(html: string): LibraryAsk[] {
+  const spans = commentSpans(html)
+  return libraryAsks(html).filter((ask) => !within(spans, ask.start))
 }
 
 /**
@@ -184,18 +237,22 @@ function scripted(source: string): string {
 function inlineLibraries(
   html: string,
   libraries: Readonly<Record<string, CanvasLibrarySource>>,
+  asks: readonly LibraryAsk[],
 ): string {
   const placed = new Set<string>()
-  const spans = commentSpans(html)
-  const commented = (at: number) => spans.some(([from, to]) => at >= from && at < to)
-  return html.replace(LIBRARY_TAG, (tag: string, name: string, at: number) => {
-    if (commented(at)) return tag
+  let out = ""
+  let at = 0
+  for (const ask of asks) {
+    out += html.slice(at, ask.start)
     // A handed record is a plain object, so a name it merely inherits (`constructor`) is no source.
-    const library = Object.hasOwn(libraries, name) ? libraries[name] : undefined
-    if (!library || placed.has(name)) return ""
-    placed.add(name)
-    return scripted(library.script) + (library.setup ? scripted(library.setup) : "")
-  })
+    const library = Object.hasOwn(libraries, ask.name) ? libraries[ask.name] : undefined
+    if (library && !placed.has(ask.name)) {
+      placed.add(ask.name)
+      out += scripted(library.script) + (library.setup ? scripted(library.setup) : "")
+    }
+    at = ask.end
+  }
+  return out + html.slice(at)
 }
 
 /**
@@ -204,12 +261,12 @@ function inlineLibraries(
  * anything the page wrote, and the page's own `<style>` still comes last and wins.
  */
 function libraryStyles(
-  html: string,
+  asks: readonly LibraryAsk[],
   libraries: Readonly<Record<string, CanvasLibrarySource>>,
 ): string {
   const seen = new Set<string>()
   let styles = ""
-  for (const name of canvasLibraryPlan(html)) {
+  for (const { name } of asks) {
     if (seen.has(name)) continue
     seen.add(name)
     const css = Object.hasOwn(libraries, name) ? libraries[name].css : undefined
@@ -277,7 +334,8 @@ export function canvasDocument(
     css?: string
   },
 ): string {
-  const page = withMode(inlineLibraries(html, libraries), mode)
+  const asks = liveAsks(html)
+  const page = withMode(inlineLibraries(html, libraries, asks), mode)
   const head = findHead(page)
   if (!head) throw new Error("a canvas document needs a <head> to be drawn")
   return sandboxedDocument(page, {
@@ -285,7 +343,7 @@ export function canvasDocument(
     afterPolicy:
       `<style>${themeVariables(tokens, mode)}</style>` +
       (css ? `<style>${escapeStyle(css)}</style>` : "") +
-      libraryStyles(html, libraries),
+      libraryStyles(asks, libraries),
     afterSafety: `<script>${scrollBridge(scroll)}</script>` + `<script>${BRIDGE_SCRIPT}</script>`,
   })
 }
