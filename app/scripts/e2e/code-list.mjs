@@ -1,11 +1,12 @@
 // The Code list arranged by session state: the four groups in their fixed order under headings with
 // their counts, empty groups absent until a session gives one, Closed collapsed and holding Resolved
 // and Discarded told apart by their icons, the sort menu choosing Title A–Z and remembering it over a
-// reload, and a search dropping the headers for one flat list in that same order. Then the unread
-// dot — the geometry no DOM without layout can prove: its corner on the round icon, absent until
-// this device has read the row (no mark, nothing to be newer than), written by the thread rendering
-// when it is opened, and back when activity lands while the list sits open — and the sticky
-// heading's tuck under the header, the same geometry's other half. The whole of it
+// reload, the project chips reading as their names' words alone at 44px in a row that scrolls
+// sideways without a bar, and a search dropping the headers for one flat list in that same order.
+// Then the unread dot — the geometry no DOM without layout can prove: its corner on the round icon,
+// absent until this device has read the row (no mark, nothing to be newer than), written by the
+// thread rendering when it is opened, and back when activity lands while the list sits open — and
+// the sticky heading's tuck under the header, the same geometry's other half. The whole of it
 // then runs again at a phone's width in the dark and at a tablet's in the light, where a header
 // row that wrapped would move the headings.
 import { app, assert, flow, pass } from "./lib.mjs"
@@ -164,6 +165,35 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
     "the same key, the opposite arrow")
   await shot("sorted-desc")
   pass("picking the chosen sort again flips its arrow instead of choosing it twice")
+
+  // A filter reads as words, so a project's chip is its name and nothing else drawn before it.
+  const chips = page.locator("[aria-label=Projects] button")
+  const faces = await chips.evaluateAll((ones) =>
+    ones.map((one) => ({
+      name: (one.textContent ?? "").trim(),
+      glyphs: one.querySelectorAll("svg").length,
+      height: Math.round(one.getBoundingClientRect().height),
+    })),
+  )
+  assert.ok(faces.length > 2, `the row carries chips to check (${faces.length})`)
+  assert.deepEqual(
+    faces.filter((one) => one.glyphs > 0).map((one) => one.name),
+    [],
+    "the project chips carry no icon",
+  )
+  assert.deepEqual(
+    faces.filter((one) => one.height !== 44).map((one) => one.name),
+    [],
+    "and each keeps the 44px its thumb needs",
+  )
+  assert.equal(faces[0].name, "All", "the row still opens on All")
+  const row = await page.locator("[aria-label=Projects]").evaluate((el) => {
+    const style = getComputedStyle(el)
+    return { overflow: style.overflowX, scrollbar: style.scrollbarWidth }
+  })
+  assert.equal(row.overflow, "auto", "the row scrolls sideways rather than wrapping")
+  assert.equal(row.scrollbar, "none", "and draws no scrollbar for it")
+  pass("the project chips are their names' words, 44px tall, in a row that scrolls with no bar")
 
   // The list's own search button, not the sidebar's: the header's carries `data-search-toggle`.
   await page.locator("button[data-search-toggle]").click()
