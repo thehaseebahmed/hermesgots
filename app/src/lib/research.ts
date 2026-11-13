@@ -82,6 +82,21 @@ const VERIFIED: MissionWriting = {
   },
 }
 
+/** The plugin searches an index, screens, reads what is open and extracts; then one synthesis. */
+const REVIEWED: MissionWriting = {
+  feature: { id: "research_literature", name: "Literature review" },
+  reworks: false,
+  pieces: () => 1,
+  drafted: () => "Finding the themes",
+  claims: (mission) => (mission.review?.cap ?? DEFAULT_CAP) * 4,
+  read: (mission) => {
+    const funnel = mission.funnel
+    if (!funnel) return "Searching the index"
+    const read = papersOf(mission.ledger).filter((paper) => paper.level).length
+    return `${funnel.screened} of ${funnel.found} screened · ${funnel.included} included · ${read} read`
+  },
+}
+
 export const MISSION_TYPES: ({
   id: MissionType
   name: string
@@ -119,6 +134,8 @@ export const MISSION_TYPES: ({
     name: "Literature review",
     icon: LibraryBigIcon,
     example: "What does research say about X?",
+    ready: true,
+    ...REVIEWED,
   },
   {
     id: "prepare",
@@ -145,12 +162,13 @@ export const typeOf = (type: MissionType) => {
  * A comparison delivers one `memo` and a verification one `verdict`, which aren't among the formats
  * a Learn mission can make.
  */
-export type OutputFormat = "guide" | "quiz" | "glossary" | "memo" | "verdict"
-export const FORMATS: { id: Exclude<OutputFormat, "memo" | "verdict">; name: string }[] = [
-  { id: "guide", name: "Guide" },
-  { id: "quiz", name: "Quiz" },
-  { id: "glossary", name: "Glossary" },
-]
+export type OutputFormat = "guide" | "quiz" | "glossary" | "memo" | "verdict" | "review"
+export const FORMATS: { id: Exclude<OutputFormat, "memo" | "verdict" | "review">; name: string }[] =
+  [
+    { id: "guide", name: "Guide" },
+    { id: "quiz", name: "Quiz" },
+    { id: "glossary", name: "Glossary" },
+  ]
 
 export type Depth = "overview" | "deep"
 
@@ -171,7 +189,34 @@ export interface Source {
   title: string
   url: string
   kind: SourceKind
+  /** A literature review's paper: the index's metadata, its screening and how much was read. */
+  paper?: Paper
 }
+
+/** Where a paper stands in a review's screening; `unscreened` is one the cap left unread. */
+export type Screening = "found" | "include" | "unsure" | "exclude" | "unscreened"
+
+/** How much of a paper the host read: its open text, the index's abstract, or neither. */
+export type EvidenceLevel = "full" | "abstract" | "metadata"
+
+export interface Paper {
+  doi: string
+  year?: number
+  venue: string
+  authors: string[]
+  preprint: boolean
+  screening: Screening
+  /** Why it was screened as it was, and the criterion an excluded one failed. */
+  reason: string
+  fails: string
+  /** Absent until the paper has been read. */
+  level?: EvidenceLevel
+  /** Fields the quote check threw out. */
+  dropped: number
+}
+
+/** The fields a review extracts from every paper, each a claim with its quote. */
+export type ReviewField = "question" | "design" | "sample" | "finding" | "limitation"
 
 /** A ledger entry: what was claimed, where, and the passage that says so. */
 export interface Claim {
@@ -187,6 +232,9 @@ export interface Claim {
   stance?: "supports" | "refutes" | "context"
   part?: string
   lane?: Lane
+  /** A review's: the field of its paper the claim is, and the theme it was grouped under. */
+  field?: ReviewField
+  theme?: string
 }
 
 /** A verification's two researchers: one looks for support, the other against. */
@@ -305,6 +353,60 @@ export interface VerdictOutput {
   checkedAt: number
 }
 
+/** A review as confirmed: the field, the years, what a paper must meet, and the Scope Gate's search. */
+export interface ReviewBrief {
+  field: string
+  fromYear?: number
+  toYear?: number
+  criteria: string[]
+  queries: string[]
+  cap: number
+  preprints: boolean
+}
+
+/** The funnel, counted by the plugin: `found = screened + unscreened`, `screened = included + excluded`. */
+export interface Funnel {
+  index: string
+  searchedAt: number
+  found: number
+  duplicates: number
+  screened: number
+  included: number
+  unsure: number
+  excluded: Record<string, number>
+  unscreened: number
+}
+
+export interface Theme {
+  id: string
+  title: string
+  paragraphs: Span[][]
+  claims: string[]
+  /** The papers behind the theme, and how many of them were read in full. */
+  papers: number
+  full: number
+}
+
+export interface ReviewOutput {
+  themes: Theme[]
+  /** Two findings of different papers, under one theme, that point opposite ways. */
+  disagreements: { a: string; b: string; theme: string; about: string }[]
+  gaps: Span[][]
+  method?: ReviewBrief & { index: string }
+  funnel?: Funnel
+  /** Included papers by how much of each was read, and the fields the quote check dropped. */
+  read: Record<EvidenceLevel, number>
+  dropped: number
+  /** The reference list, written by the plugin from the index's metadata. */
+  references: { source: string; text: string }[]
+}
+
+export const MAX_QUERIES = 6
+export const MAX_REVIEW_CRITERIA = 6
+export const MIN_CAP = 5
+export const DEFAULT_CAP = 25
+export const MAX_CAP = 40
+
 export const MAX_PARTS = 4
 export const MAX_TERMS = 8
 
@@ -355,6 +457,7 @@ export interface Outputs {
   quiz?: QuizQuestion[]
   glossary?: GlossaryTerm[]
   verdict?: VerdictOutput
+  review?: ReviewOutput
 }
 
 /** One version of what a mission delivered, kept by the plugin, and why it was written. */
@@ -421,6 +524,9 @@ export interface Mission {
   /** A verification's verdict as stored at delivery, and each lane's web searches. */
   verdict?: Verdict
   searches?: Record<Lane, string[]>
+  /** A literature review's confirmed brief and scope, and its funnel once it has searched. */
+  review?: ReviewBrief
+  funnel?: Funnel
   /** Only once the mission itself has been read, not from the list. */
   ledger?: Ledger
   outputs?: Outputs
@@ -431,7 +537,7 @@ const pick = <T extends string>(value: unknown, options: readonly T[], fallback:
 const text = (value: unknown) => (typeof value === "string" ? value : "")
 const list = (value: unknown) => (Array.isArray(value) ? value : [])
 const STAGES = ["brief", "scope", "reading", "drafting", "reviewing", "delivered"] as const
-const FORMAT_IDS = ["guide", "quiz", "glossary", "memo", "verdict"] as const
+const FORMAT_IDS = ["guide", "quiz", "glossary", "memo", "verdict", "review"] as const
 const KIND_IDS = ["papers", "docs", "articles", "videos", "forums"] as const
 
 function toOutputs(raw: unknown): Outputs | undefined {
@@ -443,6 +549,7 @@ function toOutputs(raw: unknown): Outputs | undefined {
       quiz: outputs.quiz && (list(outputs.quiz.questions) as QuizQuestion[]),
       glossary: outputs.glossary && (list(outputs.glossary.terms) as GlossaryTerm[]),
       verdict: outputs.verdict && toVerdictOutput(outputs.verdict),
+      review: outputs.review && toReviewOutput(outputs.review),
     }
   )
 }
@@ -498,6 +605,102 @@ function toSearches(raw: unknown): Mission["searches"] {
   return searches && typeof searches === "object"
     ? { for: ids(searches.for), against: ids(searches.against) }
     : undefined
+}
+
+const year = (value: unknown) => (typeof value === "number" && value > 0 ? value : undefined)
+
+function toReview(raw: unknown): ReviewBrief | undefined {
+  const review = raw as Record<string, unknown> | null | undefined
+  if (!review || typeof review !== "object") return undefined
+  return {
+    field: text(review.field),
+    fromYear: year(review.from_year),
+    toYear: year(review.to_year),
+    criteria: ids(review.criteria),
+    queries: ids(review.queries),
+    cap: Number(review.cap) || DEFAULT_CAP,
+    preprints: review.preprints !== false,
+  }
+}
+
+function toFunnel(raw: unknown): Funnel | undefined {
+  const funnel = raw as Record<string, unknown> | null | undefined
+  if (!funnel || typeof funnel !== "object" || !funnel.searched_at) return undefined
+  const excluded: Record<string, number> = {}
+  for (const [reason, count] of Object.entries((funnel.excluded as object | null) ?? {}))
+    if (typeof count === "number") excluded[reason] = count
+  const count = (value: unknown) => Number(value) || 0
+  return {
+    index: text(funnel.index),
+    searchedAt: count(funnel.searched_at),
+    found: count(funnel.found),
+    duplicates: count(funnel.duplicates),
+    screened: count(funnel.screened),
+    included: count(funnel.included),
+    unsure: count(funnel.unsure),
+    excluded,
+    unscreened: count(funnel.unscreened),
+  }
+}
+
+const SCREENINGS = ["found", "include", "unsure", "exclude", "unscreened"] as const
+const LEVELS = ["full", "abstract", "metadata"] as const
+
+function toSource(raw: Record<string, unknown>): Source {
+  const source = raw as unknown as Source
+  if (!SCREENINGS.includes(raw.screening as Screening)) return source
+  return {
+    id: text(raw.id),
+    title: text(raw.title),
+    url: text(raw.url),
+    kind: "papers",
+    paper: {
+      doi: text(raw.doi),
+      year: year(raw.year),
+      venue: text(raw.venue),
+      authors: ids(raw.authors),
+      preprint: Boolean(raw.preprint),
+      screening: raw.screening as Screening,
+      reason: text(raw.screen_reason),
+      fails: text(raw.screen_fails),
+      level: LEVELS.find((level) => level === raw.evidence_level),
+      dropped: Number(raw.dropped) || 0,
+    },
+  }
+}
+
+function toReviewOutput(raw: Record<string, unknown>): ReviewOutput {
+  const read = (raw.read ?? {}) as Record<string, unknown>
+  const method = toReview(raw.method)
+  return {
+    themes: list(raw.themes).map((theme: Record<string, unknown>) => ({
+      id: text(theme.id),
+      title: text(theme.title),
+      paragraphs: list(theme.paragraphs) as Span[][],
+      claims: ids(theme.claims),
+      papers: Number(theme.papers) || 0,
+      full: Number(theme.full) || 0,
+    })),
+    disagreements: list(raw.disagreements).map((pair: Record<string, unknown>) => ({
+      a: text(pair.a),
+      b: text(pair.b),
+      theme: text(pair.theme),
+      about: text(pair.about),
+    })),
+    gaps: list(raw.gaps) as Span[][],
+    method: method && { ...method, index: text((raw.method as Record<string, unknown>).index) },
+    funnel: toFunnel(raw.funnel),
+    read: {
+      full: Number(read.full) || 0,
+      abstract: Number(read.abstract) || 0,
+      metadata: Number(read.metadata) || 0,
+    },
+    dropped: Number(raw.dropped) || 0,
+    references: list(raw.references).map((ref: Record<string, unknown>) => ({
+      source: text(ref.source),
+      text: text(ref.text),
+    })),
+  }
 }
 
 function toMemo(raw: Record<string, unknown>): Memo {
@@ -637,8 +840,10 @@ function toMission(raw: Record<string, unknown>, profileId: string): Mission {
     verify: raw.type === "verify" ? toVerify(raw) : undefined,
     verdict: toVerdict(raw.verdict),
     searches: toSearches(raw.searches),
+    review: raw.type === "literature" ? toReview(raw.review) : undefined,
+    funnel: toFunnel(raw.funnel),
     ledger: ledger && {
-      sources: list(ledger.sources) as Source[],
+      sources: (list(ledger.sources) as Record<string, unknown>[]).map(toSource),
       claims: list(ledger.claims) as Claim[],
     },
     outputs: toOutputs(raw.outputs),
@@ -833,6 +1038,25 @@ export const approveVerification = (
   strictness: Strictness,
 ) => act(mission, "start", { source_kinds: sources, strictness })
 
+/** A review's brief: the question, its field and years, and what a paper must meet to be included. */
+export const confirmReview = (
+  mission: Mission,
+  brief: { goal: string; field: string; fromYear?: number; toYear?: number; criteria: string[] },
+) =>
+  act(mission, "brief", {
+    goal: brief.goal,
+    field: brief.field,
+    from_year: brief.fromYear ?? null,
+    to_year: brief.toYear ?? null,
+    criteria: brief.criteria,
+  })
+
+/** A review's Scope Gate: the queries to run, how many papers to read, and whether preprints count. */
+export const approveReview = (
+  mission: Mission,
+  scope: { queries: string[]; cap: number; preprints: boolean },
+) => act(mission, "start", scope)
+
 /** Another format from the same ledger: no new reading, only writing. */
 export const makeFormat = (mission: Mission, format: OutputFormat) =>
   act(mission, "formats", { format })
@@ -1004,6 +1228,179 @@ function verdictMarkdown(mission: Mission, cite: (ids?: string[]) => string) {
   return out
 }
 
+/** A mission's sources as its reader counts them: a review's are the papers it included. */
+export const sourcesOf = (ledger?: Ledger) =>
+  (ledger?.sources ?? []).filter(
+    (source) => !source.paper || ["include", "unsure"].includes(source.paper.screening),
+  )
+
+export interface PaperRow extends Paper {
+  source: Source
+  /** The paper's fields the quote check kept, by field. */
+  fields: Record<ReviewField, Claim[]>
+}
+
+/** A review's included papers, each with what was extracted from it, in the order they were read. */
+export function papersOf(ledger?: Ledger): PaperRow[] {
+  return sourcesOf(ledger)
+    .filter((source) => source.paper)
+    .map((source) => {
+      const fields: PaperRow["fields"] = {
+        question: [],
+        design: [],
+        sample: [],
+        finding: [],
+        limitation: [],
+      }
+      for (const claim of ledger?.claims ?? [])
+        if (claim.source === source.id && claim.field) fields[claim.field]?.push(claim)
+      return { ...source.paper!, source, fields }
+    })
+}
+
+export const LEVEL_NAMES: Record<EvidenceLevel, string> = {
+  full: "Full text",
+  abstract: "Abstract only",
+  metadata: "Metadata only",
+}
+
+export const SCREENING_NAMES: Record<Screening, string> = {
+  found: "Found",
+  include: "Included",
+  unsure: "Included, unsure",
+  exclude: "Screened out",
+  unscreened: "Not screened",
+}
+
+/** Where a paper stands, in a few words: screened out and why, or how much of it was read. */
+export function paperState(paper: Paper) {
+  if (paper.screening === "exclude")
+    return paper.fails ? `Screened out · ${paper.fails}` : "Screened out"
+  if (paper.screening === "include" || paper.screening === "unsure")
+    return paper.level ? LEVEL_NAMES[paper.level] : SCREENING_NAMES[paper.screening]
+  return SCREENING_NAMES[paper.screening]
+}
+
+/** "Okafor et al., 2021": a paper as a table names it, from the index's metadata. */
+export function paperCitation(paper: Paper) {
+  const last = (name: string) => name.trim().split(/\s+/).at(-1) ?? name
+  const [first, second, ...rest] = paper.authors
+  const who = !first
+    ? ""
+    : rest.length
+      ? `${last(first)} et al.`
+      : second
+        ? `${last(first)} & ${last(second)}`
+        : last(first)
+  return [who, paper.year].filter(Boolean).join(", ")
+}
+
+/** The years a review searched, in words. */
+export const yearsLine = (review: Pick<ReviewBrief, "fromYear" | "toYear">) =>
+  review.fromYear && review.toYear
+    ? `${review.fromYear} to ${review.toYear}`
+    : review.fromYear
+      ? `Since ${review.fromYear}`
+      : review.toYear
+        ? `Up to ${review.toYear}`
+        : "Any year"
+
+/** The funnel in one line per count, as the review's method states it. */
+export function funnelLines(funnel: Funnel) {
+  const excluded = Object.entries(funnel.excluded)
+  return [
+    `${funnel.found} found in ${funnel.index}` +
+      (funnel.duplicates ? ` (${funnel.duplicates} repeats folded)` : ""),
+    `${funnel.screened} screened` +
+      (funnel.unscreened ? `, ${funnel.unscreened} not reached before the cap` : ""),
+    `${funnel.included} included` + (funnel.unsure ? ` (${funnel.unsure} unsure)` : ""),
+    ...excluded.map(([reason, count]) => `${count} excluded: ${reason}`),
+  ]
+}
+
+/** How much of the included papers was read, as the review's card states it. */
+export function readLine(read: Record<EvidenceLevel, number>) {
+  const total = read.full + read.abstract + read.metadata
+  return (
+    `${read.full} of ${total} read in full · ${read.abstract} at abstract only` +
+    (read.metadata ? ` · ${read.metadata} at metadata only` : "")
+  )
+}
+
+export const droppedLine = (dropped: number) =>
+  `${plural(dropped, "extracted field")} dropped by the quote check`
+
+/** The narrative review: its method and funnel, the papers table, themes, disagreements, gaps and references. */
+function reviewMarkdown(mission: Mission, cite: (ids?: string[]) => string) {
+  const review = mission.outputs?.review
+  if (!review) return []
+  const prose = (paragraphs: Span[][]) =>
+    paragraphs.map((p) =>
+      p.map((s) => `${s.text}${s.flagged ? " (no source)" : cite(s.cites)}`).join(""),
+    )
+  const cell = (claims: Claim[]) =>
+    claims.map((c) => `${c.text.replace(/\|/g, "/")}${cite([c.id])}`).join(" ") || "–"
+  const out = ["A narrative review, not a systematic one.", ""]
+  const method = review.method ?? mission.review
+  out.push("## Scope and method", "", `Question: ${mission.goal}`)
+  if (method) {
+    out.push(
+      `Index: ${review.method?.index ?? review.funnel?.index ?? ""}` +
+        (review.funnel ? `, searched ${checkedOn(review.funnel.searchedAt)}` : ""),
+      `Years: ${yearsLine(method)} · Preprints ${method.preprints ? "included" : "left out"} · Up to ${method.cap} papers`,
+      "",
+      "Queries:",
+      ...method.queries.map((q) => `- ${q}`),
+      "",
+      "Inclusion criteria:",
+      ...method.criteria.map((c) => `- ${c}`),
+    )
+  }
+  if (review.funnel) out.push("", ...funnelLines(review.funnel).map((line) => `- ${line}`))
+  out.push(
+    "",
+    readLine(review.read) + (review.dropped ? ` · ${droppedLine(review.dropped)}` : ""),
+    "",
+  )
+  out.push(
+    "## Papers",
+    "",
+    "| Paper | Design | Sample or data | Key findings | Stated limitations | Read |",
+    "|---|---|---|---|---|---|",
+    ...papersOf(mission.ledger).map(
+      (paper) =>
+        `| ${paperCitation(paper) || paper.source.title}${paper.preprint ? " (preprint)" : ""} | ` +
+        [paper.fields.design, paper.fields.sample, paper.fields.finding, paper.fields.limitation]
+          .map(cell)
+          .join(" | ") +
+        ` | ${paper.level ? LEVEL_NAMES[paper.level] : "–"} |`,
+    ),
+    "",
+  )
+  for (const theme of review.themes)
+    out.push(
+      `## ${theme.title}`,
+      "",
+      `${plural(theme.papers, "paper")}, ${theme.full} read in full`,
+      "",
+      ...prose(theme.paragraphs).flatMap((p) => [p, ""]),
+    )
+  if (review.disagreements.length) {
+    out.push("## Where papers disagree", "")
+    for (const pair of review.disagreements) out.push(`- ${pair.about}${cite([pair.a, pair.b])}`)
+    out.push("")
+  }
+  if (review.gaps.length)
+    out.push("## Gaps and limits of this review", "", ...prose(review.gaps).flatMap((p) => [p, ""]))
+  out.push(
+    `This review searched one index${review.funnel ? ` (${review.funnel.index})` : ""} and read in full only what is openly available.`,
+    "",
+  )
+  if (review.references.length)
+    out.push("## References", "", ...review.references.map((ref) => `- ${ref.text}`), "")
+  return out
+}
+
 export function toMarkdown(mission: Mission, format: OutputFormat) {
   const ledger = mission.ledger ?? { sources: [], claims: [] }
   const used = new Set<string>()
@@ -1017,6 +1414,8 @@ export function toMarkdown(mission: Mission, format: OutputFormat) {
     out.push(...memoMarkdown(mission, cite))
   } else if (format === "verdict") {
     out.push(...verdictMarkdown(mission, cite))
+  } else if (format === "review") {
+    out.push(...reviewMarkdown(mission, cite))
   } else if (format === "guide") {
     for (const section of outputs.guide ?? []) {
       out.push(`## ${section.title}`, "")
@@ -1039,7 +1438,7 @@ export function toMarkdown(mission: Mission, format: OutputFormat) {
   const sources = new Map(ledger.sources.map((s) => [s.id, s]))
   const claims = ledger.claims.filter((c) => used.has(c.id))
   if (claims.length) {
-    out.push("## Sources", "")
+    out.push(format === "review" ? "## Quotes" : "## Sources", "")
     for (const claim of claims) {
       const source = sources.get(claim.source)
       out.push(

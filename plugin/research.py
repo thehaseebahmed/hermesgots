@@ -22,6 +22,11 @@ it bears on, and drafts a memo instead: an advocate per option makes its case, e
 others', and one judge scores every option on every criterion from the ledger. The ranking is code
 (``decide``), never the judge's.
 
+A literature review reads no page an agent found: the plugin searches a scholarly index
+(``scholar.py``), screens the candidates against the user's criteria, reads what is open and extracts
+the same few fields from each paper, each kept only with a quote found in the text it fetched. No
+Hermes run is started for it.
+
 Another format (a quiz, a glossary) is written later from the same ledger, without new reading.
 A delivered mission is written again, whole, when the user asks the questions it missed (read for
 first) or picks another model to write it; every delivery is kept as a revision with its reason.
@@ -47,7 +52,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import events, push, tools_common
+from . import events, push, scholar, tools_common
 from .store import connect, home_of
 
 logger = logging.getLogger(__name__)
@@ -59,6 +64,25 @@ FORMATS = ("guide", "quiz", "glossary")
 # A comparison delivers one thing, the memo; there are no other formats to make.
 COMPARE_FORMAT = "memo"
 VERIFY_FORMAT = "verdict"
+LITERATURE_FORMAT = "review"
+MAX_QUERIES = 6
+MAX_REVIEW_CRITERIA = 6
+MIN_CAP = 5
+DEFAULT_CAP = 25
+MAX_CAP = 40
+# The screening reads at most this many candidates for every paper the cap allows.
+SCREEN_FACTOR = 3
+# A review of one paper is that paper; fewer than this with a quoted finding fails the reading.
+MIN_PAPERS = 2
+MIN_QUOTE = 12
+# Quotes are kept short: enough to find the passage, never a stretch of the paper.
+MAX_QUOTE = 500
+MAX_FIELD = 400
+# A fetched page counts as the paper's text only when it is this long; a landing page that holds
+# the abstract and a link is not the paper.
+FULL_TEXT_WORDS = 1500
+MAX_PAPER_CHARS = 80_000
+FIRST_YEAR = 1800
 MIN_OPTIONS = 2
 MAX_OPTIONS = 5
 MIN_CRITERIA = 2
@@ -174,7 +198,9 @@ def _loads(text: Optional[str], default: Any) -> Any:
 
 def _summary(row: Any, conn: Any) -> Dict[str, Any]:
     counts = conn.execute(
-        """SELECT (SELECT COUNT(*) FROM research_sources WHERE mission_id = ?),
+        # A paper a review screened out, or never reached, is not one of its sources.
+        """SELECT (SELECT COUNT(*) FROM research_sources WHERE mission_id = ?
+                       AND (screening IS NULL OR screening IN ('include', 'unsure'))),
                   (SELECT COUNT(*) FROM research_claims WHERE mission_id = ?)""",
         (row["id"], row["id"]),
     ).fetchone()
@@ -208,6 +234,8 @@ def _summary(row: Any, conn: Any) -> Dict[str, Any]:
         "terms": _loads(row["terms"], []),
         "uncheckable": row["uncheckable"],
         "strictness": row["strictness"],
+        "review": _loads(row["review"], None),
+        "funnel": _loads(row["funnel"], None),
         "found": counts[0],
         "claims": counts[1],
         "created_at": row["created_at"],
@@ -222,7 +250,7 @@ def _row(conn: Any, mission_id: str) -> Any:
 def _update(path: Path, mission_id: str, **fields: Any) -> None:
     for key in (
         "outline", "source_kinds", "formats", "followups", "suggestions", "pending", "writer", "researcher",
-        "options", "criteria", "judge", "parts", "terms",
+        "options", "criteria", "judge", "parts", "terms", "review", "funnel",
     ):
         if key in fields and fields[key] is not None and not isinstance(fields[key], str):
             fields[key] = json.dumps(fields[key])
@@ -322,16 +350,18 @@ def note_search(path: Path, mission_id: str, lane: str, query: Any) -> None:
 
 def _ledger(conn: Any, mission_id: str) -> Dict[str, List[Dict[str, Any]]]:
     sources = conn.execute(
-        "SELECT id, title, url, kind FROM research_sources WHERE mission_id = ? ORDER BY at, rowid",
+        """SELECT id, title, url, kind, doi, year, venue, authors, preprint, screening, screen_reason,
+                  screen_fails, evidence_level, dropped
+           FROM research_sources WHERE mission_id = ? ORDER BY at, rowid""",
         (mission_id,),
     ).fetchall()
     claims = conn.execute(
         """SELECT id, text, source_id, snippet, confidence, option_id, criterion_id, stance, part_id,
-                  lane FROM research_claims WHERE mission_id = ? ORDER BY at, rowid""",
+                  lane, field, theme FROM research_claims WHERE mission_id = ? ORDER BY at, rowid""",
         (mission_id,),
     ).fetchall()
     return {
-        "sources": [dict(row) for row in sources],
+        "sources": [_source(row) for row in sources],
         "claims": [
             {
                 "id": row["id"],
@@ -341,10 +371,31 @@ def _ledger(conn: Any, mission_id: str) -> Dict[str, List[Dict[str, Any]]]:
                 "confidence": row["confidence"],
                 **({"option": row["option_id"], "criterion": row["criterion_id"]} if row["option_id"] or row["criterion_id"] else {}),
                 **({"stance": row["stance"], "part": row["part_id"], "lane": row["lane"]} if row["stance"] else {}),
+                **({"field": row["field"], "theme": row["theme"]} if row["field"] else {}),
             }
             for row in claims
         ],
     }
+
+
+def _source(row: Any) -> Dict[str, Any]:
+    """A source as a read shows it; a review's paper also carries the index's metadata, where its
+    screening stands and how much of it was read."""
+    source = {"id": row["id"], "title": row["title"], "url": row["url"], "kind": row["kind"]}
+    if row["screening"]:
+        source.update(
+            doi=row["doi"] or "",
+            year=row["year"],
+            venue=row["venue"] or "",
+            authors=_loads(row["authors"], []),
+            preprint=bool(row["preprint"]),
+            screening=row["screening"],
+            screen_reason=row["screen_reason"] or "",
+            screen_fails=row["screen_fails"] or "",
+            evidence_level=row["evidence_level"],
+            dropped=row["dropped"] or 0,
+        )
+    return source
 
 
 def _text(value: Any, limit: int, name: str, required: bool = True) -> str:
@@ -363,7 +414,10 @@ def create(path: Path, profile: Optional[str], text: Any, kind: Any = "learn") -
     text = _text(text, MAX_INPUT, "The question")
     kind = kind or "learn"
     if kind not in MISSION_TYPES:
-        raise ResearchError("Only Learn & understand, Compare & decide and Verify a claim missions can be started so far.")
+        raise ResearchError(
+            "Only Learn & understand, Compare & decide, Verify a claim and Literature review missions "
+            "can be started so far."
+        )
     mission_id = f"r_{uuid.uuid4().hex[:16]}"
     now = _now()
     conn = _open(path)
@@ -635,7 +689,7 @@ def _clear(path: Path, mission_id: str) -> None:
             conn.execute(f"DELETE FROM {table} WHERE mission_id = ?", (mission_id,))
     finally:
         conn.close()
-    _update(path, mission_id, formats=[], making=None, written=0, pending=None)
+    _update(path, mission_id, formats=[], making=None, written=0, pending=None, funnel=None)
 
 
 def make_format(path: Path, mission_id: str, fmt: Any) -> Dict[str, Any]:
@@ -1276,16 +1330,32 @@ def _words(text: str) -> str:
     return " ".join(re.findall(r"\w+", html.unescape(text).casefold()))
 
 
-def _page_words(raw: bytes, content_type: str) -> Optional[str]:
-    if "pdf" in content_type:
+def _page_text(raw: bytes, content_type: str) -> Optional[str]:
+    """A page's text with its markup taken out, or None for a PDF, which nothing here reads."""
+    if "pdf" in content_type or raw[:5] == b"%PDF-":
         return None
     charset = re.search(r"charset=([\w-]+)", content_type)
-    text = raw.decode(charset.group(1) if charset else "utf-8", errors="replace")
+    try:
+        text = raw.decode(charset.group(1) if charset else "utf-8", errors="replace")
+    except LookupError:
+        text = raw.decode("utf-8", errors="replace")
     if "html" in content_type or "<html" in text[:2000].lower():
         text = re.sub(r"(?is)<(script|style|noscript|svg)\b.*?</\1>", " ", text)
         text = re.sub(r"(?s)<!--.*?-->", " ", text)
         text = re.sub(r"<[^>]+>", " ", text)
-    return _words(text)
+    return text
+
+
+def _page_words(raw: bytes, content_type: str) -> Optional[str]:
+    text = _page_text(raw, content_type)
+    return None if text is None else _words(text)
+
+
+def _fetch_text(url: str) -> Optional[str]:
+    """A page's text as a reader would read it, or None when it can't be read here."""
+    got = _download(url)
+    text = _page_text(*got) if got else None
+    return None if text is None else html.unescape(" ".join(text.split()))
 
 
 def _fetch_words(url: str) -> Optional[str]:
@@ -1294,6 +1364,17 @@ def _fetch_words(url: str) -> Optional[str]:
         if url in _pages:
             _pages.move_to_end(url)
             return _pages[url]
+    got = _download(url)
+    words = _page_words(*got) if got else None
+    with _page_lock:
+        _pages[url] = words
+        while len(_pages) > PAGE_CACHE:
+            _pages.popitem(last=False)
+    return words
+
+
+def _download(url: str) -> Optional[Tuple[bytes, str]]:
+    """A page's bytes and content type, or None when it can't be reached."""
     request = urllib.request.Request(
         url,
         headers={
@@ -1304,15 +1385,9 @@ def _fetch_words(url: str) -> Optional[str]:
     try:
         with urllib.request.urlopen(request, timeout=FETCH_TIMEOUT_S) as response:
             raw = response.read(FETCH_MAX_BYTES)
-            content_type = (response.headers.get("Content-Type") or "").lower()
-        words = _page_words(raw, content_type)
+            return raw, (response.headers.get("Content-Type") or "").lower()
     except (urllib.error.URLError, OSError, ValueError):
-        words = None
-    with _page_lock:
-        _pages[url] = words
-        while len(_pages) > PAGE_CACHE:
-            _pages.popitem(last=False)
-    return words
+        return None
 
 
 def check_passage(page: Optional[str], snippet: str) -> Optional[bool]:
@@ -2386,6 +2461,662 @@ def _draft_verify(path: Path, found: Dict[str, Any]) -> None:
     _tell(path, "research_done", mission_id, found["title"])
 
 
+# --- a literature review ---------------------------------------------------------------------------
+#
+# The fourth type reads no web page an agent found: its candidates come from a scholarly index
+# (scholar.py) and the reading is a fixed loop of bounded calls, so it runs here as code that can
+# count, stop and pick up where it was, with no Hermes run at all. Three things hold whatever a
+# model says: a reference is the index's metadata, a field is kept only with a quote found in the
+# text the host fetched, and every paper says how much of it was read.
+
+REVIEW_FIELDS = ("question", "design", "sample", "finding", "limitation")
+DESIGNS = ("trial", "cohort", "survey", "model", "theory", "review", "other")
+SCREENINGS = ("include", "unsure", "exclude")
+INCLUDED = ("include", "unsure")
+OFF_TOPIC = "Off topic"
+
+LITERATURE_BRIEF_SYSTEM = (
+    "You read back a question someone wants the research literature reviewed on, so they can correct "
+    "it before any search starts. Stay close to what they asked; never widen it and never answer it."
+)
+LITERATURE_BRIEF_INSTRUCTIONS = (
+    f"Read the question below and fill in the brief. title: what the review is about in at most six "
+    f"words, no trailing punctuation. goal: the question the review answers, as one plain question. "
+    f"field: the research field it sits in, as a short phrase. from_year and to_year: the years the "
+    f"question limits the search to, or 0 where it names none. criteria: 2 to {MAX_REVIEW_CRITERIA - 1} "
+    f"short lines a paper must meet to be included, each one checkable from a title and an abstract "
+    f"(a population, a method, a kind of study, an outcome). queries: 3 to {MAX_QUERIES} search "
+    f"queries for a scholarly index, each a few plain keywords, that between them cover the question "
+    f"from different angles."
+)
+LITERATURE_BRIEF_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "goal": {"type": "string"},
+        "field": {"type": "string"},
+        "from_year": {"type": "integer"},
+        "to_year": {"type": "integer"},
+        "criteria": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": MAX_REVIEW_CRITERIA},
+        "queries": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": MAX_QUERIES},
+    },
+    "required": ["title", "goal", "field", "from_year", "to_year", "criteria", "queries"],
+}
+
+
+def _lines(raw: Any, limit: int, most: int, name: str) -> List[str]:
+    """Short lines as given: trimmed, blank ones and repeats (whatever their case) dropped."""
+    if not isinstance(raw, list):
+        raise ResearchError(f"The {name} are required.")
+    lines: List[str] = []
+    for item in raw:
+        if isinstance(item, str) and item.strip():
+            line = _text(item, limit, f"One of the {name}")
+            if line.casefold() not in {other.casefold() for other in lines}:
+                lines.append(line)
+    if not 1 <= len(lines) <= most:
+        raise ResearchError(f"Give 1 to {most} {name}.")
+    return lines
+
+
+def _year(value: Any, name: str) -> Optional[int]:
+    """A year a search is limited to, or None for no limit (nothing, or 0)."""
+    if value in (None, 0, ""):
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or not FIRST_YEAR <= value <= time.gmtime().tm_year + 1:
+        raise ResearchError(f"{name} must be a year.")
+    return value
+
+
+def _years(first: Any, last: Any) -> Tuple[Optional[int], Optional[int]]:
+    from_year, to_year = _year(first, "The first year"), _year(last, "The last year")
+    if from_year and to_year and from_year > to_year:
+        raise ResearchError("The first year is after the last.")
+    return from_year, to_year
+
+
+def _literature_brief(path: Path, row: Dict[str, Any]) -> None:
+    answer = _structured(
+        "brief", LITERATURE_BRIEF_SYSTEM, LITERATURE_BRIEF_INSTRUCTIONS, row["input"], LITERATURE_BRIEF_SCHEMA, 1500
+    )
+
+    def lines(key: str, most: int) -> List[str]:
+        found = [_clip(item, MAX_POINT) for item in answer.get(key) or [] if isinstance(item, str)]
+        return list(dict.fromkeys(line for line in found if line))[:most]
+
+    criteria, queries = lines("criteria", MAX_REVIEW_CRITERIA), lines("queries", MAX_QUERIES)
+    if not criteria or not queries:
+        raise ResearchError("The model couldn't read a question to review in that. Try again.", 502)
+    try:
+        from_year, to_year = _years(answer.get("from_year"), answer.get("to_year"))
+    except ResearchError:
+        from_year, to_year = None, None
+    fields = {
+        "title": _clip(answer.get("title"), MAX_TITLE) or row["title"],
+        "goal": _clip(answer.get("goal"), MAX_GOAL) or _clip(row["input"], MAX_GOAL),
+        "review": {
+            "field": _clip(answer.get("field"), MAX_NAME),
+            "from_year": from_year,
+            "to_year": to_year,
+            "criteria": criteria,
+            "queries": queries,
+            "cap": DEFAULT_CAP,
+            "preprints": True,
+        },
+    }
+    _update(path, row["id"], **fields, busy=None)
+    _tell(path, "research_brief", row["id"], fields["title"])
+
+
+def _confirm_literature_brief(path: Path, mission_id: str, body: Dict[str, Any]) -> Dict[str, Any]:
+    found = mission(path, mission_id) or {}
+    review = dict(found.get("review") or {})
+    fields: Dict[str, Any] = {"goal": _text(body.get("goal"), MAX_GOAL, "The question")}
+    if body.get("title") is not None:
+        fields["title"] = _text(body.get("title"), MAX_TITLE, "The title")
+    from_year, to_year = _years(body.get("from_year"), body.get("to_year"))
+    review.update(
+        field=_text(body.get("field"), MAX_NAME, "The field", required=False),
+        from_year=from_year,
+        to_year=to_year,
+        criteria=_lines(body.get("criteria"), MAX_POINT, MAX_REVIEW_CRITERIA, "inclusion criteria"),
+    )
+    queries = [query for query in review.get("queries") or [] if isinstance(query, str)]
+    # The queries are what gets searched, so they are the Scope Gate's outline: no model call.
+    _update(
+        path, mission_id, **fields, review=review, source_kinds=["papers"], format=LITERATURE_FORMAT,
+        audience="", stage="scope", busy=None, outline=queries, error=None,
+    )
+    _tell(path, "research_scope", mission_id)
+    return mission(path, mission_id)  # type: ignore[return-value]
+
+
+def _approve_literature_scope(path: Path, found: Dict[str, Any], body: Dict[str, Any]) -> Dict[str, Any]:
+    queries = _lines(body.get("queries"), MAX_POINT, MAX_QUERIES, "search queries")
+    cap = body.get("cap", DEFAULT_CAP)
+    if isinstance(cap, bool) or not isinstance(cap, int) or not MIN_CAP <= cap <= MAX_CAP:
+        raise ResearchError(f"Review {MIN_CAP} to {MAX_CAP} papers.")
+    preprints = body.get("preprints", True)
+    if not isinstance(preprints, bool):
+        raise ResearchError("preprints is true or false.")
+    mission_id = found["id"]
+    review = {**(found.get("review") or {}), "queries": queries, "cap": cap, "preprints": preprints}
+    _clear(path, mission_id)
+    _update(path, mission_id, review=review, outline=queries, stage="reading", busy=None, error=None)
+    return mission(path, mission_id)  # type: ignore[return-value]
+
+
+def _literature_brief_text(row: Dict[str, Any]) -> str:
+    review = row.get("review") or {}
+    years = f"{review.get('from_year') or 'any year'} to {review.get('to_year') or 'now'}"
+    return (
+        f"Question: {row['goal']}\nField: {review.get('field') or 'not stated'}\nYears: {years}\n"
+        "Inclusion criteria:\n"
+        + "".join(f"{index + 1}. {line}\n" for index, line in enumerate(review.get("criteria") or []))
+    )
+
+
+def funnel_counts(found: int, duplicates: int, screenings: List[Tuple[Optional[str], Optional[str]]]) -> Dict[str, Any]:
+    """The funnel, counted by code from where each paper stands (its screening and what it failed).
+    ``found`` papers came back once repeats were folded; every one of them is either screened or
+    wasn't reached, and every screened one is either included or excluded for a reason, so
+    ``found == screened + unscreened`` and ``screened == included + sum(excluded)`` always hold."""
+    included = sum(verdict in INCLUDED for verdict, _reason in screenings)
+    excluded: Dict[str, int] = {}
+    for verdict, reason in screenings:
+        if verdict == "exclude":
+            excluded[reason or OFF_TOPIC] = excluded.get(reason or OFF_TOPIC, 0) + 1
+    screened = included + sum(excluded.values())
+    return {
+        "found": found,
+        "duplicates": duplicates,
+        "screened": screened,
+        "included": included,
+        "unsure": sum(verdict == "unsure" for verdict, _reason in screenings),
+        "excluded": excluded,
+        "unscreened": found - screened,
+    }
+
+
+def _papers(path: Path, mission_id: str, where: str = "") -> List[Any]:
+    conn = _open(path)
+    try:
+        return conn.execute(
+            f"SELECT * FROM research_sources WHERE mission_id = ? {where} ORDER BY at, rowid", (mission_id,)
+        ).fetchall()
+    finally:
+        conn.close()
+
+
+def _reading(path: Path, mission_id: str) -> Optional[Dict[str, Any]]:
+    """The mission while it is still reading; None once it was removed, failed or moved on, which
+    is what stops the loop between two papers."""
+    conn = _open(path)
+    try:
+        row = _row(conn, mission_id)
+        if row is None or row["stage"] != "reading" or row["error"]:
+            return None
+        return _summary(row, conn)
+    finally:
+        conn.close()
+
+
+def _count_funnel(path: Path, mission_id: str) -> None:
+    found = _reading(path, mission_id)
+    if found is None:
+        return
+    base = found["funnel"] or {}
+    rows = _papers(path, mission_id)
+    counted = funnel_counts(
+        base.get("found", len(rows)), base.get("duplicates", 0),
+        [(row["screening"], row["screen_fails"]) for row in rows],
+    )
+    _update(path, mission_id, funnel={**base, **counted})
+
+
+def _search_papers(path: Path, found: Dict[str, Any]) -> None:
+    """Runs every query against the index, folds the repeats and keeps the candidates, each a
+    source at ``found``. No model is in this step."""
+    review = found["review"] or {}
+    key = scholar.api_key()
+    try:
+        lists = [
+            scholar.search(query, review.get("from_year"), review.get("to_year"), review.get("preprints", True), key)
+            for query in review.get("queries") or []
+        ]
+    except scholar.IndexError_ as error:
+        raise ResearchError(str(error), 502) from None
+    merged, duplicates = scholar.merge(lists)
+    if not merged:
+        raise ResearchError(f"{scholar.NAME} found no papers for those queries.", 502)
+    kept = merged[: (review.get("cap") or DEFAULT_CAP) * SCREEN_FACTOR]
+    now = _now()
+    conn = _open(path)
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute("DELETE FROM research_claims WHERE mission_id = ?", (found["id"],))
+        conn.execute("DELETE FROM research_sources WHERE mission_id = ?", (found["id"],))
+        for index, item in enumerate(kept):
+            conn.execute(
+                """INSERT INTO research_sources (mission_id, id, url, title, kind, at, doi, year, venue,
+                       authors, preprint, screening, abstract, text_urls)
+                   VALUES (?, ?, ?, ?, 'papers', ?, ?, ?, ?, ?, ?, 'found', ?, ?)""",
+                (
+                    found["id"], f"s{index + 1}", item["url"], item["title"], now, item["doi"], item["year"],
+                    item["venue"], json.dumps(item["authors"]), int(item["preprint"]), item["abstract"],
+                    json.dumps(item["text_urls"]),
+                ),
+            )
+        conn.execute("COMMIT")
+    finally:
+        conn.close()
+    _update(
+        path, found["id"],
+        funnel={
+            "index": scholar.NAME, "searched_at": now, "keyed": bool(key),
+            **funnel_counts(len(merged), duplicates, []),
+        },
+    )
+
+
+SCREEN_SYSTEM = (
+    "You screen one paper for a literature review, from its title and abstract alone. Judge it "
+    "against the question and the inclusion criteria as written; never guess at what the full text "
+    "might say."
+)
+SCREEN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "verdict": {"type": "string", "enum": list(SCREENINGS)},
+        "fails": {"type": "integer"},
+        "reason": {"type": "string"},
+    },
+    "required": ["verdict", "fails", "reason"],
+}
+
+
+def _paper_head(row: Any) -> str:
+    kind = "preprint" if row["preprint"] else "paper"
+    return (
+        f"Title: {row['title']}\nYear: {row['year'] or 'unknown'}\nVenue: {row['venue'] or 'unknown'} ({kind})\n"
+    )
+
+
+def screen(found: Dict[str, Any], row: Any) -> Tuple[str, str, str]:
+    """One paper's screening: include, exclude or unsure, the criterion an excluded one fails (or
+    that it is off topic) and a line of why. Unsure goes through to reading."""
+    criteria = (found["review"] or {}).get("criteria") or []
+    instructions = (
+        f"{_literature_brief_text(found)}\nSay include when the paper bears on the question and "
+        f"meets every criterion, exclude when it is off the question or plainly fails a criterion, "
+        f"and unsure when the title and abstract don't settle it. fails: the number of the criterion "
+        f"an excluded paper fails, or 0 when it is off the question (0 for include and unsure). "
+        f"reason: one short sentence."
+    )
+    text = _paper_head(row) + f"Abstract: {row['abstract'] or 'The index holds no abstract for it.'}"
+    answer = _structured("screen", SCREEN_SYSTEM, instructions, text, SCREEN_SCHEMA, 400)
+    verdict = answer.get("verdict") if answer.get("verdict") in SCREENINGS else "unsure"
+    fails = answer.get("fails")
+    failed = ""
+    if verdict == "exclude":
+        numbered = isinstance(fails, int) and not isinstance(fails, bool) and 1 <= fails <= len(criteria)
+        failed = criteria[fails - 1] if numbered else OFF_TOPIC
+    return verdict, failed, _clip(answer.get("reason"), MAX_POINT)
+
+
+def _screen_papers(path: Path, mission_id: str) -> None:
+    """Screens the candidates in the index's order until the cap of included papers is reached;
+    the ones never reached are counted as that, not as excluded."""
+    while True:
+        found = _reading(path, mission_id)
+        if found is None:
+            return
+        cap = (found["review"] or {}).get("cap") or DEFAULT_CAP
+        rows = _papers(path, mission_id)
+        waiting = [row for row in rows if row["screening"] == "found"]
+        full = sum(row["screening"] in INCLUDED for row in rows) >= cap
+        conn = _open(path)
+        try:
+            if not waiting or full:
+                conn.execute(
+                    "UPDATE research_sources SET screening = 'unscreened' WHERE mission_id = ? AND screening = 'found'",
+                    (mission_id,),
+                )
+            else:
+                verdict, failed, reason = screen(found, waiting[0])
+                conn.execute(
+                    """UPDATE research_sources SET screening = ?, screen_fails = ?, screen_reason = ?
+                       WHERE mission_id = ? AND id = ?""",
+                    (verdict, failed, reason, mission_id, waiting[0]["id"]),
+                )
+        finally:
+            conn.close()
+        _count_funnel(path, mission_id)
+        if not waiting or full:
+            return
+
+
+EXTRACT_SYSTEM = (
+    "You extract the same few fields from one research paper, for a literature review. Use only "
+    "the text you are given. Every value comes with a quote copied word for word from that text; "
+    "the quote is checked against it by code, and a field whose quote isn't found is thrown away."
+)
+_QUOTED = {
+    "type": "object",
+    "properties": {"value": {"type": "string"}, "quote": {"type": "string"}},
+    "required": ["value", "quote"],
+}
+EXTRACT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "question": _QUOTED,
+        "design": {
+            "type": "object",
+            "properties": {"value": {"type": "string", "enum": list(DESIGNS)}, "quote": {"type": "string"}},
+            "required": ["value", "quote"],
+        },
+        "sample": _QUOTED,
+        "findings": {"type": "array", "items": _QUOTED, "maxItems": 3},
+        "limitations": {"type": "array", "items": _QUOTED, "maxItems": 2},
+    },
+    "required": ["question", "design", "sample", "findings", "limitations"],
+}
+LEVEL_WORDS = {"full": "its full text", "abstract": "its abstract only", "metadata": "nothing but its metadata"}
+
+
+def _paper_text(row: Any, fetch: Callable[[str], Optional[str]]) -> Tuple[str, str]:
+    """How much of a paper can be read here and the text read: the open copy the index names when
+    it is long enough to be the paper, else the index's abstract, else nothing. A copy that can't
+    be fetched or read (a PDF, a blocked site) never fails the mission."""
+    abstract = row["abstract"] or ""
+    for url in _loads(row["text_urls"], []):
+        try:
+            text = fetch(url)
+        except Exception:
+            logger.debug("gots: couldn't fetch %s", url, exc_info=True)
+            text = None
+        if text and len(text.split()) >= max(FULL_TEXT_WORDS, 3 * len(abstract.split())):
+            return "full", text
+    return ("abstract", abstract) if abstract.strip() else ("metadata", "")
+
+
+def extract(found: Dict[str, Any], row: Any, level: str, text: str) -> Tuple[List[Tuple[str, str, str]], int]:
+    """A paper's fields as ``(field, value, quote)`` and how many were dropped. A field is kept only
+    when its quote is in the text the host holds: the model's word that it is there counts for
+    nothing."""
+    instructions = (
+        f"The review asks: {found['goal']}\nYou are given {LEVEL_WORDS[level]}. Extract: question (what "
+        f"the paper set out to find), design (one of {', '.join(DESIGNS)}), sample (who or what was "
+        f"studied, or the data used, with its size), findings (the 1 to 3 results that bear on the "
+        f"review's question) and limitations (up to 2 the authors themselves state). Each value is "
+        f"one plain sentence in your own words (design is one word), and each quote is the passage "
+        f"that says so, copied word for word from the text: one or two sentences, no ellipsis, no "
+        f"paraphrase. Leave a value and its quote empty when the text doesn't say; never fill one "
+        f"in from what you know of the paper."
+    )
+    answer = _structured(
+        "extract", EXTRACT_SYSTEM, instructions, _paper_head(row) + f"Text:\n{text[:MAX_PAPER_CHARS]}",
+        EXTRACT_SCHEMA, 2500,
+    )
+    page = _words(text)
+    kept: List[Tuple[str, str, str]] = []
+    dropped = 0
+
+    def take(field: str, item: Any) -> None:
+        nonlocal dropped
+        value = _clip(item.get("value"), MAX_FIELD) if isinstance(item, dict) else ""
+        quote = item.get("quote").strip() if isinstance(item, dict) and isinstance(item.get("quote"), str) else ""
+        if not value:
+            return
+        if field == "design" and value not in DESIGNS:
+            dropped += 1
+        elif MIN_QUOTE <= len(quote) <= MAX_QUOTE and check_passage(page, quote):
+            kept.append((field, value, quote))
+        else:
+            dropped += 1
+
+    take("question", answer.get("question"))
+    take("design", answer.get("design"))
+    take("sample", answer.get("sample"))
+    for item in (answer.get("findings") or [])[:3]:
+        take("finding", item)
+    for item in (answer.get("limitations") or [])[:2]:
+        take("limitation", item)
+    return kept, dropped
+
+
+def _extract_papers(path: Path, mission_id: str, fetch: Optional[Callable[[str], Optional[str]]] = None) -> None:
+    """Reads each included paper once: its fields and how much of it was read land together, so a
+    restart mid-paper reads that paper again and no other."""
+    while True:
+        found = _reading(path, mission_id)
+        if found is None:
+            return
+        rows = _papers(path, mission_id, "AND screening IN ('include', 'unsure') AND evidence_level IS NULL")
+        if not rows:
+            return
+        row = rows[0]
+        level, text = _paper_text(row, fetch or _fetch_text)
+        fields, dropped = extract(found, row, level, text) if level != "metadata" else ([], 0)
+        now = _now()
+        conn = _open(path)
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            count = conn.execute(
+                "SELECT COUNT(*) FROM research_claims WHERE mission_id = ?", (mission_id,)
+            ).fetchone()[0]
+            for index, (field, value, quote) in enumerate(fields):
+                conn.execute(
+                    """INSERT INTO research_claims (mission_id, id, source_id, text, snippet, confidence, at, field)
+                       VALUES (?, ?, ?, ?, ?, 'supported', ?, ?)""",
+                    (mission_id, f"c{count + index + 1}", row["id"], value, quote, now, field),
+                )
+            conn.execute(
+                "UPDATE research_sources SET evidence_level = ?, dropped = ? WHERE mission_id = ? AND id = ?",
+                (level, dropped, mission_id, row["id"]),
+            )
+            conn.execute("COMMIT")
+        finally:
+            conn.close()
+        events.note("research", mission_id, path, True)
+
+
+def _read_literature(path: Path, found: Dict[str, Any]) -> None:
+    """A review's reading, each step picking up from what the store already holds: search, screen,
+    then fetch and extract paper by paper. Enough papers with a quoted finding moves it to drafting."""
+    mission_id = found["id"]
+    if not (found["funnel"] or {}).get("searched_at"):
+        _search_papers(path, found)
+    _screen_papers(path, mission_id)
+    _extract_papers(path, mission_id)
+    found = mission(path, mission_id)  # type: ignore[assignment]
+    if found is None or found["stage"] != "reading" or found["error"]:
+        return
+    papers = {claim["source"] for claim in found["ledger"]["claims"] if claim.get("field") == "finding"}
+    if len(papers) < MIN_PAPERS:
+        included = (found["funnel"] or {}).get("included", 0)
+        raise ResearchError(
+            f"Too few papers to review: {included} passed screening and {len(papers)} gave a finding "
+            f"with a quote that could be checked. Start another with wider queries or criteria."
+        )
+    conn = _open(path)
+    try:
+        # The abstracts and addresses were working data for the reading; only short quotes stay.
+        conn.execute(
+            "UPDATE research_sources SET abstract = NULL, text_urls = NULL WHERE mission_id = ?", (mission_id,)
+        )
+    finally:
+        conn.close()
+    _update(path, mission_id, stage="drafting", written=0)
+    _draft(path, mission(path, mission_id) or found)
+
+
+SYNTHESIS_SYSTEM = (
+    "You write the synthesis of a narrative literature review from extracted findings and nothing "
+    "else. Every finding you are given was quoted from a paper; you add no fact, no paper and no "
+    "reference of your own. Never name a paper, an author or a year: cite claim ids only. Plain "
+    "words, short sentences, no markdown."
+)
+SYNTHESIS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "themes": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 6,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "claims": {"type": "array", "items": {"type": "string"}},
+                    "paragraphs": {"type": "array", "items": {"type": "string"}, "minItems": 1, "maxItems": 3},
+                },
+                "required": ["title", "claims", "paragraphs"],
+            },
+        },
+        "disagreements": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"a": {"type": "string"}, "b": {"type": "string"}, "about": {"type": "string"}},
+                "required": ["a", "b", "about"],
+            },
+        },
+        "gaps": {"type": "array", "items": {"type": "string"}, "maxItems": 3},
+    },
+    "required": ["themes", "disagreements", "gaps"],
+}
+
+
+def _review_ledger_text(found: Dict[str, Any]) -> str:
+    """The ledger paper by paper, each with how much of it was read, so the synthesis can tell a
+    finding read in full from one an abstract states."""
+    claims: Dict[str, List[Dict[str, Any]]] = {}
+    for claim in found["ledger"]["claims"]:
+        claims.setdefault(claim["source"], []).append(claim)
+    blocks = []
+    for source in found["ledger"]["sources"]:
+        if source["id"] not in claims:
+            continue
+        level = {"full": "read in full", "abstract": "abstract only"}.get(source.get("evidence_level"), "abstract only")
+        lines = [f"Paper {source['id']} ({level}), {source.get('year') or 'year unknown'}:"]
+        lines += [
+            f"  [{claim['id']}] {claim.get('field')}: {claim['text']}\n      Quote: \"{claim['snippet']}\""
+            for claim in claims[source["id"]]
+        ]
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def synthesise(found: Dict[str, Any]) -> Dict[str, Any]:
+    """The themes across the papers, where they disagree and what is unstudied, each sentence cited.
+    Code keeps what it can check: a theme's claims are ones the ledger has, and a disagreement
+    stands only between two findings of different papers under one theme."""
+    ledger = found["ledger"]
+    known = {claim["id"]: claim for claim in ledger["claims"]}
+    levels = {source["id"]: source.get("evidence_level") for source in ledger["sources"]}
+    instructions = (
+        f"The review asks: {found['goal']}\nGroup the findings into 3 to 6 themes (fewer when there "
+        f"are few papers). For each: title, a few plain words; claims, the ids of the findings under "
+        f"it; and 1 to 3 paragraphs saying what the papers found on it. {CITE_RULE} A paper read at "
+        f"abstract only may not be leaned on for a detail an abstract would not state. "
+        f"disagreements: pairs of findings from different papers, under the same theme, that point "
+        f"opposite ways, as their two claim ids with about saying in one sentence what they disagree "
+        f"on; name none when none do. gaps: up to 3 paragraphs on what the papers themselves say is "
+        f"unstudied or limited, cited the same way."
+    )
+    answer = _structured(
+        "synthesis", SYNTHESIS_SYSTEM, instructions, _review_ledger_text(found), SYNTHESIS_SCHEMA, 6000,
+        found.get("writer"),
+    )
+    themes: List[Dict[str, Any]] = []
+    for item in answer.get("themes") or []:
+        if not isinstance(item, dict):
+            continue
+        paragraphs = [
+            spans(text, set(known)) for text in item.get("paragraphs") or [] if isinstance(text, str) and text.strip()
+        ]
+        paragraphs = [paragraph for paragraph in paragraphs if paragraph]
+        cited = [cid for paragraph in paragraphs for span in paragraph for cid in span.get("cites") or []]
+        listed = [cid for cid in item.get("claims") or [] if isinstance(cid, str)]
+        ids = [cid for cid in dict.fromkeys([*listed, *cited]) if cid in known]
+        if not paragraphs or not ids:
+            continue
+        sources = {known[cid]["source"] for cid in ids}
+        themes.append(
+            {
+                "id": f"t{len(themes) + 1}",
+                "title": _clip(item.get("title"), MAX_POINT) or f"Theme {len(themes) + 1}",
+                "paragraphs": paragraphs,
+                "claims": ids,
+                # How much stands behind the theme: its papers, and how many of them were read in full.
+                "papers": len(sources),
+                "full": sum(levels.get(source) == "full" for source in sources),
+            }
+        )
+    if not themes:
+        raise ResearchError("The synthesis grouped nothing into a theme.", 502)
+    disagreements: List[Dict[str, str]] = []
+    for item in answer.get("disagreements") or []:
+        a, b = (item.get("a"), item.get("b")) if isinstance(item, dict) else (None, None)
+        if a not in known or b not in known or known[a]["source"] == known[b]["source"]:
+            continue
+        theme = next((theme["id"] for theme in themes if a in theme["claims"] and b in theme["claims"]), None)
+        if theme is None or any({a, b} == {kept["a"], kept["b"]} for kept in disagreements):
+            continue
+        disagreements.append({"a": a, "b": b, "theme": theme, "about": _clip(item.get("about"), MAX_POINT)})
+    gaps = [spans(text, set(known)) for text in answer.get("gaps") or [] if isinstance(text, str) and text.strip()]
+    return {"themes": themes, "disagreements": disagreements, "gaps": [gap for gap in gaps if gap]}
+
+
+def references(sources: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    """The reference list: every included paper, as the index's metadata says it. A model never
+    types one, so none can be invented."""
+    return [
+        {"source": source["id"], "text": scholar.reference(source)}
+        for source in sources
+        if source.get("screening") in INCLUDED
+    ]
+
+
+def _draft_literature(path: Path, found: Dict[str, Any]) -> None:
+    mission_id = found["id"]
+    if found["stage"] == "drafting":
+        written = synthesise(found)
+        sources = found["ledger"]["sources"]
+        included = [source for source in sources if source.get("screening") in INCLUDED]
+        content = {
+            **written,
+            "method": {**(found["review"] or {}), "index": scholar.NAME},
+            "funnel": found["funnel"] or {},
+            "read": {
+                level: sum(source.get("evidence_level") == level for source in included)
+                for level in ("full", "abstract", "metadata")
+            },
+            "dropped": sum(source.get("dropped") or 0 for source in included),
+            "references": references(sources),
+        }
+        conn = _open(path)
+        try:
+            conn.execute("UPDATE research_claims SET theme = NULL WHERE mission_id = ?", (mission_id,))
+            for theme in written["themes"]:
+                for claim_id in theme["claims"]:
+                    conn.execute(
+                        "UPDATE research_claims SET theme = ? WHERE mission_id = ? AND id = ? AND theme IS NULL",
+                        (theme["id"], mission_id, claim_id),
+                    )
+        finally:
+            conn.close()
+        _save_output(path, mission_id, LITERATURE_FORMAT, content)
+        _update(path, mission_id, written=1, stage="reviewing")
+    found = mission(path, mission_id) or found
+    found["formats"] = [LITERATURE_FORMAT]
+    if not found["revisions"]:
+        _revision(path, found, "first")
+    _update(path, mission_id, stage="delivered", formats=[LITERATURE_FORMAT], pending=None)
+    _tell(path, "research_done", mission_id, found["title"])
+
+
 @dataclass(frozen=True)
 class Lane:
     """One researcher of a mission: its session (named by the lane), what it is told and what it is
@@ -2419,6 +3150,9 @@ class MissionType:
     # one direction is the bias the lanes are there to remove.
     every_lane_completes: bool = False
     keeps_searches: bool = False
+    # A reading the plugin does itself, as code, in place of a researcher's run: a type that has
+    # one has no lanes, and nothing of it is posted to Hermes.
+    read: Optional[Callable[[Path, Dict[str, Any]], None]] = None
     formats_refused: Optional[str] = None
     followup_refused: Optional[str] = None
     rewrite_refused: Optional[str] = None
@@ -2484,7 +3218,29 @@ MISSION_TYPES: Dict[str, MissionType] = {
         followup_refused=FOLLOWUP_LEARN_ONLY,
         rewrite_refused=REWRITE_LEARN_ONLY,
     ),
+    "literature": MissionType(
+        default_format=LITERATURE_FORMAT,
+        read_brief=_literature_brief,
+        confirm_brief=_confirm_literature_brief,
+        brief_text=_literature_brief_text,
+        approve_scope=_approve_literature_scope,
+        outline_call=False,
+        lanes=(),
+        bearing=_no_bearing,
+        min_claims=lambda found: MIN_PAPERS,
+        draft=_draft_literature,
+        derived_fields=lambda found: {},
+        read=_read_literature,
+        formats_refused="A literature review has one format, the review.",
+        followup_refused=FOLLOWUP_LEARN_ONLY,
+        rewrite_refused=REWRITE_LEARN_ONLY,
+    ),
 }
+
+
+def reads_itself(found: Any) -> bool:
+    """Whether the mission's reading is the plugin's own loop rather than a researcher's run."""
+    return type_of(found).read is not None
 
 
 def type_of(found: Any) -> MissionType:
@@ -2538,6 +3294,10 @@ def _job(path: Path, mission_id: str) -> None:
         _brief(path, found)
     elif found["busy"] == "outline":
         _outline(path, found)
+    elif found["stage"] == "reading":
+        read = type_of(found).read
+        if read is not None:
+            read(path, found)
     elif found["stage"] in ("drafting", "reviewing"):
         _draft(path, found)
     elif found["stage"] == "delivered" and found["making"]:
@@ -2607,7 +3367,9 @@ def resume(path: Path) -> None:
         if found["error"]:
             continue
         profile = profile_of(path, found["id"])
-        if found["stage"] == "reading":
+        if found["stage"] == "reading" and reads_itself(found):
+            spawn(path, found["id"], profile)
+        elif found["stage"] == "reading":
             watch(path, found["id"], profile)
         elif found["busy"] or found["stage"] in ("drafting", "reviewing") or found["making"]:
             spawn(path, found["id"], profile)
@@ -2691,7 +3453,7 @@ def _check_watched() -> List[Tuple[Path, str, Optional[str]]]:
     moved = []
     for (_key, mission_id), (path, profile, since) in watched:
         found = mission(path, mission_id)
-        if found is None or found["stage"] != "reading" or found["error"]:
+        if found is None or found["stage"] != "reading" or found["error"] or reads_itself(found):
             _forget(path, mission_id)
             continue
         runs = runs_of(path, mission_id)

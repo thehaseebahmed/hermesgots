@@ -104,6 +104,7 @@ Gots needs this plugin on every profile it uses: chat lists, context use, todos,
 
 - A Hermes version with the cron execution ledger and `ctx.register_platform_handler` (and `ctx.register_cli_command` for `hermes gots`).
 - The API server enabled with an `API_SERVER_KEY`, the same setup Gots needs anyway.
+- For a literature review, the host has to reach `api.openalex.org`. A key is optional: without one OpenAlex charges searches to a small daily budget shared by everyone behind the host's IP address, so a host on a shared address should set a free key as `OPENALEX_API_KEY` in the profile's `.env`. A review that meets a spent budget fails its reading saying so.
 
 ## Limitations
 
