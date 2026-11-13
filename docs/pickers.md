@@ -56,6 +56,7 @@ call sites of one sheet, `ModelPick`.
 | S16 | `app/src/components/chat/mode-menu.tsx` `ModeOptions` | `PickGroup` in the Add-context sheet | `MODES` | fixed 3 (2 without the plugin) | each row's note | never 1 |
 | S17 | `app/src/components/new-project.tsx` the project's bot | `Select` | the device's bots | 1 bot is the common case | the bot's name only | **not a sheet** |
 | S18 | `app/src/routes/meetings.tsx` a meeting's project | `Select` | `No project` and the device's projects | 1 with no projects at all (`No project` alone) | — | **not a sheet** |
+| S19 | `app/src/components/chat/mention-menu.tsx` the `@` palette | an inline menu over the composer, as S12 | the sessions and bots this device knows | can be 1 | each row's line | **settled** |
 
 The applied sites are those whose sheet holds the list and nothing else: every row's second line is
 part of the option, not a second thing to read.
@@ -136,10 +137,10 @@ that same bot, so a quiet tap is what the rule already gives without code.
    drawn on a control that otherwise always opens.
 3. Auto-apply and write the active bot on every tap — a write that changes nothing, once per tap.
 
-**S12 — the `/` palette.** Not a picker: its rows are typed, and applying one would insert or run the
-reader's command for them.
+**S12 — the `/` palette, and S19 the `@` one.** Not pickers: their rows are typed, and applying one
+would insert or run the reader's command for them.
 
-1. *(taken)* Leave it. It is a menu over text already being typed.
+1. *(taken)* Leave both. They are menus over text already being typed.
 2. With one match, insert it on the query and let the reader send — writing their message for them.
 
 **S15 — the prompt library.** Hides: each row's body preview and its pencil, and the sheet is how a
