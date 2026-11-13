@@ -56,8 +56,8 @@ _TOOLS = "## Tools"
 
 # How a reply names a file, told apart from `library_add` on purpose: the tag is a convention of the
 # message, and a session can show a file it filed in an earlier run. The grammar is the app's
-# (`app/src/lib/media-parts.ts`): the marker, then an absolute path with an extension it can draw —
-# a relative one is not matched at all, so the rule says where it starts.
+# (`app/src/lib/media-parts.ts`): the marker, then an absolute path with an extension — a relative
+# one is not matched at all, so the rule says where it starts.
 _MEDIA = "## Media"
 
 _MEDIA_RULES = """A reply shows the user a file by naming it in the message: `MEDIA:` and then the file's absolute path, starting at the root of the filesystem — `MEDIA:/opt/data/files/dashboard-light.png`, never a path relative to the folder you are in, which draws nothing. The app draws the file under the message and keeps it in the thread, so naming the same path again shows that same file, never a new one.
@@ -65,7 +65,7 @@ _MEDIA_RULES = """A reply shows the user a file by naming it in the message: `ME
 - Name a library file: the absolute path `library_add` answered with. Never a scratch, worktree or other temporary path — the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.
 - A file that isn't in the library yet goes there first: file it with `library_add`, then name the path it answered with.
 
-Its extension is how the app knows what to do with it: an image is drawn in the thread, a video or a recording plays there, and anything else — a PDF, a document, an archive — is a row the user saves. So the file keeps its own name."""
+Its extension is what the app acts on: an image or a clip it can show is drawn, a recording plays, a page of HTML opens in the app, and anything else is a row the user taps — a markdown note, a text file or a PDF opens to read, an archive saves under its own name. A report you saved as markdown is handed over in a `MEDIA:` tag like any other file, never pasted into the reply."""
 
 # Where a session's generated files go. Fixed text, so the prompt cache holds; the folder itself is
 # the tool's business, which is why this names no path.

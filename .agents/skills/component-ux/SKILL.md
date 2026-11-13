@@ -44,7 +44,7 @@ component with its importers; `references/deviations.md` is what is currently of
 | A notice inside a screen or sheet | `Banner` | Above what it is about. Tone plus words; no icon where the room is tight |
 | The app talking about the thread | `SystemLine` | A room's system row, a progress reminder. Not for a reply's state |
 | What a reply is doing | `StatusLine` + `WorkRow` | Inside the thread, under the reply's work. Never in the header (ADR 0070, 0076) |
-| The result of the user's action | `toast` (sonner) | After a write: saved, failed, copied. Never for a state the screen already shows |
+| The result of the user's action | `tell` (`lib/tell`) | After a write: saved, failed, copied. `tell.error`, `.info`, `.success` or `.note` — never sonner directly, since a phone shows its own toast. Never for a state the screen already shows |
 | A list with nothing in it | *(none yet — `EmptyState` is the extraction)* | One icon disc, one sentence saying what would fill it, one action where the screen can make one. Three copies exist today; the fourth is the deviation |
 | A shape about to fill | `Skeleton` | A row, a card, an image cell while its read is out |
 | Something running | `Spinner` | Beside the words it belongs to, 16px. Never a private ring |

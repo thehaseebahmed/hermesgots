@@ -7,7 +7,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 
-import { botSubOf, botSubPath } from "@/lib/bot-subs"
+import { botSubject, botSubOf, botSubPath } from "@/lib/bot-subs"
 
 const TAB = "speech-to-text"
 
@@ -92,4 +92,13 @@ test("the LLM Providers page holds a key for each provider it lists", () => {
   assert.equal(sub.title, "Edit Provider", "titled with the verb the form performs")
   assert.equal(botSubOf("llm-providers", "key", ""), undefined, "an empty leaf names no provider")
   assert.equal(botSubOf("llm-providers", "key"), undefined, "the list itself is the page")
+})
+
+test("a page's subject names the bot, the page and the sub it holds", () => {
+  assert.equal(botSubject("bot-1", "mcps", "acme"), "bot-1/mcps/acme")
+  assert.equal(
+    botSubject("bot-1", "mcps"),
+    "bot-1/mcps/",
+    "a page holding no sub keeps a key of its own, apart from the first sub's",
+  )
 })

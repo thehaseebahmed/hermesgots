@@ -9,10 +9,9 @@ import {
   XIcon,
 } from "lucide-react"
 import { Navigate } from "react-router"
-import { toast } from "sonner"
 
 import { HOST_WORK_MS, LIST_MS, SAFETY_MS } from "@/lib/freshness"
-import { Banner } from "@/components/banner"
+import { Banner, Dismiss } from "@/components/banner"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { ItemGroup, ItemRow, pinnedLine } from "@/components/item-list"
 import { NewProjectPopup } from "@/components/new-project"
@@ -27,6 +26,7 @@ import { readProjects, makingProject, cloneLine, CLONE_FAILED } from "@/lib/proj
 import { usePoll } from "@/lib/poll"
 import { createSignal, createStore } from "@/lib/store"
 import { HermesError, deleteProject, type HermesConfig, type HermesProject } from "@/lib/hermes"
+import { tell } from "@/lib/tell"
 import { folderName } from "@/lib/workspace"
 
 const DAY_MS = 86_400_000
@@ -271,7 +271,7 @@ function ProjectsList({ pane }: { pane?: FeaturePane }) {
         onOpenChange={setCreating}
         profiles={withPlugin}
         onCreated={(profile, name) => {
-          toast.success(`Creating ${name} on ${profile.name}`)
+          tell.success(`Creating ${name} on ${profile.name}`)
           refresh()
         }}
       />
@@ -313,17 +313,7 @@ const names = new Intl.ListFormat(undefined, { type: "conjunction" })
 function PluginNotice({ names: bots, onDismiss }: { names: string[]; onDismiss: () => void }) {
   return (
     <Banner
-      action={
-        <Button
-          variant="ghost"
-          size="icon-lg"
-          className="size-11 rounded-full"
-          onClick={onDismiss}
-          aria-label="Dismiss"
-        >
-          <XIcon />
-        </Button>
-      }
+      action={<Dismiss onDismiss={onDismiss} />}
     >
       Projects need the Gots plugin, installed on the bot's Hermes server and turned on in its
       settings. It's missing for {names.format(bots)}, so {bots.length === 1 ? "its" : "their"}{" "}
@@ -363,7 +353,7 @@ function CloneItem({
     try {
       await deleteProject(profile, project.id)
     } catch (reason) {
-      toast.error(reason instanceof Error ? reason.message : "Couldn't update the project.")
+      tell.error(reason instanceof Error ? reason.message : "Couldn't update the project.")
     }
     setBusy(false)
     onChanged()

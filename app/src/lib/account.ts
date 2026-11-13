@@ -10,7 +10,8 @@ import {
 } from "@netlify/identity"
 
 import { storedUser } from "@/lib/identity-session"
-import { isNative, SITE_URL } from "@/lib/native"
+import { SITE_URL } from "@/lib/native"
+import { isNative } from "@/lib/platform"
 import {
   loadNativeAccount,
   nativeSignIn,
@@ -31,7 +32,7 @@ export type Account =
   | { status: "signed-out" }
   | { status: "signed-in"; user: User }
 
-const FUNCTIONS = `${isNative ? SITE_URL : ""}/.netlify/functions`
+const FUNCTIONS = `${isNative() ? SITE_URL : ""}/.netlify/functions`
 const ENDPOINT = `${FUNCTIONS}/sync`
 
 export class SyncError extends Error {
@@ -45,7 +46,7 @@ export class SyncError extends Error {
 }
 
 export async function loadAccount(): Promise<Account> {
-  if (isNative) return loadNativeAccount()
+  if (isNative()) return loadNativeAccount()
   try {
     const settings = await getSettings()
     if (!settings.providers.github) return { status: "unavailable" }
@@ -94,25 +95,25 @@ async function browserAccount(): Promise<Account> {
 }
 
 export function watchAccount(callback: (account: Account) => void) {
-  if (isNative) return watchNativeAccount(callback)
+  if (isNative()) return watchNativeAccount(callback)
   return onAuthChange((_event, user) =>
     callback(user ? { status: "signed-in", user } : { status: "signed-out" }),
   )
 }
 
 export function signIn() {
-  if (isNative) return nativeSignIn()
+  if (isNative()) return nativeSignIn()
   oauthLogin("github")
 }
 
 export async function signOut() {
-  if (isNative) return nativeSignOut()
+  if (isNative()) return nativeSignOut()
   await logout()
 }
 
 /** A signed-in call to one of the site's functions. */
 export async function callFunction(method: string, url: string, body?: unknown) {
-  if (isNative) return nativeSyncCall(method, url, body)
+  if (isNative()) return nativeSyncCall(method, url, body)
   const send = () =>
     fetch(url, {
       method,

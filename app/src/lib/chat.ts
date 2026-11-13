@@ -1,5 +1,3 @@
-import { toast } from "sonner"
-
 import { serverConfig } from "@/lib/connection"
 import { FLUSH_INTERVAL_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
@@ -64,6 +62,7 @@ import {
 } from "@/lib/history"
 import { unknownLastTurn } from "@/lib/model-changes"
 import { modelOf, pickOf, wantsPin } from "@/lib/model-pick"
+import { tell } from "@/lib/tell"
 import { takeHostTitle } from "@/lib/title"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { appendThinking, closeRun, forgetRuns, noteRunThinking } from "@/lib/thinking"
@@ -1723,7 +1722,7 @@ export async function removeQueued(message: Message) {
       if (host)
         await queueAction(host.config, host.conversation.hermesSessionId, message.id, "remove")
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't remove the message.")
+      tell.error(error instanceof Error ? error.message : "Couldn't remove the message.")
       return
     }
   }
@@ -1813,7 +1812,7 @@ export async function steerText(
   } catch (error) {
     // A file the host wouldn't take is why it couldn't steer, so its own words come first.
     const because = error instanceof AttachmentError ? `${error.message} ` : ""
-    toast.error(`${because}Couldn't steer this reply, so it's queued.`)
+    tell.error(`${because}Couldn't steer this reply, so it's queued.`)
   }
 }
 

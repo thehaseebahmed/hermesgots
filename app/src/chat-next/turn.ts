@@ -8,8 +8,8 @@ import { readRequest } from "@/lib/request-text"
 import { quietly } from "@/lib/report"
 import { openerFor, pinFromHost, pinModel, titleFrom, uploadAttachments } from "@/lib/send-turn"
 
+import { tell } from "@/lib/tell"
 import { ensureSessionWorkspace } from "@/lib/workspace"
-import { toast } from "sonner"
 
 /** A turn ready to post: its run's body and key, and what to do once the post is settled. */
 export interface PreparedTurn {
@@ -140,7 +140,7 @@ export async function steerTurn(
     await queueAction(config, session, item.id, "steer")
     return true
   } catch {
-    toast.error("Couldn't steer this reply, so it's queued.")
+    tell.error("Couldn't steer this reply, so it's queued.")
     return false
   }
 }

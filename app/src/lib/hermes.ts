@@ -27,7 +27,7 @@ import { pickFields } from "@/lib/model-pick"
 import type { ModelUsage } from "@/lib/pricing"
 import type { PendingInput, PendingQueue } from "@/lib/pending"
 import type { RoomEvent } from "@/lib/room-log"
-import { isNative } from "@/lib/native"
+import { isNative } from "@/lib/platform"
 import { ask, sawFrame, sawWords, sent, sentFrom } from "@/lib/net-watch"
 import type { Fingerprint, Totals } from "@/lib/dictation-log"
 import { promptEntry } from "@/lib/run-prompt"
@@ -196,7 +196,7 @@ async function request(url: string, init: RequestInit) {
 function networkHint(url: string) {
   const insecure = url.startsWith("http://")
   const local = /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:|\/)/.test(url)
-  if (insecure && !local && !isNative && window.location.protocol === "https:") {
+  if (insecure && !local && !isNative() && window.location.protocol === "https:") {
     return "Can't reach Hermes: this page is HTTPS, so the browser blocks plain-HTTP servers on other hosts. Put Hermes behind HTTPS (e.g. Tailscale Serve or a Cloudflare Tunnel)."
   }
   return `Can't reach Hermes. Check it's running and that API_SERVER_CORS_ORIGINS includes ${window.location.origin}.`
@@ -2406,15 +2406,121 @@ export async function listCanvases(config: HermesConfig, signal?: AbortSignal) {
   return Array.isArray(body?.canvases) ? (body.canvases as Record<string, unknown>[]) : []
 }
 
-/** One canvas with the document its record points at, which is what the screen draws. */
-export async function getCanvas(config: HermesConfig, id: string, signal?: AbortSignal) {
-  const response = await request(canvasRoot(config, id), {
+/**
+ * One canvas with the document its record points at, which is what the screen draws.
+ *
+ * Its documents ride it only when `docs` says so: this app sweeps them a page at a time
+ * (`canvas-sweep.ts`), so the read asks for the record alone and a canvas of five thousand documents
+ * is never one answer. Only a host from before the paged route, which ignores the ask, needs them
+ * here — the sweep's whole-read fallback.
+ */
+export async function getCanvas(
+  config: HermesConfig,
+  id: string,
+  { docs = false, signal }: { docs?: boolean; signal?: AbortSignal } = {},
+) {
+  const response = await request(`${canvasRoot(config, id)}${docs ? "" : "?docs=none"}`, {
     headers: headers(config),
     signal: signal
       ? AbortSignal.any([signal, AbortSignal.timeout(READ_TIMEOUT_MS)])
       : AbortSignal.timeout(READ_TIMEOUT_MS),
   })
   return (await response.json())?.canvas as Record<string, unknown> | undefined
+}
+
+/** One collection of a canvas's data, as the host catalogues it: no document in it. */
+export interface CanvasCollection {
+  collection: string
+  count: number
+  /** The newest clock among its documents, or nothing for a collection that holds none. */
+  newest_at: number | null
+}
+
+/** What a canvas's data holds: one row a collection, and what the whole of it weighs. */
+export interface CanvasCatalogue {
+  collections: CanvasCollection[]
+  bytes: number
+}
+
+/**
+ * A canvas's data by collection, which is the first read of a sweep: each collection's name, how many
+ * documents it holds and how fresh it is, and what the whole of the canvas's data weighs. No document
+ * rides it, so it costs the same for five thousand as for five.
+ */
+export async function dataCatalogue(
+  config: HermesConfig,
+  id: string,
+  signal?: AbortSignal,
+): Promise<CanvasCatalogue> {
+  const response = await request(`${canvasRoot(config, id)}/data`, {
+    headers: headers(config),
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(READ_TIMEOUT_MS)])
+      : AbortSignal.timeout(READ_TIMEOUT_MS),
+  })
+  const body = (await response.json()) as Record<string, unknown>
+  const collections = Array.isArray(body?.collections) ? body.collections : []
+  return {
+    collections: collections.flatMap((row: Record<string, unknown>) =>
+      typeof row?.collection === "string"
+        ? [
+            {
+              collection: row.collection,
+              count: Number(row.count) || 0,
+              newest_at: typeof row.newest_at === "number" ? row.newest_at : null,
+            },
+          ]
+        : [],
+    ),
+    bytes: Number(body?.bytes) || 0,
+  }
+}
+
+/**
+ * The host's page of one collection's documents, off `GET canvases/<id>/data/<collection>`: the id the
+ * next page starts after, and the collection's size. The wire's own shape — `documents` and `count`
+ * are what the route names — where the device's copy answers a page of `rows` (`CanvasPageRows` in
+ * `canvas-bridge.ts`).
+ */
+export interface CanvasDocsPage {
+  documents: unknown[]
+  /** The last id this page holds, or null when it was the last page. */
+  next: string | null
+  count: number
+}
+
+/**
+ * One page of a collection, read after the id the caller holds. A page is a keyset rather than an
+ * offset, so a document written or removed between two pages moves neither; `limit` is the page's size
+ * and the host clamps it to its own maximum.
+ */
+export async function dataPage(
+  config: HermesConfig,
+  id: string,
+  collection: string,
+  after: string | null = null,
+  limit?: number,
+  signal?: AbortSignal,
+): Promise<CanvasDocsPage> {
+  const query = new URLSearchParams()
+  if (after) query.set("after", after)
+  if (limit) query.set("limit", String(limit))
+  const suffix = query.toString()
+  const response = await request(
+    `${canvasRoot(config, id)}/data/${encodeURIComponent(collection)}${suffix ? `?${suffix}` : ""}`,
+    {
+      headers: headers(config),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(READ_TIMEOUT_MS)])
+        : AbortSignal.timeout(READ_TIMEOUT_MS),
+    },
+  )
+  const body = (await response.json()) as Record<string, unknown>
+  return {
+    documents: Array.isArray(body?.documents) ? body.documents : [],
+    next: typeof body?.next === "string" && body.next ? body.next : null,
+    count: Number(body?.count) || 0,
+  }
 }
 
 /**
@@ -2432,14 +2538,17 @@ export async function undoCanvas(config: HermesConfig, id: string) {
 
 /**
  * A canvas's own record changed — its title, whether it is pinned to the sidebar, whether it is
- * hidden from the list — kept on the host, so every device agrees on the shape of the list. A title
- * also renames the chat the canvas is edited in. The host answers the record as it now is: the page
- * is no part of this change, and a screen that made it already holds the version it draws.
+ * hidden from the list, whether its data is backed up — kept on the host, so every device agrees on
+ * the shape of the list. A title also renames the chat the canvas is edited in. The host answers the
+ * record as it now is: the page is no part of this change, and a screen that made it already holds
+ * the version it draws.
  */
 export type CanvasChanges = {
   title?: string
   pinned?: boolean
   archived?: boolean
+  /** Whether this canvas's data is copied into the host's OKF vault (`canvas_vault.py`). */
+  vault?: boolean
   image?: string
 }
 
@@ -4078,13 +4187,13 @@ export interface ProjectIssue {
 }
 
 /**
- * A project's tasks as AFK reads them: the frontier — what's ready, oldest first — and what is out
- * of it, claimed or blocked by an open task. Needs plugin 0.49.
+ * A project's tasks as the AFK sheet draws them: the frontier — what's ready, oldest first — and what
+ * an open task still blocks. A task somebody has taken is in neither list: AFK will never pick it,
+ * and the host leaves it out of the frontier. Needs plugin 0.49.
  */
 export interface ProjectTasks {
   repos: string[]
   ready: ProjectTask[]
-  claimed: ProjectTask[]
   blocked: ProjectTask[]
 }
 
@@ -4145,7 +4254,6 @@ export async function getProjectTasks(
       ? repos.filter((repo): repo is string => typeof repo === "string")
       : [],
     ready: parseTasks(body.ready),
-    claimed: parseTasks(body.claimed),
     blocked: parseTasks(body.blocked),
   }
 }

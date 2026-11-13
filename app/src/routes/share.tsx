@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useNavigate, useSearchParams } from "react-router"
-import { toast } from "sonner"
 import { ChevronDownIcon, CodeXmlIcon, LinkIcon, MessageCircleIcon, PlusIcon } from "lucide-react"
 
 import { Banner } from "@/components/banner"
@@ -40,6 +39,7 @@ import {
   type ShareKind,
   type ShareTarget,
 } from "@/lib/share-list"
+import { tell } from "@/lib/tell"
 import { beginChat, useNow } from "@/lib/threads"
 import { randomId } from "@/lib/utils"
 
@@ -178,7 +178,7 @@ export function SharePage() {
       route: "yes",
     }).then(({ attachments, refusals }) => {
       if (!live) return
-      for (const refusal of [...share.refused, ...refusals]) toast.error(refusal.message)
+      for (const refusal of [...share.refused, ...refusals]) tell.error(refusal.message)
       setRead({ share: share.id, files: attachments })
     })
     return () => {
@@ -256,7 +256,7 @@ export function SharePage() {
 
   const couldNot = (error: unknown) => {
     setSending(false)
-    toast.error(error instanceof Error ? error.message : "Couldn't share that.")
+    tell.error(error instanceof Error ? error.message : "Couldn't share that.")
   }
 
   /**
@@ -274,12 +274,12 @@ export function SharePage() {
     // says so rather than posting into a room the sheet isn't offering.
     const held = await db.conversations.get(id)
     if (!held?.room) {
-      toast.error("That room isn't on the sheet any more.")
+      tell.error("That room isn't on the sheet any more.")
       return
     }
     const carried = carriedFiles(files)
     if (carried.length > ROOM_MAX_ATTACHMENTS) {
-      toast.error(roomRefusal(carried.length).message)
+      tell.error(roomRefusal(carried.length).message)
       return
     }
     setSending(id)
@@ -490,6 +490,7 @@ export function SharePage() {
               <p className="px-1 text-sm text-muted-foreground">Nothing matches.</p>
             )}
           </section>
+
         </div>
         {/*
           The search at the foot. The sheet's content is its scroller, so this stays on screen while

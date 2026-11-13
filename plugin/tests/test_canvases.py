@@ -1406,19 +1406,23 @@ class DataTest(unittest.TestCase):
         self.assertEqual(canvases.current(self.path, canvas_id)["data"], before)
 
         # A write past the cap is refused whole — the canvas keeps the documents it had — and the
-        # words name the cap and what the data would have become.
-        huge = {"text": "x" * (canvases.DATA_BYTES + 1)}
-        with self.assertRaises(canvases.CanvasError) as refused:
-            canvases.put_doc(self.path, canvas_id, "notes", "big", huge)
-        self.assertIn("1 MB", str(refused.exception))
+        # words name the cap and what the data would have become. The cap is 64 MB, and a fixture
+        # that wrote one would be 64 MB of test data, so the constant is lowered for the case: the
+        # rule is the same one, and one document is well inside its own 256 KB.
+        huge = {"text": "x" * 2000}
+        with mock.patch.object(canvases, "DATA_BYTES", 1024):
+            with self.assertRaises(canvases.CanvasError) as refused:
+                canvases.put_doc(self.path, canvas_id, "notes", "big", huge)
+        self.assertIn("capped at 1 KB", str(refused.exception))
         self.assertIn("KB", str(refused.exception))
         self.assertIn("Remove something first", str(refused.exception))
         self.assertEqual(canvases.data(self.path, canvas_id), before)
         # The size is the canvas's whole data after the write, rounded up a KB: on a canvas holding
         # nothing else it is that one row's collection, id and JSON value as UTF-8 bytes.
         blank = make_canvas(self.path)
-        with self.assertRaises(canvases.CanvasError) as too_big:
-            canvases.put_doc(self.path, blank["id"], "notes", "big", huge)
+        with mock.patch.object(canvases, "DATA_BYTES", 1024):
+            with self.assertRaises(canvases.CanvasError) as too_big:
+                canvases.put_doc(self.path, blank["id"], "notes", "big", huge)
         would_be = (
             len("notes") + len("big") + len(json.dumps(huge, allow_nan=False)) + canvases.DOC_BYTES
         )
@@ -1486,7 +1490,7 @@ class DataTest(unittest.TestCase):
                 canvases.put_doc(self.path, canvas_id, "c", f"d{n}", 0)
             with self.assertRaises(canvases.CanvasError) as refused:
                 canvases.put_doc(self.path, canvas_id, "c", "d14", 0)
-        self.assertIn("capped at 1 MB", str(refused.exception))
+        self.assertIn("capped at 1 KB", str(refused.exception))
         self.assertEqual(len(canvases.data(self.path, canvas_id)), 14)
 
 
@@ -1550,6 +1554,64 @@ class NamingTest(unittest.TestCase):
         )
         self.assertNotIn("canvas", canvases.DATA_READ_SCHEMA["parameters"].get("required", []))
         self.assertNotIn("Canvas sessions only", canvases.DATA_READ_SCHEMA["description"])
+
+    def test_a_whole_read_is_bounded_and_says_which_read_answers(self) -> None:
+        # A canvas's data is capped at 64 MB now that it is read a page at a time, so the tool that
+        # answers a canvas whole could hand a model 64 MB in one result. What one answer carries is
+        # bounded to what a whole canvas could hold before the cap moved, and a read past that bound
+        # is refused in words naming the read that does answer it — one collection, or a page of one —
+        # rather than cut short.
+        canvas_id = self.canvas["id"]
+        for n in range(10):
+            canvases.put_doc(self.path, canvas_id, "bookmarks", f"b{n}", {"text": "x" * 120_000})
+        canvases.put_doc(self.path, canvas_id, "notes", "n", {"text": "hello"})
+
+        refused = json.loads(
+            canvases.handle_data_read({"canvas": canvas_id}, session_id=self.plain)
+        )
+        self.assertEqual(list(refused), ["error"], "a whole canvas past the bound is no answer")
+        self.assertIn("collection", refused["error"], "and names the collection read")
+        self.assertIn("page", refused["error"], "and the page of one")
+        self.assertIn(
+            canvases._cap(canvases.READ_MAX_BYTES),
+            refused["error"],
+            "and the bound it broke, in the bytes it is",
+        )
+
+        # The collection it names is answered where it fits: one collection under the bound rides as
+        # one answer, which is the read a caller past the whole-canvas bound is told to make.
+        small = json.loads(
+            canvases.handle_data_read(
+                {"canvas": canvas_id, "collection": "notes"}, session_id=self.plain
+            )
+        )
+        self.assertEqual(list(small), ["documents"])
+        self.assertEqual(
+            [(row["collection"], row["id"], row["doc"]) for row in small["documents"]],
+            [("notes", "n", {"text": "hello"})],
+        )
+        # And a collection that is itself past the bound is refused the same way: naming it is no way
+        # round the bound, so the refusal says to read a page of it.
+        wide = json.loads(
+            canvases.handle_data_read(
+                {"canvas": canvas_id, "collection": "bookmarks"}, session_id=self.plain
+            )
+        )
+        self.assertEqual(list(wide), ["error"])
+        self.assertIn("page", wide["error"])
+
+        # One document is one document, whatever the collection around it weighs.
+        one = json.loads(
+            canvases.handle_data_read(
+                {"canvas": canvas_id, "collection": "bookmarks", "id": "b0"}, session_id=self.plain
+            )
+        )
+        self.assertEqual(one["document"]["doc"], {"text": "x" * 120_000})
+
+        # The schema is what a model reads before it calls: it says what the answer is bounded to.
+        self.assertIn(
+            canvases._cap(canvases.READ_MAX_BYTES), canvases.DATA_READ_SCHEMA["description"]
+        )
 
     def test_a_session_outside_a_canvas_writes_and_removes_its_document(self) -> None:
         canvas_id = self.canvas["id"]
@@ -1621,15 +1683,18 @@ class NamingTest(unittest.TestCase):
             )
         )
         self.assertEqual(kept["doc"], {"text": "kept"})
-        huge = {"text": "x" * (canvases.DATA_BYTES + 1)}
-        refused = json.loads(
-            canvases.handle_data_write(
-                {"canvas": title, "collection": "notes", "id": "big", "doc": huge},
-                session_id=self.plain,
+        # The cap is 64 MB, so it is lowered here rather than written out: the rule under test is
+        # that a write past it is refused from outside too, not the size the number happens to be.
+        huge = {"text": "x" * 2000}
+        with mock.patch.object(canvases, "DATA_BYTES", 1024):
+            refused = json.loads(
+                canvases.handle_data_write(
+                    {"canvas": title, "collection": "notes", "id": "big", "doc": huge},
+                    session_id=self.plain,
+                )
             )
-        )
         self.assertEqual(list(refused), ["error"])
-        self.assertIn("1 MB", refused["error"])
+        self.assertIn("capped at 1 KB", refused["error"])
         still = json.loads(canvases.handle_data_read({"canvas": title}, session_id=self.plain))
         self.assertEqual([row["doc"] for row in still["documents"]], [{"text": "kept"}])
 

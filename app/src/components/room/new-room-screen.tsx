@@ -121,7 +121,9 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
     if (!bot) return
     const refusal = refusalFor(bot)
     if (refusal) {
-      if (saysWhy(refusal)) tell.info(refusal.say)
+      // The one greyed answer a press can act on is the Host's rule, in the app's own words — the
+      // sentence the row already wears, said because a greyed row swallows the press it explains.
+      if (refusal.kind === "greyed") tell.info(OTHER_HOST)
       return
     }
     // The guards inside the updater too: a press that lands twice in one batch seats one bot once.

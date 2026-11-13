@@ -15,7 +15,6 @@ import {
   type LucideIcon,
 } from "lucide-react"
 import { Link, useNavigate } from "react-router"
-import { toast } from "sonner"
 
 import { Banner, Retry } from "@/components/banner"
 import { Bot } from "@/components/bot"
@@ -44,12 +43,13 @@ import {
   linkRowClass,
   rowClass,
   useHeaderAction,
+  useScreenRefusal,
 } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { AFK_PICKS_FEATURE } from "@/lib/afk-picks"
 import { botPath, botTabPath, SETTING_PAGES, type BotPage, type BotTab } from "@/lib/bot-tabs"
-import { botSubPath, type BotSub } from "@/lib/bot-subs"
+import { botSubPath, botSubject, type BotSub } from "@/lib/bot-subs"
 import { connectionKey } from "@/lib/connection"
 import {
   db,
@@ -99,6 +99,7 @@ import { seedsFromCache, useReadAttempt } from "@/lib/read-attempt"
 import { useReminders } from "@/lib/reminders"
 import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
 import { SKILL_FEATURES } from "@/lib/skills"
+import { AppWords } from "@/lib/refusal"
 import { useNow } from "@/lib/threads"
 import { plural } from "@/lib/tools"
 import { cn } from "@/lib/utils"
@@ -153,6 +154,7 @@ const GENERAL_ANSWERS = { fallbacks: "fallbacks" } as const
 function EnabledSetting({ profile }: { profile: Profile }) {
   const now = useNow()
   const [saving, setSaving] = useState(false)
+  const refusal = useScreenRefusal()
   const seen = profile.seenAt
     ? isOnline(profile, now)
       ? "Online"
@@ -168,17 +170,14 @@ function EnabledSetting({ profile }: { profile: Profile }) {
       disabled={saving}
       onCheckedChange={async (checked) => {
         setSaving(true)
-        try {
+        await refusal.write("save that", async () => {
           await setBotEnabled(profile, checked)
           if (!checked && (await getSettings()).activeProfileId === profile.id) {
             const next = await getActiveProfile()
             if (next) await setActiveProfile(next.id)
           }
-        } catch (error) {
-          toast.error(error instanceof Error ? error.message : "Couldn't save that.")
-        } finally {
-          setSaving(false)
-        }
+        })
+        setSaving(false)
       }}
     />
   )
@@ -213,6 +212,7 @@ const REMINDER_LABELS: Record<ReminderLevel, string> = {
  */
 function RemindersSetting({ profile }: { profile: Profile }) {
   const { value, supported, settled, saving, save } = useReminders(profile)
+  const refusal = useScreenRefusal()
   if (!supported) return null
 
   return (
@@ -232,13 +232,7 @@ function RemindersSetting({ profile }: { profile: Profile }) {
         label="Progress updates"
         options={REMINDER_LEVELS.map((id) => ({ id, label: REMINDER_LABELS[id] }))}
         value={value}
-        onChange={(next) => {
-          void save(next).catch((error: unknown) =>
-            toast.error(
-              error instanceof Error ? error.message : "Couldn't save that reminder level.",
-            ),
-          )
-        }}
+        onChange={(next) => void refusal.write("save that reminder level", () => save(next))}
         disabled={!settled || saving}
       />
     </div>
@@ -289,16 +283,8 @@ function DeleteBotDialog({
       confirmLabel="Delete"
       onOpenChange={onOpenChange}
       onConfirm={async () => {
-        if (linked) {
-          try {
-            await removeHost(profile.hostId!)
-          } catch (error) {
-            toast.error(error instanceof Error ? error.message : "Couldn't remove it.")
-            return
-          }
-        } else {
-          await deleteProfile(profile.id)
-        }
+        if (linked) await removeHost(profile.hostId!)
+        else await deleteProfile(profile.id)
         const next = await getActiveProfile()
         if (next) await setActiveProfile(next.id)
         onDeleted?.()
@@ -539,12 +525,8 @@ function BotEditScreen({
       // the surface and its close is the cancel.
       surface={large ? "card" : "screen"}
       onSave={async (value) => {
-        try {
-          await updateProfile(profile.id, edit.patch(value))
-          close()
-        } catch (error) {
-          toast.error(error instanceof Error ? error.message : "Couldn't save that.")
-        }
+        await updateProfile(profile.id, edit.patch(value))
+        close()
       }}
       onCancel={close}
     />
@@ -705,8 +687,13 @@ function GeneralPage({
   const [pick, setPick] = useState<string>()
 
   // Every write answers the host's fresh block, so the row a person just changed is the row the
-  // host now holds — and a refused write leaves the page as it was, with the host's sentence.
-  const write = useCallback(
+  // host now holds — and a refused write leaves the page as it was, with the host's sentence drawn
+  // at the top of the page the row sits on.
+  const refusal = useScreenRefusal()
+  // The write itself, answering by throwing where the host refused. A row draws that answer on the
+  // page it sits on, and a pushed edit's form draws it in its own notice: the form is the surface the
+  // route pushed, so the words belong where the field is, not a screen above it.
+  const send = useCallback(
     async (key: string, value: unknown) => {
       setSaving(key)
       try {
@@ -719,17 +706,18 @@ function GeneralPage({
         )
         // A host that answered without its block hasn't saved anything this page can draw: say so
         // rather than closing the form over the value it held before.
-        if (!next) throw new Error("The host answered without its settings.")
+        if (!next) throw new AppWords("The host answered without its settings.")
         keep(next)
-        return true
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Couldn't save that.")
-        return false
       } finally {
         setSaving(undefined)
       }
     },
     [profile, tab, keep],
+  )
+  /** A row that writes where it stands, its refusal drawn at the top of the page the row is on. */
+  const write = useCallback(
+    (key: string, value: unknown) => refusal.write("save that", () => send(key, value)),
+    [refusal.write, send],
   )
 
   const groups = block ? generalGroups(block.fields) : []
@@ -748,7 +736,8 @@ function GeneralPage({
           block={block}
           field={field}
           saving={saving === field.key}
-          onWrite={write}
+          commit={send}
+          subject={botSubject(profile.id, tab, field.key)}
           onClose={close}
         />
       ) : problem ? (
@@ -982,13 +971,16 @@ function FieldForm({
   block,
   field,
   saving,
-  onWrite,
+  commit,
+  subject,
   onClose,
 }: {
   block: GeneralSettings
   field: GeneralField
   saving: boolean
-  onWrite: (key: string, value: unknown) => Promise<boolean>
+  commit: (key: string, value: unknown) => Promise<void>
+  /** What the form is about, so a refusal about another bot's field is not drawn in this one. */
+  subject: string
   onClose: () => void
 }) {
   const large = useLarge()
@@ -996,24 +988,23 @@ function FieldForm({
   return (
     <EditForm
       label={fieldLabel(field.key)}
+      subject={subject}
       busy={saving}
       surface={large ? "card" : "screen"}
       value={draftOf(block, field)}
       kind={field.kind === "number" ? "number" : "text"}
       placeholder={field.kind === "list" ? "comma, separated" : String(fallback ?? "")}
       note={field.restart ? RESTART_NOTE : undefined}
-      onSave={(text) => {
+      onSave={async (text) => {
         const parsed = draftValue(field, text)
         if (!parsed.ok) {
-          toast.error(field.kind === "number" ? "That isn't a number." : "Couldn't save that.")
-          return
+          throw new AppWords(field.kind === "number" ? "That isn't a number." : "Couldn't save that.")
         }
-        void onWrite(field.key, parsed.value).then((ok) => ok && onClose())
+        await commit(field.key, parsed.value)
+        onClose()
       }}
       onReset={
-        explicitly(block, field.key)
-          ? () => void onWrite(field.key, null).then((ok) => ok && onClose())
-          : undefined
+        explicitly(block, field.key) ? () => commit(field.key, null).then(onClose) : undefined
       }
       onCancel={onClose}
     />
@@ -1150,15 +1141,13 @@ function ModelsPage({ profile }: { profile: Profile }) {
 /** The chain a bot's host tries after its main model: what the Fallback providers drill-in holds. */
 function FallbacksPage({ profile }: { profile: Profile }) {
   const { list, saving, save } = useFallbackModels(profile)
+  const refusal = useScreenRefusal()
   const info = useModelInfo(profile)
   const providers = info?.providers ?? []
   const [pick, setPick] = useState<number>()
   const cannotEdit = !providers.length || saving
 
-  const write = (next: ModelChoice[]) =>
-    void save(next).catch((error: unknown) => {
-      toast.error(error instanceof Error ? error.message : String(error))
-    })
+  const write = (next: ModelChoice[]) => void refusal.write("save that", () => save(next))
 
   // Adding is the screen's own action, in its header: a row that added was a setting among settings,
   // and this screen holds a chain of picks, not a row to write.

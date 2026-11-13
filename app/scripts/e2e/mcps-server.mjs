@@ -118,7 +118,13 @@ const run = async ({ page, profileId, shot, until }) => {
       "Save to be enabled once a value is typed",
     )
     await save.click()
-    await page.getByText("Saved.", { exact: true }).waitFor({ timeout: 15_000 })
+    // The block the save redraws is the evidence, and Save is offered again only once the form
+    // matches what the Host now holds.
+    await until(
+      () => save.isDisabled().then((disabled) => disabled),
+      15_000,
+      "the save to land, and Save to be offered only once the form matches it",
+    )
     assert.equal(writes.length, 1, "the whole block was written once")
     assert.deepEqual(
       writes[0].body.values,

@@ -2,8 +2,9 @@
 
 ``post_api_request`` sees every model call with its own usage, so the hook adds it to a counter
 for the call's UTC day, model and the mode of the session it belongs to (a project session's Accept
-edits, Auto or Plan, else ``chat``), and its tokens to a counter for the day, provider and
-model. Only the numbers are kept: no prompt, text,
+edits, Auto or Plan, else ``chat``), and its tokens to a counter for the day, provider and model —
+but for a custom endpoint, which is a person's own address and no provider, so it adds to no
+provider's count. Only the numbers are kept: no prompt, text,
 session id or path. They stay on the host until the account joins the leaderboard in the app,
 which the registry answers on each check-in; then the last 35 days are sent to Gots, which adds
 them to the account's GitHub username.
@@ -24,6 +25,9 @@ from .store import connect, db_path
 logger = logging.getLogger(__name__)
 
 KEEP_DAYS = 35
+# A custom endpoint is a person's own address, not a provider, so its id's first segment names
+# nobody the board could count under.
+CUSTOM_ENDPOINT = "custom"
 KINDS = ("input", "output", "cache_write", "cache_read")
 # What the site names them: camel case, as its JSON does elsewhere.
 WIRE = {"input": "input", "output": "output", "cache_write": "cacheWrite", "cache_read": "cacheRead"}
@@ -79,6 +83,7 @@ def _record(kwargs: Dict[str, Any]) -> None:
 
     home = Path(get_hermes_home())
     path = db_path(home)
+    provider = _provider(kwargs.get("provider"))
     mode = "chat"
     if isinstance(session_id, str) and session_id:
         found = sessions.record_for(path, home, session_id)
@@ -98,11 +103,12 @@ def _record(kwargs: Dict[str, Any]) -> None:
                    calls = calls + 1""",
             (_day(), model.strip().lower()[:96], mode, *counts),
         )
-        conn.execute(
-            """INSERT INTO community_providers (day, provider, model, tokens) VALUES (?, ?, ?, ?)
-               ON CONFLICT(day, provider, model) DO UPDATE SET tokens = tokens + excluded.tokens""",
-            (_day(), _provider(kwargs.get("provider")), model.strip().lower()[:96], sum(counts)),
-        )
+        if provider != CUSTOM_ENDPOINT:
+            conn.execute(
+                """INSERT INTO community_providers (day, provider, model, tokens) VALUES (?, ?, ?, ?)
+                   ON CONFLICT(day, provider, model) DO UPDATE SET tokens = tokens + excluded.tokens""",
+                (_day(), provider, model.strip().lower()[:96], sum(counts)),
+            )
         oldest = _day(time.time() - KEEP_DAYS * 86400)
         conn.execute("DELETE FROM community_usage WHERE day < ?", (oldest,))
         conn.execute("DELETE FROM community_providers WHERE day < ?", (oldest,))
@@ -112,7 +118,8 @@ def _record(kwargs: Dict[str, Any]) -> None:
 
 def payload(home: Path) -> Dict[str, Any]:
     """``{ days: { "2026-10-15": { model: { mode: { input, output, cacheWrite, cacheRead, calls } } } },
-    providers: { "2026-10-15": { provider: { model: tokens } } } }``"""
+    providers: { "2026-10-15": { provider: { model: tokens } } } }`` — a custom endpoint names no
+    provider, so a row an older build wrote for one is left out."""
     path = db_path(home)
     if not path.exists():
         return {"days": {}, "providers": {}}
@@ -126,8 +133,8 @@ def payload(home: Path) -> Dict[str, Any]:
         ).fetchall()
         provider_rows = conn.execute(
             """SELECT day, provider, model, tokens FROM community_providers
-               WHERE day >= ? AND tokens > 0 ORDER BY day, provider, model""",
-            (oldest,),
+               WHERE day >= ? AND provider != ? AND tokens > 0 ORDER BY day, provider, model""",
+            (oldest, CUSTOM_ENDPOINT),
         ).fetchall()
     finally:
         conn.close()

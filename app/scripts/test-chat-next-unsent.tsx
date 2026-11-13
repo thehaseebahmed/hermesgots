@@ -284,15 +284,11 @@ test("a host that turns a send down keeps the message, and says why where the re
       answer()
     }
     assert.equal(device.unsent()[0].state, "Not sent", "marked as one that didn't go")
-    assert.deepEqual(
-      said,
-      [REFUSAL],
-      "the host's reason is said once, the way every request here that came back with an error is",
-    )
+    assert.deepEqual(said, [], "nothing said in passing")
     assert.equal(
       device.alert(),
-      undefined,
-      "and not left as the thread's first line, above the viewport of a thread that scrolls",
+      REFUSAL,
+      "the host's reason, drawn above the thread until the next send clears it",
     )
     assert.doesNotMatch(
       device.unsent()[0].text + device.unsent()[0].state,
@@ -326,9 +322,13 @@ test("a send the host never answers says what is known, not what a failed read s
     }
     // The reads still land, so this is not an away host: the chat's header keeps its own subject and
     // the send is the only thing that failed.
-    assert.deepEqual(said, ["This host didn't take the message."], "what the app knows is said")
+    assert.deepEqual(said, [], "nothing said in passing")
+    assert.equal(
+      device.alert(),
+      "This host didn't take the message.",
+      "what the app knows is drawn where the send was made",
+    )
     assert.equal(device.away(), false, "the host is not called away by a send that failed")
-    assert.equal(device.alert(), undefined, "and nothing is drawn above the thread")
   } finally {
     toast.error = original
     await device.close()

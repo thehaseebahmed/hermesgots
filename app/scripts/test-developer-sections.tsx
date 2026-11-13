@@ -27,6 +27,7 @@ import {
   settle,
   text,
   until,
+  withToasts,
 } from "./component-kit.tsx"
 
 const at = (entry: string) => (
@@ -78,9 +79,9 @@ test("/settings/developer with the switch on draws it", async () => {
     assert.ok(switchOf(LEGACY), "the layout switch is drawn")
     assert.match(text(), /Enable legacy chat UX/, "under its own name")
     assert.equal(
-      rowOf(LEGACY)?.textContent?.includes("Experimental"),
-      false,
-      "and is no longer marked experimental: the layout is the app's own",
+      rowOf(LEGACY)?.querySelector('[data-slot="badge"]'),
+      null,
+      "and wears no mark: the layout is the app's own, not a lab feature",
     )
     assert.ok(!findText("label", "Bot threads"), "the old switch is gone")
     assert.ok(
@@ -140,5 +141,18 @@ test("the hide button takes Remove server's shape, and Device state sits with Sy
     const device = groupOf("Device state")
     assert.ok(sync && device, "both rows are drawn")
     assert.equal(sync, device, "and one group holds them")
+  })
+})
+
+test("unlocking Developer says nothing in passing", async () => {
+  await seedSettings({ developer: false })
+  await withToasts(async (said) => {
+    await mount(at("/settings"), async () => {
+      const label = () => findAll("button").find((one) => one.textContent?.startsWith("Gots v"))
+      assert.ok(label(), "the version label sits at the foot of the menu")
+      for (let tap = 0; tap < 5; tap += 1) await click(label() as HTMLElement)
+      await until(async () => Boolean((await getSettings())?.developer), "the switch to unlock")
+      assert.deepEqual(said, [], "and nothing said for it: the Developer row appearing is the word")
+    })
   })
 })

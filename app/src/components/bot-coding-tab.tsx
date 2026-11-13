@@ -1,10 +1,9 @@
 import { MinusIcon, PlusIcon } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
-import { toast } from "sonner"
 
 import { Banner, Retry } from "@/components/banner"
 import { Segmented } from "@/components/segmented"
-import { Group, rowClass } from "@/components/settings-chrome"
+import { Group, rowClass, useScreenRefusal } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
 import { PICK_BUDGET, USAGE_THRESHOLDS } from "@/lib/afk-picks"
 import type { Profile } from "@/lib/db"
@@ -39,7 +38,9 @@ function useBotAfk(config: HermesConfig) {
   const [threshold, setThreshold] = useState<number | null>(null)
   const [stale, setStale] = useState(false)
   const [problem, setProblem] = useState<string>()
-  const { attempt, landed, landedThrew, release, retry, failed } = useReadAttempt(connectionKey(config))
+  const { attempt, landed, landedThrew, release, retry, failed } = useReadAttempt(
+    connectionKey(config),
+  )
 
   // A host from before the route answers nothing, which is the reason the tab says it couldn't read
   // it rather than drawing a number nobody wrote.
@@ -206,6 +207,8 @@ export function CodingTab({ profile }: { profile: Profile }) {
         }
       : null
 
+  const refusal = useScreenRefusal()
+
   const choose = async (next: number) => {
     // The count the tab already holds is no write, and neither is one past the host's own range: the
     // stepper's buttons are out of reach there, so this is only the guard behind them.
@@ -220,15 +223,12 @@ export function CodingTab({ profile }: { profile: Profile }) {
       return
     setDraft(next)
     setSaving(true)
-    try {
+    await refusal.write("save that pick budget", async () => {
       const answer = await setBotAfkPickBudget(config, next)
       afk.keepBudget(answer.pickBudget ?? next)
-    } catch (failure) {
-      toast.error(failure instanceof Error ? failure.message : "Couldn't save that pick budget.")
-    } finally {
-      setDraft(null)
-      setSaving(false)
-    }
+    })
+    setDraft(null)
+    setSaving(false)
   }
 
   const chooseThreshold = async (next: number | null) => {
@@ -236,20 +236,15 @@ export function CodingTab({ profile }: { profile: Profile }) {
     if (saving || stale || failed || next === thresholdShown) return
     setThresholdDraft(next)
     setSaving(true)
-    try {
+    await refusal.write("save that usage threshold", async () => {
       const answer = await setBotAfkUsageThreshold(config, next)
       afk.keepThreshold(answer.usageThreshold)
       // Off draws no figure, and the window behind it is no longer this bot's to show: the next
       // threshold set reads the account again.
       if ((answer.usageThreshold ?? null) === null) setDeciding(null)
-    } catch (failure) {
-      toast.error(
-        failure instanceof Error ? failure.message : "Couldn't save that usage threshold.",
-      )
-    } finally {
-      setThresholdDraft(null)
-      setSaving(false)
-    }
+    })
+    setThresholdDraft(null)
+    setSaving(false)
   }
 
   return (

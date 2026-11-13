@@ -11,7 +11,6 @@ import {
 } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useNavigate } from "react-router"
-import { toast } from "sonner"
 
 import { Cheatsheet, useCheatsheet } from "@/components/chat/cheatsheet"
 import { LimitNotice, type useChatUsage } from "@/components/chat/chat-actions"
@@ -51,6 +50,7 @@ import { quietly } from "@/lib/report"
 import { useProjects } from "@/lib/projects"
 import { markRead } from "@/lib/read-marks"
 import { lastActivityAt, runFinished } from "@/lib/session-work"
+import { tell } from "@/lib/tell"
 import { useLiveSubagents } from "@/lib/waiting"
 import {
   planApprovalMessage,
@@ -312,7 +312,7 @@ function NextComposerBody({
       try {
         await go(text, attachments)
       } catch (error) {
-        toast.error(error instanceof Error ? error.message : String(error))
+        tell.error(error instanceof Error ? error.message : String(error))
         throw error
       }
     }
@@ -367,7 +367,7 @@ function NextComposerBody({
                 autoAvailable: tracked,
                 onMode: (mode) =>
                   setSessionMode(session.id, mode).catch((error) =>
-                    toast.error(
+                    tell.error(
                       error instanceof Error ? error.message : "Couldn't change the mode.",
                     ),
                   ),

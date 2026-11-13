@@ -1,12 +1,12 @@
 import { useState } from "react"
 import { ExternalLinkIcon, TrophyIcon } from "lucide-react"
-import { toast } from "sonner"
 
 import { Banner } from "@/components/banner"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { LEADERBOARD_URL, joinCommunity, leaveCommunity, useCommunity } from "@/lib/community"
+import { tell } from "@/lib/tell"
 
 const SHARED = [
   "Your GitHub username, shown as your name on the board",
@@ -44,7 +44,7 @@ export function CommunitySettings() {
     try {
       setMe(join ? await joinCommunity() : await leaveCommunity())
     } catch (error) {
-      toast.error(error instanceof Error && error.message ? error.message : "Couldn't change that")
+      tell.error(error instanceof Error && error.message ? error.message : "Couldn't change that")
     } finally {
       setBusy(false)
     }

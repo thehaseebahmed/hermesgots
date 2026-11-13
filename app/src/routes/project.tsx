@@ -14,7 +14,6 @@ import {
   TriangleAlertIcon,
 } from "lucide-react"
 import { useLocation, useParams } from "react-router"
-import { toast } from "sonner"
 
 import { HOST_WORK_MS, SAFETY_MS } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
@@ -57,6 +56,7 @@ import { useProjectsPane, useRememberOpened } from "@/lib/pane"
 import { usePoll } from "@/lib/poll"
 import { deleteProject, retryProject, updateProject, type HermesProject } from "@/lib/hermes"
 import { readProjects, useProjects, cloneLine, CLONE_FAILED, makingProject } from "@/lib/projects"
+import { tell } from "@/lib/tell"
 import { projectRepos } from "@/lib/workspace"
 import { BackButton } from "@/components/back-button"
 
@@ -136,12 +136,14 @@ export function ProjectPage() {
       await action()
       reload()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : fallback)
+      tell.error(error instanceof Error ? error.message : fallback)
     } finally {
       setBusy(false)
     }
   }
 
+  // The question prints the host's refusal itself, so this hands it on rather than saying it in a
+  // toast the dialog would already have closed over.
   const remove = async () => {
     if (!profile) return
     setBusy(true)
@@ -153,8 +155,6 @@ export function ProjectPage() {
       }
       setDeleting(false)
       leave()
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't delete the project.")
     } finally {
       setBusy(false)
     }

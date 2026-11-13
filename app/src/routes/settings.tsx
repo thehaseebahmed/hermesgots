@@ -14,6 +14,7 @@ import {
   CircleAlertIcon,
   CircleCheckIcon,
   CodeXmlIcon,
+  FlaskConicalIcon,
   FolderXIcon,
   GitMergeIcon,
   GitPullRequestArrowIcon,
@@ -37,7 +38,6 @@ import {
   UsersIcon,
   type LucideIcon,
 } from "lucide-react"
-import { toast } from "sonner"
 
 import { AccountSettings } from "@/components/account-settings"
 import { BackButton } from "@/components/back-button"
@@ -47,7 +47,7 @@ import { botsByLabel, labelOf } from "@/lib/bot-name"
 import { useBotLabels } from "@/lib/use-bot-labels"
 import type { BotSub } from "@/lib/bot-subs"
 import { botPageOf, botPath, botTabOf, botTabPath, type BotPage, type BotTab } from "@/lib/bot-tabs"
-import { botSubOf, botSubPath } from "@/lib/bot-subs"
+import { botSubject, botSubOf, botSubPath } from "@/lib/bot-subs"
 import { Banner } from "@/components/banner"
 import { NetworkLogScreen } from "@/components/network-log"
 import { DeveloperOnly } from "@/components/developer-only"
@@ -56,6 +56,7 @@ import { OnlineDot } from "@/components/bot-card"
 import { LinkSheet } from "@/components/link-bots"
 import { AppearanceSettings } from "@/components/settings/appearance"
 import { DictationSettings } from "@/components/settings/dictation"
+import { LabSettings } from "@/components/settings/lab"
 import {
   ActionRow,
   Group,
@@ -66,6 +67,7 @@ import {
   rowClass,
   Screen,
   useLeaveGuard,
+  useScreenRefusal,
 } from "@/components/settings-chrome"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { DeviceStateSheet } from "@/components/device-state"
@@ -87,7 +89,8 @@ import { useDictationTotals } from "@/lib/dictations"
 import { useLiveStatus, type LiveStatus } from "@/lib/live"
 import { legacyChatOn } from "@/lib/legacy-chat"
 import { useLarge } from "@/lib/media"
-import { isNative, openNotificationSettings, setBackGuard } from "@/lib/native"
+import { openNotificationSettings, setBackGuard } from "@/lib/native"
+import { isNative } from "@/lib/platform"
 import { useNav } from "@/lib/nav"
 import {
   disablePush,
@@ -101,10 +104,13 @@ import {
 } from "@/lib/push"
 import type { PushCategory, PushFeature } from "@/lib/push-kinds"
 import { isOnline, presence, siteUrl } from "@/lib/registry"
+import { AppWords } from "@/lib/refusal"
+import { tell } from "@/lib/tell"
 import { themeLabel } from "@/lib/theme"
 import { forgetLocalKey, useSyncState } from "@/lib/sync"
 import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
+import { spoken } from "@/lib/words"
 import { APP_VERSION, pluginOutdated } from "@/lib/version"
 
 /** What both the notification row and the screen it opens are called: one name, two places. */
@@ -118,6 +124,7 @@ const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
   community: { title: "Community", render: () => <CommunitySettings /> },
   notifications: { title: NOTIFICATION_SETTINGS, render: () => <NotificationTypes /> },
   data: { title: "Local data", render: () => <DataSettings /> },
+  lab: { title: "Labs", render: () => <LabSettings /> },
   developer: { title: "Developer", render: () => developerOnly(<DeveloperSettings />) },
   network: { title: "Network log", render: () => developerOnly(<NetworkLogScreen />) },
 }
@@ -223,6 +230,9 @@ export function SettingsPage() {
         </Screen>
         <Screen
           key={botTab ?? "bot"}
+          // The pane is about this bot's page, and a refusal is about the thing that was written: the
+          // next bot, or the next page, carries none of the last one's.
+          subject={botSubject(bot.id, botTab ?? "bot", botSub?.id)}
           // The pane is titled by the sub only where the sub is the pane: an edit rides over the page
           // as a card and names itself there, so the page's own title still heads the pane.
           title={
@@ -270,7 +280,11 @@ function BotListScreen({
 }) {
   const { up } = useNav()
   return (
-    <Screen title={label} leading={<BackButton label="Back" onClick={() => up("/settings")} />}>
+    <Screen
+      title={label}
+      subject={profile.id}
+      leading={<BackButton label="Back" onClick={() => up("/settings")} />}
+    >
       <BotSettingsList profile={profile} onDeleted={onDeleted} />
     </Screen>
   )
@@ -296,6 +310,7 @@ function BotPageScreen({ profile, page, sub }: { profile: Profile; page: BotPage
   return (
     <Screen
       title={sub?.title ?? page.title}
+      subject={botSubject(profile.id, page.segment, sub?.id)}
       leading={<BackButton label="Back" onClick={guard.back} />}
     >
       <BotSettingsPage profile={profile} tab={page.segment} sub={sub} />
@@ -371,6 +386,7 @@ function MenuScreen({
         <FeedbackRow />
       </Group>
       <Group>
+        <Row to="lab" icon={FlaskConicalIcon} title="Labs" />
         <Row to="data" icon={DatabaseIcon} title="Local data" />
         {settings?.developer && <Row to="developer" icon={TerminalIcon} title="Developer" />}
       </Group>
@@ -422,26 +438,22 @@ function LinkBotRow({ onLink }: { onLink: () => void }) {
 function NotificationsRow() {
   const { permission, on } = usePush()
   const [busy, setBusy] = useState(false)
+  const refusal = useScreenRefusal()
   if (!pushAvailable()) return null
   const toggle = async (checked: boolean) => {
     setBusy(true)
-    try {
+    await refusal.write("turn on notifications", async () => {
       if (!checked) return await disablePush()
+      // A permission the platform holds back is the row's own answer, in the app's words: said in
+      // passing, since the host wrote none of it.
       if ((await enablePush()) === "denied")
-        toast.error(
-          isNative
+        throw new AppWords(
+          isNative()
             ? "Notifications are blocked in system settings"
             : "Notifications are blocked in your browser",
         )
-    } catch (error) {
-      toast.error(
-        error instanceof Error && error.message
-          ? `Couldn't turn on notifications. ${error.message}`
-          : "Couldn't turn on notifications",
-      )
-    } finally {
-      setBusy(false)
-    }
+    })
+    setBusy(false)
   }
   return (
     <SwitchRow
@@ -450,7 +462,7 @@ function NotificationsRow() {
       title="Notifications"
       subtitle={
         permission === "denied"
-          ? isNative
+          ? isNative()
             ? "Blocked in system settings"
             : "Blocked in browser settings"
           : "A session needs you"
@@ -476,24 +488,25 @@ function CommunityRow() {
  */
 export function NotificationSettingsRow() {
   if (!pushAvailable()) return null
-  return isNative ? <SystemNotificationSettingsRow /> : <NotificationListRow />
+  return isNative() ? <SystemNotificationSettingsRow /> : <NotificationListRow />
 }
 
 /** Android: the phone's screen for this app, which the app can read but not draw. */
 function SystemNotificationSettingsRow() {
+  const refusal = useScreenRefusal()
   const open = async () => {
+    refusal.clear()
+    let words: string | undefined
     try {
       // A build too old to have the screen says nothing; one that refused says why.
-      const refused = await openNotificationSettings()
-      if (refused) toast.error(refused)
+      words = await openNotificationSettings()
     } catch (error) {
-      // The call is made off the tap, so anything it throws must land here or be lost.
-      toast.error(
-        error instanceof Error && error.message
-          ? `Couldn't open notification settings. ${error.message}`
-          : "Couldn't open notification settings",
-      )
+      // The call is made off the tap, so a throw from the step before the call's own guard is
+      // answered here rather than lost — worded with what the row was doing, since a bridge's own
+      // words don't say it.
+      words = `Couldn't open notification settings. ${spoken(error, "The phone didn't say why.")}`
     }
+    if (words) refusal.refuse({ ok: false, said: words })
   }
   return (
     <ActionRow
@@ -546,12 +559,7 @@ const FEATURE_ICONS: Record<PushFeature, LucideIcon> = {
  */
 function NotificationTypes() {
   const features = usePushFeatures()
-  const failed = (error: unknown) =>
-    toast.error(
-      error instanceof Error && error.message
-        ? `Couldn't change that. ${error.message}`
-        : "Couldn't change that",
-    )
+  const refusal = useScreenRefusal()
   return (
     <div className="flex flex-col gap-4">
       {features.map((feature) => {
@@ -566,7 +574,9 @@ function NotificationTypes() {
               title={feature.title}
               subtitle={single ? only.title : `${feature.on} of ${feature.categories.length} on`}
               checked={feature.on > 0}
-              onCheckedChange={(checked) => void setPushFeature(feature.id, checked).catch(failed)}
+              onCheckedChange={(checked) =>
+                void refusal.write("change that", () => setPushFeature(feature.id, checked))
+              }
             />
             {!single &&
               feature.categories.map((category) => (
@@ -578,7 +588,7 @@ function NotificationTypes() {
                   title={category.title}
                   checked={category.checked}
                   onCheckedChange={(checked) =>
-                    void setPushCategory(category.id, checked).catch(failed)
+                    void refusal.write("change that", () => setPushCategory(category.id, checked))
                   }
                 />
               ))}
@@ -600,7 +610,6 @@ function VersionLabel({ developer }: { developer: boolean }) {
     if (developer || taps.current.length < TAPS_TO_UNLOCK) return
     taps.current = []
     void saveSettings({ developer: true })
-    toast("Developer settings on")
   }
   return (
     <button
@@ -649,22 +658,12 @@ export function DeveloperSettings() {
           id="show-progress-reminders"
           icon={MessageSquareTextIcon}
           title="Show progress reminders"
-          experimental
           subtitle="Each reminder a thread hides, as a row of its own"
           checked={Boolean(settings?.showProgressReminders)}
           onCheckedChange={(checked) => saveSettings({ showProgressReminders: checked })}
         />
-        <SwitchRow
-          id="meetings"
-          icon={AudioLinesIcon}
-          title="Meetings"
-          experimental
-          subtitle="Design only, with sample meetings"
-          checked={Boolean(settings?.meetings)}
-          onCheckedChange={(checked) => saveSettings({ meetings: checked })}
-        />
       </Group>
-      {isNative && pushAvailable() && <TestPushRow />}
+      {isNative() && pushAvailable() && <TestPushRow />}
       <Group>
         <SyncServerRow />
         <DeviceStateRow />
@@ -715,20 +714,14 @@ export function DeveloperSettings() {
 function TestPushRow() {
   const { on } = usePush()
   const [busy, setBusy] = useState(false)
+  const refusal = useScreenRefusal()
   const send = async () => {
     setBusy(true)
-    try {
-      await sendTestPush()
-      toast("Test notification sent")
-    } catch (error) {
-      toast.error(
-        error instanceof Error && error.message
-          ? `Couldn't send. ${error.message}`
-          : "Couldn't send the test notification",
-      )
-    } finally {
-      setBusy(false)
-    }
+    // The row redraws nothing when a test push lands, so this one confirmation is the only evidence
+    // it did — and it is the app's own sentence, so it stays a toast.
+    if (await refusal.write("send the test notification", () => sendTestPush()))
+      tell.note("Test notification sent")
+    setBusy(false)
   }
   return (
     <Group>
@@ -891,7 +884,7 @@ function DataSettings() {
           onConfirm={async () => {
             await clearAllData()
             forgetLocalKey()
-            toast.success("Local data cleared")
+            tell.success("Local data cleared")
           }}
         />
       </CardContent>

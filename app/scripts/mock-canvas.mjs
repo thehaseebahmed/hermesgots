@@ -195,6 +195,9 @@ function newCanvas({ title, prompt, version, versions, tools }) {
     version,
     pinned: false,
     archived: false,
+    // The reader's own answer about the OKF vault, as the plugin keeps it on the record: off until
+    // they turn it on for this canvas.
+    vault: false,
     // Nothing until a version is written: a canvas still being built draws its own mark.
     image: null,
     at: now,
@@ -253,6 +256,7 @@ export function createCanvasStore() {
     version: c.version,
     pinned: c.pinned,
     archived: c.archived,
+    vault: c.vault,
     image: c.image ?? null,
     at: c.at,
     created_at: c.created_at,
@@ -606,8 +610,8 @@ export async function handleCanvas(
 
   if (req.method === "POST") {
     const body = (await readBody(req)) ?? {}
-    if (!["title", "pinned", "archived", "image"].some((field) => field in body)) {
-      fail(400, "A canvas's update names what changes: a title, pinned, archived, or image.")
+    if (!["title", "pinned", "archived", "vault", "image"].some((field) => field in body)) {
+      fail(400, "A canvas's update names what changes: a title, pinned, archived, vault, or image.")
       return true
     }
     if ("title" in body) {
@@ -618,7 +622,7 @@ export async function handleCanvas(
       const title = body.title.trim()
       canvas.title = titleOf(title)
     }
-    for (const field of ["pinned", "archived"]) {
+    for (const field of ["pinned", "archived", "vault"]) {
       if (!(field in body)) continue
       if (typeof body[field] !== "boolean") {
         fail(400, `A canvas's ${field} is true or false; this one is ${JSON.stringify(body[field])}.`)

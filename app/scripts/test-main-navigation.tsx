@@ -11,6 +11,7 @@ import { rememberLastChat } from "@/lib/last-chat"
 
 import {
   botProfile,
+  find,
   findAll,
   findText,
   json,
@@ -34,7 +35,9 @@ const mainRow = () => ({
   updatedAt: 10,
   changedAt: 0,
 })
-async function seed(patch: { developer?: boolean; legacyChat?: boolean } = {}) {
+async function seed(
+  patch: { developer?: boolean; legacyChat?: boolean; meetings?: boolean; canvas?: boolean } = {},
+) {
   await seedSettings({
     activeProfileId: bot.id,
     ...patch,
@@ -199,6 +202,58 @@ test("the legacy switch brings the Recents list and the New chat button back", a
         false,
         "nothing opens a bot's Main: the list is Recents",
       )
+    },
+  )
+})
+
+test("the sidebar's Canvas row follows its Labs switch", async () => {
+  await seed({ canvas: false })
+  globalThis.fetch = async () => json({})
+  await mount(
+    <MemoryRouter initialEntries={["/"]}>
+      <ConversationList />
+    </MemoryRouter>,
+    async () => {
+      await until(async () => Boolean(find('a[href="/research"]')), "the nav")
+      assert.equal(Boolean(find('a[href="/canvas"]')), false, "Canvas is off, so no row")
+    },
+  )
+  await seed()
+  await mount(
+    <MemoryRouter initialEntries={["/"]}>
+      <ConversationList />
+    </MemoryRouter>,
+    async () => {
+      await until(async () => Boolean(find('a[href="/canvas"]')), "the Canvas row")
+      assert.equal(
+        find('a[href="/canvas"]')?.textContent?.includes("Labs"),
+        true,
+        "on by default, and wearing the pill",
+      )
+    },
+  )
+})
+
+test("the sidebar marks the lab features with the pill, and its own screens with none", async () => {
+  await seed({ meetings: true })
+  globalThis.fetch = async () => json({})
+  await mount(
+    <MemoryRouter initialEntries={["/"]}>
+      <ConversationList />
+    </MemoryRouter>,
+    async () => {
+      const row = (href: string) => find(`a[href="${href}"]`)
+      await until(async () => Boolean(row("/meetings")), "the Meetings row")
+      for (const href of ["/canvas", "/meetings"]) {
+        const mark = row(href)
+        assert.ok(mark, `${href} is drawn`)
+        assert.equal(mark.textContent?.includes("Labs"), true, `${href} wears the pill`)
+      }
+      for (const href of ["/projects", "/code", "/research"]) {
+        const own = row(href)
+        assert.ok(own, `${href} is drawn`)
+        assert.equal(own.textContent?.includes("Labs"), false, `${href} is no lab feature`)
+      }
     },
   )
 })

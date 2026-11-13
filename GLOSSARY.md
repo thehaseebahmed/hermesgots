@@ -391,11 +391,11 @@ Taking a task so nothing else picks it up. A claimed task is out of the frontier
 _Avoid_: assign, lock, pickup; and claim for what research checks or records, which is a **checked claim** or an **evidence claim**
 
 **Hold**:
-One of the tasks a project's AFK switch has claimed, with the session working it: the host's own record, one row per task in flight, kept until the task's work is in review. A finished task lets go of its hold and leaves the claim, and a session the user closes gives both back.
+One of the tasks a project's AFK switch has claimed, with the session working it: the host's own record, one row per task in flight, kept until the task's work is in review. A finished task lets go of its hold and leaves the claim, and a session the user closes gives both back. Lowering a project's **pick count** takes no hold back: the tasks it already has finish, and the sheet draws the count's places in **Working** and the rest in **Queued**.
 _Avoid_: lock, lease, slot
 
 **Pick count**:
-How many tasks a project's AFK will hold at once, from one to five, set in its AFK pop-up.
+How many tasks a project's AFK will hold at once, from one to five, set in its AFK pop-up. It is the number of places the sheet draws: a hold past a lowered count is still AFK's work and still claimed, and it waits in **Queued** rather than being drawn against a count it no longer fits.
 _Avoid_: concurrency, parallelism, workers, slots
 
 **Pick budget**:
@@ -437,6 +437,14 @@ _Avoid_: bottom bar, FAB row, dock
 **Filter**:
 One of the pills that narrow a list. A bot's chat list wears All, Unread, Chats, Rooms and Routines in the **bar** under its title row — under the search where there is one — and the one pressed is remembered on this device, with All what a device that never chose opens on; Chats is a row that is neither a room nor a routine's run, and Unread is the same mark this device's read dot reads. A bot's **Skills tab** wears All and its **skill categories** instead, drawn in the tab's own flow rather than pinned to a header, forgotten when the tab is left, and each one holding at least one skill by construction — so the tab's only "nothing here" is the search's. Either way a filter only narrows and never re-orders.
 _Avoid_: tab, segment, tag
+
+**Tell**:
+What the app says in passing: one line near the foot of the screen, about something that has just happened and needs no answer. Inside the Android app it is the phone's own toast; on the web it is the toaster. Every screen asks `lib/tell`, so the words are the same on both roads and the app's four tones are decided in one place: error, info, success and note (ADR 0147).
+_Avoid_: toast message, snackbar, popup, alert
+
+**Note**:
+A tell with no tone: something worth saying and neither good nor bad news — a log copied, a note copied, the exit toast. On the web it is the toaster's plain message, drawn without an icon; on a phone it is a toast like any other, since the platform's has no tone to draw. It goes as quickly as the platform's short toast, unless it asks to be held.
+_Avoid_: neutral toast, plain message, info
 
 ## Rooms
 
@@ -508,7 +516,7 @@ An attachment whose bytes ride in the message itself, which only a model that re
 _Avoid_: embedded, attached copy, base64 upload
 
 **Media**:
-An attachment the thread can show rather than only hand over: an image, a video or an audio recording. Everything else is an attachment the thread offers as a download.
+An attachment the thread can show rather than only hand over: an image, a video or an audio recording. Everything else is an attachment the thread offers as a row: a note or a PDF opens to read, an archive saves under its own name.
 _Avoid_: image, file, rich media
 
 **Gallery**:
@@ -763,8 +771,32 @@ One saved state of a canvas's HTML, made by every write its bot does. Undo steps
 _Avoid_: revision, snapshot, draft
 
 **Canvas data**:
-What a canvas keeps for itself — the ticked boxes, the logged runs — stored on its host apart from its versions, so undoing an edit never loses it.
+What a canvas keeps for itself — the ticked boxes, the logged runs — held as documents in named collections and stored on its host apart from its versions, so undoing an edit never loses it.
 _Avoid_: state, storage, store, database
+
+**Document**:
+One row of a canvas's data: a collection's name, an id, and a value of any JSON, stamped with its host's clock.
+_Avoid_: record, row, item, entry
+
+**Collection**:
+A canvas's named bucket of documents — the unit a page lists whole and a query reads a page of.
+_Avoid_: table, folder, namespace, group
+
+**Sweep**:
+A device reading a canvas's documents a page at a time to fill its own copy. It is a *completed* sweep only once the last page of the last collection has landed, and only a completed sweep may treat a document it did not see as gone, so only a completed sweep prunes.
+_Avoid_: sync, pull, refresh, download
+
+**Partial**:
+A device's copy of a canvas's documents before any sweep of it has completed, or while one is running. A page says so in its answer and `canvas.data.partial` answers it on its own, and a get of a document the rows don't hold is refused — with that code beside the words — rather than answered as missing, because the rows are only evidence of what is gone after a completed sweep.
+_Avoid_: incomplete, unsynced, stale, syncing
+
+**Pending write**:
+A page's write the device kept because its bot was away: read back at once and sent in order when the bot answers, and never outranking an answer the host has given.
+_Avoid_: queued write, outbox entry, draft, retry
+
+**Vault**:
+The OKF bundle a canvas's documents are copied into when that canvas's own switch is on — one markdown file per document, under the bot's home, written by its host and never read back.
+_Avoid_: wiki, backup folder, export, mirror
 
 **Ask**:
 The empty `<script data-canvas-lib="NAME">` a page puts where it wants a library, which the app

@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router"
-import { toast } from "sonner"
 
 import { Chip, ChipRow } from "@/components/chip"
 import { FootSearch, FootSearchClose } from "@/components/foot-search"
@@ -16,6 +15,7 @@ import {
   RowText,
   SplitSwitchRow,
   SwitchRow,
+  useScreenRefusal,
 } from "@/components/settings-chrome"
 import type { Profile } from "@/lib/db"
 import type { Skill } from "@/lib/hermes"
@@ -63,6 +63,7 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
   const [pending, setPending] = useState(false)
   const [removing, setRemoving] = useState<string | null>(null)
   const [query, setQuery] = useState("")
+  const refusal = useScreenRefusal()
   // The pill the reader pressed, by its key: the tab's own, gone when it remounts.
   const [chosen, setChosen] = useState(ALL_SKILLS_KEY)
   // Whether the foot's field is up, which is the only thing the foot holds: the words are the tab's
@@ -95,13 +96,8 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
 
   const toggle = async (name: string, enabled: boolean) => {
     setSaving(name)
-    try {
-      await state.setEnabled(name, enabled)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't save that.")
-    } finally {
-      setSaving(null)
-    }
+    await refusal.write("save that", () => state.setEnabled(name, enabled))
+    setSaving(null)
   }
 
   // A category's header is a switch over the whole category, and its tap follows the value the
@@ -114,24 +110,19 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
     const names = categoryWrites(group, target)
     if (names.length === 0) return
     setFlipping(key)
-    try {
+    await refusal.write("save that", async () => {
       for (const name of names) await state.setEnabled(name, target)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't save that.")
-    } finally {
-      setFlipping(null)
-    }
+    })
+    setFlipping(null)
   }
 
+  // The question holds its own refusal, so the write only has to land or throw.
   const confirmRemove = async (name: string) => {
     setPending(true)
     try {
       await state.remove(name)
       // The skill's own note has nothing left to say, so the tab takes the screen back.
       navigate(botTabPath(profile.id, "skills"), { replace: true })
-      setRemoving(null)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't remove that skill.")
       setRemoving(null)
     } finally {
       setPending(false)
@@ -147,7 +138,9 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
       confirmLabel="Remove"
       busy={pending}
       onOpenChange={(open) => !open && setRemoving(null)}
-      onConfirm={() => removing !== null && void confirmRemove(removing)}
+      onConfirm={async () => {
+        if (removing !== null) await confirmRemove(removing)
+      }}
     />
   )
 
@@ -195,11 +188,7 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
         {pills.length > 1 && (
           <ChipRow label="Filter skills">
             {pills.map((pill) => (
-              <Chip
-                key={pill.key}
-                active={pill.key === chosen}
-                onClick={() => setChosen(pill.key)}
-              >
+              <Chip key={pill.key} active={pill.key === chosen} onClick={() => setChosen(pill.key)}>
                 {pill.label}
               </Chip>
             ))}

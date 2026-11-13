@@ -44,6 +44,28 @@ const chosen = () => pills().find((one) => one.getAttribute("aria-checked") === 
 const afkWrites = (host: { calls: { method: string; path: string; body: unknown }[] }) =>
   host.calls.filter((call) => call.method === "POST" && call.path.endsWith("/afk"))
 
+test("a project holding more than its count works the places and queues the rest", async () => {
+  // A count lowered below what the project holds finishes what it claimed (ADR 0025): the Working
+  // block is the count's places, and the tasks past it are Queued, oldest first, waiting for one.
+  globalThis.fetch = afkHost({ features: FEATURES, holds: THREE, pickCount: 1 })
+    .fetch as unknown as typeof fetch
+  await picksOn(async () => {
+    assert.deepEqual(
+      findAll("[data-hold]").map((row) => row.getAttribute("data-hold")),
+      ["265"],
+      "one row for the one place the count names, oldest first",
+    )
+    assert.equal(find("[data-holds]")?.textContent, "Working (1 of 1)", "the heading counts the places")
+    assert.deepEqual(
+      findAll("[data-queued-task]").map((row) => row.getAttribute("data-queued-task")),
+      ["266", "267"],
+      "and the holds past the count are Queued under it, oldest first",
+    )
+    assert.equal(find("[data-queued] h3")?.textContent, "Queued (2)", "under a heading of its own")
+    assert.ok(missing("[data-above]"), "with no line about a count it is past")
+  })
+})
+
 test("the Working block lists every task it holds, over the count against its pick count", async () => {
   globalThis.fetch = afkHost({ features: FEATURES, holds: THREE, pickCount: 3 })
     .fetch as unknown as typeof fetch
@@ -64,12 +86,12 @@ test("the Working block lists every task it holds, over the count against its pi
     assert.match(rows[2].textContent ?? "", /#267\s*Ship the change/, "and the last its own")
     assert.equal(
       find("[data-holds]")?.textContent,
-      "3 of 3 held",
-      "the count row over the list, holds against the pick count",
+      "Working (3 of 3)",
+      "the heading counts the rows under it, against the pick count",
     )
     assert.match(
       section?.textContent ?? "",
-      /Working3 of 3 held#265.*#266.*#267/s,
+      /Working \(3 of 3\)#265.*#266.*#267/s,
       "the count reads above the rows it counts",
     )
   })
@@ -107,7 +129,7 @@ test("the pick count is one write, and the count row reads the host's answer", a
       ["1", "2", "3", "4", "5"],
       "one to five, the host's own range",
     )
-    assert.equal(find("[data-holds]")?.textContent, "2 of 2 held", "both places taken")
+    assert.equal(find("[data-holds]")?.textContent, "Working (2 of 2)", "both places taken")
 
     await click(pill(3))
     assert.deepEqual(
@@ -118,8 +140,8 @@ test("the pick count is one write, and the count row reads the host's answer", a
     assert.equal(chosen()?.textContent, "3", "the row reads the count the host answered")
     assert.equal(
       find("[data-holds]")?.textContent,
-      "2 of 3 held",
-      "and the count row counts against it",
+      "Working (2 of 3)",
+      "and the heading counts against it",
     )
   })
 })
@@ -172,8 +194,8 @@ test("a write the host refuses leaves the count it had", async () => {
     assert.equal(chosen()?.textContent, "2", "and the count the host still holds is what shows")
     assert.equal(
       find("[data-holds]")?.textContent,
-      "2 of 2 held",
-      "the count row is the host's too",
+      "Working (2 of 2)",
+      "the heading is the host's too",
     )
   })
 })
@@ -201,7 +223,7 @@ test("a plugin without afk_picks draws the sheet it always drew", async () => {
   await mountAfk(connection("before-picks"), project, async () => {
     // Booleans, not nodes: a failing assertion must not print a whole DOM tree.
     assert.equal(findAll("[data-hold]").length, 0, "no per-hold rows")
-    assert.equal(Boolean(find("[data-holds]")), false, "no count row")
+    assert.equal(Boolean(find("[data-holds]")), false, "nothing counted")
     assert.equal(Boolean(find("[data-afk-picks]")), false, "no pick count")
     assert.match(
       find("[data-working]")?.textContent ?? "",
@@ -217,7 +239,7 @@ test("a host that holds no list keeps the one Working row from its task", async 
   globalThis.fetch = afkHost({ features: FEATURES, pickCount: 3 }).fetch as unknown as typeof fetch
   await picksOn(async () => {
     assert.equal(findAll("[data-hold]").length, 0, "no per-hold rows")
-    assert.equal(Boolean(find("[data-holds]")), false, "no count row")
+    assert.equal(Boolean(find("[data-holds]")), false, "nothing counted")
     assert.match(
       find("[data-working]")?.textContent ?? "",
       /#338\s*Pick a workflow/,
@@ -241,8 +263,8 @@ test("the pop-up draws the pick count and no budget line, whatever the bot answe
     assert.equal(chosen()?.textContent, "3", "the project's own count is what the row draws")
     assert.equal(
       find("[data-holds]")?.textContent ?? null,
-      "3 of 3 held",
-      "the count row under it still counts the holds",
+      "Working (3 of 3)",
+      "the heading still counts the holds",
     )
   })
 })
@@ -256,7 +278,7 @@ test("a host that answers no count draws no pick count row, whatever budget it a
     assert.equal(
       find("[data-holds]")?.textContent ?? null,
       null,
-      "nor a count row with nothing to count against",
+      "nor a heading with nothing to count against",
     )
     assert.equal(findAll("[data-hold]").length, 3, "the holds themselves are still named")
   })
