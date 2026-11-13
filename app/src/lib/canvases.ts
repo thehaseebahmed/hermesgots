@@ -11,6 +11,7 @@ import {
   type BridgeToolCall,
   type BridgeWriteCall,
   type CanvasDoc,
+  type CanvasCopy,
   type CanvasGrant,
   type CanvasReadShape,
 } from "@/lib/canvas-bridge"
@@ -25,7 +26,15 @@ import {
   recordOf,
   upsert,
 } from "@/lib/canvas-cache"
-import { cachedDocs, forgetDoc, keepWrite, settleDoc, sweepMarks } from "@/lib/canvas-docs"
+import {
+  cachedCount,
+  cachedDocs,
+  forgetDoc,
+  keepWrite,
+  settleDoc,
+  sweptWhole,
+  sweepMarks,
+} from "@/lib/canvas-docs"
 import {
   drainCanvas,
   drainOutbox,
@@ -318,7 +327,25 @@ export async function canvasData(id: string, collection?: string): Promise<Canva
  * are this device's, so where a document lives is a change here and nowhere else.
  */
 export function canvasReader(id: string): (call: BridgeDataCall) => Promise<unknown> {
-  return async (call) => answerRead(call, await canvasData(id, call.collection))
+  return async (call) => answerRead(call, await canvasCopy(id))
+}
+
+/**
+ * One canvas's rows as a read sees them, resolved for the one call that asks: the bot the canvas
+ * belongs to, read once, then its collection's documents, their count and the sweep's mark, each read
+ * when the call needs it — so a count never carries five thousand documents to answer a number. A
+ * canvas this device holds no bot for has no rows and no completed sweep, so a read of it is partial
+ * rather than empty.
+ */
+async function canvasCopy(id: string): Promise<CanvasCopy> {
+  const profileId = profileOf(id)
+  const profile = profileId ? await db.profiles.get(profileId) : undefined
+  if (!profile) return { docs: async () => [], count: async () => 0, whole: async () => false }
+  return {
+    docs: (collection) => cachedDocs(profile, id, collection),
+    count: (collection) => cachedCount(id, collection),
+    whole: () => sweptWhole(profile, id),
+  }
 }
 
 /** The bot a canvas belongs to, from what this device already holds. */

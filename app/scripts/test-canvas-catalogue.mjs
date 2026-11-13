@@ -50,7 +50,7 @@ test("the guide states the cap the host really enforces", () => {
 test("the guide keeps the length it shipped with", () => {
   // The number is the guide's own. If it moves, a canvas session is told different words — a
   // legitimate edit updates this pin on purpose, the way a version's tests hold their literal.
-  assert.equal(rendered.length, 3_963, "the canvas's guide is 3,963 characters and stays that way")
+  assert.equal(rendered.length, 3_971, "the canvas's guide is 3,971 characters and stays that way")
 })
 
 test("the catalogue, the sources it writes and the guide it renders are one list", () => {

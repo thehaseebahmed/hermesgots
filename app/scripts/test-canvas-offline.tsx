@@ -248,9 +248,19 @@ test(
       // Both are readable at once, from the page's own read, with the host still silent.
       await say({ type: BRIDGE_MESSAGE, call: 3, method: "list", collection: "items" })
       await until(() => posted.length > 2, "the page's list to be answered")
-      const listed = posted[2].value as CanvasDoc[]
-      assert.deepEqual(listed.map((row) => row.id), ["one", "two"], "both writes are readable at once")
-      assert.deepEqual(listed.map((row) => row.pending), [true, true], "as pending writes")
+      const listed = posted[2].value as { rows: CanvasDoc[]; partial: boolean }
+      assert.deepEqual(
+        listed.rows.map((row) => row.id),
+        ["one", "two"],
+        "both writes are readable at once",
+      )
+      assert.deepEqual(
+        listed.rows.map((row) => row.pending),
+        [true, true],
+        "as pending writes",
+      )
+      // No sweep ever reached this canvas's last page: the list is what the phone holds and says so.
+      assert.equal(listed.partial, true)
 
       // The bot comes back, and the list's poll is what sends what this device kept: the write the
       // page made first goes first, so the host ends on the document the page last wrote.

@@ -1150,6 +1150,8 @@ export interface CanvasSweepRow {
   canvasId: string
   generation: number
   completeAt?: number
+  /** When the sweep under way began: unset before one begins, and cleared by the one that finishes. */
+  startedAt?: number
   /** The newest clock among the documents the completed sweep saw, which is the record's `docs_at`. */
   docsAt?: number
 }

@@ -31,6 +31,12 @@ export interface CanvasSweep {
   generation: number
   /** Unset while no sweep of this canvas has ever reached its last page. */
   completeAt?: number
+  /**
+   * When the sweep under way began, where one is. A sweep is under way from its first page until it
+   * reaches its last, so the rows in between are neither the sweep before nor the one after — which is
+   * what a read says `partial` for (`sweptWhole`).
+   */
+  startedAt?: number
   /** The newest clock among the documents the completed sweep saw — the record's `docs_at`. */
   docsAt?: number
 }
@@ -157,6 +163,27 @@ export async function cachedDocs(
   return inOrder(rows.map(docOf))
 }
 
+/**
+ * How many documents one collection holds, read off the index rather than carried: what a page's
+ * `count` answers, and the number a page of them says is the whole. The canvas's id is the host's own
+ * uuid, so the collection index's rows are one canvas's alone — which is why the count needs no bot
+ * and carries no document to answer a number.
+ */
+export async function cachedCount(canvasId: string, collection: string): Promise<number> {
+  return db.canvasDocs.where("[canvasId+collection]").equals([canvasId, collection]).count()
+}
+
+/**
+ * Whether this device's rows are the canvas whole: a sweep reached its last page, and none is under
+ * way now. A sweep that began and never finished leaves rows that are real and a canvas that is not
+ * whole — what it did not reach is not absent because it is gone, which is the rule `pruneDocs` keeps
+ * for deleting and a read keeps for answering `null` (GLOSSARY "Partial").
+ */
+export async function sweptWhole(profile: Profile, canvasId: string): Promise<boolean> {
+  const mark = await sweepMark(profile, canvasId)
+  return Boolean(mark?.completeAt) && mark?.startedAt === undefined
+}
+
 /** Drops one document this device holds — a remove the host answered. */
 export async function forgetDoc(
   profile: Profile,
@@ -198,6 +225,7 @@ export async function beginSweep(profile: Profile, canvasId: string): Promise<nu
       connection: connectionKey(profile),
       canvasId,
       generation,
+      startedAt: Date.now(),
     })
     return generation
   })

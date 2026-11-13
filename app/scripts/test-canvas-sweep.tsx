@@ -218,10 +218,12 @@ test(
       await say({ type: BRIDGE_MESSAGE, call: 1, method: "list", collection: "items" })
       await until(() => posted.length > 0, "the page's list to be answered")
       assert.equal(posted[0].ok, true, "the read is answered")
-      const rows = posted[0].value as CanvasDoc[]
+      const list = posted[0].value as { rows: CanvasDoc[]; partial: boolean }
+      const rows = list.rows
       assert.equal(rows.length, 5000, "five thousand documents, with the host away")
       assert.equal(rows[0].id, "d0000", "in the order the host keeps them")
       assert.equal(rows[rows.length - 1].id, "d4999")
+      assert.equal(list.partial, false, "and the sweep that filled them reached its last page")
       assert.equal(asked.length, 0, "and the page's list asked the host nothing at all")
     })
   }),

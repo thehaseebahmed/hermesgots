@@ -777,6 +777,10 @@ _Avoid_: table, folder, namespace, group
 A device reading a canvas's documents a page at a time to fill its own copy. It is a *completed* sweep only once the last page of the last collection has landed, and only a completed sweep may treat a document it did not see as gone, so only a completed sweep prunes.
 _Avoid_: sync, pull, refresh, download
 
+**Partial**:
+A device's copy of a canvas's documents before any sweep of it has completed, or while one is running. A list or a page says so in its answer, and a get of a document the rows don't hold is refused rather than answered as missing, because the rows are only evidence of what is gone after a completed sweep.
+_Avoid_: incomplete, unsynced, stale, syncing
+
 **Pending write**:
 A page's write the device kept because its bot was away: read back at once and sent in order when the bot answers, and never outranking an answer the host has given.
 _Avoid_: queued write, outbox entry, draft, retry

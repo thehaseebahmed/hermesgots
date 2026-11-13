@@ -1,16 +1,16 @@
 # Canvas
 
-A canvas is one HTML page the user keeps and asks you to change. Write it whole with `canvas_write`;
-read it with `canvas_read` first.
+A canvas is one HTML page the user keeps and asks you to change. Write it whole with `canvas_write`
+after `canvas_read`.
 
 ## The user's design
 
-Their aesthetic wins: a named look, a brand, a palette, a font or a reference is the design and the
-job; what follows is a floor, filling only what the user leaves unsaid.
+Their aesthetic wins: a named look, brand, palette, font or reference is the design and the
+job; the rest is a floor, filling what they leave unsaid.
 ## The floor
 
 One surface, one job, a real hierarchy: a title, a next step, one deliberate accent, and its empty,
-loading and error states, each saying what to do, with no explanatory copy.
+loading and error states, each saying what to do — no explanatory copy.
 ## Colour and classes
 
 The app draws the page, its theme on `:root` as CSS variables:
@@ -19,27 +19,27 @@ The app draws the page, its theme on `:root` as CSS variables:
 --secondary-foreground --muted --muted-foreground --accent --accent-foreground --border
 --destructive --success --warning --info --radius`
 
-Use them and it follows the mode; a hardcoded colour breaks in dark, so spend colour on the tokens,
-`--primary` for what the page is for. Tailwind v4 compiles classes from the same tokens, so
-`bg-primary`, `text-foreground`, `border-border`, `rounded-lg`, `p-4`, `md:` and `dark:` work, every
-token having `bg-`, `text-` and `border-`. Only markup classes compile; `<style>` is for the rest.
+They follow the mode; a hardcoded colour breaks in dark, so spend colour on tokens — `--primary`
+for what the page is for. Tailwind v4 compiles classes from the same tokens, so `bg-primary`,
+`text-foreground`, `border-border`, `rounded-lg`, `p-4`, `md:` and `dark:` work, each token also as
+`bg-`, `text-` and `border-`. Only markup classes compile; `<style>` is for the rest.
 ## Phone first
 
-Most open on a phone: lay it out for 390px first, then breathe from 768px; nothing scrolls sideways.
-Tappable is 44px tall and never behind hover; typed-into type is 16px. Keep the foot clear of the
-phone's bar: `env(safe-area-inset-bottom)`.
+Most open on a phone: lay out for 390px first, then breathe from 768px; nothing scrolls sideways.
+Tappable is 44px tall, never behind hover; typed-into type is 16px. Keep the foot clear of the
+phone bar: `env(safe-area-inset-bottom)`.
 
 ## Points
 
 A message may end with `[POINT — Total | selector: #total]`: the reader tapped that element while
-asking; the label says what they tapped, the selector finds it.
+asking; the label names it, the selector finds it.
 
 ## Design skills
 
 Three load with `skill_view`: `gots:impeccable` when the page should look like something,
-`gots:web-design-guidelines` when it has to pass a review, `gots:transitions-dev` when it moves (CSS
-to paste, not to import). `plugin/canvas/DESIGN.md` is the design system, and the page gets the tokens
-above and no others.
+`gots:web-design-guidelines` when it must pass a review, `gots:transitions-dev` when it moves (CSS
+to paste, not import). `plugin/canvas/DESIGN.md` is the design system; the page gets those tokens
+and no others.
 ## The sandbox
 
 - A form's submit is cancelled in place: nothing navigates, so handle the click.
@@ -50,8 +50,8 @@ above and no others.
 
 ## The document
 
-One complete file: `<!doctype html>`, `<html lang="en">`, a `<head>` with a `<title>` and viewport
-meta, styles in `<style>`, script in `<script>`. Under 256 KB. No secrets: it is readable by all.
+One complete file: `<!doctype html>`, `<html lang="en">`, a `<head>` with `<title>` and viewport
+meta, styles in `<style>`, script in `<script>`. Under 256 KB, no secrets: it is readable by all.
 
 ## Libraries
 
@@ -63,15 +63,16 @@ Chart.js, Day.js, lucide, d3, Alpine.js, Three.js and Leaflet are built in, no C
 
 ## Its data
 
-A canvas keeps documents of `{collection, id, doc, at}`. The page has `canvas.data.list`,
-`canvas.data.get`, `canvas.data.put` and `canvas.data.remove`, each taking a collection and, but
-`list`, an id; you have `canvas_data_read` and `canvas_data_write`. Any of the bot's sessions but
-another canvas's reaches it by title or id, which `canvas_list` names. 64 MB a canvas, 256 KB a
-document, read a page at a time.
+A canvas keeps documents of `{collection, id, doc, at}`. Its page reads with `canvas.data.list`,
+`canvas.data.get`, `canvas.data.page` and `canvas.data.count`, and writes with `canvas.data.put` and
+`canvas.data.remove`; a page is `{after, limit}`. A list stops at 5000 documents and refuses past it,
+so page instead. Until a sweep finishes, a list or page says `partial: true` and a get of a
+document the device lacks throws instead of null — absence follows only a sweep. You have
+`canvas_data_read` and `canvas_data_write`. 64 MB a canvas, 256 KB a document.
 ## The host, from the page
 
-It reads four host shapes — `canvas.read("usage", {provider})`, and `canvas.read("routines")`,
-`canvas.read("projects")` or `canvas.read("sessions")` — and may call a tool its version declares,
-named in `tools` on `canvas_write` or `canvas_edit`: `canvas.tool.call("<server>.<tool>", args)`, which
-asks once per tool on its first call. `canvas_edit` takes find-and-replace pairs, each `find` matching
-once, all of them or none.
+It reads four host shapes — `canvas.read("usage", {provider})`, `canvas.read("routines")`,
+`canvas.read("projects")` and `canvas.read("sessions")` — and may call a tool its version declares in
+`tools` on `canvas_write` or `canvas_edit`: `canvas.tool.call("<server>.<tool>", args)`,
+once per tool. `canvas_edit` takes find-and-replace pairs: each `find`
+matches once, all or none.
