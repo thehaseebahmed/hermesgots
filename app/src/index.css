@@ -259,6 +259,15 @@
   }
 }
 
+/*
+  The unread dot's halo: the mark keeps its size and gains a faint glow of its own tone, so it reads
+  on a row tinted by its own hover without growing into the words beside it. The one glow outside a
+  pop-up's shadow, named as such in DESIGN.md; the tone is the dot's, `--warning`, in both themes.
+*/
+.dot-glow {
+  box-shadow: 0 0 0.375rem color-mix(in oklab, var(--warning) 45%, transparent);
+}
+
 @theme inline {
   --animate-work-pulse: work-pulse 1.8s ease-in-out infinite;
   --font-sans: "Figtree Variable", ui-sans-serif, system-ui, sans-serif;

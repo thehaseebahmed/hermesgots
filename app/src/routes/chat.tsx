@@ -98,6 +98,7 @@ import {
   db,
   getActiveProfile,
   getMessages,
+  NEW_CHAT_TITLE,
   setActiveProfile,
   updateConversation,
 } from "@/lib/db"
@@ -1052,7 +1053,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
   // Nothing started has no title yet, and its bot is the big one in the middle. A chat gone from this
   // device draws no title: it is never drawn as a new one, and a header standing empty is the honest
   // answer. A bot's Main is titled with its own name, like any other chat.
-  const headerTitle = gone ? "" : unstarted ? "" : (conversation?.title ?? "New chat")
+  const headerTitle = gone ? "" : unstarted ? "" : (conversation?.title ?? NEW_CHAT_TITLE)
   let subtitle: string | undefined
   if (!unstarted)
     subtitle = session
@@ -1278,6 +1279,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
             }}
             connection={serverConfig(profile)}
             botName={profile?.name}
+            mentionable={profile ? { bot: profile, here: id } : undefined}
             dictationWords={profile?.vocabulary}
             dictationHint={dictationHint({
               title: conversation?.title,

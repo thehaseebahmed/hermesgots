@@ -64,6 +64,10 @@ export function presence(
   answer?: PresenceAnswer,
 ): boolean | undefined {
   if (!bot.hostId || bot.disabled) return undefined
+  // A pass that got no answer from a host this device has never heard says nothing it can place: the
+  // bot is unknown to it, not away, which is the same silence Settings keeps about the same bot
+  // (`presenceLine`). Only a sighting of some kind lets a failed pass read as `Offline`.
+  if (answer === "unreachable" && !bot.seenAt) return undefined
   return heard(bot, now, answer)
 }
 
