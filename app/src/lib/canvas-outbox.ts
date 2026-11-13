@@ -12,8 +12,9 @@
  * whose clock runs ahead cannot keep its own write on the page. A refusal the host gives is dropped and
  * said in the host's own words — it has spoken about that document, and sending it again would only be
  * refused again — while a request that never landed stops that canvas's drain and leaves the rest
- * queued for the next time the bot answers. What a refusal is, exactly, is `refusedWrite`: a statused
- * 400, 403 or 409 (404 for a remove), since a 5xx, a 429 or a timeout is the bot not answering at all.
+ * queued for the next time the bot answers. What a refusal is, exactly, is `hostVerdict` in
+ * `canvas-bridge.ts`: the one rule this drain, a page's own write and `withHost` in `canvases.ts` all
+ * read, so no two of them can disagree about what the host answered.
  *
  * It runs where the host is found again: the app's return or the network's (`onReturn`), the canvas
  * list's poll, and the opening of a canvas, which are the three moments a bot that was away has just
@@ -22,7 +23,7 @@
 
 import Dexie from "dexie"
 
-import type { CanvasWrite } from "@/lib/canvas-bridge"
+import { hostVerdict, type CanvasWrite } from "@/lib/canvas-bridge"
 import { forgetPending, keepAnswer } from "@/lib/canvas-docs"
 import { connectionKey, hostTargets } from "@/lib/connection"
 import {
@@ -32,24 +33,11 @@ import {
   type CanvasOutboxRow,
   type Profile,
 } from "@/lib/db"
-import { callCanvas, HermesError } from "@/lib/hermes"
+import { callCanvas } from "@/lib/hermes"
 import { onlineNow } from "@/lib/online"
 import { quietly } from "@/lib/report"
 import { tell } from "@/lib/tell"
 import { onReturn } from "@/lib/wake"
-
-/**
- * The statuses a host refuses a canvas's write with: a document past its cap or a name it won't take
- * (400), a write it won't allow (403), one it will not store as the canvas now stands (409) — and the
- * canvas being gone (404), which a put is refused by as a remove is: there is nowhere left to store it.
- * Every other status a host can send is no answer at all: a 5xx, a 429 or a timeout is a bot that
- * isn't there yet, and its write is still waiting.
- */
-const WRITE_REFUSALS = new Set([400, 403, 404, 409])
-
-/** Whether a host's failure is its answer about a write — a refusal — rather than no answer. */
-export const refusedWrite = (failure: unknown): failure is HermesError =>
-  failure instanceof HermesError && WRITE_REFUSALS.has(failure.status ?? 0)
 
 /**
  * The write's network half, and only that: one round-trip through the host's `call` route, which
@@ -162,10 +150,11 @@ async function send(profile: Profile, canvasId: string): Promise<boolean> {
       // included, which is no place to store the write at all: the row goes, the Pending write it kept
       // goes with it so the copy is the host's own again, and the reader is told which document and
       // why, in the host's own words. Anything else leaves the queue where it is.
-      if (!refusedWrite(failure)) return false
+      if (hostVerdict(failure) !== "refused") return false
       const sent = await dropRow(row)
       if (sent) await forgetPending(profile, canvasId, row.collection, row.docId)
-      tell.error(`${refusedWords(row)} ${failure.message}`)
+      const said = failure instanceof Error ? failure.message : String(failure)
+      tell.error(`${refusedWords(row)} ${said}`)
       continue
     }
     const kept = await keepAnswer(profile, canvasId, call, value)

@@ -4,6 +4,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { wireContent } from "@/lib/attachments"
 import {
   answerRead,
+  hostVerdict,
   mergeGrants,
   type BridgeDataCall,
   type BridgeHostCall,
@@ -42,7 +43,6 @@ import {
   drainOutbox,
   dropQueued,
   enqueueWrite,
-  refusedWrite,
   sendWrite,
   serialWrite,
 } from "@/lib/canvas-outbox"
@@ -517,7 +517,7 @@ async function readInto(
     }
     // A host that answered and refused — an undo past the first version, a key it won't take — said
     // what it thinks of this request; only one that never landed leaves the canvas read-only.
-    if (!hostAnswered(failure)) markAway(id)
+    if (hostVerdict(failure) === "away") markAway(id)
     throw failure
   }
   if (raw) put(profile, toCanvas(raw, profileId))
@@ -650,8 +650,8 @@ async function takeWrite(id: string, call: BridgeWriteCall): Promise<unknown> {
   } catch (failure) {
     // A host that refused said what it thinks of this write: that is the page's own answer, in its
     // words. A bot that isn't answering — a 5xx, a 429, a timeout — has said nothing, and the write
-    // is one this device keeps for later (`refusedWrite` is the one rule).
-    if (refusedWrite(failure)) throw failure
+    // is one this device keeps for later. `hostVerdict` is the one rule, here and in the queue.
+    if (hostVerdict(failure) === "refused") throw failure
     markAway(id)
     return keepOnDevice(profile, id, call)
   }
@@ -851,10 +851,11 @@ async function hosting(id: string) {
  *
  * One rule for reaching the bot, so a data write, a read, a tool call and a grant all fail the
  * same way: with no network at all the call is refused without asking, and a request that never
- * landed leaves the canvas unreachable. A host that answered and refused keeps its own words —
- * that is the page's own answer, and the bridge reads a consent hold off it — and is never
- * toasted as the bot being away. The bot comes back with the answer because some answers are kept
- * against it: a write leaves a copy to keep, a grant a row.
+ * landed leaves the canvas unreachable. A host that answered keeps its own words — that is the
+ * page's own answer, and the bridge reads a consent hold off it — and is never toasted as the bot
+ * being away. `hostVerdict` is the judgement: only `away` is no answer, so a read answered with a
+ * 5xx still says what the host said rather than calling the bot gone. The bot comes back with the
+ * answer because some answers are kept against it: a write leaves a copy to keep, a grant a row.
  */
 async function withHost<T>(
   id: string,
@@ -866,7 +867,7 @@ async function withHost<T>(
   try {
     return { profile, value: await task(profile) }
   } catch (failure) {
-    if (hostAnswered(failure)) throw failure
+    if (hostVerdict(failure) !== "away") throw failure
     markAway(id)
     refuse(refusal, failure)
   }

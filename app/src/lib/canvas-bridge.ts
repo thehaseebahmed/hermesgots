@@ -214,6 +214,37 @@ export type CanvasWrite =
   | { method: "put"; collection: string; id: string; doc: unknown }
   | { method: "remove"; collection: string; id: string }
 
+/**
+ * The statuses a host refuses a canvas's write with — the one list a canvas's callers read: a document
+ * past its cap or a name it won't take (400), a write it won't allow (403), one it will not store as
+ * the canvas now stands (409), and the canvas being gone (404), which a put is refused by as a remove
+ * is: there is nowhere left to store it. Every other status a host can send is no answer at all.
+ */
+export const WRITE_REFUSALS: readonly number[] = [400, 403, 404, 409]
+
+/**
+ * What a failed call to a canvas's host is, in the one judgement every caller of that host reads
+ * (ADR 0149): `refused` when the host answered with a status it refuses a write by — its own words are
+ * the page's answer, and a write is never queued for it; `answered` when it answered with any other
+ * status, which is a read's answer and no refusal of a write, since a 5xx or a 429 is the bot not
+ * being there yet; and `away` when the request never landed, so nothing answered at all.
+ *
+ * `hostAnswered` in `hermes.ts` says only whether a status came back; this says which of the three a
+ * canvas's call is, so `withHost` in `canvases.ts`, a page's write and the queue beside them cannot
+ * disagree about what "away" means. Import-free: the status is read off the failure rather than
+ * tested with `instanceof`, since the only failures these callers see are the host's own
+ * (`request` in `hermes.ts`, which is the one place that builds them) and the transport's, and only
+ * the first carries a status.
+ */
+export type HostVerdict = "refused" | "answered" | "away"
+
+export function hostVerdict(failure: unknown): HostVerdict {
+  const status =
+    failure && typeof failure === "object" ? (failure as { status?: unknown }).status : undefined
+  if (typeof status !== "number") return "away"
+  return WRITE_REFUSALS.includes(status) ? "refused" : "answered"
+}
+
 /** A call the host answers: the canvas's own data read by the host, or a declared tool. */
 export type BridgeHostCall = Extract<BridgeCall, { method: "read" | "query" | "tool" }>
 

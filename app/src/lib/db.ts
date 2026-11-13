@@ -1750,6 +1750,19 @@ db.version(44)
   })
 
 /**
+ * v45: the indexes nothing reads, gone. `canvasDocs` is read by its key, by `connection` (a bot that
+ * goes takes its copies with it) and by the two collection indexes a page and a collection read
+ * through; the plain `canvasId` index answered no query — every read of one canvas's rows is a range
+ * of the key or one of those two — and `canvasSweeps` is read by its key alone, so its `canvasId`
+ * index is gone with it. Restating both stores is what drops the indexes; no row moves, and the
+ * columns the rows carry stay as they are.
+ */
+db.version(45).stores({
+  canvasDocs: "key, connection, [canvasId+collection], [canvasId+collection+id]",
+  canvasSweeps: "key",
+})
+
+/**
  * How many rows of one room's log this device keeps: the page a reader can scroll back through.
  * A room's log lives on its Host and is read by sequence, so a page is what a screen needs and no
  * more — without a bound, every fold and every read mark would pay for the room's whole history.

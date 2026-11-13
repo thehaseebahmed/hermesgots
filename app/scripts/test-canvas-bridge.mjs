@@ -18,8 +18,10 @@ import {
   answerRead,
   applyWrite,
   bridgeHandler,
+  hostVerdict,
   mergeGrants,
   readCall,
+  WRITE_REFUSALS,
 } from "../src/lib/canvas-bridge.ts"
 
 /** A document of the canvas's data, as the host answers it. */
@@ -1208,4 +1210,22 @@ test("a point from another window is not the canvas talking", () => {
   hear({ source: frame, data: { type: POINT_MESSAGE, point: { label: "Total", selector: "#total" } } })
   assert.deepEqual(points, [{ label: "Total", selector: "#total" }])
   assert.deepEqual(frame.posted, [], "a point is answered with nothing")
+})
+
+test("a host's failure is one away rule, read by every caller of that host", () => {
+  // ADR 0149: a status the host refuses a write by is its own answer — thrown to the page and never
+  // queued — while a 5xx or a 429 is the bot not being there yet, and a request that never landed has
+  // no status at all. Both of those are queued. The third answer, `answered`, is a status that is a
+  // read's answer and no refusal of a write, which is why a read still shows the host's own words.
+  // `withHost` in canvases.ts, a page's write there and canvas-outbox.ts's drain all ask this one
+  // predicate, so the three cannot disagree about what "away" means.
+  assert.deepEqual([...WRITE_REFUSALS], [400, 403, 404, 409], "the statuses a write is refused with")
+  for (const status of [400, 403, 404, 409])
+    assert.equal(hostVerdict({ status }), "refused", `a ${status} is the host's answer`)
+  for (const status of [429, 500, 502, 503])
+    assert.equal(hostVerdict({ status }), "answered", `a ${status} is not a refusal of a write`)
+  assert.equal(hostVerdict(new TypeError("Failed to fetch")), "away", "a request that never landed")
+  assert.equal(hostVerdict(new Error("a plain error")), "away")
+  assert.equal(hostVerdict(null), "away")
+  assert.equal(hostVerdict({ status: "500" }), "away", "a status that is not a number says nothing")
 })
