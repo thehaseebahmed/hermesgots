@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent,
   type ReactNode,
   type RefObject,
 } from "react"
@@ -25,13 +26,14 @@ import { UsageSheet } from "@/components/chat/usage-sheet"
 import { LabLabel } from "@/components/lab-badge"
 import { ItemGroup } from "@/components/item-list"
 import { setBackGuard } from "@/lib/native"
-import { useNav } from "@/lib/nav"
+import { plainPress, useNav } from "@/lib/nav"
 import { Button } from "@/components/ui/button"
 import { failed, type RefusalHold } from "@/lib/refusal"
 import { useRefusal, useSaidRefusal } from "@/lib/use-refusal"
 import { awayLine } from "@/lib/away"
 import { hostAnswered } from "@/lib/hermes"
 import { bridgeHandler, pointWatch } from "@/lib/canvas-bridge"
+import { openCanvas } from "@/lib/canvas-open"
 import { canvasCss, canvasCssKey } from "@/lib/canvas-css"
 import {
   canvasDocument,
@@ -98,6 +100,14 @@ const CHAT_LANE = "flex min-h-0 flex-1 flex-col"
 const NO_LIBRARIES: Record<string, CanvasLibrarySource> = {}
 
 /**
+ * The flow's own open: the reader picked this canvas on Canvas's own screens. A press meant for a new
+ * tab opens nothing here, since this tab stays where it is.
+ */
+const openedBy = (id: string) => (event: MouseEvent<HTMLAnchorElement>) => {
+  if (plainPress(event)) openCanvas(id)
+}
+
+/**
  * A canvas in the list: the picture its bot put on it, or its own mark, over the name and where it
  * stands. A tile rather than a row, since what a reader picks from is a page — the picture is the
  * whole of what tells two canvases apart at a glance.
@@ -107,6 +117,7 @@ function CanvasTile({ canvas, now }: { canvas: Canvas; now: number }) {
   return (
     <Link
       to={`/canvas/${canvas.id}`}
+      onClick={openedBy(canvas.id)}
       data-canvas-tile
       className="group flex min-w-0 flex-col gap-2 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
     >
@@ -178,6 +189,8 @@ export function CanvasPage() {
       // The canvas's own address, not its chat's: the preview decides which screen a canvas opens on
       // (a phone sends a canvas with no version to its chat from there), so only one screen owns that
       // rule, and the desktop no longer mounts the chat it will not draw beside the page (ADR 0130).
+      // A start is the flow's open too (ADR 0151).
+      openCanvas(started.id)
       navigate(`/canvas/${started.id}`)
     } finally {
       setStarting(false)
