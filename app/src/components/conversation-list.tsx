@@ -22,7 +22,7 @@ import {
 } from "lucide-react"
 
 import { Bot } from "@/components/bot"
-import { LabBadge } from "@/components/lab-badge"
+import { LabLabel } from "@/components/lab-badge"
 import { RoomFaces } from "@/components/room/room-faces"
 import { SortMenu } from "@/components/sort-menu"
 import { Button } from "@/components/ui/button"
@@ -61,17 +61,8 @@ const railClass = ({ isActive }: { isActive: boolean }) =>
   )
 
 /**
- * A lab feature's row: its name, then the pill that marks it, pinned to the row's end. The name keeps
- * the room the pill leaves, so a long one truncates instead of pushing the mark out of the row.
+ * A sidebar destination: top-level, so it opens as the only entry and back leaves the app.
  */
-const labNavLabel = (word: string) => (
-  <>
-    <span className="min-w-0 flex-1 truncate">{word}</span>
-    <LabBadge />
-  </>
-)
-
-/** A sidebar destination: top-level, so it opens as the only entry and back leaves the app. */
 function RootLink({
   to,
   onClick,
@@ -705,7 +696,7 @@ export function ConversationList({
             className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
           >
             <FrameIcon className="size-5 text-muted-foreground" />
-            {!collapsed && labNavLabel("Canvas")}
+            {!collapsed && <LabLabel fill>Canvas</LabLabel>}
           </RootLink>
           <RootLink
             to="/research"
@@ -714,7 +705,7 @@ export function ConversationList({
             className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
           >
             <TelescopeIcon className="size-5 text-muted-foreground" />
-            {!collapsed && labNavLabel("Research")}
+            {!collapsed && <LabLabel fill>Research</LabLabel>}
           </RootLink>
           {meetings && (
             <RootLink
@@ -724,7 +715,7 @@ export function ConversationList({
               className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
             >
               <AudioLinesIcon className="size-5 text-muted-foreground" />
-              {!collapsed && labNavLabel("Meetings")}
+              {!collapsed && <LabLabel fill>Meetings</LabLabel>}
             </RootLink>
           )}
           {legacy === true && (

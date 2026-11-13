@@ -1,21 +1,21 @@
 import type { ReactNode } from "react"
 
+import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
 
-/** Marks a feature the app still considers a lab, wherever it can be turned on or picked. */
+/** Marks a lab feature, wherever it can be turned on or picked. */
 export function LabBadge() {
-  return <Badge className="bg-warning/15 px-2.5 text-warning">Lab</Badge>
+  return <Badge className="h-[22px] bg-warning/15 px-2.5 text-warning-ink">Lab</Badge>
 }
 
 /**
- * A lab feature's own name with that mark: one centred line, so the larger type of a heading cannot
- * leave the pill riding its baseline. The sidebar pins the pill to the row's end instead, and spells
- * that itself.
+ * A lab feature's name and its mark, on one centred line. `fill` gives the name the row's spare width
+ * and pins the pill to its end, which is how the sidebar draws it.
  */
-export function LabLabel({ children }: { children: ReactNode }) {
+export function LabLabel({ children, fill }: { children: ReactNode; fill?: boolean }) {
   return (
-    <span className="flex items-center gap-2">
-      {children}
+    <span className={cn("flex items-center gap-2", fill && "min-w-0 flex-1")}>
+      {fill ? <span className="min-w-0 truncate">{children}</span> : children}
       <LabBadge />
     </span>
   )
