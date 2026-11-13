@@ -32,11 +32,13 @@ document, reaching outside itself for anything it loads, or asking for a library
 carry — the last one naming the library and every name it would have answered.
 
 A canvas also keeps data of its own: JSON documents in collections (``data``, ``put_doc``,
-``remove_doc``), written by the page through the host's call route and by the agent through
-``canvas_data_read`` and ``canvas_data_write``. The data is the canvas's, not a version's — a
-write or an undo never touches it — so a page keeps its state through a version the user walks
-back, and the whole of it is capped at ``DATA_BYTES`` because every open and every device's copy
-carries it.
+``remove_doc``, ``data_catalogue``, ``data_page``), written by the page through the host's call
+route and by the agent through ``canvas_data_read`` and ``canvas_data_write``. The data is the
+canvas's, not a version's — a write or an undo never touches it — so a page keeps its state through
+a version the user walks back. It is read a page at a time, a collection at a time, which is what
+lets the whole of it be capped at ``DATA_BYTES`` with one document at ``DOC_MAX_BYTES``; the
+whole-array read an app from before the paged route makes survives, bounded to
+``LEGACY_DATA_BYTES``.
 
 A page calls a tool on the host only when the version it is drawn from declared that tool, and only
 once the user has answered for it: ``may_call`` reads the version's list and the canvas's own grant
@@ -59,6 +61,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional
 
 from . import (
+    canvas_docs,
     chats,
     cleanup,
     events,
@@ -79,13 +82,26 @@ MAX_BYTES = 256 * 1024
 KEEP_VERSIONS = 20
 # How much of a prompt becomes a canvas's title — and so its chat's.
 TITLE_CHARS = 60
-# The whole of a canvas's data. It rides every open and every device's copy of the page, so the cap
-# is the canvas's rather than one document's, and a write past it is refused whole.
-DATA_BYTES = 1024 * 1024
+# The whole of a canvas's data. The cap is the canvas's rather than one document's: a page reads its
+# collection a page at a time, so the whole of a canvas no longer rides every open, and 5000
+# bookmarks at about 320 B a row are 1.6 MB of a 64 MB cap.
+DATA_BYTES = 64 * 1024 * 1024
+# What one write may store, and no more: a document is what one page draws, and a page is already
+# capped at ``MAX_BYTES`` — the same 256 KB, kept as its own number because it is its own rule.
+DOC_MAX_BYTES = 256 * 1024
+# What a device from before the paged read is handed as one array: the whole of a canvas's data as it
+# used to be capped, since an app from before this change can only hold that much anyway.
+LEGACY_DATA_BYTES = 1024 * 1024
+# What one agent answer may carry. `canvas_data_read` is the tool a model reads a canvas's data with,
+# and a canvas is capped at DATA_BYTES now — so an unbounded whole-array read is a tool result of up to
+# 64 MB. One answer is bounded to what a whole canvas could hold before this change, so no read that
+# worked then is refused now, and a read past it is refused in words naming the read that does answer:
+# one collection, or a page of one.
+READ_MAX_BYTES = LEGACY_DATA_BYTES
 # What one document weighs beside its content: the keys, the clock and the punctuation a read of the
-# data carries for it. Counting only the content would let a page keep a hundred thousand one-byte
-# documents and hand every open an answer many times the cap.
-DOC_BYTES = 64
+# data carries for it. One number, in the module that reads the row — the cap, a catalogue's bytes
+# and the bound a whole-array read is cut at are the same measure.
+DOC_BYTES = canvas_docs.DOC_BYTES
 # A collection and a document id are names the page sends, so they stay short and readable: what a
 # key and a URL can carry without becoming a page of their own.
 NAME_CHARS = 64
@@ -513,17 +529,30 @@ _COLUMNS = (
     "version",
     "pinned",
     "archived",
+    # Whether this canvas's data is copied into the host's OKF vault, the canvas's own switch
+    # (canvas_vault.py): off unless the user turned it on for this canvas, in this bot's options.
+    "vault",
     "image",
     "at",
     "created_at",
 )
-_RECORD = ", ".join(_COLUMNS)
+# What a record answers beyond the canvas's own row: `docs_at` is a seek into the canvas's documents
+# rather than a column of its own — a clock kept beside the rows is an invariant every write and
+# remove could break, and a device polling the list only needs to know whether the data it swept has
+# moved since (canvas_docs.py). Kept apart from `_COLUMNS` so adding a column cannot silently shift
+# the record's SQL.
+_DERIVED = ("docs_at",)
+_RECORD = (
+    ", ".join(_COLUMNS)
+    + ", (SELECT MAX(at) FROM canvas_docs WHERE canvas_docs.canvas_id = canvases.id) AS docs_at"
+)
 
 
 def _row(row: Any) -> Dict[str, Any]:
-    record = dict(zip(_COLUMNS, row))
+    record = dict(zip(_COLUMNS + _DERIVED, row))
     record["pinned"] = bool(record["pinned"])
     record["archived"] = bool(record["archived"])
+    record["vault"] = bool(record["vault"])
     return record
 
 
@@ -600,6 +629,25 @@ def names(path: Path) -> List[Dict[str, Any]]:
     finally:
         conn.close()
     return [_name_row(row) for row in rows]
+
+
+def vaulting(path: Path) -> List[Dict[str, Any]]:
+    """Every canvas whose data is backed up, by its id and its title, in one stable order.
+
+    The vault's own read (``canvas_vault``), and the only one it makes of the record: a canvas holds
+    a folder named by its id and an ``index.md`` carrying its title, and nothing else of the record
+    is the vault's to draw. The order is the store's key rather than the clock, so a backup that a
+    tick's budget cut short resumes on the canvases it did not reach instead of following whichever
+    one was written to last.
+    """
+    if not path.exists():
+        return []
+    conn = connect(path)
+    try:
+        rows = conn.execute("SELECT id, title FROM canvases WHERE vault = 1 ORDER BY id").fetchall()
+    finally:
+        conn.close()
+    return [{"id": row[0], "title": row[1]} for row in rows]
 
 
 def _answers_to(named: str, canvas_id: str, title: Optional[str]) -> bool:
@@ -747,16 +795,25 @@ def page(path: Path, canvas_id: str) -> Dict[str, Any]:
         conn.close()
 
 
-def current(path: Path, canvas_id: str) -> Dict[str, Any]:
+def current(path: Path, canvas_id: str, documents: bool = True) -> Dict[str, Any]:
     """A canvas as the app draws it, answered from one connection: its record, the version the
-    record points at, whether there is a version under it to undo to, and the data it keeps."""
+    record points at, whether there is a version under it to undo to, and the data it keeps.
+
+    ``documents`` says whether the whole-array read rides the answer — what an app from before the
+    paged route needs, and bounded to ``LEGACY_DATA_BYTES`` for its sake, since it can only hold what
+    the old cap was. The app this bot ships asks ``?docs=none`` and sweeps each collection a page at a
+    time instead, so a canvas of five thousand documents is never one answer.
+    """
     if not canvas_id or not path.exists():
         raise CanvasError("There is no such canvas.", 404)
     conn = connect(path)
     try:
         # The data beside the page, on this same connection: a page that keeps state needs it the
         # moment it opens, and no version has ever touched it.
-        return {**_page(conn, canvas_id), "data": _documents(conn, canvas_id)}
+        answer = _page(conn, canvas_id)
+        if not documents:
+            return answer
+        return {**answer, "data": canvas_docs.upto(conn, canvas_id, LEGACY_DATA_BYTES)}
     finally:
         conn.close()
 
@@ -1021,7 +1078,9 @@ def undo(path: Path, canvas_id: str) -> Dict[str, Any]:
         can_undo = _greatest_below(conn, canvas_id, number) is not None
         answer = {
             **_answer(conn, {**found, "version": number, "at": now}, version, can_undo),
-            "data": _documents(conn, canvas_id),
+            # The whole-array read, bounded as the GET's is: an undo carries the data a page draws,
+            # and an app from before the paged route can only hold what the old cap was.
+            "data": canvas_docs.upto(conn, canvas_id, LEGACY_DATA_BYTES),
         }
     events.note("canvas", found["session_id"], path, True)
     return answer
@@ -1036,26 +1095,32 @@ def _flag(value: Any, field: str) -> bool:
 def update(path: Path, canvas_id: str, body: Any) -> Dict[str, Any]:
     """Changes a canvas's name and its place in the list, and answers its record as it now is.
 
-    The three are the host's, not the app's: a device that pins a canvas and one that hides it
+    The record is the host's, not the app's: a device that pins a canvas and one that hides it
     write one record, so every device draws the same list. A title renames the chat too — a canvas
     and its thread are one name, as ``_commit`` writes them — and ``chats.set_title`` keeps
     ``titleEdited``, so Hermes's auto-title never takes the canvas's name away.
 
+    ``vault`` is the canvas's own backup switch (``canvas_vault``): a flag of the record like the
+    other two, so the device that turned it on and the host that writes the notes agree about which
+    canvas is copied, and a second device draws the same answer.
+
     The answer is the record alone: a name or a place is not the page, and a screen that changed one
     already holds the version it draws, so it keeps its document rather than reading 256 KB back.
-    A body naming none of the three is nobody's change; a flag that isn't a boolean or a title that
+    A body naming none of them is nobody's change; a flag that isn't a boolean or a title that
     isn't a line of text is refused rather than stored, since a record the app can't draw is worse
     than a refusal it can show. The record's clock moves on the host's, taken under the write lock
     like every other write here, since the list is ordered by it.
     """
-    if not any(field in body for field in ("title", "pinned", "archived", "image")):
-        raise CanvasError("A canvas's update names what changes: a title, pinned, archived, or image.")
+    if not any(field in body for field in ("title", "pinned", "archived", "vault", "image")):
+        raise CanvasError(
+            "A canvas's update names what changes: a title, pinned, archived, vault, or image."
+        )
     changes: Dict[str, Any] = {}
     if "title" in body:
         if not isinstance(body["title"], str) or not body["title"].strip():
             raise CanvasError("A canvas's title is a line of text; this one is blank.")
         changes["title"] = title_of(body["title"])
-    for field in ("pinned", "archived"):
+    for field in ("pinned", "archived", "vault"):
         if field in body:
             changes[field] = _flag(body[field], field)
     if "image" in body:
@@ -1069,12 +1134,14 @@ def update(path: Path, canvas_id: str, body: Any) -> Dict[str, Any]:
         conn.execute(
             """UPDATE canvases
                SET title = COALESCE(?, title), pinned = COALESCE(?, pinned),
-                   archived = COALESCE(?, archived), image = COALESCE(?, image), at = ?
+                   archived = COALESCE(?, archived), vault = COALESCE(?, vault),
+                   image = COALESCE(?, image), at = ?
                WHERE id = ?""",
             (
                 changes.get("title"),
                 changes.get("pinned"),
                 changes.get("archived"),
+                changes.get("vault"),
                 changes.get("image"),
                 now,
                 canvas_id,
@@ -1134,36 +1201,47 @@ def delete(
 
 # --- the data ------------------------------------------------------------------------------------
 
-# One order for every read, so a page's list of a collection is the same however its writes landed.
-_DOCUMENTS = "SELECT collection, id, value, at FROM canvas_docs WHERE canvas_id = ?"
-
-
-def _document(collection: str, doc_id: str, value: str, at: int) -> Dict[str, Any]:
-    """One row of ``canvas_docs`` as the document it holds: a collection, an id, the document and
-    the host's clock for it."""
-    return {"collection": collection, "id": doc_id, "doc": json.loads(value), "at": at}
-
-
 def _documents(
     conn: sqlite3.Connection,
     canvas_id: str,
     collection: Optional[str] = None,
     doc_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
-    """A canvas's documents, ordered by collection then id, narrowed by whichever name is given.
+    """A canvas's documents as one array — the whole of its data, one collection's or one
+    document — which is what a read of the data hands the agent.
 
-    The narrowing is the read's own: a page or a bot asking for one document costs one point lookup
-    on the table's primary key rather than a parse of everything the canvas keeps.
+    The rule that reads them is ``canvas_docs``'s, so a document's shape and the order they come in
+    are decided in one place rather than here. This is the agent's whole-array read, and it answers
+    everything the canvas holds, because a short array is a wrong answer no caller could detect —
+    the app reads a page at a time instead (``data_page``), which is a read that says where it ended.
     """
-    query, args = _DOCUMENTS, [canvas_id]
-    if collection is not None:
-        query += " AND collection = ?"
-        args.append(collection)
-    if doc_id is not None:
-        query += " AND id = ?"
-        args.append(doc_id)
-    rows = conn.execute(query + " ORDER BY collection, id", args).fetchall()
-    return [_document(*row) for row in rows]
+    return list(canvas_docs.each(conn, canvas_id, collection, doc_id=doc_id))
+
+
+def _too_big(weighed: int, canvas_id: str, collection: Optional[str]) -> CanvasError:
+    """The refusal one agent read past ``READ_MAX_BYTES`` is answered with.
+
+    Built from the cap it broke, so the words move with the number, and naming the reads that do answer
+    it: one collection, or a page of one through the paged route a device sweeps with. A short array
+    would be a wrong answer no caller could detect, so a read past the bound is refused whole instead.
+    """
+    what = (
+        f"the collection `{collection}` weighs"
+        if collection is not None
+        else "this canvas's data weighs"
+    )
+    narrowed = (
+        "Read it a page at a time from the data route "
+        f"(`/canvases/{canvas_id}/data/{collection}?after=`), or one document at a time by naming its "
+        "`id`."
+        if collection is not None
+        else "Read one collection by naming it with `collection` — or a page of one at a time from the "
+        f"data route (`/canvases/{canvas_id}/data/<collection>?after=`)."
+    )
+    return CanvasError(
+        f"{TOOL_DATA_READ}: {what} {_cap(weighed)} and one answer carries at most "
+        f"{_cap(READ_MAX_BYTES)}. {narrowed}"
+    )
 
 
 def data(
@@ -1177,6 +1255,12 @@ def data(
     Read over a connection of its own, opened and closed like ``listing``. A canvas this store has
     never heard of is a 404, as it is for a write and for a read of the page: one rule for "there is
     no such canvas", whichever part of it was asked for.
+
+    One answer carries at most ``READ_MAX_BYTES``: a canvas is capped at ``DATA_BYTES`` (64 MB) and this
+    is the tool a model reads it with, so what is past the bound is refused whole — in words naming the
+    collection read and the paged one — rather than handed over as an answer nobody can read or cut
+    short into an array no caller could tell was short. The bound is what a whole canvas could hold
+    before the cap moved, so a read that answered then still answers.
     """
     if not canvas_id or not path.exists():
         raise CanvasError("There is no such canvas.", 404)
@@ -1188,9 +1272,113 @@ def data(
     try:
         if not _exists(conn, canvas_id):
             raise CanvasError("There is no such canvas.", 404)
+        if doc_id is None:
+            weighed = canvas_docs.weigh(conn, canvas_id, collection)
+            if weighed > READ_MAX_BYTES:
+                raise _too_big(weighed, canvas_id, collection)
         return _documents(conn, canvas_id, collection, doc_id)
     finally:
         conn.close()
+
+
+def data_catalogue(path: Path, canvas_id: str) -> Dict[str, Any]:
+    """A canvas's data by collection: what each one holds, how fresh it is, and what it all weighs.
+
+    The read a sweep starts with — a device filling its own copy of a canvas — which says how many
+    collections there are, how many documents each holds and the newest clock among them, and never
+    a document: a collection's documents are read a page at a time afterwards. ``bytes`` is the
+    measure the canvas's cap counts, so a reader comparing it to the cap gets the host's answer.
+
+    Read over a connection of its own, and a canvas this store has never heard of is a 404, as it is
+    for every other read of one.
+    """
+    if not canvas_id or not path.exists():
+        raise CanvasError("There is no such canvas.", 404)
+    conn = connect(path)
+    try:
+        if not _exists(conn, canvas_id):
+            raise CanvasError("There is no such canvas.", 404)
+        return canvas_docs.catalogue(conn, canvas_id)
+    finally:
+        conn.close()
+
+
+def data_page(
+    path: Path,
+    canvas_id: str,
+    collection: Any,
+    after: Any = None,
+    limit: Any = None,
+) -> Dict[str, Any]:
+    """One page of one collection, the key the next page starts after, and the collection's size.
+
+    The page is a keyset on ``(collection, id)`` — the order every read here uses — so ``after``,
+    the last id the caller holds, starts the page past it whether or not that document is still
+    there, and a write or a remove between two pages moves neither. ``limit`` is ``PAGE_ROWS`` when
+    the caller names none and is clamped to ``PAGE_MAX`` past it, both said in ``_limit``; the
+    answer's ``count`` is the whole collection's, so a reader knows how far it has to go.
+
+    A page asked for past the collection's end is an empty one with ``next`` null rather than an
+    error, since a caller's key is a name and not a promise that the collection still holds it.
+    """
+    if not canvas_id or not path.exists():
+        raise CanvasError("There is no such canvas.", 404)
+    collection = _name(collection, "collection")
+    after = _name(after, "id") if after else None
+    size = _limit(limit)
+    conn = connect(path)
+    try:
+        if not _exists(conn, canvas_id):
+            raise CanvasError("There is no such canvas.", 404)
+        return canvas_docs.page(conn, canvas_id, collection, after, size)
+    finally:
+        conn.close()
+
+
+def data_query(path: Path, canvas_id: str, args: Any) -> Dict[str, Any]:
+    """One ``data.query`` call: a page's collection filtered, sorted and cut to a page by the host.
+
+    The page names the collection and its spec — the tests, the sort and the page — and the store's
+    own rule answers it (`canvas_docs.query`): one statement, so five thousand documents are read by
+    the host rather than carried to the phone. A field's name, an op, a limit and an offset are the
+    spec's to get wrong, and each is refused in words a page can act on.
+
+    Read over a connection of its own, and a canvas this store has never heard of is a 404, as it is
+    for every other read of one.
+    """
+    args = args if isinstance(args, dict) else {}
+    spec = dict(args)
+    spec["collection"] = _name(args.get("collection"), "collection")
+    if not canvas_id or not path.exists():
+        raise CanvasError("There is no such canvas.", 404)
+    conn = connect(path)
+    try:
+        if not _exists(conn, canvas_id):
+            raise CanvasError("There is no such canvas.", 404)
+        return canvas_docs.query(conn, canvas_id, spec)
+    finally:
+        conn.close()
+
+
+def _limit(value: Any) -> int:
+    """How many documents one page may answer, from the ``limit`` a caller asked for.
+
+    None is ``PAGE_ROWS``, the page a sweep reads without being told. Past ``PAGE_MAX`` the ask is
+    clamped rather than refused, since the answer still says whether another page follows; below
+    one, or not a whole number of documents at all, it is refused — a page of nothing is a caller's
+    mistake, and guessing at "lots" would answer a page nobody asked for.
+    """
+    if value is None or value == "":
+        return canvas_docs.PAGE_ROWS
+    try:
+        asked = int(value)
+    except (TypeError, ValueError):
+        asked = 0
+    if asked < 1:
+        raise CanvasError(
+            f"A page's limit is a whole number of documents, from 1 to {canvas_docs.PAGE_MAX}."
+        )
+    return min(asked, canvas_docs.PAGE_MAX)
 
 
 def _name(value: Any, what: str) -> str:
@@ -1233,39 +1421,59 @@ def _json(doc: Any) -> str:
         ) from None
 
 
+def _cap(size: int) -> str:
+    """A byte cap as a refusal names it: whole MB where it is a whole number of them, else KB rounded up.
+
+    Read off the constant rather than written into the sentence, so a cap that moves moves the words
+    a write is refused in — a message naming a cap the host no longer enforces is a bot told a rule
+    that isn't the one it was refused by.
+    """
+    if size and size % (1024 * 1024) == 0:
+        return f"{size // (1024 * 1024)} MB"
+    return f"{-(-size // 1024)} KB"
+
+
 def _stored_bytes(
     conn: sqlite3.Connection, canvas_id: str, collection: str, doc_id: str, value: str
 ) -> int:
     """A canvas's data in bytes, with one write counted in place of the row it replaces.
 
-    Measured by SQLite rather than by walking every row here: each row counts its collection, its id,
-    its JSON value as UTF-8 bytes, and ``DOC_BYTES`` for the envelope a read carries for it — so the
-    cap bounds the answer a page is handed, not only the text inside it. A write onto a row already
-    there counts that row once, as the document about to land, so an update that fits is never
-    refused for the bytes it is about to release.
+    Measured by SQLite from `canvas_docs.WEIGHT` — the one expression the catalogue's bytes, the
+    legacy cut and `canvas_docs.weight` are all built from — so the cap bounds the answer a page is
+    handed, not only the text inside it. A write onto a row already there counts that row once, as
+    the document about to land, so an update that fits is never refused for the bytes it is about to
+    release.
     """
     counted = conn.execute(
-        """SELECT COALESCE(SUM(length(CAST(collection AS BLOB)) + length(CAST(id AS BLOB))
-                              + length(CAST(value AS BLOB)) + ?), 0)
-           FROM canvas_docs WHERE canvas_id = ? AND NOT (collection = ? AND id = ?)""",
+        f"""SELECT COALESCE(SUM({canvas_docs.WEIGHT}), 0)
+            FROM canvas_docs WHERE canvas_id = ? AND NOT (collection = ? AND id = ?)""",
         (DOC_BYTES, canvas_id, collection, doc_id),
     ).fetchone()[0]
-    return (
-        counted
-        + DOC_BYTES
-        + len(collection.encode("utf-8"))
-        + len(doc_id.encode("utf-8"))
-        + len(value.encode("utf-8"))
-    )
+    return counted + canvas_docs.weight(conn, collection, doc_id, value)
+
+
+def _moved() -> None:
+    """A canvas's data has moved, so the vault's next tick looks again (``canvas_vault``).
+
+    Every write and every remove of a document comes through here, whichever asked for it — a
+    page's call, the agent's tool, the route a device posts — so one call site is the wake and no
+    path can write a document the backup never hears about. Imported where it is used: the vault
+    reads a canvas's documents and its records through this module.
+    """
+    from . import canvas_vault
+
+    canvas_vault.wake()
 
 
 def put_doc(path: Path, canvas_id: str, collection: Any, doc_id: Any, doc: Any) -> Dict[str, Any]:
     """Stores one document as the canvas's own, and answers it as it now is.
 
     A document is one row of its canvas's data: the last write wins, on the host's clock rather than
-    anything the caller sent. The whole of the data is capped at ``DATA_BYTES``, read under the
-    write lock with this write counted in, so two writers racing can't both fit under it — and a
-    write past it is refused whole, leaving every document the canvas had where it was.
+    anything the caller sent. Two caps are read under the write lock with this write counted in, so
+    two writers racing can't both fit under either: the document's own, ``DOC_MAX_BYTES``, since a
+    document is what one page draws and what one write costs, and the canvas's, ``DATA_BYTES``. A
+    write past either is refused whole, naming the cap it broke, and leaves every document the
+    canvas had where it was.
     """
     collection = _name(collection, "collection")
     doc_id = _name(doc_id, "id")
@@ -1276,10 +1484,16 @@ def put_doc(path: Path, canvas_id: str, collection: Any, doc_id: Any, doc: Any) 
         # The clock is read under the lock, so `at` follows the order the writes landed in: two
         # racing writers can't store the later stamp first and be read as the older one.
         now = int(time.time() * 1000)
+        weighed = canvas_docs.weight(conn, collection, doc_id, value)
+        if weighed > DOC_MAX_BYTES:
+            raise CanvasError(
+                f"A document is capped at {_cap(DOC_MAX_BYTES)}; this one would be "
+                f"{-(-weighed // 1024)} KB. Keep less in it, or split it across documents."
+            )
         size = _stored_bytes(conn, canvas_id, collection, doc_id, value)
         if size > DATA_BYTES:
             raise CanvasError(
-                "A canvas's data is capped at 1 MB; this write would make it "
+                f"A canvas's data is capped at {_cap(DATA_BYTES)}; this write would make it "
                 f"{-(-size // 1024)} KB. Remove something first."
             )
         conn.execute(
@@ -1291,7 +1505,8 @@ def put_doc(path: Path, canvas_id: str, collection: Any, doc_id: Any, doc: Any) 
         )
     # The answer is the stored document read back, not the caller's object: what a page reads next
     # is exactly this, whatever it sent.
-    return _document(collection, doc_id, value, now)
+    _moved()
+    return canvas_docs.stored(collection, doc_id, value, now)
 
 
 def remove_doc(path: Path, canvas_id: str, collection: Any, doc_id: Any) -> Dict[str, Any]:
@@ -1310,6 +1525,10 @@ def remove_doc(path: Path, canvas_id: str, collection: Any, doc_id: Any) -> Dict
             "DELETE FROM canvas_docs WHERE canvas_id = ? AND collection = ? AND id = ?",
             (canvas_id, collection, doc_id),
         ).rowcount
+    # A remove that found no row moved nothing, so the vault is not woken for it: a page asking
+    # again for a remove whose answer came slowly would otherwise be a write every time it asks.
+    if removed:
+        _moved()
     return {"collection": collection, "id": doc_id, "removed": removed > 0}
 
 
@@ -1802,7 +2021,10 @@ DATA_READ_SCHEMA = {
         "version and no undo touches. Name the canvas by its title or its id; in the canvas's own "
         "session leave `canvas` out to mean this canvas. No more arguments answers every "
         "collection; a collection answers that one; a collection and an id answers one document, "
-        "or null when there is none."
+        "or null when there is none. One answer carries at most "
+        f"{_cap(READ_MAX_BYTES)} — what a whole canvas could hold before its cap moved — so a canvas "
+        "or a collection past that is refused with the read that answers it: one collection, or a "
+        "page of one from the data route."
     ),
     "parameters": {
         "type": "object",
@@ -1822,8 +2044,8 @@ DATA_WRITE_SCHEMA = {
     "description": (
         "Stores one document in a canvas's data, or removes it. Name the canvas by its title or "
         "its id; in the canvas's own session leave `canvas` out to mean this canvas. A write "
-        "replaces the document with that collection and id, and the whole of a canvas's data is "
-        "capped at 1 MB, so a write past it is refused whole."
+        "replaces the document with that collection and id, and it is capped twice — one document "
+        "at 256 KB and a canvas's whole data at 64 MB — so a write past either is refused whole."
     ),
     "parameters": {
         "type": "object",
@@ -2043,7 +2265,11 @@ def handle_data_read(
     args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any
 ) -> str:
     """The tool: the named canvas's own documents — all of them, a collection, or one document —
-    or, in that canvas's own session, this canvas's."""
+    or, in that canvas's own session, this canvas's.
+
+    One answer carries at most ``READ_MAX_BYTES`` (``data``), so a canvas past that is refused in words
+    naming the collection read and the paged one rather than answered whole.
+    """
     args = args if isinstance(args, dict) else {}
     collection, doc_id = args.get("collection"), args.get("id")
 

@@ -31,6 +31,7 @@ from . import (
     approvals,
     attachments,
     canvases,
+    canvas_vault,
     chats,
     clarify,
     cleanup,
@@ -473,6 +474,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             asyncio.ensure_future(merges.run(home)),
             # Queued messages start their turn once the session's run is over; see outbox.py.
             asyncio.ensure_future(outbox.run(adapter, home)),
+            # A canvas whose backup switch is on is copied into this bot's OKF vault, a tick at a
+            # time; a data write wakes it. See canvas_vault.py.
+            asyncio.ensure_future(canvas_vault.run(home)),
             asyncio.ensure_future(alerts.run(home)),
             # Research missions write up once their researcher stops; see research.py.
             asyncio.ensure_future(research.run(home)),
@@ -700,7 +704,15 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # A canvas is a page its bot writes and the app draws (canvases.py, ADR 0113),
                     # advertised only where its tools reach a canvas's session and that session is
                     # told the design guide (openui.py) — a canvas with neither can't be worked.
-                    *(["canvas"] if canvases.ready() and openui.canvas_ready() else []),
+                    # `canvas_data` rides with it: the paged read of a canvas's own data, which a
+                    # device sweeps a collection at a time rather than in one answer. `canvas_vault`
+                    # is the canvas's own backup switch, drawn on its options sheet where the host
+                    # keeps one (canvas_vault.py): a host from before it offers no row.
+                    *(
+                        ["canvas", "canvas_data", "canvas_vault"]
+                        if canvases.ready() and openui.canvas_ready()
+                        else []
+                    ),
                     # Hermes's own MCP built-ins, and the MCP screen with them; see mcp.py.
                     *mcp_features,
                 ],
@@ -3271,8 +3283,19 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             logger.debug("gots: couldn't follow a new canvas's queue", exc_info=True)
         return web.json_response({"object": "gots.canvas", "canvas": found}, status=202)
 
-    async def canvas_view(request: "web.Request", read, *args) -> "web.Response":
-        """A canvas answered by one read of it: the GET and the undo both say what the app draws."""
+    async def canvas_answer(
+        request: "web.Request",
+        read,
+        *args,
+        kind: str = "gots.canvas",
+        key: Optional[str] = "canvas",
+    ) -> "web.Response":
+        """A canvas's route answered by one read of it — the auth, the read and the refusal in one
+        place, so a new read of a canvas cannot answer differently from the rest.
+
+        ``kind`` is the object the answer says it is, and ``key`` the field a record of it rides: none
+        where the read's own answer is the body, which is what a catalogue and a page of documents are.
+        """
         denied = unauthorized(request)
         if denied is not None:
             return denied
@@ -3282,15 +3305,52 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             )
         except canvases.CanvasError as error:
             return _error(web, str(error), error.status)
-        return web.json_response({"object": "gots.canvas", "canvas": found})
+        return web.json_response({"object": kind, **({key: found} if key else found)})
 
     async def get_canvas(request: "web.Request") -> "web.Response":
-        """One canvas: the version its record points at, which is what the app draws."""
-        return await canvas_view(request, canvases.current)
+        """One canvas: the version its record points at, which is what the app draws.
+
+        Its documents ride it unless the caller asks ``?docs=none``: an app from before the paged
+        read needs them with the page, while the app this bot ships asks for the record alone and
+        then sweeps each collection a page at a time — a canvas of five thousand documents is never
+        one answer. Either way the whole-array read is bounded to what that older app could hold.
+        """
+        return await canvas_answer(
+            request, canvases.current, request.query.get("docs") != "none"
+        )
+
+    async def canvas_data(request: "web.Request") -> "web.Response":
+        """A canvas's data as a catalogue: one row a collection, and what the whole of it weighs.
+
+        The first read of a sweep (``canvases.data_catalogue``, canvases.py). No document rides
+        it, so it costs the same for five thousand documents as for five — the documents themselves
+        are asked for a page at a time, one collection at a time, from the route below.
+        """
+        return await canvas_answer(
+            request, canvases.data_catalogue, kind="gots.canvas.data", key=None
+        )
+
+    async def canvas_documents(request: "web.Request") -> "web.Response":
+        """One page of one collection, the key the next page starts after, and the collection's size.
+
+        ``after`` is the last id the caller holds — the keyset every page here is cut on — and
+        ``limit`` the page's size: ``PAGE_ROWS`` documents when the caller names none, clamped to
+        ``PAGE_MAX`` past it, and refused where it is not a whole number of documents (``_limit``,
+        canvases.py). A page past the collection's end is an empty one with ``next`` null.
+        """
+        return await canvas_answer(
+            request,
+            canvases.data_page,
+            request.match_info["collection"],
+            request.query.get("after") or None,
+            request.query.get("limit") or None,
+            kind="gots.canvas.documents",
+            key=None,
+        )
 
     async def undo_canvas(request: "web.Request") -> "web.Response":
         """Moves a canvas back one version, which is what the app's Undo asks (canvases.py)."""
-        return await canvas_view(request, canvases.undo)
+        return await canvas_answer(request, canvases.undo)
 
     async def update_canvas(request: "web.Request") -> "web.Response":
         """A canvas's name and its place in the list, written on the host so every device agrees.
@@ -3304,7 +3364,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         body = await json_body(request)
         if body is None:
             return _error(web, "Body must be a JSON object", 400)
-        return await canvas_view(request, canvases.update, body)
+        return await canvas_answer(request, canvases.update, body)
 
     async def delete_canvas(request: "web.Request") -> "web.Response":
         """Takes a canvas out of the store, and its chat and Hermes session with it (canvases.py)."""
@@ -3331,11 +3391,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         """A call a canvas's page makes: its own data, the four host reads, or a declared tool.
 
         The page owns its data (ADR 0113) and reads the bot's own facts, so those shapes are
-        answered without consent — they write the canvas's own store and read what the app itself
-        renders. A tool named ``<server>.<tool>`` is answered only where the version the page is
-        drawn from declares it and the user allowed it (ADR 0114): ``canvases.may_call`` reads both
-        off the store, and a refusal's verdict rides back as the error's ``code``. The tab is told
-        nothing it could call for any other canvas, since the id is this route's and not the body's.
+        answered without consent — they write, read and query the canvas's own store and read what
+        the app itself renders. A tool named ``<server>.<tool>`` is answered only where the version
+        the page is drawn from declares it and the user allowed it (ADR 0114): ``canvases.may_call``
+        reads both off the store, and a refusal's verdict rides back as the error's ``code``. The tab
+        is told nothing it could call for any other canvas, since the id is this route's and not the
+        body's.
 
         Each read answers the shape the app's own screens draw, and no more. ``sessions`` is this
         bot's chat list — flat, newest first, tombstones dropped — and not the Host's rooms, a
@@ -3379,9 +3440,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         async def read_sessions_shape(args: Dict[str, Any]) -> Dict[str, Any]:
             return {"sessions": await asyncio.to_thread(chats.summaries, path, CANVAS_READS_MAX)}
 
-        writes = {
+        own = {
             "data.put": lambda args: canvases.put_call(path, canvas_id, args),
             "data.remove": lambda args: canvases.remove_call(path, canvas_id, args),
+            "data.query": lambda args: canvases.data_query(path, canvas_id, args),
         }
         # The four names have one home (`page_calls.HOST_SHAPES`): a fifth there with no read here
         # is a KeyError rather than a shape the guide promises and the page can never read.
@@ -3395,7 +3457,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             result = await page_calls.answer(
                 body,
                 reads={shape: readers[shape] for shape in page_calls.HOST_SHAPES},
-                writes=writes,
+                own=own,
                 may_call=partial(canvases.may_call, path, canvas_id),
                 profile=_request_profile(),
                 locks=canvas_locks,
@@ -3790,6 +3852,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/canvases", list_canvases)
     app.router.add_post(f"{PREFIX}/canvases", create_canvas)
     app.router.add_get(f"{PREFIX}/canvases/{{canvas_id}}", get_canvas)
+    app.router.add_get(f"{PREFIX}/canvases/{{canvas_id}}/data", canvas_data)
+    app.router.add_get(f"{PREFIX}/canvases/{{canvas_id}}/data/{{collection}}", canvas_documents)
     app.router.add_post(f"{PREFIX}/canvases/{{canvas_id}}", update_canvas)
     app.router.add_delete(f"{PREFIX}/canvases/{{canvas_id}}", delete_canvas)
     app.router.add_post(f"{PREFIX}/canvases/{{canvas_id}}/undo", undo_canvas)

@@ -1,5 +1,5 @@
 {
-  "ceiling": 31,
+  "ceiling": 32,
   "entries": [
     {
       "file": "chat-next/blank.tsx",
@@ -154,6 +154,11 @@
     {
       "file": "lib/use-refusal.ts",
       "function": "say",
+      "reason": "screen-cannot-hold-it"
+    },
+    {
+      "file": "lib/canvas-outbox.ts",
+      "function": "send",
       "reason": "screen-cannot-hold-it"
     }
   ]

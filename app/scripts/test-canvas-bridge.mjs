@@ -7,6 +7,10 @@ import {
   BRIDGE_METHODS,
   BRIDGE_SCRIPT,
   CANVAS_CONSENT_REQUIRED,
+  CANVAS_PARTIAL,
+  LIST_MAX,
+  PAGE_MAX,
+  PAGE_ROWS,
   POINT_LABEL_MAX,
   POINT_MESSAGE,
   pointWatch,
@@ -14,14 +18,37 @@ import {
   answerRead,
   applyWrite,
   bridgeHandler,
+  hostVerdict,
   mergeGrants,
   readCall,
+  WRITE_REFUSALS,
 } from "../src/lib/canvas-bridge.ts"
 
 /** A document of the canvas's data, as the host answers it. */
 const doc = (collection, id, value, at) => ({ collection, id, doc: value, at })
 
 const COPY = [doc("items", "a", { n: 1 }, 10), doc("items", "b", { n: 2 }, 20), doc("notes", "a", "hi", 30)]
+
+/**
+ * A device's rows as a read is answered from: one collection's documents, one document by its key, one
+ * page of a collection, their count, and whether a sweep has seen the canvas whole. `count` is
+ * overridable so a case can say a collection is bigger than the documents it hands back — which is what
+ * a real index says when the documents were never carried.
+ */
+const copyOf = (docs, { whole = true, count } = {}) => ({
+  docs: async (collection) => docs.filter((row) => row.collection === collection),
+  get: async (collection, id) =>
+    docs.find((row) => row.collection === collection && row.id === id),
+  page: async (collection, after, limit) => {
+    const rest = docs
+      .filter((row) => row.collection === collection)
+      .filter((row) => after === null || row.id > after)
+    const rows = rest.slice(0, limit)
+    return { rows, next: rest.length > limit ? rows[rows.length - 1].id : null }
+  },
+  count: async (collection) => count ?? docs.filter((row) => row.collection === collection).length,
+  whole: async () => whole,
+})
 
 function fakeFrame() {
   const posted = []
@@ -70,7 +97,7 @@ test("test_canvas_bridge_answers_reads_from_the_copy_and_posts_writes", async ()
   let copy = COPY
   const hear = bridgeHandler({
     frame: () => frame,
-    copy: () => copy,
+    read: async (call) => answerRead(call, copyOf(copy)),
     write: async (call) => {
       writes.push(call)
       return call.method === "put"
@@ -80,8 +107,10 @@ test("test_canvas_bridge_answers_reads_from_the_copy_and_posts_writes", async ()
   })
   const message = (data) => hear({ source: frame, data })
 
-  // A read never goes to the host: the device's copy is what the page reads.
+  // A read never goes to the host: the device's copy is what the page reads. A list is its
+  // collection's documents and nothing else — the shape every canvas already written reads.
   message({ type: BRIDGE_MESSAGE, call: 1, method: "list", collection: "items" })
+  await settled()
   assert.deepEqual(frame.posted, [
     {
       type: BRIDGE_MESSAGE,
@@ -91,8 +120,10 @@ test("test_canvas_bridge_answers_reads_from_the_copy_and_posts_writes", async ()
     },
   ])
   message({ type: BRIDGE_MESSAGE, call: 2, method: "get", collection: "items", id: "b" })
+  await settled()
   assert.deepEqual(frame.posted[1].value, doc("items", "b", { n: 2 }, 20))
   message({ type: BRIDGE_MESSAGE, call: 3, method: "get", collection: "items", id: "zzz" })
+  await settled()
   assert.equal(frame.posted[2].value, null)
   assert.deepEqual(writes, [], "no read is a write")
 
@@ -119,7 +150,7 @@ test("test_canvas_bridge_answers_reads_from_the_copy_and_posts_writes", async ()
   // A host that refuses says why, in the words the page gets.
   const refusing = bridgeHandler({
     frame: () => frame,
-    copy: () => copy,
+    read: async (call) => answerRead(call, copyOf(copy)),
     write: async () => {
       throw new Error("A canvas's data is capped at 1 MB; this write would make it 1025 KB.")
     },
@@ -140,7 +171,7 @@ test("a message from another source is ignored", async () => {
   let writes = 0
   const hear = bridgeHandler({
     frame: () => frame,
-    copy: () => COPY,
+    read: async (call) => answerRead(call, copyOf(COPY)),
     write: async () => {
       writes += 1
     },
@@ -159,7 +190,7 @@ test("a message from another source is ignored", async () => {
   assert.equal(writes, 0, "a write from elsewhere is not the canvas's")
 })
 
-test("readCall takes a call the page sent and answerRead answers it from the copy", () => {
+test("readCall takes a call the page sent and answerRead answers it from the copy", async () => {
   assert.deepEqual(readCall({ type: BRIDGE_MESSAGE, call: 1, method: "list", collection: "items" }), {
     call: 1,
     method: "list",
@@ -186,14 +217,176 @@ test("readCall takes a call the page sent and answerRead answers it from the cop
   assert.equal(readCall(null), null)
   assert.equal(readCall("gots:canvas-data"), null)
 
-  // The copy alone answers a read: the collection's documents in copy order, the one document, or
-  // nothing.
-  assert.deepEqual(answerRead({ call: 9, method: "list", collection: "items" }, COPY), [
+  // A page, a count and a partial are a collection's, as a list is.
+  assert.deepEqual(readCall({ type: BRIDGE_MESSAGE, call: 4, method: "count", collection: "items" }), {
+    call: 4,
+    method: "count",
+    collection: "items",
+  })
+  assert.deepEqual(readCall({ type: BRIDGE_MESSAGE, call: 4, method: "partial", collection: "items" }), {
+    call: 4,
+    method: "partial",
+    collection: "items",
+  })
+  assert.equal(readCall({ type: BRIDGE_MESSAGE, call: 4, method: "partial" }), null)
+  assert.deepEqual(
+    readCall({ type: BRIDGE_MESSAGE, call: 4, method: "page", collection: "items", after: "b", limit: 50 }),
+    { call: 4, method: "page", collection: "items", after: "b", limit: 50 },
+  )
+  // A page that names no id starts at the first document, and one that names no limit asks for the
+  // host's own page; asking for more than the host's cap is the cap, since a page of everything is the
+  // call this one replaces.
+  assert.deepEqual(readCall({ type: BRIDGE_MESSAGE, call: 4, method: "page", collection: "items" }), {
+    call: 4,
+    method: "page",
+    collection: "items",
+    after: null,
+    limit: PAGE_ROWS,
+  })
+  assert.equal(
+    readCall({ type: BRIDGE_MESSAGE, call: 4, method: "page", collection: "items", limit: 90_000 }).limit,
+    PAGE_MAX,
+  )
+  for (const data of [
+    { method: "count" },
+    { method: "page", collection: "" },
+    { method: "page", collection: "items", after: "" },
+    { method: "page", collection: "items", after: 7 },
+    { method: "page", collection: "items", limit: 0 },
+    { method: "page", collection: "items", limit: -2 },
+    { method: "page", collection: "items", limit: 1.5 },
+    { method: "page", collection: "items", limit: "50" },
+  ]) {
+    assert.equal(readCall({ type: BRIDGE_MESSAGE, call: 4, ...data }), null, JSON.stringify(data))
+  }
+
+  // The device's rows alone answer a read: the collection's documents in the host's order, the one
+  // document, or — only where a sweep has seen the canvas whole — nothing.
+  assert.deepEqual(await answerRead({ call: 9, method: "list", collection: "items" }, copyOf(COPY)), [
     COPY[0],
     COPY[1],
   ])
-  assert.deepEqual(answerRead({ call: 9, method: "get", collection: "notes", id: "a" }, COPY), COPY[2])
-  assert.equal(answerRead({ call: 9, method: "get", collection: "items", id: "zzz" }, COPY), null)
+  assert.deepEqual(await answerRead({ call: 9, method: "get", collection: "notes", id: "a" }, copyOf(COPY)), COPY[2])
+  assert.equal(await answerRead({ call: 9, method: "get", collection: "items", id: "zzz" }, copyOf(COPY)), null)
+
+  // Before a sweep has finished, a document the rows don't hold is no evidence it is gone: the read
+  // says it is partial rather than answering `null`, which a page would draw as deleted.
+  await assert.rejects(
+    answerRead({ call: 9, method: "get", collection: "items", id: "zzz" }, copyOf(COPY, { whole: false })),
+    (error) => error.code === CANVAS_PARTIAL && /partial on this phone/.test(error.message),
+  )
+  // A list says the same thing in its own verb, since a list of a part is a part and its array is
+  // the array every canvas already reads.
+  assert.equal(await answerRead({ call: 9, method: "partial", collection: "items" }, copyOf(COPY)), false)
+  assert.equal(
+    await answerRead({ call: 9, method: "partial", collection: "items" }, copyOf(COPY, { whole: false })),
+    true,
+  )
+})
+
+test("a get reads one row and a page reads one page, never the collection", async () => {
+  // A collection of five thousand answers a get by carrying five thousand rows to find one, and a page
+  // the same: both calls exist because a page need not hold a collection, so what they read is what
+  // they answer. The copy counts what it is asked for, since that is the cost.
+  const rows = Array.from({ length: 5000 }, (_, n) => doc("items", `k${String(n).padStart(4, "0")}`, n, n))
+  const reads = { docs: 0, get: 0, page: 0, limits: [] }
+  const copy = {
+    docs: async (collection) => {
+      reads.docs += 1
+      return rows.filter((row) => row.collection === collection)
+    },
+    get: async (collection, id) => {
+      reads.get += 1
+      return rows.find((row) => row.collection === collection && row.id === id)
+    },
+    page: async (collection, after, limit) => {
+      reads.page += 1
+      reads.limits.push(limit)
+      const rest = rows
+        .filter((row) => row.collection === collection)
+        .filter((row) => after === null || row.id > after)
+      const held = rest.slice(0, limit)
+      return { rows: held, next: rest.length > limit ? held[held.length - 1].id : null }
+    },
+    count: async () => rows.length,
+    whole: async () => true,
+  }
+
+  assert.deepEqual(
+    await answerRead({ call: 1, method: "get", collection: "items", id: "k0007" }, copy),
+    rows[7],
+  )
+  assert.equal(reads.get, 1, "a get reads the one row it answers")
+  assert.equal(reads.docs, 0, "and carries no collection to find it in")
+
+  // A page of five rows reads five rows: the collection is not carried to cut a page out of it.
+  const paged = await answerRead(
+    { call: 2, method: "page", collection: "items", after: null, limit: 5 },
+    copy,
+  )
+  assert.deepEqual(paged, {
+    rows: rows.slice(0, 5),
+    next: "k0004",
+    total: 5000,
+    partial: false,
+  })
+  assert.equal(reads.page, 1, "a page is the copy's own read")
+  assert.deepEqual(reads.limits, [5], "for the number of rows the page asked for")
+  assert.equal(reads.docs, 0, "and nothing reads the collection whole")
+
+  // The end of the collection is the copy's to say: the bridge no longer knows whether another page
+  // follows until the copy answers one.
+  assert.deepEqual(
+    await answerRead(
+      { call: 3, method: "page", collection: "items", after: "k4998", limit: 5 },
+      copy,
+    ),
+    { rows: rows.slice(4999), next: null, total: 5000, partial: false },
+  )
+})
+
+test("a page reads a collection a page at a time, counts it, and refuses to list a big one", async () => {
+  const rows = Array.from({ length: 7 }, (_, n) => doc("items", `k${n}`, n, n))
+  const copy = copyOf(rows)
+  // Each page starts after the document the one before ended on, and says where the next starts.
+  assert.deepEqual(
+    await answerRead({ call: 1, method: "page", collection: "items", after: null, limit: 3 }, copy),
+    { rows: rows.slice(0, 3), next: "k2", total: 7, partial: false },
+  )
+  assert.deepEqual(
+    await answerRead({ call: 2, method: "page", collection: "items", after: "k2", limit: 3 }, copy),
+    { rows: rows.slice(3, 6), next: "k5", total: 7, partial: false },
+  )
+  // The last page names no next — and `partial` is what says whether that end is the canvas's own.
+  assert.deepEqual(
+    await answerRead({ call: 3, method: "page", collection: "items", after: "k5", limit: 3 }, copy),
+    { rows: rows.slice(6), next: null, total: 7, partial: false },
+  )
+  assert.equal(
+    (
+      await answerRead(
+        { call: 4, method: "page", collection: "items", after: null, limit: 2 },
+        copyOf(rows, { whole: false }),
+      )
+    ).partial,
+    true,
+  )
+  // A count is the collection's number and carries no document.
+  assert.equal(await answerRead({ call: 5, method: "count", collection: "items" }, copy), 7)
+
+  // A collection past the cap is refused whole, naming the call that answers it, and the documents are
+  // never carried to say so.
+  const tooBig = {
+    docs: async () => {
+      throw new Error("a list too big to answer carried its documents")
+    },
+    count: async () => LIST_MAX + 1,
+    whole: async () => true,
+  }
+  await assert.rejects(
+    answerRead({ call: 6, method: "list", collection: "items" }, tooBig),
+    new RegExp(`canvas\\.data\\.page`),
+  )
 })
 
 test("mergeGrants keeps the later answer to each tool and both sides' tools", () => {
@@ -324,7 +517,7 @@ test("a host read and a tool call reach the host, and a tool is asked about once
   let allow = false
   const hear = bridgeHandler({
     frame: () => frame,
-    copy: () => COPY,
+    read: async (call) => answerRead(call, copyOf(COPY)),
     write: async () => {
       throw new Error("a write this case never makes")
     },
@@ -392,7 +585,7 @@ test("a tool the host refuses for any other reason is not put to the reader", as
   let asked = 0
   const hear = bridgeHandler({
     frame: () => frame,
-    copy: () => COPY,
+    read: async (call) => answerRead(call, copyOf(COPY)),
     write: async () => {
       throw new Error("a write this case never makes")
     },
@@ -414,6 +607,66 @@ test("a tool the host refuses for any other reason is not put to the reader", as
   assert.equal(asked, 0, "the reader is asked nothing")
   assert.equal(frame.posted[0].ok, false)
   assert.match(frame.posted[0].error, /never declared/)
+})
+
+test("a refusal's code crosses the wire and reaches the error a page catches", async () => {
+  // The words say what happened; `code` is what a page branches on, so the app posts it beside them
+  // and the page's half puts it on the error it rejects with — a page reading a partial copy is told
+  // so without matching a sentence.
+  const frame = fakeFrame()
+  const hear = bridgeHandler({
+    frame: () => frame,
+    read: async (call) => answerRead(call, copyOf(COPY, { whole: false })),
+    write: async () => {
+      throw new Error("a write this case never makes")
+    },
+  })
+  hear({
+    source: frame,
+    data: { type: BRIDGE_MESSAGE, call: 1, method: "get", collection: "items", id: "zzz" },
+  })
+  await settled()
+  assert.equal(frame.posted[0].ok, false)
+  assert.equal(frame.posted[0].code, CANVAS_PARTIAL, "the code rides the reply beside the words")
+  assert.match(frame.posted[0].error, /partial on this phone/)
+
+  // An error with no code is posted with none: a refusal that isn't one stays just its words.
+  const plainRefusal = bridgeHandler({
+    frame: () => frame,
+    read: async () => {
+      throw new Error("This collection holds 5001 documents and canvas.data.list answers at most 5000.")
+    },
+    write: async () => {
+      throw new Error("a write this case never makes")
+    },
+  })
+  plainRefusal({
+    source: frame,
+    data: { type: BRIDGE_MESSAGE, call: 2, method: "list", collection: "items" },
+  })
+  await settled()
+  assert.equal(frame.posted[1].ok, false)
+  assert.equal("code" in frame.posted[1], false, "a refusal with no code carries none")
+
+  // The page's half: a reply that names a code is an error the page can branch on.
+  const { context, posted, reply } = pageHarness()
+  const asked = context.window.canvas.data.get("items", "zzz")
+  reply({
+    type: BRIDGE_MESSAGE,
+    epoch: posted[1].epoch,
+    reply: 1,
+    ok: false,
+    error: "This canvas's data is partial on this phone.",
+    code: CANVAS_PARTIAL,
+  })
+  await assert.rejects(
+    asked,
+    (error) => error.code === CANVAS_PARTIAL && /partial on this phone/.test(error.message),
+  )
+
+  const bare = context.window.canvas.data.list("items")
+  reply({ type: BRIDGE_MESSAGE, epoch: posted[2].epoch, reply: 2, ok: false, error: "Something else." })
+  await assert.rejects(bare, (error) => error.code === undefined && error.message === "Something else.")
 })
 
 test("the page's half posts the call it was asked for and settles on the reply", async () => {
@@ -500,6 +753,52 @@ test("the page's half posts the call it was asked for and settles on the reply",
     error: "You didn't allow this canvas to use files.search.",
   })
   await assert.rejects(tool, /didn't allow/)
+
+  // A page and a count are on the same table: the page names the id it starts after and how many it
+  // asks for, and a count asks for none.
+  const paged = api.page("items", { after: "k2", limit: 50 })
+  assert.deepEqual(plain(posted[7]), {
+    type: BRIDGE_MESSAGE,
+    epoch,
+    call: 7,
+    method: "page",
+    collection: "items",
+    after: "k2",
+    limit: 50,
+  })
+  reply({
+    type: BRIDGE_MESSAGE,
+    epoch,
+    reply: 7,
+    ok: true,
+    value: { rows: [], next: null, total: 0, partial: true },
+  })
+  assert.deepEqual(await paged, { rows: [], next: null, total: 0, partial: true })
+
+  // Asked for nothing, a page asks for the first one and leaves the limit to the app, which answers
+  // the host's own page size.
+  const first = api.page("items")
+  assert.deepEqual(plain(posted[8]), {
+    type: BRIDGE_MESSAGE,
+    epoch,
+    call: 8,
+    method: "page",
+    collection: "items",
+    after: null,
+  })
+  reply({ type: BRIDGE_MESSAGE, epoch, reply: 8, ok: true, value: { rows: [], next: null, total: 0, partial: false } })
+  assert.deepEqual(await first, { rows: [], next: null, total: 0, partial: false })
+
+  const counted = api.count("items")
+  assert.deepEqual(plain(posted[9]), {
+    type: BRIDGE_MESSAGE,
+    epoch,
+    call: 9,
+    method: "count",
+    collection: "items",
+  })
+  reply({ type: BRIDGE_MESSAGE, epoch, reply: 9, ok: true, value: 12 })
+  assert.equal(await counted, 12)
 })
 
 test("a tap posts one open call and a handled or foreign click posts none", async () => {
@@ -537,7 +836,7 @@ test("a tap posts one open call and a handled or foreign click posts none", asyn
   const opened = []
   const hear = bridgeHandler({
     frame: () => frame,
-    copy: () => COPY,
+    read: async (call) => answerRead(call, copyOf(COPY)),
     write: async () => {
       throw new Error("a write this case never makes")
     },
@@ -716,7 +1015,7 @@ test("a call the app cannot read is answered rather than dropped", async () => {
   const frame = fakeFrame()
   const hear = bridgeHandler({
     frame: () => frame,
-    copy: () => COPY,
+    read: async (call) => answerRead(call, copyOf(COPY)),
     write: async () => {
       throw new Error("a write this case never makes")
     },
@@ -742,6 +1041,7 @@ test("a call the app cannot read is answered rather than dropped", async () => {
   assert.equal(frame.posted.length, 3)
   // A reply carries the epoch of the call it answers, so the page can tell whose it is.
   hear({ source: frame, data: { type: BRIDGE_MESSAGE, call: 4, epoch: "p1", method: "list", collection: "items" } })
+  await settled()
   assert.equal(frame.posted[3].epoch, "p1")
   assert.equal(frame.posted[3].ok, true)
 })
@@ -899,7 +1199,7 @@ test("a point from another window is not the canvas talking", () => {
   const points = []
   const hear = bridgeHandler({
     frame: () => frame,
-    copy: () => COPY,
+    read: async (call) => answerRead(call, copyOf(COPY)),
     write: async () => {
       throw new Error("a write this case never makes")
     },
@@ -910,4 +1210,22 @@ test("a point from another window is not the canvas talking", () => {
   hear({ source: frame, data: { type: POINT_MESSAGE, point: { label: "Total", selector: "#total" } } })
   assert.deepEqual(points, [{ label: "Total", selector: "#total" }])
   assert.deepEqual(frame.posted, [], "a point is answered with nothing")
+})
+
+test("a host's failure is one away rule, read by every caller of that host", () => {
+  // ADR 0149: a status the host refuses a write by is its own answer — thrown to the page and never
+  // queued — while a 5xx or a 429 is the bot not being there yet, and a request that never landed has
+  // no status at all. Both of those are queued. The third answer, `answered`, is a status that is a
+  // read's answer and no refusal of a write, which is why a read still shows the host's own words.
+  // `withHost` in canvases.ts, a page's write there and canvas-outbox.ts's drain all ask this one
+  // predicate, so the three cannot disagree about what "away" means.
+  assert.deepEqual([...WRITE_REFUSALS], [400, 403, 404, 409], "the statuses a write is refused with")
+  for (const status of [400, 403, 404, 409])
+    assert.equal(hostVerdict({ status }), "refused", `a ${status} is the host's answer`)
+  for (const status of [429, 500, 502, 503])
+    assert.equal(hostVerdict({ status }), "answered", `a ${status} is not a refusal of a write`)
+  assert.equal(hostVerdict(new TypeError("Failed to fetch")), "away", "a request that never landed")
+  assert.equal(hostVerdict(new Error("a plain error")), "away")
+  assert.equal(hostVerdict(null), "away")
+  assert.equal(hostVerdict({ status: "500" }), "away", "a status that is not a number says nothing")
 })

@@ -11,11 +11,12 @@ import unittest
 from contextlib import contextmanager
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
-from typing import Any, Dict, Iterable, Iterator, List, Optional
+from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 from unittest.mock import MagicMock, patch
 
 import plugin
 from plugin import dictation_cleanup
+from plugin.store import connect
 from plugin.tasks import READY_LABEL
 
 # Stands in for the host's own profile scope: `HERMES_HOME_OVERRIDE` and the secret scope are context
@@ -72,7 +73,13 @@ class FakeWeb:
         """The request body passed the server's own cap, which a route answers in its own words."""
 
     class Request:
-        pass
+        """A request as far as a route reads one: its query, and whatever a test hangs on it.
+
+        A real request always carries its query, so a harness's bare request does too — empty unless
+        the case set it, which is a caller who asked for nothing.
+        """
+
+        query: Dict[str, str] = {}
 
     @staticmethod
     def json_response(payload: Any, status: int = 200) -> Dict[str, Any]:
@@ -370,3 +377,26 @@ def issue_row(
     if pull_request:
         row["pull_request"] = {"url": "https://api.github.com/repos/mock-user/gots/pulls/1"}
     return row
+
+
+def plant(path: Path, canvas_id: str, rows: List[Tuple[str, str, Any, int]]) -> None:
+    """Rows written straight into one canvas's data, as ``(collection, id, document, at)``.
+
+    A fixture of five thousand documents is planted rather than put one at a time: every ``put_doc``
+    weighs the whole of the canvas, which is the rule its cap rests on, so a write each is a
+    quadratic fixture. One transaction, because a write the connection never committed is invisible
+    to the read that follows it.
+    """
+    conn = connect(path)
+    try:
+        conn.execute("BEGIN")
+        conn.executemany(
+            "INSERT INTO canvas_docs (canvas_id, collection, id, value, at) VALUES (?, ?, ?, ?, ?)",
+            [
+                (canvas_id, collection, doc_id, json.dumps(doc), at)
+                for collection, doc_id, doc, at in rows
+            ],
+        )
+        conn.execute("COMMIT")
+    finally:
+        conn.close()

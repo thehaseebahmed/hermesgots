@@ -14,10 +14,10 @@ from plugin import mcp, page_calls
 ALLOWED = page_calls.ALLOWED
 
 
-def run(sent, reads=None, writes=None, may_call=lambda tool: ALLOWED, profile="p"):
+def run(sent, reads=None, own=None, may_call=lambda tool: ALLOWED, profile="p"):
     return asyncio.run(
         page_calls.answer(
-            sent, reads=reads or {}, writes=writes, may_call=may_call, profile=profile, locks={}
+            sent, reads=reads or {}, own=own, may_call=may_call, profile=profile, locks={}
         )
     )
 
@@ -62,7 +62,7 @@ class CanvasData(unittest.TestCase):
         put = mock.Mock(return_value={"collection": "notes", "id": "a"})
         value = run(
             {"shape": "data.put", "args": {"collection": "notes", "id": "a", "doc": 1}},
-            writes={"data.put": put},
+            own={"data.put": put},
             may_call=lambda *a: asked.append(a) or ALLOWED,
         )
         self.assertEqual(value, {"collection": "notes", "id": "a"})
@@ -74,7 +74,7 @@ class CanvasData(unittest.TestCase):
         seen = []
         run(
             {"shape": "data.remove", "args": {"collection": "notes", "id": "a"}},
-            writes={"data.remove": lambda args: seen.append(threading.current_thread())},
+            own={"data.remove": lambda args: seen.append(threading.current_thread())},
         )
         self.assertEqual(len(seen), 1)
         self.assertIsNot(seen[0], threading.main_thread())
@@ -84,7 +84,7 @@ class CanvasData(unittest.TestCase):
             raise ValueError("A document has to be JSON.")
 
         with self.assertRaises(page_calls.CallRefused) as caught:
-            run({"shape": "data.put"}, writes={"data.put": put})
+            run({"shape": "data.put"}, own={"data.put": put})
         self.assertEqual(
             (caught.exception.status, str(caught.exception)),
             (400, "A document has to be JSON."),
@@ -98,7 +98,7 @@ class CanvasData(unittest.TestCase):
             raise Missing("There is no such canvas.")
 
         with self.assertRaises(page_calls.CallRefused) as caught:
-            run({"shape": "data.put"}, writes={"data.put": put})
+            run({"shape": "data.put"}, own={"data.put": put})
         self.assertEqual(
             (caught.exception.status, str(caught.exception)), (404, "There is no such canvas.")
         )
@@ -108,7 +108,7 @@ class CanvasData(unittest.TestCase):
         with mock.patch.object(page_calls.mcp_call, "call", mock.Mock(return_value=1)):
             run(
                 {"shape": "home.light"},
-                writes={"data.put": lambda args: 1},
+                own={"data.put": lambda args: 1},
                 may_call=lambda tool: asked.append(tool) or ALLOWED,
             )
         self.assertEqual(asked, ["home.light"])
