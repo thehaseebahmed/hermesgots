@@ -492,6 +492,106 @@ class RefusalTests(_Base):
         self.assertIn("ship", data["error"])
 
 
+class ReadyTests(_Base):
+    """A draft is taken out of draft, so the pull request can be reviewed and then merged."""
+
+    def _ready(self, state="draft", record=None):
+        pr = {"number": 7, "state": state, "title": "T", "url": "u"}
+        ready = {"number": 7, "state": "open", "title": "T", "url": "u"}
+        with (
+            patch("plugin.github.token", return_value=("tok", "u")),
+            patch("plugin.github.origin_repo", return_value="o/r"),
+            patch("plugin.github.pull_request", return_value=pr),
+            patch("plugin.github.mark_ready", return_value=ready) as mark,
+            patch("plugin.github.forget_pull_request") as forget,
+        ):
+            return self._call({"action": "ready"}, record or _record(self.tmp)), mark, forget
+
+    def test_ready_marks_the_draft_and_forgets_the_cached_row(self):
+        data, mark, forget = self._ready()
+        mark.assert_called_once_with("o/r", 7, "tok")
+        self.assertTrue(forget.called, "the app's next read must see it out of draft")
+        self.assertEqual(data["results"][0]["pr"]["state"], "open")
+        self.assertNotIn("error", data["results"][0])
+
+    def test_ready_says_there_is_no_draft_to_mark(self):
+        data, mark, _ = self._ready(state="open")
+        mark.assert_not_called()
+        self.assertIn("No draft pull request", data["error"])
+
+
+class MergeTests(_Base):
+    """The end of the road: the pull request is merged, and everything that cached it lets go."""
+
+    def _pr(self, state="open", checks="success"):
+        return {"number": 7, "state": state, "checks": checks, "title": "T", "url": "u"}
+
+    def _merge(self, pr=None, merged=None, failure=None, method=None):
+        """The merge action's answer, and what it did: the call, the forget and the resolution."""
+        merged = merged or {"repo": "o/r", "number": 7, "sha": "cafe1234", "merged": True}
+        args = {"action": "merge"}
+        if method:
+            args["merge_method"] = method
+        with (
+            patch("plugin.github.token", return_value=("tok", "u")),
+            patch("plugin.github.origin_repo", return_value="o/r"),
+            patch("plugin.github.pull_request", return_value=pr or self._pr()),
+            patch("plugin.github.merge_pull_request", return_value=merged) as call,
+            patch("plugin.github.forget_pull_request") as forget,
+            patch("plugin.merges.check", return_value=1) as resolve,
+        ):
+            if failure:
+                call.side_effect = failure
+            return self._call(args), call, forget, resolve
+
+    def test_merge_merges_the_live_pull_request_on_a_squash_by_default(self):
+        data, call, forget, resolve = self._merge()
+        call.assert_called_once_with("o/r", 7, "squash", "tok")
+        self.assertTrue(forget.called, "a merged row is not the row the app should list")
+        self.assertTrue(data["results"][0]["merged"])
+
+    def test_merge_names_another_method_when_asked_for_one(self):
+        _, call, _, _ = self._merge(method="rebase")
+        self.assertEqual(call.call_args.args[2], "rebase")
+
+    def test_merge_refuses_a_method_it_does_not_know(self):
+        data, call, _, _ = self._merge(method="fast-forward")
+        call.assert_not_called()
+        self.assertIn("merge_method", data["error"])
+
+    def test_merging_resolves_the_session_once(self):
+        """The app lists the state and the user hears it: both come from the merge's own pass."""
+        _, _, _, resolve = self._merge()
+        resolve.assert_called_once()
+        self.assertEqual(resolve.call_args.kwargs.get("only") or resolve.call_args.args[1], {"s1"})
+
+    def test_merge_refuses_a_draft_and_says_to_make_it_ready(self):
+        data, call, _, _ = self._merge(pr=self._pr(state="draft"))
+        call.assert_not_called()
+        self.assertIn("ready", data["error"])
+
+    def test_merge_refuses_a_pull_request_whose_checks_failed(self):
+        data, call, _, _ = self._merge(pr=self._pr(checks="failure"))
+        call.assert_not_called()
+        self.assertIn("checks failed", data["error"])
+
+    def test_merge_waits_for_checks_that_still_run(self):
+        data, call, _, _ = self._merge(pr=self._pr(checks="pending"))
+        call.assert_not_called()
+        self.assertIn("still running", data["error"])
+
+    def test_a_merge_git_hub_refused_is_reported_and_nothing_is_resolved(self):
+        refused = ship.ShipError("GitHub won't merge o/r#7: Pull Request is not mergeable.", 409)
+        data, _, _, resolve = self._merge(failure=refused)
+        resolve.assert_not_called()
+        self.assertIn("o/r#7", data["error"])
+
+    def test_merge_says_when_there_is_no_open_pull_request(self):
+        data, call, _, _ = self._merge(pr={"number": 7, "state": "merged", "checks": None})
+        call.assert_not_called()
+        self.assertIn("No open pull request", data["error"])
+
+
 class ShipTests(_Base):
     """A session that isn't AFK's ships as it always did, with no stage to answer to."""
 

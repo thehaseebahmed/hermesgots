@@ -418,6 +418,38 @@ def ship(
         lock.release()
 
 
+def ready(hermes_home: Path, record: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Takes each repo's draft pull request on the session's branch out of draft, for review.
+
+    The step between shipping and merging: a draft is what a run opens, and a merge GitHub will
+    accept is one it has been told to accept. One result per repo that had a draft; a repo whose
+    draft GitHub wouldn't move carries the failure rather than stopping the others.
+    """
+    auth, _ = github.token(hermes_home)
+    if not auth:
+        raise ShipError("No GitHub account on the server.", 409)
+    results = []
+    for repo in record["repos"]:
+        name = github.origin_repo(repo["repo_root"])
+        if not name:
+            continue
+        pr = github.pull_request(
+            hermes_home, repo["repo_root"], repo["branch"], fresh=True, checks=False
+        )
+        if not pr or pr["state"] != "draft":
+            continue
+        result: Dict[str, Any] = {"name": repo["name"], "pr": pr}
+        try:
+            result["pr"] = github.mark_ready(name, pr["number"], auth)
+            github.forget_pull_request(repo["repo_root"], repo["branch"])
+        except github.GitHubError as error:
+            result["error"] = str(error)
+        results.append(result)
+    if not results:
+        raise ShipError("No draft pull request on this session's branch to mark ready.", 409)
+    return results
+
+
 def update(
     hermes_home: Path, record: Dict[str, Any], title: Optional[str], body: Optional[str]
 ) -> List[Dict[str, Any]]:
@@ -486,7 +518,7 @@ def template(tree: Optional[str]) -> Optional[str]:
 
 TOOL = "pull_request"
 LEGACY_TOOL = "open_pull_request"
-ACTIONS = ("ship", "push", "update", "status")
+ACTIONS = ("ship", "push", "update", "ready", "status")
 # Listed so the agent gets the teaching refusal rather than a schema error; never performed here.
 REFUSED_ACTIONS = ("merge", "close")
 SCHEMA = {
@@ -562,7 +594,7 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
             }
         )
     if action not in ACTIONS:
-        return json.dumps({"error": "action is required: ship, push, update or status."})
+        return json.dumps({"error": f"action is required: {', '.join(ACTIONS)}."})
     path, home = sessions._paths()
     record = sessions.record_for_call(path, home, task_id, session_id)
     if not record:
@@ -572,6 +604,8 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
             return json.dumps({"results": status(record)})
         if action == "update":
             results = update(home, record, args.get("title"), args.get("body"))
+        elif action == "ready":
+            results = ready(home, record)
         else:
             results = ship(
                 home,
