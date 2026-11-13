@@ -5,19 +5,20 @@
  * declared. Every change but a tool's is the canvas's record on the host, so the same page is named,
  * pinned and archived the same way on every device; nothing here is kept on this one alone.
  */
-import { useCallback, useState } from "react"
+import { useCallback, useRef, useState } from "react"
+import { ChevronRightIcon } from "lucide-react"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { CanvasMark } from "@/components/canvas-mark"
+import { CanvasMarkPicker } from "@/components/canvas-mark-picker"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import {
   DestructiveButton,
   FormActions,
   Group,
-  RowText,
   SwitchRow,
   fieldInputClass,
   fieldLabelClass,
-  linkRowClass,
 } from "@/components/settings-chrome"
 import { Input } from "@/components/ui/input"
 import {
@@ -31,7 +32,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import type { Canvas, CanvasChanges } from "@/lib/canvases"
-import { cn } from "@/lib/utils"
 
 /** The plugin's own cap on a canvas's title (`canvases.py`'s `TITLE_CHARS`), mirrored by the field. */
 const TITLE_CHARS = 60
@@ -223,7 +223,9 @@ function NameSheet({
  * its chat with it.
  *
  * The backup row is drawn only where the host advertises `canvas_vault` (`vaultable`): a plugin from
- * before it has no writer, and a switch that writes nothing is a promise the host can't keep.
+ * before it has no writer, and a switch that writes nothing is a promise the host can't keep. The
+ * mark row is drawn on the same rule (`markable`), since its picker writes a field an older record
+ * has no room for.
  *
  * Every control is disabled while one of the sheet's writes is out, so a second tap can't be lost:
  * two answers for one canvas would land in either order, and a switch that moves under a tap is no
@@ -234,6 +236,7 @@ export function CanvasOptions({
   onOpenChange,
   canvas,
   vaultable,
+  markable,
   onGrant,
   onUpdate,
   onDelete,
@@ -243,6 +246,8 @@ export function CanvasOptions({
   canvas: Canvas | undefined
   /** Whether this bot's host keeps a vault, which is what offers the backup switch. */
   vaultable: boolean
+  /** Whether this bot's host keeps a mark on the record, which is what offers the mark row. */
+  markable: boolean
   onGrant: (tool: string, allow: boolean) => Promise<boolean>
   /** Writes the canvas's own record; the host's answer is what the screens redraw from. */
   onUpdate: (changes: CanvasChanges) => Promise<void>
@@ -252,6 +257,10 @@ export function CanvasOptions({
   const [saving, setSaving] = useState<string | null>(null)
   const [asking, setAsking] = useState(false)
   const [naming, setNaming] = useState(false)
+  const [marking, setMarking] = useState(false)
+  // The mark's own box in the name block: the picker opens anchored to it, so a laptop draws the
+  // card beside it (the model selector's rule) and a phone draws a sheet.
+  const markButton = useRef<HTMLButtonElement>(null)
   const busy = saving !== null
   const deleting = saving === "delete"
 
@@ -295,19 +304,34 @@ export function CanvasOptions({
             <PopupTitle>Options</PopupTitle>
           </PopupHeader>
           <div data-canvas-options className="flex flex-col gap-4 px-4 pb-4">
-            <Group>
-              <button
-                type="button"
-                className={cn(linkRowClass, "disabled:opacity-60")}
-                disabled={!canvas || busy}
-                onClick={() => setNaming(true)}
-              >
-                <RowText title="Name" />
-                <span className="max-w-[50%] truncate text-sm text-muted-foreground">
+            {/* The name and the mark beside it, as a project's Edit screen draws its own: the box at
+                the head is the mark, and a tap on it picks another (issue #1065). */}
+            <div data-canvas-name-block className="flex flex-col gap-2">
+              <span className="px-1 text-sm font-medium">Name</span>
+              <div className="flex items-center gap-3 rounded-3xl bg-muted p-2">
+                <button
+                  ref={markButton}
+                  type="button"
+                  data-canvas-mark-open
+                  aria-label={markable ? "Change mark" : "Mark"}
+                  disabled={!canvas || busy || !markable}
+                  onClick={() => setMarking(true)}
+                  className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-background/60 outline-none transition-colors hover:bg-background focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-60"
+                >
+                  <CanvasMark mark={canvas?.mark} />
+                </button>
+                <button
+                  type="button"
+                  data-canvas-name-open
+                  disabled={!canvas || busy}
+                  onClick={() => setNaming(true)}
+                  className="h-11 min-w-0 flex-1 truncate pr-3 text-left text-base outline-none disabled:opacity-60"
+                >
                   {canvas?.title}
-                </span>
-              </button>
-            </Group>
+                </button>
+                <ChevronRightIcon className="mr-2 size-4 shrink-0 text-muted-foreground" />
+              </div>
+            </div>
 
             <Group>
               <SwitchRow
@@ -388,6 +412,17 @@ export function CanvasOptions({
           onOpenChange={setNaming}
           title={canvas.title}
           onSave={(title) => onUpdate({ title })}
+        />
+      )}
+
+      {canvas && (
+        <CanvasMarkPicker
+          key={canvas.id}
+          open={marking}
+          onOpenChange={setMarking}
+          anchor={markButton}
+          canvas={canvas}
+          onUpdate={onUpdate}
         />
       )}
 

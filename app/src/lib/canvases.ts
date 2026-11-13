@@ -106,6 +106,11 @@ export interface Canvas {
    * version, or nothing, which the tile draws as the canvas's own mark.
    */
   image?: string
+  /**
+   * The mark this canvas's pinned row draws (#1065): one lucide icon's name, or one emoji, as its
+   * user chose it in the canvas's options. Empty or absent is the app's own frame mark.
+   */
+  mark?: string
   /** The record's change clock. */
   at: number
   createdAt: number
@@ -271,6 +276,7 @@ function toCanvas(raw: Record<string, unknown>, profileId: string): Canvas {
     chatId: String(raw.chat_id ?? ""),
     canUndo: Boolean(raw.can_undo),
     ...(typeof raw.image === "string" && raw.image ? { image: raw.image } : {}),
+    ...(typeof raw.mark === "string" && raw.mark ? { mark: raw.mark } : {}),
     ...(typeof raw.docs_at === "number" ? { docsAt: raw.docs_at } : {}),
     ...(grants ? { grants } : {}),
     ...(typeof raw.html === "string" ? { html: raw.html } : {}),

@@ -533,6 +533,9 @@ export function CanvasView() {
   // Whether this bot's host keeps a vault, which is what its options sheet offers the backup switch
   // on: a host from before it writes no notes, and a switch that writes nothing is a promise broken.
   const vaultable = usePluginFeatureOn(profile, "canvas_vault")
+  // The same for the mark a pinned row draws (#1065): a host whose record has no field for one
+  // offers no picker, rather than one whose every pick it would refuse.
+  const markable = usePluginFeatureOn(profile, "canvas_mark")
   const dark = useDark()
   const mode: CanvasMode = dark ? "dark" : "light"
   const html = canvas?.html
@@ -869,6 +872,7 @@ export function CanvasView() {
         onOpenChange={setOptionsOpen}
         canvas={canvas}
         vaultable={vaultable}
+        markable={markable}
         onGrant={grant}
         onUpdate={update}
         onDelete={remove}
@@ -908,6 +912,7 @@ export function CanvasEdit() {
   const { awayNow, words: awayWords } = useAway(away)
   // The same read the preview makes: a canvas's options are the same sheet on both screens.
   const vaultable = usePluginFeatureOn(profile, "canvas_vault")
+  const markable = usePluginFeatureOn(profile, "canvas_mark")
   const large = useLarge()
   const [optionsOpen, setOptionsOpen] = useState(false)
   // This screen draws no notice of its own, so the answers its options give are said in passing: the
@@ -999,6 +1004,7 @@ export function CanvasEdit() {
         onOpenChange={setOptionsOpen}
         canvas={canvas}
         vaultable={vaultable}
+        markable={markable}
         onGrant={grant}
         onUpdate={update}
         onDelete={remove}

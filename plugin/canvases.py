@@ -122,6 +122,12 @@ TOOL_NAME_CHARS = 64
 # is one inline image — never a URL, since a list that fetched one would be a list reaching outside
 # itself — and a picture past the cap is refused rather than trimmed.
 IMAGE_CHARS = 192 * 1024
+# The mark a canvas's row draws (#1065): one lucide icon's name, as lucide writes it, or one emoji.
+# An icon's name is bounded like a tool's; an emoji is a handful of code points, and one with a
+# joiner in it — a family, a flag — is still one emoji, so the cap has room for them.
+MARK_CHARS = 40
+# An icon's name, as lucide writes one: lower case, hyphenated, and nothing else.
+MARK_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 
 TOOL_LIST = "canvas_list"
 TOOL_WRITE = "canvas_write"
@@ -533,6 +539,9 @@ _COLUMNS = (
     # (canvas_vault.py): off unless the user turned it on for this canvas, in this bot's options.
     "vault",
     "image",
+    # The mark a pinned canvas's row draws (#1065): one icon's name or one emoji. The record's, not
+    # the pin's, so every device draws the same row.
+    "mark",
     "at",
     "created_at",
 )
@@ -872,6 +881,35 @@ def _image(raw: Any) -> str:
     return raw
 
 
+def _mark(raw: Any) -> str:
+    """``raw`` as the mark a canvas's row draws, or a 400 naming why.
+
+    A mark is one lucide icon's name — lower case and hyphenated, as lucide writes it — or one emoji,
+    which is any short run of characters holding no letter or digit in any script, and no space. An
+    empty string clears it, which is how a canvas goes back to the app's own frame mark.
+
+    The vocabulary is the app's rather than this store's: the icons it can draw move with its own
+    dependency, so a list of names kept here would refuse a name after an upgrade. A record naming one
+    the app's build doesn't carry draws the frame mark, which is the same place a canvas with no mark
+    starts from.
+    """
+    if not isinstance(raw, str):
+        raise CanvasError("A canvas's mark is one icon's name or one emoji; this one is not text.")
+    if not raw:
+        return ""
+    if len(raw) > MARK_CHARS:
+        raise CanvasError(
+            f"A canvas's mark is one icon's name or one emoji; this one is {len(raw)} characters."
+        )
+    if MARK_NAME.match(raw):
+        return raw
+    if any(character.isalnum() or character.isspace() for character in raw):
+        raise CanvasError(
+            "A canvas's mark is one icon's name, as lucide writes it, or one emoji — not a word."
+        )
+    return raw
+
+
 def declarable(name: Any) -> bool:
     """Whether a version may declare ``name``: ``_tool_name``'s rule, asked as a question."""
     try:
@@ -1111,9 +1149,9 @@ def update(path: Path, canvas_id: str, body: Any) -> Dict[str, Any]:
     than a refusal it can show. The record's clock moves on the host's, taken under the write lock
     like every other write here, since the list is ordered by it.
     """
-    if not any(field in body for field in ("title", "pinned", "archived", "vault", "image")):
+    if not any(field in body for field in ("title", "pinned", "archived", "vault", "image", "mark")):
         raise CanvasError(
-            "A canvas's update names what changes: a title, pinned, archived, vault, or image."
+            "A canvas's update names what changes: a title, pinned, archived, vault, image, or mark."
         )
     changes: Dict[str, Any] = {}
     if "title" in body:
@@ -1125,17 +1163,21 @@ def update(path: Path, canvas_id: str, body: Any) -> Dict[str, Any]:
             changes[field] = _flag(body[field], field)
     if "image" in body:
         changes["image"] = _image(body["image"])
+    if "mark" in body:
+        changes["mark"] = _mark(body["mark"])
     with _writing(path) as conn:
         found = _record(conn, canvas_id)
         if found is None:
             raise CanvasError("There is no such canvas.", 404)
         now = int(time.time() * 1000)
-        # COALESCE: a body changes only the fields it names, so a pin never clears a title.
+        # COALESCE: a body changes only the fields it names, so a pin never clears a title. A field
+        # that is cleared is cleared by an empty string rather than a null, which is the one thing
+        # COALESCE can tell from "not named" (`_image`, `_mark`).
         conn.execute(
             """UPDATE canvases
                SET title = COALESCE(?, title), pinned = COALESCE(?, pinned),
                    archived = COALESCE(?, archived), vault = COALESCE(?, vault),
-                   image = COALESCE(?, image), at = ?
+                   image = COALESCE(?, image), mark = COALESCE(?, mark), at = ?
                WHERE id = ?""",
             (
                 changes.get("title"),
@@ -1143,6 +1185,7 @@ def update(path: Path, canvas_id: str, body: Any) -> Dict[str, Any]:
                 changes.get("archived"),
                 changes.get("vault"),
                 changes.get("image"),
+                changes.get("mark"),
                 now,
                 canvas_id,
             ),

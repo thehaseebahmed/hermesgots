@@ -7,6 +7,11 @@
 // and drawn again, and the chat's Point row sends the reader to the page and takes the element
 // they tap back as the field's chip — and a visit costs only what its page asked: a page that asks
 // for no library fetches none of one, and one that asks for three fetches each of those chunks once.
+// The mark's own box at the head of the options' Name block opens the mark picker (issue #1065) as
+// a sheet on the phone and a menu anchored to it on a wide screen, lucide's icons listed eight to a
+// row and narrowed by the field, an icon then an emoji picked as the mark its row draws, and the one
+// Remove Icon button under the grid clearing it back to the app's frame — and a pinned canvas's row
+// in the docked sidebar wearing the mark it chose.
 // A wide screen is the same canvas in two panes, and only boxes say where they are: no DOM without
 // layout can measure which pane a header spans.
 // The head is the last thing it reads, and only a browser can: how tight its line sits under its
@@ -20,7 +25,9 @@
 // and the tap that answer a point are that document's own script, a library's source is a chunk
 // only the browser runs (the component tier loads the sources, but no page makes a request), what a visit
 // fetches is the browser's own request log rather than anything the build's output says, and the
-// versions land from the mock's clock rather than a component test's single step.
+// versions land from the mock's clock rather than a component test's single step. The mark's grid is
+// boxes — eight to a row is a fact about layout — and which form the picker takes is the window's
+// width, which a component test stands in for with a matchMedia stub and a browser answers itself.
 import { app, assert, flow, mockJson, pass, SEND_CHORD, settled } from "./lib.mjs"
 
 const PROMPT = "A checklist for the deck"
@@ -187,7 +194,9 @@ await flow(
 
     // A gap only a browser can measure: the sheet's heading starts 16px below its drag handle.
     await page.locator("[data-canvas-options-open]").click()
-    const optionsTitle = page.locator('[data-slot="sheet-title"]')
+    // Named, not any sheet's title: the options open the mark picker as a sheet of its own, and a
+    // screen with two sheets has two titles.
+    const optionsTitle = page.getByRole("heading", { name: "Options", exact: true })
     await optionsTitle.waitFor({ timeout: 10_000 })
     await settled(page)
     const gap = await page.evaluate(() => {
@@ -213,6 +222,70 @@ await flow(
         `(handle bottom ${gap.handle}, heading top ${gap.heading})`,
     )
     await shot("options-sheet")
+    // The mark a pinned canvas's row draws (#1065): the box at the head of the options' Name block
+    // opens the picker as a sheet on this phone, its search narrows lucide's own set, and what is
+    // picked is the record's — an icon, then an emoji, then the app's own frame mark again.
+    const grid = () => page.locator('[data-slot="canvas-mark-picker"] [data-canvas-mark-grid="icons"]')
+    await page.locator("[data-canvas-mark-open]").click()
+    // The icons are one chunk fetched the first time something draws one, so the grid is waited for
+    // rather than asserted at once.
+    await grid().waitFor({ timeout: 40_000 })
+    await page.getByRole("searchbox", { name: "Search icons" }).fill("heart")
+    await page.getByRole("button", { name: "Heart", exact: true }).waitFor({ timeout: 10_000 })
+    // Eight to a row, measured rather than read off a class: a wrapped cell is still a cell, and only
+    // a box says which row it landed in.
+    const gridBoxes = await page.evaluate(() => {
+      const ys = [...document.querySelectorAll('[data-canvas-mark-grid="icons"] button')].map((cell) =>
+        Math.round(cell.getBoundingClientRect().y),
+      )
+      return { inRow: ys.filter((y) => y === ys[0]).length, total: ys.length }
+    })
+    console.log(`mark picker 390 — ${gridBoxes.inRow} to the row of ${gridBoxes.total}`)
+    assert.equal(gridBoxes.inRow, 8, `the picker draws eight icons to a row (${gridBoxes.inRow})`)
+    assert.equal(
+      await page.locator('[data-popup-form="sheet"] [data-slot="canvas-mark-picker"]').count(),
+      1,
+      "a phone draws the picker as a sheet",
+    )
+    // The grid is the thing that scrolls: the way back to the app's own mark is pinned under it, so
+    // clearing a mark is never a scroll past every icon to find.
+    const pinnedClear = await page.evaluate(() => {
+      const picker = document.querySelector('[data-slot="canvas-mark-picker"]')?.closest("[data-popup-form]")
+      const clear = document.querySelector("[data-canvas-mark-unset]")
+      if (!picker || !clear) return null
+      const box = picker.getBoundingClientRect()
+      const row = clear.getBoundingClientRect()
+      return { popup: Math.round(box.bottom), row: Math.round(row.bottom), top: Math.round(row.top), popupTop: Math.round(box.top) }
+    })
+    assert.ok(
+      pinnedClear && pinnedClear.row <= pinnedClear.popup && pinnedClear.top >= pinnedClear.popupTop,
+      `the clear row is inside the picker without scrolling (row ${JSON.stringify(pinnedClear)})`,
+    )
+    await shot("mark-picker")
+    await page.getByRole("button", { name: "Heart", exact: true }).click()
+    await page.locator("[data-canvas-mark-open] svg.lucide-heart").waitFor({ timeout: 20_000 })
+    await shot("mark-icon")
+    pass("the options: the picker searches lucide's icons eight to a row, and the icon picked is the mark")
+
+    // An emoji is the picker's other tab, and the mark is the character itself.
+    await page.locator("[data-canvas-mark-open]").click()
+    await grid().waitFor({ timeout: 20_000 })
+    await page.getByRole("tab", { name: "Emojis" }).click()
+    await page.getByRole("searchbox", { name: "Search emojis" }).fill("party")
+    await page.getByRole("button", { name: /^Party popper/ }).click()
+    await page.locator("[data-canvas-mark-open]").getByText("🎉").waitFor({ timeout: 20_000 })
+    pass("the options: the emoji tab's pick is the mark, drawn as the character itself")
+
+    // And the way back to the app's own frame mark, which is what clears the record's. Reopened, the
+    // picker stands on the tab the mark lives in — the emojis — and its clear row is under either.
+    await page.locator("[data-canvas-mark-open]").click()
+    await page.locator('[data-slot="canvas-mark-picker"]').waitFor({ timeout: 20_000 })
+    await page.getByRole("button", { name: "Remove Icon" }).click()
+    await page.locator("[data-canvas-mark-open] svg.lucide-frame").waitFor({ timeout: 20_000 })
+    await page
+      .locator('[data-slot="canvas-mark-picker"]')
+      .waitFor({ state: "detached", timeout: 10_000 })
+    pass("the options: the one button under the grid clears the mark back to the app's frame")
     // Shut again, so the legs after this one read the page and not a sheet laid over it.
     await page.keyboard.press("Escape")
     await optionsTitle.waitFor({ state: "detached", timeout: 10_000 })
@@ -553,6 +626,29 @@ await flow(
     )
     await shot("wide-two-panes")
     pass("a wide screen: the chat's lane is the left pane, and the page fills the right with no header")
+
+    // The mark the sidebar's row draws (#1065), where a wide screen keeps that row docked: the picker
+    // is a floating menu beside the Mark row, and the pin is what puts the marked row in the band.
+    await page.locator("[data-canvas-options-open]").click()
+    const options = page.locator("[data-canvas-options]")
+    await options.waitFor({ timeout: 10_000 })
+    await page.locator("[data-canvas-mark-open]").click()
+    const menu = page.locator('[data-popup-form="menu"] [data-slot="canvas-mark-picker"]')
+    await menu.waitFor({ timeout: 40_000 })
+    assert.equal(
+      await page.locator('[data-popup-form="sheet"] [data-slot="canvas-mark-picker"]').count(),
+      0,
+      "a wide screen draws the picker as a menu beside its box, not a sheet",
+    )
+    await page.getByRole("searchbox", { name: "Search icons" }).fill("star")
+    await page.getByRole("button", { name: "Star", exact: true }).click()
+    await options.waitFor({ state: "visible", timeout: 10_000 })
+    // The row's own words are what a thumb presses: the switch's input is the label's, hidden.
+    await options.getByText("Pin to sidebar", { exact: true }).click()
+    await page.keyboard.press("Escape")
+    await page.locator("a[data-canvas-pinned] svg.lucide-star").waitFor({ timeout: 20_000 })
+    await shot("pinned-mark")
+    pass("a wide screen: the picker is a menu beside the mark's box, and the pinned row draws its mark")
 
     // The scrollbar is the platform's own, and it is pinned here rather than styled: the page's
     // document is grown past its own viewport, and what is read is what the app does NOT force —

@@ -505,7 +505,7 @@ export const FLOWS = {
   canvas: {
     script: "e2e/canvas.mjs",
     about:
-      "A canvas on a phone: made from a prompt, its page building under a non-modal half sheet, a box ticked above that sheet and kept through an edit sent from it and through Undo, a point tagged on the page while the sheet is up, a page that sets location to an outside URL staying put, and the sheet swiped down to leave the page whole",
+      "A canvas on a phone: made from a prompt, its page building under a non-modal half sheet, a box ticked above that sheet and kept through an edit sent from it and through Undo, a point tagged on the page while the sheet is up, a page that sets location to an outside URL staying put, the mark picker opened from the mark's box in the options' Name block as a sheet, lucide's icons eight to a row with an icon, an emoji and the clear button picked from it, and the sheet swiped down to leave the page whole",
   },
   submission: {
     script: "regression-submission.mjs",

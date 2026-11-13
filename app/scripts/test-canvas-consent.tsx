@@ -675,7 +675,7 @@ test(
       await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
 
       await click(find("[data-canvas-options-open]"))
-      await click(findText('[data-canvas-options] button', "Name"))
+      await click(find("[data-canvas-name-open]"))
       await until(async () => find("#canvas-name") !== null, "the name field")
       await type(find("#canvas-name"), "Split the bill")
       await click(findText("button", "Save"))
@@ -774,13 +774,17 @@ test(
         /call any of the bot's tools/,
         "a version with no tools says nothing at all about them",
       )
+      // The name is a block of its own — a project's Edit screen's — so the one card left holds the
+      // switches alone.
+      const block = find("[data-canvas-name-block]")
+      assert.ok(block, "the name's own block")
+      assert.match(wordsOf(block), /Name/, "the block holds the canvas's name")
       const groups = findAll("[data-canvas-options] [data-settings-group]")
-      assert.equal(groups.length, 2, "two groups and no third: the name, and the switches")
-      assert.match(wordsOf(groups[0]), /Name/, "the first holds the canvas's name")
+      assert.equal(groups.length, 1, "one group: the switches, and no card for the name")
       assert.match(
-        wordsOf(groups[1]),
+        wordsOf(groups[0]),
         /Pin to sidebar[\s\S]*Archive/,
-        "the second its place in the sidebar and its archive",
+        "which hold its place in the sidebar and its archive",
       )
       assert.equal(toolSwitches().length, 0, "and no tool row is drawn at all")
     })
@@ -823,9 +827,9 @@ test(
       assert.equal(row.getAttribute("aria-checked"), "false", "and it starts off")
       // It stands with the other switches of the canvas's own record, in the same card.
       const groups = findAll("[data-canvas-options] [data-settings-group]")
-      assert.equal(groups.length, 2, "the backup is no group of its own")
+      assert.equal(groups.length, 1, "the backup is no group of its own")
       assert.match(
-        wordsOf(groups[1]),
+        wordsOf(groups[0]),
         /Pin to sidebar[\s\S]*Archive[\s\S]*Back up to a wiki/,
         "it is drawn beside Pin and Archive",
       )
