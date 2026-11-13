@@ -14,10 +14,11 @@ const DEFINES = [
   "src/components/settings-chrome.tsx",
   "src/components/chat/model-picker.tsx",
   "src/components/ui/select.tsx",
+  "src/components/pick-row.tsx",
 ]
 
 /** The surfaces a pick is drawn on, as the doc's rows name them. */
-const SURFACES = ["PickSurface", "PickList", "ModelPicker", "ModelMenu", "Select"]
+const SURFACES = ["PickSurface", "PickList", "ModelPicker", "ModelMenu", "PickGroup", "Select"]
 
 /** What a file draws when it opens a pick: one list, so a surface added above is checked below. */
 const DRAWS = new RegExp(`<(${SURFACES.join("|")})\\b`)

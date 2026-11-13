@@ -866,6 +866,9 @@ function helpers(page) {
             window.__popups.push({ form: popup.getAttribute("data-popup-form") })
           }
         }
+        // A second arming replaces the first: one observer at a time, so each look counts only the
+        // pop-ups drawn from its own tap.
+        window.__popupObserver?.disconnect()
         window.__popupObserver = new MutationObserver((records) => {
           for (const record of records)
             for (const node of record.addedNodes) if (node.nodeType === 1) note(node)

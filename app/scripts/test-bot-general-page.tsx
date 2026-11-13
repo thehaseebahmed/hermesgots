@@ -382,14 +382,19 @@ const modelsOf = (models: string[]) => ({
   ],
 })
 
-/** Every sheet drawn from the moment it is armed, so a tap's own is caught even for one frame. */
-test("a one-model host applies the General Model row's model, and draws no sheet", async () => {
-  const server = await seed("general-model-one", { models: modelsOf(["own-model"]) })
+/**
+ * The row a bot's chats run on is the host's own model, so a host offering one model finds the row
+ * already holding it: the tap is the quiet branch, and the device is untouched. (The apply branch is
+ * a row whose value differs — the Models page and the Delegation row have those legs.)
+ */
+test("a one-model host leaves the General Model row quiet when it already runs that model", async () => {
+  await seed("general-model-one", { models: modelsOf(["own-model"]) })
   await mount(page(), async () => {
     await until(
       async () => /openrouter\/own-model/.test(rowText("model")),
       "the host's model on the row",
     )
+    const before = await db.profiles.get("bot-1")
     const sheets = watchSheets()
     try {
       await click(row("model"))
@@ -397,9 +402,9 @@ test("a one-model host applies the General Model row's model, and draws no sheet
       sheets.stop()
     }
     assert.deepEqual(sheets.drawn, [], "no sheet was drawn, not even for a frame")
-    assert.deepEqual(
-      server.calls.filter((one) => one.method === "POST"),
-      [],
+    assert.equal(
+      (await db.profiles.get("bot-1"))?.updatedAt,
+      before?.updatedAt,
       "and nothing was written: the row already held the one model",
     )
     assert.equal(

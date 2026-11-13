@@ -1097,7 +1097,6 @@ const ONE_MODEL = {
 }
 
 /** Every sheet drawn from the moment it is armed, so a tap's own is caught even for one frame. */
-/** Waits for the host's model list to land on the bot, which is what a tap decides against. */
 test("a one-model host applies the cleanup model from its row, and draws no pick", async () => {
   const calls = await seed(
     "cleanup-one-model",

@@ -18,8 +18,9 @@ at that moment, and the rule answers one of three things:
   nothing, or it holds two or more.
 
 The rule is asked only from a tap, never from an effect, so a list that lands after the tap has no
-path to an apply. A write in flight is marked before it starts and released when it settles, so one
-tap can never apply twice. `modelsRead` (`app/src/lib/model-pick.ts`) is how a model surface says
+path to an apply. A write in flight is marked before it starts and released when its own promise
+settles, so one tap can never apply twice: a second tap while the write is out does nothing, and a
+tap after it lands finds the option in force and is the quiet case. `modelsRead` (`app/src/lib/model-pick.ts`) is how a model surface says
 which of the three states its list is in.
 
 ## The enumeration
@@ -40,7 +41,7 @@ call sites of one sheet, `ModelPick`.
 | S5 | `app/src/components/bot-dictation-tab.tsx` Speech model | `PickSurface` + `PickList` | `modelsFor(settings, block)` | can be 1 | `ProbeNote`, and opening is what asks for the probe | **settled** |
 | S6 | `app/src/components/bot-dictation-tab.tsx` `SettingSurface` — a host setting whose control is a pick | `PickSurface` + `PickList` | `pickOptions(block, row)` (`app/src/lib/stt-settings.ts`): the host's STT providers, or one provider's models | can be 1 | — | **applied** |
 | S7 | `app/src/components/chat/model-picker.tsx` `ModelMenu`, drawn by `app/src/routes/chat.tsx`, `app/src/chat-next/chat-body.tsx` and `app/src/components/chat/chat-composer.tsx` | `Popup` + `ModelPicker` | `useModelInfo(profile).providers` | can be 1 | the Default row, the recent picks | **applied** |
-| S8a | `app/src/components/bot-settings.tsx` General's Model row | `PickSurface` + `ModelPick` | as S7 | can be 1 | the Default row, a real write (`setDefaultModel(profile, undefined)`) | **applied** |
+| S8a | `app/src/components/bot-settings.tsx` General's Model row | `PickSurface` + `ModelPick` | as S7 | can be 1 | the Default row, a real write (`setDefaultModel(profile, undefined)`) | **applied** (quiet on a one-model host: the row runs the host's own model, which is that model) |
 | S8b | `app/src/components/bot-settings.tsx` `ModelsPage` | as S8a | as S7 | can be 1 | — (`onPick` ignores `undefined`) | **applied** |
 | S8c | `app/src/components/bot-settings.tsx` `SubagentModelRow` (Delegation) | as S8a | as S7 | can be 1 | the Default model row | **applied** |
 | S8d | `app/src/components/bot-dictation-tab.tsx` Cleanup model | as S8a | as S7 | can be 1 | the Default row | **applied** |
@@ -155,7 +156,7 @@ must never look like a list that holds nothing, since those are different facts 
 
 | Surface | While the list is reading | When the read failed | When the list holds nothing |
 |---|---|---|---|
-| `PickSurface` + `PickList` (`PickList` takes `options: PickOption[] \| undefined`) | *Reading this list…* beside a spinner | nothing of its own: a list that has not arrived keeps its reading words, and a read that failed is said on the page the sheet was opened from | *Nothing to pick from.* — and *Nothing matches.* when a search emptied a list that does hold options |
+| `PickSurface` + `PickList` (`PickList` takes `options: PickOption[] \| undefined`) | *Reading this list…* beside a spinner | nothing of its own: a list that has not arrived keeps its reading words, and a read that failed is said on the page the sheet was opened from. None of these six sites reads a list that can fail on its own — the STT block is what draws those rows, and the bots come from the device — so a `failed` arm is owed only when a site does | *Nothing to pick from.* — and *Nothing matches.* when a search emptied a list that does hold options |
 | `PickSurface` + `ModelPick` (`info: ModelInfo \| null \| undefined`) | *Reading this bot's models…* beside a spinner | *Couldn't read this bot's models.* | *This bot's host offers no models.* |
 | `Popup` + `ModelPicker` anywhere but `ModelPick` (S7's sheet when it opens, S9, S10, S14) | the control that opened it shows the model in force — the host's last report, muted, where it is only remembered — and the sheet draws the Default row and the providers it holds | the same as reading: the sheet draws what it holds, and the row that opened it says the host's own words where the page draws refusals | the sheet's Default row stands alone; *No models match.* is only a search's |
 | `Popup` + `PickGroup` (S15) | *Reading prompts…* beside a spinner | the sheet draws the library this device holds | *No prompts yet.* |
@@ -172,6 +173,10 @@ must never look like a list that holds nothing, since those are different facts 
   choice.
 - `PickGroup` and `PickRow` (`app/src/components/pick-row.tsx`) are the row and its list, drawn under
   every sheet here and under surfaces that are not a pick of one value.
+- `app/src/components/chat/attach-menu.tsx` — the composer's `+`, a `PickGroup` of tools whose rows
+  are switches: two or more toggles, never one choice.
+- `app/src/components/chat/outputs-drawer.tsx` — a turn's pull requests, a `PickGroup` whose rows
+  open one; the list is what the turn produced, not a value to set.
 - `ValueForm` (`app/src/components/bot-dictation-tab.tsx`) draws a `PickSurface` around a value typed
   in by hand: a form, not a list to pick from.
 
@@ -181,8 +186,9 @@ and the only "choose a skill" surface is the `/` palette (S12), typed into the c
 ## What holds this page to the code
 
 `app/scripts/test-pickers-doc.mjs` reads `app/src/` for every file that renders `<PickSurface`,
-`<PickList`, `<ModelPicker`, `<ModelMenu` or `<Select` — leaving out the modules that only define
-them (`app/src/components/ui/select.tsx` among them),
+`<PickList`, `<ModelPicker`, `<ModelMenu`, `<PickGroup` or `<Select` — leaving out the modules that
+only define them (`app/src/components/pick-row.tsx` and `app/src/components/ui/select.tsx` among
+them),
 `app/src/components/settings-chrome.tsx` and `app/src/components/chat/model-picker.tsx` — and reads
 this page for the files it names. It fails on a file that draws one of those surfaces with no row
 here, on a row whose surface column says it draws one while its file no longer does, and on a site

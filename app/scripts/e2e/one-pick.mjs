@@ -202,12 +202,18 @@ await flow("one-pick", async ({ page, profileId, held, seed, shot, until, watchP
           20_000,
           "the list to land in the open sheet",
         )
-        assert.equal(
-          (await bot()).model,
-          readingBefore.model,
-          `nothing was applied when the list landed at ${look}`,
+        // The bot already runs that model, so its values cannot tell an apply from nothing. Two
+        // things can: the sheet is still open — a late apply goes through the write that closes it —
+        // and the host was sent no model.
+        assert.ok(
+          await readingSheet.isVisible(),
+          `the sheet stayed open when the list landed at ${look}`,
         )
-        assert.equal((await bot()).modelChoice, readingBefore.modelChoice)
+        assert.equal(
+          (await bot()).modelChoice?.model,
+          readingBefore.modelChoice?.model,
+          `and the bot's own pick is where it was at ${look}`,
+        )
         assert.deepEqual(modelTraffic(readingFrom), [], `and the landing wrote nothing to the host at ${look}`)
         pass(`at ${look} a held read opened the sheet reading, and landing applied nothing`)
         await shot(`${look}-landed`)

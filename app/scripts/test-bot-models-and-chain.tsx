@@ -433,8 +433,6 @@ test("picking General's Model makes it the host's main model", async () => {
   })
 })
 
-/** Every sheet drawn from the moment it is armed, so a tap's own is caught even for one frame. */
-/** Waits for the host's model list to land on the bot, which is what a tap decides against. */
 test("a one-model host applies it from the Models page's row, and draws no sheet", async () => {
   const calls = await seed("models-one-model", { models: ["own-model"] })
   await mount(page("/settings/bots/bot-1/models"), async () => {
@@ -456,7 +454,7 @@ test("a one-model host applies it from the Models page's row, and draws no sheet
 })
 
 test("a one-model host leaves its row quiet when the bot already runs that model", async () => {
-  const calls = await seed("models-one-model-in-force", { models: ["own-model"] })
+  await seed("models-one-model-in-force", { models: ["own-model"] })
   // What the row draws, and what its tap writes: the bot's own model, already the host's one.
   await db.profiles.update("bot-1", { model: "own-model" })
   await mount(page("/settings/bots/bot-1/models"), async () => {
@@ -469,15 +467,11 @@ test("a one-model host leaves its row quiet when the bot already runs that model
       sheets.stop()
     }
     assert.deepEqual(sheets.drawn, [], "no sheet was drawn, not even for a frame")
-    assert.deepEqual(
-      calls.filter((one) => one.method === "POST"),
-      [],
-      "and nothing was written: the row already held the host's one model",
-    )
+    // The write this row makes is the device's own, so its clock is what says nothing happened.
     assert.equal(
       (await db.profiles.get("bot-1"))?.updatedAt,
       before?.updatedAt,
-      "the bot is untouched",
+      "and nothing was written: the row already held the host's one model",
     )
   })
 })

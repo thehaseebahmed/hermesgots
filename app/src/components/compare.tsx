@@ -272,11 +272,12 @@ export function JudgePicker({
   }, [profile])
 
   // The judge's pick and a row of its sheet make one write between them, so a host offering a
-  // single model is applied by the tap and no sheet is drawn.
+  // single model is applied by the tap and no sheet is drawn. The write's promise is handed back, so
+  // the trigger's guard lasts as long as it does.
   const choose = (next: ModelChoice | undefined) => {
     setOpen(false)
-    if (next && profile) void rememberModel(profile.id, next)
     onChoose(next)
+    return next && profile ? rememberModel(profile.id, next) : undefined
   }
   const { tap } = usePickOne({
     read: modelsRead(info),
