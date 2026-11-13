@@ -164,7 +164,11 @@ export interface Profile {
   muted?: boolean
   /** Turned off in the app: hidden, and nothing checks on it. Local copy of the registry's flag. */
   disabled?: boolean
-  /** When its host last checked in with the registry. Local only. */
+  /**
+   * When this device's chat-list pass last heard the bot's host answer — the pass's own answer,
+   * written here at most once a minute. Local only: it is this device's record of what its own pass
+   * saw, never the account's, and the dot itself reads the answer the pass is holding.
+   */
   seenAt?: number
   /** The Gots plugin version its host last reported. Local only. */
   pluginVersion?: string

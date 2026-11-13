@@ -73,11 +73,6 @@ interface Device {
   updatedAt: number
 }
 
-interface Seen {
-  at: number
-  pluginVersion?: string
-}
-
 /** A code works for 30 minutes and up to 20 profiles, so one covers a sitting. */
 export const CODE_TTL_MS = 30 * 60_000
 const MAX_CLAIMS = 20
@@ -176,9 +171,7 @@ async function deleteHost(store: RegistryStore, userId: string, hostId: string) 
   for (const { key } of (await store.list({ prefix: `users/${userId}/bots/` })).blobs) {
     const bot = await read<BotRecord>(store, key)
     if (bot?.data.hostId !== hostId) continue
-    const botId = key.slice(key.lastIndexOf("/") + 1)
     await store.delete(key)
-    await store.delete(`users/${userId}/seen/${botId}`)
   }
   await store.delete(`users/${userId}/pushed/${hostId}`)
   await store.delete(`users/${userId}/hosts/${hostId}`)
@@ -284,7 +277,6 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
       const current = await read<BotRecord>(store, botKey)
       if (current && current.data.hostId !== hostId) return error("Not this host's bot", 403)
       await store.delete(botKey)
-      await store.delete(`users/${userId}/seen/${id}`)
       return new Response(null, { status: 204 })
     }
 
@@ -298,21 +290,15 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
       ) {
         return error("Invalid bots", 400)
       }
-      const pluginVersion =
-        typeof input?.pluginVersion === "string" ? input.pluginVersion.slice(0, 32) : undefined
+      // An answer, never a record: what the plugin asks is whether each bot it holds is still there
+      // and still on, which is what its own check-in reads to publish one that went or was switched
+      // off. When this device's chat-list pass last heard a host is the app's own business now.
       const bots: Record<string, { enabled: boolean } | null> = {}
       for (const botId of ids as string[]) {
         const record = await read<BotRecord>(store, `users/${userId}/bots/${botId}`)
-        if (!record || record.data.hostId !== hostId) {
-          // Gone (or never published): the plugin publishes it again.
-          bots[botId] = null
-          continue
-        }
-        await store.setJSON(`users/${userId}/seen/${botId}`, {
-          at: now,
-          pluginVersion,
-        } satisfies Seen)
-        bots[botId] = { enabled: record.data.enabled }
+        // Gone (or never published): the plugin publishes it again.
+        const held = record && record.data.hostId === hostId ? record.data : null
+        bots[botId] = held ? { enabled: held.enabled } : null
       }
       const inbox = await ctx.inbox(userId)
       return json({ keyId: inbox?.keyId ?? null, bots })
@@ -411,13 +397,11 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
   }
 
   if (op === "GET bots") {
-    const bots: Record<string, BotRecord & { seen?: Seen }> = {}
+    const bots: Record<string, BotRecord> = {}
     for (const { key } of (await store.list({ prefix: `users/${userId}/bots/` })).blobs) {
       const record = await read<BotRecord>(store, key)
       if (!record) continue
-      const botId = key.slice(key.lastIndexOf("/") + 1)
-      const seen = await read<Seen>(store, `users/${userId}/seen/${botId}`)
-      bots[botId] = { ...record.data, ...(seen ? { seen: seen.data } : {}) }
+      bots[key.slice(key.lastIndexOf("/") + 1)] = record.data
     }
     return json({ bots })
   }

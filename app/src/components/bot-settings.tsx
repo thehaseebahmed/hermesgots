@@ -100,6 +100,7 @@ import { presenceLine } from "@/lib/presence"
 import { removeHost, setBotEnabled } from "@/lib/registry"
 import { SKILL_FEATURES } from "@/lib/skills"
 import { AppWords } from "@/lib/refusal"
+import { useSyncState } from "@/lib/sync"
 import { useNow } from "@/lib/threads"
 import { plural } from "@/lib/tools"
 import { cn } from "@/lib/utils"
@@ -150,12 +151,13 @@ function gated(page: BotTab): boolean {
 
 const GENERAL_ANSWERS = { fallbacks: "fallbacks" } as const
 
-/** The registry's Enabled flag, with when the bot's host last checked in. */
+/** The registry's Enabled flag, with when this device's last pass heard the bot's host answer. */
 function EnabledSetting({ profile }: { profile: Profile }) {
   const now = useNow()
   const [saving, setSaving] = useState(false)
   const refusal = useScreenRefusal()
-  const seen = presenceLine(profile, now) ?? "Not seen yet"
+  const { chatStores } = useSyncState()
+  const seen = presenceLine(profile, now, chatStores[profile.id]) ?? "Not seen yet"
 
   return (
     <SwitchRow

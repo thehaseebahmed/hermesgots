@@ -102,7 +102,7 @@ import {
   usePushFeatures,
 } from "@/lib/push"
 import type { PushCategory, PushFeature } from "@/lib/push-kinds"
-import { presence, presenceLine } from "@/lib/presence"
+import { presence, presenceLine, type PresenceAnswer } from "@/lib/presence"
 import { siteUrl } from "@/lib/registry"
 import { AppWords } from "@/lib/refusal"
 import { tell } from "@/lib/tell"
@@ -399,7 +399,10 @@ function MenuScreen({
 /** A bot in the menu: its connectivity dot, then the bot itself, then when its host last checked in. */
 function BotRow({ profile, label }: { profile: Profile; label: string }) {
   const now = useNow()
-  const online = presence(profile, now)
+  // The chat-list pass's answer for this bot, when one has run: the dot is that and nothing else.
+  const { chatStores } = useSyncState()
+  const answer = chatStores[profile.id]
+  const online = presence(profile, now, answer)
   return (
     <Row
       to={`bots/${profile.id}`}
@@ -415,16 +418,16 @@ function BotRow({ profile, label }: { profile: Profile; label: string }) {
         </>
       }
       title={label}
-      subtitle={botStatus(profile, now)}
+      subtitle={botStatus(profile, now, answer)}
     />
   )
 }
 
-/** A bot's row subtext: a warning first, else when its host last checked in. */
-function botStatus(profile: Profile, now: number): string | undefined {
+/** A bot's row subtext: a warning first, else when this device last heard its host answer. */
+function botStatus(profile: Profile, now: number, answer?: PresenceAnswer): string | undefined {
   if (profile.disabled) return undefined
   if (pluginOutdated(profile.pluginVersion)) return "Plugin out of date"
-  return presenceLine(profile, now)
+  return presenceLine(profile, now, answer)
 }
 
 /** The row that opens the link sheet, at the end of the bots. */

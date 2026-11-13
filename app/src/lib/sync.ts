@@ -114,6 +114,12 @@ type ChatValue = Pick<Conversation, (typeof CHAT_FIELDS)[number]>
 /** Whether the bot's Gots plugin answered the last chat list sync. */
 export type ChatStore = "plugin" | "unreachable"
 
+/**
+ * How often a pass rewrites when it last heard a bot. Every write repaints the list it just merged,
+ * so a pass a minute after the last one leaves the timestamp where it is.
+ */
+const HEARD_EVERY_MS = 60_000
+
 export interface SyncState {
   account: Account
   vault: "unknown" | "missing" | "locked" | "unlocked"
@@ -876,6 +882,9 @@ async function syncChatLists(only?: Set<string>) {
     for (const [i, profile] of members.entries()) {
       const answer = merged[i] ? "plugin" : "unreachable"
       if (stores[profile.id] !== answer) stores[profile.id] = answer
+      // The answer is presence now, and this is when this device got it: what a screen reads for
+      // the dot, and what it says when the bot is away.
+      if (merged[i]) await markHeard(profile)
       await applyChatList(profile, merged[i])
     }
     if (reported) await report(true)
@@ -888,6 +897,17 @@ async function syncChatLists(only?: Set<string>) {
   // The pass holds the sync for `CHATS_MERGE_WAIT_MS` at most, whatever the bots' hosts are doing.
   await within(settled, CHATS_MERGE_WAIT_MS)
   if (!reported) await report(false)
+}
+
+/**
+ * Notes that this device heard the bot on the pass that just ran — the fact a screen's dot is, and
+ * the time a bot that is away says. Its own write, kept to once a minute (a pass a few seconds
+ * later would repaint every row it just merged), and never pushed: `seenAt` is this device's alone.
+ */
+async function markHeard(profile: Profile) {
+  const now = Date.now()
+  if (profile.seenAt && now - profile.seenAt < HEARD_EVERY_MS) return
+  await db.profiles.update(profile.id, { seenAt: now })
 }
 
 /** Applies one bot's answer: its rows and tombstones. Its old list moves off on its own. */

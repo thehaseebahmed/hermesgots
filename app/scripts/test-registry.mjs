@@ -102,7 +102,7 @@ async function call(store, caller, method, route, options = {}) {
   return { status: res.status, body: res.status === 204 ? null : await res.json() }
 }
 
-test("a check-in writes when each bot was heard and answers the account's key and flag", async () => {
+test("a check-in answers without writing a record", async () => {
   const store = setup()
   publish(store, "b1")
 
@@ -112,10 +112,8 @@ test("a check-in writes when each bot was heard and answers the account's key an
 
   assert.equal(res.status, 200)
   assert.deepEqual(res.body, { keyId: KEY_ID, bots: { b1: { enabled: true } } })
-  assert.deepEqual(store.data.get(`users/${USER_ID}/seen/b1`), {
-    at: NOW,
-    pluginVersion: "0.41.2",
-  })
+  // Nothing is kept about when the host was heard: presence is the chat-list pass's answer now.
+  assert.equal(store.data.has(`users/${USER_ID}/seen/b1`), false)
 })
 
 test("a check-in answers null for a bot the store doesn't hold or another host owns", async () => {
@@ -132,28 +130,22 @@ test("a check-in answers null for a bot the store doesn't hold or another host o
   assert.equal(store.data.has(`users/${USER_ID}/seen/b2`), false)
 })
 
-test("deleting a bot takes its record and its seen key, and no other bot's", async () => {
+test("deleting a bot takes its record and no other bot's", async () => {
   const store = setup()
   publish(store, "b1")
   publish(store, "b2")
-  store.data.set(`users/${USER_ID}/seen/b1`, { at: NOW })
-  store.data.set(`users/${USER_ID}/seen/b2`, { at: NOW })
 
   const res = await call(store, host, "DELETE", "bots", { query: { id: "b1" } })
 
   assert.equal(res.status, 204)
   assert.equal(store.data.has(`users/${USER_ID}/bots/b1`), false)
-  assert.equal(store.data.has(`users/${USER_ID}/seen/b1`), false)
   assert.equal(store.data.has(`users/${USER_ID}/bots/b2`), true)
-  assert.deepEqual(store.data.get(`users/${USER_ID}/seen/b2`), { at: NOW })
 })
 
-test("deleting a host takes its token, its bots and their seen keys", async () => {
+test("deleting a host takes its token and its bots, and no other host's", async () => {
   const store = setup()
   publish(store, "b1")
   publish(store, "b2", OTHER_HOST_ID)
-  store.data.set(`users/${USER_ID}/seen/b1`, { at: NOW })
-  store.data.set(`users/${USER_ID}/seen/b2`, { at: NOW })
 
   const res = await call(store, user, "DELETE", "hosts", { query: { id: HOST_ID } })
 
@@ -162,10 +154,8 @@ test("deleting a host takes its token, its bots and their seen keys", async () =
   assert.equal(store.data.has(`tokens/${TOKEN_HASH}`), false)
   assert.equal(store.data.has(`users/${USER_ID}/hosts/${HOST_ID}`), false)
   assert.equal(store.data.has(`users/${USER_ID}/bots/b1`), false)
-  assert.equal(store.data.has(`users/${USER_ID}/seen/b1`), false)
   // Another host's bot is not this host's to delete.
   assert.equal(store.data.has(`users/${USER_ID}/bots/b2`), true)
-  assert.deepEqual(store.data.get(`users/${USER_ID}/seen/b2`), { at: NOW })
 })
 
 test("a push inside the second is refused and leaves the gap at its first stamp", async () => {

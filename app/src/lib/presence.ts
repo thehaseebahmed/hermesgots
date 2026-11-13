@@ -8,8 +8,8 @@
  * Three things decide it: the bot (its host, whether it is hidden, and when this device last heard
  * it), this device's clock, and — where a caller has one — the answer the chat lists' own pass
  * recorded for the bot (`ChatStore` in `sync.ts`). An answer decides by itself: the plugin that
- * answered is online and one that didn't is away. With no answer, the stored check-in decides against
- * the window the plugin keeps, which is what every screen reads until the pass writes its answer.
+ * answered is online and one that didn't is away. With no answer — a launch whose first pass hasn't
+ * landed yet — the last time this device heard the host decides against the window.
  */
 
 import { formatRelative } from "./relative.ts"
@@ -31,13 +31,17 @@ export interface PresenceBot {
  */
 export type PresenceAnswer = "plugin" | "unreachable"
 
-/** The plugin checks in every 10 minutes, so two missed check-ins and a margin mean it's gone. */
+/**
+ * How fresh the last time this device heard the host has to be to still count: while a launch's
+ * first chat-list pass is still out, a bot heard from within this window reads as it did, and the
+ * pass's own answer replaces that guess the moment it lands.
+ */
 const ONLINE_MS = 25 * 60_000
 
 /**
- * Whether this device has heard from the bot: the pass's answer where there is one, else the check-in
- * against the window. `undefined` where nothing has been heard at all — a device that has heard from
- * no host cannot call the bot away.
+ * Whether this device has heard from the bot: the pass's answer where there is one, else the last
+ * time it heard the host against the window. `undefined` where nothing has been heard at all — a
+ * device that has heard from no host cannot call the bot away.
  */
 function heard(bot: PresenceBot, now: number, answer?: PresenceAnswer): boolean | undefined {
   if (answer) return answer === "plugin"

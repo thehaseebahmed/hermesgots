@@ -29,7 +29,6 @@ interface RegistryBot {
   sealed: SealedToInbox
   enabled: boolean
   adopts?: string
-  seen?: { at: number; pluginVersion?: string }
 }
 
 /** What a plugin seals for the app (`record` in `plugin/link.py`). */
