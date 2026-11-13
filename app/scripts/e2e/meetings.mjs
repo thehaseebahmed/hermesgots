@@ -71,7 +71,6 @@ for (const [width, dark] of [
       const setSwitch = (meetings) =>
         page.evaluate(async (meetings) => {
           const { db } = await import("/src/lib/db.ts")
-          // The Lab switch alone: no Developer unlock, which the feature no longer asks for.
           await db.settings.update("settings", { meetings })
         }, meetings)
 
