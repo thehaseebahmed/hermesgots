@@ -1235,6 +1235,12 @@ export interface CanvasOutboxRow {
   method: "put" | "remove"
   /** What a put carries; a remove carries none. */
   doc?: unknown
+  /**
+   * What the row weighs on the queue's own bound (`OUTBOX_BYTES` in `canvas-outbox.ts`), on the measure
+   * a document's row is kept by (`canvasDocBytes`). Written with the row so a bound pass doesn't encode
+   * every queued document again; a row from before the field existed is weighed as it is read.
+   */
+  bytes?: number
 }
 
 /** The key one queued write is filed under, which is also what makes it one row a document. */

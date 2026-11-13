@@ -27,7 +27,7 @@ import {
   sweepMark,
   sweptWhole,
 } from "@/lib/canvas-docs"
-import { drainCanvas, enqueueWrite } from "@/lib/canvas-outbox"
+import { drainCanvas, enqueueWrite, holdWriteCooldown } from "@/lib/canvas-outbox"
 import { sweepCanvas } from "@/lib/canvas-sweep"
 import { refreshCanvases, writeCanvasData } from "@/lib/canvases"
 import { db, canvasDocBytes, canvasDocKey, type Profile } from "@/lib/db"
@@ -476,10 +476,17 @@ test("a remove made while away stays removed through a sweep and lands when the 
   )
   assert.ok((await sweepMark(bot, CANVAS.id))?.completeAt, "although the sweep completed")
 
-  // And the removal lands: the host is sent it, and neither side holds the document after.
-  assert.equal(await drainCanvas(bot, CANVAS.id), true, "the removal is sent")
-  assert.deepEqual(host.calls?.map((one) => one.shape), ["data.remove"], "as a removal")
-  assert.deepEqual(await db.canvasOutbox.toArray(), [], "and nothing is left queued")
+  // And the removal lands: the host is sent it, and neither side holds the document after. The window
+  // the failed write opened has its own cases (`test-canvas-offline.tsx`); this one is what a sweep
+  // makes of a removal still waiting, so the drain is asked with no window in its way.
+  const ends = holdWriteCooldown(0)
+  try {
+    assert.equal(await drainCanvas(bot, CANVAS.id), true, "the removal is sent")
+    assert.deepEqual(host.calls?.map((one) => one.shape), ["data.remove"], "as a removal")
+    assert.deepEqual(await db.canvasOutbox.toArray(), [], "and nothing is left queued")
+  } finally {
+    ends()
+  }
   await sweepCanvas(bot, CANVAS.id)
   assert.deepEqual(
     await cachedDocs(bot, CANVAS.id),

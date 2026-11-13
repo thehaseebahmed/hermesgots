@@ -492,6 +492,23 @@ export async function withToasts(body: (said: string[]) => Promise<void>) {
 }
 
 /**
+ * The notes a screen says in passing — the app's own word that something was kept, not a refusal —
+ * collected from the toasts it shows. `withToasts` is the same for the refusals.
+ */
+export async function withNotes(body: (said: string[]) => Promise<void>) {
+  const said: string[] = []
+  const original = toast.info
+  toast.info = ((message: unknown) => {
+    said.push(String(message))
+  }) as typeof toast.info
+  try {
+    await body(said)
+  } finally {
+    toast.info = original
+  }
+}
+
+/**
  * Records every landing a screen asks for (`scrollIntoView` with `block: "end"`), so a test can read
  * where it was sent. Restore it when the test is done.
  */

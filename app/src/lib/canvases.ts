@@ -39,12 +39,15 @@ import {
   sweepMarks,
 } from "@/lib/canvas-docs"
 import {
+  clearCooldown,
+  cooling,
   drainCanvas,
   drainOutbox,
   dropQueued,
   enqueueWrite,
   sendWrite,
   serialWrite,
+  startCooldown,
 } from "@/lib/canvas-outbox"
 import { sweepCanvas } from "@/lib/canvas-sweep"
 import { hostTargets, serverConfig } from "@/lib/connection"
@@ -625,7 +628,11 @@ export async function deleteCanvas(id: string) {
  * A host that can't be reached is no refusal: the write is applied to the rows at once, marked
  * pending, and queued for the bot's return (`canvas-outbox.ts`), so a page's tick taken on a train is
  * read back now and delivered later (ADR 0149). A host that answered and refused is still the page's
- * own refusal, in the host's words, and is never queued — it said no, not "not now".
+ * own refusal, in the host's words, and is never queued — it said no, not "not now". A host that has
+ * just failed a write is not asked again for fifteen seconds (`WRITE_COOLDOWN_MS`), so a tick inside
+ * that window is kept without a round-trip and the reader is told once a window rather than on every
+ * tick; a queue with no room left refuses the write instead of growing past the device's budget, and
+ * leaves this device's copy as the host last answered it.
  *
  * One write at a time per canvas matters more now than it did: the host handles them in the order it
  * is asked, and two in flight could queue a remove before a put the host handled first. The queue is
@@ -642,6 +649,15 @@ async function takeWrite(id: string, call: BridgeWriteCall): Promise<unknown> {
   if (!onlineNow()) {
     // No network at all: the host is not asked, and the write is kept where the page reads it back.
     markAway(id)
+    const kept = await keepOnDevice(profile, id, call)
+    tell.info(CANVAS_AWAY)
+    return kept
+  }
+  // This canvas's host failed a write a moment ago: asking again inside the window is the same
+  // round-trip and, at a page's pace, the same note on every tick, so the write is kept without
+  // asking. The reader was told when the window opened.
+  if (cooling(profile, id)) {
+    markAway(id)
     return keepOnDevice(profile, id, call)
   }
   let value: unknown
@@ -649,11 +665,21 @@ async function takeWrite(id: string, call: BridgeWriteCall): Promise<unknown> {
     value = await sendWrite(profile, id, call)
   } catch (failure) {
     // A host that refused said what it thinks of this write: that is the page's own answer, in its
-    // words. A bot that isn't answering — a 5xx, a 429, a timeout — has said nothing, and the write
-    // is one this device keeps for later. `hostVerdict` is the one rule, here and in the queue.
-    if (hostVerdict(failure) === "refused") throw failure
+    // words, and it is also the host being there, so a window an earlier failure opened is spent. A
+    // bot that isn't answering — a 5xx, a 429, a timeout — has said nothing, and the write is one this
+    // device keeps for later, behind a window the next write inside it doesn't ask through.
+    // `hostVerdict` is the one rule, here and in the queue.
+    if (hostVerdict(failure) === "refused") {
+      clearCooldown(profile, id)
+      throw failure
+    }
     markAway(id)
-    return keepOnDevice(profile, id, call)
+    const opened = startCooldown(profile, id)
+    // Kept first, said second: a queue with no room refuses this write, and a note saying it was saved
+    // would be a promise nothing is going to keep.
+    const kept = await keepOnDevice(profile, id, call)
+    if (opened) tell.info(CANVAS_AWAY)
+    return kept
   }
   // An answer the bridge can't read applied nothing: the page's promise is refused rather than told a
   // write landed that this device holds no evidence of.
@@ -662,8 +688,10 @@ async function takeWrite(id: string, call: BridgeWriteCall): Promise<unknown> {
   // The host has answered this document, so anything still queued for it is older and has nothing left
   // to say.
   await dropQueued(profile, id, call.collection, call.id)
-  // A write the host answered is an answer: the words saying its bot is away go, as a read's would.
+  // A write the host answered is an answer: the words saying its bot is away go, as a read's would,
+  // and nothing waits on a window for this canvas.
   clearAway(id)
+  clearCooldown(profile, id)
   return value
 }
 
@@ -672,9 +700,14 @@ async function takeWrite(id: string, call: BridgeWriteCall): Promise<unknown> {
  * this device now holds it — the page's own value, the clock this device stamped it with, and the
  * `pending` that says the host has not answered it. The queue row holds the call as the page made it,
  * so the bot is sent exactly what was written once it is back.
+ *
+ * The queue takes the write first, since it is what says whether the write can be kept at all: past the
+ * queue's bound a write is refused with the page's own promise, and this device's copy stays the one the
+ * host last answered — a Pending row for a write no drain will ever send would read back as saved.
  */
 async function keepOnDevice(profile: Profile, id: string, call: BridgeWriteCall) {
   const at = Date.now()
+  await enqueueWrite(profile, id, call)
   if (call.method === "remove") await forgetDoc(profile, id, call.collection, call.id)
   else
     await keepWrite(profile, id, {
@@ -684,8 +717,6 @@ async function keepOnDevice(profile: Profile, id: string, call: BridgeWriteCall)
       at,
       pending: true,
     })
-  await enqueueWrite(profile, id, call)
-  tell.info(CANVAS_AWAY)
   return call.method === "put"
     ? { collection: call.collection, id: call.id, doc: call.doc, at, pending: true }
     : { collection: call.collection, id: call.id, removed: true, pending: true }
