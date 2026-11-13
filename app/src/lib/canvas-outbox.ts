@@ -40,19 +40,16 @@ import { onReturn } from "@/lib/wake"
 
 /**
  * The statuses a host refuses a canvas's write with: a document past its cap or a name it won't take
- * (400), a write it won't allow (403), one it will not store as the canvas now stands (409) — and, for
- * a remove, the canvas being gone (404). Every other status a host can send is no answer at all: a
- * 5xx, a 429 or a timeout is a bot that isn't there yet, and its write is still waiting.
+ * (400), a write it won't allow (403), one it will not store as the canvas now stands (409) — and the
+ * canvas being gone (404), which a put is refused by as a remove is: there is nowhere left to store it.
+ * Every other status a host can send is no answer at all: a 5xx, a 429 or a timeout is a bot that
+ * isn't there yet, and its write is still waiting.
  */
-const WRITE_REFUSALS = new Set([400, 403, 409])
+const WRITE_REFUSALS = new Set([400, 403, 404, 409])
 
 /** Whether a host's failure is its answer about a write — a refusal — rather than no answer. */
-export const refusedWrite = (
-  failure: unknown,
-  method: CanvasWrite["method"],
-): failure is HermesError =>
-  failure instanceof HermesError &&
-  (WRITE_REFUSALS.has(failure.status ?? 0) || (method === "remove" && failure.status === 404))
+export const refusedWrite = (failure: unknown): failure is HermesError =>
+  failure instanceof HermesError && WRITE_REFUSALS.has(failure.status ?? 0)
 
 /**
  * The write's network half, and only that: one round-trip through the host's `call` route, which
@@ -108,6 +105,29 @@ export async function dropQueued(
   await db.canvasOutbox.delete(canvasOutboxKey(connectionKey(profile), canvasId, collection, docId))
 }
 
+// One write of one canvas at a time: the page's own and the queue's are the same canvas's writes, and
+// the host handles them in the order it is asked. A page's tick that went out while a queued put was
+// in flight would otherwise reach the host after it, and the older write would be the one the host
+// kept. The queue is keyed by the canvas's id alone, since the writes are the canvas's whichever bot
+// reaches it — and a failed write does not stop the next one getting its turn.
+const writing = new Map<string, Promise<unknown>>()
+
+/**
+ * One canvas's turn: `write` runs when every write before it has settled, and answers what it answers.
+ * The one place a write to a canvas is ordered, so a page's write and a queued one cannot overtake
+ * each other.
+ */
+export function serialWrite<T>(canvasId: string, write: () => Promise<T>): Promise<T> {
+  const previous = writing.get(canvasId) ?? Promise.resolve()
+  const asked = previous.catch(() => undefined).then(write)
+  writing.set(canvasId, asked)
+  const clear = () => {
+    if (writing.get(canvasId) === asked) writing.delete(canvasId)
+  }
+  void asked.then(clear, clear)
+  return asked
+}
+
 // One drain of one canvas at a time: the list's poll, a canvas's open and the app's return all ask,
 // and the second joins the one already out rather than sending the same write twice.
 const draining = new Map<string, Promise<boolean>>()
@@ -117,7 +137,9 @@ export function drainCanvas(profile: Profile, canvasId: string): Promise<boolean
   const key = `${connectionKey(profile)}\n${canvasId}`
   const running = draining.get(key)
   if (running) return running
-  const drain = send(profile, canvasId).finally(() => {
+  // The queue takes the canvas's own turn, as a page's write does: a queued put is never sent beside a
+  // write that is already out, since the host handles one canvas's writes in the order it is asked.
+  const drain = serialWrite(canvasId, () => send(profile, canvasId)).finally(() => {
     if (draining.get(key) === drain) draining.delete(key)
   })
   draining.set(key, drain)
@@ -136,10 +158,11 @@ async function send(profile: Profile, canvasId: string): Promise<boolean> {
     try {
       value = await sendWrite(profile, canvasId, call)
     } catch (failure) {
-      // A statused refusal is the host's answer about this document: the row goes, the Pending write it
-      // kept goes with it so the copy is the host's own again, and the reader is told which document and
+      // A statused refusal is the host's answer about this document — a canvas it no longer holds
+      // included, which is no place to store the write at all: the row goes, the Pending write it kept
+      // goes with it so the copy is the host's own again, and the reader is told which document and
       // why, in the host's own words. Anything else leaves the queue where it is.
-      if (!refusedWrite(failure, call.method)) return false
+      if (!refusedWrite(failure)) return false
       const sent = await dropRow(row)
       if (sent) await forgetPending(profile, canvasId, row.collection, row.docId)
       tell.error(`${refusedWords(row)} ${failure.message}`)
@@ -197,8 +220,9 @@ async function dropRow(row: CanvasOutboxRow) {
 
 /**
  * Drains what this device kept, one canvas at a time: every canvas the bot named, or one bot's. A
- * canvas whose host didn't answer ends the pass — nothing after it would be heard either — and the
- * rows stay queued for the next trigger.
+ * canvas whose host didn't answer keeps its own rows queued for the next trigger, and the pass moves on
+ * — another canvas's writes are a different canvas's, and a bot that holds one of them can still be
+ * told about them.
  */
 export async function drainOutbox(one?: Profile) {
   if (!onlineNow()) return
@@ -215,9 +239,10 @@ export async function drainOutbox(one?: Profile) {
     const profile = byConnection.get(row.connection)
     if (profile) canvases.set(row.canvasId, profile)
   }
-  for (const [canvasId, profile] of canvases) {
-    if (!(await drainCanvas(profile, canvasId))) return
-  }
+  // One canvas at a time, and one canvas's failure is its own: a canvas the host no longer holds
+  // answers 404 to every write queued for it, and a pass that stopped there would keep every other
+  // canvas's writes waiting behind a canvas no bot will ever answer for.
+  for (const [canvasId, profile] of canvases) await drainCanvas(profile, canvasId)
 }
 
 // The host's return is the queue's own trigger: a network that comes back is the moment the writes

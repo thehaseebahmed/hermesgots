@@ -45,20 +45,40 @@ DOC_BYTES = 64
 PAGE_ROWS = 200
 PAGE_MAX = 500
 
+# The one measure of a document's weight, as SQLite reads it: its collection, its id, its JSON value
+# as UTF-8 bytes, and ``DOC_BYTES`` for the envelope a read carries for it. Every reader of the
+# measure is built from this one expression — a collection's SUM, the catalogue's ``bytes``, the bound
+# the whole-array read is cut at, and ``weight`` itself — because a document that fits a canvas has to
+# fit on its own, and three spellings of one measure are three chances for the cap and the read to
+# disagree about what a byte is.
+WEIGHT = (
+    "? + length(CAST(collection AS BLOB)) + length(CAST(id AS BLOB))"
+    " + length(CAST(value AS BLOB))"
+)
+
 # What each collection holds, how fresh it is and what it weighs, in the one statement a catalogue
 # is: no document is read, so a canvas of five thousand of them is the same cost as one of five.
-COLLECTIONS = """SELECT collection, COUNT(*), MAX(at),
-                        SUM(length(CAST(collection AS BLOB)) + length(CAST(id AS BLOB))
-                            + length(CAST(value AS BLOB)) + ?)
-                 FROM canvas_docs WHERE canvas_id = ? GROUP BY collection ORDER BY collection"""
+COLLECTIONS = f"""SELECT collection, COUNT(*), MAX(at), SUM({WEIGHT})
+                  FROM canvas_docs WHERE canvas_id = ? GROUP BY collection ORDER BY collection"""
 
 # Every row with what it weighs, for the whole-array read a device from before the paged route
-# makes: the same measure as ``COLLECTIONS``, one document to a row, so the read is cut where the
-# next document would pass the bound rather than after it.
-WEIGHED = """SELECT collection, id, value, at,
-                    ? + length(CAST(collection AS BLOB)) + length(CAST(id AS BLOB))
-                      + length(CAST(value AS BLOB))
-             FROM canvas_docs WHERE canvas_id = ? ORDER BY collection, id"""
+# makes: the same measure, one document to a row, so the read is cut where the next document would
+# pass the bound rather than after it.
+WEIGHED = f"""SELECT collection, id, value, at, {WEIGHT}
+              FROM canvas_docs WHERE canvas_id = ? ORDER BY collection, id"""
+
+
+def weight(conn: sqlite3.Connection, collection: str, doc_id: str, value: str) -> int:
+    """One document's weight, from the row it is stored as: collection, id, JSON and the envelope.
+
+    The one function that answers the measure, and the same expression the three sums are built from
+    — SQLite evaluates it here over a row made of the values, so a document weighed on its own and a
+    document weighed in a canvas's total are one arithmetic and not two that must agree.
+    """
+    return conn.execute(
+        f"SELECT {WEIGHT} FROM (SELECT ? AS collection, ? AS id, ? AS value)",
+        (DOC_BYTES, collection, doc_id, value),
+    ).fetchone()[0]
 
 
 def stored(collection: str, doc_id: str, value: str, at: int) -> Dict[str, Any]:
@@ -136,14 +156,12 @@ def catalogue(conn: sqlite3.Connection, canvas_id: str) -> Dict[str, Any]:
 def weigh(conn: sqlite3.Connection, canvas_id: str, collection: Optional[str] = None) -> int:
     """What a canvas's data weighs — or one collection of it — read off the store, no document parsed.
 
-    The same measure ``catalogue`` answers ``bytes`` in: each document's collection, its id and the JSON
-    it is stored as, plus ``DOC_BYTES`` for the envelope a read carries for it. One ``SUM``, so a canvas
-    of five thousand documents costs the same statement as one of five, and a reader can refuse an
-    answer before it is carried rather than after.
+    The same measure ``catalogue`` answers ``bytes`` in, and ``weight`` answers for one document: one
+    ``SUM`` of that one expression, so a canvas of five thousand documents costs the same statement as
+    one of five, and a reader can refuse an answer before it is carried rather than after.
     """
-    query = """SELECT COALESCE(SUM(? + length(CAST(collection AS BLOB)) + length(CAST(id AS BLOB))
-                                  + length(CAST(value AS BLOB))), 0)
-                 FROM canvas_docs WHERE canvas_id = ?"""
+    query = f"""SELECT COALESCE(SUM({WEIGHT}), 0)
+                  FROM canvas_docs WHERE canvas_id = ?"""
     args: List[Any] = [DOC_BYTES, canvas_id]
     if collection is not None:
         query += " AND collection = ?"

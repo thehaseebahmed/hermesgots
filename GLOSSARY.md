@@ -778,7 +778,7 @@ A device reading a canvas's documents a page at a time to fill its own copy. It 
 _Avoid_: sync, pull, refresh, download
 
 **Partial**:
-A device's copy of a canvas's documents before any sweep of it has completed, or while one is running. A list or a page says so in its answer, and a get of a document the rows don't hold is refused rather than answered as missing, because the rows are only evidence of what is gone after a completed sweep.
+A device's copy of a canvas's documents before any sweep of it has completed, or while one is running. A page says so in its answer and `canvas.data.partial` answers it on its own, and a get of a document the rows don't hold is refused — with that code beside the words — rather than answered as missing, because the rows are only evidence of what is gone after a completed sweep.
 _Avoid_: incomplete, unsynced, stale, syncing
 
 **Pending write**:

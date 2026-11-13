@@ -105,12 +105,12 @@ const drawn = () => find("iframe[data-canvas-frame]")?.getAttribute("srcdoc") ??
 
 /** A page's call, as the app hears it from the frame, and the reply it posts back. */
 function speak() {
-  const posted: { reply: number; ok: boolean; error?: string; value?: unknown }[] = []
+  const posted: { reply: number; ok: boolean; error?: string; code?: string; value?: unknown }[] = []
   const page = (find("iframe[data-canvas-frame]") as HTMLIFrameElement).contentWindow
   assert.ok(page, "the frame has a window of its own")
   Object.defineProperty(page, "postMessage", {
     configurable: true,
-    value: (data: { reply: number; ok: boolean; error?: string; value?: unknown }) =>
+    value: (data: { reply: number; ok: boolean; error?: string; code?: string; value?: unknown }) =>
       posted.push(data),
   })
   const ask = async (data: Record<string, unknown>) => {
@@ -144,38 +144,29 @@ async function open(
   })
 }
 
-test("a page lists what the sweep has and says the list is partial", async () => {
-  // A device that has never finished a sweep holds rows but cannot claim they are the canvas whole: the
-  // list says so, and it stops saying so only once a sweep has reached the last page of every
-  // collection. A sweep begun again is no longer whole either, since a document it hasn't reached yet
-  // is not absent because it is gone.
+test("a page lists what the sweep has and asks whether it is partial", async () => {
+  // A list answers its collection's documents — the bare array every canvas already written reads —
+  // and whether the device can claim they are the canvas whole is a verb of its own, so a page that
+  // needs to know asks `canvas.data.partial` instead of reading a second field off its rows. A sweep
+  // begun again is no longer whole either, since a document it hasn't reached yet is not gone.
   const rows = [doc(0), doc(1), doc(2)]
   await open("page-partial", rows, async ({ bot, ask, keys }) => {
     let reply = await ask({ type: BRIDGE_MESSAGE, call: 1, method: "list", collection: "items" })
-    assert.deepEqual(reply, {
-      type: BRIDGE_MESSAGE,
-      reply: 1,
-      ok: true,
-      value: { rows, partial: true },
-    })
+    assert.deepEqual(reply, { type: BRIDGE_MESSAGE, reply: 1, ok: true, value: rows })
+
+    let partial = await ask({ type: BRIDGE_MESSAGE, call: 2, method: "partial", collection: "items" })
+    assert.deepEqual(partial, { type: BRIDGE_MESSAGE, reply: 2, ok: true, value: true })
 
     await completeSweep(bot, CANVAS.id, 0, 3, keys)
-    reply = await ask({ type: BRIDGE_MESSAGE, call: 2, method: "list", collection: "items" })
+    reply = await ask({ type: BRIDGE_MESSAGE, call: 3, method: "list", collection: "items" })
     assert.equal(reply.ok, true)
-    assert.deepEqual((reply.value as { rows: CanvasDoc[] }).rows, rows)
-    assert.equal(
-      (reply.value as { partial: boolean }).partial,
-      false,
-      "a completed sweep is the whole of it",
-    )
+    assert.deepEqual(reply.value, rows)
+    partial = await ask({ type: BRIDGE_MESSAGE, call: 4, method: "partial", collection: "items" })
+    assert.equal(partial.value, false, "a completed sweep is the whole of it")
 
     await beginSweep(bot, CANVAS.id)
-    reply = await ask({ type: BRIDGE_MESSAGE, call: 3, method: "list", collection: "items" })
-    assert.equal(
-      (reply.value as { partial: boolean }).partial,
-      true,
-      "a sweep under way is not whole either",
-    )
+    partial = await ask({ type: BRIDGE_MESSAGE, call: 5, method: "partial", collection: "items" })
+    assert.equal(partial.value, true, "a sweep under way is not whole either")
   })
 })
 
@@ -193,6 +184,7 @@ test("a get of an unswept id throws instead of answering null", async () => {
     })
     assert.equal(reply.ok, false, "a get of a document the rows don't hold is refused")
     assert.match(reply.error ?? "", /partial/)
+    assert.equal(reply.code, "partial", "and says so in a code a page can branch on")
     assert.equal(reply.value, undefined, "and answers no document at all")
 
     // The same read after a completed sweep is an answer: this device has seen the canvas whole, and
@@ -444,5 +436,44 @@ test("a page reads one page of its rows and a count without them", async () => {
       collection: "items",
     })
     assert.deepEqual(counted, { type: BRIDGE_MESSAGE, reply: 3, ok: true, value: 3 })
+  })
+})
+
+test("a page reads its own bot's rows when two bots name one canvas", async () => {
+  // A canvas's id is its host's uuid, so two bots can hold a canvas by the same id: the rows are
+  // filed under the connection as well, and a page or a count that read the index alone would repeat
+  // the other bot's documents and call the doubled number the total.
+  const mine = [doc(0), doc(2), doc(4)]
+  const theirs = [doc(1), doc(3), doc(5)]
+  await open("page-two-bots", mine, async ({ bot, ask, keys }) => {
+    await completeSweep(bot, CANVAS.id, 0, 5, keys)
+    const other = botProfile("page-two-bots-other", { id: "bot-2", botId: "bot-2" })
+    await db.profiles.put(other)
+    await completeSweep(other, CANVAS.id, 0, 6, await keepDocs(other, CANVAS.id, theirs))
+
+    // Theirs interleave with ours, so a page that read the index alone would answer one of theirs in
+    // place of one of ours and count six.
+    const first = await ask({
+      type: BRIDGE_MESSAGE,
+      call: 1,
+      method: "page",
+      collection: "items",
+      limit: 2,
+    })
+    assert.deepEqual(first.value, {
+      rows: [doc(0), doc(2)],
+      next: "d0002",
+      total: 3,
+      partial: false,
+    })
+
+    const counted = await ask({ type: BRIDGE_MESSAGE, call: 2, method: "count", collection: "items" })
+    assert.deepEqual(counted, { type: BRIDGE_MESSAGE, reply: 2, ok: true, value: 3 })
+
+    // And the other bot's rows are still its own, untouched by the read.
+    assert.deepEqual(
+      (await cachedDocs(other, CANVAS.id, "items")).map((row) => row.id),
+      theirs.map((row) => row.id),
+    )
   })
 })

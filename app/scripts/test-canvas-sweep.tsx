@@ -255,13 +255,15 @@ test(
       await say({ type: BRIDGE_MESSAGE, call: 1, method: "list", collection: "items" })
       await until(() => posted.length > 0, "the page's list to be answered")
       assert.equal(posted[0].ok, true, "the read is answered")
-      const list = posted[0].value as { rows: CanvasDoc[]; partial: boolean }
-      const rows = list.rows
+      const rows = posted[0].value as CanvasDoc[]
       assert.equal(rows.length, 5000, "five thousand documents, with the host away")
       assert.equal(rows[0].id, "d0000", "in the order the host keeps them")
       assert.equal(rows[rows.length - 1].id, "d4999")
-      assert.equal(list.partial, false, "and the sweep that filled them reached its last page")
-      assert.equal(asked.length, 0, "and the page's list asked the host nothing at all")
+      // And the verb that says whether those rows are the canvas whole agrees with the sweep.
+      await say({ type: BRIDGE_MESSAGE, call: 2, method: "partial", collection: "items" })
+      await until(() => posted.length > 1, "the page's partial to be answered")
+      assert.equal(posted[1].value, false, "the sweep that filled them reached its last page")
+      assert.equal(asked.length, 0, "and neither read asked the host anything at all")
     })
   }),
 )
@@ -804,4 +806,57 @@ test("the canvas on screen and a pinned canvas are never evicted", async () => {
   } finally {
     release()
   }
+})
+
+test("a row the app cannot read is a row the sweep saw", async () => {
+  // A document whose answer this app can't read is no copy at all, but its key is still a document
+  // the host named: pruning it would empty a collection as the answer's shape drifted. So the swept
+  // set is every row the page named, read or not.
+  const bot = await seed("sweep-unreadable")
+  const held = doc(0)
+  await keepDocs(bot, CANVAS.id, [held])
+  // A document with no `doc` at all: the one shape `storedDoc` refuses.
+  const unreadable = { collection: held.collection, id: held.id, at: 9 } as unknown as CanvasDoc
+  const host: PagedHost = { docs: [unreadable], rows: 200, asked: [] }
+  servePaged(host)
+  await sweepCanvas(bot, CANVAS.id)
+  assert.deepEqual(
+    (await cachedDocs(bot, CANVAS.id)).map((row) => row.id),
+    [held.id],
+    "the document the host named is still held",
+  )
+  assert.ok((await sweepMark(bot, CANVAS.id))?.completeAt, "and the sweep completed")
+})
+
+test("a sweep cut on the phone resumes where it stopped", async () => {
+  // Twenty-five pages of a phone's sweep is most of a minute: a sweep cut at the twenty-fourth page
+  // and restarted from the first would never finish a canvas of five thousand, so the mark keeps the
+  // place the walk reached — the collection, and the last id it finished — and the next sweep starts
+  // there instead.
+  const bot = await seed("sweep-resume")
+  const docs = Array.from({ length: 5000 }, (_, n) => doc(n))
+  const host: PagedHost = { docs, rows: 200, pages: 24, asked: [] }
+  servePaged(host)
+  await assert.rejects(sweepCanvas(bot, CANVAS.id), "the sweep was cut")
+  assert.equal(
+    (await cachedDocs(bot, CANVAS.id)).length,
+    4800,
+    "twenty-four pages landed before the host went",
+  )
+  assert.equal((await sweepMark(bot, CANVAS.id))?.completeAt, undefined, "and no sweep completed")
+
+  // The phone comes back: the sweep starts at the page it was cut on, not at the first one.
+  host.pages = undefined
+  host.asked.length = 0
+  await sweepCanvas(bot, CANVAS.id)
+  const pages = host.asked.filter((path) => path.includes("/data/items"))
+  assert.equal(pages.length, 1, "one page, the one that was left")
+  assert.equal(
+    new URL(pages[0], "http://x").searchParams.get("after"),
+    "d4799",
+    "asking after the last id the cut sweep finished",
+  )
+  assert.equal((await cachedDocs(bot, CANVAS.id)).length, 5000, "and the canvas is whole")
+  assert.ok((await sweepMark(bot, CANVAS.id))?.completeAt, "so the sweep completed")
+  assert.equal((await sweepMark(bot, CANVAS.id))?.cursor, undefined, "and the place it was at is gone")
 })

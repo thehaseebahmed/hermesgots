@@ -1433,40 +1433,23 @@ def _cap(size: int) -> str:
     return f"{-(-size // 1024)} KB"
 
 
-def _weigh(collection: str, doc_id: str, value: str) -> int:
-    """One document's weight: its collection, its id, its JSON value as UTF-8 bytes, and ``DOC_BYTES``
-    for the envelope a read carries for it.
-
-    The term a canvas's total counts for that document, and the whole of its own cap — so a document
-    that fits in the canvas always fits on its own, and there is one measure rather than two that must
-    agree.
-    """
-    return (
-        DOC_BYTES
-        + len(collection.encode("utf-8"))
-        + len(doc_id.encode("utf-8"))
-        + len(value.encode("utf-8"))
-    )
-
-
 def _stored_bytes(
     conn: sqlite3.Connection, canvas_id: str, collection: str, doc_id: str, value: str
 ) -> int:
     """A canvas's data in bytes, with one write counted in place of the row it replaces.
 
-    Measured by SQLite rather than by walking every row here: each row counts its collection, its id,
-    its JSON value as UTF-8 bytes, and ``DOC_BYTES`` for the envelope a read carries for it — so the
-    cap bounds the answer a page is handed, not only the text inside it. A write onto a row already
-    there counts that row once, as the document about to land, so an update that fits is never
-    refused for the bytes it is about to release.
+    Measured by SQLite from `canvas_docs.WEIGHT` — the one expression the catalogue's bytes, the
+    legacy cut and `canvas_docs.weight` are all built from — so the cap bounds the answer a page is
+    handed, not only the text inside it. A write onto a row already there counts that row once, as
+    the document about to land, so an update that fits is never refused for the bytes it is about to
+    release.
     """
     counted = conn.execute(
-        """SELECT COALESCE(SUM(length(CAST(collection AS BLOB)) + length(CAST(id AS BLOB))
-                              + length(CAST(value AS BLOB)) + ?), 0)
-           FROM canvas_docs WHERE canvas_id = ? AND NOT (collection = ? AND id = ?)""",
+        f"""SELECT COALESCE(SUM({canvas_docs.WEIGHT}), 0)
+            FROM canvas_docs WHERE canvas_id = ? AND NOT (collection = ? AND id = ?)""",
         (DOC_BYTES, canvas_id, collection, doc_id),
     ).fetchone()[0]
-    return counted + _weigh(collection, doc_id, value)
+    return counted + canvas_docs.weight(conn, collection, doc_id, value)
 
 
 def _moved() -> None:
@@ -1501,7 +1484,7 @@ def put_doc(path: Path, canvas_id: str, collection: Any, doc_id: Any, doc: Any) 
         # The clock is read under the lock, so `at` follows the order the writes landed in: two
         # racing writers can't store the later stamp first and be read as the older one.
         now = int(time.time() * 1000)
-        weighed = _weigh(collection, doc_id, value)
+        weighed = canvas_docs.weight(conn, collection, doc_id, value)
         if weighed > DOC_MAX_BYTES:
             raise CanvasError(
                 f"A document is capped at {_cap(DOC_MAX_BYTES)}; this one would be "

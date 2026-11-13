@@ -105,7 +105,8 @@ test("test_canvas_bridge_answers_reads_from_the_copy_and_posts_writes", async ()
   })
   const message = (data) => hear({ source: frame, data })
 
-  // A read never goes to the host: the device's copy is what the page reads.
+  // A read never goes to the host: the device's copy is what the page reads. A list is its
+  // collection's documents and nothing else — the shape every canvas already written reads.
   message({ type: BRIDGE_MESSAGE, call: 1, method: "list", collection: "items" })
   await settled()
   assert.deepEqual(frame.posted, [
@@ -113,10 +114,7 @@ test("test_canvas_bridge_answers_reads_from_the_copy_and_posts_writes", async ()
       type: BRIDGE_MESSAGE,
       reply: 1,
       ok: true,
-      value: {
-        rows: [doc("items", "a", { n: 1 }, 10), doc("items", "b", { n: 2 }, 20)],
-        partial: false,
-      },
+      value: [doc("items", "a", { n: 1 }, 10), doc("items", "b", { n: 2 }, 20)],
     },
   ])
   message({ type: BRIDGE_MESSAGE, call: 2, method: "get", collection: "items", id: "b" })
@@ -217,12 +215,18 @@ test("readCall takes a call the page sent and answerRead answers it from the cop
   assert.equal(readCall(null), null)
   assert.equal(readCall("gots:canvas-data"), null)
 
-  // A page and a count are a collection's, as a list is.
+  // A page, a count and a partial are a collection's, as a list is.
   assert.deepEqual(readCall({ type: BRIDGE_MESSAGE, call: 4, method: "count", collection: "items" }), {
     call: 4,
     method: "count",
     collection: "items",
   })
+  assert.deepEqual(readCall({ type: BRIDGE_MESSAGE, call: 4, method: "partial", collection: "items" }), {
+    call: 4,
+    method: "partial",
+    collection: "items",
+  })
+  assert.equal(readCall({ type: BRIDGE_MESSAGE, call: 4, method: "partial" }), null)
   assert.deepEqual(
     readCall({ type: BRIDGE_MESSAGE, call: 4, method: "page", collection: "items", after: "b", limit: 50 }),
     { call: 4, method: "page", collection: "items", after: "b", limit: 50 },
@@ -256,10 +260,10 @@ test("readCall takes a call the page sent and answerRead answers it from the cop
 
   // The device's rows alone answer a read: the collection's documents in the host's order, the one
   // document, or — only where a sweep has seen the canvas whole — nothing.
-  assert.deepEqual(await answerRead({ call: 9, method: "list", collection: "items" }, copyOf(COPY)), {
-    rows: [COPY[0], COPY[1]],
-    partial: false,
-  })
+  assert.deepEqual(await answerRead({ call: 9, method: "list", collection: "items" }, copyOf(COPY)), [
+    COPY[0],
+    COPY[1],
+  ])
   assert.deepEqual(await answerRead({ call: 9, method: "get", collection: "notes", id: "a" }, copyOf(COPY)), COPY[2])
   assert.equal(await answerRead({ call: 9, method: "get", collection: "items", id: "zzz" }, copyOf(COPY)), null)
 
@@ -269,10 +273,12 @@ test("readCall takes a call the page sent and answerRead answers it from the cop
     answerRead({ call: 9, method: "get", collection: "items", id: "zzz" }, copyOf(COPY, { whole: false })),
     (error) => error.code === CANVAS_PARTIAL && /partial on this phone/.test(error.message),
   )
-  // The list says the same thing in its answer, since a list of a part is a part.
-  assert.deepEqual(
-    await answerRead({ call: 9, method: "list", collection: "items" }, copyOf(COPY, { whole: false })),
-    { rows: [COPY[0], COPY[1]], partial: true },
+  // A list says the same thing in its own verb, since a list of a part is a part and its array is
+  // the array every canvas already reads.
+  assert.equal(await answerRead({ call: 9, method: "partial", collection: "items" }, copyOf(COPY)), false)
+  assert.equal(
+    await answerRead({ call: 9, method: "partial", collection: "items" }, copyOf(COPY, { whole: false })),
+    true,
   )
 })
 
@@ -599,6 +605,66 @@ test("a tool the host refuses for any other reason is not put to the reader", as
   assert.equal(asked, 0, "the reader is asked nothing")
   assert.equal(frame.posted[0].ok, false)
   assert.match(frame.posted[0].error, /never declared/)
+})
+
+test("a refusal's code crosses the wire and reaches the error a page catches", async () => {
+  // The words say what happened; `code` is what a page branches on, so the app posts it beside them
+  // and the page's half puts it on the error it rejects with — a page reading a partial copy is told
+  // so without matching a sentence.
+  const frame = fakeFrame()
+  const hear = bridgeHandler({
+    frame: () => frame,
+    read: async (call) => answerRead(call, copyOf(COPY, { whole: false })),
+    write: async () => {
+      throw new Error("a write this case never makes")
+    },
+  })
+  hear({
+    source: frame,
+    data: { type: BRIDGE_MESSAGE, call: 1, method: "get", collection: "items", id: "zzz" },
+  })
+  await settled()
+  assert.equal(frame.posted[0].ok, false)
+  assert.equal(frame.posted[0].code, CANVAS_PARTIAL, "the code rides the reply beside the words")
+  assert.match(frame.posted[0].error, /partial on this phone/)
+
+  // An error with no code is posted with none: a refusal that isn't one stays just its words.
+  const plainRefusal = bridgeHandler({
+    frame: () => frame,
+    read: async () => {
+      throw new Error("This collection holds 5001 documents and canvas.data.list answers at most 5000.")
+    },
+    write: async () => {
+      throw new Error("a write this case never makes")
+    },
+  })
+  plainRefusal({
+    source: frame,
+    data: { type: BRIDGE_MESSAGE, call: 2, method: "list", collection: "items" },
+  })
+  await settled()
+  assert.equal(frame.posted[1].ok, false)
+  assert.equal("code" in frame.posted[1], false, "a refusal with no code carries none")
+
+  // The page's half: a reply that names a code is an error the page can branch on.
+  const { context, posted, reply } = pageHarness()
+  const asked = context.window.canvas.data.get("items", "zzz")
+  reply({
+    type: BRIDGE_MESSAGE,
+    epoch: posted[1].epoch,
+    reply: 1,
+    ok: false,
+    error: "This canvas's data is partial on this phone.",
+    code: CANVAS_PARTIAL,
+  })
+  await assert.rejects(
+    asked,
+    (error) => error.code === CANVAS_PARTIAL && /partial on this phone/.test(error.message),
+  )
+
+  const bare = context.window.canvas.data.list("items")
+  reply({ type: BRIDGE_MESSAGE, epoch: posted[2].epoch, reply: 2, ok: false, error: "Something else." })
+  await assert.rejects(bare, (error) => error.code === undefined && error.message === "Something else.")
 })
 
 test("the page's half posts the call it was asked for and settles on the reply", async () => {

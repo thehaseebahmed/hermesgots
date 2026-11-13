@@ -540,3 +540,64 @@ class LegacyReadTest(unittest.TestCase):
         whole = self.host.call("/canvases/{canvas_id}", canvas_id=canvas_id)["payload"]["canvas"]
         self.assertEqual(len(whole["data"]), 50)
         self.assertEqual(whole["data"][0]["doc"], {"n": 0})
+
+
+class WeightTest(unittest.TestCase):
+    """One rule answers what a document weighs, and every reader of the measure asks it.
+
+    The cap a write is refused by, the catalogue's ``bytes`` a sweep compares to that cap, and the
+    bound the whole-array read is cut at are one number: a document that fits a canvas always fits on
+    its own, and a measure that moves moves all three at once.
+    """
+
+    def setUp(self) -> None:
+        self.host = Host(self)
+
+    def test_one_rule_answers_a_document_s_weight(self) -> None:
+        canvas_id = self.host.canvas["id"]
+        plant(
+            self.host.path,
+            canvas_id,
+            [
+                ("bookmarks", "b1", {"title": "Rust", "n": 1}, 1_000),
+                ("bookmarks", "b2", {"tags": ["a", "b"], "n": 2}, 2_000),
+                ("notes", "n-é", {"text": "héllo ✓"}, 3_000),
+            ],
+        )
+        conn = connect(self.host.path)
+        try:
+            rows = conn.execute(
+                "SELECT collection, id, value FROM canvas_docs WHERE canvas_id = ? "
+                "ORDER BY collection, id",
+                (canvas_id,),
+            ).fetchall()
+            self.assertEqual([row[1] for row in rows], ["b1", "b2", "n-é"])
+            each = [canvas_docs.weight(conn, *row) for row in rows]
+            # The catalogue's bytes are those weights summed, and a collection's are its own rows'.
+            self.assertEqual(sum(each), canvas_docs.weigh(conn, canvas_id))
+            self.assertEqual(each[0] + each[1], canvas_docs.weigh(conn, canvas_id, "bookmarks"))
+            # The whole-array read is cut at the same measure: two documents fit, the third is one
+            # past the bound rather than half-written into it.
+            self.assertEqual(
+                [one["id"] for one in canvas_docs.upto(conn, canvas_id, each[0] + each[1])],
+                ["b1", "b2"],
+            )
+        finally:
+            conn.close()
+        self.assertEqual(sum(each), canvases.data_catalogue(self.host.path, canvas_id)["bytes"])
+
+        # And the cap a write is refused by is that same number: one byte under a document's own
+        # weight refuses it, and the weight itself stores it.
+        document = {"text": "héllo ✓"}
+        conn = connect(self.host.path)
+        try:
+            weighed = canvas_docs.weight(conn, "notes", "n2", json.dumps(document))
+        finally:
+            conn.close()
+        with mock.patch.object(canvases, "DOC_MAX_BYTES", weighed - 1):
+            with self.assertRaises(canvases.CanvasError) as refused:
+                canvases.put_doc(self.host.path, canvas_id, "notes", "n2", document)
+        self.assertIn("capped at", str(refused.exception))
+        with mock.patch.object(canvases, "DOC_MAX_BYTES", weighed):
+            stored = canvases.put_doc(self.host.path, canvas_id, "notes", "n2", document)
+        self.assertEqual(stored["id"], "n2")

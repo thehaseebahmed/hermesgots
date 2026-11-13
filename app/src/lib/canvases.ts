@@ -44,6 +44,7 @@ import {
   enqueueWrite,
   refusedWrite,
   sendWrite,
+  serialWrite,
 } from "@/lib/canvas-outbox"
 import { sweepCanvas } from "@/lib/canvas-sweep"
 import { hostTargets, serverConfig } from "@/lib/connection"
@@ -349,8 +350,8 @@ async function canvasCopy(id: string): Promise<CanvasCopy> {
   return {
     docs: (collection) => cachedDocs(profile, id, collection),
     get: (collection, docId) => cachedDoc(profile, id, collection, docId),
-    page: (collection, after, limit) => pageDocs(id, collection, after, limit),
-    count: (collection) => cachedCount(id, collection),
+    page: (collection, after, limit) => pageDocs(profile, id, collection, after, limit),
+    count: (collection) => cachedCount(profile, id, collection),
     whole: () => sweptWhole(profile, id),
   }
 }
@@ -627,19 +628,12 @@ export async function deleteCanvas(id: string) {
  * own refusal, in the host's words, and is never queued — it said no, not "not now".
  *
  * One write at a time per canvas matters more now than it did: the host handles them in the order it
- * is asked, and two in flight could queue a remove before a put the host handled first.
+ * is asked, and two in flight could queue a remove before a put the host handled first. The queue is
+ * the same canvas's writes, so it takes the same turn (`serialWrite`), and a page's write and a
+ * queued one cannot overtake each other.
  */
-const writing = new Map<string, Promise<unknown>>()
-
 export async function writeCanvasData(id: string, call: BridgeWriteCall) {
-  const previous = writing.get(id) ?? Promise.resolve()
-  const asked = previous.catch(() => undefined).then(() => takeWrite(id, call))
-  writing.set(id, asked)
-  try {
-    return await asked
-  } finally {
-    if (writing.get(id) === asked) writing.delete(id)
-  }
+  return serialWrite(id, () => takeWrite(id, call))
 }
 
 /** The write itself: the host's answer where it can be reached, and a Pending write where it can't. */
@@ -657,7 +651,7 @@ async function takeWrite(id: string, call: BridgeWriteCall): Promise<unknown> {
     // A host that refused said what it thinks of this write: that is the page's own answer, in its
     // words. A bot that isn't answering — a 5xx, a 429, a timeout — has said nothing, and the write
     // is one this device keeps for later (`refusedWrite` is the one rule).
-    if (refusedWrite(failure, call.method)) throw failure
+    if (refusedWrite(failure)) throw failure
     markAway(id)
     return keepOnDevice(profile, id, call)
   }

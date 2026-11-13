@@ -1148,6 +1148,16 @@ export interface CanvasDocRow {
 }
 
 /**
+ * Where a sweep of a canvas had walked to when it was cut: the collection, and the last id of it the
+ * sweep finished. A sweep reads a canvas a page at a time, so a place is what lets the next one carry
+ * on instead of starting the canvas again.
+ */
+export interface CanvasSweepPlace {
+  collection: string
+  after: string | null
+}
+
+/**
  * What a canvas's sweeps left (`canvas-docs.ts`): the generation the last one wrote under, when one
  * last reached its last page, and how fresh the data it saw was. `completeAt` is the one thing that
  * says a canvas is wholly read — a sweep that was cut leaves it where it was.
@@ -1161,6 +1171,13 @@ export interface CanvasSweepRow {
   completeAt?: number
   /** When the sweep under way began: unset before one begins, and cleared by the one that finishes. */
   startedAt?: number
+  /**
+   * Where a sweep that was cut had walked to: the collection it was in, and the last id of it the
+   * sweep finished. The next sweep of the canvas starts there rather than at the canvas's first page,
+   * and the sweep that completes clears it. It rides the mark beside `startedAt`, since a canvas whose
+   * sweep is under way is the one a place belongs to.
+   */
+  cursor?: CanvasSweepPlace
   /** The newest clock among the documents the completed sweep saw, which is the record's `docs_at`. */
   docsAt?: number
   /**

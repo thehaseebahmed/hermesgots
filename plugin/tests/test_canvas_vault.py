@@ -94,8 +94,21 @@ class Host:
 
     @property
     def folder(self) -> Path:
-        """The one folder a canvas's notes live in — named by its id."""
-        return self.vault / self.id
+        """The one folder a canvas's notes live in, found under the vault rather than named here: the
+        vault's own name for a canvas is its rule, not this test's."""
+        folders = [one for one in self.vault.iterdir() if one.is_dir()]
+        assert len(folders) == 1, "one canvas in the store, one folder in the vault"
+        return folders[0]
+
+    def folder_of(self, collection: str) -> Path:
+        """The folder the vault filed one collection under, found by the name its index carries."""
+        for one in self.folder.iterdir():
+            index = one / canvas_vault.INDEX
+            if not one.is_dir() or not index.exists():
+                continue
+            if frontmatter(index.read_text(encoding="utf-8")).get("id") == collection:
+                return one
+        raise AssertionError(f"no folder under the canvas's own holds {collection!r}")
 
     def call(
         self,
@@ -124,7 +137,7 @@ class Host:
 
     def notes(self, collection: str) -> List[str]:
         """The note files of one collection, its own ``index.md`` left out."""
-        folder = self.folder / collection
+        folder = self.folder_of(collection)
         return sorted(
             one.name for one in folder.glob("*.md") if one.name != canvas_vault.INDEX
         )
@@ -162,13 +175,13 @@ class SwitchTest(unittest.TestCase):
         self.host.switched(True)
         self.host.put("bookmarks", "b1", {"title": "Rust"})
         self.assertEqual(self.host.back_up(), 3, "a note, and the two folders' own indexes")
-        kept = self.host.folder / "bookmarks" / canvas_vault.note_name("b1")
+        kept = self.host.folder_of("bookmarks") / canvas_vault.note_name("b1")
         inode = kept.stat().st_ino
         self.host.switched(False)
         self.host.put("bookmarks", "b2", {"title": "Go"})
         self.assertEqual(self.host.back_up(), 0)
         self.assertEqual(kept.stat().st_ino, inode, "the note already written is left where it is")
-        self.assertFalse((self.host.folder / "bookmarks" / canvas_vault.note_name("b2")).exists())
+        self.assertFalse((self.host.folder_of("bookmarks") / canvas_vault.note_name("b2")).exists())
 
 
 class NoteTest(unittest.TestCase):
@@ -203,7 +216,7 @@ class NoteTest(unittest.TestCase):
         # Three notes and the collection's own index, and the canvas's own index above them.
         self.assertEqual(written, 5)
 
-        folder = self.host.folder / "bookmarks"
+        folder = self.host.folder_of("bookmarks")
         self.assertEqual(len(self.host.notes("bookmarks")), 3)
         self.assertTrue((folder / canvas_vault.INDEX).exists())
         # Every file in the folder says what it is, as OKF's one required key asks.
@@ -283,8 +296,8 @@ class NoteTest(unittest.TestCase):
         self.host.put("bookmarks", "b1", {"title": "Rust"})
         self.host.put("bookmarks", "b2", {"title": "Go"})
         self.host.back_up()
-        gone = self.host.folder / "bookmarks" / canvas_vault.note_name("b1")
-        kept = self.host.folder / "bookmarks" / canvas_vault.note_name("b2")
+        gone = self.host.folder_of("bookmarks") / canvas_vault.note_name("b1")
+        kept = self.host.folder_of("bookmarks") / canvas_vault.note_name("b2")
         inode = kept.stat().st_ino
         canvases.remove_doc(self.host.path, self.host.id, "bookmarks", "b1")
         self.host.back_up()
@@ -297,7 +310,7 @@ class NoteTest(unittest.TestCase):
         self.host.put("bookmarks", "../../etc/passwd", {"title": "Escape"})
         self.host.put("bookmarks", "index", {"title": "Not the index"})
         self.host.back_up()
-        folder = self.host.folder / "bookmarks"
+        folder = self.host.folder_of("bookmarks")
         files = sorted(folder.glob("*.md"))
         self.assertEqual(len(files), 3, "two notes and the folder's own index")
         for one in files:
@@ -375,7 +388,7 @@ class BudgetTest(unittest.TestCase):
         # Five thousand notes need twenty-five full ticks, however many the two indexes ride.
         self.assertGreaterEqual(len([one for one in ticks if one]), math.ceil(5_000 / 200))
         self.assertEqual(len(self.host.notes("bookmarks")), 5_000)
-        self.assertTrue((self.host.folder / "bookmarks" / canvas_vault.INDEX).exists())
+        self.assertTrue((self.host.folder_of("bookmarks") / canvas_vault.INDEX).exists())
         self.assertEqual(self.host.back_up(), 0, "a converged vault writes nothing at all")
 
     def test_a_walk_cut_short_by_the_budget_deletes_nothing(self) -> None:
@@ -384,7 +397,7 @@ class BudgetTest(unittest.TestCase):
         self.host.switched(True)
         self.host.put("bookmarks", "b1", {"title": "Rust"})
         self.host.back_up()
-        kept = self.host.folder / "bookmarks" / canvas_vault.note_name("b1")
+        kept = self.host.folder_of("bookmarks") / canvas_vault.note_name("b1")
         plant(
             self.host.path,
             self.host.id,
@@ -406,7 +419,7 @@ class StaleTest(unittest.TestCase):
         self.host.switched(True)
         self.host.put("bookmarks", "b1", {"title": "Rust"})
         self.host.back_up()
-        kept = self.host.folder / "bookmarks" / canvas_vault.note_name("b1")
+        kept = self.host.folder_of("bookmarks") / canvas_vault.note_name("b1")
         conn = connect(self.host.path)
         try:
             conn.execute("DELETE FROM canvases WHERE id = ?", (self.host.id,))
@@ -417,3 +430,126 @@ class StaleTest(unittest.TestCase):
         # walks records, so nothing is read and nothing is deleted.
         self.assertEqual(self.host.back_up(), 0)
         self.assertTrue(kept.exists())
+
+
+class OwnershipTest(unittest.TestCase):
+    """The vault deletes and rewrites only what it wrote: the rest of the bundle is the reader's.
+
+    A wiki is a folder people add to, so a tick that took every ``*.md`` it did not name would delete
+    the notes they wrote beside the ones it did — and a document moving onto a name the reader had
+    already used would replace their file with the vault's. What a file is is readable from the file:
+    a note says ``type: canvas.document``, and a folder's own index carries the marker the vault
+    writes on its first line. Everything else is left exactly as it is.
+    """
+
+    def setUp(self) -> None:
+        self.host = Host(self)
+
+    def test_a_file_the_vault_did_not_write_is_left_exactly_as_it_is(self) -> None:
+        self.host.switched(True)
+        self.host.put("bookmarks", "b1", {"title": "Rust"})
+        self.host.back_up()
+        folder = self.host.folder_of("bookmarks")
+        # Two files of the reader's own: one beside the documents, and one at the name the vault would
+        # give a document that does not exist yet — which a later write would otherwise overwrite.
+        aside = folder / "Reading list.md"
+        aside_text = "# Reading list\n\nWhat I still want to read.\n"
+        aside.write_text(aside_text, encoding="utf-8")
+        clash = folder / canvas_vault.note_name("b2")
+        clash_text = "---\ntype: note\n---\n\nMine, with my notes on it.\n"
+        clash.write_text(clash_text, encoding="utf-8")
+
+        # A document whose clock is past the note's, which is what a document moving looks like to a
+        # tick: b1's own note is set back to the clock it was written at, as an untouched one would be,
+        # and then the document moves. b2 is a document the reader's file happens to be named for.
+        held = folder / canvas_vault.note_name("b1")
+        os.utime(held, (AT / 1000, AT / 1000))
+        canvases.put_doc(self.host.path, self.host.id, "bookmarks", "b1", {"title": "Rust, second edition"})
+        plant(self.host.path, self.host.id, [("bookmarks", "b2", {"title": "Go"}, AT)])
+        self.host.back_up()
+
+        self.assertEqual(aside.read_text(encoding="utf-8"), aside_text, "a note of the reader's stays")
+        self.assertEqual(
+            clash.read_text(encoding="utf-8"), clash_text, "and one at a document's own name is not replaced"
+        )
+        # The vault's own notes are still the vault's: b1 moved, and its note says so.
+        self.assertIn(
+            "Rust, second edition",
+            held.read_text(encoding="utf-8"),
+            "a note the vault wrote is rewritten when its document moves",
+        )
+        self.assertEqual(aside.read_text(encoding="utf-8"), aside_text, "and the reader's is still theirs")
+
+    def test_a_folder_the_vault_did_not_write_is_left_exactly_as_it_is(self) -> None:
+        self.host.switched(True)
+        self.host.put("bookmarks", "b1", {"title": "Rust"})
+        self.host.back_up()
+        canvas_folder = self.host.folder
+        # A folder of the reader's beside the collections, with a note in it the vault never made.
+        mine = canvas_folder / "Reading"
+        mine.mkdir()
+        someday = mine / "someday.md"
+        someday.write_text("# Someday\n\nA few links for later.\n", encoding="utf-8")
+        # And a note of theirs inside the collection's folder.
+        collection = self.host.folder_of("bookmarks")
+        beside = collection / "Notes on Rust.md"
+        beside_text = "# Notes\n\nBorrow checker, again.\n"
+        beside.write_text(beside_text, encoding="utf-8")
+
+        # The collection's every document goes, so the catalogue stops naming it: the vault's own
+        # notes go with the collection, and nothing else does.
+        canvases.remove_doc(self.host.path, self.host.id, "bookmarks", "b1")
+        self.host.back_up()
+
+        self.assertTrue(mine.is_dir(), "a folder of the reader's stays")
+        self.assertEqual(someday.read_text(encoding="utf-8"), "# Someday\n\nA few links for later.\n")
+        self.assertTrue(collection.is_dir(), "and so does a collection's, while their note is in it")
+        self.assertEqual(beside.read_text(encoding="utf-8"), beside_text)
+        self.assertFalse(
+            (collection / canvas_vault.note_name("b1")).exists(), "the note the vault wrote is gone"
+        )
+        self.assertFalse((collection / canvas_vault.INDEX).exists(), "and its own index with it")
+
+
+class FolderNameTest(unittest.TestCase):
+    """A folder's name is one directory inside its parent, whatever the collection is called."""
+
+    def setUp(self) -> None:
+        self.host = Host(self)
+
+    def test_a_collection_named_for_its_parent_stays_inside_the_canvas_s_folder(self) -> None:
+        self.host.switched(True)
+        # A collection is a page's to name, so `..` and `.` are names it can give one: escaped and
+        # digested as a note's name is, they are folders inside the canvas's own and nowhere else.
+        for collection in ("..", ".", "../../etc", "bookmarks"):
+            self.host.put(collection, "d1", {"title": collection})
+        self.host.back_up()
+
+        self.assertEqual(list(self.host.vault.glob("*.md")), [], "nothing is written in the vault's root")
+        above = self.host.vault.parent
+        self.assertEqual(list(above.glob("*.md")), [], "nor above it")
+        self.assertFalse((above / "bookmarks").exists(), "and no collection's folder is beside the vault")
+        self.assertFalse((self.host.home / "etc").exists(), "and nothing escapes the home")
+
+        canvas_folder = self.host.folder
+        folders = [one for one in canvas_folder.iterdir() if one.is_dir()]
+        self.assertEqual(len(folders), 4, "one folder a collection")
+        named: Dict[str, Path] = {}
+        for one in folders:
+            self.assertEqual(one.parent.resolve(), canvas_folder.resolve(), "no collection climbs out")
+            index = frontmatter((one / canvas_vault.INDEX).read_text(encoding="utf-8"))
+            named[index["id"]] = one
+        self.assertEqual(sorted(named), [".", "..", "../../etc", "bookmarks"])
+        # The name a person reads is the collection's own, and the note under it is the document's.
+        for collection, folder in named.items():
+            with self.subTest(collection=collection):
+                note = folder / canvas_vault.note_name("d1")
+                self.assertTrue(note.exists(), "the document's note is in the collection's folder")
+                self.assertEqual(
+                    frontmatter(note.read_text(encoding="utf-8"))["collection"], collection
+                )
+        # And the canvas's own index is still the canvas's: no collection took its folder to write in.
+        self.assertEqual(
+            frontmatter((canvas_folder / canvas_vault.INDEX).read_text(encoding="utf-8"))["type"],
+            canvas_vault.CANVAS,
+        )

@@ -37,11 +37,20 @@ export const POINT_SELECTOR_MAX = 200
  * What a page may ask of its data, in the order the page's half offers them: the same names the guide
  * tells a bot it may call, held here so a guide that names one more is a failing test rather than a
  * promise the app doesn't keep. `list` and `get` read a collection whole; `page` and `count` read it a
- * page at a time, which is how a collection of five thousand is read at all; `query` asks the host to
- * filter, sort and page one, because a phone holding five thousand rows is not the place to search
- * them.
+ * page at a time, which is how a collection of five thousand is read at all; `partial` asks whether
+ * the rows the device holds are the canvas whole; `query` asks the host to filter, sort and page one,
+ * because a phone holding five thousand rows is not the place to search them.
  */
-export const BRIDGE_METHODS = ["list", "get", "page", "count", "query", "put", "remove"] as const
+export const BRIDGE_METHODS = [
+  "list",
+  "get",
+  "page",
+  "count",
+  "partial",
+  "query",
+  "put",
+  "remove",
+] as const
 
 /**
  * How many documents one `list` answers. Past it the call is refused whole and told to page, because a
@@ -170,6 +179,7 @@ export type BridgeCall =
       limit: number
     })
   | (BridgeCallBase & { method: "count"; collection: string })
+  | (BridgeCallBase & { method: "partial"; collection: string })
   | (BridgeCallBase & {
       method: "query"
       collection: string
@@ -188,9 +198,9 @@ export type BridgeCall =
   | (BridgeCallBase & { method: "tool"; tool: string; args: Record<string, unknown> })
   | (BridgeCallBase & { method: "open"; url: string })
 
-/** A call answered from this device's rows of the canvas's data: the four reads that never reach the
+/** A call answered from this device's rows of the canvas's data: the five reads that never reach the
  * host. */
-export type BridgeDataCall = Extract<BridgeCall, { method: "list" | "get" | "page" | "count" }>
+export type BridgeDataCall = Extract<BridgeCall, { method: "list" | "get" | "page" | "count" | "partial" }>
 
 /** A call the host answers: the canvas's own data, written through the host's one route. */
 export type BridgeWriteCall = Extract<BridgeCall, { method: "put" | "remove" }>
@@ -322,13 +332,14 @@ export function readCall(data: unknown): BridgeCall | null {
     method !== "get" &&
     method !== "page" &&
     method !== "count" &&
+    method !== "partial" &&
     method !== "query" &&
     method !== "put" &&
     method !== "remove"
   )
     return null
   if (typeof raw.collection !== "string" || !raw.collection) return null
-  if (method === "list" || method === "count") {
+  if (method === "list" || method === "count" || method === "partial") {
     return { ...epoch, call: raw.call, method, collection: raw.collection }
   }
   if (method === "query") {
@@ -431,15 +442,19 @@ function partial(call: BridgeDataCall): Error {
 
 /**
  * What a data read answers, from the rows and the sweep's mark it is given. No data read reaches the
- * host. A `list` is one collection's documents in the host's order, and refuses past `LIST_MAX` rather
- * than answering a short array no page could tell was short; a `page` is that collection a page at a
- * time, from the id it was given, with the total and where the next starts; a `count` is the index's
- * number; and a `get` is one document — answering `null` only where a completed sweep says this device
- * has seen the canvas whole, since before one a document the rows don't hold may simply not have been
- * read yet (GLOSSARY "Partial").
+ * host. A `list` is one collection's documents in the host's order — a bare array, which is the shape
+ * every canvas already written reads — and refuses past `LIST_MAX` rather than answering a short
+ * array no page could tell was short; a `page` is that collection a page at a time, from the id it
+ * was given, with the total and where the next starts; a `count` is the index's number; `partial` is
+ * whether those rows are the canvas whole; and a `get` is one document — answering `null` only where a
+ * completed sweep says this device has seen the canvas whole, since before one a document the rows
+ * don't hold may simply not have been read yet (GLOSSARY "Partial").
  */
 export async function answerRead(call: BridgeDataCall, copy: CanvasCopy): Promise<unknown> {
   if (call.method === "count") return copy.count(call.collection)
+  // The one truth a list and a page are honest by, asked on its own: a page that needs to know
+  // whether an absence is evidence asks this rather than reading a field off a list.
+  if (call.method === "partial") return !(await copy.whole())
   if (call.method === "get") {
     const row = await copy.get(call.collection, call.id)
     if (row) return row
@@ -455,8 +470,7 @@ export async function answerRead(call: BridgeDataCall, copy: CanvasCopy): Promis
           `Read it a page at a time with canvas.data.page.`,
       )
     }
-    const [rows, whole] = await Promise.all([copy.docs(call.collection), copy.whole()])
-    return { rows, partial: !whole }
+    return copy.docs(call.collection)
   }
   const [one, total, whole] = await Promise.all([
     copy.page(call.collection, call.after, call.limit),
@@ -654,12 +668,14 @@ try{parent.postMessage({type:TYPE,ready:true},"*")}catch(e){}
 
 /**
  * The page's half, put in the head ahead of the page's own scripts: `window.canvas.data` with
- * `list`, `get`, `page`, `count`, `query`, `put` and `remove`, `window.canvas.read(shape, args)` for
- * the host's four free reads, and `window.canvas.tool.call(name, args)` for a tool the version
- * declared. `query` is the one data call the host answers, so it is the one a page needs the bot for.
- * Each posts the call to the parent and settles on the reply that names it — a tool call waits on the reader's
- * answer, which the app keeps for it. Every message carries this document's own epoch, so a reply
- * meant for the page drawn before this one can never settle a promise here. ES5, like the scroll
+ * `list`, `get`, `page`, `count`, `partial`, `query`, `put` and `remove`, `window.canvas.read(shape,
+ * args)` for the host's four free reads, and `window.canvas.tool.call(name, args)` for a tool the
+ * version declared. `query` is the one data call the host answers, so it is the one a page needs the
+ * bot for. Each posts the call to the parent and settles on the reply that names it — a tool call
+ * waits on the reader's answer, which the app keeps for it. Every message carries this document's own
+ * epoch, so a reply meant for the page drawn before this one can never settle a promise here. A reply
+ * that fails carries the error's `code` where it has one, and the page's own error is given that code,
+ * so a page can ask whether its copy is partial without matching the words. ES5, like the scroll
  * bridge beside it: it runs before the page's own scripts and asks nothing of the page.
  *
  * A link is the page's second way out of the frame, and the reader's tap is how a page is meant to ask:
@@ -687,7 +703,7 @@ try{parent.postMessage({type:TYPE,ready:true},"*")}catch(e){}
 export const BRIDGE_SCRIPT =
   `(function(){var TYPE="` +
   BRIDGE_MESSAGE +
-  `";var EPOCH=Math.random().toString(36).slice(2);var waiting={};var calls=0;var ask=function(fields){var call=++calls;return new Promise(function(resolve,reject){waiting[call]={resolve:resolve,reject:reject};var message={type:TYPE,epoch:EPOCH,call:call};for(var key in fields){if(Object.prototype.hasOwnProperty.call(fields,key)){message[key]=fields[key]}}try{parent.postMessage(message,"*")}catch(e){delete waiting[call];reject(new Error("The canvas is not on the app's page."))}})};addEventListener("message",function(event){var data=event.data;if(!data||typeof data!=="object"||data.type!==TYPE||data.epoch!==EPOCH){return}var call=waiting[data.reply];if(!call){return}delete waiting[data.reply];if(data.ok){call.resolve(data.value)}else{call.reject(new Error(typeof data.error==="string"&&data.error?data.error:"The canvas's request didn't answer."))}});var web=function(url){try{var protocol=new URL(String(url==null?"":url)).protocol;return protocol==="http:"||protocol==="https:"}catch(e){return false}};var asked={};var anchor=function(node){while(node){if(String(node.tagName||"").toUpperCase()==="A"&&node.getAttribute&&node.getAttribute("href")){return node}node=node.parentNode}return null};var hrefOf=function(link){var raw="";try{raw=String(link.getAttribute("href")||"")}catch(e){raw=""}if(!web(raw)){return ""}var href="";try{href=link.href||""}catch(e){href=""}return web(href)?link.href:raw};var openAsk=function(url){ask({method:"open",url:url}).catch(function(){})};addEventListener("click",function(event){if(!event||event.isTrusted!==true||event.defaultPrevented||!event.target){return}var link=anchor(event.target);if(!link){return}var url=hrefOf(link);if(!url){return}event.preventDefault();if(asked[url]){return}openAsk(url)},false);window.open=function(url,target){var href=String(url==null?"":url);var name=String(target==null?"":target).toLowerCase();if(name==="_self"||!web(href)){return null}openAsk(href);asked[href]=true;setTimeout(function(){delete asked[href]},0);return {closed:false,opener:null,focus:function(){},blur:function(){},close:function(){},postMessage:function(){}}};window.canvas={data:{list:function(collection){return ask({method:"list",collection:collection})},get:function(collection,id){return ask({method:"get",collection:collection,id:id})},page:function(collection,options){var opts=options||{};return ask({method:"page",collection:collection,after:opts.after==null?null:opts.after,limit:opts.limit})},count:function(collection){return ask({method:"count",collection:collection})},query:function(spec){var held=spec||{};return ask({method:"query",collection:held.collection,where:held.where,order:held.order,limit:held.limit,offset:held.offset})},put:function(collection,id,doc){return ask({method:"put",collection:collection,id:id,doc:doc})},remove:function(collection,id){return ask({method:"remove",collection:collection,id:id})}},read:function(shape,args){return ask({method:"read",shape:shape,args:args||{}})},tool:{call:function(name,args){return ask({method:"tool",tool:name,args:args||{}})}}}})()` +
+  `";var EPOCH=Math.random().toString(36).slice(2);var waiting={};var calls=0;var ask=function(fields){var call=++calls;return new Promise(function(resolve,reject){waiting[call]={resolve:resolve,reject:reject};var message={type:TYPE,epoch:EPOCH,call:call};for(var key in fields){if(Object.prototype.hasOwnProperty.call(fields,key)){message[key]=fields[key]}}try{parent.postMessage(message,"*")}catch(e){delete waiting[call];reject(new Error("The canvas is not on the app's page."))}})};addEventListener("message",function(event){var data=event.data;if(!data||typeof data!=="object"||data.type!==TYPE||data.epoch!==EPOCH){return}var call=waiting[data.reply];if(!call){return}delete waiting[data.reply];if(data.ok){call.resolve(data.value)}else{var said=new Error(typeof data.error==="string"&&data.error?data.error:"The canvas's request didn't answer.");if(typeof data.code==="string"&&data.code){said.code=data.code}call.reject(said)}});var web=function(url){try{var protocol=new URL(String(url==null?"":url)).protocol;return protocol==="http:"||protocol==="https:"}catch(e){return false}};var asked={};var anchor=function(node){while(node){if(String(node.tagName||"").toUpperCase()==="A"&&node.getAttribute&&node.getAttribute("href")){return node}node=node.parentNode}return null};var hrefOf=function(link){var raw="";try{raw=String(link.getAttribute("href")||"")}catch(e){raw=""}if(!web(raw)){return ""}var href="";try{href=link.href||""}catch(e){href=""}return web(href)?link.href:raw};var openAsk=function(url){ask({method:"open",url:url}).catch(function(){})};addEventListener("click",function(event){if(!event||event.isTrusted!==true||event.defaultPrevented||!event.target){return}var link=anchor(event.target);if(!link){return}var url=hrefOf(link);if(!url){return}event.preventDefault();if(asked[url]){return}openAsk(url)},false);window.open=function(url,target){var href=String(url==null?"":url);var name=String(target==null?"":target).toLowerCase();if(name==="_self"||!web(href)){return null}openAsk(href);asked[href]=true;setTimeout(function(){delete asked[href]},0);return {closed:false,opener:null,focus:function(){},blur:function(){},close:function(){},postMessage:function(){}}};window.canvas={data:{list:function(collection){return ask({method:"list",collection:collection})},get:function(collection,id){return ask({method:"get",collection:collection,id:id})},page:function(collection,options){var opts=options||{};return ask({method:"page",collection:collection,after:opts.after==null?null:opts.after,limit:opts.limit})},count:function(collection){return ask({method:"count",collection:collection})},partial:function(collection){return ask({method:"partial",collection:collection})},query:function(spec){var held=spec||{};return ask({method:"query",collection:held.collection,where:held.where,order:held.order,limit:held.limit,offset:held.offset})},put:function(collection,id,doc){return ask({method:"put",collection:collection,id:id,doc:doc})},remove:function(collection,id){return ask({method:"remove",collection:collection,id:id})}},read:function(shape,args){return ask({method:"read",shape:shape,args:args||{}})},tool:{call:function(name,args){return ask({method:"tool",tool:name,args:args||{}})}}}})()` +
   ";" +
   POINT_SCRIPT
 
@@ -825,13 +841,20 @@ export function bridgeHandler(host: BridgeHost): (event: MessageEvent) => void {
     const settle = (asked: Promise<unknown>) =>
       void asked.then(
         (value) => reply(call.call, true, { value }),
-        (error: unknown) => reply(call.call, false, { error: wordsOf(error) }),
+        (error: unknown) => {
+          // The words are what a page shows; the code, where the error carries one, is what it
+          // branches on — a partial copy is told apart from any other refusal without matching a
+          // sentence.
+          const code = codeOf(error)
+          reply(call.call, false, { error: wordsOf(error), ...(code ? { code } : {}) })
+        },
       )
     if (
       call.method === "list" ||
       call.method === "get" ||
       call.method === "page" ||
-      call.method === "count"
+      call.method === "count" ||
+      call.method === "partial"
     ) {
       settle(host.read(call))
       return

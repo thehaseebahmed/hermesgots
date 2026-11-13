@@ -15,11 +15,12 @@ import {
   cachedList,
   canvasCacheKey,
   canvasListKey,
+  forgetCanvas,
   keepCanvas,
   recordOf,
 } from "@/lib/canvas-cache"
-import { cachedDocs, keepDocs } from "@/lib/canvas-docs"
-import { drainCanvas } from "@/lib/canvas-outbox"
+import { cachedDocs, keepDocs, keepWrite } from "@/lib/canvas-docs"
+import { drainCanvas, drainOutbox, enqueueWrite } from "@/lib/canvas-outbox"
 import { refreshCanvas, refreshCanvases, undoCanvas, writeCanvasData } from "@/lib/canvases"
 import { connectionKey } from "@/lib/connection"
 import { db, deleteProfile, updateProfile } from "@/lib/db"
@@ -259,19 +260,22 @@ test(
       // Both are readable at once, from the page's own read, with the host still silent.
       await say({ type: BRIDGE_MESSAGE, call: 3, method: "list", collection: "items" })
       await until(() => posted.length > 2, "the page's list to be answered")
-      const listed = posted[2].value as { rows: CanvasDoc[]; partial: boolean }
+      const listed = posted[2].value as CanvasDoc[]
       assert.deepEqual(
-        listed.rows.map((row) => row.id),
+        listed.map((row) => row.id),
         ["one", "two"],
         "both writes are readable at once",
       )
       assert.deepEqual(
-        listed.rows.map((row) => row.pending),
+        listed.map((row) => row.pending),
         [true, true],
         "as pending writes",
       )
-      // No sweep ever reached this canvas's last page: the list is what the phone holds and says so.
-      assert.equal(listed.partial, true)
+      // No sweep ever reached this canvas's last page: the list is what the phone holds, and the
+      // verb that says whether that is the canvas whole says so.
+      await say({ type: BRIDGE_MESSAGE, call: 4, method: "partial", collection: "items" })
+      await until(() => posted.length > 3, "the page's partial to be answered")
+      assert.equal(posted[3].value, true)
 
       // The bot comes back, and the list's poll is what sends what this device kept: the write the
       // page made first goes first, so the host ends on the document the page last wrote.
@@ -766,5 +770,98 @@ test(
       assert.equal(await cachedCanvas(bot, KEPT.id), undefined, "the page row goes")
       assert.deepEqual(await cachedList(bot), [], "and the record with it")
     })
+  }),
+)
+
+test(
+  "a canvas the host no longer holds empties its queue and leaves the rest to be drained",
+  atWidth(390, async () => {
+    // A canvas deleted on another device answers 404 to a put as it does to a remove: the queue row
+    // goes, the Pending row it kept goes with it, and the pass moves on to the next canvas. A pass
+    // that stopped at the first 404 would keep every other canvas's writes queued behind a canvas no
+    // host holds.
+    const bot = await seedCanvasChat("canvas-gone-queued")
+    // The canvas the host has forgotten sorts first, so a pass that returned on it would never ask
+    // for the one the host still holds.
+    const gone = "a-gone"
+    for (const [canvasId, id, n] of [
+      [gone, "one", 7],
+      [KEPT.id, "two", 8],
+    ] as const) {
+      await keepWrite(bot, canvasId, { collection: "items", id, doc: { n }, at: 5, pending: true })
+      await enqueueWrite(bot, canvasId, { method: "put", collection: "items", id, doc: { n } })
+    }
+    const calls: string[] = []
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input))
+      if (new RegExp(`/canvases/${gone}/call$`).test(url.pathname)) {
+        calls.push(gone)
+        return json({ error: { message: "There is no such canvas." } }, 404)
+      }
+      if (/\/canvases\/[^/]+\/call$/.test(url.pathname)) {
+        calls.push(KEPT.id)
+        const body = JSON.parse(String(init?.body)) as { args: Record<string, unknown> }
+        return json({ object: "gots.canvas.call", result: { ...body.args, at: 100 } })
+      }
+      return json({ error: { message: "no route" } }, 404)
+    }) as unknown as typeof fetch
+
+    await withToasts(async (said) => {
+      await drainOutbox(bot)
+      assert.equal(said.length, 1, "the 404 is said once")
+      assert.match(said[0], /items \/ one/, "naming the document the host no longer holds")
+    })
+    assert.deepEqual(calls, [gone, KEPT.id], "the pass went on to the canvas the host still holds")
+    assert.deepEqual(await db.canvasOutbox.toArray(), [], "neither canvas has anything left queued")
+    assert.deepEqual(
+      await cachedDocs(bot, KEPT.id),
+      [{ collection: "items", id: "two", doc: { n: 8 }, at: 100 }],
+      "the write the host answered is the row it kept",
+    )
+    assert.deepEqual(await cachedDocs(bot, gone), [], "and the gone canvas kept nothing of its own")
+  }),
+)
+
+test("a canvas the host no longer holds takes the writes queued for it", async () => {
+  // A canvas deleted on the host leaves no queue: the writes it kept are for a canvas no bot holds,
+  // and a queue row the device still lists is a document the budget would spare for ever.
+  const bot = await seedCanvasChat("canvas-forget-queued")
+  await enqueueWrite(bot, KEPT.id, { method: "put", collection: "items", id: "one", doc: { n: 7 } })
+  assert.equal(await db.canvasOutbox.count(), 1, "the write waits")
+  await forgetCanvas(bot, KEPT.id)
+  assert.deepEqual(await db.canvasOutbox.toArray(), [], "and goes with the canvas")
+})
+
+test(
+  "a drain takes the canvas's own turn, so a queued write cannot overtake a page's",
+  atWidth(390, async () => {
+    // The host handles a canvas's writes in the order it is asked, and the drain sends one a page
+    // kept earlier. It takes the same per-canvas turn a page's own write takes, so the queue is sent
+    // after the write already out rather than alongside it.
+    const bot = await seedCanvasChat("canvas-drain-lock")
+    await db.canvasCache.put({
+      key: canvasCacheKey(bot, KEPT.id),
+      connection: connectionKey(bot),
+      canvasId: KEPT.id,
+      canvas: KEPT,
+    })
+    const host: Host = { docs: [DOC], calls: [] }
+    serveCanvases(host)
+    await enqueueWrite(bot, KEPT.id, { method: "put", collection: "items", id: "two", doc: { n: 1 } })
+    let release: () => void = () => {}
+    host.holdCall = () => new Promise<void>((done) => (release = done))
+    const page = writeCanvasData("c1", { method: "put", collection: "items", id: "one", doc: { n: 2 } })
+    await until(() => host.calls.length === 1, "the page's write to reach the host")
+    const queued = drainCanvas(bot, KEPT.id)
+    await settle()
+    assert.equal(host.calls.length, 1, "the queued write waits the page's turn out")
+    release()
+    await page
+    await queued
+    assert.deepEqual(
+      host.calls.map((one) => one.args.id),
+      ["one", "two"],
+      "and the queue is sent after it, not beside it",
+    )
   }),
 )

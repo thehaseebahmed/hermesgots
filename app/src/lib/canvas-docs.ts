@@ -34,6 +34,7 @@ import {
   canvasDocKey,
   db,
   type CanvasDocRow,
+  type CanvasSweepPlace,
   type CanvasSweepRow,
   type Profile,
 } from "@/lib/db"
@@ -246,13 +247,48 @@ export async function cachedDocs(
 }
 
 /**
- * How many documents one collection holds, read off the index rather than carried: what a page's
- * `count` answers, and the number a page of them says is the whole. The canvas's id is the host's own
- * uuid, so the collection index's rows are one canvas's alone — which is why the count needs no bot
- * and carries no document to answer a number.
+ * The keys of every document an answer named, read or not: the swept set a completed sweep prunes
+ * against.
+ *
+ * `storedDocs` drops a document this app can't read, since a row it can't draw is no copy — but the
+ * host still named it, and this device holds a row for it, so that row is a document the sweep saw. A
+ * prune that left it out would delete it as the answer's shape drifted, emptying a collection without
+ * a document having been removed. A value with no name at all is nothing a row can be filed under: a
+ * row's key is its collection and its id, and both are what this reads.
  */
-export async function cachedCount(canvasId: string, collection: string): Promise<number> {
-  return db.canvasDocs.where("[canvasId+collection]").equals([canvasId, collection]).count()
+export function docKeys(profile: Profile, canvasId: string, values: unknown): string[] {
+  if (!Array.isArray(values)) return []
+  const connection = connectionKey(profile)
+  const keys: string[] = []
+  for (const value of values) {
+    if (!value || typeof value !== "object") continue
+    const { collection, id } = value as { collection?: unknown; id?: unknown }
+    if (typeof collection !== "string" || !collection) continue
+    if (typeof id !== "string" || !id) continue
+    keys.push(canvasDocKey(connection, canvasId, collection, id))
+  }
+  return keys
+}
+
+/**
+ * How many documents one collection holds, read off the index rather than carried: what a page's
+ * `count` answers, and the number a page of them says is the whole.
+ *
+ * The index is the collection's, and a canvas's id is its own host's uuid — but two bots can reach
+ * hosts that hold a canvas by one id, so the index's rows are not one canvas's alone. The connection
+ * is what says whose they are, and it is read here for the reason `cachedDocs` reads it.
+ */
+export async function cachedCount(
+  profile: Profile,
+  canvasId: string,
+  collection: string,
+): Promise<number> {
+  const connection = connectionKey(profile)
+  return db.canvasDocs
+    .where("[canvasId+collection]")
+    .equals([canvasId, collection])
+    .filter((row) => row.connection === connection)
+    .count()
 }
 
 /**
@@ -278,16 +314,18 @@ export async function cachedDoc(
  * caller is not sent after an empty page. `after` is a name and not a promise that the collection still
  * holds it: the index seeks past it whether or not the document is still there.
  *
- * The canvas's id is the host's own uuid, as it is for `cachedCount`, so the index's rows are one
- * canvas's alone and the read needs no bot: a connection is not part of the key it seeks, and a filter
- * over it would be a read of the page and then some.
+ * The index's rows are one canvas's id's, not one bot's: two bots can hold canvases by one id, and the
+ * page is one bot's, so the connection narrows what the keyset seeks before the page is cut — a filter
+ * after the `limit` would count the other bot's rows into this page's count and hand back two.
  */
 export async function pageDocs(
+  profile: Profile,
   canvasId: string,
   collection: string,
   after: string | null,
   limit: number,
 ): Promise<CanvasPage> {
+  const connection = connectionKey(profile)
   const rows = await db.canvasDocs
     .where("[canvasId+collection+id]")
     .between(
@@ -298,6 +336,7 @@ export async function pageDocs(
       false,
       true,
     )
+    .filter((row) => row.connection === connection)
     .limit(limit + 1)
     .toArray()
   const page = rows.slice(0, limit).map(docOf)
@@ -373,11 +412,17 @@ export async function pruneDocs(
  * Starts a sweep and answers the generation it writes under — the one after the last, so a row can say
  * which sweep wrote it. The mark's `completeAt` is left as it was: a sweep that is cut has seen no more
  * than the one before it, and only the sweep that reaches its last page may move it (`completeSweep`).
+ *
+ * A sweep that was cut and is being carried on keeps the generation it began under, because the rows it
+ * wrote in the part that landed are stamped with that one: a new generation would make the completion
+ * treat every one of them as a document this sweep did not see, and prune the canvas it just read.
  */
 export async function beginSweep(profile: Profile, canvasId: string): Promise<number> {
   const key = canvasSweepKey(profile, canvasId)
   return db.transaction("rw", db.canvasSweeps, async () => {
     const held = await db.canvasSweeps.get(key)
+    // A place on the mark is a sweep that began and did not finish: this one is that sweep, continued.
+    if (held?.cursor) return held.generation
     const generation = (held?.generation ?? 0) + 1
     await db.canvasSweeps.put({
       ...held,
@@ -388,6 +433,42 @@ export async function beginSweep(profile: Profile, canvasId: string): Promise<nu
       startedAt: Date.now(),
     })
     return generation
+  })
+}
+
+/**
+ * Where a sweep that was cut had walked to, or nothing for a canvas no cut sweep left a place on: the
+ * collection it was in, and the last id of it the sweep finished. What a sweep starts from, so a phone
+ * backgrounded at the twenty-fourth page of a canvas carries on there rather than reading the canvas
+ * again from its first.
+ */
+export async function sweepCursor(
+  profile: Profile,
+  canvasId: string,
+): Promise<CanvasSweepPlace | undefined> {
+  return (await db.canvasSweeps.get(canvasSweepKey(profile, canvasId)))?.cursor
+}
+
+/**
+ * Records how far a sweep has walked: the collection it is in, and the last id of it the page finished
+ * on. Written as each page lands, so a sweep cut between two pages resumes at the one it did not read —
+ * the walk's own place, since a canvas of five thousand is twenty-five pages and a phone may be
+ * backgrounded at any of them.
+ *
+ * A mark that has gone took the place with it: an eviction during the sweep dropped the canvas whole,
+ * and a sweep writing into rows nothing owns has nothing to record.
+ */
+export async function noteSweepPlace(
+  profile: Profile,
+  canvasId: string,
+  collection: string,
+  after: string | null,
+) {
+  const key = canvasSweepKey(profile, canvasId)
+  await db.transaction("rw", db.canvasSweeps, async () => {
+    const held = await db.canvasSweeps.get(key)
+    if (!held) return
+    await db.canvasSweeps.put({ ...held, cursor: { collection, after } })
   })
 }
 
@@ -429,7 +510,9 @@ export async function noteOpened(profile: Profile, canvasId: string) {
  * whole test; the generation pruned by is this sweep's own.
  *
  * `openedAt` is carried over: the mark this writes is a new one, and when a reader last opened the
- * canvas is nothing a sweep has an opinion about.
+ * canvas is nothing a sweep has an opinion about. The place a cut sweep left is not carried: a mark
+ * that says a copy is whole has no walk to carry on, so the canvas's next sweep starts at its first
+ * page.
  */
 export async function completeSweep(
   profile: Profile,

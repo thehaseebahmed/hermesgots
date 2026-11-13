@@ -153,20 +153,27 @@ export async function keptBot(id: string) {
  * Drops a copy the host says it no longer holds, and its record with it: a listing would prune the
  * record too, but a device that opens with the host away never runs one, and the list it draws would
  * name a canvas the host has already said is gone. The documents the device kept for it go with it —
- * they are rows of their own — so a canvas deleted on the host is not drawn from them either.
+ * they are rows of their own — so a canvas deleted on the host is not drawn from them either, and so
+ * do the writes queued for it: a queue row is a document waiting for a canvas no host will store it on,
+ * and a queue the device still lists is one the budget spares for ever.
  */
 export async function forgetCanvas(profile: Profile, id: string) {
   const key = canvasListKey(profile)
+  const connection = connectionKey(profile)
   await db
-    .transaction("rw", db.canvasCache, async () => {
+    .transaction("rw", db.canvasCache, db.canvasOutbox, async () => {
       const rows = (await db.canvasCache.get(key))?.canvases ?? []
       if (rows.some((one) => one.id === id))
         await db.canvasCache.put({
           key,
-          connection: connectionKey(profile),
+          connection,
           canvases: rows.filter((one) => one.id !== id),
         })
       await db.canvasCache.delete(canvasCacheKey(profile, id))
+      const queued = (
+        await db.canvasOutbox.where("canvasId").equals(id).toArray()
+      ).filter((row) => row.connection === connection)
+      if (queued.length) await db.canvasOutbox.bulkDelete(queued.map((row) => row.id))
     })
     .catch(quietly("Letting a canvas's copy go"))
   await forgetDocs(profile, id).catch(quietly("Letting a canvas's documents go"))

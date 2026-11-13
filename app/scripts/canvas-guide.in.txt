@@ -56,13 +56,13 @@ meta, styles in `<style>`, script in `<script>`. Under 256 KB, no secrets.
 ## Its data
 
 A canvas keeps documents of `{collection, id, doc, at}`. A page reads `canvas.data.list`,
-`canvas.data.get`, `canvas.data.page` and `canvas.data.count`, writes `canvas.data.put` and
-`canvas.data.remove`, and asks the host to filter, sort and page a collection with
+`canvas.data.get`, `canvas.data.page`, `canvas.data.count` and `canvas.data.partial`, writes
+`canvas.data.put` and `canvas.data.remove`, and asks the host to filter, sort and page with
 `canvas.data.query({collection, where: [{field, op, value}], order: {field|id, dir}, limit, offset})`
-— `op` is `eq`, `contains`, `prefix`, `gt` or `lt` — answering `{documents, total}`. A query
-needs the bot; with it away ask `page`. A page is `{after, limit}`; a list stops at 5000, refusing
-past it. Until a sweep finishes a list or page says `partial: true`; a get of a missing document
-throws instead of null — absence follows only a sweep. 64 MB a canvas, 256 KB a document.
+— `op` is `eq`, `contains`, `prefix`, `gt` or `lt` — `{documents, total}`. A query needs the bot;
+away, `page`. A list is the collection's documents; a page takes `{after, limit}` and answers
+`{rows, next, total, partial}`; a list caps at 5000. `partial` is true until a sweep finishes, and a
+missing document's get throws its code. 64 MB a canvas, 256 KB a document.
 ## The host, from the page
 
 It reads four host shapes — `canvas.read("usage", {provider})`, `canvas.read("routines")`,

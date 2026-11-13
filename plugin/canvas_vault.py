@@ -6,7 +6,8 @@ and ``canvases.py``'s ``vault`` the switch that says which canvases are copied).
 a bundle of markdown files with YAML frontmatter, ``type`` the one key that has to be there, a
 concept's id being its path without the ``.md``, and ``index.md`` the folder's own file. So a
 bookmark is a file a vault's own tools can list and link, and the folder is named by a canvas's id
-rather than its title, since a title is the user's to change and a rename would orphan every note.
+rather than its title — escaped and digested as a note's name is — since a title is the user's to
+change and a rename would orphan every note, and a collection is a page's to name with anything at all.
 
 Nothing here is ever read back: the vault is a copy the host writes, not a second store. What that
 copy has to be is *incremental* and *bounded*, and both come from the same fact — the host writes
@@ -18,6 +19,12 @@ the file and the host stamped the document:
 - A note is deleted only where the store no longer names its document: a walk that reached the end of
   its collection, or a collection the catalogue has stopped listing. A remove writes no tombstone, so
   a walk cut short is no evidence that a document is gone.
+- Only the vault's own files are ever deleted or rewritten, and the file itself says which those are:
+  a note carries ``type: canvas.document`` in its frontmatter and an index carries the generator key
+  the vault writes. Everything else in the bundle is the reader's — their own notes beside the
+  documents, a folder they made, a file of theirs at a name a document would take — and is left
+  exactly as it is. A wiki is a folder people add to, so a tick that took every ``*.md`` it did not
+  name would delete their work as the store's changed.
 - A tick writes at most ``VAULT_PER_TICK`` files and stops after ``VAULT_SECONDS``: five thousand
   documents converge over ticks instead of holding the host for a minute, and a steady-state tick
   writes the one note that moved.
@@ -64,6 +71,13 @@ RESERVED_STEMS = ("index", "log")
 DOCUMENT = "canvas.document"
 COLLECTION = "canvas.collection"
 CANVAS = "canvas.canvas"
+
+# The key an index the vault wrote carries, and the value it holds: a folder's own file has no
+# document behind it, so ``type`` is its kind rather than a mark of who wrote it — this is. A file
+# without it is the reader's, whether they wrote an ``index.md`` of their own or a note beside the
+# documents, and no tick rewrites or deletes it.
+GENERATED = "generator"
+GENERATOR = "gots.canvas-vault"
 
 # One tick's bound: what it may write, and how long it may take. A first backup of five thousand
 # documents is twenty-five of these.
@@ -145,21 +159,21 @@ def tick(store: Path, home: Path) -> int:
 
 def _back_up(store: Path, base: Path, canvas: Dict[str, Any], budget: "_Bounded") -> None:
     """A canvas's folder: its own ``index.md``, then each collection of its catalogue."""
-    folder = base / _folder(canvas["id"])
+    folder = base / folder_name(canvas["id"])
     conn = connect(store)
     try:
         held = canvas_docs.catalogue(conn, canvas["id"])
-        _keep(folder / INDEX, _canvas_index(canvas, held["collections"]), budget)
+        _keep_index(folder / INDEX, _canvas_index(canvas, held["collections"]), budget)
         # A collection the catalogue no longer names is a collection whose every document the store
         # has stopped holding, so its notes go with them — and anything beside them, which is the
         # user's, keeps the folder.
-        _prune_folders(folder, {_folder(row["collection"]) for row in held["collections"]})
+        _prune_folders(folder, {folder_name(row["collection"]) for row in held["collections"]})
         for row in held["collections"]:
             if budget.spent:
                 return
             _back_up_collection(
                 conn,
-                folder / _folder(row["collection"]),
+                folder / folder_name(row["collection"]),
                 canvas,
                 row["collection"],
                 row["count"],
@@ -184,7 +198,7 @@ def _back_up_collection(
     A walk the budget cut short has not seen the collection whole: it starts again on the next tick,
     and it deletes nothing, since a note it did not meet is no evidence of a document removed.
     """
-    _keep(folder / INDEX, _collection_index(collection, count), budget)
+    _keep_index(folder / INDEX, _collection_index(collection, count), budget)
     names: Set[str] = set()
     for document in canvas_docs.each(conn, canvas["id"], collection, canvas_docs.PAGE_ROWS):
         names.add(_note(folder, canvas, collection, document, budget))
@@ -207,32 +221,42 @@ def _note(
     user has touched is left as they left it, since no tick writes over a file it did not write
     last. A file that isn't there is written whatever its document's age, which is what a first
     backup and a note deleted by hand both are.
+
+    A file that is there and is not the vault's is the reader's, whatever its clock: a name a
+    document would take is a name they may have taken first, and their file is left exactly as it is.
     """
     name = note_name(document["id"])
     path = folder / name
-    if path.exists() and document["at"] <= int(path.stat().st_mtime * 1000):
-        return name
+    if path.exists():
+        held = _vault_note(path)
+        if held is None or document["at"] <= int(path.stat().st_mtime * 1000):
+            return name
     _put(path, note(canvas, collection, document))
     budget.spend()
     return name
 
 
 def _prune(folder: Path, names: Set[str]) -> None:
-    """Deletes the notes a completed walk did not name, and the folder's own files never."""
+    """Deletes the vault's notes a completed walk did not name, and nothing else in the folder.
+
+    A ``*.md`` the walk did not name is a document the store has stopped holding only if the vault
+    wrote it; anything else is the reader's, and a wiki is a folder they add to. The folder's own
+    file is neither: it is the index this collection still has.
+    """
     if not folder.exists():
         return
     for one in folder.glob("*.md"):
         if one.name != INDEX and one.name not in names:
-            one.unlink()
+            _drop(one)
 
 
 def _prune_folders(folder: Path, collections: Set[str]) -> None:
-    """Deletes a collection's folder where the catalogue names no collection that answers to it.
+    """Clears a collection's folder where the catalogue names no collection that answers to it.
 
-    A collection the store no longer holds a document of is not a collection, so every note under
-    it is a document the store has stopped naming — the same rule a walk inside the folder applies,
-    read off the catalogue instead of the walk. Only the notes go: a file the user put beside them
-    keeps the folder, since a wiki is theirs to add to.
+    A collection the store no longer holds a document of is not a collection, so the vault's own
+    files under it are documents it has stopped naming — the same rule a walk inside the folder
+    applies, read off the catalogue instead of the walk. Only the vault's files go: a file the user
+    put beside them keeps the folder, and a folder they made themselves is not this rule's at all.
     """
     if not folder.exists():
         return
@@ -240,12 +264,63 @@ def _prune_folders(folder: Path, collections: Set[str]) -> None:
         if not one.is_dir() or one.name in collections:
             continue
         for note in one.glob("*.md"):
-            note.unlink()
+            _drop(note)
         try:
             one.rmdir()
         except OSError:
             # Something of the user's is in there, which is no reason to have kept the notes.
             pass
+
+
+# --- whose file it is ------------------------------------------------------------------------------
+
+
+def _frontmatter_of(text: str) -> Dict[str, str]:
+    """A file's frontmatter as the keys it names, values as written — and nothing where it has none.
+
+    Read by hand rather than parsed as YAML: the two keys ownership is decided by are both plain
+    scalars the vault writes itself, and a vault is not the place to guess at another reader's dialect.
+    """
+    if not text.startswith("---\n"):
+        return {}
+    end = text.find("\n---", 4)
+    if end < 0:
+        return {}
+    held: Dict[str, str] = {}
+    for line in text[4:end].splitlines():
+        key, _, value = line.partition(":")
+        if key.strip():
+            held.setdefault(key.strip(), value.strip())
+    return held
+
+
+def _vault_note(path: Path) -> Optional[str]:
+    """The text of a note the vault wrote, or None for a file that is the reader's.
+
+    A note says what it is in the one key OKF requires, so the file itself answers whether a tick may
+    rewrite it — no record beside it to keep true, and nothing to go stale when the reader edits one.
+    """
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    return text if _frontmatter_of(text).get("type") == DOCUMENT else None
+
+
+def _is_vault_index(path: Path) -> bool:
+    """Whether a folder's own file is one the vault wrote, by the generator key it carries."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+    return _frontmatter_of(text).get(GENERATED) == GENERATOR
+
+
+def _drop(path: Path) -> None:
+    """Deletes a file the vault wrote, and leaves anything else exactly as it is."""
+    mine = _is_vault_index(path) if path.name == INDEX else _vault_note(path) is not None
+    if mine:
+        path.unlink()
 
 
 # --- the files' names ----------------------------------------------------------------------------
@@ -271,15 +346,16 @@ def note_name(doc_id: str) -> str:
     return f"{stem}-{_digest(doc_id)}.md"
 
 
-def _folder(name: str) -> str:
-    """The folder one name is filed under: the name itself where nothing had to be replaced.
+def folder_name(name: str) -> str:
+    """The folder one name is filed under: the name escaped, with a digest of it after.
 
-    A canvas id and a collection are read by a person looking through a vault, so an ordinary name
-    stays whole; a name that needed escaping takes a digest, so two collections can never be handed
-    one folder and a document can never be read under another collection's name.
+    A collection is named by a page, so ``..`` and ``.`` are names one can be given: escaped and
+    digested as a note's name is, a folder is always one directory inside its parent — never a name
+    the filesystem reads as a path of its own, and never a name that climbs out of the canvas's
+    folder to write in another canvas's, or in the vault's own root. The digest is what keeps two
+    names that escape alike apart, as it does for a note.
     """
-    stem = _PLAIN.sub("_", name)
-    return stem if stem == name else f"{stem}-{_digest(name)}"
+    return f"{_PLAIN.sub('_', name)}-{_digest(name)}"
 
 
 def _digest(value: str) -> str:
@@ -325,11 +401,11 @@ def note(canvas: Dict[str, Any], collection: str, document: Dict[str, Any]) -> s
 
 def _canvas_index(canvas: Dict[str, Any], collections: List[Dict[str, Any]]) -> str:
     """A canvas's own file: the canvas by title, and the collections its vault holds."""
-    header = [("type", CANVAS), ("title", canvas["title"]), ("id", canvas["id"])]
+    header = [(GENERATED, GENERATOR), ("type", CANVAS), ("title", canvas["title"]), ("id", canvas["id"])]
     lines = [f"# {canvas['title']}", ""]
     if collections:
         lines += [
-            f"- [{row['collection']}]({_folder(row['collection'])}/{INDEX}) — {_count(row['count'])}"
+            f"- [{row['collection']}]({folder_name(row['collection'])}/{INDEX}) — {_count(row['count'])}"
             for row in collections
         ]
     else:
@@ -339,7 +415,12 @@ def _canvas_index(canvas: Dict[str, Any], collections: List[Dict[str, Any]]) -> 
 
 def _collection_index(collection: str, count: int) -> str:
     """A collection's own file: the collection by name, and how many documents it holds."""
-    header = [("type", COLLECTION), ("title", collection), ("id", collection)]
+    header = [
+        (GENERATED, GENERATOR),
+        ("type", COLLECTION),
+        ("title", collection),
+        ("id", collection),
+    ]
     body = [f"# {collection}", "", f"{_count(count)}."]
     return _frontmatter(header) + "\n\n" + "\n".join(body) + "\n"
 
@@ -363,8 +444,15 @@ def _put(path: Path, text: str) -> None:
     os.replace(part, path)
 
 
-def _keep(path: Path, text: str, budget: "_Bounded") -> None:
-    """Writes a file whose text changed, and nothing where it is the one already there."""
+def _keep_index(path: Path, text: str, budget: "_Bounded") -> None:
+    """Writes a folder's own file where its text changed — and only over one the vault wrote.
+
+    A folder is the reader's too: an ``index.md`` they wrote themselves is theirs, and a tick that
+    replaced it would take the one file a vault's own tools read to find the folder. Nothing is
+    written where the file is theirs, exactly as nothing is deleted.
+    """
+    if path.exists() and not _is_vault_index(path):
+        return
     if path.exists() and path.read_text(encoding="utf-8") == text:
         return
     _put(path, text)
