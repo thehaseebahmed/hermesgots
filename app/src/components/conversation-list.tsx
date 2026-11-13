@@ -28,12 +28,11 @@ import { SortMenu } from "@/components/sort-menu"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { botChatsPath } from "@/lib/bot-tabs"
-import { previewLine } from "@/lib/bot-chrome"
+import { stateLine } from "@/lib/bot-chrome"
 import { closeCanvas, useCanvasOpened } from "@/lib/canvas-open"
 import { useCanvasEnabled, usePinnedCanvases, type Canvas } from "@/lib/canvases"
 import { chatOwner } from "@/lib/chat-owner"
 import { compareChatOrder, waitsOnUser } from "@/lib/chat-list"
-import { presence } from "@/lib/presence"
 import type { Conversation, Message, Profile } from "@/lib/db"
 import { db, isReply, newestMessage } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
@@ -363,11 +362,13 @@ function Recents({
 
 /**
  * With bot threads on, in place of Recents: every bot that's turned on, each with its newest thread
- * and a count of the threads waiting on the user. A bot opens as one chat holding its threads.
+ * and its state — something unread, or whether its host is checking in (ADR 0151). A bot opens as one
+ * chat holding its threads.
  *
- * The Host's rooms are rows of the same list, after the bots: a room is nobody's thread, so it
- * belongs to no bot's row, and it is not a section of its own either — it is drawn by the chat
- * list's own row, with its members, its last activity and the mark its log reads (ADR 0115).
+ * The Host's rooms are rows of the same list, after the bots: a room is nobody's thread, so it is never
+ * a row of a bot's own — though a room its roster seats counts toward that bot's unread (ADR 0151). It
+ * is not a section of its own either — it is drawn by the chat list's own row, with its members, its
+ * last activity and the mark its log reads (ADR 0115).
  */
 function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; collapsed?: boolean }) {
   const summaries = useBotSummaries()
@@ -384,7 +385,8 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
     return found ? chatOwner(found).answerer : undefined
   }, [chat])
   const now = useNow()
-  // What this device's last chat-list pass answered for each bot: the dot's whole evidence.
+  // What this device's last chat-list pass answered for each bot: the whole evidence behind the
+  // line's Online or Offline.
   const { chatStores } = useSyncState()
 
   return (
@@ -408,7 +410,7 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
         </div>
       )}
       <ul className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>
-        {bots?.map(({ bot, label, latest, preview, waiting, unread }) => {
+        {bots?.map(({ bot, label, latest, unread }) => {
           const age = latest?.updatedAt
           return (
             <li key={bot.id}>
@@ -424,8 +426,10 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
               >
                 <span className="relative shrink-0">
                   <Bot id={bot.botId} className="size-9" />
-                  {/* New since this device last looked at one of the bot's threads (ADR 0110). */}
-                  {unread && (
+                  {/* The rail draws no line under the name, so its mark is the only one a row has
+                      there: news since this device last looked at one of the bot's conversations
+                      (ADR 0110, ADR 0151). */}
+                  {collapsed && unread > 0 && (
                     <>
                       <span className="sr-only">New activity</span>
                       <span
@@ -448,19 +452,26 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
                       )}
                       {age && <RowAge at={age} now={now} />}
                     </span>
+                    {/* Drawn, never read out: the line beside it already counts what it marks
+                        (ADR 0151). */}
                     <span className="flex items-center gap-2">
-                      <span className="min-w-0 flex-1 truncate text-xs font-normal text-muted-foreground">
-                        {previewLine({
-                          line: preview,
-                          title: latest?.title,
-                          online: presence(bot, now, chatStores[bot.id]),
+                      <span
+                        data-slot="bot-state"
+                        className="min-w-0 flex-1 truncate text-xs font-normal text-muted-foreground"
+                      >
+                        {stateLine({
+                          unread,
+                          bot,
+                          now,
+                          answer: chatStores[bot.id],
                         })}
                       </span>
-                      {waiting > 0 && (
-                        <span className="shrink-0 rounded-full bg-warning/15 px-1.5 text-xs leading-5 font-semibold text-warning tabular-nums">
-                          {waiting}
-                          <span className="sr-only"> waiting for you</span>
-                        </span>
+                      {unread > 0 && (
+                        <span
+                          data-unread
+                          aria-hidden
+                          className="dot-glow size-2.5 shrink-0 rounded-full bg-warning"
+                        />
                       )}
                     </span>
                   </span>
