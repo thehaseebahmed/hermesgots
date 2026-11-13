@@ -227,9 +227,10 @@ def is_missing(error: "GitHubError") -> bool:
     """Whether GitHub said the thing isn't there.
 
     Every HTTP failure but a 401 arrives as GitHub's own wording rather than its status, so this is
-    the one place that reads a 404 out of it.
+    the one place that reads a 404 out of it — the code the failure kept where it had one, else
+    GitHub's own words.
     """
-    return "Not Found" in str(error)
+    return error.code == 404 or "Not Found" in str(error)
 
 
 def _user(auth: Optional[str]) -> Dict[str, Any]:
@@ -686,7 +687,7 @@ def mark_ready(repo: str, number: int, auth: str) -> Dict[str, Any]:
     node = row.get("node_id")
     if not isinstance(node, str) or not node:
         raise GitHubError(f"GitHub didn't name {repo}#{number} in a way it can be marked ready by.")
-    answer = _fetch("/graphql", auth, "POST", {"query": READY_MUTATION, "variables": {"id": node}})[0]
+    answer = _request("/graphql", auth, "POST", {"query": READY_MUTATION, "variables": {"id": node}})
     errors = answer.get("errors") if isinstance(answer, dict) else None
     if isinstance(errors, list) and errors:
         first = errors[0] if isinstance(errors[0], dict) else {}
@@ -774,8 +775,6 @@ def _merge_refused(repo: str, number: int, error: "GitHubError") -> "GitHubError
             409,
             error.code,
         )
-    if error.code == 404:
-        return GitHubError(f"GitHub has no pull request #{number} in {repo}.", 409, 404)
     return error
 
 

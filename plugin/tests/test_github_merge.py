@@ -157,8 +157,7 @@ class MergeCallTests(unittest.TestCase):
         }
         for code, (wanted, said) in cases.items():
             with self.subTest(code=code):
-                refusal = github.GitHubError(said)
-                refusal.code = code
+                refusal = github.GitHubError(said, 502, code)
                 _, serving = self._serve(pull_row(draft=False), refusal=refusal)
                 with serving:
                     with self.assertRaises(github.GitHubError) as raised:

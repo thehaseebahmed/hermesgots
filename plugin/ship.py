@@ -533,9 +533,10 @@ def merge(
             resolved = merges.check(hermes_home, only={session_id})
         except Exception:
             logger.warning("gots: resolving a merged session failed", exc_info=True)
-    for result in results:
-        if result.get("merged"):
-            result["resolved"] = bool(resolved)
+    if resolved:
+        for result in results:
+            if result.get("merged"):
+                result["resolved"] = True
     return results
 
 
