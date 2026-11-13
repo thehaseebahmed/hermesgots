@@ -18,6 +18,7 @@ import {
   missing,
   mountAfk,
   seedSettings,
+  settle,
   type HoldRow,
 } from "./component-kit.tsx"
 
@@ -60,6 +61,48 @@ test("a project holding more than its count draws the places and names the rest"
       find("[data-above]")?.textContent,
       "2 more claimed above the count",
       "and the holds past the count are named, not hidden",
+    )
+  })
+})
+
+test("a task AFK holds is not drawn again as somebody else's", async () => {
+  // A host from before the claim mark was excluded answers a held task in both groups. Working is
+  // where it belongs, and one task in two places is exactly the confusion this replaced (ADR 0150).
+  globalThis.fetch = afkHost({
+    features: FEATURES,
+    // The same repository the frontier rows name: a project's tasks all live in one.
+    holds: THREE.map((hold) => ({ ...hold, repo: "mock-user/gots" })),
+    pickCount: 3,
+    frontier: {
+      ready: [{ number: 271, title: "A task nobody has" }],
+      claimed: [
+        { number: 265, title: "Read the frontier", assignees: ["someone"] },
+        { number: 270, title: "A task another hand took", assignees: ["someone"] },
+      ],
+    },
+  }).fetch as unknown as typeof fetch
+  await picksOn(async () => {
+    // The frontier is a read of its own: the sheet opens on Working and fills the groups after it.
+    await settle()
+    assert.deepEqual(
+      await findAll('[data-group="claimed"] li').map((row) => row.textContent?.match(/#\d+/)?.[0]),
+      ["#270"],
+      "only the task somebody else has is claimed",
+    )
+    assert.match(
+      find('[data-group="claimed"]')?.textContent ?? "",
+      /\(1\)/,
+      "and the group counts the one row it draws",
+    )
+    assert.equal(
+      findAll('[data-hold="265"]').length,
+      1,
+      "the held task is drawn once, in Working",
+    )
+    assert.equal(
+      await find('[data-group="ready"]')?.textContent?.includes("#271"),
+      true,
+      "a task nobody has is still offered",
     )
   })
 })

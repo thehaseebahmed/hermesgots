@@ -25,6 +25,10 @@ The rules that follow:
   in Working while it runs and in Code once its work is in review; `groups()` puts it in no group. What
   the group keeps is an assignee with no claim mark — a person, or another tool — which is the one
   thing Working cannot say. It draws no heading when nothing is in it.
+- **The sheet holds that rule too.** A task the project's own answer names under `holds` is never
+  drawn under Claimed, whatever the host's grouping said: a plugin from before this rule still
+  answers AFK's own tasks as claimed, and one task in two places is the confusion being reported. The
+  host's rule and the sheet's guard are the same sentence said at both ends of the wire.
 
 ## Considered options
 
@@ -49,5 +53,6 @@ The rules that follow:
 - The sheet's Claimed group empties for a project whose only claimed tasks are its own. A task that
   carries the claim mark with no hold behind it — the state a GitHub release refused leaves — is
   drawn in no group; the project's refusal line is what says the release failed.
-- The plugin's `projects/{id}/tasks` answers `claimed` with a different meaning, and the app needs no
-  new field for it.
+- The plugin's `projects/{id}/tasks` answers `claimed` with a different meaning, and the app draws a
+  claimed row only for a task the project does not hold — so the two can't disagree in the one place
+  a person reads them.

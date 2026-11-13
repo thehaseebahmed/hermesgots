@@ -294,6 +294,7 @@ export function AfkPopup({
           )}
           <Tasks
             tasks={tasks}
+            held={new Set(holds.map((one) => `${one.repo}#${one.number}`))}
             error={error}
             // Said twice only when it is the same thing said: the switch's reason can differ from why
             // the frontier failed, and then it is two different facts, not one repeated.
@@ -560,11 +561,18 @@ function Working({
 /** The groups that hold something, or the one line that says why none does. */
 function Tasks({
   tasks,
+  held,
   error,
   duplicate,
   manyRepos,
 }: {
   tasks: ProjectTasks | undefined
+  /**
+   * The tasks AFK holds, as `repo#number`. Working draws them, so they are never drawn again as
+   * somebody else's — a host from before the claim mark was excluded still lists them under
+   * claimed, and one task in two places is the confusion this replaced (ADR 0150).
+   */
+  held: ReadonlySet<string>
   error: string | undefined
   duplicate: boolean
   manyRepos: boolean
@@ -579,17 +587,21 @@ function Tasks({
       </p>
     )
   }
-  const groups = GROUPS.filter((group) => tasks[group.key].length > 0)
+  const rowsOf = (key: (typeof GROUPS)[number]["key"]) =>
+    (tasks[key] ?? []).filter(
+      (task) => key !== "claimed" || !held.has(`${task.repo}#${task.number}`),
+    )
+  const groups = GROUPS.filter((group) => rowsOf(group.key).length > 0)
   if (!groups.length) return <p className="px-1 text-sm text-muted-foreground">No ready tasks.</p>
   return (
     <>
       {groups.map((group) => (
         <section key={group.key} aria-label={group.label} data-group={group.key}>
           <h3 className="px-1 pb-1 text-sm text-muted-foreground">
-            {group.label} ({tasks[group.key].length})
+            {group.label} ({rowsOf(group.key).length})
           </h3>
           <ul>
-            {tasks[group.key].map((task) => (
+            {rowsOf(group.key).map((task) => (
               <TaskRow
                 key={`${task.repo}#${task.number}`}
                 task={task}
