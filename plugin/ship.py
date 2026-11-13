@@ -596,15 +596,19 @@ REFUSED_ACTIONS = ("close",)
 SCHEMA = {
     "name": TOOL,
     "description": (
-        "Ships this session's work to its pull request. action: 'ship' commits what's uncommitted in "
-        "its worktrees with commit_message, pushes the session branch and opens a pull request (always "
-        "a draft) or pushes to the one already open; 'push' commits and pushes without opening one; "
-        "'update' changes the open pull request's title and/or body; 'status' reports changes and "
+        "Ships this session's work to its pull request, and can take it the whole way. action: "
+        "'ship' commits what's uncommitted in its worktrees with commit_message, pushes the session "
+        "branch and opens a pull request (always a draft) or pushes to the one already open; 'push' "
+        "commits and pushes without opening one; 'update' changes the open pull request's title "
+        "and/or body; 'ready' takes the draft out of draft so it can be reviewed and merged; 'merge' "
+        "merges it once it is out of draft and its checks pass; 'status' reports changes and "
         "unpushed commits without writing anything. Pass force: true only after a rebase or amend, to "
         "replace the branch's remote commits. Call 'ship' yourself as soon as the work is done and "
-        "checked; don't ask the user first. Merging and closing are the user's decision: the tool "
-        "refuses them, so ask the user with clarify instead. The server holds the GitHub account, so use "
-        "this instead of git push or gh."
+        "checked; don't ask the user first. Mark it ready when it is going to be read, and merge it "
+        "when the project's Prompt asks for the work to be delivered — otherwise the merged or "
+        "reviewed pull request is the user's to finish. Closing a pull request is always the user's: "
+        "the tool refuses it, so ask with clarify instead. The server holds the GitHub account, so "
+        "use this instead of git push or gh."
     ),
     "parameters": {
         "type": "object",
@@ -612,7 +616,7 @@ SCHEMA = {
             "action": {
                 "type": "string",
                 "enum": [*ACTIONS, *REFUSED_ACTIONS],
-                "description": "What to do: ship, push, update or status. Required.",
+                "description": f"What to do: {', '.join(ACTIONS)}. Required.",
             },
             "title": {
                 "type": "string",
@@ -628,6 +632,14 @@ SCHEMA = {
             "commit_message": {
                 "type": "string",
                 "description": "For anything not yet committed. Required when there is (ship, push).",
+            },
+            "merge_method": {
+                "type": "string",
+                "enum": list(MERGE_METHODS),
+                "description": (
+                    "How the merge lands (merge): 'squash' puts one commit on the base branch, which "
+                    "is the default; 'merge' keeps the branch's commits; 'rebase' replays them."
+                ),
             },
             "force": {
                 "type": "boolean",
