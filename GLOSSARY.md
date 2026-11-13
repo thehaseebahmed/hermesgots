@@ -217,7 +217,10 @@ _Avoid_: display name, nickname, handle
 Whether a bot's host answered this device's last chat-list pass, and when this device last heard it: the
 pass's own answer decides online or away, and until a pass lands the time this device kept stands in for it.
 It is not a stored heartbeat — nothing on the server records a check-in — and the screens draw two words
-from it, `Online` or `Last seen 2 hr. ago`, or nothing at all about a bot this device cannot answer for.
+from it, `Online` or `Last seen 2 hr. ago`, and the sidebar's bot row the third, `Offline`, since a row
+one line tall has no room for when it was heard; or nothing at all about a bot this device cannot
+answer for, which is a bot with no host, a bot turned off, and a host this device has never heard at
+all (ADR 0151).
 _Avoid_: heartbeat, online status, availability
 
 **Chat**:

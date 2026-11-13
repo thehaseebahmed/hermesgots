@@ -366,9 +366,10 @@ function Recents({
  * and its state — something unread, or whether its host is checking in (ADR 0151). A bot opens as one
  * chat holding its threads.
  *
- * The Host's rooms are rows of the same list, after the bots: a room is nobody's thread, so it
- * belongs to no bot's row, and it is not a section of its own either — it is drawn by the chat
- * list's own row, with its members, its last activity and the mark its log reads (ADR 0115).
+ * The Host's rooms are rows of the same list, after the bots: a room is nobody's thread, so it is never
+ * a row of a bot's own — though a room its roster seats counts toward that bot's unread (ADR 0151). It
+ * is not a section of its own either — it is drawn by the chat list's own row, with its members, its
+ * last activity and the mark its log reads (ADR 0115).
  */
 function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; collapsed?: boolean }) {
   const summaries = useBotSummaries()
@@ -385,7 +386,8 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
     return found ? chatOwner(found).answerer : undefined
   }, [chat])
   const now = useNow()
-  // What this device's last chat-list pass answered for each bot: the dot's whole evidence.
+  // What this device's last chat-list pass answered for each bot: the whole evidence behind the
+  // line's Online or Offline.
   const { chatStores } = useSyncState()
 
   return (
@@ -451,13 +453,11 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
                       )}
                       {age && <RowAge at={age} now={now} />}
                     </span>
-                    {/* The bot's state, and never a chat's words: something unread first, else
-                        whether its host is checking in, and nothing where this device can't tell
-                        (ADR 0151). The dot says the same thing the count does, so it is drawn and
-                        not read out. */}
+                    {/* Drawn, never read out: the line beside it already counts what it marks
+                        (ADR 0151). */}
                     <span className="flex items-center gap-2">
                       <span
-                        data-bot-state
+                        data-slot="bot-state"
                         className="min-w-0 flex-1 truncate text-xs font-normal text-muted-foreground"
                       >
                         {stateLine({

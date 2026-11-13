@@ -76,8 +76,7 @@ const botRow = () => find(`a[href="/b/${bot.id}"]`)
 const selected = (row: Element | null) => Boolean(row?.className.split(/\s+/).includes("bg-muted"))
 /** The row's unread mark, as the list draws it. */
 const dotted = (row: Element | null) => Boolean(row?.querySelector("[data-unread]"))
-/** The words the row puts under the bot's name, which are its state. */
-const stateOf = (row: Element | null) => row?.querySelector("[data-bot-state]")?.textContent ?? null
+const stateOf = (row: Element | null) => row?.querySelector('[data-slot="bot-state"]')?.textContent ?? null
 
 /** The sidebar over a screen, so a case can open a chat by the row that leads to it. */
 const screen = (entry: string, also?: { to: string }) => (
@@ -186,12 +185,15 @@ test("a room its roster seats counts toward the bot's unread", async () => {
     { id: "room-thread", at: 2 },
     { hostId: "host-1", seenAt: Date.now(), hermesProfile: "main" },
   )
-  // A room is nobody's chat: it lists in every bot its roster seats (ADR 0115), and its row is
-  // unread by the same rule a chat's is — one conversation, one count. `roomNeeds` is already at the
-  // record's own clock, so the list asks the Host for nothing while this case runs.
+  // A room is nobody's chat, and it lists in every bot its roster seats rather than in the bot that
+  // carried the record here (ADR 0115) — so another bot of the same host carries it. Its row is
+  // unread by the same rule a chat's is, and `roomNeeds` is already at the record's own clock, so the
+  // list asks the Host for nothing while this case runs.
+  const carrier = { ...bot, id: "bot-2", name: "Other", hermesProfile: "other" }
+  await db.profiles.put(carrier)
   await db.conversations.put({
     id: "room-1",
-    profileId: bot.id,
+    profileId: carrier.id,
     title: "A room",
     hermesSessionId: "room-1",
     room: {

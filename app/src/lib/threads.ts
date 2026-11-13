@@ -51,8 +51,8 @@ export interface BotSummary {
   latest?: Conversation
   waiting: number
   /**
-   * How many of the bot's conversations this device holds past its read mark: its chats, and the
-   * rooms its roster seats — one conversation, one of the count (ADR 0110, ADR 0115).
+   * How many conversations of the bot's this device holds past its read mark: every chat its list
+   * draws, and every room its roster seats — one conversation, one of the count (ADR 0110, ADR 0115).
    */
   unread: number
 }
@@ -106,13 +106,14 @@ export function useBotSummaries(): BotSummary[] | undefined {
     const bots = await listEnabledProfiles()
     return Promise.all(
       bots.map(async (bot) => {
-        const chats = await conversationsOf(bot.id)
-          .reverse()
-          .filter(listsAsChat)
-          .limit(BOT_CHATS)
-          .toArray()
-        // Only a chat's newest reply can wait on the user, so only that one is read.
-        const newest = await Promise.all(chats.map((c) => newestMessage(c.id, isReply)))
+        // Every chat the bot has, newest first: a chat older than a read bound is still a row of its
+        // list, so it still counts (ADR 0136).
+        const chats = await conversationsOf(bot.id).reverse().filter(listsAsChat).toArray()
+        // Only a chat's newest reply can wait on the user, and a reply's read is what a row costs, so
+        // only the newest `BOT_CHATS` are read — a bound on the reads, never on what the row counts.
+        const newest = await Promise.all(
+          chats.slice(0, BOT_CHATS).map((c) => newestMessage(c.id, isReply)),
+        )
         const local = new Set(newest.filter((m) => waitsOnUser(m)).map((m) => m!.conversationId))
         return { bot, chats, local }
       }),
@@ -124,8 +125,9 @@ export function useBotSummaries(): BotSummary[] | undefined {
     label: labelOf(labels, bot),
     latest: chats[0],
     waiting: chats.filter((c) => local.has(c.id) || live[c.hermesSessionId]).length,
-    // A chat this device has never opened holds no mark and so counts for nothing, exactly as its row
-    // draws no dot; a room's own row is unread by that same rule, and its record is the one to ask.
+    // A chat this device has never opened holds no mark, so it counts for nothing, exactly as its row
+    // draws no dot (ADR 0110). A room counts off its own record's clock and its own read mark, which
+    // is the rule its row draws too (ADR 0115).
     unread:
       chats.filter((chat) => isUnread(chat.updatedAt, marks[chat.id])).length +
       (rooms ?? []).filter(

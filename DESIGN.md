@@ -427,10 +427,11 @@ the tint a banner, a badge or a count sits on; `warning-line` and `destructive-l
 that speaks on that surface. A tone is never used as its own line of text: the tint would leave it
 at 2.55:1.
 
-**Dots, code and charts.** A state is an 8px dot in `{colors.success}`, `{colors.info}`,
-`{colors.merged}` or `{colors.warning}` — the last the one that says a row holds something this
-device hasn't read, and it always stands beside the words that count it. A project's token use is
-four dots, `{colors.usage-input}` through
+**Dots, code and charts.** A state is an 8px dot in `{colors.success}`, `{colors.info}` or
+`{colors.merged}`. The one exception names its meaning: a bot row's `{colors.warning}` dot at the end
+of its line says the bot holds something this device hasn't read, and it always stands beside the
+words that count it — a mark on an avatar, where no words stand, stays `{colors.info}`. A project's
+token use is four dots, `{colors.usage-input}` through
 `{colors.usage-cache-read}`. Code is `{typography.code}` on the muted block a tool card draws, in
 the six syntax colours. A chart draws its series from `chart-series-1` upward, never reordering
 them, and an interface's tables and lists reuse the row and card above rather than inventing a

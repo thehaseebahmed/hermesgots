@@ -19,9 +19,14 @@ every pass, and the bot's own list says the same thing one tap away.
 **The mark is the warning dot, and there is one of it.** A dot sits at the right end of the row while
 something is unread, in `{colors.warning}` — the tone the app already carries for a thing waiting on
 the reader, and a fill, never a line of text. It is drawn and never read out, because the count beside
-it is what says the state. The waiting pill goes: a reply that waits on the user is activity past the
-read mark, so the count already includes it. The avatar's corner dot stays for the rail alone — a
-collapsed sidebar draws no line under the name, so that is the only place it has to be.
+it is what says the state. The waiting pill goes, because the row is allowed one mark and the user
+chose the count: what it said is still on the bot's list, where a row says it needs the reader. The
+count is not a replacement for it — the count is mark-based, so a chat this device has already read
+can still hold a reply waiting on the user and not be counted — and the chip was the better words for
+that fact; it went for the row's sake, not because the count covers it. The avatar's corner dot stays
+for the rail alone, in `{colors.info}` like every other unread dot in the app: a collapsed sidebar
+draws no line under the name, so that is the only place it has to be, and a dot with no words beside
+it is the app's existing mark rather than the toned one this row adds.
 
 ## Considered options
 
@@ -39,6 +44,10 @@ collapsed sidebar draws no line under the name, so that is the only place it has
 
 - `stateLine` (`lib/bot-chrome.ts`) holds the words, and `scripts/test-bot-chrome.mjs` pins all four
   states as one table. `previewLine`, and the `preview` read behind it, are gone.
+- `presence` answers `undefined` where a pass got no answer from a host this device has never heard:
+  before this, it answered "away", so the row would have said `Offline` about a bot the device cannot
+  place at all, while Settings said nothing about the same bot. Only a sighting lets a failed pass read
+  as away (ADR 0110's rule for the dot is unchanged).
 - `BotSummary.unread` is a count. `useBotSummaries` asks `useRoomNeeds` for the seats, so a room is
   counted where it lists (ADR 0115), and that costs the read of each room's page where the summary
   used to read each bot's newest chat.
