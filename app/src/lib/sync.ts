@@ -38,6 +38,7 @@ import {
   type Appearance,
   type Conversation,
   type Profile,
+  type Settings,
 } from "@/lib/db"
 import { mergeDocs, type Doc, type Entry } from "@/lib/merge"
 import { syncRegistry } from "@/lib/registry"
@@ -528,16 +529,19 @@ async function syncPrompts(key: CryptoKey) {
 }
 
 /**
- * The `settings` document: the Appearance switches as one record. It is the document's only record
- * now — a device still running a build with the retired chat threads record writes it beside this
- * one, and this build neither reads nor re-adopts it.
+ * The `settings` document's one record: the Appearance switches as `APPEARANCE_FIELDS` names them, by
+ * hand, so adding one to that list fails to compile here. Nothing else on this device's settings row
+ * is in it — a pill, a sort, a keyboard answer is how this device is read, not a fact about the
+ * account (ADR 0078, ADR 0145) — and that naming is what keeps them here: a field nothing names
+ * cannot be carried, so a per-bot chat filter never crosses a device, and nothing has to promise it
+ * won't. `appearanceAt` is 0 until the user changes a switch here, so a choice made on another device
+ * wins until then.
  *
- * The appearance record names every field of `APPEARANCE_FIELDS` by hand, so adding one to the list
- * fails to compile here; `appearanceAt` is 0 until the user changes a switch here, so a choice made
- * on another device wins until then.
+ * Exported for the case that reads the record without unsealing a document, since it is the one place
+ * the list of fields that cross devices is spelled.
  */
-async function localSettings(): Promise<Doc<Appearance>> {
-  const { appearanceAt, steerByDefault, breakReminders, navShortcuts } = await getSettings()
+export function syncedAppearance(settings: Settings): Doc<Appearance> {
+  const { appearanceAt, steerByDefault, breakReminders, navShortcuts } = settings
   return {
     appearance: {
       at: appearanceAt ?? 0,
@@ -548,6 +552,15 @@ async function localSettings(): Promise<Doc<Appearance>> {
       },
     },
   }
+}
+
+/**
+ * The `settings` document: the Appearance switches as one record. It is the document's only record
+ * now — a device still running a build with the retired chat threads record writes it beside this
+ * one, and this build neither reads nor re-adopts it.
+ */
+async function localSettings(): Promise<Doc<Appearance>> {
+  return syncedAppearance(await getSettings())
 }
 
 async function syncAppearance(key: CryptoKey) {
