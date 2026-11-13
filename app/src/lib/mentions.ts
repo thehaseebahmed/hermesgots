@@ -20,8 +20,8 @@ import { mentionName } from "./mention"
 import type { Mention } from "./mention-marker"
 import { quietly } from "./report"
 
-/** How many of the bot's sessions the menu offers: what fits the room above a phone's keyboard. */
-const OFFERED_SESSIONS = 8
+/** How many rows an unfiltered menu draws: what fits the room above a phone's keyboard. */
+export const MENU_ROWS = 8
 
 /** One row the menu draws: what a pick writes, and the one word under it saying what it is. */
 export interface MentionRow extends Mention {
@@ -50,12 +50,14 @@ export function useMentionRows(
 }
 
 /**
- * The bot's newest sessions that can be named, newest first. A read that fails leaves the bots that
- * answered standing rather than taking the whole menu down with it.
+ * Every session of the bot's that can be named, newest first — not just the newest few: the menu
+ * draws a handful while nothing is typed and searches the whole list behind a query, so a session
+ * from months ago is reachable by its name. A read that fails leaves the bots that answered
+ * standing rather than taking the whole menu down with it.
  */
 async function sessionsOf(profileId: string, here: string | undefined): Promise<MentionRow[]> {
-  // The walk stops once eight have been found, so a bot with a long history pays for eight rows and
-  // not for the partition: the predicate runs per row the index hands over, as it is read.
+  // The exclusions run per row as the index hands it over, so the partition is walked once, and
+  // only the rows a reader could name are materialised.
   const chats = await conversationsOf(profileId)
     .reverse()
     .filter(
@@ -67,7 +69,6 @@ async function sessionsOf(profileId: string, here: string | undefined): Promise<
         !chat.canvasId &&
         chat.id !== here,
     )
-    .limit(OFFERED_SESSIONS)
     .toArray()
     .catch(quietly("Reading the sessions that may be mentioned"))
   return (chats ?? []).map((chat) => ({

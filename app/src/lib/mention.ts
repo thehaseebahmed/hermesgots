@@ -61,11 +61,17 @@ export function pickMention(text: string, token: MentionToken, name: string) {
 }
 
 /**
- * The rows a typed query keeps: a name holding it, case aside, in the list's own order — sessions
- * before bots, as the list offers them. Nothing typed is every row.
+ * The rows a menu draws under a query: a name holding it, case aside, in the list's own order —
+ * sessions before bots, as the list offers them. Nothing typed is the first `limit` rows, which is
+ * the room the menu has; a query is asked of every row, since a reader who types a name is hunting
+ * for one the short list did not have room to show.
  */
-export function rankMentions<T extends { name: string }>(rows: T[], query: string): T[] {
+export function rankMentions<T extends { name: string }>(
+  rows: T[],
+  query: string,
+  limit: number,
+): T[] {
   const wanted = query.toLowerCase()
-  if (!wanted) return rows
+  if (!wanted) return rows.slice(0, limit)
   return rows.filter((row) => row.name.toLowerCase().includes(wanted))
 }

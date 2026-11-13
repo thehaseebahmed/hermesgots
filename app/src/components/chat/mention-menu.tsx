@@ -2,8 +2,9 @@
  * The `@` menu: this bot's sessions and the other bots on its host, one row each, drawn in the same
  * box the `/` menu hangs in.
  *
- * A row's name is what a pick writes into the sentence, so `@` is part of what the row shows; the
- * line under it says which kind of thing it is, because two names can read alike. The list is one
+ * A row shows the name a pick writes into the sentence — the session's title, a bot's name, and no
+ * `@` of its own — and the line under it says which kind of thing it is, because two names can read
+ * alike. The list is one
  * group and one `optionId` run, so a row's id means the same thing whichever kind it holds.
  */
 import { useEffect } from "react"
@@ -56,7 +57,7 @@ export function MentionMenu({
                 key={`${row.kind}:${row.id}`}
                 id={optionId(id, index)}
                 leading={<Icon className="size-4 text-muted-foreground" />}
-                title={<span className="min-w-0 truncate text-sm">@{row.name}</span>}
+                title={<span className="min-w-0 truncate text-sm">{row.name}</span>}
                 line={row.line}
                 active={index === active}
                 onActive={() => index !== active && onActive(index)}

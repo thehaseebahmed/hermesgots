@@ -21,7 +21,6 @@ test("an @ that begins a word mid-message is a token too", () => {
 
 test("a new line starts a token just as a space does", () => {
   assert.equal(tokenAt("fix the tests\n@week")?.start, 14)
-  assert.equal(tokenAt("fix the tests\n@week")?.start, 14)
   assert.equal(tokenAt("\n@week")?.start, 1)
 })
 
@@ -92,23 +91,35 @@ test("the letters typed after the caret inside the token stay", () => {
 
 test("a query keeps the rows whose name holds it, in the list's own order", () => {
   const rows = [{ name: "Weekly review" }, { name: "Q3 Planning" }, { name: "Weekly retro" }]
-  // Nothing typed is every row, in the order the menu offers them.
+  // Nothing typed is the room the menu has, in the order the menu offers them.
   assert.deepEqual(
-    rankMentions(rows, "").map((row) => row.name),
+    rankMentions(rows, "", 8).map((row) => row.name),
     ["Weekly review", "Q3 Planning", "Weekly retro"],
   )
+  assert.equal(rankMentions(rows, "", 2).length, 2, "and no more than the room it was given")
   // A substring anywhere in the name, not a prefix, and case is no part of it.
   assert.deepEqual(
-    rankMentions(rows, "week").map((row) => row.name),
+    rankMentions(rows, "week", 8).map((row) => row.name),
     ["Weekly review", "Weekly retro"],
   )
   assert.deepEqual(
-    rankMentions(rows, "WEEKLY").map((row) => row.name),
+    rankMentions(rows, "WEEKLY", 8).map((row) => row.name),
     ["Weekly review", "Weekly retro"],
   )
   assert.deepEqual(
-    rankMentions(rows, "plan").map((row) => row.name),
+    rankMentions(rows, "plan", 8).map((row) => row.name),
     ["Q3 Planning"],
   )
-  assert.deepEqual(rankMentions(rows, "zzz"), [])
+  assert.deepEqual(rankMentions(rows, "zzz", 8), [])
+})
+
+test("a query is asked of every row, and the limit is only the empty list's room", () => {
+  const rows = Array.from({ length: 20 }, (_, place) => ({ name: `Session ${place + 1}` }))
+  assert.equal(rankMentions(rows, "", 8).length, 8, "nothing typed is a menu's worth")
+  assert.deepEqual(
+    rankMentions(rows, "session 17", 8).map((row) => row.name),
+    ["Session 17"],
+    "a name older than the menu's room is still found",
+  )
+  assert.equal(rankMentions(rows, "session", 8).length, 20, "and a query is not capped by it")
 })

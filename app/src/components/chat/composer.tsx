@@ -73,7 +73,7 @@ import {
 } from "@/lib/slash"
 import { enterSends, isDoubleEscape, isInterrupt, isSendChord } from "@/lib/keys"
 import { mentionToken, pickMention, rankMentions } from "@/lib/mention"
-import { useMentionRows, type MentionRow } from "@/lib/mentions"
+import { MENU_ROWS, useMentionRows, type MentionRow } from "@/lib/mentions"
 import { markRequest } from "@/lib/request-text"
 import { useSkills } from "@/lib/skills"
 import { midReply, steerAsked } from "@/lib/steer"
@@ -409,7 +409,7 @@ export function Composer({
     mentionable?.here,
     !plain && Boolean(tag) && !disabled,
   )
-  const tagRows = tag ? rankMentions(offered, tag.query) : []
+  const tagRows = tag ? rankMentions(offered, tag.query, MENU_ROWS) : []
   const skillItems: SlashItem[] =
     skills.status === "ok"
       ? runnableSkills(skills.skills).map((skill) => ({ kind: "skill", ...skill }))

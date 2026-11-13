@@ -83,7 +83,7 @@ const menu = () => find(MENU)
 const slashMenu = () => labelled('[role="listbox"]', "Commands and skills")
 /** A row's words are its title and its line, and `PickRow` puts nothing between them. */
 const options = () => findAll('[role="option"]').map((row) => wordsOf(row))
-const offers = (name: string, line: "Session" | "Bot") => options().includes(`@${name}${line}`)
+const offers = (name: string, line: "Session" | "Bot") => options().includes(`${name}${line}`)
 const field = composerField
 
 /** One key in the field, as a reader presses it: the menu's own keys are read from here. */
@@ -117,7 +117,7 @@ test("typing @ offers this bot's sessions and its host's other bots, and nothing
 
     await type(field(), "@wee")
     await until(async () => Boolean(menu()), "the menu under the query")
-    assert.deepEqual(options(), ["@Weekly reviewSession"], "the query keeps the one row it names")
+    assert.deepEqual(options(), ["Weekly reviewSession"], "the query keeps the one row it names")
   })
 })
 
@@ -151,29 +151,34 @@ test("Return takes the row the cursor is on, and Escape shuts the menu till the 
   })
 })
 
-test("the menu offers the newest eight sessions, and no more", async () => {
+test("the menu shows its eight rows at rest, and a query reaches every session", async () => {
+  // Ten sessions, named without a space so a query can name one: a token ends at whitespace, so
+  // `@session 2` is two words, not one tag.
   const chats = Array.from({ length: 10 }, (_, place) => ({
     id: `c${place}`,
     profileId: "bot-1",
-    title: `Session ${place + 1}`,
+    title: `Session-${place + 1}`,
     at: 100 + place,
   }))
-  await seedChats(
-    [...chats, { id: "here", profileId: "bot-1", title: "The chat we are in", at: 500 }],
-    {
-      bots: [MENTIONER, SIBLING, AWAY, UNNAMED],
-      active: "bot-1",
-    },
-  )
+  await seedChats([...chats, { id: "here", profileId: "bot-1", title: "The chat we are in", at: 500 }], {
+    bots: [MENTIONER, SIBLING, AWAY, UNNAMED],
+    active: "bot-1",
+  })
   fakeHost("gots-here", { plugin: true })
   await mount(chatScreen("here"), async () => {
     await until(async () => Boolean(field()), "the composer")
     await type(field(), "@")
     await until(async () => Boolean(menu()), "the @ menu")
-    const sessions = options().filter((row) => row.endsWith("Session"))
-    assert.equal(sessions.length, 8, "eight rows: the room above a phone's keyboard")
-    assert.ok(offers("Session 10", "Session"), "the newest is one of them")
-    assert.equal(offers("Session 1", "Session"), false, "the oldest of ten is not")
+    const atRest = options().filter((row) => row.endsWith("Session"))
+    assert.equal(atRest.length, 8, "eight rows at rest: the room above a phone's keyboard")
+    assert.ok(offers("Session-10", "Session"), "the newest is one of them")
+    assert.equal(offers("Session-1", "Session"), false, "and the oldest of ten is not")
+
+    // A name the short list had no room for is found by typing it: the query is asked of every
+    // session this device holds for the bot, not of the eight the menu drew.
+    await type(field(), "@session-2")
+    await until(async () => offers("Session-2", "Session"), "the older session, found by its name")
+    assert.equal(offers("Session-10", "Session"), false, "and the rows the query doesn't name are gone")
   })
 })
 
