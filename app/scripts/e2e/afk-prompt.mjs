@@ -36,9 +36,9 @@ const LAPTOP = 1024
  * app reads those documents as it starts, and a 404 the stub would otherwise answer is a console
  * error the flow can't tell from the app's own.
  */
-const openVault = async (page, profileId) => {
+const openVault = async (page) => {
   await seedVault(page, accountUser.id)
-  const docs = ["bots", "prompts", "settings", `chats/${profileId}`]
+  const docs = ["bots", "prompts", "settings"]
   const sealed = await page.evaluate(
     async ({ userId, docs }) => {
       const vault = await import("/src/lib/vault.ts")
@@ -70,7 +70,7 @@ const run = async ({ page, profileId, shot, until }) => {
   page.on("console", (message) => {
     if (message.type() === "error") errors.push(message.text())
   })
-  await openVault(page, profileId)
+  await openVault(page)
 
   const projectId = await makeProject(until, "AFK Prompt")
   const screen = `${app}/projects/${profileId}/${projectId}`

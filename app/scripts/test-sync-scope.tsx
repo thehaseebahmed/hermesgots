@@ -31,7 +31,7 @@ const REGISTRY_BOT = "bot-registered"
 /** How the sync function answers: at once, slowly, or never well. */
 type Netlify = "fast" | "slow" | "down"
 
-const netlify = { mode: "fast" as Netlify, calls: [] as string[], hangLists: false }
+const netlify = { mode: "fast" as Netlify, calls: [] as string[] }
 /** What each bot's host answers, and what it was asked. */
 const hosts = new Map<string, { chats: number; reachable: boolean }>()
 /** Records the fake plugin answers with beside this device's own, as another device's would look. */
@@ -92,8 +92,6 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.pathname === "/.netlify/functions/sync") {
     const doc = url.searchParams.get("doc") ?? ""
     netlify.calls.push(`${method} ${doc}`)
-    // A document read with no timeout of its own: fetch is given no signal, so nothing ends it.
-    if (netlify.hangLists && doc.startsWith("chats/")) return neverAnswers(init?.signal)
     if (netlify.mode === "down") return json({ error: "Netlify is having a day" }, 500)
     if (netlify.mode === "slow") await sleep(5_000)
     if (method === "PUT") {
@@ -196,7 +194,7 @@ async function device() {
   if (ready) return
   ready = true
   signIn()
-  await seedSettings({ onboarded: true, movedChats: [bot.id] })
+  await seedSettings({ onboarded: true })
   await db.profiles.clear()
   await db.profiles.put(bot)
   await db.conversations.clear()
@@ -249,6 +247,22 @@ test("a change made here reads the documents however recent the last read was", 
   const calls = netlify.calls.slice(before)
   assert.ok(calls.includes("GET bots"), "a whole sync ignores the throttle")
   assert.equal(host(HOST).chats, 1, "and merges the chat list beside it")
+})
+
+test("a pass asks for no bot's old chat document", async () => {
+  await device()
+  host(HOST).chats = 0
+  // Every request the sync function answers is recorded, so a name the pass no longer asks for
+  // leaves no call of its own behind.
+  netlify.calls.length = 0
+  await syncNow()
+  await settle()
+  assert.equal(host(HOST).chats, 1, "the pass merged the bot's chat list")
+  assert.deepEqual(
+    netlify.calls.filter((call) => call.startsWith("GET chats/")),
+    [],
+    "and asked for no bot's old chat document",
+  )
 })
 
 test("a rename here still pushes the bots document, throttle or no throttle", async () => {
@@ -376,30 +390,5 @@ test("a record's text with no saved draft is kept out of this device's row and d
   } finally {
     incoming.clear()
     await db.conversations.delete("legacy-chat")
-  }
-})
-
-test("a document read that never answers doesn't leave the sync running", async () => {
-  await device()
-  // A list that hasn't moved yet: the pass pulls it before it merges anything, and that read
-  // carries no timeout of its own (`account.ts`'s `getDoc` hands `fetch` no signal).
-  await seedSettings({ onboarded: true, movedChats: [] })
-  netlify.hangLists = true
-  host(HOST).chats = 0
-  try {
-    const started = Date.now()
-    const settled = await Promise.race([
-      syncNow().then(() => "settled" as const),
-      sleep(9_000).then(() => "hung" as const),
-    ])
-    const took = Date.now() - started
-    assert.equal(settled, "settled", "the sync ended rather than waiting on the read")
-    assert.ok(took < 8_000, `it ended inside its own budget, not after it (${took}ms)`)
-    assert.equal(syncState().syncingChats, false, "the chat lists' lane ended")
-    assert.equal(syncState().syncingAccount, false, "and so did the documents'")
-    assert.ok(host(HOST).chats >= 1, "and the bots that answered still merged")
-  } finally {
-    netlify.hangLists = false
-    await seedSettings({ onboarded: true, movedChats: [bot.id] })
   }
 })

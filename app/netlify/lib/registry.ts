@@ -47,6 +47,8 @@ interface Code {
 interface Host {
   tokenHash: string
   createdAt: number
+  /** When this host last had a push sent for it, which is the gap a push is throttled by. */
+  pushedAt?: number
 }
 
 interface TokenEntry {
@@ -71,11 +73,8 @@ interface Device {
   /** The categories of push it wants; absent for an app from before there were more than three. */
   categories?: string[]
   updatedAt: number
-}
-
-interface Seen {
-  at: number
-  pluginVersion?: string
+  /** When this device last asked for a test push, which is the gap its own tests are throttled by. */
+  testedAt?: number
 }
 
 /** A code works for 30 minutes and up to 20 profiles, so one covers a sitting. */
@@ -141,22 +140,33 @@ async function read<T>(store: RegistryStore, key: string) {
   return entry ? { data: entry.data as T, etag: entry.etag } : null
 }
 
-/** Read, change and write back on the etag read, retrying when someone wrote in between. */
+/** What an `update` did: the record as it now stands, and whether this call wrote it. */
+interface Update<T> {
+  value: T | null
+  wrote: boolean
+}
+
+/**
+ * Read, change and write back on the etag read, retrying when someone wrote in between. It answers
+ * the record as it now stands and whether this call wrote it, so a route that decided to leave the
+ * record alone — a throttle whose gap hasn't passed — reads that from its own answer rather than
+ * smuggling a flag out of the change.
+ */
 async function update<T>(
   store: RegistryStore,
   key: string,
   change: (current: T | null) => T | null,
-): Promise<T | null> {
+): Promise<Update<T>> {
   for (let attempt = 0; attempt < 4; attempt++) {
     const current = await read<T>(store, key)
     const next = change(current?.data ?? null)
-    if (next === null) return current?.data ?? null
+    if (next === null) return { value: current?.data ?? null, wrote: false }
     const result = await store.setJSON(
       key,
       next,
       current?.etag ? { onlyIfMatch: current.etag } : { onlyIfNew: true },
     )
-    if (result.modified) return next
+    if (result.modified) return { value: next, wrote: true }
   }
   throw new Error("Changed too often")
 }
@@ -176,11 +186,8 @@ async function deleteHost(store: RegistryStore, userId: string, hostId: string) 
   for (const { key } of (await store.list({ prefix: `users/${userId}/bots/` })).blobs) {
     const bot = await read<BotRecord>(store, key)
     if (bot?.data.hostId !== hostId) continue
-    const botId = key.slice(key.lastIndexOf("/") + 1)
     await store.delete(key)
-    await store.delete(`users/${userId}/seen/${botId}`)
   }
-  await store.delete(`users/${userId}/pushed/${hostId}`)
   await store.delete(`users/${userId}/hosts/${hostId}`)
 }
 
@@ -284,7 +291,6 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
       const current = await read<BotRecord>(store, botKey)
       if (current && current.data.hostId !== hostId) return error("Not this host's bot", 403)
       await store.delete(botKey)
-      await store.delete(`users/${userId}/seen/${id}`)
       return new Response(null, { status: 204 })
     }
 
@@ -298,21 +304,15 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
       ) {
         return error("Invalid bots", 400)
       }
-      const pluginVersion =
-        typeof input?.pluginVersion === "string" ? input.pluginVersion.slice(0, 32) : undefined
+      // An answer, never a record: what the plugin asks is whether each bot it holds is still there
+      // and still on, which is what its own check-in reads to publish one that went or was switched
+      // off. When this device's chat-list pass last heard a host is the app's own business now.
       const bots: Record<string, { enabled: boolean } | null> = {}
       for (const botId of ids as string[]) {
         const record = await read<BotRecord>(store, `users/${userId}/bots/${botId}`)
-        if (!record || record.data.hostId !== hostId) {
-          // Gone (or never published): the plugin publishes it again.
-          bots[botId] = null
-          continue
-        }
-        await store.setJSON(`users/${userId}/seen/${botId}`, {
-          at: now,
-          pluginVersion,
-        } satisfies Seen)
-        bots[botId] = { enabled: record.data.enabled }
+        // Gone (or never published): the plugin publishes it again.
+        const held = record && record.data.hostId === hostId ? record.data : null
+        bots[botId] = held ? { enabled: held.enabled } : null
       }
       const inbox = await ctx.inbox(userId)
       return json({ keyId: inbox?.keyId ?? null, bots })
@@ -345,10 +345,15 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
         title: text(input?.title, 120),
         stage: text(input?.stage, 32),
       }
-      const gapKey = `users/${userId}/pushed/${hostId}`
-      const last = await read<{ at: number }>(store, gapKey)
-      if (last && now - last.data.at < PUSH_GAP_MS) return error("Slow down", 429)
-      await store.setJSON(gapKey, { at: now })
+      // The gap rides the host's own record, which this route already reads to learn whose push it
+      // is: one read-modify-write on its etag, instead of a key of its own beside it. A record that
+      // is there and unmodified is the gap refusing the push.
+      const host = await update<Host>(store, `users/${userId}/hosts/${hostId}`, (current) => {
+        if (!current) return null
+        if (current.pushedAt !== undefined && now - current.pushedAt < PUSH_GAP_MS) return null
+        return { ...current, pushedAt: now }
+      })
+      if (host.value && !host.wrote) return error("Slow down", 429)
       let sent = 0
       let failed = 0
       let skipped = 0
@@ -411,13 +416,11 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
   }
 
   if (op === "GET bots") {
-    const bots: Record<string, BotRecord & { seen?: Seen }> = {}
+    const bots: Record<string, BotRecord> = {}
     for (const { key } of (await store.list({ prefix: `users/${userId}/bots/` })).blobs) {
       const record = await read<BotRecord>(store, key)
       if (!record) continue
-      const botId = key.slice(key.lastIndexOf("/") + 1)
-      const seen = await read<Seen>(store, `users/${userId}/seen/${botId}`)
-      bots[botId] = { ...record.data, ...(seen ? { seen: seen.data } : {}) }
+      bots[key.slice(key.lastIndexOf("/") + 1)] = record.data
     }
     return json({ bots })
   }
@@ -436,7 +439,7 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
       return error("Invalid adopts", 400)
     }
     let missing = false
-    const record = await update<BotRecord>(store, `users/${userId}/bots/${id}`, (current) => {
+    const { value: record } = await update<BotRecord>(store, `users/${userId}/bots/${id}`, (current) => {
       if (!current) {
         missing = true
         return null
@@ -466,12 +469,14 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
     }
     const categories = cleanCategories(input?.categories)
     if (input?.categories !== undefined && !categories) return error("Invalid categories", 400)
-    // A token that rotates keeps what the device asked for.
+    // A token that rotates keeps what the device asked for, and the gap its own tests sit behind.
     const previous = await read<Device>(store, `${prefix}${id}`)
     const keep = categories ?? previous?.data.categories
+    const testedAt = previous?.data.testedAt
     await store.setJSON(`${prefix}${id}`, {
       token,
       ...(keep ? { categories: keep } : {}),
+      ...(testedAt !== undefined ? { testedAt } : {}),
       updatedAt: now,
     } satisfies Device)
     return json({ ok: true })
@@ -492,13 +497,15 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
   if (op === "POST push-test") {
     if (!ID.test(id)) return error("Invalid device id", 400)
     if (!ctx.fcm) return error("Push isn't set up on this site", 503)
-    const device = await read<Device>(store, `users/${userId}/devices/${id}`)
-    if (!device) return error("This device isn't registered for push", 404)
-    const gapKey = `users/${userId}/tested`
-    const last = await read<{ at: number }>(store, gapKey)
-    if (last && now - last.data.at < TEST_GAP_MS) return error("Slow down", 429)
-    await store.setJSON(gapKey, { at: now })
-    const reason = await ctx.fcm.test(device.data.token)
+    // The gap rides this device's own record, so one device's test never throttles another's.
+    const device = await update<Device>(store, `users/${userId}/devices/${id}`, (current) => {
+      if (!current) return null
+      if (current.testedAt !== undefined && now - current.testedAt < TEST_GAP_MS) return null
+      return { ...current, testedAt: now }
+    })
+    if (device.value && !device.wrote) return error("Slow down", 429)
+    if (!device.value) return error("This device isn't registered for push", 404)
+    const reason = await ctx.fcm.test(device.value.token)
     return reason ? error(reason, 502) : json({ ok: true })
   }
 
