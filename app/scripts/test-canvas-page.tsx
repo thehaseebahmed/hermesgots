@@ -131,14 +131,16 @@ async function open(
   story: (asked: {
     bot: Awaited<ReturnType<typeof seed>>
     ask: ReturnType<typeof speak>
+    /** The keys the rows were kept under: what a completed sweep of them prunes against. */
+    keys: string[]
   }) => Promise<void>,
 ) {
   const bot = await seed(name)
-  await keepDocs(bot, CANVAS.id, rows)
+  const keys = await keepDocs(bot, CANVAS.id, rows)
   serveNothing()
   await mount(screen, async () => {
     await until(() => drawn().includes("<h1>Reading</h1>"), "the canvas to draw")
-    await story({ bot, ask: speak() })
+    await story({ bot, ask: speak(), keys })
   })
 }
 
@@ -148,7 +150,7 @@ test("a page lists what the sweep has and says the list is partial", async () =>
   // collection. A sweep begun again is no longer whole either, since a document it hasn't reached yet
   // is not absent because it is gone.
   const rows = [doc(0), doc(1), doc(2)]
-  await open("page-partial", rows, async ({ bot, ask }) => {
+  await open("page-partial", rows, async ({ bot, ask, keys }) => {
     let reply = await ask({ type: BRIDGE_MESSAGE, call: 1, method: "list", collection: "items" })
     assert.deepEqual(reply, {
       type: BRIDGE_MESSAGE,
@@ -157,7 +159,7 @@ test("a page lists what the sweep has and says the list is partial", async () =>
       value: { rows, partial: true },
     })
 
-    await completeSweep(bot, CANVAS.id, 0, 3)
+    await completeSweep(bot, CANVAS.id, 0, 3, keys)
     reply = await ask({ type: BRIDGE_MESSAGE, call: 2, method: "list", collection: "items" })
     assert.equal(reply.ok, true)
     assert.deepEqual((reply.value as { rows: CanvasDoc[] }).rows, rows)
@@ -181,7 +183,7 @@ test("a get of an unswept id throws instead of answering null", async () => {
   // Absence is only evidence after a completed sweep: before one, the rows the device holds are a part
   // of the canvas, and a document it can't find may simply not have been read yet. A page told `null`
   // would draw it as deleted.
-  await open("page-unswept-get", [doc(0)], async ({ bot, ask }) => {
+  await open("page-unswept-get", [doc(0)], async ({ bot, ask, keys }) => {
     let reply = await ask({
       type: BRIDGE_MESSAGE,
       call: 1,
@@ -195,7 +197,7 @@ test("a get of an unswept id throws instead of answering null", async () => {
 
     // The same read after a completed sweep is an answer: this device has seen the canvas whole, and
     // the document really isn't in it.
-    await completeSweep(bot, CANVAS.id, 0, 1)
+    await completeSweep(bot, CANVAS.id, 0, 1, keys)
     reply = await ask({
       type: BRIDGE_MESSAGE,
       call: 2,
@@ -214,6 +216,89 @@ test("a get of an unswept id throws instead of answering null", async () => {
       id: "d0000",
     })
     assert.deepEqual(reply, { type: BRIDGE_MESSAGE, reply: 3, ok: true, value: doc(0) })
+  })
+})
+
+test("a get reads one row and a page reads one page of the table", async () => {
+  // A collection of five thousand is what the rows are for: a `get` that carries it to find one row
+  // costs a collection per document, and a `page` that carries it is the read `page` exists to
+  // replace. What each call reads off the table is what this counts — the index it was answered from.
+  const rows = Array.from({ length: 5000 }, (_, n) => doc(n))
+  await open("page-point", rows, async ({ ask }) => {
+    assert.ok(
+      db.canvasDocs.schema.indexes.some((one) => one.name === "[canvasId+collection+id]"),
+      "the table carries the index a page's keyset is read on",
+    )
+
+    const reads: string[] = []
+    const table = db.canvasDocs as unknown as Record<string, unknown>
+    const where = table.where as (index: string) => Record<string, unknown>
+    const get = table.get as (key: string) => Promise<unknown>
+    table.get = (key: string) => {
+      reads.push("one row")
+      return get.call(db.canvasDocs, key)
+    }
+    table.where = (index: string) => {
+      const clause = where.call(db.canvasDocs, index)
+      // What the clause is *asked* for is the cost: a page read off the keyset is the rows it asked
+      // for, while a read of the collection is every row of it and then a cut. `.limit` and `.offset`
+      // answer another collection, so the watch rides them too.
+      const watched = (collection: Record<string, unknown>): Record<string, unknown> => {
+        const toArray = collection.toArray as () => Promise<unknown>
+        collection.toArray = () => {
+          reads.push(`rows from ${index}`)
+          return toArray.call(collection)
+        }
+        for (const name of ["limit", "offset"]) {
+          const next = collection[name] as (...args: unknown[]) => Record<string, unknown>
+          collection[name] = (...args: unknown[]) => watched(next.apply(collection, args))
+        }
+        const count = collection.count as () => Promise<number>
+        collection.count = () => {
+          reads.push(`count from ${index}`)
+          return count.call(collection)
+        }
+        return collection
+      }
+      for (const name of ["between", "equals"]) {
+        const narrowed = clause[name] as (...args: unknown[]) => Record<string, unknown>
+        clause[name] = (...args: unknown[]) => watched(narrowed.apply(clause, args))
+      }
+      return clause
+    }
+    try {
+      const got = await ask({
+        type: BRIDGE_MESSAGE,
+        call: 1,
+        method: "get",
+        collection: "items",
+        id: "d0007",
+      })
+      assert.deepEqual(got, { type: BRIDGE_MESSAGE, reply: 1, ok: true, value: doc(7) })
+      assert.deepEqual(reads, ["one row"], "a get is one row by its key, and no collection at all")
+
+      reads.length = 0
+      const paged = await ask({
+        type: BRIDGE_MESSAGE,
+        call: 2,
+        method: "page",
+        collection: "items",
+        limit: 5,
+      })
+      assert.equal((paged.value as { rows: CanvasDoc[] }).rows.length, 5)
+      assert.deepEqual(
+        [...new Set(reads.filter((one) => one.startsWith("rows from")))],
+        ["rows from [canvasId+collection+id]"],
+        "a page's rows come off the keyset, never off the collection they belong to",
+      )
+      assert.ok(
+        reads.includes("count from [canvasId+collection]"),
+        "and its total is the index's count, which carries no document",
+      )
+    } finally {
+      table.where = where
+      table.get = get
+    }
   })
 })
 

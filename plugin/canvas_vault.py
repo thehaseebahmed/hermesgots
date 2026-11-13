@@ -20,6 +20,9 @@ the file and the host stamped the document:
 - A tick writes at most ``VAULT_PER_TICK`` files and stops after ``VAULT_SECONDS``: five thousand
   documents converge over ticks instead of holding the host for a minute, and a steady-state tick
   writes the one note that moved.
+- A write wakes the watcher, and a wake starts at most one tick a ``WAKE_SECONDS``: a burst of writes —
+  a page's, a device's — is one tick over a store that already holds all of them, so the tick rate is
+  not the write rate and a vault with nothing to write is not walked per document written.
 
 Turning the switch off stops the writing and deletes nothing already written, since a wiki the user
 may have linked and edited is not the app's to take away; a canvas the store no longer holds is
@@ -70,7 +73,21 @@ VAULT_SECONDS = 20.0
 # the pace a first backup converges at rather than the pace a change is noticed at.
 TICK_SECONDS = 60.0
 
+# The least time between two ticks a write may ask for. Every write and every remove that took a row
+# wakes the vault, and a page's burst or a device sweeping a canvas writes thousands: at the write rate
+# the tick rate *is* the write rate, and a converged tick over five thousand documents is a walk of
+# every note's ``stat()`` for a vault that has not moved. A minimum interval makes one tick carry what
+# every write inside it asked for — the walk is incremental, so a tick that waited still writes only
+# what moved — and ``TICK_SECONDS`` is the pace a burst ends at, since a wake inside the interval is
+# dropped rather than queued.
+WAKE_SECONDS = 2.0
+
 _ticker = ticker.Ticker("canvas vault")
+
+# When a wake last started a tick, on the monotonic clock: the gate ``wake`` reads. A module value
+# rather than the ticker's, because the ticker only knows when it was poked, and the rate this bounds
+# is the work a poke causes.
+_woken_at: float = float("-inf")
 
 
 def root(home: Path) -> Path:
@@ -79,7 +96,18 @@ def root(home: Path) -> Path:
 
 
 def wake() -> None:
-    """Has the vault look again now; safe from any thread, which is where a data write lands."""
+    """Has the vault look again, at most once a ``WAKE_SECONDS``; safe from any thread.
+
+    Called by every data write and remove (``canvases._moved``), so this is where a burst is coalesced:
+    the first write of a burst starts a tick and the rest ride it, since the tick re-reads the store and
+    writes what moved — what a dropped wake would have asked for is what the next tick finds. Returns
+    None: whether a wake was taken is the vault's business, not the writer's.
+    """
+    global _woken_at
+    now = time.monotonic()
+    if now - _woken_at < WAKE_SECONDS:
+        return
+    _woken_at = now
     _ticker.wake()
 
 

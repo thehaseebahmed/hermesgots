@@ -39,19 +39,22 @@ export function sweepCanvas(profile: Profile, id: string): Promise<void> {
 
 async function run(profile: Profile, id: string) {
   const generation = await beginSweep(profile, id)
+  // Every key this sweep saw, in the order the host named them: what its completion prunes against, so a
+  // row it read and did not rewrite is still a document the sweep saw.
+  const swept = new Set<string>()
   // Only the catalogue is asked with the whole read in hand: a host from before the paged route has
   // no `/data` at all, and today's one read of the canvas stands in for a sweep that couldn't begin.
   // A 404 to a page of a canvas the host did catalogue is that canvas moving under the sweep, and it
   // leaves the pages that landed and prunes nothing rather than answering as a whole read.
   const catalogue = await catalogueOf(profile, id)
   if (!catalogue) {
-    await sweepWhole(profile, id, generation)
+    await sweepWhole(profile, id, generation, swept)
     return
   }
   for (const { collection } of catalogue.collections)
-    await sweepCollection(profile, id, collection, generation)
+    await sweepCollection(profile, id, collection, generation, swept)
   const newest = catalogue.collections.reduce((at, one) => Math.max(at, one.newest_at ?? 0), 0)
-  await completeSweep(profile, id, generation, newest)
+  await completeSweep(profile, id, generation, newest, swept)
 }
 
 /**
@@ -73,25 +76,33 @@ async function sweepCollection(
   id: string,
   collection: string,
   generation: number,
+  swept: Set<string>,
 ) {
   let after: string | null = null
   for (;;) {
     const page = await dataPage(profile, id, collection, after, PAGE_ROWS)
-    await keepDocs(profile, id, storedDocs(page.documents), generation)
+    for (const key of await keepDocs(profile, id, storedDocs(page.documents), generation))
+      swept.add(key)
     if (page.next === null) return
     after = page.next
   }
 }
 
 /** The whole read a host without the paged route answers, kept as a completed sweep. */
-async function sweepWhole(profile: Profile, id: string, generation: number) {
+async function sweepWhole(
+  profile: Profile,
+  id: string,
+  generation: number,
+  swept: Set<string>,
+) {
   const raw = await getCanvas(profile, id, { docs: true })
   const docs = storedDocs(raw?.data)
-  await keepDocs(profile, id, docs, generation)
+  for (const key of await keepDocs(profile, id, docs, generation)) swept.add(key)
   await completeSweep(
     profile,
     id,
     generation,
     docs.reduce((at, one) => Math.max(at, one.at), 0),
+    swept,
   )
 }

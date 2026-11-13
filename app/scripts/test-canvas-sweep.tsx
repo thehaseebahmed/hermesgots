@@ -15,7 +15,7 @@ import { act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { BRIDGE_MESSAGE, type CanvasDoc } from "@/lib/canvas-bridge"
-import { canvasCacheKey } from "@/lib/canvas-cache"
+import { canvasCacheKey, canvasListKey, recordOf } from "@/lib/canvas-cache"
 import {
   beginSweep,
   cachedDocs,
@@ -299,6 +299,39 @@ test("a completed sweep prunes exactly the document the host stopped naming", as
   assert.ok((await sweepMark(bot, CANVAS.id))?.completeAt, "a sweep completed")
 })
 
+test("a sweep of documents that did not move writes no row", async () => {
+  // A sweep re-puts every row it reads unless it reads the clock first: a canvas of five thousand
+  // documents would then be five thousand writes on every open and every poll, for a canvas the host
+  // has not changed a document of. A row whose clock is where it was is the row the page would write.
+  const bot = await seed("sweep-unmoved")
+  const held = [doc(0), doc(1), doc(2)]
+  await swept(bot, CANVAS.id, held)
+  const writes: number[] = []
+  const table = db.canvasDocs as unknown as Record<string, unknown>
+  const bulkPut = table.bulkPut as (rows: unknown[]) => Promise<unknown>
+  const put = table.put as (row: unknown) => Promise<unknown>
+  table.bulkPut = (rows: unknown[]) => {
+    writes.push(rows.length)
+    return bulkPut.call(db.canvasDocs, rows)
+  }
+  table.put = (row: unknown) => {
+    writes.push(1)
+    return put.call(db.canvasDocs, row)
+  }
+  try {
+    await swept(bot, CANVAS.id, held)
+  } finally {
+    table.bulkPut = bulkPut
+    table.put = put
+  }
+  assert.deepEqual(writes, [], "a sweep that found nothing moved wrote nothing")
+  assert.deepEqual(
+    (await cachedDocs(bot, CANVAS.id)).map((row) => row.id),
+    held.map((row) => row.id),
+    "and every document it saw is still held — a row it did not rewrite is not one it did not see",
+  )
+})
+
 test("a host with no paged route fills the rows from one whole read", async () => {
   // A plugin from before this route answers 404 to the catalogue: the app asks for the canvas itself,
   // which carries its documents, and keeps them as a completed sweep.
@@ -476,6 +509,11 @@ test("a v41 database opens its canvas's documents as rows", async () => {
   before.close()
   await db.open()
   assert.deepEqual(await cachedDocs(bot, CANVAS.id), [doct], "the document is a row")
+  assert.ok(
+    ((await db.canvasDocs.get(canvasDocKey(connectionKey(bot), CANVAS.id, "items", doct.id)))
+      ?.bytes ?? 0) > 0,
+    "and the row says what it weighs, so no budget pass has to encode it again",
+  )
   assert.equal(
     (await db.canvasCache.get(canvasCacheKey(bot, CANVAS.id)))?.canvas?.data,
     undefined,
@@ -523,8 +561,14 @@ const BUDGET = 2_600
 /** One canvas this device has swept whole: its rows, and the mark a completed sweep leaves. */
 async function swept(bot: Profile, id: string, docs: CanvasDoc[]) {
   const generation = await beginSweep(bot, id)
-  await keepDocs(bot, id, docs, generation)
-  await completeSweep(bot, id, generation, docs.reduce((at, one) => Math.max(at, one.at), 0))
+  const keys = await keepDocs(bot, id, docs, generation)
+  await completeSweep(
+    bot,
+    id,
+    generation,
+    docs.reduce((at, one) => Math.max(at, one.at), 0),
+    keys,
+  )
 }
 
 /** A canvas opened on this device at a clock of the test's choosing: recency is the device's fact. */
@@ -622,14 +666,14 @@ test("an eviction during a sweep leaves the canvas unswept", async () => {
     await openedAt(bot, screen, 3_000)
     // The coldest canvas begins a sweep and one of its pages lands.
     const generation = await beginSweep(bot, inFlight)
-    await keepDocs(bot, inFlight, [bulky(0, 1)], generation)
+    const landed = await keepDocs(bot, inFlight, [bulky(0, 1)], generation)
     // Another canvas's sweep carries the device past its budget, and the one under way is the coldest.
     await swept(bot, screen, [bulky(0, 1), bulky(1, 2)])
     assert.deepEqual(await cachedDocs(bot, inFlight), [], "the evicted canvas's rows went")
     assert.equal(await sweepMark(bot, inFlight), undefined, "with its mark")
 
     // The sweep in flight now reaches its last page, and may not say the canvas is whole.
-    await completeSweep(bot, inFlight, generation, 2)
+    await completeSweep(bot, inFlight, generation, 2, landed)
     assert.equal(
       await sweepMark(bot, inFlight),
       undefined,
@@ -642,17 +686,108 @@ test("an eviction during a sweep leaves the canvas unswept", async () => {
   }
 })
 
+test("the budget reads a bot's records and never a canvas's page", async () => {
+  // The device's budget needs two facts off the copy: which canvases a reader pinned, and which hold a
+  // write its host has not answered. The second is the queue, and the first is the list of records —
+  // while the per-canvas rows beside it carry the page each screen drew, up to 256 KB each, which the
+  // pass was reading to learn a flag.
+  const bot = await seed("budget-pages")
+  const [pinned, spare, screen] = ["c-pinned", "c-spare", "c-screen"]
+  for (const id of [pinned, spare, screen]) await swept(bot, id, [bulky(0, 1), bulky(1, 2)])
+  // One canvas kept with the page it was drawn with, and one list of every record.
+  await db.canvasCache.put({
+    key: canvasCacheKey(bot, pinned),
+    connection: connectionKey(bot),
+    canvasId: pinned,
+    canvas: { ...CANVAS, id: pinned, profileId: bot.id, html: "x".repeat(200_000) },
+  })
+  await db.canvasCache.put({
+    key: canvasListKey(bot),
+    connection: connectionKey(bot),
+    canvases: [pinned, spare, screen].map((id) =>
+      recordOf({ ...CANVAS, id, profileId: bot.id, pinned: id === pinned }),
+    ),
+  })
+
+  const reads: string[] = []
+  const table = db.canvasCache as unknown as Record<string, unknown>
+  const bulkGet = table.bulkGet as (keys: string[]) => Promise<unknown[]>
+  const toArray = table.toArray as () => Promise<unknown[]>
+  table.bulkGet = (keys: string[]) => {
+    reads.push(...keys)
+    return bulkGet.call(db.canvasCache, keys)
+  }
+  table.toArray = () => {
+    reads.push("every row")
+    return toArray.call(db.canvasCache)
+  }
+  const release = holdDocBudget(BUDGET)
+  try {
+    await openedAt(bot, pinned, 1_000)
+    await openedAt(bot, spare, 2_000)
+    await openedAt(bot, screen, 3_000)
+    await swept(bot, screen, [bulky(0, 1), bulky(1, 2)])
+  } finally {
+    release()
+    table.bulkGet = bulkGet
+    table.toArray = toArray
+  }
+
+  assert.ok(
+    !reads.includes("every row"),
+    `the budget never reads the table whole, pages and all: ${reads.join(", ")}`,
+  )
+  assert.ok(
+    reads.every((key) => key.endsWith("\ncanvases")),
+    `every row it reads is a bot's records: ${reads.join(", ")}`,
+  )
+  assert.equal((await cachedDocs(bot, pinned)).length, 2, "and the canvas a reader pinned is spared")
+  assert.deepEqual(await cachedDocs(bot, spare), [], "while the coldest canvas that is neither goes")
+})
+
+test("the budget weighs the rows it is given, not their documents again", async () => {
+  // What a row weighs is fixed when the row is written, so the pass that trims the device is a sum
+  // rather than the JSON of every document encoded a second time — which is what walking the rows to
+  // weigh them costs, on every completed sweep and every write that adds a document.
+  const bot = await seed("budget-weigh")
+  const docs = Array.from({ length: 20 }, (_, n) => bulky(n))
+  await swept(bot, "c-one", docs)
+  await swept(bot, "c-two", docs)
+  const generation = await beginSweep(bot, "c-three")
+  const keys = await keepDocs(bot, "c-three", docs, generation)
+
+  const real = JSON.stringify
+  let weighed = 0
+  JSON.stringify = ((value: unknown, ...rest: unknown[]) => {
+    if (value && typeof value === "object" && "text" in (value as Record<string, unknown>)) {
+      weighed += 1
+    }
+    return (real as (...args: unknown[]) => string | undefined)(value, ...rest)
+  }) as typeof JSON.stringify
+  const release = holdDocBudget(BUDGET)
+  try {
+    // A completed sweep is where the rows have just grown, and so where the budget is enforced.
+    await completeSweep(bot, "c-three", generation, 20, keys)
+  } finally {
+    release()
+    JSON.stringify = real
+  }
+
+  assert.equal(weighed, 0, "no document was weighed a second time: every row carries its own bytes")
+  assert.deepEqual(await cachedDocs(bot, "c-one"), [], "and the pass still took the coldest canvas")
+})
+
 test("the canvas on screen and a pinned canvas are never evicted", async () => {
   // Two canvases are not the budget's to take: the one a screen is drawing, and one the reader asked
   // to keep by pinning it — so the coldest canvas that is neither is what goes.
   const bot = await seed("budget-spared")
   const [pinned, spare, screen] = ["c-pinned", "c-spare", "c-screen"]
   for (const id of [pinned, spare, screen]) await swept(bot, id, [bulky(0, 1), bulky(1, 2)])
+  // The pinned canvas's record, kept where records live: the list's row, which carries no page.
   await db.canvasCache.put({
-    key: canvasCacheKey(bot, pinned),
+    key: canvasListKey(bot),
     connection: connectionKey(bot),
-    canvasId: pinned,
-    canvas: { ...CANVAS, id: pinned, profileId: bot.id, pinned: true },
+    canvases: [recordOf({ ...CANVAS, id: pinned, profileId: bot.id, pinned: true })],
   })
   const release = holdDocBudget(BUDGET)
   try {

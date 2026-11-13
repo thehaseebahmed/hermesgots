@@ -13,13 +13,17 @@
  */
 
 import type { Canvas, CanvasRecord } from "@/lib/canvases"
-import { forgetDocs } from "@/lib/canvas-docs"
+import { canvasListKey as listKeyOf, forgetDocs } from "@/lib/canvas-docs"
 import { connectionKey } from "@/lib/connection"
 import { db, type Profile } from "@/lib/db"
 import { equal } from "@/lib/equal"
 import { quietly } from "@/lib/report"
 
-export const canvasListKey = (profile: Profile) => `${connectionKey(profile)}\ncanvases`
+/**
+ * The key a bot's whole list of records is filed under: the key is the connection's
+ * (`canvas-docs.ts`), named here by the bot a caller holds.
+ */
+export const canvasListKey = (profile: Profile) => listKeyOf(connectionKey(profile))
 
 export const canvasCacheKey = (profile: Profile, id: string) =>
   `${connectionKey(profile)}\n${id}`

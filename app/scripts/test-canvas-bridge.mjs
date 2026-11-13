@@ -28,12 +28,22 @@ const doc = (collection, id, value, at) => ({ collection, id, doc: value, at })
 const COPY = [doc("items", "a", { n: 1 }, 10), doc("items", "b", { n: 2 }, 20), doc("notes", "a", "hi", 30)]
 
 /**
- * A device's rows as a read is answered from: one collection's documents, their count, and whether a
- * sweep has seen the canvas whole. `count` is overridable so a case can say a collection is bigger than
- * the documents it hands back — which is what a real index says when the documents were never carried.
+ * A device's rows as a read is answered from: one collection's documents, one document by its key, one
+ * page of a collection, their count, and whether a sweep has seen the canvas whole. `count` is
+ * overridable so a case can say a collection is bigger than the documents it hands back — which is what
+ * a real index says when the documents were never carried.
  */
 const copyOf = (docs, { whole = true, count } = {}) => ({
   docs: async (collection) => docs.filter((row) => row.collection === collection),
+  get: async (collection, id) =>
+    docs.find((row) => row.collection === collection && row.id === id),
+  page: async (collection, after, limit) => {
+    const rest = docs
+      .filter((row) => row.collection === collection)
+      .filter((row) => after === null || row.id > after)
+    const rows = rest.slice(0, limit)
+    return { rows, next: rest.length > limit ? rows[rows.length - 1].id : null }
+  },
   count: async (collection) => count ?? docs.filter((row) => row.collection === collection).length,
   whole: async () => whole,
 })
@@ -263,6 +273,67 @@ test("readCall takes a call the page sent and answerRead answers it from the cop
   assert.deepEqual(
     await answerRead({ call: 9, method: "list", collection: "items" }, copyOf(COPY, { whole: false })),
     { rows: [COPY[0], COPY[1]], partial: true },
+  )
+})
+
+test("a get reads one row and a page reads one page, never the collection", async () => {
+  // A collection of five thousand answers a get by carrying five thousand rows to find one, and a page
+  // the same: both calls exist because a page need not hold a collection, so what they read is what
+  // they answer. The copy counts what it is asked for, since that is the cost.
+  const rows = Array.from({ length: 5000 }, (_, n) => doc("items", `k${String(n).padStart(4, "0")}`, n, n))
+  const reads = { docs: 0, get: 0, page: 0, limits: [] }
+  const copy = {
+    docs: async (collection) => {
+      reads.docs += 1
+      return rows.filter((row) => row.collection === collection)
+    },
+    get: async (collection, id) => {
+      reads.get += 1
+      return rows.find((row) => row.collection === collection && row.id === id)
+    },
+    page: async (collection, after, limit) => {
+      reads.page += 1
+      reads.limits.push(limit)
+      const rest = rows
+        .filter((row) => row.collection === collection)
+        .filter((row) => after === null || row.id > after)
+      const held = rest.slice(0, limit)
+      return { rows: held, next: rest.length > limit ? held[held.length - 1].id : null }
+    },
+    count: async () => rows.length,
+    whole: async () => true,
+  }
+
+  assert.deepEqual(
+    await answerRead({ call: 1, method: "get", collection: "items", id: "k0007" }, copy),
+    rows[7],
+  )
+  assert.equal(reads.get, 1, "a get reads the one row it answers")
+  assert.equal(reads.docs, 0, "and carries no collection to find it in")
+
+  // A page of five rows reads five rows: the collection is not carried to cut a page out of it.
+  const paged = await answerRead(
+    { call: 2, method: "page", collection: "items", after: null, limit: 5 },
+    copy,
+  )
+  assert.deepEqual(paged, {
+    rows: rows.slice(0, 5),
+    next: "k0004",
+    total: 5000,
+    partial: false,
+  })
+  assert.equal(reads.page, 1, "a page is the copy's own read")
+  assert.deepEqual(reads.limits, [5], "for the number of rows the page asked for")
+  assert.equal(reads.docs, 0, "and nothing reads the collection whole")
+
+  // The end of the collection is the copy's to say: the bridge no longer knows whether another page
+  // follows until the copy answers one.
+  assert.deepEqual(
+    await answerRead(
+      { call: 3, method: "page", collection: "items", after: "k4998", limit: 5 },
+      copy,
+    ),
+    { rows: rows.slice(4999), next: null, total: 5000, partial: false },
   )
 })
 

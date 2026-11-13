@@ -27,11 +27,13 @@ import {
 } from "@/lib/canvas-cache"
 import {
   cachedCount,
+  cachedDoc,
   cachedDocs,
   forgetDoc,
   keepAnswer,
   keepWrite,
   noteOpened,
+  pageDocs,
   sweptWhole,
   sweepMarks,
 } from "@/lib/canvas-docs"
@@ -327,17 +329,27 @@ export function canvasReader(id: string): (call: BridgeDataCall) => Promise<unkn
 
 /**
  * One canvas's rows as a read sees them, resolved for the one call that asks: the bot the canvas
- * belongs to, read once, then its collection's documents, their count and the sweep's mark, each read
- * when the call needs it — so a count never carries five thousand documents to answer a number. A
- * canvas this device holds no bot for has no rows and no completed sweep, so a read of it is partial
- * rather than empty.
+ * belongs to, read once, then the read that call is — a collection's documents, one document, one page,
+ * their count, the sweep's mark — each read when the call needs it, so a count never carries five
+ * thousand documents to answer a number and a get never carries a collection to answer one. A canvas
+ * this device holds no bot for has no rows and no completed sweep, so a read of it is partial rather
+ * than empty.
  */
 async function canvasCopy(id: string): Promise<CanvasCopy> {
   const profileId = profileOf(id)
   const profile = profileId ? await db.profiles.get(profileId) : undefined
-  if (!profile) return { docs: async () => [], count: async () => 0, whole: async () => false }
+  if (!profile)
+    return {
+      docs: async () => [],
+      get: async () => undefined,
+      page: async () => ({ rows: [], next: null }),
+      count: async () => 0,
+      whole: async () => false,
+    }
   return {
     docs: (collection) => cachedDocs(profile, id, collection),
+    get: (collection, docId) => cachedDoc(profile, id, collection, docId),
+    page: (collection, after, limit) => pageDocs(id, collection, after, limit),
     count: (collection) => cachedCount(id, collection),
     whole: () => sweptWhole(profile, id),
   }

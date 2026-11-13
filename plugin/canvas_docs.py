@@ -133,6 +133,24 @@ def catalogue(conn: sqlite3.Connection, canvas_id: str) -> Dict[str, Any]:
     }
 
 
+def weigh(conn: sqlite3.Connection, canvas_id: str, collection: Optional[str] = None) -> int:
+    """What a canvas's data weighs — or one collection of it — read off the store, no document parsed.
+
+    The same measure ``catalogue`` answers ``bytes`` in: each document's collection, its id and the JSON
+    it is stored as, plus ``DOC_BYTES`` for the envelope a read carries for it. One ``SUM``, so a canvas
+    of five thousand documents costs the same statement as one of five, and a reader can refuse an
+    answer before it is carried rather than after.
+    """
+    query = """SELECT COALESCE(SUM(? + length(CAST(collection AS BLOB)) + length(CAST(id AS BLOB))
+                                  + length(CAST(value AS BLOB))), 0)
+                 FROM canvas_docs WHERE canvas_id = ?"""
+    args: List[Any] = [DOC_BYTES, canvas_id]
+    if collection is not None:
+        query += " AND collection = ?"
+        args.append(collection)
+    return conn.execute(query, args).fetchone()[0]
+
+
 def page(
     conn: sqlite3.Connection,
     canvas_id: str,

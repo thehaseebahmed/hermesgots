@@ -92,6 +92,12 @@ DOC_MAX_BYTES = 256 * 1024
 # What a device from before the paged read is handed as one array: the whole of a canvas's data as it
 # used to be capped, since an app from before this change can only hold that much anyway.
 LEGACY_DATA_BYTES = 1024 * 1024
+# What one agent answer may carry. `canvas_data_read` is the tool a model reads a canvas's data with,
+# and a canvas is capped at DATA_BYTES now — so an unbounded whole-array read is a tool result of up to
+# 64 MB. One answer is bounded to one page's worth, the size a canvas's page draws and a document is
+# capped at, and a read past it is refused in words naming the read that does answer: one collection,
+# or a page of one.
+READ_MAX_BYTES = DOC_MAX_BYTES
 # What one document weighs beside its content: the keys, the clock and the punctuation a read of the
 # data carries for it. One number, in the module that reads the row — the cap, a catalogue's bytes
 # and the bound a whole-array read is cut at are the same measure.
@@ -1212,6 +1218,32 @@ def _documents(
     return list(canvas_docs.each(conn, canvas_id, collection, doc_id=doc_id))
 
 
+def _too_big(weighed: int, canvas_id: str, collection: Optional[str]) -> CanvasError:
+    """The refusal one agent read past ``READ_MAX_BYTES`` is answered with.
+
+    Built from the cap it broke, so the words move with the number, and naming the reads that do answer
+    it: one collection, or a page of one through the paged route a device sweeps with. A short array
+    would be a wrong answer no caller could detect, so a read past the bound is refused whole instead.
+    """
+    what = (
+        f"the collection `{collection}` weighs"
+        if collection is not None
+        else "this canvas's data weighs"
+    )
+    narrowed = (
+        "Read it a page at a time from the data route "
+        f"(`/canvases/{canvas_id}/data/{collection}?after=`), or one document at a time by naming its "
+        "`id`."
+        if collection is not None
+        else "Read one collection by naming it with `collection` — or a page of one at a time from the "
+        f"data route (`/canvases/{canvas_id}/data/<collection>?after=`)."
+    )
+    return CanvasError(
+        f"{TOOL_DATA_READ}: {what} {_cap(weighed)} and one answer carries at most "
+        f"{_cap(READ_MAX_BYTES)}. {narrowed}"
+    )
+
+
 def data(
     path: Path,
     canvas_id: str,
@@ -1223,6 +1255,12 @@ def data(
     Read over a connection of its own, opened and closed like ``listing``. A canvas this store has
     never heard of is a 404, as it is for a write and for a read of the page: one rule for "there is
     no such canvas", whichever part of it was asked for.
+
+    One answer carries at most ``READ_MAX_BYTES``: a canvas is capped at ``DATA_BYTES`` (64 MB) and this
+    is the tool a model reads it with, so what is past one page's worth is refused whole — in words
+    naming the collection read and the paged one — rather than handed over as an answer nobody can read
+    or cut short into an array no caller could tell was short. One document is never past the bound: a
+    document is capped at ``DOC_MAX_BYTES``, which is the bound.
     """
     if not canvas_id or not path.exists():
         raise CanvasError("There is no such canvas.", 404)
@@ -1234,6 +1272,10 @@ def data(
     try:
         if not _exists(conn, canvas_id):
             raise CanvasError("There is no such canvas.", 404)
+        if doc_id is None:
+            weighed = canvas_docs.weigh(conn, canvas_id, collection)
+            if weighed > READ_MAX_BYTES:
+                raise _too_big(weighed, canvas_id, collection)
         return _documents(conn, canvas_id, collection, doc_id)
     finally:
         conn.close()
@@ -1998,7 +2040,10 @@ DATA_READ_SCHEMA = {
         "version and no undo touches. Name the canvas by its title or its id; in the canvas's own "
         "session leave `canvas` out to mean this canvas. No more arguments answers every "
         "collection; a collection answers that one; a collection and an id answers one document, "
-        "or null when there is none."
+        "or null when there is none. One answer carries at most "
+        f"{_cap(READ_MAX_BYTES)} — one page's worth, the size a document and a canvas's page are "
+        "capped at — so a canvas or a collection past that is refused with the read that answers "
+        "it: one collection, or a page of one from the data route."
     ),
     "parameters": {
         "type": "object",
@@ -2239,7 +2284,11 @@ def handle_data_read(
     args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any
 ) -> str:
     """The tool: the named canvas's own documents — all of them, a collection, or one document —
-    or, in that canvas's own session, this canvas's."""
+    or, in that canvas's own session, this canvas's.
+
+    One answer carries at most ``READ_MAX_BYTES`` (``data``), so a canvas past that is refused in words
+    naming the collection read and the paged one rather than answered whole.
+    """
     args = args if isinstance(args, dict) else {}
     collection, doc_id = args.get("collection"), args.get("id")
 

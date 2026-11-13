@@ -17,6 +17,7 @@ import asyncio
 import json
 import math
 import os
+import time
 import unittest
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -321,6 +322,34 @@ class NoteTest(unittest.TestCase):
         # Two ids that escape to one stem are still two files, which is what the digest is for.
         self.assertEqual(canvas_vault.note_name("a/b")[:2], "a_")
         self.assertNotEqual(canvas_vault.note_name("a/b"), canvas_vault.note_name("a_b"))
+
+
+class WakeTest(unittest.TestCase):
+    """A data write wakes the vault's watcher, and a burst of writes wakes it once."""
+
+    def setUp(self) -> None:
+        self.host = Host(self)
+
+    def test_two_writes_inside_the_interval_wake_one_tick(self) -> None:
+        # The tick is what a write asks for, and a page of writes — or a device sweeping a canvas —
+        # asks thousands of times: at the write rate, a tick that has nothing to write costs a walk of
+        # every note in the vault. A minimum interval between ticks coalesces what the writes asked
+        # for, and the watcher's own TICK_SECONDS is the pace a burst ends at.
+        woke = mock.Mock()
+        with mock.patch.object(canvas_vault, "_ticker", woke), mock.patch.object(
+            canvas_vault, "_woken_at", float("-inf")
+        ):
+            self.host.put("bookmarks", "b1", {"title": "Rust"})
+            self.host.put("bookmarks", "b2", {"title": "Go"})
+            self.assertEqual(woke.wake.call_count, 1, "two writes inside one interval are one tick")
+            # A write past the interval is a tick of its own, so a backup converges as writes land.
+            with mock.patch.object(
+                canvas_vault,
+                "_woken_at",
+                time.monotonic() - canvas_vault.WAKE_SECONDS - 1,
+            ):
+                self.host.put("bookmarks", "b3", {"title": "Zig"})
+            self.assertEqual(woke.wake.call_count, 2, "a write past the interval wakes it again")
 
 
 class BudgetTest(unittest.TestCase):

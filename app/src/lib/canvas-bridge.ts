@@ -385,17 +385,34 @@ export function readCall(data: unknown): BridgeCall | null {
 /**
  * What a read is answered from: this device's rows of one canvas, asked as the call arrives, so a write
  * landing never replaces a reader under a running page. `docs` and `count` are the two ways to ask for
- * a collection — the documents, or only how many there are — and `whole` is what the sweep's mark says
- * about them. Where those rows live is the reader's business (`canvasReader` in `canvases.ts`); this is
- * only what a read needs to answer.
+ * a collection — the documents, or only how many there are — `get` and `page` are the two ways to ask
+ * for less than one, and `whole` is what the sweep's mark says about them. Where those rows live is the
+ * reader's business (`canvasReader` in `canvases.ts`); this is only what a read needs to answer.
+ *
+ * Each read is the read its call is: a `get` is one row by its key, so it never carries a collection to
+ * find a document in, and a `page` is one page of a collection, so a page of five reads five.
  */
 export interface CanvasCopy {
   /** One collection's documents, in the host's own order. */
   docs(collection: string): Promise<CanvasDoc[]>
+  /** One document by its key — the point read a `get` answers from. */
+  get(collection: string, id: string): Promise<CanvasDoc | undefined>
+  /** One page of a collection: the documents after `after`, and where the next page starts. */
+  page(collection: string, after: string | null, limit: number): Promise<CanvasPage>
   /** One collection's count, off the device's index: a read of the number, not of the documents. */
   count(collection: string): Promise<number>
   /** Whether the rows are the canvas whole — a sweep reached its last page, and none is under way. */
   whole(): Promise<boolean>
+}
+
+/**
+ * One page of a collection as the copy reads it: the documents, and the id the next page starts after
+ * — null where this was the collection's last page. Only the copy knows whether another page follows,
+ * since it is the copy that read one row more than the page needed to answer that.
+ */
+export interface CanvasPage {
+  rows: CanvasDoc[]
+  next: string | null
 }
 
 /** A read that cannot answer, in the words a page is given and the code a caller can read. */
@@ -418,11 +435,14 @@ function partial(call: BridgeDataCall): Error {
  * number; and a `get` is one document — answering `null` only where a completed sweep says this device
  * has seen the canvas whole, since before one a document the rows don't hold may simply not have been
  * read yet (GLOSSARY "Partial").
+ *
+ * Each call is answered by the read it is: a `get` reads one row, a `page` one page, so a document of a
+ * collection of five thousand costs one row and a page of five costs five.
  */
 export async function answerRead(call: BridgeDataCall, copy: CanvasCopy): Promise<unknown> {
   if (call.method === "count") return copy.count(call.collection)
   if (call.method === "get") {
-    const row = (await copy.docs(call.collection)).find((one) => one.id === call.id)
+    const row = await copy.get(call.collection, call.id)
     if (row) return row
     if (!(await copy.whole())) throw partial(call)
     return null
@@ -439,23 +459,15 @@ export async function answerRead(call: BridgeDataCall, copy: CanvasCopy): Promis
     const [rows, whole] = await Promise.all([copy.docs(call.collection), copy.whole()])
     return { rows, partial: !whole }
   }
-  const [rows, total, whole] = await Promise.all([
-    copy.docs(call.collection),
+  const [one, total, whole] = await Promise.all([
+    copy.page(call.collection, call.after, call.limit),
     copy.count(call.collection),
     copy.whole(),
   ])
-  const after = call.after
-  const rest = after === null ? rows : rows.filter((row) => byCodePoint(row.id, after) > 0)
-  const landed = rest.slice(0, call.limit)
-  return {
-    rows: landed,
-    // Where the next page starts: after this one's last document, in the host's own order, since two
-    // pages of one collection are stitched by the id they share. A page that reached the end names
-    // none, and `partial` is what says whether that end is the canvas's own.
-    next: rest.length > landed.length ? landed[landed.length - 1].id : null,
-    total,
-    partial: !whole,
-  }
+  // Where the next page starts is the copy's answer, since it is the copy that read one row past this
+  // page: a page that reached the end names none, and `partial` is what says whether that end is the
+  // canvas's own.
+  return { rows: one.rows, next: one.next, total, partial: !whole }
 }
 
 /**

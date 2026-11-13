@@ -1134,6 +1134,13 @@ export interface CanvasDocRow {
   id: string
   doc: unknown
   at: number
+  /**
+   * What the document costs this device — its collection, its id and its JSON in bytes — weighed when
+   * the row was written (`canvas-docs.ts`'s `weigh`). The budget sums these instead of encoding every
+   * document again, so the field is the row's own and never a total across rows. Unset on a row a v42
+   * or v43 database moved in, which is weighed once and rewritten the next time that document moves.
+   */
+  bytes?: number
   generation: number
   /** This device's own write, which no host answer has come back for (ADR 0149). */
   pending?: boolean
@@ -1170,6 +1177,23 @@ export const canvasDocKey = (
   collection: string,
   id: string,
 ) => `${connection}\n${canvasId}\n${collection}\n${id}`
+
+const encoder = new TextEncoder()
+
+/**
+ * What one document costs this device (`CanvasDocRow.bytes`): the UTF-8 bytes its collection, its id and
+ * its document's JSON take — the measure a catalogue counts a canvas's `bytes` in, without the fixed
+ * envelope it adds for the keys a read carries.
+ *
+ * The rule is the row's, held here beside the row it describes, because three places need the same
+ * number: the write that files the row, the upgrade that stamps a row written before the field existed,
+ * and a budget pass over a row from before it. One measure, so a device's total is the same number
+ * however its rows got there.
+ */
+export const canvasDocBytes = (collection: string, id: string, doc: unknown) =>
+  encoder.encode(collection).byteLength +
+  encoder.encode(id).byteLength +
+  encoder.encode(JSON.stringify(doc) ?? "").byteLength
 
 /**
  * A page's write its host never heard, kept until it does (`canvas-outbox.ts`, ADR 0149): the call
@@ -1681,6 +1705,31 @@ db.version(42)
  * had one has nothing waiting.
  */
 db.version(43).stores({ canvasOutbox: "id, canvasId, [canvasId+seq], connection" })
+
+/**
+ * v44: the index a page of a canvas's documents is read on, `[canvasId+collection+id]`, and the weight
+ * each row already holds.
+ *
+ * A page is a keyset on the id — the order the rows are already filed in — so the read starts at the id
+ * a caller holds and stops after the rows it asked for, rather than carrying a collection to cut a page
+ * out of it. The weight is `canvasDocBytes`: a v42 or v43 row has no field for it, and a row that is
+ * never rewritten would otherwise be weighed on every budget pass for the life of the device. The
+ * upgrade stamps it once, over the rows as they stand; nothing else about a row moves.
+ */
+db.version(44)
+  .stores({
+    canvasDocs: "key, connection, canvasId, [canvasId+collection], [canvasId+collection+id]",
+  })
+  .upgrade(async (tx) => {
+    const docs = tx.table<CanvasDocRow>("canvasDocs")
+    const stamped: CanvasDocRow[] = []
+    await docs.each((row) => {
+      if (row.bytes === undefined) {
+        stamped.push({ ...row, bytes: canvasDocBytes(row.collection, row.id, row.doc) })
+      }
+    })
+    if (stamped.length) await docs.bulkPut(stamped)
+  })
 
 /**
  * How many rows of one room's log this device keeps: the page a reader can scroll back through.

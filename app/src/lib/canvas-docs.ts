@@ -2,25 +2,35 @@
  * A canvas's documents as this device keeps them (`db.canvasDocs`), and the mark its sweeps leave
  * (`db.canvasSweeps`).
  *
- * One row a document — its collection, its id, the document and the host's clock for it — filed under
- * `<connection>\n<canvasId>\n<collection>\n<id>`, so a canvas's rows are a range of the primary key and
- * a read of one collection never has to walk another's. `cachedDocs` is the one reading of them: the
- * documents a canvas holds, in the order its host keeps them.
+ * One row a document — its collection, its id, the document, the host's clock for it and what the row
+ * weighs — filed under `<connection>\n<canvasId>\n<collection>\n<id>`, so a canvas's rows are a range of
+ * the primary key and a read of one collection never has to walk another's. `cachedDocs` is the one
+ * reading of them: the documents a canvas holds, in the order its host keeps them; `cachedDoc` is one
+ * of them by its key; `pageDocs` is one page of a collection, cut on the index's own keyset so a page
+ * of five rows reads five.
  *
- * A row carries the generation of the sweep that wrote it. Only a completed sweep prunes, because a
- * page is no evidence a document is gone, and the prune takes what that sweep did not write — which is
- * the rule `keepList` already keeps for the list: only a read that saw the whole set may say what is
- * missing from it. A write's answer stamps the row with the generation the canvas is under, so a
- * document the host answered while a sweep ran is not what that sweep's completion deletes.
+ * A row carries the generation of the sweep that wrote it, and a sweep's completion prunes by the keys
+ * that sweep saw — which is the rule `keepList` already keeps for the list: only a read that saw the
+ * whole set may say what is missing from it. A page of a sweep writes only the rows whose clock moved,
+ * so a canvas of five thousand documents that nothing changed is one read and no writes at all.
  *
  * A module of its own for the reason `canvas-cache.ts` keeps its own table: this is the device's side of
  * a canvas's data — its keys, its rows, the prune and the budget — while `canvas-sweep.ts` is the
  * reading that fills them and `canvases.ts` is the store the screens draw from.
  */
 
-import { applyWrite, inOrder, type CanvasDoc, type CanvasWrite } from "@/lib/canvas-bridge"
+import Dexie from "dexie"
+
+import {
+  applyWrite,
+  inOrder,
+  type CanvasDoc,
+  type CanvasPage,
+  type CanvasWrite,
+} from "@/lib/canvas-bridge"
 import { connectionKey } from "@/lib/connection"
 import {
+  canvasDocBytes,
   canvasDocKey,
   db,
   type CanvasDocRow,
@@ -31,6 +41,13 @@ import {
 /** The key one canvas's sweep mark is filed under: its connection and the canvas. */
 export const canvasSweepKey = (profile: Profile, canvasId: string) =>
   `${connectionKey(profile)}\n${canvasId}`
+
+/**
+ * The key a bot's list of records is filed under, by connection — `canvas-cache.ts`'s list, which is
+ * where a canvas's pinned flag is kept with no page beside it. The budget reads it to spare a pinned
+ * canvas without reading the page each canvas keeps.
+ */
+export const canvasListKey = (connection: string) => `${connection}\ncanvases`
 
 /**
  * How much of this device every canvas's documents may take together (32 MB). Past it the least
@@ -84,6 +101,7 @@ function rowOf(
     id: one.id,
     doc: one.doc,
     at: one.at,
+    bytes: canvasDocBytes(one.collection, one.id, one.doc),
     generation,
     ...(pending ? { pending: true } : {}),
   }
@@ -97,11 +115,15 @@ async function generationOf(profile: Profile, canvasId: string) {
 
 /**
  * Keeps documents as rows — one page of a sweep, or the one a write's answer carried — in one
- * transaction, under the generation given or the one the canvas is already under.
+ * transaction, under the generation given or the one the canvas is already under, and answers the keys
+ * it saw: the swept set a completed sweep prunes against.
  *
  * A row only ever moves forward on the host's clock: a page the host answered before a write's answer
  * landed must not put the row back on the document that write replaced, so the held row wins where it
- * is newer. That is the same rule `applyWrite` keeps for a copy, now kept for the rows.
+ * is newer. That is the same rule `applyWrite` keeps for a copy, now kept for the rows. A row whose
+ * clock is where the page's is *is* the row the page would write, so it is not written at all — a
+ * sweep of a canvas nothing moved is reads and no writes — and its key in the swept set is what keeps
+ * the prune from treating it as a document the sweep did not see.
  *
  * A write this device has not delivered is not something a page can answer: the host has never seen
  * it, so a page that does not carry it is no evidence about it, and the row stays as this device
@@ -114,9 +136,12 @@ export async function keepDocs(
   canvasId: string,
   docs: CanvasDoc[],
   generation?: number,
-) {
-  if (!docs.length) return
+): Promise<string[]> {
+  if (!docs.length) return []
   const connection = connectionKey(profile)
+  // Every key the page named, whether a row was written for it or not: what a sweep saw is what its
+  // completion may prune against.
+  const keys = docs.map((one) => canvasDocKey(connection, canvasId, one.collection, one.id))
   await db.transaction("rw", db.canvasDocs, db.canvasSweeps, db.canvasOutbox, async () => {
     const under = generation ?? (await generationOf(profile, canvasId))
     const removing = new Set(
@@ -124,7 +149,6 @@ export async function keepDocs(
         .filter((row) => row.connection === connection && row.method === "remove")
         .map((row) => `${row.collection}\n${row.docId}`),
     )
-    const keys = docs.map((one) => canvasDocKey(connection, canvasId, one.collection, one.id))
     const held = await db.canvasDocs.bulkGet(keys)
     const rows: CanvasDocRow[] = []
     const stale: string[] = []
@@ -137,11 +161,14 @@ export async function keepDocs(
         if (kept) stale.push(keys[at])
         return
       }
-      if (!kept || kept.at <= one.at) rows.push(rowOf(profile, canvasId, one, under, false))
+      // A row at the page's own clock is the row this page would write: only a document that moved is
+      // written, and one that did not is still one this sweep saw.
+      if (!kept || kept.at < one.at) rows.push(rowOf(profile, canvasId, one, under, false))
     })
     if (rows.length) await db.canvasDocs.bulkPut(rows)
     if (stale.length) await db.canvasDocs.bulkDelete(stale)
   })
+  return keys
 }
 
 /**
@@ -231,6 +258,55 @@ export async function cachedCount(canvasId: string, collection: string): Promise
 }
 
 /**
+ * One document this device holds, by its key — the point read a page's `get` answers from, so a
+ * collection of five thousand costs one row rather than five thousand carried to find it in.
+ */
+export async function cachedDoc(
+  profile: Profile,
+  canvasId: string,
+  collection: string,
+  id: string,
+): Promise<CanvasDoc | undefined> {
+  const row = await db.canvasDocs.get(canvasDocKey(connectionKey(profile), canvasId, collection, id))
+  return row ? docOf(row) : undefined
+}
+
+/**
+ * One page of a collection, read off the keyset index `[canvasId+collection+id]`: the `limit` documents
+ * after `after` in the order the rows are filed in, and where the next page starts.
+ *
+ * One row more than the page is read, which is how `next` knows whether another page exists — the same
+ * rule the host's own `canvas_docs.page` keeps, so a page of exactly the rows left names no next and a
+ * caller is not sent after an empty page. `after` is a name and not a promise that the collection still
+ * holds it: the index seeks past it whether or not the document is still there.
+ *
+ * The canvas's id is the host's own uuid, as it is for `cachedCount`, so the index's rows are one
+ * canvas's alone and the read needs no bot: a connection is not part of the key it seeks, and a filter
+ * over it would be a read of the page and then some.
+ */
+export async function pageDocs(
+  canvasId: string,
+  collection: string,
+  after: string | null,
+  limit: number,
+): Promise<CanvasPage> {
+  const rows = await db.canvasDocs
+    .where("[canvasId+collection+id]")
+    .between(
+      [canvasId, collection, after ?? Dexie.minKey],
+      [canvasId, collection, Dexie.maxKey],
+      // `after` is the last id the caller holds, so the page starts past it and not on it; the lower
+      // bound of a first page is the index's own floor, which excludes nothing.
+      false,
+      true,
+    )
+    .limit(limit + 1)
+    .toArray()
+  const page = rows.slice(0, limit).map(docOf)
+  return { rows: page, next: rows.length > limit ? page[page.length - 1].id : null }
+}
+
+/**
  * Whether this device's rows are the canvas whole: a sweep reached its last page, and none is under
  * way now. A sweep that began and never finished leaves rows that are real and a canvas that is not
  * whole — what it did not reach is not absent because it is gone, which is the rule `pruneDocs` keeps
@@ -270,16 +346,27 @@ export async function forgetPending(
 }
 
 /**
- * Every row of a canvas a completed sweep did not write. The one prune there is: a sweep is the only
- * read that has seen the canvas whole, so it is the only one that may say a document is gone — and a
- * Pending write is exempt, because the host never saw it, so no sweep it answers can say it is gone
- * (ADR 0149).
+ * Every row of a canvas a completed sweep did not see. The one prune there is: a sweep is the only read
+ * that has seen the canvas whole, so it is the only one that may say a document is gone — and what it
+ * saw is the keys it wrote or found already there (`keepDocs` answers them), not the generation, since
+ * a row whose clock did not move is not rewritten and is still a document the sweep saw.
+ *
+ * A Pending write is exempt, because the host never saw it, so no sweep it answers can say it is gone
+ * (ADR 0149). So is a row stamped under this sweep's generation that the sweep did not name: a write's
+ * answer that landed while the sweep ran stamped the generation the canvas was under, which is this
+ * sweep's, and the document it answered is the host's word heard after the page that missed it.
  */
-export async function pruneDocs(profile: Profile, canvasId: string, generation: number) {
+export async function pruneDocs(
+  profile: Profile,
+  canvasId: string,
+  generation: number,
+  swept: Iterable<string>,
+) {
+  const seen = new Set(swept)
   const stale = await db.canvasDocs
     .where("key")
     .startsWith(`${canvasSweepKey(profile, canvasId)}\n`)
-    .filter((row) => row.generation !== generation && !row.pending)
+    .filter((row) => row.generation !== generation && !row.pending && !seen.has(row.key))
     .primaryKeys()
   if (stale.length) await db.canvasDocs.bulkDelete(stale)
 }
@@ -333,8 +420,9 @@ export async function noteOpened(profile: Profile, canvasId: string) {
 
 /**
  * Marks a sweep finished and prunes in the same transaction: the last page of the last collection has
- * landed, so the rows this sweep did not write are the documents the host no longer names. `docsAt` is
- * the newest clock among them, which is what the canvas's record says its data is as fresh as.
+ * landed, so the rows this sweep did not see — `swept`, every key it read, whether the row was written
+ * or was already there — are the documents the host no longer names. `docsAt` is the newest clock among
+ * them, which is what the canvas's record says its data is as fresh as.
  *
  * Only a sweep whose mark still stands completes one. An eviction during a sweep takes the canvas
  * whole — its rows and its mark — so a missing mark is this sweep having been overtaken: the pages it
@@ -350,6 +438,7 @@ export async function completeSweep(
   canvasId: string,
   generation: number,
   docsAt: number,
+  swept: Iterable<string>,
 ) {
   let completed = false
   await db.transaction("rw", db.canvasDocs, db.canvasSweeps, async () => {
@@ -365,12 +454,13 @@ export async function completeSweep(
       docsAt,
       ...(held.openedAt ? { openedAt: held.openedAt } : {}),
     })
-    await pruneDocs(profile, canvasId, generation)
+    await pruneDocs(profile, canvasId, generation, swept)
     completed = true
   })
   if (!completed) return
   // The rows have just grown by everything the sweep read, which is one of the two moments this
-  // device's total moves up: what it holds past its budget goes now.
+  // device's total moves up: what it holds past its budget goes now — once, here, where the sweep has
+  // settled, rather than on every page it wrote.
   await enforceBudget()
 }
 
@@ -418,18 +508,19 @@ export async function forgetDocs(profile: Profile, canvasId: string) {
   await dropDocs(connectionKey(profile), canvasId)
 }
 
-const encoder = new TextEncoder()
-
 /**
- * What one document costs this device: the bytes its collection, its id and its document's JSON take —
- * the measure a catalogue counts a canvas's `bytes` in, without the fixed envelope it adds for the keys
- * a read carries. The budget counts what this device keeps, so it is weighed here rather than believed
- * from an answer.
+ * What one row costs this device, as the row already says: the bytes its collection, its id and its
+ * document's JSON take, weighed when the row was written (`weigh`). The measure is read off the row and
+ * never off its document, so a pass over a device's rows is a sum rather than every document's JSON
+ * encoded a second time — which is what a walk of five thousand rows to weigh them cost, on every
+ * completed sweep and every write that added a document.
+ *
+ * A row written before the field existed — one seeded by hand, since v44's upgrade stamps the rows a v42
+ * or v43 database moved in — is weighed here, once, and rewritten with its own number the next time that
+ * document moves.
  */
 const bytesOf = (row: CanvasDocRow) =>
-  encoder.encode(row.collection).byteLength +
-  encoder.encode(row.id).byteLength +
-  encoder.encode(JSON.stringify(row.doc) ?? "").byteLength
+  row.bytes ?? canvasDocBytes(row.collection, row.id, row.doc)
 
 /** One canvas's rows as the budget sees them: what they weigh, and the key both tables file it under. */
 interface Weight {
@@ -460,13 +551,18 @@ async function weights(): Promise<Map<string, Weight>> {
  * one holding a write its host has not answered (the queue is where that write lives, and the page
  * reads its own write back from these rows), and the one a screen has open — the canvas this device
  * opened last, which is the only open a device can name after the fact.
+ *
+ * A pin is a fact about a record, and a record is kept in its bot's list row, which carries no page. The
+ * per-canvas rows beside it hold the page each screen drew — up to 256 KB each, and every canvas this
+ * device ever opened — so reading those to learn one flag is the budget paying a page a canvas for a
+ * boolean. The list row is read by its own key, one per connection that holds any rows at all.
  */
-async function spared(): Promise<Set<string>> {
+async function spared(connections: Iterable<string>): Promise<Set<string>> {
   const kept = new Set<string>()
-  for (const row of await db.canvasCache.toArray()) {
-    if (row.canvasId && row.canvas?.pinned) kept.add(`${row.connection}\n${row.canvasId}`)
-    for (const one of row.canvases ?? [])
-      if (one.pinned) kept.add(`${row.connection}\n${one.id}`)
+  const lists = await db.canvasCache.bulkGet([...connections].map(canvasListKey))
+  for (const row of lists) {
+    for (const one of row?.canvases ?? [])
+      if (one.pinned) kept.add(`${row!.connection}\n${one.id}`)
   }
   for (const row of await db.canvasOutbox.toArray()) kept.add(`${row.connection}\n${row.canvasId}`)
   return kept
@@ -491,7 +587,7 @@ async function enforceBudget() {
   // Recency, as this device recorded it. A canvas nothing recorded is the coldest there is: rows a
   // version before the marks left behind were opened at no time this device knows of.
   const opened = new Map(keys.map((key, at) => [key, marks[at]?.openedAt ?? 0]))
-  const kept = await spared()
+  const kept = await spared(new Set([...weighed.values()].map((one) => one.connection)))
   const onScreen = keys
     .filter((key) => opened.get(key))
     .sort((a, b) => opened.get(b)! - opened.get(a)!)[0]
