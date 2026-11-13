@@ -12,7 +12,6 @@ import type { HermesConfig, LibraryFolder } from "@/lib/hermes"
 
 import {
   click,
-  find,
   findText,
   json,
   labelled,
@@ -28,11 +27,10 @@ import {
 const config: HermesConfig = { baseUrl: "http://bot.test", apiKey: "key" }
 
 /**
- * A second bot for the folder cases: the URL this page holds for a path is remembered for the page's
- * life and keyed by the bot's address, so a case that opened a path on `config` would open it here
- * from what that case already minted.
+ * A bot of a case's own: the URL this page holds for a path is remembered for the page's life and
+ * keyed by the bot's address, so two cases that open the same path would share what the first minted.
  */
-const severalConfig: HermesConfig = { ...config, baseUrl: "http://several.test" }
+const botFor = (name: string): HermesConfig => ({ ...config, baseUrl: `http://${name}.test` })
 
 const folders: LibraryFolder[] = [
   {
@@ -143,13 +141,21 @@ const screen = () => (
   <LibraryTree config={config} folders={folders} order={{ key: "date", dir: "desc" }} />
 )
 
-/** The same tree over a folder of several files the Previewer draws. */
-const severalScreen = () => (
-  <LibraryTree config={severalConfig} folders={several} order={{ key: "date", dir: "desc" }} />
+/** The same tree over a folder of several files the Previewer draws, on a bot of its own. */
+const severalScreen = (name: string) => (
+  <LibraryTree config={botFor(name)} folders={several} order={{ key: "date", dir: "desc" }} />
 )
 
 /** A file's row in the tree, by the name it wears. */
 const row = (name: string) => findText("button", name)
+
+/** The Previewer's own pane, and its words with the gaps collapsed. */
+const panel = () => document.querySelector('[role="dialog"]')
+const panelText = () => (panel()?.textContent ?? "").replace(/\s+/g, " ")
+
+/** Whether the Previewer is drawing this file, and saying where it sits among the folder's files. */
+const viewing = (name: string, place: string) =>
+  panelText().includes(name) && panelText().includes(place)
 
 test("a library file opens through the app's previewer, from a URL the bot signs", async () => {
   const asked = mediaHost()
@@ -245,7 +251,7 @@ test("Library opens an .html in the Previewer, not the platform", async () => {
 test("a folder's second file opens at its own place among the folder's files", async () => {
   const asked = mediaHost()
   try {
-    await mount(severalScreen(), async () => {
+    await mount(severalScreen("several"), async () => {
       await click(row("library-tab"))
       await until(async () => row("chart.png") !== null, "the folder's files")
 
@@ -284,7 +290,7 @@ test("a session's own tree opens its folder the same way", async () => {
     return inner(input as RequestInfo, init)
   }) as typeof fetch
   try {
-    await mount(<SessionLibrary config={severalConfig} sessionId="s-1" active />, async () => {
+    await mount(<SessionLibrary config={botFor("session")} sessionId="s-1" active />, async () => {
       await click(row("library-tab"))
       await until(async () => row("sketch.png") !== null, "the session's files")
       await click(row("sketch.png"))
@@ -305,5 +311,42 @@ test("a session's own tree opens its folder the same way", async () => {
     })
   } finally {
     globalThis.fetch = inner
+  }
+})
+
+test("stepping signs the file now shown, and a step back onto the tapped file mints nothing", async () => {
+  const asked = mediaHost()
+  try {
+    await mount(severalScreen("stepping"), async () => {
+      await click(row("library-tab"))
+      await until(async () => row("chart.png") !== null, "the folder's files")
+      await click(row("chart.png"))
+      await until(async () => viewing("chart.png", "2 of 3"), "the tapped file, second of three")
+
+      // The tree draws them newest first: sketch.png, then chart.png, then clip.mp4.
+      await click(labelled("button", "Next"))
+      await until(async () => viewing("clip.mp4", "3 of 3"), "the next file, signed as it arrives")
+      await click(labelled("button", "Next"))
+      await until(
+        async () => viewing("sketch.png", "1 of 3"),
+        "the last step, wrapping to the first",
+      )
+      assert.deepEqual(
+        mediaReads(asked).map((path) => path.split("/").pop()),
+        ["chart.png", "clip.mp4", "sketch.png"],
+        "one mint a step, each for the file now shown, in the order the tree draws them",
+      )
+
+      // Back onto a file this page already signed: nothing is minted again.
+      await click(labelled("button", "Previous"))
+      await until(async () => viewing("clip.mp4", "3 of 3"), "the file stepped back onto")
+      assert.deepEqual(
+        mediaReads(asked).map((path) => path.split("/").pop()),
+        ["chart.png", "clip.mp4", "sketch.png"],
+        "a URL this page still holds is drawn from, not asked for again",
+      )
+    })
+  } finally {
+    mediaHost()
   }
 })

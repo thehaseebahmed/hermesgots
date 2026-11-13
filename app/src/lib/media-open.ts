@@ -1,6 +1,6 @@
-import { useCallback, useState } from "react"
+import { useCallback, useId, useRef, useState } from "react"
 
-import { usePreviewer } from "@/components/chat/previewer"
+import { usePreviewer, type PreviewItem } from "@/components/chat/previewer"
 import { openAttachment, openFailed } from "@/lib/attachments"
 import type { HermesConfig } from "@/lib/hermes"
 import { drawnCell, mediaKind } from "@/lib/media-kind"
@@ -42,8 +42,47 @@ export interface HostFileOpen {
  * its own sentence, and a host that didn't answer is not a missing file.
  */
 export function useOpenHostFile(config: HermesConfig): HostFileOpen {
-  const { open: preview } = usePreviewer()
+  const { open: preview, update } = usePreviewer()
+  const owner = useId()
   const [busy, setBusy] = useState<string | null>(null)
+  // The list the Previewer is drawing, kept here because a step fills one of its files after it was
+  // opened: a step writes the whole list back through the provider's own `update`.
+  const drawing = useRef<PreviewItem[]>([])
+  // The paths whose URL is being asked for right now, so a quick press of Next asks for one file once.
+  const asking = useRef(new Set<string>())
+
+  /** Signs one file of the open list and writes the list back with what answered. */
+  const sign = useCallback(
+    (item: PreviewItem, again: boolean) => {
+      if (asking.current.has(item.key)) return
+      asking.current.add(item.key)
+      void (async () => {
+        try {
+          const answer = await askMediaUrl(config, item.key, { again })
+          drawing.current = drawing.current.map((one) => {
+            if (one.key !== item.key) return one
+            // The host's own words for the ways it answers without a URL: a file it hasn't got, one it
+            // refused in the route's own sentence, a plugin too old to sign, a host that didn't reply.
+            if (answer.state !== "ready")
+              return { ...one, state: "failed", note: askNote(answer, one.name) }
+            return {
+              ...one,
+              type: answer.read.type,
+              size: answer.read.size ?? one.size,
+              src: answer.read.url,
+              folder: answer.read.folder,
+              state: "ready",
+            }
+          })
+          update(owner, drawing.current)
+        } finally {
+          asking.current.delete(item.key)
+        }
+      })()
+    },
+    [config, owner, update],
+  )
+
   const open = useCallback(
     (files: HostFile[], at: number) => {
       const file = files[at]
@@ -82,12 +121,23 @@ export function useOpenHostFile(config: HermesConfig): HostFileOpen {
           // A tapped file the name left out of its folder's list opens on its own, rather than at a
           // place that isn't there.
           if (list.index < 0) {
-            preview({ items: [item], index: 0 })
+            drawing.current = [item]
+            preview({
+              items: [item],
+              index: 0,
+              onShown: (one) => sign(one, false),
+              onRetry: (one) => sign(one, true),
+            })
             return
           }
+          drawing.current = list.items.map((one, place) => (place === list.index ? item : one))
           preview({
-            items: list.items.map((one, place) => (place === list.index ? item : one)),
+            items: drawing.current,
             index: list.index,
+            // A file the reader steps onto is signed as it arrives, and one that won't come says why
+            // and can be asked again.
+            onShown: (one) => sign(one, false),
+            onRetry: (one) => sign(one, true),
           })
         } catch (error) {
           openFailed(file.name, error)
@@ -96,7 +146,7 @@ export function useOpenHostFile(config: HermesConfig): HostFileOpen {
         }
       })()
     },
-    [config, preview],
+    [config, preview, sign],
   )
   return { open, busy }
 }

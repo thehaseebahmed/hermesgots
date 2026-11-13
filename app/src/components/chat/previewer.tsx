@@ -75,6 +75,13 @@ export interface PreviewRequest {
   onRemove?: (item: PreviewItem) => void
   /** Asks a file whose read failed again, and draws what answers. */
   onRetry?: (item: PreviewItem) => void
+  /**
+   * The file now on screen, reported when that changes and only while the Previewer is open. A screen
+   * whose list is drawn from URLs it signs itself — the library's folder — asks the host for the one
+   * the reader has arrived at, and passes the list back through `update`. The Previewer never asks for
+   * anything: it draws what a list gives it, and says which of them it is drawing.
+   */
+  onShown?: (item: PreviewItem) => void
 }
 
 /** What a screen can ask of its one Previewer: open it, and keep the list it was opened on current. */
@@ -543,11 +550,18 @@ export function Previewer({
   open: boolean
   onIndex: (index: number | null) => void
 }) {
-  const { items, index, onRemove, onRetry } = request
+  const { items, index, onRemove, onRetry, onShown } = request
   const count = items.length
   const at = Math.min(Math.max(index, 0), count - 1)
   const item = items[at]
-  const step = (by: number) => onIndex((at + by + count) % count)
+  const step = (by: number) => {
+    const next = (at + by + count) % count
+    // The reader has arrived at this file, so whoever holds the list hears about it — the one place
+    // the item on screen changes while the Previewer is open. It is said before the index moves, so
+    // the list is asked for the file that is about to be drawn.
+    onShown?.(items[next])
+    onIndex(next)
+  }
   const close = () => onIndex(null)
   if (!item) return null
   const details = [
