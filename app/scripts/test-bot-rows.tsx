@@ -152,13 +152,22 @@ test("a quiet bot's row says Offline once its host goes stale", async () => {
   })
 })
 
-test("a quiet bot's row says nothing at all where this device cannot tell", async () => {
-  // No host: `presence` answers `undefined`, and Settings stays silent about the same bot, so the row
-  // says no state rather than calling a bot it has never heard from Offline.
-  await seed({ id: "quiet-unknown", at: 2 })
+test("a quiet bot's row says Not seen yet until its host has answered once", async () => {
+  // Linked, and nothing heard: the same words Settings' Enabled row uses for the same bot, so the
+  // row never falls silent and never calls a bot it cannot place Offline.
+  await seed({ id: "quiet-unseen", at: 2 }, { hostId: "host-1" })
   await mount(screen("/"), async () => {
-    await until(async () => Boolean(botRow()), "the bot's row")
-    assert.equal(stateOf(botRow()), "", "an unknown host is not Offline")
+    await until(async () => stateOf(botRow()) === "Not seen yet", "the row to say nothing has answered")
+    assert.equal(dotted(botRow()), false, "and nothing unread draws no mark")
+  })
+})
+
+test("a bot no host registered says it is not linked", async () => {
+  // A bot added by hand: no host to check in, so the row says what is missing rather than nothing,
+  // in the vocabulary Settings' own `Link a bot` row uses.
+  await seed({ id: "quiet-unlinked", at: 2 })
+  await mount(screen("/"), async () => {
+    await until(async () => stateOf(botRow()) === "Not linked", "the row to say what is missing")
     assert.equal(dotted(botRow()), false, "and nothing unread draws no mark")
   })
 })

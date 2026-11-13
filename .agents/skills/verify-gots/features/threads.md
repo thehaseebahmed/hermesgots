@@ -117,9 +117,9 @@ Preconditions:
 - A marker's Undo is offered only while the thread it moved into has not replied. Once it replies
   the control is gone; do not wait for it later in a drive.
 - The sidebar's bot row says the bot's state, never Main's words: `3 unread` with a warning dot when
-  the bot's list holds something this device hasn't read, else `Online` or `Offline`, and nothing at
-  all about a bot the device can't place (ADR 0151). A drive that waits for Main's last line in that
-  row waits forever; Main's own header and the third pane are where its words are asserted.
+  the bot's list holds something this device hasn't read, else `Online` or `Offline`, else `Not seen
+  yet` or `Not linked` — the row is never empty (ADR 0151). A drive that waits for Main's last line in
+  that row waits forever; Main's own header and the third pane are where its words are asserted.
 - The third pane's thread is this device's memory (`localStorage`, `gots:last-thread:<bot id>`),
   not the host's: a fresh browser profile shows Main alone until a thread of that bot has been
   opened in it, and a drive that only seeds threads through Dexie sees two columns. Opening one

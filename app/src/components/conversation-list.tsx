@@ -33,7 +33,6 @@ import { closeCanvas, useCanvasOpened } from "@/lib/canvas-open"
 import { useCanvasEnabled, usePinnedCanvases, type Canvas } from "@/lib/canvases"
 import { chatOwner } from "@/lib/chat-owner"
 import { compareChatOrder, waitsOnUser } from "@/lib/chat-list"
-import { presence } from "@/lib/presence"
 import type { Conversation, Message, Profile } from "@/lib/db"
 import { db, isReply, newestMessage } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
@@ -462,14 +461,16 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
                       >
                         {stateLine({
                           unread,
-                          online: presence(bot, now, chatStores[bot.id]),
+                          bot,
+                          now,
+                          answer: chatStores[bot.id],
                         })}
                       </span>
                       {unread > 0 && (
                         <span
                           data-unread
                           aria-hidden
-                          className="size-2.5 shrink-0 rounded-full bg-warning"
+                          className="dot-glow size-2.5 shrink-0 rounded-full bg-warning"
                         />
                       )}
                     </span>
