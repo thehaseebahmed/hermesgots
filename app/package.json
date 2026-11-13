@@ -15,6 +15,7 @@
     "lint": "oxlint",
     "typecheck": "node node_modules/typescript-7/bin/tsc -b",
     "format": "prettier --write src",
+    "inventory": "node --experimental-strip-types scripts/inventory.mjs",
     "test": "pnpm build:canvas-libraries && pnpm test:unit && pnpm test:component",
     "test:unit": "node --experimental-strip-types --test --test-concurrency=3 \"scripts/test-*.mjs\"",
     "test:component": "node --max-old-space-size=1536 --test --test-concurrency=2 --test-force-exit --import ./scripts/component-hooks.mjs \"scripts/test-*.tsx\"",
