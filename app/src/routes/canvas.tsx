@@ -366,8 +366,9 @@ function CanvasHead({
   return (
     <ChatHeader
       className="relative pb-2"
-      // The subtitle is no part of this control: it carries the away sentence as a live region, and a
-      // live region inside a button becomes part of that button's name.
+      // The subtitle's away sentence stays outside the control: a live region inside a button
+      // becomes part of its name.
+      onTitlePress={canvas ? onOpenOptions : undefined}
       title={
         canvas ? (
           <button
@@ -375,8 +376,9 @@ function CanvasHead({
             aria-haspopup="dialog"
             aria-expanded={optionsOpen}
             data-canvas-options-open
-            onClick={onOpenOptions}
-            className="flex min-h-11 w-full min-w-0 items-center rounded-lg text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
+            // The press is the block's (`onTitlePress`); this button is what a reader, a tab stop and
+            // a keyboard activate, and its own presses bubble to the block.
+            className="flex min-h-11 w-full min-w-0 items-center text-left outline-none"
           >
             <span className="min-w-0 truncate">{canvas.title}</span>
           </button>
