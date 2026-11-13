@@ -15,7 +15,7 @@ import { MemoryRouter, Route, Routes, type InitialEntry } from "react-router"
 import { Home } from "@/App"
 import { BotChatsPage, BotChatsPane } from "@/routes/bot-chats"
 import { BOT_CHATS } from "@/lib/chat-list"
-import { db, deleteConversation, getSettings, type Message } from "@/lib/db"
+import { db, deleteConversation, getSettings, saveChatFilter, saveSettings, type Message } from "@/lib/db"
 import { pressBack } from "@/lib/native"
 import { markRead } from "@/lib/read-marks"
 import {
@@ -994,4 +994,19 @@ test("a pill pressed on one bot leaves every other bot's list on its own", async
     await until(async () => rowIds().length === 1, "the first bot's list, on its own pill")
     assert.deepEqual(rowIds(), ["planning"], "the rows the first bot kept")
   })
+})
+
+test("a pill saved beside another write of the settings row survives it", async () => {
+  await seed([{ id: "planning", title: "Planning", at: 150, room: true }])
+  // The row is put whole, so a save that read it before the pill landed would restore the map it saw:
+  // the pill's own write and the row's are both transactions, and the later one keeps both fields.
+  let lost = 0
+  for (let i = 0; i < 20; i += 1) {
+    await Promise.all([
+      saveChatFilter(bot.id, "rooms"),
+      saveSettings({ appearanceAt: i + 1 }),
+    ])
+    if ((await getSettings()).chatFilters?.[bot.id] !== "rooms") lost += 1
+  }
+  assert.equal(lost, 0, "no pill is lost to a save of the switches beside it")
 })

@@ -1827,22 +1827,29 @@ export async function getSettings(): Promise<Settings> {
   return { ...DEFAULT_SETTINGS, ...(await db.settings.get("settings")) }
 }
 
+/**
+ * Writes part of this device's settings row. Its read and its put are one transaction, because the put
+ * carries the whole row: two writers whose reads both landed before either write — a pill and an
+ * appearance switch, say — would otherwise undo each other's field. A caller already inside a
+ * transaction on this table joins it rather than opening a second.
+ */
 export async function saveSettings(patch: Partial<Omit<Settings, "id">>) {
-  const stored = await db.settings.get("settings")
-  // Every screen reads settings live, so a write that changes nothing would wake them all.
-  const changed =
-    !stored ||
-    (Object.keys(patch) as (keyof typeof patch)[]).some(
-      (key) => JSON.stringify(stored[key]) !== JSON.stringify(patch[key]),
-    )
-  if (changed) {
+  await db.transaction("rw", db.settings, async () => {
+    const stored = await db.settings.get("settings")
+    // Every screen reads settings live, so a write that changes nothing would wake them all.
+    const changed =
+      !stored ||
+      (Object.keys(patch) as (keyof typeof patch)[]).some(
+        (key) => JSON.stringify(stored[key]) !== JSON.stringify(patch[key]),
+      )
+    if (!changed) return
     const row = { ...DEFAULT_SETTINGS, ...stored, ...patch, id: "settings" } as Settings &
       Record<string, unknown>
     // `stored` can carry a key nothing reads, written by an older build or pushed by a device
     // running one: the save puts the whole row, so the retired key goes here too.
     for (const key of RETIRED_SETTINGS_KEYS) delete row[key]
     await db.settings.put(row)
-  }
+  })
 }
 
 /** Saves an appearance switch; the clock moves so sync carries the change to the account's devices. */
