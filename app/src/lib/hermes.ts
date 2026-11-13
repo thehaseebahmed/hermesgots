@@ -4079,7 +4079,9 @@ export interface ProjectIssue {
 
 /**
  * A project's tasks as AFK reads them: the frontier — what's ready, oldest first — and what is out
- * of it, claimed or blocked by an open task. Needs plugin 0.49.
+ * of it, taken by somebody else or blocked by an open task. A task AFK claimed itself is none of
+ * these three: the host names it in `holds` while it works and in Code once its work is in review,
+ * so the sheet never lists the same task twice. Needs plugin 0.49.
  */
 export interface ProjectTasks {
   repos: string[]

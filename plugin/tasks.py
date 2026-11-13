@@ -64,9 +64,13 @@ def issue_url(task: Dict[str, Any]) -> str:
 def groups(tasks: Iterable[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
     """The project's tasks grouped the way AFK reads them: ready, claimed and blocked.
 
-    Only an open task carrying the ready mark is one of AFK's at all; it's out of the frontier when
-    it carries Gots's claim mark or an assignee — someone has it — and blocked while any of its
-    blockers is still open, those named on the row. What's left is the frontier, oldest first.
+    Only an open task carrying the ready mark is one of AFK's at all, and it is blocked while any of
+    its blockers is still open, those named on the row. A task somebody else has — an assignee with
+    no Gots claim mark on it — is claimed; what is left of the frontier is ready, oldest first.
+
+    Gots's own claim is AFK's work rather than somebody's: the host draws it in Working while it
+    holds the task and in Code once the work is in review, so it is in no group here, which is what
+    stops the sheet drawing one task twice (ADR 0150).
     """
     ready: List[Dict[str, Any]] = []
     claimed: List[Dict[str, Any]] = []
@@ -75,12 +79,12 @@ def groups(tasks: Iterable[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
         if task.get("state") != "open":
             continue
         labels = task.get("labels") or []
-        if READY_LABEL not in labels:
+        if READY_LABEL not in labels or ours(labels):
             continue
         row = {key: task.get(key) for key in SHOWN}
         row["title"] = row["title"] or ""
         row["assignees"] = list(row["assignees"] or [])
-        if _claimed(labels, row["assignees"]):
+        if row["assignees"]:
             row["blockers"] = []
             claimed.append(row)
             continue
@@ -96,9 +100,14 @@ def _body(text: Any) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n") if isinstance(text, str) else ""
 
 
-def _claimed(labels: Iterable[Any], assignees: Iterable[Any]) -> bool:
-    """Whether someone has the task: Gots's own mark, or an assignee who took it."""
-    return CLAIM_LABEL in labels or bool(list(assignees))
+def ours(labels: Iterable[Any]) -> bool:
+    """Whether the task carries Gots's own claim mark: AFK took it, so no other hand is on it."""
+    return CLAIM_LABEL in labels
+
+
+def taken(labels: Iterable[Any], assignees: Iterable[Any]) -> bool:
+    """Whether anyone has the task: Gots's mark, or an assignee — ours or a person's."""
+    return ours(labels) or bool(list(assignees))
 
 
 def order(task: Dict[str, Any]) -> Tuple[str, int]:
@@ -229,8 +238,8 @@ def _task(
         for assignee in row.get("assignees") or []
         if isinstance(assignee, dict) and isinstance(assignee.get("login"), str)
     ]
-    # A claimed task is out of the frontier whatever it blocks, so its blockers aren't read.
-    blockers = [] if _claimed(labels, assignees) else _blockers(repo, row, auth, edges, looked_up)
+    # A taken task is out of the frontier whatever it blocks, so its blockers aren't read.
+    blockers = [] if taken(labels, assignees) else _blockers(repo, row, auth, edges, looked_up)
     return {
         "repo": repo,
         "number": row.get("number"),

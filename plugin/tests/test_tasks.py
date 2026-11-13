@@ -84,10 +84,15 @@ class FrontierTests(unittest.TestCase):
         self.assertEqual(found["ready"], [])
         self.assertEqual([row["number"] for row in found["claimed"]], [265])
 
-    def test_a_task_with_the_claim_mark_is_claimed(self) -> None:
-        found = groups([task(265, labels=(READY_LABEL, CLAIM_LABEL))])
+    def test_a_task_afk_claims_is_not_listed_as_claimed_by_somebody_else(self) -> None:
+        """Gots's own claim is AFK's work, drawn in Working — or in Code once it is in review.
+
+        The claimed group is for a task somebody has taken, which is what a sheet can say that
+        Working cannot: drawing AFK's own tasks there too showed every held task twice (ADR 0150).
+        """
+        found = groups([task(265, labels=(READY_LABEL, CLAIM_LABEL), assignees=["mock-user"])])
         self.assertEqual(found["ready"], [])
-        self.assertEqual([row["number"] for row in found["claimed"]], [265])
+        self.assertEqual(found["claimed"], [], "AFK's own claim is nobody else's")
 
     def test_a_task_with_an_open_blocker_is_blocked_and_names_it(self) -> None:
         found = groups([task(266, blockers=[blocker(265)])])
@@ -216,7 +221,7 @@ class ReadTests(unittest.TestCase):
             {
                 "/repos/mock-user/gots/issues?": [
                     issue_row(265, body="Describe it."),
-                    issue_row(266, body="Claimed.", labels=(READY_LABEL, CLAIM_LABEL)),
+                    issue_row(266, body="Taken.", assignees=("someone",)),
                     issue_row(267, body="Blocked.", created="2026-10-03T00:00:00Z", summary=1),
                 ],
                 "/repos/mock-user/gots/issues/267/dependencies/blocked_by": [issue_row(265)],
@@ -390,7 +395,7 @@ class ReadTests(unittest.TestCase):
         self.serve(
             {
                 "/repos/mock-user/gots/issues?": [
-                    issue_row(265, labels=(READY_LABEL, CLAIM_LABEL), summary=2)
+                    issue_row(265, assignees=("someone",), summary=2)
                 ],
                 "/repos/mock-user/gots/issues/265/dependencies/blocked_by": [],
             }
@@ -400,6 +405,22 @@ class ReadTests(unittest.TestCase):
         self.assertEqual(found["claimed"][0]["blockers"], [])
         # The summary says it has edges; a claim means they're never worth a request.
         self.assertEqual(len(self.paths), 1, self.paths)
+
+    def test_a_task_gots_claimed_is_in_no_group(self) -> None:
+        """AFK's own claim is its own work: the sheet draws it in Working, not as somebody's claim."""
+        self.serve(
+            {
+                "/repos/mock-user/gots/issues?": [
+                    issue_row(265, labels=(READY_LABEL, CLAIM_LABEL), assignees=("mock-user",))
+                ],
+            }
+        )
+        found = read(Path(self.home.name), self.folders)
+        self.assertEqual(
+            {group: len(found[group]) for group in ("ready", "claimed", "blocked")},
+            {"ready": 0, "claimed": 0, "blocked": 0},
+            "a claim-marked task is the project's hold, not a task somebody else has",
+        )
 
     def test_a_task_whose_blockers_are_all_closed_asks_no_edges(self) -> None:
         """``blocked_by`` counts the open ones, so a zero settles it without a second request."""
