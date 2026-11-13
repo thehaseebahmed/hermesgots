@@ -6,9 +6,9 @@ import {
   CATALOG_RETRY_MS,
   CATALOG_TTL_MS,
   MODELS_DEV_URL,
+  catalogFrom,
   fetchModelsDev,
-  knownModelIds,
-  knownModels,
+  knownCatalog,
   modelKey,
   modelKeys,
 } from "../netlify/lib/models-dev.ts"
@@ -222,86 +222,93 @@ test("a model id is looked up by its bare, lower-case spelling", () => {
   assert.equal(modelKey("DeepSeek-V4.1-Flash"), "deepseek-v4-1-flash")
 })
 
-test("the catalogue's model ids are read off its providers", () => {
+test("the catalogue is read as its models and the providers it names", () => {
   const payload = {
     anthropic: { models: { "claude-opus-5-5": {}, "claude-sonnet-4.5": {} } },
     deepseek: { models: { "deepseek/deepseek-v4-pro": {}, "deepseek-v4.1-flash": {} } },
+    "  Acme  ": { models: { "acme-1": {} } },
   }
-  // Keyed by the lookup spelling, holding the name the catalogue serves — dots and all.
-  assert.deepEqual([...knownModels(payload)].sort(), [
+  const catalog = catalogFrom(payload)
+  // Models keyed by the lookup spelling, holding the name the catalogue serves — dots and all.
+  assert.deepEqual([...catalog.models].sort(), [
+    ["acme-1", "acme-1"],
     ["claude-opus-5-5", "claude-opus-5-5"],
     ["claude-sonnet-4-5", "claude-sonnet-4.5"],
     ["deepseek-v4-1-flash", "deepseek-v4.1-flash"],
     ["deepseek-v4-pro", "deepseek-v4-pro"],
   ])
+  // Every provider the payload names, lower-cased, is one the board can vouch for.
+  assert.deepEqual([...catalog.providers].sort(), ["acme", "anthropic", "deepseek"])
   // Anything that isn't the registry, or holds no id, is no answer at all.
   for (const junk of ["nope", [], {}, { a: {} }, { a: { models: {} } }, { a: "nope" }]) {
-    assert.equal(knownModels(junk), null)
+    assert.equal(catalogFrom(junk), null)
   }
 })
 
 test("a fresh catalogue row answers without fetching", async () => {
   const store = memoryStore()
-  store.data.set("models-dev", { models: ["claude-opus-5-5", "gpt-5"], at: NOW })
+  store.data.set("models-dev", { models: ["claude-opus-5-5", "gpt-5"], providers: ["anthropic"], at: NOW })
   const load = async () => {
     throw new Error("a fresh row is not fetched")
   }
-  assert.deepEqual(
-    await knownModelIds(store, NOW, load),
-    new Map([
+  assert.deepEqual(await knownCatalog(store, NOW, load), {
+    models: new Map([
       ["claude-opus-5-5", "claude-opus-5-5"],
       ["gpt-5", "gpt-5"],
     ]),
-  )
+    providers: new Set(["anthropic"]),
+  })
 })
 
 test("a stale catalogue row is refreshed and written back", async () => {
   const store = memoryStore()
-  store.data.set("models-dev", { models: ["gone-model"], at: NOW - CATALOG_TTL_MS - 1 })
+  store.data.set("models-dev", { models: ["gone-model"], providers: ["gone"], at: NOW - CATALOG_TTL_MS - 1 })
   const load = async () => ({
     anthropic: { models: { "claude-opus-5-5": {}, "claude-sonnet-4.5": {} } },
   })
-  assert.deepEqual(
-    await knownModelIds(store, NOW, load),
-    new Map([
+  assert.deepEqual(await knownCatalog(store, NOW, load), {
+    models: new Map([
       ["claude-opus-5-5", "claude-opus-5-5"],
       ["claude-sonnet-4-5", "claude-sonnet-4.5"],
     ]),
-  )
+    providers: new Set(["anthropic"]),
+  })
   assert.deepEqual(store.data.get("models-dev"), {
     models: ["claude-opus-5-5", "claude-sonnet-4.5"],
+    providers: ["anthropic"],
     at: NOW,
   })
 })
 
 test("a failed refresh keeps the stale ids and is not retried for every visitor", async () => {
   const store = memoryStore()
-  store.data.set("models-dev", { models: ["claude-opus-5-5"], at: NOW - CATALOG_TTL_MS - 1 })
+  store.data.set("models-dev", { models: ["claude-opus-5-5"], providers: ["anthropic"], at: NOW - CATALOG_TTL_MS - 1 })
   const down = async () => {
     throw new Error("models.dev is down")
   }
-  assert.deepEqual(await knownModelIds(store, NOW, down), new Map([["claude-opus-5-5", "claude-opus-5-5"]]))
+  const stale = { models: new Map([["claude-opus-5-5", "claude-opus-5-5"]]), providers: new Set(["anthropic"]) }
+  assert.deepEqual(await knownCatalog(store, NOW, down), stale)
   // The failure is on file for its own, shorter window: a second request inside it fetches nothing.
   let fetches = 0
   const counted = async () => {
     fetches += 1
     throw new Error("models.dev is down")
   }
-  assert.deepEqual(await knownModelIds(store, NOW + 60_000, counted), new Map([["claude-opus-5-5", "claude-opus-5-5"]]))
+  assert.deepEqual(await knownCatalog(store, NOW + 60_000, counted), stale)
   assert.equal(fetches, 0)
   // A payload that isn't the registry is no better an answer than an error.
-  assert.deepEqual(
-    await knownModelIds(store, NOW + CATALOG_RETRY_MS + 1, async () => "nope"),
-    new Map([["claude-opus-5-5", "claude-opus-5-5"]]),
-  )
-  assert.equal(await knownModelIds(memoryStore(), NOW, down), null)
+  assert.deepEqual(await knownCatalog(store, NOW + CATALOG_RETRY_MS + 1, async () => "nope"), stale)
+  assert.equal(await knownCatalog(memoryStore(), NOW, down), null)
 })
 
 test("an empty catalogue row is read again rather than emptying the board", async () => {
   const store = memoryStore()
-  store.data.set("models-dev", { models: [], at: NOW })
+  store.data.set("models-dev", { models: [], providers: [], at: NOW })
   const load = async () => ({ anthropic: { models: { "claude-opus-5-5": {} } } })
-  assert.deepEqual(await knownModelIds(store, NOW, load), new Map([["claude-opus-5-5", "claude-opus-5-5"]]))
+  assert.deepEqual(await knownCatalog(store, NOW, load), {
+    models: new Map([["claude-opus-5-5", "claude-opus-5-5"]]),
+    providers: new Set(["anthropic"]),
+  })
 })
 
 test("a store that can't be read is a catalogue nobody knows", async () => {
@@ -316,7 +323,7 @@ test("a store that can't be read is a catalogue nobody knows", async () => {
     throw new Error("models.dev is down")
   }
   // A store that won't answer is no reason to fail the request that asked.
-  assert.equal(await knownModelIds(store, NOW, down), null)
+  assert.equal(await knownCatalog(store, NOW, down), null)
 })
 
 test("fetchModelsDev reads the registry and refuses an error", async () => {
@@ -342,7 +349,10 @@ test("a catalogue the store can't cache still answers", async () => {
     throw new Error("the blob write was refused")
   }
   const load = async () => ({ anthropic: { models: { "claude-opus-5-5": {} } } })
-  assert.deepEqual(await knownModelIds(store, NOW, load), new Map([["claude-opus-5-5", "claude-opus-5-5"]]))
+  assert.deepEqual(await knownCatalog(store, NOW, load), {
+    models: new Map([["claude-opus-5-5", "claude-opus-5-5"]]),
+    providers: new Set(["anthropic"]),
+  })
 })
 
 test("a cached board asks the catalogue nothing", async () => {
@@ -363,9 +373,12 @@ test("a cached board asks the catalogue nothing", async () => {
   assert.equal(again.body.periods.today.tokens[0].total, 2)
 })
 
-// The catalogue, as the community function hands it to the rules: only these models exist, under
-// these names.
-const LISTED = new Map([["claude-opus-5-5", "claude-opus-5-5"]])
+// The catalogue, as the community function hands it to the rules: only these models and providers
+// exist, under these names.
+const LISTED = {
+  models: new Map([["claude-opus-5-5", "claude-opus-5-5"]]),
+  providers: new Set(["anthropic", "openrouter"]),
+}
 
 test("a report's unlisted models and custom providers are not stored", async () => {
   const env = { ...setup(), catalog: async () => LISTED }
@@ -414,6 +427,7 @@ test("a member stored before the rules serves no custom provider or unlisted mod
     providers: {
       "2026-10-15": {
         custom: { "totally-fake-model": 1800 },
+        "buy-followers-here": { "claude-opus-5-5": 100 },
         anthropic: { "claude-opus-5-5": 200, "totally-fake-model": 800 },
       },
     },
@@ -441,10 +455,13 @@ test("a member stored before the rules serves no custom provider or unlisted mod
 test("a model counts under the catalogue's own name, however it is spelled", () => {
   // The catalogue spells one model two ways and a host may spell it a third: all three meet, and the
   // board serves the catalogue's own name.
-  const known = new Map([
-    ["claude-opus-5-5", "claude-opus-5-5"],
-    ["claude-sonnet-4-5", "claude-sonnet-4.5"],
-  ])
+  const known = {
+    models: new Map([
+      ["claude-opus-5-5", "claude-opus-5-5"],
+      ["claude-sonnet-4-5", "claude-sonnet-4.5"],
+    ]),
+    providers: new Set(["anthropic"]),
+  }
   const day = cleanDays(
     {
       "2026-10-15": {
@@ -484,11 +501,42 @@ test("a model counts under the catalogue's own name, however it is spelled", () 
   )
 })
 
-test("a provider keeps its own slug unless it is a custom endpoint", () => {
-  assert.deepEqual(
-    cleanProviders({ "2026-10-15": { "openrouter:beta": { m: 5 }, custom: { n: 7 } } }, NOW),
-    { "2026-10-15": { "openrouter:beta": { m: 5 } } },
-  )
+test("a provider bar is only for a provider the board can vouch for", () => {
+  const catalog = {
+    models: new Map([["claude-opus-5-5", "claude-opus-5-5"]]),
+    providers: new Set(["anthropic", "openrouter"]),
+  }
+  const day = {
+    "2026-10-15": {
+      anthropic: { "claude-opus-5-5": 5 },
+      "buy-followers-here": { "claude-opus-5-5": 900 },
+      custom: { "claude-opus-5-5": 50 },
+      "custom:acme": { "claude-opus-5-5": 50 },
+      // Neither is in the catalogue, and both are names Hermes really reports.
+      nous: { "claude-opus-5-5": 3 },
+      "openai-codex": { "claude-opus-5-5": 4 },
+      together: { "claude-opus-5-5": 2 },
+      unknown: { "claude-opus-5-5": 1 },
+      "openrouter:beta": { "claude-opus-5-5": 6 },
+    },
+  }
+  assert.deepEqual(Object.keys(cleanProviders(day, NOW, catalog)["2026-10-15"]).sort(), [
+    "anthropic",
+    "nous",
+    "openai-codex",
+    "together",
+    "unknown",
+  ])
+  // No catalogue is no check, which is what an unreachable models.dev means: the host's slug stands.
+  assert.deepEqual(Object.keys(cleanProviders(day, NOW)["2026-10-15"]).sort(), [
+    "anthropic",
+    "buy-followers-here",
+    "nous",
+    "openai-codex",
+    "openrouter:beta",
+    "together",
+    "unknown",
+  ])
 })
 
 test("an id is looked up under its own spelling, then without a snapshot date", () => {
