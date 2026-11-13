@@ -695,6 +695,72 @@ def mark_ready(repo: str, number: int, auth: str) -> Dict[str, Any]:
     return _pr_or_error(repo, {**row, "draft": False}, None)
 
 
+MERGE_METHODS = ("merge", "squash", "rebase")
+
+
+def merge_pull_request(repo: str, number: int, method: str, auth: str) -> Dict[str, Any]:
+    """Merges a pull request, on the head this call read, and says whether GitHub merged it.
+
+    The head sha is passed as the guard GitHub documents: a branch that moved since the read is
+    refused with a 409 rather than merging a commit nobody looked at. What GitHub answers when it
+    won't merge — 405 for a conflict or a rule, 409 for a moved head, 422 for the request itself —
+    becomes the step the agent takes next, because each one is a different next call.
+    """
+    if method not in MERGE_METHODS:
+        raise GitHubError(f"merge_method must be one of {', '.join(MERGE_METHODS)}.", 400)
+    row = _pull(repo, number, auth)
+    if row.get("draft"):
+        raise GitHubError(
+            f"{repo}#{number} is still a draft, and GitHub won't merge one. Call pull_request with "
+            "action 'ready' first, then 'merge'.",
+            409,
+        )
+    head = row.get("head")
+    sha = head.get("sha") if isinstance(head, dict) else None
+    fields: Dict[str, Any] = {"merge_method": method}
+    if isinstance(sha, str) and sha:
+        fields["sha"] = sha
+    try:
+        answer = _request(f"/repos/{repo}/pulls/{number}/merge", auth, "PUT", fields)
+    except GitHubError as error:
+        raise _merge_refused(repo, number, error) from None
+    answer = answer if isinstance(answer, dict) else {}
+    said = answer.get("message")
+    return {
+        "repo": repo,
+        "number": number,
+        "sha": sha if isinstance(sha, str) else None,
+        "merged": bool(answer.get("merged")),
+        "message": said if isinstance(said, str) else None,
+    }
+
+
+def _merge_refused(repo: str, number: int, error: "GitHubError") -> "GitHubError":
+    """A merge GitHub wouldn't make, said as the call the agent makes next."""
+    said = str(error)
+    if error.code == 405:
+        return GitHubError(
+            f"GitHub won't merge {repo}#{number}: {said}. A conflict, a required review or a check "
+            "it says failed is in the way — fix what GitHub names, call 'ship' again, then 'merge'. "
+            "Leave a rule the user set on the branch alone, and say what it asks for.",
+            409,
+            error.code,
+        )
+    if error.code == 409:
+        return GitHubError(
+            f"{repo}#{number}'s branch moved since this session last read it, so GitHub refused the "
+            "merge rather than merge a commit nobody reviewed. Call pull_request with action 'ship' "
+            "to push this session's commits, then 'merge' again.",
+            409,
+            error.code,
+        )
+    if error.code == 422:
+        return GitHubError(f"GitHub refused the merge of {repo}#{number}: {said}", 409, error.code)
+    if error.code == 404:
+        return GitHubError(f"GitHub has no pull request #{number} in {repo}.", 409, 404)
+    return error
+
+
 def create_pull_request(
     repo: str, branch: str, base: str, title: str, body: str, draft: bool, auth: str
 ) -> Dict[str, Any]:
