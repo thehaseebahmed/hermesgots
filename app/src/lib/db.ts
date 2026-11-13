@@ -1764,6 +1764,13 @@ export function conversationsOf(profileId: string) {
     .between([profileId, Dexie.minKey], [profileId, Dexie.maxKey])
 }
 
+/**
+ * The title a chat wears until something is said in it: what a new one is made with, and what a
+ * list that names one reads as "nothing said here yet" — so a menu offering sessions to tag leaves
+ * these out rather than listing three rows all called the same thing.
+ */
+export const NEW_CHAT_TITLE = "New chat"
+
 export async function createConversation(
   profileId: string,
   fields: Partial<Pick<Conversation, "title" | "projectId" | "mode" | "modelChoice">> = {},
@@ -1772,7 +1779,7 @@ export async function createConversation(
   const conversation: Conversation = {
     id: randomId(),
     profileId,
-    title: "New chat",
+    title: NEW_CHAT_TITLE,
     hermesSessionId: `gots-${randomId()}`,
     createdAt: now,
     updatedAt: now,

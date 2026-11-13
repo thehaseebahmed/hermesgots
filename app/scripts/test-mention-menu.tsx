@@ -61,9 +61,13 @@ async function seeded() {
       // Two word-runs, so the name that lands in the sentence is the title as read.
       { id: "s3", profileId: "bot-1", title: "Q3  planning review", at: 30 },
       { id: "x1", profileId: "bot-2", title: "Sibling notes", at: 40 },
+      // A chat nobody has said anything in: it wears the title a new one is made with.
+      { id: "s4", profileId: "bot-1", title: "New chat", at: 50 },
     ],
     { bots: [MENTIONER, SIBLING, AWAY], active: "bot-1" },
   )
+  // Seeded chats are titled for good; this one is left as the app makes it, so it reads as unsaid.
+  await db.conversations.update("s4", { titleEdited: false })
   // chat-next reads the open chat's transcript too; the hosts this menu reads are the device's.
   return fakeHost("gots-c1", { plugin: true })
 }
@@ -98,6 +102,11 @@ test("typing @ offers this bot's sessions and its host's other bots, and nothing
     assert.ok(offers("Sibling", "Bot"), "the host's other bot is offered")
     assert.equal(offers("Away bot", "Bot"), false, "a bot of another host is not")
     assert.equal(offers("Mentioner", "Bot"), false, "and this bot never offers itself")
+    assert.equal(
+      offers("New chat", "Session"),
+      false,
+      "a chat nobody has said anything in has nothing to name",
+    )
 
     await type(field(), "@wee")
     await until(async () => Boolean(menu()), "the menu under the query")
@@ -132,6 +141,23 @@ test("Return takes the row the cursor is on, and Escape shuts the menu till the 
     await type(field(), "/")
     await until(async () => Boolean(slashMenu()), "the / menu")
     absent(MENU, "the @ menu gave way to it")
+  })
+})
+
+test("a chat the reader names is offered the moment the rename lands", async () => {
+  await seeded()
+  await mount(chatScreen("c1"), async () => {
+    await until(async () => Boolean(field()), "the composer")
+    await type(field(), "@")
+    await until(async () => Boolean(menu()), "the @ menu")
+    assert.equal(offers("New chat", "Session"), false, "nothing said in it yet")
+
+    // The list is this device's own rows, read live: a rename lands in the menu behind the open,
+    // with no reload and no second read asked of anyone.
+    await act(async () => {
+      await db.conversations.update("s4", { titleEdited: true })
+    })
+    await until(async () => offers("New chat", "Session"), "the renamed chat, offered")
   })
 })
 

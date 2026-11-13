@@ -15,7 +15,7 @@
  */
 import { useLiveQuery } from "dexie-react-hooks"
 
-import { conversationsOf, db, type Profile } from "./db"
+import { conversationsOf, db, NEW_CHAT_TITLE, type Profile } from "./db"
 import { mentionName } from "./mention"
 import type { Mention } from "./mention-marker"
 import { quietly } from "./report"
@@ -59,7 +59,15 @@ async function sessionsOf(profileId: string, here: string | undefined): Promise<
     .toArray()
     .catch(quietly("Reading the sessions that may be mentioned"))
   return (chats ?? [])
-    .filter((chat) => chat.title.trim() && !chat.canvasId && chat.id !== here)
+    .filter(
+      (chat) =>
+        chat.title.trim() &&
+        // A chat nobody has said anything in wears the default title, so there is nothing in it to
+        // name; one the reader renamed to those same words is theirs and stays.
+        (chat.title !== NEW_CHAT_TITLE || chat.titleEdited) &&
+        !chat.canvasId &&
+        chat.id !== here,
+    )
     .slice(0, OFFERED_SESSIONS)
     .map((chat) => ({
       name: mentionName(chat.title),
