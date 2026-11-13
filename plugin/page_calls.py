@@ -33,8 +33,8 @@ DENIED = "denied"
 NOT_DECLARED = "not_declared"
 
 Read = Callable[[Dict[str, Any]], Awaitable[Any]]
-# A canvas's own data: one store write, taken off the loop, whose ValueError is a refusal.
-Write = Callable[[Dict[str, Any]], Any]
+# A canvas's own data: one store read or write, taken off the loop, whose ValueError is a refusal.
+Own = Callable[[Dict[str, Any]], Any]
 # ``may_call(tool)``: one of the verdicts above, and a ValueError is a refusal of its own. An answer
 # is the user's for a tool and not for a verb, so the predicate is asked the tool alone.
 MayCall = Callable[[str], str]
@@ -69,7 +69,7 @@ async def answer(
     sent: Dict[str, Any],
     *,
     reads: Dict[str, Read] | None = None,
-    writes: Dict[str, Write] | None = None,
+    own: Dict[str, Own] | None = None,
     may_call: MayCall | None = None,
     profile: Any = None,
     locks: Dict[str, threading.Lock] | None = None,
@@ -81,12 +81,13 @@ async def answer(
     wiring: they are threads' locks, taken in the thread the call runs on, so a request cancelled
     while its call is out can't release one that is still doing the work.
 
-    ``writes`` maps the canvas's own shapes to their writes. A page owns its canvas's data, so one
-    of those is answered without asking anybody: no consent to agree to, and no act lock, since the
-    store's own transaction is what makes two writes land one at a time. A canvas's own shapes say by
-    their name whether they write, so the ``write`` flag — the consent path's — is not read for them.
-    A ValueError a write raises is a refusal at the status it names — a canvas that isn't there is a
-    404, not a 400 — or at 400 when it names none.
+    ``own`` maps the canvas's own shapes to their answer — ``data.put``, ``data.remove`` and
+    ``data.query``. A page owns its canvas's data, so one of those is answered without asking
+    anybody: no consent to agree to, and no act lock, since the store's own transaction is what makes
+    two writes land one at a time and its own statement what makes a query one read. A canvas's own
+    shapes say by their name what they do, so the ``write`` flag — the consent path's — is not read
+    for them. A ValueError one raises is a refusal at the status it names — a canvas that isn't there
+    is a 404, not a 400 — or at 400 when it names none.
 
     A caller that answers no other shape passes neither ``reads`` nor ``may_call``, and a name that
     is not a ``<server>.<tool>`` is refused here: a route that takes no tools says so once.
@@ -100,13 +101,13 @@ async def answer(
     args = sent.get("args")
     args = args if isinstance(args, dict) else {}
     read = (reads or {}).get(shape) if isinstance(shape, str) else None
-    own = writes.get(shape) if writes and isinstance(shape, str) else None
+    own_shape = own.get(shape) if own and isinstance(shape, str) else None
     if read is not None and write:
         raise CallRefused(f"{shape!r} is a read of the bot's own; it has no write.", 400)
-    if own is not None:
+    if own_shape is not None:
         # The canvas's page owns its data: nobody is asked about it, and it takes no act lock.
         try:
-            return await asyncio.to_thread(own, args)
+            return await asyncio.to_thread(own_shape, args)
         except ValueError as error:
             # A refusal that names its own status keeps it — a canvas that isn't there is a 404,
             # not a bad request — and any other ValueError is the caller's mistake.

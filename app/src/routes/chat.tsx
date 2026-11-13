@@ -10,7 +10,6 @@ import {
 } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Navigate, useLocation, useNavigate, useParams } from "react-router"
-import { toast } from "sonner"
 
 import {
   CATCH_UP_MS,
@@ -21,6 +20,8 @@ import {
   SAFETY_MS,
   SEND_CAUGHT_UP_MS,
 } from "@/lib/freshness"
+import { attempt } from "@/lib/attempt"
+import { failed } from "@/lib/refusal"
 import { equal } from "@/lib/equal"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { pausedQueue, type PendingQueue } from "@/lib/pending"
@@ -31,13 +32,19 @@ import { awayLine } from "@/lib/away"
 import { useOnline } from "@/lib/online"
 import { labelOf } from "@/lib/bot-name"
 import { repoCap, sessionSubtitle } from "@/lib/repo-line"
+import { Refusal } from "@/components/banner"
 import { useBotLabels } from "@/lib/use-bot-labels"
 import { useBreakReminderEligibility } from "@/components/break-reminder-context"
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { CODE_FACE, CodeFaceProvider } from "@/components/chat/code-face"
-import { ChatActions, LimitNotice, useChatSurface, useChatUsage } from "@/components/chat/chat-actions"
+import {
+  ChatActions,
+  LimitNotice,
+  useChatSurface,
+  useChatUsage,
+} from "@/components/chat/chat-actions"
 import { FollowAfterApproval, FollowOnSend } from "@/components/chat/follow"
 import { useFirstRows } from "@/components/chat/first-rows"
 import { Composer } from "@/components/chat/composer"
@@ -56,6 +63,7 @@ import {
   PlanReadyCard,
   QueuePausedCard,
   ResolvedCard,
+  ThreadRefusal,
 } from "@/components/chat/session-cards"
 import { TodosPill, TodosSheet } from "@/components/chat/todos"
 import { ModelMenu } from "@/components/chat/model-picker"
@@ -90,6 +98,7 @@ import {
   db,
   getActiveProfile,
   getMessages,
+  NEW_CHAT_TITLE,
   setActiveProfile,
   updateConversation,
 } from "@/lib/db"
@@ -100,6 +109,8 @@ import { supportsSteer, type DelegatedAgent, type HermesProject } from "@/lib/he
 import { readProjects, useProjects } from "@/lib/projects"
 import { caughtUpWithin, loadEarlierHistory, reconcileHistory } from "@/lib/history"
 import { useLive, watchChat } from "@/lib/live"
+import { useRefusal } from "@/lib/use-refusal"
+import { tell } from "@/lib/tell"
 import { useLiveRun, useLiveSubagents } from "@/lib/waiting"
 import { runFinished } from "@/lib/session-work"
 import { usePoll } from "@/lib/poll"
@@ -108,6 +119,7 @@ import { useCodePane, useRememberOpened } from "@/lib/pane"
 import { markRead } from "@/lib/read-marks"
 import { useDismissChatPushes } from "@/lib/push"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
+import { cn } from "@/lib/utils"
 import { useNav } from "@/lib/nav"
 import { rememberLastChat } from "@/lib/last-chat"
 import { useUnreadElsewhere } from "@/lib/unread-chats"
@@ -503,6 +515,10 @@ function CurrentChatPage({ slot }: ChatPageProps) {
   const params = useParams()
   const { state: address } = useLocation()
   const id = params.id
+  // The chat's own refusal: what the host said about a write made from this thread, drawn above the
+  // composer for a send and where a card or a row asked for the rest. Keyed by the chat, since a
+  // screen can turn from one chat to the next and nothing said about the first is about the second.
+  const refusal = useRefusal(id)
   const navigate = useNavigate()
   const { root, up } = useNav()
   // Settings answer "no row" on a device that never wrote one, so an absent answer is `null` here
@@ -542,7 +558,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
     if (!id) return
     setLoadingEarlier(true)
     loadEarlierHistory(id)
-      .catch((error) => toast.error(error instanceof Error ? error.message : "Couldn't load more."))
+      .catch((error) => tell.error(error instanceof Error ? error.message : "Couldn't load more."))
       .finally(() => setLoadingEarlier(false))
   }, [id])
   /** The read that left the thread empty: what it was, and the facts the pane and the report keep. */
@@ -696,7 +712,8 @@ function CurrentChatPage({ slot }: ChatPageProps) {
       }, HOST_QUEUE_SETTLE_MS)
     } catch (error) {
       setFreed(false)
-      toast.error(error instanceof Error ? error.message : "Couldn't discard the lost turn.")
+      // The card that asked holds the words: it is the surface still on screen when the host refuses.
+      throw error
     } finally {
       setDiscarding(false)
     }
@@ -737,7 +754,10 @@ function CurrentChatPage({ slot }: ChatPageProps) {
     const stored = storedPick(choice)
     // Re-picking the model the chat already holds would wake every query over its row for nothing.
     if (samePick(conversation.modelChoice, stored)) return
-    void updateConversation(conversation.id, { modelChoice: stored })
+    // The pill's pick closes as it writes, so the words land on the chat the pill was opened from.
+    void attempt("save that", () =>
+      updateConversation(conversation.id, { modelChoice: stored }),
+    ).then(refusal.refuse)
   }
   // The chat's model pill: the composer's, and the plan-ready card's while a plan waits on it. A
   // chat with no record has no pick to write, so it has no pill.
@@ -871,16 +891,14 @@ function CurrentChatPage({ slot }: ChatPageProps) {
   const stopEverything = useCallback((): boolean => {
     if (!id) return false
     stopMessage(id)
-    if (agentsSource?.sessionId)
-      void stopSubagents(agentsSource.server, agentsSource.sessionId, agentsSource.agents, {
-        stopAll: hostStopsAll,
-      }).catch(() => {
-        // A subagent the host declined says why on its own card; only a call that never landed has
-        // nowhere to say it.
-        toast.error("Couldn't stop the subagents.")
-      })
+    const source = agentsSource
+    const sessionId = source?.sessionId
+    if (source && sessionId)
+      void attempt("stop the subagents", () =>
+        stopSubagents(source.server, sessionId, source.agents, { stopAll: hostStopsAll }),
+      ).then(refusal.refuse)
     return true
-  }, [id, agentsSource, hostStopsAll])
+  }, [id, agentsSource, hostStopsAll, refusal.refuse])
   // Only persistent /v1/runs work survives losing the app's connection; legacy streams do not.
   useBreakReminderEligibility(
     isBackgroundSafeRunActive({
@@ -997,17 +1015,21 @@ function CurrentChatPage({ slot }: ChatPageProps) {
 
   const send = async (text: string, attachments: Attachment[] = [], at?: number) => {
     if (!id) return
-    try {
-      // So a reply that builds on another device's latest turn shows after it, not before; a chat
-      // that caught up a moment ago doesn't wait again.
-      if (!caughtUpWithin(id, SEND_CAUGHT_UP_MS))
-        await Promise.race([reconcileHistory(id).catch(() => undefined), wait(1500)])
-      await sendMessage(id, text, { attachments, at })
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't send your message.")
-      throw error
-    }
+    // So a reply that builds on another device's latest turn shows after it, not before; a chat
+    // that caught up a moment ago doesn't wait again.
+    if (!caughtUpWithin(id, SEND_CAUGHT_UP_MS))
+      await Promise.race([reconcileHistory(id).catch(() => undefined), wait(1500)])
+    await sendMessage(id, text, { attachments, at })
   }
+
+  /**
+   * A suggestion sent from an empty thread has no composer to hold the words, so the thread's own
+   * notice says them: the pane the suggestion was tapped on is where the failure is read.
+   */
+  const suggest = (text: string) =>
+    send(text).catch((error: unknown) =>
+      refusal.refuse(failed(error, "Couldn't send your message.")),
+    )
 
   const unread = useUnreadElsewhere(conversation?.profileId, conversation?.id)
   const actions = conversation && (
@@ -1031,7 +1053,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
   // Nothing started has no title yet, and its bot is the big one in the middle. A chat gone from this
   // device draws no title: it is never drawn as a new one, and a header standing empty is the honest
   // answer. A bot's Main is titled with its own name, like any other chat.
-  const headerTitle = gone ? "" : unstarted ? "" : (conversation?.title ?? "New chat")
+  const headerTitle = gone ? "" : unstarted ? "" : (conversation?.title ?? NEW_CHAT_TITLE)
   let subtitle: string | undefined
   if (!unstarted)
     subtitle = session
@@ -1076,10 +1098,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
                   {drawn.map((entry) => {
                     if (entry.kind === "compaction")
                       return (
-                        <Compacted
-                          key={`compaction-${entry.at}`}
-                          compaction={entry.compaction}
-                        />
+                        <Compacted key={`compaction-${entry.at}`} compaction={entry.compaction} />
                       )
                     const message = entry.message
                     // A model change is a project session's mark; a chat draws none (ADR 0087).
@@ -1147,11 +1166,12 @@ function CurrentChatPage({ slot }: ChatPageProps) {
           id={conversation?.id}
           line={!gone}
           // A bot's chat nothing has been said in yet offers the message that starts it.
-          onSend={session ? undefined : send}
+          onSend={session ? undefined : suggest}
         />
       )}
 
       <div data-slot="composer-slot" data-toast-above className={COMPOSER_SLOT}>
+        <Refusal hold={refusal} className={cn(COLUMN_BOX, "mb-2")} />
         {(todos.length > 0 || prs.length > 0 || outputs > 0) && (
           // One line, centred; wider than the screen it scrolls, from the first pill.
           <div className="-mx-3 flex [scrollbar-width:none] overflow-x-auto px-3 pb-2 sm:-mx-4 sm:px-4 [&::-webkit-scrollbar]:hidden">
@@ -1259,6 +1279,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
             }}
             connection={serverConfig(profile)}
             botName={profile?.name}
+            mentionable={profile ? { bot: profile, here: id } : undefined}
             dictationWords={profile?.vocabulary}
             dictationHint={dictationHint({
               title: conversation?.title,
@@ -1273,12 +1294,12 @@ function CurrentChatPage({ slot }: ChatPageProps) {
                     ? "accept_edits"
                     : (session.mode ?? "accept_edits"),
                 autoAvailable: tracked,
-                onMode: (mode) =>
-                  setSessionMode(session.id, mode).catch((error) =>
-                    toast.error(
-                      error instanceof Error ? error.message : "Couldn't change the mode.",
-                    ),
-                  ),
+                onMode: (mode) => {
+                  // The sheet closes as the mode is picked, so the words land on the chat's notice.
+                  void attempt("change the mode", () => setSessionMode(session.id, mode)).then(
+                    refusal.refuse,
+                  )
+                },
               }
             }
             model={modelPill({ disabled: busy })}
@@ -1330,7 +1351,11 @@ function CurrentChatPage({ slot }: ChatPageProps) {
         className="relative flex min-h-0 flex-1 flex-col"
         inert={!ready}
       >
-        {ready ? frame : <PendingChat />}
+        {ready ? (
+          <ThreadRefusal.Provider value={refusal}>{frame}</ThreadRefusal.Provider>
+        ) : (
+          <PendingChat />
+        )}
       </div>
     </CodeFaceProvider>
   )

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { RotateCwIcon } from "lucide-react"
 
@@ -7,7 +7,7 @@ import { CopyBlock } from "@/components/copy-block"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import { labelOf } from "@/lib/bot-name"
+import { botsByLabel, labelOf } from "@/lib/bot-name"
 import { db, type Profile } from "@/lib/db"
 import {
   linkCommands,
@@ -50,6 +50,7 @@ export function LinkBots({ onReachable }: { onReachable?: (reachable: boolean) =
   )
   // This is the list where a host's own bots arrive, so it is where two of them first read alike.
   const labels = useBotLabels()
+  const listed = useMemo(() => botsByLabel(bots ?? [], labels), [bots, labels])
   const [reachable, setReachable] = useState<Record<string, boolean>>({})
   const { registryError, vault } = useSyncState()
 
@@ -122,7 +123,7 @@ export function LinkBots({ onReachable }: { onReachable?: (reachable: boolean) =
         </div>
       )}
       <ul className="flex flex-col gap-2" aria-live="polite">
-        {bots?.map((bot) => (
+        {listed.map((bot) => (
           <LinkedBot
             key={bot.id}
             profile={bot}

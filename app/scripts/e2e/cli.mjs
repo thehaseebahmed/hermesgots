@@ -281,7 +281,7 @@ export const FLOWS = {
   afk: {
     script: "e2e/afk.mjs",
     about:
-      "A project's options menu opens AFK's frontier: ready oldest first, claimed marked, blocked naming its open blocker, with no row for a plugin that can't read it",
+      "A project's options menu opens AFK's frontier: ready oldest first, blocked naming its open blocker, and no group of somebody else's claims, with no row for a plugin that can't read it",
   },
   "afk-switch": {
     script: "e2e/afk-switch.mjs",
@@ -433,7 +433,7 @@ export const FLOWS = {
   },
   meetings: {
     script: "e2e/meetings.mjs",
-    about: "Meetings behind its Developer switch: a recording, an added file and a timestamp",
+    about: "Meetings behind its Lab switch: a recording, an added file and a timestamp",
   },
   "clarify-polling": {
     script: "regression-clarify-polling.mjs",
@@ -737,7 +737,7 @@ async function warm() {
     // The feature switches open the routes and the chunks the flows drive.
     await page.evaluate(async () => {
       const { db } = await import("/src/lib/db.ts")
-      await db.settings.update("settings", { developer: true, meetings: true })
+      await db.settings.update("settings", { meetings: true })
     })
     for (const route of ["/projects", "/code", "/routines", "/meetings", "/research", "/settings"])
       await page.goto(`${app}${route}`)

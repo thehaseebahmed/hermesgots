@@ -95,8 +95,8 @@ for (const width of [390, 1024]) {
           `no bot picture in the session's header at ${look}`,
         )
         // The owner the repositories share said once, the names the width has room for, the rest counted.
-        const line = width < 768 ? "test-bot · gots +3" : "test-bot · gots, gots-app +2"
-        const subtitle = header.getByText(/^test-bot · /)
+        const line = width < 768 ? "Test bot · gots +3" : "Test bot · gots, gots-app +2"
+        const subtitle = header.getByText(/^Test bot · /)
         await subtitle.first().waitFor({ timeout: 5_000 })
         assert.equal(
           (await subtitle.first().innerText()).trim(),
@@ -137,13 +137,13 @@ for (const width of [390, 1024]) {
         // above — and the same centring gates hold in it.
         if (width === 1024) {
           for (const [at, expected] of [
-            [768, "test-bot · gots, gots-app +2"],
-            [1280, "test-bot · gots, gots-app, docs +1"],
+            [768, "Test bot · gots, gots-app +2"],
+            [1280, "Test bot · gots, gots-app, docs +1"],
           ]) {
             await page.setViewportSize({ width: at, height: at === 768 ? 768 : 900 })
             await page.goto(`${app}/c/${sessionId}`)
             const laptop = page.locator("header").filter({ hasText: SESSION_TITLE })
-            const laptopLine = laptop.getByText(/^test-bot · /)
+            const laptopLine = laptop.getByText(/^Test bot · /)
             await laptopLine.first().waitFor({ timeout: 15_000 })
             assert.equal(
               (await laptopLine.first().innerText()).trim(),

@@ -2,9 +2,9 @@ import { useCallback, useEffect, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useNavigate } from "react-router"
 import { FingerprintIcon, LogInIcon, TrophyIcon } from "lucide-react"
-import { toast } from "sonner"
 
 import { RecoveryCode, UnlockSync } from "@/components/account-settings"
+import { Refusal } from "@/components/banner"
 import { useCopiedCode } from "@/components/copied-code"
 import { Bot } from "@/components/bot"
 import { SharingNotes } from "@/components/community-settings"
@@ -23,6 +23,8 @@ import {
   type PendingSetup,
   type SyncState,
 } from "@/lib/sync"
+import { type RefusalHold } from "@/lib/refusal"
+import { useRefusal } from "@/lib/use-refusal"
 import { PrfUnsupportedError, supportsPasskeys } from "@/lib/vault"
 import { cn } from "@/lib/utils"
 
@@ -84,6 +86,9 @@ function SetupPage({
   const { copied, noteCopied } = useCopiedCode(setup?.recoveryCode)
   const [reachable, setReachable] = useState(false)
   const onReachable = useCallback((ok: boolean) => setReachable(ok), [])
+  // Setup's own writes — turning sync on, a passkey, the code itself — are answered where the reader
+  // is in the flow, above the step they are on.
+  const refusal = useRefusal("setup")
 
   const { account } = sync
   const identity = account.status !== "unavailable"
@@ -108,49 +113,41 @@ function SetupPage({
     }
   }, [authed, setup, identity])
 
-  const fail = (error: unknown) =>
-    toast.error(error instanceof Error ? error.message : "Something went wrong.")
-
   const turnOn = async () => {
     setBusy(true)
-    try {
-      setSetup(await setUpSync())
-    } catch (error) {
-      fail(error)
-    } finally {
-      setBusy(false)
-    }
+    let started: PendingSetup | undefined
+    if (
+      await refusal.write("turn on sync", async () => {
+        started = await setUpSync()
+      })
+    )
+      setSetup(started)
+    setBusy(false)
   }
 
   const onAddPasskey = async () => {
     if (!setup) return
     setBusy(true)
-    try {
-      await setup.addPasskey()
-      toast.success("Passkey added")
-    } catch (error) {
-      // Backing out of the prompt, or an authenticator that can't do PRF, is a choice to go on
-      // with the code alone rather than a failure of the step.
-      const chosen =
-        (error instanceof DOMException && error.name === "NotAllowedError") ||
-        error instanceof PrfUnsupportedError
-      if (!chosen) fail(error)
-    } finally {
-      setBusy(false)
-    }
+    await refusal.write("add a passkey", async () => {
+      try {
+        await setup.addPasskey()
+      } catch (error) {
+        // Backing out of the prompt, or an authenticator that can't do PRF, is a choice to go on
+        // with the code alone rather than a failure of the step.
+        const chosen =
+          (error instanceof DOMException && error.name === "NotAllowedError") ||
+          error instanceof PrfUnsupportedError
+        if (!chosen) throw error
+      }
+    })
+    setBusy(false)
   }
 
   const save = async () => {
     if (!setup) return
     setBusy(true)
-    try {
-      await setup.confirm()
-      setSetup(undefined)
-    } catch (error) {
-      fail(error)
-    } finally {
-      setBusy(false)
-    }
+    if (await refusal.write("save that", () => setup.confirm())) setSetup(undefined)
+    setBusy(false)
   }
 
   const finish = async () => {
@@ -167,6 +164,8 @@ function SetupPage({
           <Bot id={profile?.botId} animate className="size-20" />
           {step !== "checking" && <StepDots steps={steps} current={step} />}
         </div>
+
+        <Refusal hold={refusal} />
 
         {step === "sign-in" && (
           <Section title="Welcome to Gots" description="Sign in to get started.">
@@ -228,7 +227,9 @@ function SetupPage({
 
         {step === "checking" && <Spinner className="self-center" />}
 
-        {step === "community" && <CommunityStep onDone={() => setLinkStep("link")} />}
+        {step === "community" && (
+          <CommunityStep hold={refusal} onDone={() => setLinkStep("link")} />
+        )}
 
         {step === "link" && (
           <Section title="Link your bots">
@@ -246,8 +247,11 @@ function SetupPage({
 /**
  * Joining the leaderboard is on by default, so a new user is counted unless they turn it off here.
  * Settings > Community can still leave it later.
+ *
+ * The write is the page's, through the hold the page draws: a host that refused said so above the
+ * steps, and the step stays where it is rather than advancing over a choice that was never saved.
  */
-function CommunityStep({ onDone }: { onDone: () => void }) {
+function CommunityStep({ hold, onDone }: { hold: RefusalHold; onDone: () => void }) {
   const { me, setMe } = useCommunity()
   const [on, setOn] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -255,21 +259,14 @@ function CommunityStep({ onDone }: { onDone: () => void }) {
 
   const next = async () => {
     setBusy(true)
-    try {
+    const landed = await hold.write("change the leaderboard", async () => {
       // A read that failed leaves nothing to compare, so the choice is sent as it stands.
       if (me !== undefined && on !== joined) {
         setMe(on ? await joinCommunity() : await leaveCommunity())
       }
-    } catch (error) {
-      toast.error(
-        error instanceof Error && error.message
-          ? error.message
-          : "Couldn't change that. You can change it in Settings.",
-      )
-    } finally {
-      setBusy(false)
-    }
-    onDone()
+    })
+    setBusy(false)
+    if (landed) onDone()
   }
 
   return (

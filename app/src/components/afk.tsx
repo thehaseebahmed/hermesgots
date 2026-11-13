@@ -1,6 +1,8 @@
 /**
  * AFK: a project's switch for working its own tasks, and the tasks it would work — the frontier,
- * what's ready oldest first, what somebody has already claimed, and what an open task still blocks.
+ * what's ready oldest first and what an open task still blocks. The tasks the host holds are Working,
+ * up to the project's pick count, and any past that count are Queued: work a lowered count left in
+ * flight, waiting for a place.
  * The switch is the host's setting for the project, so it reads back the same on every device. It is
  * always shown: a project that can't be left to work (or a Bot on a plugin too old to switch one) has
  * it off and disabled, with the reason underneath. The frontier is there where the plugin advertises
@@ -21,7 +23,6 @@
  */
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { ChevronRightIcon } from "lucide-react"
-import { toast } from "sonner"
 
 import { PromptEditor } from "@/components/afk-prompt"
 import { RowText } from "@/components/settings-chrome"
@@ -54,6 +55,7 @@ import { promptLine } from "@/lib/prompt-library"
 import { usePromptEntry, usePromptLibraryReady } from "@/lib/prompt-library-store"
 import { promptSourceState } from "@/lib/prompt-source"
 import { noteFailure } from "@/lib/report"
+import { tell } from "@/lib/tell"
 
 /** The feature the plugin advertises when it can read a project's tasks. */
 export const AFK_FEATURE = "afk"
@@ -69,7 +71,6 @@ const unsupported = cooldown()
 
 const GROUPS = [
   { key: "ready", label: "Ready" },
-  { key: "claimed", label: "Claimed" },
   { key: "blocked", label: "Blocked" },
 ] as const
 
@@ -192,22 +193,16 @@ export function AfkPopup({
 
   const holds = afk?.holds ?? (afk?.task ? [afk.task] : [])
   const heldKey = holds.map((one) => `${one.repo}#${one.number}`).join(",")
-  const everyHoldAlreadyClaimed =
-    holds.length > 0 &&
-    holds.every((one) =>
-      Boolean(
-        tasks?.claimed.some((row) => `${row.repo}#${row.number}` === `${one.repo}#${one.number}`),
-      ),
-    )
+  // A hold means a task just left the ready list, so the sheet reads the frontier again to drop it —
+  // and a hold given back puts it there again.
   const seen = useRef(heldKey)
   useEffect(() => {
     if (seen.current === heldKey) return
     seen.current = heldKey
-    if (everyHoldAlreadyClaimed) return
     const controller = new AbortController()
     read(controller.signal)
     return () => controller.abort()
-  }, [heldKey, everyHoldAlreadyClaimed, read])
+  }, [heldKey, read])
 
   // Every write shows the host's answer: a write it refused never reads back as done.
   const save = async (write: () => Promise<ProjectAfk>) => {
@@ -215,7 +210,7 @@ export function AfkPopup({
     try {
       setAfk(await write())
     } catch (failure) {
-      toast.error(failure instanceof Error ? failure.message : "Couldn't save that.")
+      tell.error(failure instanceof Error ? failure.message : "Couldn't save that.")
     } finally {
       setSaving(false)
     }
@@ -229,7 +224,7 @@ export function AfkPopup({
     try {
       setAfk(await setProjectAfkPickCount(config, projectId, count))
     } catch (failure) {
-      toast.error(failure instanceof Error ? failure.message : "Couldn't save that pick count.")
+      tell.error(failure instanceof Error ? failure.message : "Couldn't save that pick count.")
     } finally {
       setPickDraft(null)
       setSavingPicks(false)
@@ -243,7 +238,7 @@ export function AfkPopup({
       setAfk(await setProjectAfkPrompt(config, projectId, draft))
       return "saved"
     } catch (failure) {
-      toast.error(failure instanceof Error ? failure.message : "Couldn't save that Prompt.")
+      tell.error(failure instanceof Error ? failure.message : "Couldn't save that Prompt.")
       return "refused"
     }
   }
@@ -486,6 +481,10 @@ function PromptRow({
  * Where the host holds several tasks, its answer names them all and the block is a row each, oldest
  * first, over the count of them against the project's pick count. A host that names none of that
  * holds at most the one task, and keeps the single row the app has always drawn.
+ *
+ * The pick count is the number of places, so the list is the places: a project whose count was
+ * lowered keeps the tasks it already holds and finishes them (ADR 0025), and the ones past the count
+ * are named in one line under the list rather than drawn against a count they no longer fit.
  */
 function Working({
   task,
@@ -503,12 +502,16 @@ function Working({
   manyRepos: boolean
 }) {
   const held = holds && holds.length > 0 ? holds : null
-  const rows: ({ hold: AfkHold; kind: "hold" } | { hold: AfkHold; kind: "task" })[] = held
-    ? held.map((hold) => ({ hold, kind: "hold" as const }))
+  // The places the count names, and the holds past them: what a lowered count left finishing, drawn
+  // as Queued rather than against a count they no longer fit.
+  const places = held && typeof pickCount === "number" ? held.slice(0, pickCount) : held
+  const queued = held && places ? held.slice(places.length) : []
+  const rows: ({ hold: AfkHold; kind: "hold" } | { hold: AfkHold; kind: "task" })[] = places
+    ? places.map((hold) => ({ hold, kind: "hold" as const }))
     : task
       ? [{ hold: { ...task, stalled: null }, kind: "task" as const }]
       : []
-  if (!refusal && !rows.length) return null
+  if (!refusal && !rows.length && !queued.length) return null
   return (
     <div className="flex flex-col gap-3">
       {refusal && (
@@ -518,17 +521,19 @@ function Working({
       )}
       {rows.length > 0 && (
         <section aria-label="Working" data-working>
-          <h3 className="px-1 pb-1 text-sm text-muted-foreground">Working</h3>
-          {/* Only a host that answered a list is counted: one task against a count of one is a
-              sentence about nothing. */}
-          {held && typeof pickCount === "number" && (
-            <p
-              data-holds={held.length}
+          {/* Every heading counts what is under it: the places taken against the count for Working,
+              and a plain number for Queued, Ready and Blocked. A host that answers no list of holds
+              — one from before the pick count — says nothing about a count. */}
+          {held && typeof pickCount === "number" ? (
+            <h3
+              data-holds={rows.length}
               data-pick-count={pickCount}
               className="px-1 pb-1 text-sm text-muted-foreground"
             >
-              {`${held.length} of ${pickCount} held`}
-            </p>
+              {`Working (${rows.length} of ${pickCount})`}
+            </h3>
+          ) : (
+            <h3 className="px-1 pb-1 text-sm text-muted-foreground">Working</h3>
           )}
           <ul>
             {rows.map(({ hold, kind }) => (
@@ -536,6 +541,23 @@ function Working({
                 key={`${hold.repo}#${hold.number}`}
                 data-hold={kind === "hold" ? hold.number : undefined}
               >
+                <TaskLink task={hold} note={manyRepos ? hold.repo : undefined} />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+      {/* A lowered count finishes what it already claimed rather than handing it back (ADR 0025), so
+          the tasks past the count are their own section: still AFK's work, still claimed on GitHub,
+          and waiting for a place. */}
+      {queued.length > 0 && (
+        <section aria-label="Queued" data-queued>
+          <h3 className="px-1 pb-1 text-sm text-muted-foreground">
+            {`Queued (${queued.length})`}
+          </h3>
+          <ul>
+            {queued.map((hold) => (
+              <li key={`${hold.repo}#${hold.number}`} data-queued-task={hold.number}>
                 <TaskLink task={hold} note={manyRepos ? hold.repo : undefined} />
               </li>
             ))}
@@ -579,12 +601,7 @@ function Tasks({
           </h3>
           <ul>
             {tasks[group.key].map((task) => (
-              <TaskRow
-                key={`${task.repo}#${task.number}`}
-                task={task}
-                claimed={group.key === "claimed"}
-                manyRepos={manyRepos}
-              />
+              <TaskRow key={`${task.repo}#${task.number}`} task={task} manyRepos={manyRepos} />
             ))}
           </ul>
         </section>
@@ -594,15 +611,7 @@ function Tasks({
 }
 
 /** One issue as the sheet shows it: its number and its title, opening it on GitHub, a note under it. */
-function TaskLink({
-  task,
-  note,
-  badge,
-}: {
-  task: ProjectIssue
-  note?: ReactNode
-  badge?: ReactNode
-}) {
+function TaskLink({ task, note }: { task: ProjectIssue; note?: ReactNode }) {
   return (
     <a
       href={task.url ?? undefined}
@@ -614,38 +623,19 @@ function TaskLink({
       <span className="flex min-w-0 items-start gap-2">
         <span className="shrink-0 font-mono text-base text-muted-foreground">#{task.number}</span>
         <span className="min-w-0 flex-1 text-base leading-snug break-words">{task.title}</span>
-        {badge}
       </span>
       {note && <span className="pl-8 text-sm text-muted-foreground">{note}</span>}
     </a>
   )
 }
 
-function TaskRow({
-  task,
-  claimed,
-  manyRepos,
-}: {
-  task: ProjectTask
-  claimed: boolean
-  manyRepos: boolean
-}) {
+function TaskRow({ task, manyRepos }: { task: ProjectTask; manyRepos: boolean }) {
   const note: ReactNode[] = []
   if (manyRepos && task.repo) note.push(task.repo)
   if (task.blockers.length) note.push(`Blocked by ${blockerNames(task)}`)
   return (
     <li>
-      <TaskLink
-        task={task}
-        note={note.length > 0 ? note.join(" · ") : undefined}
-        badge={
-          claimed ? (
-            <span className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">
-              {task.assignees[0] ?? "Claimed"}
-            </span>
-          ) : undefined
-        }
-      />
+      <TaskLink task={task} note={note.length > 0 ? note.join(" · ") : undefined} />
     </li>
   )
 }

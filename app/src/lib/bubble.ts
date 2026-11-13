@@ -28,7 +28,7 @@ import {
 import { confirmedTake } from "@/lib/hermes"
 import type { CleanupLevel } from "@/lib/speech"
 import { pluginRoot } from "@/lib/host-url"
-import { isNative } from "@/lib/native"
+import { isNative } from "@/lib/platform"
 import { quietly } from "@/lib/report"
 import { onReturn } from "@/lib/wake"
 
@@ -83,7 +83,7 @@ const Bubble = registerPlugin<BubblePlugin>(PLUGIN)
 
 /** The Android app only: a browser has no service, no window over other apps and no accessibility. */
 export function bubbleAvailable() {
-  return isNative && Capacitor.isPluginAvailable(PLUGIN)
+  return isNative() && Capacitor.isPluginAvailable(PLUGIN)
 }
 
 export async function bubbleState(): Promise<BubbleState | undefined> {

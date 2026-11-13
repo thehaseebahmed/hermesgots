@@ -8,7 +8,6 @@ import { botChatsPath } from "@/lib/bot-tabs"
 import { getActiveProfile } from "@/lib/db"
 import { useLaunchRestore, useRecordLastChat } from "@/lib/launch"
 import { warmCatalog } from "@/lib/models"
-import { warmRankings } from "@/lib/rankings"
 import { useShareReceiver } from "@/lib/share"
 import { toHex } from "@/lib/theme"
 import { useLegacyChat } from "@/lib/legacy-chat"
@@ -36,6 +35,9 @@ const MeetingPage = lazy(() =>
   import("@/routes/meetings").then((m) => ({ default: m.MeetingPage })),
 )
 const TopicPage = lazy(() => import("@/routes/meetings").then((m) => ({ default: m.TopicPage })))
+const CanvasGate = lazy(() =>
+  import("@/routes/canvas").then((m) => ({ default: m.CanvasGate })),
+)
 const CanvasPage = lazy(() =>
   import("@/routes/canvas").then((m) => ({ default: m.CanvasPage })),
 )
@@ -100,11 +102,11 @@ function MovedProject() {
 function AppRoutes() {
   useRecordLastChat()
   useShareReceiver()
-  // The model sheet reads the catalog and rankings on every open, so warm them here: a
-  // returning user's facts and scores refresh in the background without the sheet fetching.
+  // The model sheet reads the models.dev catalog on every open, so warm it here: a returning
+  // user's facts refresh in the background without the sheet fetching. The scores need no warm of
+  // their own — the payload they come from ships with the build.
   useEffect(() => {
     void warmCatalog()
-    void warmRankings()
   }, [])
   if (!useLaunchRestore()) return null
   return (
@@ -125,9 +127,30 @@ function AppRoutes() {
         <Route path="meetings/:id" element={<MeetingPage />} />
         <Route path="meetings/:id/topics/:topic" element={<TopicPage />} />
         <Route path="routines" element={<RoutinesHome />} />
-        <Route path="canvas" element={<CanvasPage />} />
-        <Route path="canvas/:id" element={<CanvasView />} />
-        <Route path="canvas/:id/edit" element={<CanvasEdit />} />
+        <Route
+          path="canvas"
+          element={
+            <CanvasGate>
+              <CanvasPage />
+            </CanvasGate>
+          }
+        />
+        <Route
+          path="canvas/:id"
+          element={
+            <CanvasGate>
+              <CanvasView />
+            </CanvasGate>
+          }
+        />
+        <Route
+          path="canvas/:id/edit"
+          element={
+            <CanvasGate>
+              <CanvasEdit />
+            </CanvasGate>
+          }
+        />
         <Route path="research" element={<ResearchPage />} />
         <Route path="research/:id" element={<MissionPage />} />
         <Route path="settings/:section?/:botId?/:tab?/:sub?/:leaf?" element={<SettingsPage />} />

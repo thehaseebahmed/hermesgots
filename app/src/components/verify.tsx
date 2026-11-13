@@ -10,7 +10,7 @@ import {
   type LucideIcon,
 } from "lucide-react"
 
-import { Banner } from "@/components/banner"
+import { Banner, Refusal } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { SourceKinds } from "@/components/compare"
 import { Bars, Spans } from "@/components/research"
@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
-import { attempt } from "@/lib/attempt"
+import { useRefusal } from "@/lib/use-refusal"
 import {
   LANES,
   MAX_PARTS,
@@ -125,6 +125,7 @@ export function VerifyBriefForm({ mission }: { mission: Mission }) {
   const [parts, setParts] = useState(brief.parts.map((p) => p.text))
   const [terms, setTerms] = useState(brief.terms)
   const [saving, setSaving] = useState(false)
+  const refusal = useRefusal()
   const kept = parts.filter((p) => p.trim())
   const ready = restatement.trim() && kept.length >= 1 && kept.length <= MAX_PARTS && !saving
 
@@ -141,7 +142,7 @@ export function VerifyBriefForm({ mission }: { mission: Mission }) {
 
   const save = async () => {
     setSaving(true)
-    await attempt("save the brief", () =>
+    await refusal.write("save the brief", () =>
       confirmVerification(mission, {
         restatement,
         parts: kept,
@@ -193,9 +194,11 @@ export function VerifyScopeForm({ mission, botId }: { mission: Mission; botId?: 
   const [sources, setSources] = useState(mission.sources)
   const [strictness, setStrictness] = useState<Strictness>(mission.verify?.strictness ?? "any")
   const [starting, setStarting] = useState(false)
+  const refusal = useRefusal()
 
   return (
     <>
+      <Refusal hold={refusal} />
       <h2 className="flex items-center gap-2.5 font-semibold">
         <Bot id={botId} className="size-7" />
         What I'll check
@@ -226,7 +229,7 @@ export function VerifyScopeForm({ mission, botId }: { mission: Mission; botId?: 
         disabled={!sources.length || starting}
         onClick={async () => {
           setStarting(true)
-          await attempt("start the research", () =>
+          await refusal.write("start the research", () =>
             approveVerification(mission, sources, strictness),
           )
           setStarting(false)

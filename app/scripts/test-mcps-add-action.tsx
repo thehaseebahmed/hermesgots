@@ -331,8 +331,7 @@ test(
         "the + is in the MCP page's header",
       )
       assert.equal(
-        // The bot's list is titled by the host it answers at (ADR 0148).
-        titled("mcp-add-wide")?.querySelector("[data-mcp-add]"),
+        titled("A bot")?.querySelector("[data-mcp-add]"),
         null,
         "and the bot's list beside it has none",
       )

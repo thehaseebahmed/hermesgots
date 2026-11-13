@@ -2,6 +2,11 @@
 // Plain string matching only (no AI). Exits 1 when an unmatched id is not
 // listed in scripts/benchlm-known-gaps.json, so new mismatches get fixed.
 //
+// The scores come from the payload the build ships (`src/lib/rankings-data.ts`), the same module the
+// picker scores from, so the ids are checked against what the app really has rather than against a
+// deployed function. `scripts/build-rankings.mjs` refreshes that file; the weekly job in
+// `.github/workflows/benchlm-match.yml` runs it before this check.
+//
 // Usage: node scripts/check-benchlm-matches.mjs [--report <path>]
 
 import { readFileSync, writeFileSync } from "node:fs"
@@ -10,13 +15,9 @@ import path from "node:path"
 
 import { scoreFor, scoreMapOf } from "../src/lib/model-match.ts"
 import { MODELS_DEV_URL } from "../src/lib/models-dev.ts"
+import { RANKINGS } from "../src/lib/rankings-data.ts"
 
 const PROVIDERS = ["github-copilot", "ollama-cloud", "anthropic", "deepseek", "xai"]
-// Every push to main deploys the candidate build first, so ids are checked against what the site
-// will serve before a release reaches it; the workflow passes that URL as MEMENTO_SITE_URL.
-const SITE_URL =
-  process.env.MEMENTO_SITE_URL || process.env.VITE_SITE_URL || "https://candidate--hermesgots.netlify.app"
-const BENCHLM_URL = `${SITE_URL.replace(/\/+$/, "")}/.netlify/functions/benchlm`
 const here = path.dirname(fileURLToPath(import.meta.url))
 const GAPS_PATH = path.join(here, "benchlm-known-gaps.json")
 
@@ -67,12 +68,10 @@ async function main() {
   const reportIdx = process.argv.indexOf("--report")
   const reportPath = reportIdx > -1 ? process.argv[reportIdx + 1] : null
 
-  const [catalogRes, benchRes] = await Promise.all([fetch(MODELS_DEV_URL), fetch(BENCHLM_URL)])
+  const catalogRes = await fetch(MODELS_DEV_URL)
   if (!catalogRes.ok) throw new Error(`models.dev returned ${catalogRes.status}`)
-  if (!benchRes.ok) throw new Error(`BenchLM proxy returned ${benchRes.status}`)
   const catalog = await catalogRes.json()
-  const bench = await benchRes.json()
-  const rows = bench.items ?? []
+  const rows = RANKINGS.items
 
   const ids = chatIdsByProvider(catalog)
   const gaps = JSON.parse(readFileSync(GAPS_PATH, "utf8"))
@@ -91,7 +90,7 @@ async function main() {
   const failing = unlistedGaps(unmatchedByProvider, gaps)
   const report = {
     checkedAt: new Date().toISOString(),
-    benchlmDataAsOf: bench.dataAsOf ?? null,
+    benchlmDataAsOf: RANKINGS.dataAsOf ?? null,
     summary,
     unmatched: unmatchedByProvider,
     failing,

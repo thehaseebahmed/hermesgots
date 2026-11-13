@@ -1,5 +1,3 @@
-import { toast } from "sonner"
-
 import { LIBRARY_MS, PR_QUIET_MS, PR_MS, PR_PENDING_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import { noteFailure } from "@/lib/report"
 import { connectionKey, hasServer } from "@/lib/connection"
@@ -39,6 +37,7 @@ import {
 import { tellClose } from "@/lib/close-reports"
 import { syncNow } from "@/lib/sync"
 import { sessionState, type SessionState } from "@/lib/session-work"
+import { tell } from "@/lib/tell"
 
 /**
  * Where a session stands, from the pure rule in `src/lib/session-work.ts` — a screen keeps reading it
@@ -566,11 +565,11 @@ export async function closeSessionWork(
   try {
     const { kept } = await removeWorkspace(profile, session)
     for (const tree of kept)
-      toast.info(
+      tell.info(
         `Kept ${tree.name}: it has ${tree.reason === "dirty" ? "uncommitted" : "unpushed"} changes.`,
       )
   } catch (error) {
-    toast.error(error instanceof Error ? error.message : "Couldn't reach the plugin.")
+    tell.error(error instanceof Error ? error.message : "Couldn't reach the plugin.")
   }
 }
 

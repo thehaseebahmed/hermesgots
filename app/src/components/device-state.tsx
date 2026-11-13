@@ -17,7 +17,7 @@ import {
 } from "@/lib/diagnostics"
 import { conversationsOf, db, getSettings, listProfiles, type Profile } from "@/lib/db"
 import { getPluginInfo, type PluginInfo } from "@/lib/hermes"
-import { isNative } from "@/lib/native"
+import { isNative } from "@/lib/platform"
 import { resumeTrace } from "@/lib/resume-trace"
 import { legacyChatOn } from "@/lib/legacy-chat"
 import { landingChat, lastChatOf } from "@/lib/last-chat"
@@ -73,7 +73,7 @@ export async function readDeviceDiagnostics(): Promise<DiagDevice> {
     at: new Date().toISOString(),
     app: __APP_VERSION__,
     minPlugin: MIN_PLUGIN_VERSION,
-    native: isNative,
+    native: isNative(),
     route: window.location.pathname,
     schema: db.verno,
     developer: Boolean(settings?.developer),

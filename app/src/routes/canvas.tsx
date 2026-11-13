@@ -14,6 +14,7 @@ import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-r
 import { ChatBody } from "@/chat-next/chat-body"
 import { BackButton } from "@/components/back-button"
 import { CanvasConsentDialog, CanvasOptions, useCanvasConsent } from "@/components/canvas-consent"
+import { Refusal } from "@/components/banner"
 import { CanvasPointsProvider, type CanvasPoints } from "@/components/chat/canvas-points"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { useChatSurface } from "@/components/chat/chat-actions"
@@ -21,13 +22,15 @@ import { BotPicker } from "@/components/chat/bot-picker"
 import { Composer } from "@/components/chat/composer"
 import { PreviewerProvider } from "@/components/chat/previewer"
 import { UsageSheet } from "@/components/chat/usage-sheet"
-import { ExperimentalBadge } from "@/components/experimental-badge"
+import { LabLabel } from "@/components/lab-badge"
 import { ItemGroup } from "@/components/item-list"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { Button } from "@/components/ui/button"
-import { attempt } from "@/lib/attempt"
+import { failed, type RefusalHold } from "@/lib/refusal"
+import { useRefusal, useSaidRefusal } from "@/lib/use-refusal"
 import { awayLine } from "@/lib/away"
+import { hostAnswered } from "@/lib/hermes"
 import { bridgeHandler, pointWatch } from "@/lib/canvas-bridge"
 import { canvasCss, canvasCssKey } from "@/lib/canvas-css"
 import {
@@ -42,7 +45,7 @@ import { librarySource, loadLibraries } from "@/lib/canvas-library-sources"
 import { keepPoint, takePoint } from "@/lib/canvas-point-pick"
 import {
   callCanvasCall,
-  canvasData,
+  canvasReader,
   deleteCanvas,
   grantCanvasTool,
   hasVersion,
@@ -52,6 +55,7 @@ import {
   undoCanvas,
   updateCanvas,
   useCanvas,
+  useCanvasEnabled,
   useCanvasRecord,
   useCanvases,
   writeCanvasData,
@@ -61,14 +65,12 @@ import {
 import { db, getActiveProfile, type Attachment, type Profile } from "@/lib/db"
 import { MAX_ATTACHMENTS } from "@/lib/attachment-caps"
 import { serverConfig } from "@/lib/connection"
-import { usePluginFeature } from "@/lib/features"
+import { usePluginFeature, usePluginFeatureOn } from "@/lib/features"
 import { HEADER_BUTTON } from "@/lib/layout"
 import type { CanvasPoint } from "@/lib/point-marker"
-import { hostAnswered } from "@/lib/hermes"
 import { useLarge } from "@/lib/media"
 import { openExternal } from "@/lib/native"
 import { useOnline } from "@/lib/online"
-import { AttachmentError } from "@/lib/send-turn"
 import { useDark } from "@/lib/theme"
 import { BUILDING_ACTIVITY, formatRelative } from "@/lib/format"
 import { tell } from "@/lib/tell"
@@ -132,6 +134,15 @@ function CanvasTile({ canvas, now }: { canvas: Canvas; now: number }) {
 }
 
 /**
+ * Canvas is behind its Labs switch; with it off, its screens send you home and the nav draws no row.
+ */
+export function CanvasGate({ children }: { children: ReactNode }) {
+  const enabled = useCanvasEnabled()
+  if (enabled === undefined) return null
+  return enabled ? children : <Navigate to="/" replace />
+}
+
+/**
  * The create screen's own: a prompt and the files staged with it. The composer is the app's, in its
  * plain mode — a surface that is not a chat, which takes no `/` command and asks for words of its own
  * — so the ten-file cap, the dedupe, the refusal sentences, the tiles and their Remove are the ones
@@ -168,16 +179,6 @@ export function CanvasPage() {
       // (a phone sends a canvas with no version to its chat from there), so only one screen owns that
       // rule, and the desktop no longer mounts the chat it will not draw beside the page (ADR 0130).
       navigate(`/canvas/${started.id}`)
-    } catch (failure) {
-      // A file the host refused is the composer's to say, on the tile it belongs to: another sentence
-      // here would say the same thing twice.
-      if (!(failure instanceof AttachmentError))
-        tell.error(
-          failure instanceof Error && failure.message
-            ? failure.message
-            : "Couldn't start the canvas.",
-        )
-      throw failure
     } finally {
       setStarting(false)
     }
@@ -190,9 +191,7 @@ export function CanvasPage() {
         heading
         showBot={false}
         title={
-          <>
-            Canvas <ExperimentalBadge />
-          </>
+          <LabLabel>Canvas</LabLabel>
         }
       />
 
@@ -297,7 +296,7 @@ function useAway(away: boolean) {
  * and the chat that is a phone's only screen of a canvas with no version cannot answer them
  * differently — and one place that says what a refusal looks like and where deleting leaves.
  */
-function useCanvasManagement(id: string) {
+function useCanvasManagement(id: string, hold: RefusalHold) {
   const navigate = useNavigate()
 
   /**
@@ -305,8 +304,7 @@ function useCanvasManagement(id: string) {
    * the screen draws. A grant that couldn't be posted answers no — the page's own promise hears the
    * refusal rather than being retried on a permission the host never recorded. A host that answered
    * and refused said why (a version rewritten while the dialog was up no longer declares the tool),
-   * and that is the page's answer in the host's own words, said to the reader too; only a host that
-   * never landed answers no.
+   * and those words are held over the page; only a host that never landed answers no in silence.
    */
   const grant = async (tool: string, allow: boolean) => {
     try {
@@ -314,7 +312,7 @@ function useCanvasManagement(id: string) {
       return allow
     } catch (failure) {
       if (!hostAnswered(failure)) return false
-      tell.error(failure.message)
+      hold.refuse(failed(failure, "Couldn't allow that tool."))
       throw failure
     }
   }
@@ -325,23 +323,13 @@ function useCanvasManagement(id: string) {
     try {
       await updateCanvas(id, changes)
     } catch (failure) {
-      if (hostAnswered(failure)) {
-        tell.error(failure instanceof Error ? failure.message : "Couldn't change the canvas.")
-      }
+      if (hostAnswered(failure)) hold.refuse(failed(failure, "Couldn't change the canvas."))
       throw failure
     }
   }
 
   const remove = async () => {
-    try {
-      await deleteCanvas(id)
-    } catch (failure) {
-      if (hostAnswered(failure)) {
-        tell.error(failure instanceof Error ? failure.message : "Couldn't delete the canvas.")
-      }
-      // Thrown on so the question stays up: nothing was deleted.
-      throw failure
-    }
+    await deleteCanvas(id)
     tell.success("Canvas deleted.")
     // The canvas is gone, so the list is where the reader lands — from either screen, and in this
     // entry's place: stepping back would draw the canvas that was just deleted.
@@ -514,6 +502,9 @@ export function CanvasView() {
   useEffect(() => setBackGuard(back()), [back])
   const { canvas, profile, missing, loaded, away } = useCanvas(id)
   const { awayNow, words: awayWords } = useAway(away)
+  // Whether this bot's host keeps a vault, which is what its options sheet offers the backup switch
+  // on: a host from before it writes no notes, and a switch that writes nothing is a promise broken.
+  const vaultable = usePluginFeatureOn(profile, "canvas_vault")
   const dark = useDark()
   const mode: CanvasMode = dark ? "dark" : "light"
   const html = canvas?.html
@@ -631,7 +622,8 @@ export function CanvasView() {
 
   // The reader's answers about the canvas are the same three on either screen, so they are read from
   // one place: the options sheet, the page's own consent, and the delete.
-  const { grant, update, remove } = useCanvasManagement(id)
+  const refusal = useRefusal(id)
+  const { grant, update, remove } = useCanvasManagement(id, refusal)
   const consent = useCanvasConsent(grant)
   // The banner is the phone's: a wide screen draws the chat beside the page, so nothing needs
   // pointing here (ADR 0130) — and a canvas with no page has nothing to point at.
@@ -736,13 +728,14 @@ export function CanvasView() {
     setRedrawn({ key: frameKey, document })
   }
 
-  // The page's own data and its calls through the app: a data read is answered from the copy this
-  // device holds and a data write goes to the host's one route (ADR 0113); the host's four reads
-  // are asked freely, and a declared tool's call waits here while the reader is asked (ADR 0114).
+  // The page's own data and its calls through the app: a data read this device can answer is the
+  // reader's, which answers from the copy it holds — a `query` is the one it hands to the host — and a
+  // data write goes to the host's one route (ADR 0113); the host's four reads are asked freely, and a
+  // declared tool's call waits here while the reader is asked (ADR 0114).
   useEffect(() => {
     const hear = bridgeHandler({
       frame: () => frame.current?.contentWindow ?? null,
-      copy: () => canvasData(id),
+      read: canvasReader(id),
       write: (call) => writeCanvasData(id, call),
       call: (call) => callCanvasCall(id, call),
       consent: (tool) => askRef.current(tool),
@@ -760,7 +753,7 @@ export function CanvasView() {
   const undoVersion = async () => {
     if (!canvas || undoing) return
     setUndoing(true)
-    await attempt("undo the canvas", () => undoCanvas(canvas.id))
+    await refusal.write("undo the canvas", () => undoCanvas(canvas.id))
     setUndoing(false)
   }
 
@@ -778,6 +771,7 @@ export function CanvasView() {
           draws the chat there, so there is nothing to flip to (ADR 0130), and a canvas no bot holds has
           no chat to open: there is no Edit for either. */}
       <div data-canvas-lane className={LANE}>
+        <Refusal hold={refusal} className="mx-auto mb-2 w-full max-w-2xl" />
         <CanvasHead
           canvas={canvas}
           profile={profile}
@@ -847,6 +841,7 @@ export function CanvasView() {
         open={optionsOpen}
         onOpenChange={setOptionsOpen}
         canvas={canvas}
+        vaultable={vaultable}
         onGrant={grant}
         onUpdate={update}
         onDelete={remove}
@@ -884,9 +879,14 @@ export function CanvasEdit() {
   // The record alone: this screen draws no page, so what keeps it right is the list's sweep.
   const { canvas, profile, missing, away, loaded } = useCanvasRecord(id)
   const { awayNow, words: awayWords } = useAway(away)
+  // The same read the preview makes: a canvas's options are the same sheet on both screens.
+  const vaultable = usePluginFeatureOn(profile, "canvas_vault")
   const large = useLarge()
   const [optionsOpen, setOptionsOpen] = useState(false)
-  const { grant, update, remove } = useCanvasManagement(id)
+  // This screen draws no notice of its own, so the answers its options give are said in passing: the
+  // preview beside it holds them over the page they are about.
+  const refusal = useSaidRefusal()
+  const { grant, update, remove } = useCanvasManagement(id, refusal)
   // The first version is what makes there be a page at all, so it is also what the corners follow.
   const versioned = hasVersion(canvas)
   /**
@@ -981,6 +981,7 @@ export function CanvasEdit() {
         open={optionsOpen}
         onOpenChange={setOptionsOpen}
         canvas={canvas}
+        vaultable={vaultable}
         onGrant={grant}
         onUpdate={update}
         onDelete={remove}

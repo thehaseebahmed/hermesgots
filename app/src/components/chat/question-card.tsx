@@ -5,8 +5,8 @@ import {
   ChevronRightIcon,
   MessageCircleQuestionIcon,
 } from "lucide-react"
-import { toast } from "sonner"
 
+import { Refusal } from "@/components/banner"
 import { CARD } from "@/components/chat/session-cards"
 import { useCodeFace } from "@/components/chat/code-face"
 import { Badge } from "@/components/ui/badge"
@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { answerClarify } from "@/lib/chat"
 import { prefersReducedMotion } from "@/lib/media"
 import type { ClarifyAnswers, ClarifyQuestion, Message } from "@/lib/db"
+import { useRefusal } from "@/lib/use-refusal"
 import { cn } from "@/lib/utils"
 
 const OTHER = "\u0000other"
@@ -214,6 +215,7 @@ export function QuestionCard({
   const askedPage = askedId ? questions.findIndex((one) => one.id === askedId) : -1
   const oneAtATime = askedPage >= 0
   const [sending, setPending] = useState(false)
+  const refusal = useRefusal()
   // The form as sent, still owed to a host that asks one question at a time.
   const [committed, setCommitted] = useState<ClarifyAnswers | null>(null)
   /** The asked question the committed form last answered, so no question is answered twice. */
@@ -333,11 +335,7 @@ export function QuestionCard({
   const send = async (given: ClarifyAnswers) => {
     setPending(true)
     try {
-      await onAnswer(given)
-      return true
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't send your answer.")
-      return false
+      return await refusal.write("send your answer", () => onAnswer(given))
     } finally {
       setPending(false)
     }
@@ -447,6 +445,7 @@ export function QuestionCard({
           />
         </CardContent>
       )}
+      <Refusal hold={refusal} className="mx-(--card-spacing)" />
       <CardFooter ref={foot} className="shrink-0 gap-2">
         <Button
           type="button"

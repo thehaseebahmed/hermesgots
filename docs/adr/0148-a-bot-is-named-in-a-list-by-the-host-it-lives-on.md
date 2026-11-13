@@ -1,5 +1,9 @@
 # A bot is named in a list by the host it lives on
 
+**Superseded in what it calls a bot by [ADR 0149](0149-a-bot-is-named-in-a-list-by-its-own-name.md)**:
+a list reads a bot's own name and draws the host only where another bot of that name answers elsewhere.
+What this ADR built — the host ladder, the one peer set, one rule every screen reads — stands.
+
 Every Hermes host seals its default profile as **Hermes** (`plugin/link.py`), so a device with three
 hosts linked held three bots called "Hermes" — and every list of them, the chat's picker, New
 project's, the room's seats, Settings' menu, the sidebar, the network log's pills, drew rows nothing

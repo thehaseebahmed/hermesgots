@@ -6,7 +6,7 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { listEnabledProfiles } from "@/lib/db"
 import { hasServer } from "@/lib/connection.ts"
 import { getPluginVersion } from "@/lib/hermes"
-import { isNative } from "@/lib/native"
+import { isNative } from "@/lib/platform"
 import { REPO_URL } from "@/lib/repo"
 
 const ISSUES = `${REPO_URL}/issues/new`
@@ -25,7 +25,7 @@ const KINDS: { kind: Kind; template: string; label: string; icon: LucideIcon }[]
 
 /** Where the app runs, for a bug report's Device field. */
 function device() {
-  const where = isNative
+  const where = isNative()
     ? "Android app"
     : matchMedia("(display-mode: standalone)").matches
       ? "Installed web app"
@@ -80,7 +80,7 @@ export function FeedbackSheet({
 
   const follow = (event: MouseEvent<HTMLAnchorElement>) => {
     onOpenChange(false)
-    if (!isNative) return
+    if (!isNative()) return
     event.preventDefault()
     void Browser.open({ url: event.currentTarget.href })
   }

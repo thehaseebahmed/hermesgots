@@ -239,6 +239,5 @@ sequenceDiagram
 - Renaming `imagesAvailable`, now that it decides only whether a picture can go inline.
 - A mark on the tile saying which road a photo took, so the user can tell an inline photo from a stored one.
 - Scaling a file-road photo that fits, to help the agent's own vision tool read it.
-- Moving the app's other toasts onto `lib/tell`: the sheet's refusal is the only one that has to reach a
-  phone's own toast here, and the rest are a decision of their own.
+- Moving the app's other toasts onto `lib/tell`: done in ADR 0147, for every toast in the app.
 - Bounding the file road's total: ten photos are ten uploads, each its own request under the plugin's cap.

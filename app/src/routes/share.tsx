@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useNavigate, useSearchParams } from "react-router"
-import { toast } from "sonner"
 import { ChevronDownIcon, CodeXmlIcon, LinkIcon, MessageCircleIcon, PlusIcon } from "lucide-react"
 
 import { Banner } from "@/components/banner"
@@ -15,6 +14,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { ROOM_MAX_ATTACHMENTS, carriedFiles, isPhoto, roomRefusal } from "@/lib/attachment-caps"
 import { prepareIntake } from "@/lib/attachments"
 import { queueMessage, sendMessage } from "@/lib/chat"
+import { botsByLabel } from "@/lib/bot-name"
+import { useBotLabels } from "@/lib/use-bot-labels"
 import { serverConfig } from "@/lib/connection"
 import {
   conversationsOf,
@@ -38,6 +39,7 @@ import {
   type ShareKind,
   type ShareTarget,
 } from "@/lib/share-list"
+import { tell } from "@/lib/tell"
 import { beginChat, useNow } from "@/lib/threads"
 import { randomId } from "@/lib/utils"
 
@@ -132,12 +134,10 @@ export function SharePage() {
   }
 
   const answering = useLiveQuery(listEnabledProfiles, [])
-  // The bots by name, as the picker lists them, and the first of them the sheet starts on: a share
-  // has no bot of its own, and the one it arrived at is whichever bot was last talked to.
-  const bots = useMemo(
-    () => [...(answering ?? [])].sort((a, b) => a.name.localeCompare(b.name)),
-    [answering],
-  )
+  const labels = useBotLabels()
+  // The bots in the order the picker draws them, and the first of them the sheet starts on: a share
+  // has no bot of its own, so it must not open on a bot the picker draws second.
+  const bots = useMemo(() => botsByLabel(answering ?? [], labels), [answering, labels])
   const [picked, setPicked] = useState<string>()
   const profile = bots.find((bot) => bot.id === picked) ?? bots[0]
   const [showAll, setShowAll] = useState(false)
@@ -178,7 +178,7 @@ export function SharePage() {
       route: "yes",
     }).then(({ attachments, refusals }) => {
       if (!live) return
-      for (const refusal of [...share.refused, ...refusals]) toast.error(refusal.message)
+      for (const refusal of [...share.refused, ...refusals]) tell.error(refusal.message)
       setRead({ share: share.id, files: attachments })
     })
     return () => {
@@ -256,7 +256,7 @@ export function SharePage() {
 
   const couldNot = (error: unknown) => {
     setSending(false)
-    toast.error(error instanceof Error ? error.message : "Couldn't share that.")
+    tell.error(error instanceof Error ? error.message : "Couldn't share that.")
   }
 
   /**
@@ -274,12 +274,12 @@ export function SharePage() {
     // says so rather than posting into a room the sheet isn't offering.
     const held = await db.conversations.get(id)
     if (!held?.room) {
-      toast.error("That room isn't on the sheet any more.")
+      tell.error("That room isn't on the sheet any more.")
       return
     }
     const carried = carriedFiles(files)
     if (carried.length > ROOM_MAX_ATTACHMENTS) {
-      toast.error(roomRefusal(carried.length).message)
+      tell.error(roomRefusal(carried.length).message)
       return
     }
     setSending(id)
@@ -490,7 +490,6 @@ export function SharePage() {
               <p className="px-1 text-sm text-muted-foreground">Nothing matches.</p>
             )}
           </section>
-
 
         </div>
         {/*

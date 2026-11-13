@@ -409,7 +409,8 @@ test("an answer the host refuses stops the drain on the asked page, with the res
       await click(button("Send"))
       await settle()
       assert.deepEqual(answers, [{ q0: "staging" }], "the asked question was tried")
-      assert.deepEqual(said, ["The host refused the answer."], "and the refusal said")
+      assert.deepEqual(said, [], "and nothing said in passing")
+      assert.match(text(), /The host refused the answer\./, "the refusal drawn in the card")
       assert.match(text(), /1 of 3/, "the card is back on the asked page")
       assert.equal(pressed("staging"), "true", "with its answer still picked")
       assert.equal(

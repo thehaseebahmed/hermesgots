@@ -7,8 +7,10 @@
  * This is the one place that decides whether a block draws at all.
  */
 import { useEffect, useMemo, useState } from "react"
+import { useLiveQuery } from "dexie-react-hooks"
 
 import { OPENUI_ROOT } from "@/components/openui/root.ts"
+import { getSettings } from "@/lib/db.ts"
 import type { PluginServer } from "@/lib/features.ts"
 import { useHostRecord } from "@/lib/host-record"
 import { mayCarryBlock } from "@/lib/openui-block.ts"
@@ -31,16 +33,19 @@ export function useDraws(rows: ThreadRow[], server?: PluginServer): Map<string, 
     OPENUI_SWITCH,
     UNANSWERED_IS_ON,
   )
+  // The Labs master switch is this device's, and off means no interface draws whatever the host holds.
+  const settings = useLiveQuery(getSettings, [])
+  const labsOn = settings?.labs !== false
   const [fold, setFold] = useState<Fold>()
   useEffect(() => {
-    if (fold || !carries || !settled || !on) return
+    if (fold || !carries || !settled || !on || !labsOn) return
     void import("./openui-thread.ts").then(
       (module) => setFold(() => module.resolveInterfaces),
       quietly("the interface fold"),
     )
-  }, [carries, settled, on, fold])
+  }, [carries, settled, on, labsOn, fold])
   return useMemo(
-    () => (fold && settled && on ? fold(rows, OPENUI_ROOT) : EMPTY),
-    [fold, settled, on, rows],
+    () => (fold && settled && on && labsOn ? fold(rows, OPENUI_ROOT) : EMPTY),
+    [fold, settled, on, labsOn, rows],
   )
 }

@@ -12,8 +12,8 @@
  * person, and leaving deletes the lot.
  */
 
-import type { RegistryStore } from "./registry.ts"
-import { sha256 } from "./registry.ts"
+import { modelKeys, type Catalog } from "./models-dev.ts"
+import { sha256, type RegistryStore } from "./registry.ts"
 
 export const MODES = ["plan", "auto", "accept_edits", "chat"] as const
 export type Mode = (typeof MODES)[number]
@@ -60,6 +60,12 @@ export interface CommunityContext {
   caller: Caller
   /** The username behind a GitHub account id; null when GitHub doesn't know it. */
   github: (id: string) => Promise<string | null>
+  /**
+   * The model ids models.dev lists, or null when the catalogue couldn't be read — in which case
+   * nothing is filtered and a report is taken as it always was. Absent in a caller with no
+   * catalogue to hand, which is the same as unreadable.
+   */
+  catalog?: () => Promise<Catalog | null>
   now?: number
 }
 
@@ -99,7 +105,7 @@ export interface Board {
   >
 }
 
-export const BOARD_VERSION = 3
+export const BOARD_VERSION = 4
 
 /** Days kept per member, and the longest period the board shows. */
 export const KEEP_DAYS = 35
@@ -171,6 +177,53 @@ export function modelName(raw: unknown): string | null {
   return MODEL.test(name) ? name : null
 }
 
+/** The catalogue a caller has, or null when it has none or it couldn't be read: nothing is filtered. */
+const catalogOf = async (ctx: CommunityContext): Promise<Catalog | null> =>
+  (await ctx.catalog?.()) ?? null
+
+/**
+ * The name the board counts a model under: the catalogue's own spelling (`models-dev.ts`), so a host
+ * that respells a real id — `Claude.opus-5-5`, or a snapshot like `claude-opus-5-5-20250929` — lands on
+ * a name the catalogue lists. Undefined for a model no catalogue knows: a host's own word is all that
+ * name is, and the board doesn't count what nobody can look up. Without a catalogue the host's name
+ * is the answer, since nothing can be checked and nothing is filtered.
+ */
+function servedAs(model: string, catalog?: Catalog | null): string | undefined {
+  if (!catalog) return model
+  for (const key of modelKeys(model)) {
+    const served = catalog.models.get(key)
+    if (served) return served
+  }
+  return undefined
+}
+
+/**
+ * Provider slugs Hermes reports that models.dev spells otherwise or doesn't list at all — `nous` for
+ * the Nous portal, `openai-codex` for a ChatGPT plan, `together` for Together AI. They are counted by
+ * name because the catalogue can't vouch for them, and losing a real provider to a spelling is worse
+ * than this list being short.
+ */
+const HERMES_PROVIDERS = new Set(["nous", "openai-codex", "together"])
+
+/** The one provider a host sends when the hook named none. A fixed word, never a person's text. */
+const NO_PROVIDER = "unknown"
+
+/**
+ * A provider as the board names it, or null when it can't stand behind the name. Lower case; nothing
+ * at all for a custom endpoint — `custom` itself or `custom:acme` — since a person's own address is
+ * not a provider; and, when there is a catalogue, only a provider it lists (or Hermes's own few), so
+ * the board can never be made to draw an advertisement in that field. Without a catalogue nothing can
+ * be checked and the host's own slug stands, as it always has.
+ */
+function providerName(raw: unknown, catalog?: Catalog | null): string | null {
+  if (typeof raw !== "string") return null
+  const name = raw.trim().toLowerCase()
+  if (name.split(":", 1)[0] === "custom" || !MODEL.test(name)) return null
+  if (!catalog) return name
+  const vouched = name === NO_PROVIDER || HERMES_PROVIDERS.has(name) || catalog.providers.has(name)
+  return vouched ? name : null
+}
+
 function count(value: unknown, max: number): number | null {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0 || value > max) {
     return null
@@ -196,11 +249,12 @@ function cleanCounts(value: unknown): Counts | null {
 /**
  * A host's report, cleaned: only dates in the window, only models and modes the board knows, only
  * whole non-negative counts. A day that doesn't add up to a believable figure is held back, so one
- * bad number never costs the rest.
+ * bad number never costs the rest. A model the catalogue doesn't list (`catalog`) doesn't count.
  */
 export function cleanDays(
   value: unknown,
   now: number,
+  catalog?: Catalog | null,
 ): { days: Days; heldBack: string[] } | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null
   const oldest = dateOf(now, KEEP_DAYS - 1)
@@ -216,7 +270,8 @@ export function cleanDays(
     let tokens = 0
     let calls = 0
     for (const [raw, modes] of Object.entries(models as Record<string, unknown>)) {
-      const model = modelName(raw)
+      const name = modelName(raw)
+      const model = name && servedAs(name, catalog)
       if (!model || !modes || typeof modes !== "object") continue
       for (const [raw, rawCounts] of Object.entries(modes as Record<string, unknown>)) {
         const mode = modeOf(raw)
@@ -240,9 +295,10 @@ export function cleanDays(
 
 /**
  * A host's tokens by provider, cleaned like its days. An older plugin sends none, and a shape that
- * can't be read is dropped without costing the rest of the report.
+ * can't be read is dropped without costing the rest of the report. A custom endpoint names no
+ * provider, and a model the catalogue doesn't list counts for none.
  */
-export function cleanProviders(value: unknown, now: number): ProviderDays {
+export function cleanProviders(value: unknown, now: number, catalog?: Catalog | null): ProviderDays {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {}
   const oldest = dateOf(now, KEEP_DAYS - 1)
   const newest = dateOf(now, -1)
@@ -255,10 +311,11 @@ export function cleanProviders(value: unknown, now: number): ProviderDays {
     const day: Record<string, Record<string, number>> = {}
     let tokens = 0
     for (const [raw, models] of Object.entries(providers as Record<string, unknown>)) {
-      const provider = typeof raw === "string" ? raw.trim().toLowerCase() : ""
-      if (!MODEL.test(provider) || !models || typeof models !== "object") continue
+      const provider = providerName(raw, catalog)
+      if (!provider || !models || typeof models !== "object") continue
       for (const [rawModel, rawTokens] of Object.entries(models as Record<string, unknown>)) {
-        const model = modelName(rawModel)
+        const spelled = modelName(rawModel)
+        const model = spelled && servedAs(spelled, catalog)
         const n = count(rawTokens, MAX_DAY_TOKENS)
         if (!model || !n) continue
         const slot = (day[provider] ??= {})
@@ -325,8 +382,10 @@ function empty(): Record<Mode, number> {
 /**
  * The board for a set of members: who spent the most, and which models carry the tokens. Each
  * person's tokens are split by the period's five most used models, so their bars share one legend.
+ * A custom provider and a model the catalogue doesn't list (`catalog`) are served to nobody, whatever
+ * a member record still holds.
  */
-export function buildBoard(members: Member[], now: number): Board {
+export function buildBoard(members: Member[], now: number, catalog?: Catalog | null): Board {
   const periods = {} as Board["periods"]
   for (const period of Object.keys(PERIOD_DAYS) as PeriodId[]) {
     const since = dateOf(now, PERIOD_DAYS[period] - 1)
@@ -336,7 +395,9 @@ export function buildBoard(members: Member[], now: number): Board {
       const person = { login: member.login, total: 0, byModel: new Map<string, number>() }
       for (const [date, day] of Object.entries(member.days)) {
         if (date < since) continue
-        for (const [model, modes] of Object.entries(day)) {
+        for (const [spelled, modes] of Object.entries(day)) {
+          const model = servedAs(spelled, catalog)
+          if (!model) continue
           const entry = models.get(model) ?? { tokens: 0, users: new Set<string>(), modes: empty() }
           for (const [raw, counts] of Object.entries(modes) as [string, Counts][]) {
             // A record stored before a mode was renamed still counts, under its new name.
@@ -380,22 +441,25 @@ export function buildBoard(members: Member[], now: number): Board {
       topModels,
       tokens,
       models: ranked.slice(0, MODEL_ROWS),
-      providers: providerRows(members, since),
+      providers: providerRows(members, since, catalog),
     }
   }
   return { version: BOARD_VERSION, updatedAt: now, periods }
 }
 
 /** Top providers since a date, each split by its own five most used models and the rest. */
-function providerRows(members: Member[], since: string): ProviderRow[] {
+function providerRows(members: Member[], since: string, catalog?: Catalog | null): ProviderRow[] {
   const providers = new Map<string, { models: Map<string, number>; users: Set<string> }>()
   for (const member of members) {
     for (const [date, day] of Object.entries(member.providers ?? {})) {
       if (date < since) continue
-      for (const [provider, models] of Object.entries(day)) {
+      for (const [raw, models] of Object.entries(day)) {
+        const provider = providerName(raw, catalog)
+        if (!provider) continue
         const entry = providers.get(provider) ?? { models: new Map(), users: new Set<string>() }
-        for (const [model, n] of Object.entries(models)) {
-          if (n <= 0) continue
+        for (const [spelled, n] of Object.entries(models)) {
+          const model = servedAs(spelled, catalog)
+          if (!model || n <= 0) continue
           entry.models.set(model, (entry.models.get(model) ?? 0) + n)
           entry.users.add(member.login)
         }
@@ -434,7 +498,13 @@ const ownerKey = (login: string) => `community/owners/${login.toLowerCase()}`
 const reportKey = (userId: string, hostId: string) => `community/reports/${userId}/${hostId}`
 const memberKey = (login: string) => `users/${login.toLowerCase()}`
 
-async function recompute(ctx: CommunityContext, userId: string, login: string, now: number) {
+async function recompute(
+  ctx: CommunityContext,
+  userId: string,
+  login: string,
+  now: number,
+  catalog?: Catalog | null,
+) {
   const reports: Days[] = []
   const providers: ProviderDays[] = []
   const prefix = `community/reports/${userId}/`
@@ -447,8 +517,11 @@ async function recompute(ctx: CommunityContext, userId: string, login: string, n
     }
     const report = await read<Report>(ctx.registry, key)
     if (report) {
-      reports.push(report.days)
-      providers.push(report.providers ?? {})
+      // A stored report is folded through today's rules rather than trusted as it was stored: what
+      // the board counts changes under it (`custom` stopped being a provider, an unlisted model
+      // stopped counting), and a member record is only as clean as the rules that wrote it.
+      reports.push(cleanDays(report.days, now, catalog)?.days ?? {})
+      providers.push(cleanProviders(report.providers ?? {}, now, catalog))
     }
   }
   const member: Member = {
@@ -465,6 +538,8 @@ async function board(ctx: CommunityContext, now: number): Promise<Board> {
   if (cached && cached.version === BOARD_VERSION && now - cached.updatedAt < BOARD_TTL_MS) {
     return cached
   }
+  // Read here, not by the caller: a board answered from its cache asks the catalogue for nothing.
+  const catalog = await catalogOf(ctx)
   const oldest = dateOf(now, KEEP_DAYS - 1)
   const members: Member[] = []
   for (const { key } of (await ctx.store.list({ prefix: "users/" })).blobs) {
@@ -475,20 +550,26 @@ async function board(ctx: CommunityContext, now: number): Promise<Board> {
     // Nothing in the window: the host stopped reporting, so the record is only weight.
     else await ctx.store.delete(key)
   }
-  const fresh = buildBoard(members, now)
+  const fresh = buildBoard(members, now, catalog)
   await ctx.store.setJSON("board", fresh)
   return fresh
 }
 
-/** The summed tokens of one member over each period, for the app's own standing. */
-function standing(member: Member | null, now: number) {
+/**
+ * The summed tokens of one member over each period, for the app's own standing — under the same
+ * rules the board counts by, so a record written before them can't say one number here and another
+ * there.
+ */
+function standing(member: Member | null, now: number, catalog?: Catalog | null) {
   const out = {} as Record<PeriodId, number>
   for (const period of Object.keys(PERIOD_DAYS) as PeriodId[]) {
     const since = dateOf(now, PERIOD_DAYS[period] - 1)
     let total = 0
     for (const [date, day] of Object.entries(member?.days ?? {})) {
       if (date < since) continue
-      for (const modes of Object.values(day)) {
+      for (const [spelled, modes] of Object.entries(day)) {
+        const model = servedAs(spelled, catalog)
+        if (!model) continue
         for (const counts of Object.values(modes)) total += sum(counts)
       }
     }
@@ -522,19 +603,23 @@ export async function handleCommunity(req: Request, ctx: CommunityContext) {
     if (op === "POST report") {
       // Counts are only taken from accounts that joined; anything else is asked not to send them.
       if (!account) return error("This account hasn't joined the leaderboard", 403)
+      // A body that can't be read, or a host sending too often, costs no catalogue read: the ids are
+      // a fetched resource, and this is a public endpoint.
       const input = await body(req)
-      const cleaned = cleanDays(input?.days, now)
-      if (!cleaned) return error("Invalid report", 400)
-      const gapKey = `community/gap/${hostId}`
-      const last = await read<{ at: number }>(ctx.registry, gapKey)
+      if (!input) return error("Invalid report", 400)
+      // The gap is the report row's own `at`, read where the throttle key used to be: a public
+      // endpoint gains no write and no shared record beyond the report it is already given.
+      const last = await read<Report>(ctx.registry, reportKey(userId, hostId))
       if (last && now - last.at < REPORT_GAP_MS) return error("Slow down", 429)
-      await ctx.registry.setJSON(gapKey, { at: now })
+      const catalog = await catalogOf(ctx)
+      const cleaned = cleanDays(input.days, now, catalog)
+      if (!cleaned) return error("Invalid report", 400)
       await ctx.registry.setJSON(reportKey(userId, hostId), {
         days: cleaned.days,
-        providers: cleanProviders(input?.providers, now),
+        providers: cleanProviders(input.providers, now, catalog),
         at: now,
       } satisfies Report)
-      await recompute(ctx, userId, account.login, now)
+      await recompute(ctx, userId, account.login, now, catalog)
       return json({ ok: true, heldBack: cleaned.heldBack })
     }
 
@@ -547,7 +632,7 @@ export async function handleCommunity(req: Request, ctx: CommunityContext) {
 
   const joined = async (login: string) => {
     const member = await read<Member>(ctx.store, memberKey(login))
-    return json({ joined: true, login, totals: standing(member, now) })
+    return json({ joined: true, login, totals: standing(member, now, await catalogOf(ctx)) })
   }
 
   if (op === "GET me") {
@@ -582,7 +667,6 @@ export async function handleCommunity(req: Request, ctx: CommunityContext) {
       await ctx.store.delete("board")
       const prefix = `community/reports/${userId}/`
       for (const { key } of (await ctx.registry.list({ prefix })).blobs) {
-        await ctx.registry.delete(`community/gap/${key.slice(prefix.length)}`)
         await ctx.registry.delete(key)
       }
       await ctx.registry.delete(ownerKey(account.login))

@@ -11,12 +11,13 @@ import {
   type ReactNode,
 } from "react"
 import { ArrowUpIcon, MicIcon, SquareIcon } from "lucide-react"
-import { toast } from "sonner"
 
+import { Refusal } from "@/components/banner"
 import { AttachMenu } from "@/components/chat/attach-menu"
 import { PointChip, useCanvasPoints } from "@/components/chat/canvas-points"
 import { useCodeFace } from "@/components/chat/code-face"
 import { AttachmentTile } from "@/components/chat/attachments"
+import { MentionMenu } from "@/components/chat/mention-menu"
 import type { ModeSettings } from "@/components/chat/mode-menu"
 import { usePreviewer, type PreviewItem } from "@/components/chat/previewer"
 import { SlashMenu } from "@/components/chat/slash-menu"
@@ -35,13 +36,16 @@ import { openAttachment, prepareIntake } from "@/lib/attachments"
 import { attachmentUrl, drawable } from "@/lib/attachment-url"
 import { drawnCell, mediaKind } from "@/lib/media-kind"
 import { previewItem } from "@/lib/media-items"
-import type { Attachment } from "@/lib/db"
-import { pointText, type CanvasPoint } from "@/lib/point-marker"
+import type { Attachment, Profile } from "@/lib/db"
+import type { Mention } from "@/lib/mention-marker"
+import type { CanvasPoint } from "@/lib/point-marker"
 import type { PluginFeatureAnswer } from "@/lib/features"
 
 import { flushDrafts, loadDraft, saveDraft, saveDraftToChat, useDraftText } from "@/lib/drafts"
 import { quietly } from "@/lib/report"
 import { AttachmentError } from "@/lib/send-turn"
+import { failed } from "@/lib/refusal"
+import { useRefusal } from "@/lib/use-refusal"
 import { tell } from "@/lib/tell"
 import type { HermesConfig } from "@/lib/hermes"
 import { COLUMN_BOX } from "@/lib/layout"
@@ -70,6 +74,9 @@ import {
   type SlashItem,
 } from "@/lib/slash"
 import { enterSends, isDoubleEscape, isInterrupt, isSendChord } from "@/lib/keys"
+import { mentionToken, pickMention, rankMentions } from "@/lib/mention"
+import { MENU_ROWS, useMentionRows, type MentionRow } from "@/lib/mentions"
+import { markRequest } from "@/lib/request-text"
 import { useSkills } from "@/lib/skills"
 import { midReply, steerAsked } from "@/lib/steer"
 import { runnableSkills } from "@/lib/skills-cache"
@@ -110,6 +117,7 @@ export function Composer({
   onCommand,
   connection,
   botName = "Hermes",
+  mentionable,
   dictationHint,
   dictationWords,
   model,
@@ -149,6 +157,11 @@ export function Composer({
   /** The chat's Hermes profile, for the skills in the `/` menu. */
   connection: HermesConfig
   botName?: string
+  /**
+   * What may be tagged under an `@`: the bot whose sessions the menu offers, and the chat this is,
+   * which is never one of them. Absent on a surface that tags nothing.
+   */
+  mentionable?: { bot: Profile; here?: string }
   /** Names the chat may mention (its title, a project's repos), to help the host hear them. */
   dictationHint?: string
   /** The bot's vocabulary: the names and words its dictation is written with. */
@@ -225,11 +238,21 @@ export function Composer({
   })
   const [pointing, setPointing] = useState(false)
   /**
+   * The sessions and bots this message names, as they were picked: the name rides in the sentence
+   * and the id rides in a marker line at the send, and a message the host never took hands the picks
+   * back with the text, as a point is handed back.
+   */
+  const [mentionsHeld, setMentionsHeld] = useState<Mention[]>([])
+  /**
    * The staged files the Host refused, each with its own sentence: a tile the user can take off,
    * rather than a message the whole of which was refused with no word about which file it was. A
    * send that keeps a refused file says it again, because the Host is asked again.
    */
   const [refused, setRefused] = useState<Record<string, string>>({})
+  // The send waits on the host, so a refusal is drawn here — above the field it was typed in — rather
+  // than in passing, where it says nothing about which message it was about. Keyed by the draft, so
+  // a refusal about one chat's send is not left standing over the next chat's composer.
+  const refusal = useRefusal(draftKey)
   // Picked files still being read, shown as placeholders where they'll land.
   const [preparing, setPreparing] = useState<{ id: string; name: string; image: boolean }[]>([])
   // Files taken moments ago, so a paste and the drop it can also fire add one copy.
@@ -251,6 +274,8 @@ export function Composer({
     // A point is the canvas's page, not this chat's: another chat is another place to point at.
     setPoints([])
     setPointing(false)
+    // A pick names something in this chat's sentence, and another chat's sentence is another's.
+    setMentionsHeld([])
   }
   // A draft that lands after mount fills the field only while it is still empty and untouched.
   const syncedDraft = useDraftText(draftKey)
@@ -300,6 +325,7 @@ export function Composer({
   // When the last Escape that had nothing else to close was pressed, for the double that clears.
   const lastEscape = useRef<number | null>(null)
   const listId = useId()
+  const tagListId = useId()
   const dictationInfo = useDictationInfo(connection)
   const placeLanded = useRef<(landed: string, takeId: TakeId) => void>(() => {})
   const dictation = useChunkedDictation(
@@ -379,25 +405,39 @@ export function Composer({
     return () => window.clearTimeout(timer)
   }, [stopAsked, runId, working])
 
-  // The menu follows the caret: a `/` that begins a word opens it, wherever in the message it is.
+  // The menu follows the caret: a `/` or an `@` that begins a word opens one, wherever in the message
+  // it is. A caret sits in one token or none, so exactly one list can stand at a time.
   const token = slashToken(value, caret)
+  const tag = plain || !mentionable ? null : mentionToken(value, caret)
   const skills = useSkills(connection, !plain && Boolean(token) && !disabled)
+  const offered = useMentionRows(
+    mentionable?.bot,
+    mentionable?.here,
+    !plain && Boolean(tag) && !disabled,
+  )
+  const tagRows = tag ? rankMentions(offered, tag.query, MENU_ROWS) : []
   const skillItems: SlashItem[] =
     skills.status === "ok"
       ? runnableSkills(skills.skills).map((skill) => ({ kind: "skill", ...skill }))
       : []
-  const items =
+  const slashItems =
     plain || !token
       ? []
       : rankSlashItems([...localCommands(), ...(busy ? SEND_COMMANDS : []), ...skillItems], token)
-  // Escape closes the menu until the text changes: any edit opens it again, and so does a new `/`.
-  const menuOpen =
+  // Escape closes a menu until the text changes: any edit opens it again, whichever token it types.
+  const slashOpen =
     !plain &&
     token !== null &&
     !dismissed &&
     !disabled &&
-    (items.length > 0 || skills.status !== "ok")
-  const activeIndex = Math.min(active, Math.max(items.length - 1, 0))
+    (slashItems.length > 0 || skills.status !== "ok")
+  // The `/` menu opens while its host read is out; a mention's rows are this device's own, so a
+  // query that matches none of them has nothing to stand over and no menu opens.
+  const mentionOpen = !plain && Boolean(tag) && !dismissed && !disabled && tagRows.length > 0
+  const menu: "slash" | "mention" | null = slashOpen ? "slash" : mentionOpen ? "mention" : null
+  const shown = menu === "mention" ? tagRows : slashItems
+  const openId = menu === "mention" ? tagListId : listId
+  const activeIndex = Math.min(active, Math.max(shown.length - 1, 0))
   // The caret follows the field. A pick places it (`caretWanted`); anything else that writes the
   // value — a restored draft, dictation, a message handed back after a failed send — leaves it
   // where the field put it, so the menu tracks the text the user is in and not where the mirror
@@ -437,19 +477,41 @@ export function Composer({
     setValue(next.text)
   }
 
+  const pickTag = (row: MentionRow) => {
+    if (!tag) return
+    const next = pickMention(value, tag, row.name)
+    caretWanted.current = next.caret
+    setDismissed(false)
+    setValue(next.text)
+    // One entry per thing picked, whatever else the sentence goes on to say: a name picked twice is
+    // one mention, and its id is the newest row it was picked from.
+    setMentionsHeld((held) => [
+      ...held.filter((one) => !(one.kind === row.kind && one.id === row.id)),
+      { name: row.name, kind: row.kind, id: row.id },
+    ])
+  }
+
   const submitText = (raw: string) => {
     const text = plain ? raw : (sendMode(raw)?.text ?? raw)
     if (!text.trim() && !attachments.length && !points.length) return
     const sent = attachments
     const steer = !plain && steersNow(raw, sent)
-    // A point rides the message it was taken for: the model reads its label and its selector. A steer
-    // is a nudge at the reply already running, so the chip waits for the message after it.
-    const marked = steer ? text : pointText(text, points)
+    // A pick rides the message it was made for only while its name still stands in the words:
+    // deleting the name is the reader taking it back. A point rides the same message, so the two go
+    // on in the order every reader peels them — the words, the point lines, then the mentions. A
+    // steer is a nudge at the reply already running, so it carries neither.
+    const live = mentionsHeld.filter((mention) => text.includes(`@${mention.name}`))
+    const marked = steer ? text : markRequest({ text, points, mentions: live })
     const carried = steer ? [] : points
+    const carriedPicks = steer ? [] : live
     setValue("")
     setAttachments([])
     if (carried.length) setPoints([])
+    setMentionsHeld([])
     setPointing(false)
+    // The write starts here, so the words of the last refusal go with it: a second refusal replaces
+    // the first rather than standing beside it.
+    refusal.clear()
     const go = () => (steer ? onSteer!(text, sent) : (busy ? onQueue : onSend)(marked, sent))
     // Hand the message back if it never made it into the chat, unless something new was added.
     void Promise.resolve(go()).then(
@@ -458,16 +520,22 @@ export function Composer({
         setValue((current) => current || raw)
         setAttachments((current) => (current.length ? current : sent))
         setPoints((current) => (current.length ? current : carried))
+        setMentionsHeld((current) => (current.length ? current : carriedPicks))
         // A file the Host refused is the one thing here worth interrupting for: the tile that
-        // carries it turns red, and the Host's own sentence — the limit it names — is a toast on
-        // the phone and the page's own toaster on the web. A send refused for another reason keeps
-        // its place in the screen's own words, as it always has.
-        if (!(error instanceof AttachmentError)) return
-        const message =
-          error.message || `Couldn't send ${sent.length > 1 ? "a file" : "that file"}.`
-        if (error.attachmentId)
-          setRefused((current) => ({ ...current, [error.attachmentId!]: message }))
-        tell.error(message)
+        // carries it turns red, and the Host's own sentence — the limit it names — is drawn on it.
+        // The notice above the field is not asked to repeat what the tile already says.
+        if (error instanceof AttachmentError) {
+          const message =
+            error.message || `Couldn't send ${sent.length > 1 ? "a file" : "that file"}.`
+          if (error.attachmentId)
+            return setRefused((current) => ({ ...current, [error.attachmentId!]: message }))
+          // A sentence about no one file — a host with no route to store them, said by the send
+          // itself — has no tile to land on, so it is drawn above the field like any other refusal of
+          // the send rather than dropped.
+          return refusal.refuse({ ok: false, said: message })
+        }
+        // Anything else is about the send itself, and is drawn above the field it was typed in.
+        refusal.refuse(failed(error, "Couldn't send your message."))
       },
     )
   }
@@ -652,7 +720,7 @@ export function Composer({
     try {
       await dictation.retry()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't start the microphone.")
+      tell.error(error instanceof Error ? error.message : "Couldn't start the microphone.")
     }
   }
 
@@ -662,7 +730,7 @@ export function Composer({
     dictation
       .start(dictationAt.current)
       .catch((error: unknown) =>
-        toast.error(error instanceof Error ? error.message : "Couldn't start the microphone."),
+        tell.error(error instanceof Error ? error.message : "Couldn't start the microphone."),
       )
   }
 
@@ -708,8 +776,8 @@ export function Composer({
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing) return
-    if (menuOpen && items.length > 0) {
-      const count = items.length
+    if (menu && shown.length > 0) {
+      const count = shown.length
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault()
         setActive((activeIndex + (event.key === "ArrowDown" ? 1 : count - 1)) % count)
@@ -720,11 +788,12 @@ export function Composer({
         event.key === "Tab"
       ) {
         event.preventDefault()
-        pick(items[activeIndex])
+        if (menu === "mention") pickTag(tagRows[activeIndex])
+        else pick(slashItems[activeIndex])
         return
       }
     }
-    if (menuOpen && event.key === "Escape") {
+    if (menu && event.key === "Escape") {
       event.preventDefault()
       setDismissed(true)
       lastEscape.current = null
@@ -819,13 +888,22 @@ export function Composer({
       onDrop={dropped}
       className={`${COLUMN_BOX} relative`}
     >
-      {menuOpen && (
+      {menu === "slash" && (
         <SlashMenu
           id={listId}
-          items={items}
+          items={slashItems}
           active={activeIndex}
           status={skills.status}
           onPick={pick}
+          onActive={setActive}
+        />
+      )}
+      {menu === "mention" && (
+        <MentionMenu
+          id={tagListId}
+          rows={tagRows}
+          active={activeIndex}
+          onPick={pickTag}
           onActive={setActive}
         />
       )}
@@ -855,6 +933,7 @@ export function Composer({
           ))}
         </div>
       )}
+      <Refusal hold={refusal} className="mb-2" />
       <InputGroup
         className={cn(
           "bg-background shadow-lg shadow-black/5 has-data-[align=block-end]:rounded-[1.75rem] has-[textarea]:rounded-[1.75rem] dark:bg-input/30",
@@ -879,13 +958,11 @@ export function Composer({
           onPaste={pasted}
           onKeyDown={onKeyDown}
           enterKeyHint={sendOnEnter ? "send" : "enter"}
-          role={menuOpen ? "combobox" : undefined}
-          aria-expanded={menuOpen ? true : undefined}
-          aria-controls={menuOpen ? listId : undefined}
-          aria-autocomplete={menuOpen ? "list" : undefined}
-          aria-activedescendant={
-            menuOpen && items.length ? optionId(listId, activeIndex) : undefined
-          }
+          role={menu ? "combobox" : undefined}
+          aria-expanded={menu ? true : undefined}
+          aria-controls={menu ? openId : undefined}
+          aria-autocomplete={menu ? "list" : undefined}
+          aria-activedescendant={menu && shown.length ? optionId(openId, activeIndex) : undefined}
           placeholder={
             placeholder ??
             (disabled

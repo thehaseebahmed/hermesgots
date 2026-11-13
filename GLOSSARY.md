@@ -206,11 +206,19 @@ One Hermes profile the user has linked to Gots: its own agent, skills and settin
 _Avoid_: profile, agent, assistant
 
 **Bot's label**:
-What a list calls a bot, read off the host it answers at: `hermes.domain.com` is `hermes`, the domain part
-where two hosts share that short name (`domain` and `example`), the Hermes profile appended where one host
-holds several bots (`hermes/work`), and a bare host's port where it has one. Never stored, and never the name
-a host sealed for its default profile — every host calls that one "Hermes" (ADR 0148).
-_Avoid_: display name, nickname, bot name
+What a list calls a bot: the name its host gave it, and the host it answers at only where another bot of that
+name answers somewhere else — `Hermes (domain)` and `Hermes (example)` for two hosts' sealed defaults, `Studio`
+for a name nobody shares, and two bots of one name on one host drawn bare, since no host tells those two apart.
+Read at render, never stored, and never written by the app: the name is the one the link took from the host
+(ADR 0149).
+_Avoid_: display name, nickname, handle
+
+**Presence**:
+Whether a bot's host answered this device's last chat-list pass, and when this device last heard it: the
+pass's own answer decides online or away, and until a pass lands the time this device kept stands in for it.
+It is not a stored heartbeat — nothing on the server records a check-in — and the screens draw two words
+from it, `Online` or `Last seen 2 hr. ago`, or nothing at all about a bot this device cannot answer for.
+_Avoid_: heartbeat, online status, availability
 
 **Chat**:
 A bot's own conversation with you — where the app is: a bot's address lands in its chat, so the chat,
@@ -390,11 +398,11 @@ Taking a task so nothing else picks it up. A claimed task is out of the frontier
 _Avoid_: assign, lock, pickup; and claim for what research checks or records, which is a **checked claim** or an **evidence claim**
 
 **Hold**:
-One of the tasks a project's AFK switch has claimed, with the session working it: the host's own record, one row per task in flight, kept until the task's work is in review. A finished task lets go of its hold and leaves the claim, and a session the user closes gives both back.
+One of the tasks a project's AFK switch has claimed, with the session working it: the host's own record, one row per task in flight, kept until the task's work is in review. A finished task lets go of its hold and leaves the claim, and a session the user closes gives both back. Lowering a project's **pick count** takes no hold back: the tasks it already has finish, and the sheet draws the count's places in **Working** and the rest in **Queued**.
 _Avoid_: lock, lease, slot
 
 **Pick count**:
-How many tasks a project's AFK will hold at once, from one to five, set in its AFK pop-up.
+How many tasks a project's AFK will hold at once, from one to five, set in its AFK pop-up. It is the number of places the sheet draws: a hold past a lowered count is still AFK's work and still claimed, and it waits in **Queued** rather than being drawn against a count it no longer fits.
 _Avoid_: concurrency, parallelism, workers, slots
 
 **Pick budget**:
@@ -436,6 +444,14 @@ _Avoid_: bottom bar, FAB row, dock
 **Filter**:
 One of the pills that narrow a list. A bot's chat list wears All, Unread, Chats, Rooms and Routines in the **bar** under its title row — under the search where there is one — and the one pressed is remembered on this device, with All what a device that never chose opens on; Chats is a row that is neither a room nor a routine's run, and Unread is the same mark this device's read dot reads. A bot's **Skills tab** wears All and its **skill categories** instead, drawn in the tab's own flow rather than pinned to a header, forgotten when the tab is left, and each one holding at least one skill by construction — so the tab's only "nothing here" is the search's. Either way a filter only narrows and never re-orders.
 _Avoid_: tab, segment, tag
+
+**Tell**:
+What the app says in passing: one line near the foot of the screen, about something that has just happened and needs no answer. Inside the Android app it is the phone's own toast; on the web it is the toaster. Every screen asks `lib/tell`, so the words are the same on both roads and the app's four tones are decided in one place: error, info, success and note (ADR 0147).
+_Avoid_: toast message, snackbar, popup, alert
+
+**Note**:
+A tell with no tone: something worth saying and neither good nor bad news — a log copied, a note copied, the exit toast. On the web it is the toaster's plain message, drawn without an icon; on a phone it is a toast like any other, since the platform's has no tone to draw. It goes as quickly as the platform's short toast, unless it asks to be held.
+_Avoid_: neutral toast, plain message, info
 
 ## Rooms
 
@@ -507,7 +523,7 @@ An attachment whose bytes ride in the message itself, which only a model that re
 _Avoid_: embedded, attached copy, base64 upload
 
 **Media**:
-An attachment the thread can show rather than only hand over: an image, a video or an audio recording. Everything else is an attachment the thread offers as a download.
+An attachment the thread can show rather than only hand over: an image, a video or an audio recording. Everything else is an attachment the thread offers as a row: a note or a PDF opens to read, an archive saves under its own name.
 _Avoid_: image, file, rich media
 
 **Gallery**:
@@ -515,7 +531,7 @@ The row of media in a thread: images and video side by side, each opened in the 
 _Avoid_: carousel, thumbnails, media strip, lightbox
 
 **Previewer**:
-The app's own full-screen look at one piece of media, holding the name, the size and where the reader is in the media it was opened on — a message's, or the one file a Library row opened: a photo at its own shape — magnified by a pinch or a double tap about the point touched, and dragged only as far as it overflows the pane — a clip on a player that starts paused, a recording on a player. A **page** is drawn in a sandboxed frame. A file the app can't show is handed to the platform instead — a new tab on the web, the phone's own app in the Android app — and never drawn in the Previewer.
+The app's own full-screen look at one piece of media, holding the name, the size and where the reader is in the media it was opened on — a message's, or the files of the folder a **Library** row opened, which it steps between one at a time: a photo at its own shape — magnified by a pinch or a double tap about the point touched, and dragged only as far as it overflows the pane — a clip on a player that starts paused, a recording on a player. A **page** is drawn in a sandboxed frame. A file the app can't show is handed to the platform instead — a new tab on the web, the phone's own app in the Android app — and never drawn in the Previewer.
 _Avoid_: lightbox, image viewer, gallery popup, media sheet
 
 **Page**:
@@ -523,7 +539,7 @@ An HTML file the app shows in the **Previewer** rather than hands over, run in a
 _Avoid_: HTML preview, web view, document, site
 
 **Library**:
-The files an agent made, kept in a project's own tree and listed by folder — the tab a project opens them from, and the outputs a session filed. A tap opens the file the way a thread does: in the **Previewer** from a **Signed URL**, or handed to the platform where the Previewer can't draw it.
+The files an agent made, kept in a project's own tree and listed by folder — the tab a project opens them from, and the outputs a session filed. A tap opens the file the way a thread does: in the **Previewer** from a **Signed URL**, with the folder's other files it draws behind it so the reader can step through them, or handed to the platform where the Previewer can't draw it. Each of those files is signed when it is looked at, never the folder up front.
 _Avoid_: outputs folder, artifacts, files tab, downloads
 
 **Signed URL**:
@@ -762,8 +778,32 @@ One saved state of a canvas's HTML, made by every write its bot does. Undo steps
 _Avoid_: revision, snapshot, draft
 
 **Canvas data**:
-What a canvas keeps for itself — the ticked boxes, the logged runs — stored on its host apart from its versions, so undoing an edit never loses it.
+What a canvas keeps for itself — the ticked boxes, the logged runs — held as documents in named collections and stored on its host apart from its versions, so undoing an edit never loses it.
 _Avoid_: state, storage, store, database
+
+**Document**:
+One row of a canvas's data: a collection's name, an id, and a value of any JSON, stamped with its host's clock.
+_Avoid_: record, row, item, entry
+
+**Collection**:
+A canvas's named bucket of documents — the unit a page lists whole and a query reads a page of.
+_Avoid_: table, folder, namespace, group
+
+**Sweep**:
+A device reading a canvas's documents a page at a time to fill its own copy. It is a *completed* sweep only once the last page of the last collection has landed, and only a completed sweep may treat a document it did not see as gone, so only a completed sweep prunes.
+_Avoid_: sync, pull, refresh, download
+
+**Partial**:
+A device's copy of a canvas's documents before any sweep of it has completed, or while one is running. A page says so in its answer and `canvas.data.partial` answers it on its own, and a get of a document the rows don't hold is refused — with that code beside the words — rather than answered as missing, because the rows are only evidence of what is gone after a completed sweep.
+_Avoid_: incomplete, unsynced, stale, syncing
+
+**Pending write**:
+A page's write the device kept because its bot was away: read back at once and sent in order when the bot answers, and never outranking an answer the host has given.
+_Avoid_: queued write, outbox entry, draft, retry
+
+**Vault**:
+The OKF bundle a canvas's documents are copied into when that canvas's own switch is on — one markdown file per document, under the plugin's data folder (`$HERMES_HOME/plugin-data/gots/llm-wiki/canvas`), written by its host and never read back.
+_Avoid_: wiki, backup folder, export, mirror
 
 **Ask**:
 The empty `<script data-canvas-lib="NAME">` a page puts where it wants a library, which the app

@@ -8,7 +8,6 @@ import assert from "node:assert/strict"
 import { act } from "react"
 import { createRoot } from "react-dom/client"
 import { MemoryRouter, Route, Routes, useLocation, useNavigate, useNavigationType } from "react-router"
-import { toast } from "sonner"
 
 import { AfkPopup } from "@/components/afk"
 import { AppShell } from "@/components/app-shell"
@@ -16,6 +15,8 @@ import { DEFAULT_SETTINGS, db, type Message, type Profile, type Settings } from 
 import { fingerprintOf, orderOf } from "@/lib/dictation-log"
 import type { SessionMessage } from "@/lib/hermes"
 import { clearShare } from "@/lib/share"
+
+import { spyToaster } from "./toaster-spy.ts"
 import { THINKING_WORD } from "@/lib/thinking"
 import { WAKE_PROMPT_FOOTER, WAKE_PROMPT_HEADER } from "@/lib/wake-prompt"
 import { ChatPage } from "@/routes/chat"
@@ -478,16 +479,32 @@ export async function withReducedMotion(body: () => Promise<void>) {
  * however the case ends — a case that threw halfway must not hand the next one a share to send.
  */
 export async function withToasts(body: (said: string[]) => Promise<void>) {
+  // Every tone, not only the error one: a screen may answer in passing as a note or a success, and a
+  // case asserting "nothing was said" has to be able to hear those as well. The toaster fills `said`
+  // as it goes, since a case can be waiting for the first thing said.
   const said: string[] = []
-  const original = toast.error
-  toast.error = ((message: unknown) => {
-    said.push(String(message))
-  }) as typeof toast.error
+  const toaster = spyToaster(said)
   try {
     await body(said)
   } finally {
-    toast.error = original
+    toaster.restore()
     clearShare()
+  }
+}
+
+/**
+ * The notes a screen says in passing — the app's own word that something was kept, not a refusal —
+ * collected from the toasts it shows. `withToasts` is the same for the refusals.
+ */
+export async function withNotes(body: (said: string[]) => Promise<void>) {
+  const said: string[] = []
+  // The one spy on the toaster, taken as the suite's own helper takes it: a toast is recorded
+  // wherever the app says it, and the real toaster is put back even when the body throws.
+  const toaster = spyToaster(said)
+  try {
+    await body(said)
+  } finally {
+    toaster.restore()
   }
 }
 

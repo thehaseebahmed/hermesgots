@@ -50,10 +50,13 @@ logger = logging.getLogger(__name__)
 # 68 keeps the stance, part and lane of a verification's claim, and how each lane's run ended
 # (`research.py`): four new columns.
 # 69 keeps what each of a verification's lanes searched (`research.py`): one new table.
-# 70 keeps a literature review's papers (`research.py`): the review's own brief and funnel on its
+# 70 keeps whether a canvas's data is copied into its host's OKF vault (`canvases.py`'s record,
+# `canvas_vault.py`): one column, off for every canvas an older store holds, since a backup nobody
+# asked for is not one to start.
+# 71 keeps a literature review's papers (`research.py`): the review's own brief and funnel on its
 # mission, a paper's metadata, screening and evidence level on its source, and the field and theme
 # of a claim. New columns only, so every other mission reads as it did.
-SCHEMA_VERSION = 70
+SCHEMA_VERSION = 71
 
 
 def data_dir(hermes_home: Path) -> Path:
@@ -577,7 +580,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    PRIMARY KEY (mission_id, lane, query)
                )"""
         )
-        # v70: a literature review (research.py). `review` is what the user confirmed (the field, the
+        # v71: a literature review (research.py). `review` is what the user confirmed (the field, the
         # years, the criteria, the queries, the cap, preprints) and `funnel` what the search and the
         # screening counted. A paper is a source: its metadata is the index's, `screening` is where
         # it stands (found, include, unsure, exclude, unscreened) with the reason and what it failed,
@@ -999,6 +1002,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    created_at INTEGER NOT NULL
                )"""
         )
+        # v70: whether this canvas's data is copied into the host's OKF vault, the canvas's own
+        # switch and no setting of the app's (canvas_vault.py). Off for every canvas an older store
+        # holds, since a backup nobody asked for is not one to start.
+        if version < 70:
+            canvas_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvases)")}
+            if "vault" not in canvas_columns:
+                conn.execute("ALTER TABLE canvases ADD COLUMN vault INTEGER NOT NULL DEFAULT 0")
         # v64: the picture a canvas's tile draws (canvases.py, #934). It is the canvas's, not a
         # version's, so a record written before one keeps drawing its mark until a write names one.
         if version < 64:

@@ -1,5 +1,3 @@
-import { toast } from "sonner"
-
 import { serverConfig } from "@/lib/connection"
 import { FLUSH_INTERVAL_MS, READ_TIMEOUT_MS } from "@/lib/freshness"
 import {
@@ -45,6 +43,7 @@ import {
   type TurnUsage,
 } from "@/lib/hermes"
 import { attachmentsText, splitAttachments } from "@/lib/attachment-text"
+import { readRequest } from "@/lib/request-text"
 import { progressReminderNote, progressRemindersShown } from "@/lib/progress-reminder"
 import { measureReply } from "@/lib/reply-stats"
 import { wireContent } from "@/lib/attachments"
@@ -63,6 +62,7 @@ import {
 } from "@/lib/history"
 import { unknownLastTurn } from "@/lib/model-changes"
 import { modelOf, pickOf, wantsPin } from "@/lib/model-pick"
+import { tell } from "@/lib/tell"
 import { takeHostTitle } from "@/lib/title"
 import { onTodoTool, refreshTodos } from "@/lib/todos"
 import { appendThinking, closeRun, forgetRuns, noteRunThinking } from "@/lib/thinking"
@@ -1537,7 +1537,7 @@ async function syncQueue(conversationId: string) {
       const mine = byId.get(item.id)
       // The host's stored text may carry the marker lines the send wrote, which are never the
       // message's words — a row in the thread draws the same way whether it is queued or sent.
-      const folded = splitAttachments(item.text)
+      const folded = readRequest(item.text)
       // This device's copy first, then what the host answered for, then what the text's own markers
       // name.
       const own = mine?.attachments?.length ? mine.attachments : attachmentsOf(item)
@@ -1722,7 +1722,7 @@ export async function removeQueued(message: Message) {
       if (host)
         await queueAction(host.config, host.conversation.hermesSessionId, message.id, "remove")
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't remove the message.")
+      tell.error(error instanceof Error ? error.message : "Couldn't remove the message.")
       return
     }
   }
@@ -1812,7 +1812,7 @@ export async function steerText(
   } catch (error) {
     // A file the host wouldn't take is why it couldn't steer, so its own words come first.
     const because = error instanceof AttachmentError ? `${error.message} ` : ""
-    toast.error(`${because}Couldn't steer this reply, so it's queued.`)
+    tell.error(`${because}Couldn't steer this reply, so it's queued.`)
   }
 }
 

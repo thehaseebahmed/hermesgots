@@ -9,20 +9,13 @@ import {
   type ReactNode,
 } from "react"
 
-import {
-  ChevronRightIcon,
-  EyeIcon,
-  EyeOffIcon,
-  Trash2Icon,
-  type LucideIcon,
-} from "lucide-react"
-
-import { toast } from "sonner"
+import { ChevronRightIcon, EyeIcon, EyeOffIcon, Trash2Icon, type LucideIcon } from "lucide-react"
 
 import { Link } from "react-router"
 
+import { Refusal } from "@/components/banner"
 import { ModelPicker } from "@/components/chat/model-picker"
-import { ExperimentalBadge } from "@/components/experimental-badge"
+import { LabBadge } from "@/components/lab-badge"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { PickGroup, PickRow } from "@/components/pick-row"
 import { SearchField } from "@/components/search-field"
@@ -38,7 +31,9 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import type { ModelChoice, Profile } from "@/lib/db"
+import type { RefusalHold } from "@/lib/refusal"
 import { useModelInfo } from "@/lib/model-info"
+import { useRefusal, useSaidRefusal } from "@/lib/use-refusal"
 import { holdsUnsavedChanges, useUnsavedChanges } from "@/lib/unsaved"
 import { cn } from "@/lib/utils"
 
@@ -55,15 +50,36 @@ const HeaderSlot = createContext<(key: string, draw: (() => ReactNode) | null) =
  */
 const TitleSlot = createContext<(title: string | undefined) => void>(() => {})
 
+/**
+ * The one refusal the page holds, handed down rather than passed: a bot's page draws its rows
+ * several components below the `Screen` that holds them, and the write a row makes is the page's to
+ * answer. A row drawn with no `Screen` above it has no notice to draw the words in, so it says them
+ * in passing instead — a refusal is never kept where nothing renders it.
+ */
+const RefusalSlot = createContext<RefusalHold | null>(null)
+
+/** The refusal the `Screen` above holds, or one that says the words where there is no `Screen`. */
+export function useScreenRefusal(): RefusalHold {
+  const slot = useContext(RefusalSlot)
+  const said = useSaidRefusal()
+  return slot ?? said
+}
+
 /** The chrome every Settings screen wears: a sticky header over one centred column of groups. */
 export function Screen({
   title,
+  subject,
   leading,
   action,
   className,
   children,
 }: {
   title: string
+  /**
+   * What this page is about, where its title doesn't say: the bot and page it holds. A refusal is
+   * about the thing that was written, so a page about something else carries none of it.
+   */
+  subject?: string
   leading?: ReactNode
   /** A control at the header's right edge, after the title: the screen's own action. */
   action?: ReactNode
@@ -72,6 +88,7 @@ export function Screen({
 }) {
   const [page, setPage] = useState<{ key: string; draw: () => ReactNode } | null>(null)
   const [named, setNamed] = useState<string>()
+  const refusal = useRefusal(subject ?? title)
   const publish = useCallback((key: string, draw: (() => ReactNode) | null) => {
     setPage(draw ? { key, draw } : null)
   }, [])
@@ -84,12 +101,21 @@ export function Screen({
           <h1 className="text-xl font-semibold tracking-tight">{named ?? title}</h1>
           {shown && <div className="ml-auto flex min-h-11 shrink-0 items-center">{shown}</div>}
         </div>
+        {/* The page's refusal is pinned with the header: a write made at the foot of a long page is
+            answered where the reader is looking, not a screenful above them. */}
+        {refusal.words && (
+          <div className="mx-auto mt-3 w-full max-w-2xl">
+            <Refusal hold={refusal} />
+          </div>
+        )}
       </header>
       <HeaderSlot.Provider value={publish}>
         <TitleSlot.Provider value={setNamed}>
-          <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
-            {children}
-          </div>
+          <RefusalSlot.Provider value={refusal}>
+            <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
+              {children}
+            </div>
+          </RefusalSlot.Provider>
         </TitleSlot.Provider>
       </HeaderSlot.Provider>
     </div>
@@ -234,7 +260,7 @@ export function SwitchRow({
   id,
   icon: Icon,
   title,
-  experimental,
+  lab,
   subtitle,
   extra,
   checked,
@@ -247,7 +273,7 @@ export function SwitchRow({
   /** A category header is a title alone, so a row without one draws nothing in the icon's place. */
   icon?: LucideIcon
   title: string
-  experimental?: boolean
+  lab?: boolean
   subtitle?: string
   /** Extra lines under the subtitle, inside the row's own column (a skill's health line). */
   extra?: ReactNode
@@ -273,10 +299,12 @@ export function SwitchRow({
       {Icon && <Icon className="size-5 shrink-0 text-muted-foreground" />}
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="flex min-w-0 items-center gap-2">
-          <span className={cn("truncate text-base", variant === "header" && "font-semibold")}>
+          <span
+            className={cn("line-clamp-2 text-base", variant === "header" && "font-semibold")}
+          >
             {title}
           </span>
-          {experimental && <ExperimentalBadge />}
+          {lab && <LabBadge />}
         </span>
         {subtitle && <span className="line-clamp-2 text-sm text-muted-foreground">{subtitle}</span>}
         {extra}
@@ -395,7 +423,7 @@ export function useLeaveGuard(leave: () => void) {
         confirmLabel="Discard"
         cancelLabel="Keep editing"
         onOpenChange={setAsking}
-        onConfirm={() => {
+        onConfirm={async () => {
           setAsking(false)
           go()
         }}
@@ -543,7 +571,7 @@ export function FormFoot({ children }: { children: ReactNode }) {
   return (
     <div
       data-form-foot
-      className="sticky bottom-0 z-10 -mb-[max(2rem,env(safe-area-inset-bottom))] mt-auto flex flex-col bg-gradient-to-t from-background from-40% via-background/95 to-transparent px-1 pt-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
+      className="sticky bottom-0 z-10 mt-auto -mb-[max(2rem,env(safe-area-inset-bottom))] flex flex-col bg-gradient-to-t from-background from-40% via-background/95 to-transparent px-1 pt-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]"
     >
       {children}
     </div>
@@ -641,6 +669,7 @@ export function EditForm({
   busy,
   surface,
   saveable,
+  subject,
   resetLabel,
   resetDestructive,
   onSave,
@@ -654,9 +683,15 @@ export function EditForm({
   kind?: "text" | "url" | "secret" | "number"
   /** A line under the field about the write itself: when the host reads the key, say. */
   note?: string
-  onSave: (value: string) => void
+  /** The one write Save makes: it lands by returning, and is refused by throwing. */
+  onSave: (value: string) => unknown
   /** The form's nothing value, where the host holds one: the key leaving the file. */
-  onReset?: () => void
+  onReset?: () => unknown
+  /**
+   * What this form is about, where the field's label doesn't say: a card retargeted to another bot
+   * keeps its label, so the label alone would hold one bot's refusal over another's field.
+   */
+  subject?: string
   /** What the reset is called where its own word says what goes: *Delete key*. */
   resetLabel?: string
   /** The reset deletes something rather than clearing a value: it wears the destructive ink. */
@@ -678,17 +713,25 @@ export function EditForm({
 }) {
   const [draft, setDraft] = useState(value)
   const [shown, setShown] = useState(false)
+  // The form's own write is answered here, above its actions: on a phone an edit *is* the screen, and
+  // a notice a screen-height above Save is a toast with better manners.
+  const refusal = useRefusal(subject ?? label)
   const id = `edit-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
   const next = kind === "text" ? draft.trim() : draft
   const offers = saveable ?? ((held: string) => held !== value)
   // What a back would throw away — only where the form is the screen. A card is a pop-up, and closing
   // a pop-up is the whole of saying no: nothing is asked.
   useUnsavedChanges(surface === "screen" && next !== value)
+  // The reset is the form's write too, so its refusal is drawn in the form's own notice rather than
+  // said from wherever the caller's handler ran.
+  const reset = onReset
+    ? () => void refusal.write("reset that", async () => onReset())
+    : undefined
   const actions = (
     <FormActions
       className={surface === "screen" ? undefined : "mt-auto"}
       onCancel={onCancel}
-      onReset={onReset}
+      onReset={reset}
       resetLabel={resetLabel}
       destructive={resetDestructive}
       disabled={!offers(next)}
@@ -700,7 +743,7 @@ export function EditForm({
       className={cn(surface === "screen" ? formColumnClass : "flex flex-col gap-6")}
       onSubmit={(event) => {
         event.preventDefault()
-        onSave(next)
+        void refusal.write("save that", async () => onSave(next))
       }}
     >
       <div className="flex flex-col gap-2">
@@ -736,6 +779,7 @@ export function EditForm({
         </InputGroup>
         {note && <p className="mt-3 px-1 text-center text-sm text-muted-foreground">{note}</p>}
       </div>
+      <Refusal hold={refusal} />
       {surface === "screen" ? <FormFoot>{actions}</FormFoot> : actions}
     </form>
   )
@@ -766,6 +810,8 @@ export function ModelPick({
 }) {
   const info = useModelInfo(profile)
   const providers = info?.providers ?? []
+  // The pick closes as it writes, so the words land on the page the pick was opened from.
+  const refusal = useScreenRefusal()
   return (
     <PickSurface open={open} onOpenChange={(next) => !next && onClose()} title={title}>
       {providers.length ? (
@@ -776,9 +822,7 @@ export function ModelPick({
           recent={profile.recentModels}
           choice={choice}
           onChoose={(next) => {
-            void Promise.resolve(onPick(next)).catch((error: unknown) => {
-              toast.error(error instanceof Error ? error.message : String(error))
-            })
+            void refusal.write("save that", async () => onPick(next))
             onClose()
           }}
         />
@@ -827,11 +871,7 @@ export function PickList({
   return (
     <div className="flex min-h-0 flex-col gap-3">
       {search && (
-        <SearchField
-            value={query}
-            onChange={setQuery}
-            label={`Search ${label.toLowerCase()}`}
-          />
+        <SearchField value={query} onChange={setQuery} label={`Search ${label.toLowerCase()}`} />
       )}
       <div data-pick-list={label} className="flex min-h-0 flex-col overflow-y-auto">
         <PickGroup mode="choose" label={label}>

@@ -1,8 +1,9 @@
 import { useState, type ReactNode } from "react"
-import { CircleAlertIcon, InfoIcon, RotateCwIcon, TriangleAlertIcon } from "lucide-react"
+import { CircleAlertIcon, InfoIcon, RotateCwIcon, TriangleAlertIcon, XIcon } from "lucide-react"
 
 import { Alert, AlertAction, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import type { RefusalHold } from "@/lib/refusal"
 import { cn } from "@/lib/utils"
 
 const TONES = {
@@ -13,6 +14,9 @@ const TONES = {
 
 /** What the retry is called: it draws no label, so these words are all a reader has of it. */
 const TRY_AGAIN = "Try again"
+
+/** What the dismiss is called, for the same reason. */
+const DISMISS = "Dismiss"
 
 /**
  * The notice's own control: one tap asks the read again, and no second tap lands while that read is
@@ -37,6 +41,51 @@ export function Retry({ onRetry }: { onRetry: () => Promise<void> }) {
     >
       <RotateCwIcon />
     </Button>
+  )
+}
+
+/**
+ * The notice's other control: one tap takes the words away for good. It is `Retry`'s twin — the
+ * same 44px ghost circle, named for a reader who cannot see it — because a refusal and a failed
+ * read stand in the same place and are both answered by a thumb.
+ */
+export function Dismiss({ onDismiss }: { onDismiss: () => void }) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="icon-lg"
+      className="size-11 rounded-full"
+      aria-label={DISMISS}
+      title={DISMISS}
+      onClick={onDismiss}
+    >
+      <XIcon />
+    </Button>
+  )
+}
+
+/**
+ * A failed write, where it was made: the host's own words in an error banner, with the one control
+ * that takes them away. Nothing is drawn while there is nothing to say, and nothing moves focus —
+ * `Alert`'s own `role="alert"` is what announces it, which is what the toast it replaces did.
+ */
+export function Refusal({
+  hold,
+  className,
+}: {
+  /**
+   * The words a surface holds, and the way the reader asks for them to go: the hold's own type, so a
+   * field renamed there is a compile error here rather than a notice that quietly draws nothing.
+   */
+  hold: Pick<RefusalHold, "words" | "dismiss"> & { words: string | undefined }
+  className?: string
+}) {
+  if (!hold.words) return null
+  return (
+    <Banner tone="error" className={className} action={<Dismiss onDismiss={hold.dismiss} />}>
+      {hold.words}
+    </Banner>
   )
 }
 
