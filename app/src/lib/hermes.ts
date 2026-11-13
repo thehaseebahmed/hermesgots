@@ -2550,6 +2550,8 @@ export type CanvasChanges = {
   /** Whether this canvas's data is copied into the host's OKF vault (`canvas_vault.py`). */
   vault?: boolean
   image?: string
+  /** The mark this canvas's pinned row draws (#1065); an empty string clears it. */
+  mark?: string
 }
 
 export async function updateCanvas(

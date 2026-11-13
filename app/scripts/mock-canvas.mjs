@@ -10,6 +10,12 @@ const DATA_BYTES = 1024 * 1024
 const NAME_CHARS = 64
 // The plugin's own cap (`plugin/canvases.py`) and its one-line rule: a title is cut here too.
 const TITLE_CHARS = 60
+// The mark a pinned canvas's row draws (#1065): one lucide icon's name or one emoji — the plugin's
+// own rule, mirrored here so a flow's write is answered as the host would answer it.
+const MARK_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
+const MARK_CHARS = 40
+const isMark = (mark) =>
+  mark.length <= MARK_CHARS && (MARK_NAME.test(mark) || !/[\p{L}\p{N}\s]/u.test(mark))
 
 function titleOf(text) {
   const flat = String(text).trim().split(/\s+/).join(" ")
@@ -200,6 +206,9 @@ function newCanvas({ title, prompt, version, versions, tools }) {
     vault: false,
     // Nothing until a version is written: a canvas still being built draws its own mark.
     image: null,
+    // The mark the sidebar row draws (#1065): absent until the user chooses one, which is the app's
+    // own frame mark.
+    mark: null,
     at: now,
     created_at: now,
     versions,
@@ -258,6 +267,7 @@ export function createCanvasStore() {
     archived: c.archived,
     vault: c.vault,
     image: c.image ?? null,
+    mark: c.mark ?? null,
     at: c.at,
     created_at: c.created_at,
   })
@@ -610,8 +620,8 @@ export async function handleCanvas(
 
   if (req.method === "POST") {
     const body = (await readBody(req)) ?? {}
-    if (!["title", "pinned", "archived", "vault", "image"].some((field) => field in body)) {
-      fail(400, "A canvas's update names what changes: a title, pinned, archived, vault, or image.")
+    if (!["title", "pinned", "archived", "vault", "image", "mark"].some((field) => field in body)) {
+      fail(400, "A canvas's update names what changes: a title, pinned, archived, vault, image, or mark.")
       return true
     }
     if ("title" in body) {
@@ -636,6 +646,15 @@ export async function handleCanvas(
         return true
       }
       canvas.image = body.image || null
+    }
+    // The host's own rule (`canvases.py`'s `_mark`): one lucide icon's name or one emoji. An empty
+    // string clears it.
+    if ("mark" in body) {
+      if (typeof body.mark !== "string" || !isMark(body.mark)) {
+        fail(400, "A canvas's mark is one icon's name, as lucide writes it, or one emoji — not a word.")
+        return true
+      }
+      canvas.mark = body.mark || null
     }
     canvas.at = Date.now()
     noteEvent("canvas", canvas.session_id)

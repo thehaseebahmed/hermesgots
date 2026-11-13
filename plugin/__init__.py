@@ -708,9 +708,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # `canvas_data` rides with it: the paged read of a canvas's own data, which a
                     # device sweeps a collection at a time rather than in one answer. `canvas_vault`
                     # is the canvas's own backup switch, drawn on its options sheet where the host
-                    # keeps one (canvas_vault.py): a host from before it offers no row.
+                    # keeps one (canvas_vault.py): a host from before it offers no row. `canvas_mark`
+                    # is the same shape for the mark its pinned row draws (#1065): the picker is
+                    # offered where the record can keep one, and nowhere it would be refused.
                     *(
-                        ["canvas", "canvas_data", "canvas_vault"]
+                        ["canvas", "canvas_data", "canvas_vault", "canvas_mark"]
                         if canvases.ready() and openui.canvas_ready()
                         else []
                     ),

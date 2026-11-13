@@ -582,6 +582,45 @@ class WriteTest(unittest.TestCase):
         canvases.update(self.path, self.canvas["id"], {"image": ""})
         self.assertEqual(canvases.record(self.path, self.canvas["id"])["image"], "")
 
+    def test_a_mark_is_chosen_read_back_and_cleared(self) -> None:
+        # The mark a pinned canvas's row draws is the record's, like its place in the list (#1065):
+        # one lucide icon's name, or one emoji.
+        marked = canvases.update(self.path, self.canvas["id"], {"mark": "heart"})
+        self.assertEqual(marked["mark"], "heart")
+        self.assertEqual(canvases.listing(self.path)[0]["mark"], "heart")
+        # The two updates that already write this row leave the mark where it is.
+        canvases.update(self.path, self.canvas["id"], {"title": "Split the bill"})
+        canvases.update(self.path, self.canvas["id"], {"archived": True})
+        canvases.update(self.path, self.canvas["id"], {"archived": False})
+        kept = canvases.record(self.path, self.canvas["id"])
+        self.assertEqual(
+            (kept["mark"], kept["title"], kept["archived"]), ("heart", "Split the bill", False)
+        )
+        emoji = canvases.update(self.path, self.canvas["id"], {"mark": "🎉"})
+        self.assertEqual(emoji["mark"], "🎉")
+        # An empty name clears the mark, which is the one thing COALESCE cannot do with a null: it
+        # keeps what the row holds, so the clear has to be a value of its own.
+        cleared = canvases.update(self.path, self.canvas["id"], {"mark": ""})
+        self.assertEqual(cleared["mark"], "")
+        self.assertEqual(canvases.record(self.path, self.canvas["id"])["mark"], "")
+
+    def test_a_mark_that_is_no_icon_name_or_emoji_is_refused(self) -> None:
+        for named, refused in (
+            (17, "one emoji"),
+            ("Heart", "one emoji"),
+            ("two words", "one emoji"),
+            ("heart red", "one emoji"),
+            ("a" * 41, "one emoji"),
+            ("grin 😀", "one emoji"),
+            ("漢", "one emoji"),
+        ):
+            with self.subTest(named=str(named)[:24]):
+                with self.assertRaises(canvases.CanvasError) as why:
+                    canvases.update(self.path, self.canvas["id"], {"mark": named})
+                self.assertIn(refused, str(why.exception))
+        # Refused whole: the record holds no mark, and the refusal left nothing behind.
+        self.assertIsNone(canvases.record(self.path, self.canvas["id"])["mark"])
+
     def test_a_write_past_256_kb_is_refused_naming_the_cap(self) -> None:
         huge = DOCUMENT.replace("<h1>Tip</h1>", "<p>" + "x" * (canvases.MAX_BYTES + 1) + "</p>")
         with self.assertRaises(canvases.CanvasError) as refused:
@@ -2417,6 +2456,7 @@ class RouteTest(unittest.TestCase):
             ({}, None),
             ({"pinned": "yes"}, "pinned"),
             ({"archived": 1}, "archived"),
+            ({"mark_tint": "coral"}, "mark"),
             ({"title": 3}, "title"),
             ({"title": "   "}, "title"),
         ):
