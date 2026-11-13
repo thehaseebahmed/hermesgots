@@ -73,13 +73,13 @@ function FileRow({
   file: LibraryFile
   /** Whether this is the file being opened right now, so its row says it is working. */
   busy: boolean
-  onOpen: (file: LibraryFile) => void
+  onOpen: () => void
 }) {
   const Icon = ICONS[iconOf(file.name)]
   return (
     <button
       type="button"
-      onClick={() => onOpen(file)}
+      onClick={onOpen}
       aria-busy={busy || undefined}
       className={cn(
         "-mx-2 flex min-h-11 w-[calc(100%+1rem)] items-center gap-3 rounded-xl px-2 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring",
@@ -111,9 +111,7 @@ function sortFolders(folders: LibraryFolder[], sort: Sort<LibrarySort>): Library
   const alphabetical = sort.key === "name"
   const by = (compare: number) => withDir(compare, sort.dir)
   const files = (folder: LibraryFolder) =>
-    [...folder.files].sort((a, b) =>
-      alphabetical ? by(byName(a.name, b.name)) : by(a.at - b.at),
-    )
+    [...folder.files].sort((a, b) => (alphabetical ? by(byName(a.name, b.name)) : by(a.at - b.at)))
   return [...folders]
     .sort((a, b) => (alphabetical ? by(byName(a.name, b.name)) : by(newestAt(a) - newestAt(b))))
     .map((folder) => ({ ...folder, files: files(folder) }))
@@ -154,12 +152,12 @@ function FolderSection({
       </CollapsibleTrigger>
       <CollapsibleContent>
         <div className={cn("space-y-0.5 pl-[3.25rem]", own && "pb-3")}>
-          {folder.files.map((file) => (
+          {folder.files.map((file, at) => (
             <FileRow
               key={file.path}
               file={file}
               busy={busy === file.path}
-              onOpen={(one) => open(one)}
+              onOpen={() => open(folder.files, at)}
             />
           ))}
         </div>

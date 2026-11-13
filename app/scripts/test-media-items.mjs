@@ -145,7 +145,14 @@ const folder = (...names) =>
   names.map((name) => ({ name, path: `/home/h/.hermes/library/library-tab/${name}` }))
 
 test("a folder's list is the files the Previewer draws, in the order the folder draws them", () => {
-  const files = folder("chart.png", "notes.md", "photo.heic", "bundle.zip", "clip.mp4", "screenshot")
+  const files = folder(
+    "chart.png",
+    "notes.md",
+    "photo.heic",
+    "bundle.zip",
+    "clip.mp4",
+    "screenshot",
+  )
   const { items, index } = folderItems(files, 4)
   assert.deepEqual(
     items.map((item) => item.name),

@@ -7,12 +7,14 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { LibraryTree } from "@/components/library"
+import { LibraryTree, SessionLibrary } from "@/components/library"
 import type { HermesConfig, LibraryFolder } from "@/lib/hermes"
 
 import {
   click,
+  find,
   findText,
+  json,
   labelled,
   mediaHost,
   mediaReads,
@@ -24,6 +26,13 @@ import {
 } from "./component-kit.tsx"
 
 const config: HermesConfig = { baseUrl: "http://bot.test", apiKey: "key" }
+
+/**
+ * A second bot for the folder cases: the URL this page holds for a path is remembered for the page's
+ * life and keyed by the bot's address, so a case that opened a path on `config` would open it here
+ * from what that case already minted.
+ */
+const severalConfig: HermesConfig = { ...config, baseUrl: "http://several.test" }
 
 const folders: LibraryFolder[] = [
   {
@@ -59,6 +68,59 @@ const folders: LibraryFolder[] = [
   },
 ]
 
+/**
+ * A folder of several files that the Previewer draws, written here in an order the tree does not
+ * draw them in: the list the Previewer opens on has to come from the tree's own sort, and a note and
+ * a phone's HEIC sit among them so stepping skips what the platform takes.
+ */
+const several: LibraryFolder[] = [
+  {
+    name: "library-tab",
+    files: [
+      {
+        name: "notes.md",
+        path: "/home/h/.hermes/library/library-tab/notes.md",
+        folder: "library-tab",
+        worktree: "a-session",
+        size: 300,
+        at: 5,
+      },
+      {
+        name: "chart.png",
+        path: "/home/h/.hermes/library/library-tab/chart.png",
+        folder: "library-tab",
+        worktree: "a-session",
+        size: 2048,
+        at: 3,
+      },
+      {
+        name: "sketch.png",
+        path: "/home/h/.hermes/library/library-tab/sketch.png",
+        folder: "library-tab",
+        worktree: "a-session",
+        size: 1024,
+        at: 4,
+      },
+      {
+        name: "clip.mp4",
+        path: "/home/h/.hermes/library/library-tab/clip.mp4",
+        folder: "library-tab",
+        worktree: "a-session",
+        size: 9000,
+        at: 2,
+      },
+      {
+        name: "photo.heic",
+        path: "/home/h/.hermes/library/library-tab/photo.heic",
+        folder: "library-tab",
+        worktree: "a-session",
+        size: 4096,
+        at: 1,
+      },
+    ],
+  },
+]
+
 /** A page an agent left in the library: the Previewer draws it, the platform never gets it. */
 const page: LibraryFolder[] = [
   {
@@ -79,6 +141,11 @@ const page: LibraryFolder[] = [
 /** The tree as a project's Library tab draws it: the tree brings the Previewer its rows tap into. */
 const screen = () => (
   <LibraryTree config={config} folders={folders} order={{ key: "date", dir: "desc" }} />
+)
+
+/** The same tree over a folder of several files the Previewer draws. */
+const severalScreen = () => (
+  <LibraryTree config={severalConfig} folders={several} order={{ key: "date", dir: "desc" }} />
 )
 
 /** A file's row in the tree, by the name it wears. */
@@ -172,5 +239,71 @@ test("Library opens an .html in the Previewer, not the platform", async () => {
     )
   } finally {
     browser.restore()
+  }
+})
+
+test("a folder's second file opens at its own place among the folder's files", async () => {
+  const asked = mediaHost()
+  try {
+    await mount(severalScreen(), async () => {
+      await click(row("library-tab"))
+      await until(async () => row("chart.png") !== null, "the folder's files")
+
+      // The second of the three files the Previewer draws: the note above it and the HEIC below it are
+      // the platform's, so they are not stepped over — they are not in the list at all.
+      await click(row("chart.png"))
+      await until(
+        async () => document.querySelector("img[alt='chart.png']") !== null,
+        "the photo in the Previewer",
+      )
+      assert.equal(
+        text().includes("2 of 3"),
+        true,
+        "the Previewer says where the reader is among the folder's files",
+      )
+      assert.deepEqual(
+        mediaReads(asked).map((path) => path.split("/").pop()),
+        ["chart.png"],
+        "the tap signs the file tapped, and nothing else",
+      )
+    })
+  } finally {
+    mediaHost()
+  }
+})
+
+test("a session's own tree opens its folder the same way", async () => {
+  const asked = mediaHost()
+  const inner = globalThis.fetch
+  // `SessionLibrary` reads the session's own route for its tree, so the fake answers that and leaves
+  // every other read to the host this file already faked.
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), "http://localhost")
+    if (/\/sessions\/[^/]+\/library$/.test(url.pathname))
+      return json({ worktree: "a-session", folders: several })
+    return inner(input as RequestInfo, init)
+  }) as typeof fetch
+  try {
+    await mount(<SessionLibrary config={severalConfig} sessionId="s-1" active />, async () => {
+      await click(row("library-tab"))
+      await until(async () => row("sketch.png") !== null, "the session's files")
+      await click(row("sketch.png"))
+      await until(
+        async () => document.querySelector("img[alt='sketch.png']") !== null,
+        "the photo in the Previewer",
+      )
+      assert.equal(
+        text().includes("1 of 3"),
+        true,
+        "a session's tree steps through its folder too, newest first as it draws it",
+      )
+      assert.deepEqual(
+        mediaReads(asked).map((path) => path.split("/").pop()),
+        ["sketch.png"],
+        "and signs only the file it was asked for",
+      )
+    })
+  } finally {
+    globalThis.fetch = inner
   }
 })
