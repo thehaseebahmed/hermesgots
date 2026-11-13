@@ -8,6 +8,25 @@ import { COLUMN_BOX, HEADER_BUTTON } from "@/lib/layout"
 import { cn } from "@/lib/utils"
 
 /**
+ * The app sidebar's door: the drawer, where the sidebar is collapsed behind it. A screen that leads
+ * with it passes it as `leading`; the header draws it itself where a caller has no leading control.
+ */
+export function SidebarButton({ className }: { className?: string }) {
+  const openDrawer = useOpenDrawer()
+  return (
+    <Button
+      variant="outline"
+      size="icon-lg"
+      className={cn(HEADER_BUTTON, "pointer-events-auto shrink-0", className)}
+      onClick={openDrawer}
+      aria-label="Open conversations"
+    >
+      <MenuIcon />
+    </Button>
+  )
+}
+
+/**
  * Floating header, read from the left: the drawer button (or `leading`), the bot's picture (unless
  * `showBot` is false), then the title with its status under it, both cut with an ellipsis; actions
  * right.
@@ -63,7 +82,6 @@ export function ChatHeader({
   onTitlePress?: () => void
   className?: string
 }) {
-  const openDrawer = useOpenDrawer()
   const mark = muted && (
     <BellOffIcon className="size-3.5 shrink-0 text-muted-foreground" aria-label="Muted" />
   )
@@ -99,15 +117,7 @@ export function ChatHeader({
           <div className="pointer-events-auto shrink-0">{leading}</div>
         ) : (
           <>
-            <Button
-              variant="outline"
-              size="icon-lg"
-              className={cn(HEADER_BUTTON, "pointer-events-auto shrink-0 md:hidden")}
-              onClick={openDrawer}
-              aria-label="Open conversations"
-            >
-              <MenuIcon />
-            </Button>
+            <SidebarButton className="md:hidden" />
             {/* The centred arrangement holds the row's centre by both flanks sharing it, so where
                 nothing leads the row — a coding session drawn beside Code's list — the leading
                 track still takes a box. Below `md` the drawer above is that box. */}
