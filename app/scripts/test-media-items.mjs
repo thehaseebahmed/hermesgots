@@ -7,7 +7,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { mediaItems } from "../src/lib/media-items.ts"
+import { folderItems, mediaItems } from "../src/lib/media-items.ts"
 
 const tag = (name) => ({ key: `0:${name}`, path: `/tmp/${name}`, name })
 const ready = (type, size = 12) => ({
@@ -138,4 +138,39 @@ test("a tag that names nothing of its own draws as it always did", () => {
   assert.equal(items[0].type, "", "no type until the host answers")
   assert.equal(items[0].size, undefined)
   assert.equal(items[0].cell, "gallery", "the extension still says what it is")
+})
+
+/** A folder's files as the tree lists them, in the order it draws them. */
+const folder = (...names) =>
+  names.map((name) => ({ name, path: `/home/h/.hermes/library/library-tab/${name}` }))
+
+test("a folder's list is the files the Previewer draws, in the order the folder draws them", () => {
+  const files = folder("chart.png", "notes.md", "photo.heic", "bundle.zip", "clip.mp4", "screenshot")
+  const { items, index } = folderItems(files, 4)
+  assert.deepEqual(
+    items.map((item) => item.name),
+    ["chart.png", "clip.mp4"],
+    "the photo and the clip, and nothing the platform takes: not the note, the HEIC, the archive or the file with no suffix",
+  )
+  assert.equal(index, 1, "the clip's place among the files that are stepped through")
+  assert.deepEqual(
+    items.map((item) => [item.kind, item.state, item.src]),
+    [
+      ["image", "reading", undefined],
+      ["video", "reading", undefined],
+    ],
+    "each holds its place unsigned, drawn as its own kind until the host answers for it",
+  )
+  assert.equal(
+    items.every((item) => item.folder === undefined),
+    true,
+    "a library folder's name is not a page's folder on the host",
+  )
+})
+
+test("a file the folder's list leaves out has no place in it", () => {
+  const files = folder("chart.png", "notes.md", "clip.mp4")
+  assert.equal(folderItems(files, 1).index, -1, "the note is nowhere in the list")
+  assert.equal(folderItems(files, 0).index, 0, "and the first photo is where the tree draws it")
+  assert.equal(folderItems(files, 2).index, 1, "with the note stepped over rather than counted")
 })
