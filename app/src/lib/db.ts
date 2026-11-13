@@ -1154,6 +1154,12 @@ export interface CanvasSweepRow {
   startedAt?: number
   /** The newest clock among the documents the completed sweep saw, which is the record's `docs_at`. */
   docsAt?: number
+  /**
+   * When a screen last had this canvas open on this device (`canvas-docs.ts`'s `noteOpened`), on the
+   * device's own clock: the fact an eviction picks its victims by. Not an index, so the store's schema
+   * is unchanged and Dexie keeps it as it keeps `docsAt` — a property of the row, no version of its own.
+   */
+  openedAt?: number
 }
 
 /** The key one document's row is filed under, which is also the order a canvas's rows are read in. */

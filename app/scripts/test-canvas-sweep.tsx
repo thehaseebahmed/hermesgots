@@ -16,10 +16,19 @@ import { MemoryRouter, Route, Routes } from "react-router"
 
 import { BRIDGE_MESSAGE, type CanvasDoc } from "@/lib/canvas-bridge"
 import { canvasCacheKey } from "@/lib/canvas-cache"
-import { cachedDocs, completeSweep, keepDocs, sweepMark } from "@/lib/canvas-docs"
+import {
+  beginSweep,
+  cachedDocs,
+  completeSweep,
+  holdDocBudget,
+  keepDocs,
+  noteOpened,
+  sweepMark,
+} from "@/lib/canvas-docs"
+import { enqueueWrite } from "@/lib/canvas-outbox"
 import { sweepCanvas } from "@/lib/canvas-sweep"
 import { refreshCanvases } from "@/lib/canvases"
-import { db, canvasDocKey } from "@/lib/db"
+import { db, canvasDocKey, type Profile } from "@/lib/db"
 import { connectionKey } from "@/lib/connection"
 import { CanvasView } from "@/routes/canvas"
 
@@ -358,4 +367,136 @@ test("a canvas whose documents moved is swept again by the list's poll", async (
     [3, 4],
     "the rows say what the host last answered",
   )
+})
+
+/**
+ * A document of the one collection these cases sweep, as heavy as a page of a real one. The phone's
+ * budget is 32 MB, which no test can write, so these cases hold it at a few kilobytes and let the rule
+ * run at a size a test can fill: three canvases of two documents weigh about 3.7 KB.
+ */
+const bulky = (n: number, at = n + 1): CanvasDoc => ({
+  collection: "items",
+  id: `d${String(n).padStart(4, "0")}`,
+  doc: { text: "x".repeat(600) },
+  at,
+})
+
+/** The budget these cases hold: past what two canvases of `bulky` documents weigh, under three. */
+const BUDGET = 2_600
+
+/** One canvas this device has swept whole: its rows, and the mark a completed sweep leaves. */
+async function swept(bot: Profile, id: string, docs: CanvasDoc[]) {
+  const generation = await beginSweep(bot, id)
+  await keepDocs(bot, id, docs, generation)
+  await completeSweep(bot, id, generation, docs.reduce((at, one) => Math.max(at, one.at), 0))
+}
+
+/** A canvas opened on this device at a clock of the test's choosing: recency is the device's fact. */
+async function openedAt(bot: Profile, id: string, at: number) {
+  const real = Date.now
+  Date.now = () => at
+  try {
+    await noteOpened(bot, id)
+  } finally {
+    Date.now = real
+  }
+}
+
+test("over the budget the coldest canvas's rows go whole and its sweep mark is cleared", async () => {
+  // The device keeps a budget's worth of documents across every canvas, and past it the canvas a
+  // reader opened longest ago goes — whole, because a half-held collection is a list that lies.
+  const bot = await seed("budget-coldest")
+  const [oldest, middle, screen] = ["c-oldest", "c-middle", "c-screen"]
+  // Seeded in an order that says nothing about recency: what this device opened last is the fact.
+  for (const id of [middle, oldest, screen]) await swept(bot, id, [bulky(0, 1), bulky(1, 2)])
+  const release = holdDocBudget(BUDGET)
+  try {
+    await openedAt(bot, oldest, 1_000)
+    await openedAt(bot, middle, 2_000)
+    await openedAt(bot, screen, 3_000)
+    // The sweep of the canvas on screen is what carries the device past its budget.
+    await swept(bot, screen, [bulky(0, 1), bulky(1, 2)])
+
+    assert.deepEqual(
+      await cachedDocs(bot, oldest),
+      [],
+      "the canvas this device opened longest ago holds no document at all",
+    )
+    assert.equal(
+      await sweepMark(bot, oldest),
+      undefined,
+      "and its sweep mark is cleared, so its next open sweeps again",
+    )
+    assert.deepEqual(
+      (await cachedDocs(bot, middle)).map((row) => row.id),
+      ["d0000", "d0001"],
+      "the canvas opened after it is untouched",
+    )
+    assert.ok((await sweepMark(bot, middle))?.completeAt, "and still wholly swept")
+    assert.equal((await cachedDocs(bot, screen)).length, 2, "as is the canvas on screen")
+  } finally {
+    release()
+  }
+})
+
+test("a canvas with a queued write is never evicted", async () => {
+  // The host has not answered a write this device kept, so the canvas holding it is not one the device
+  // may drop: the page would read back nothing, and the queue's own document with it.
+  const bot = await seed("budget-queued")
+  const [queued, next, screen] = ["c-queued", "c-next", "c-screen"]
+  for (const id of [queued, next, screen]) await swept(bot, id, [bulky(0, 1), bulky(1, 2)])
+  await enqueueWrite(bot, queued, {
+    method: "put",
+    collection: "items",
+    id: "dq",
+    doc: { text: "written on a train" },
+  })
+  const release = holdDocBudget(BUDGET)
+  try {
+    // The queued canvas is the coldest of the three, so nothing but the queue keeps it.
+    await openedAt(bot, queued, 1_000)
+    await openedAt(bot, next, 2_000)
+    await openedAt(bot, screen, 3_000)
+    await swept(bot, screen, [bulky(0, 1), bulky(1, 2)])
+
+    assert.deepEqual(
+      (await cachedDocs(bot, queued)).map((row) => row.id),
+      ["d0000", "d0001"],
+      "the canvas holding a queued write keeps its rows",
+    )
+    assert.ok((await sweepMark(bot, queued))?.completeAt, "and its mark, so its copy still reads whole")
+    assert.deepEqual(await cachedDocs(bot, next), [], "the next coldest went instead")
+    assert.equal(await sweepMark(bot, next), undefined, "with its mark")
+  } finally {
+    release()
+  }
+})
+
+test("the canvas on screen and a pinned canvas are never evicted", async () => {
+  // Two canvases are not the budget's to take: the one a screen is drawing, and one the reader asked
+  // to keep by pinning it — so the coldest canvas that is neither is what goes.
+  const bot = await seed("budget-spared")
+  const [pinned, spare, screen] = ["c-pinned", "c-spare", "c-screen"]
+  for (const id of [pinned, spare, screen]) await swept(bot, id, [bulky(0, 1), bulky(1, 2)])
+  await db.canvasCache.put({
+    key: canvasCacheKey(bot, pinned),
+    connection: connectionKey(bot),
+    canvasId: pinned,
+    canvas: { ...CANVAS, id: pinned, profileId: bot.id, pinned: true },
+  })
+  const release = holdDocBudget(BUDGET)
+  try {
+    await openedAt(bot, pinned, 1_000)
+    await openedAt(bot, spare, 2_000)
+    await openedAt(bot, screen, 3_000)
+    await swept(bot, screen, [bulky(0, 1), bulky(1, 2)])
+
+    assert.equal((await cachedDocs(bot, pinned)).length, 2, "a pinned canvas keeps its rows")
+    assert.ok((await sweepMark(bot, pinned))?.completeAt, "and its mark")
+    assert.equal((await cachedDocs(bot, screen)).length, 2, "the canvas on screen keeps its rows")
+    assert.deepEqual(await cachedDocs(bot, spare), [], "the coldest canvas that is neither went")
+    assert.equal(await sweepMark(bot, spare), undefined, "with its mark")
+  } finally {
+    release()
+  }
 })

@@ -32,6 +32,7 @@ import {
   cachedDocs,
   forgetDoc,
   keepWrite,
+  noteOpened,
   settleDoc,
   sweptWhole,
   sweepMarks,
@@ -775,6 +776,7 @@ export function useCanvas(id: string) {
   // it while it was away.
   useEffect(() => {
     if (!profile) return
+    void noteOpened(profile, id).catch(quietly("Noting a canvas's open"))
     void sweepCanvas(profile, id).catch(() => undefined)
     void drainCanvas(profile, id).catch(quietly("Sending a canvas's saved writes"))
   }, [profile, id])

@@ -14,8 +14,8 @@
  * document the host answered while a sweep ran is not what that sweep's completion deletes.
  *
  * A module of its own for the reason `canvas-cache.ts` keeps its own table: this is the device's side of
- * a canvas's data — its keys, its rows and the prune — while `canvas-sweep.ts` is the reading that
- * fills them and `canvases.ts` is the store the screens draw from.
+ * a canvas's data — its keys, its rows, the prune and the budget — while `canvas-sweep.ts` is the
+ * reading that fills them and `canvases.ts` is the store the screens draw from.
  */
 
 import { inOrder, type CanvasDoc } from "@/lib/canvas-bridge"
@@ -25,6 +25,28 @@ import { canvasDocKey, db, type CanvasDocRow, type Profile } from "@/lib/db"
 /** The key one canvas's sweep mark is filed under: its connection and the canvas. */
 export const canvasSweepKey = (profile: Profile, canvasId: string) =>
   `${connectionKey(profile)}\n${canvasId}`
+
+/**
+ * How much of this device every canvas's documents may take together (32 MB). Past it the least
+ * recently opened canvas's rows go whole — never part of one, because a half-held collection is a
+ * list that lies — and its sweep mark goes with them, so its next open sweeps again.
+ */
+export const DOC_BUDGET_BYTES = 32 * 1024 * 1024
+
+/**
+ * The budget a pass trims to. Only a test lowers it (`holdDocBudget`): 32 MB is not a size a test can
+ * write, and a budget passed in at the call would not be the one a sweep trips on its own.
+ */
+let budget = DOC_BUDGET_BYTES
+
+/** Runs under a budget of `bytes` until the answer is called — the one way a test reaches it. */
+export function holdDocBudget(bytes: number) {
+  const was = budget
+  budget = bytes
+  return () => {
+    budget = was
+  }
+}
 
 /** What a canvas's sweeps left: the generation the last wrote under, and when one last finished. */
 export interface CanvasSweep {
@@ -39,6 +61,12 @@ export interface CanvasSweep {
   startedAt?: number
   /** The newest clock among the documents the completed sweep saw — the record's `docs_at`. */
   docsAt?: number
+  /**
+   * When a screen last had this canvas open on this device, on the device's own clock. Recency is
+   * what an eviction picks its victims by, and an open is the only thing that makes a canvas recent:
+   * a host's clock says when its data moved, not when a reader last looked at it.
+   */
+  openedAt?: number
 }
 
 const docOf = (row: CanvasDocRow): CanvasDoc => ({
@@ -129,6 +157,7 @@ export async function keepWrite(profile: Profile, canvasId: string, one: CanvasD
  * and between two answers it moves forward only, as `keepDocs` does.
  */
 export async function settleDoc(profile: Profile, canvasId: string, one: CanvasDoc) {
+  let added = false
   await db.transaction("rw", db.canvasDocs, db.canvasSweeps, async () => {
     const held = await db.canvasDocs.get(
       canvasDocKey(connectionKey(profile), canvasId, one.collection, one.id),
@@ -136,7 +165,11 @@ export async function settleDoc(profile: Profile, canvasId: string, one: CanvasD
     if (held && !held.pending && held.at > one.at) return
     const under = await generationOf(profile, canvasId)
     await db.canvasDocs.put(rowOf(profile, canvasId, one, under, false))
+    added = !held
   })
+  // This is where a page's write grows the device: a document that was not held arrived. A write that
+  // replaced one grew nothing, so ticking a box pays for no walk and adding a document pays for one.
+  if (added) await enforceBudget()
 }
 
 /**
@@ -232,9 +265,37 @@ export async function beginSweep(profile: Profile, canvasId: string): Promise<nu
 }
 
 /**
+ * Records that a screen has this canvas open, on this device's clock — the one fact an eviction
+ * picks its victims by. It rides the canvas's sweep mark, which a canvas whose rows this device holds
+ * already has, and a mark that goes takes the recency with it: an evicted canvas is one whose next
+ * open is what makes it recent again, and what sweeps it again.
+ *
+ * The generation is left as it was found, so an open never looks like a sweep to anything reading the
+ * mark, and a canvas this device has never swept gets a mark with no `completeAt` — which is a canvas
+ * whose copy is partial, exactly as it was.
+ */
+export async function noteOpened(profile: Profile, canvasId: string) {
+  const key = canvasSweepKey(profile, canvasId)
+  await db.transaction("rw", db.canvasSweeps, async () => {
+    const held = await db.canvasSweeps.get(key)
+    await db.canvasSweeps.put({
+      ...held,
+      key,
+      connection: connectionKey(profile),
+      canvasId,
+      generation: held?.generation ?? 0,
+      openedAt: Date.now(),
+    })
+  })
+}
+
+/**
  * Marks a sweep finished and prunes in the same transaction: the last page of the last collection has
  * landed, so the rows this sweep did not write are the documents the host no longer names. `docsAt` is
  * the newest clock among them, which is what the canvas's record says its data is as fresh as.
+ *
+ * `openedAt` is carried over: the mark this writes is a new one, and when a reader last opened the
+ * canvas is nothing a sweep has an opinion about.
  */
 export async function completeSweep(
   profile: Profile,
@@ -243,16 +304,22 @@ export async function completeSweep(
   docsAt: number,
 ) {
   await db.transaction("rw", db.canvasDocs, db.canvasSweeps, async () => {
+    const key = canvasSweepKey(profile, canvasId)
+    const openedAt = (await db.canvasSweeps.get(key))?.openedAt
     await db.canvasSweeps.put({
-      key: canvasSweepKey(profile, canvasId),
+      key,
       connection: connectionKey(profile),
       canvasId,
       generation,
       completeAt: Date.now(),
       docsAt,
+      ...(openedAt ? { openedAt } : {}),
     })
     await pruneDocs(profile, canvasId, generation)
   })
+  // The rows have just grown by everything the sweep read, which is one of the two moments this
+  // device's total moves up: what it holds past its budget goes now.
+  await enforceBudget()
 }
 
 /** What a canvas's sweeps left, or nothing for a canvas this device has never swept. */
@@ -285,4 +352,114 @@ export async function forgetDocs(profile: Profile, canvasId: string) {
       .delete()
     await db.canvasSweeps.delete(canvasSweepKey(profile, canvasId))
   })
+}
+
+const encoder = new TextEncoder()
+
+/**
+ * What one document costs this device: the bytes its collection, its id and its document's JSON take —
+ * the measure a catalogue counts a canvas's `bytes` in, without the fixed envelope it adds for the keys
+ * a read carries. The budget counts what this device keeps, so it is weighed here rather than believed
+ * from an answer.
+ */
+const bytesOf = (row: CanvasDocRow) =>
+  encoder.encode(row.collection).byteLength +
+  encoder.encode(row.id).byteLength +
+  encoder.encode(JSON.stringify(row.doc) ?? "").byteLength
+
+/** One canvas's rows as the budget sees them: what they weigh, and the key both tables file it under. */
+interface Weight {
+  connection: string
+  canvasId: string
+  bytes: number
+}
+
+/**
+ * What each canvas's rows weigh, walked once. No running total is kept: the sum over a budget's worth
+ * of rows is one read against the connection the rows were written through, and a count kept beside
+ * them would be an invariant every write, prune and settle would have to keep true — to save a
+ * millisecond on the two moments a device's rows grow.
+ */
+async function weights(): Promise<Map<string, Weight>> {
+  const weighed = new Map<string, Weight>()
+  await db.canvasDocs.each((row) => {
+    const key = `${row.connection}\n${row.canvasId}`
+    const one = weighed.get(key) ?? { connection: row.connection, canvasId: row.canvasId, bytes: 0 }
+    one.bytes += bytesOf(row)
+    weighed.set(key, one)
+  })
+  return weighed
+}
+
+/**
+ * The canvases an eviction leaves alone: one a reader pinned (they asked for its row in the sidebar),
+ * one holding a write its host has not answered (the queue is where that write lives, and the page
+ * reads its own write back from these rows), and the one a screen has open — the canvas this device
+ * opened last, which is the only open a device can name after the fact.
+ */
+async function spared(): Promise<Set<string>> {
+  const kept = new Set<string>()
+  for (const row of await db.canvasCache.toArray()) {
+    if (row.canvasId && row.canvas?.pinned) kept.add(`${row.connection}\n${row.canvasId}`)
+    for (const one of row.canvases ?? [])
+      if (one.pinned) kept.add(`${row.connection}\n${one.id}`)
+  }
+  for (const row of await db.canvasOutbox.toArray()) kept.add(`${row.connection}\n${row.canvasId}`)
+  return kept
+}
+
+/**
+ * Drops one canvas's rows whole, and the mark that said it was swept. Whole, because a collection half
+ * held is a list that lies about what its host has — and never a page of one, for the same reason a
+ * sweep that was cut is no evidence: what is missing may be there. The mark goes with them, because a
+ * mark without its rows would say a copy is whole that holds nothing; without one the canvas is a
+ * canvas this device has never swept, so its next open is what reads it again, and the list's poll
+ * leaves it alone rather than filling back what the budget just took.
+ */
+async function evict(connection: string, canvasId: string) {
+  await db.transaction("rw", db.canvasDocs, db.canvasSweeps, async () => {
+    await db.canvasDocs.where("key").startsWith(`${connection}\n${canvasId}\n`).delete()
+    await db.canvasSweeps.delete(`${connection}\n${canvasId}`)
+  })
+}
+
+/**
+ * Trims this device's documents to its budget, coldest canvas first, and takes each one whole. Called
+ * where the rows grow — a completed sweep, and a write's answer that added a document — since those
+ * are the only two moments the total moves up.
+ *
+ * A canvas that can be spared goes, until the device is under its budget again. A device still over it
+ * with nothing left to take stays over it: the canvas on screen is not the budget's to take, and one
+ * canvas of documents is over whatever is evicted for it.
+ */
+async function enforceBudget() {
+  const weighed = await weights()
+  let total = 0
+  for (const one of weighed.values()) total += one.bytes
+  if (total <= budget) return
+  const keys = [...weighed.keys()]
+  const marks = await db.canvasSweeps.bulkGet(keys)
+  // Recency, as this device recorded it. A canvas nothing recorded is the coldest there is: rows a
+  // version before the marks left behind were opened at no time this device knows of.
+  const opened = new Map(keys.map((key, at) => [key, marks[at]?.openedAt ?? 0]))
+  const kept = await spared()
+  const onScreen = keys
+    .filter((key) => opened.get(key))
+    .sort((a, b) => opened.get(b)! - opened.get(a)!)[0]
+  if (onScreen) kept.add(onScreen)
+  const coldest = keys
+    .map((key) => weighed.get(key)!)
+    .sort(
+      (a, b) =>
+        opened.get(`${a.connection}\n${a.canvasId}`)! -
+          opened.get(`${b.connection}\n${b.canvasId}`)! ||
+        // Two canvases opened at one instant: the id decides, so a device makes the same choice twice.
+        (a.canvasId < b.canvasId ? -1 : 1),
+    )
+  for (const one of coldest) {
+    if (total <= budget) return
+    if (kept.has(`${one.connection}\n${one.canvasId}`)) continue
+    await evict(one.connection, one.canvasId)
+    total -= one.bytes
+  }
 }
