@@ -16,9 +16,11 @@ the folder:
   only then is the list opened, at the tapped file's place. A tapped file the name excluded opens alone,
   which is what every screen with no siblings does.
 - **Every other file is signed when the reader arrives at it.** The Previewer reports the item it is
-  drawing — one optional field on its request, never a fetch of its own — and the screen that holds the
+  drawing — an optional field on its request, never a fetch of its own — and the screen that holds the
   list asks the host for that one path and passes the list back through the provider's existing
-  `update`. A tap costs one mint, a step at most one, and a step back onto a file this page still holds
+  `update`. A file whose answer says the platform takes it (a `.png` the host serves as a phone's HEIC)
+  reaches the card's own "Open elsewhere", the hand-over a failed page already offered, rather than a
+  pane that can never fill. A tap costs one mint, a step at most one, and a step back onto a file this page still holds
   a URL for costs none. Signing a folder up front was rejected: it spends a mint per file nobody looked
   at, and a URL lives minutes (ADR 0075, `0075-a-drawn-file-stays-drawn-and-a-url-is-never-drawn-from-spent.md`), so a slowly browsed folder would re-mint what it pre-signed.
 - **An answer without a URL is that item's own sentence**, `askNote`'s — the host has no such file,
