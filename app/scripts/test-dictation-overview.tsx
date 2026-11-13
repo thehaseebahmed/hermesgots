@@ -18,7 +18,7 @@ const { DictationSettings } = await import("@/components/settings/dictation")
 const { Screen } = await import("@/components/settings-chrome")
 const { connectionKey } = await import("@/lib/connection")
 const { db } = await import("@/lib/db")
-const { botProfile, click, find, findAll, missing, mount, seedSettings, text, until } =
+const { botProfile, click, find, findAll, missing, mount, seedSettings, text, until, watchSheets } =
   await import("./component-kit.tsx")
 const { speech } = await import("./dictation-page-kit.tsx")
 const { readSpeech } = await import("@/lib/speech")
@@ -341,21 +341,6 @@ test("picking a bot moves the Bubble's bot, not the chat selection, and mirrors 
 })
 
 /** Every sheet drawn from the moment it is armed, so a tap's own is caught even for one frame. */
-function watchSheets() {
-  const drawn: Element[] = []
-  const watcher = new MutationObserver((records) => {
-    for (const record of records)
-      for (const node of record.addedNodes)
-        if (
-          node instanceof Element &&
-          (node.matches("[data-popup-form]") || node.querySelector("[data-popup-form]"))
-        )
-          drawn.push(node)
-  })
-  watcher.observe(document.body, { childList: true, subtree: true })
-  return { drawn, stop: () => watcher.disconnect() }
-}
-
 test("a phone holding one bot draws no sheet from the Bot row, and writes nothing", async () => {
   await seed()
   // One bot left on the device, and it is the one the Bubble dictates with: the list the row would

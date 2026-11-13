@@ -28,9 +28,11 @@ import {
   missing,
   mount,
   path,
+  hostModelRead,
   seedSettings,
   settle,
   until,
+  watchSheets,
   wordsOf,
 } from "./component-kit.tsx"
 
@@ -432,29 +434,34 @@ test("picking General's Model makes it the host's main model", async () => {
 })
 
 /** Every sheet drawn from the moment it is armed, so a tap's own is caught even for one frame. */
-function watchSheets() {
-  const drawn: Element[] = []
-  const watcher = new MutationObserver((records) => {
-    for (const record of records)
-      for (const node of record.addedNodes)
-        if (
-          node instanceof Element &&
-          (node.matches("[data-popup-form]") || node.querySelector("[data-popup-form]"))
-        )
-          drawn.push(node)
-  })
-  watcher.observe(document.body, { childList: true, subtree: true })
-  return { drawn, stop: () => watcher.disconnect() }
-}
-
 /** Waits for the host's model list to land on the bot, which is what a tap decides against. */
-const modelRead = () =>
-  until(async () => Boolean((await db.profiles.get("bot-1"))?.hostModel), "the host's model read")
-
 test("a one-model host applies it from the Models page's row, and draws no sheet", async () => {
   const calls = await seed("models-one-model", { models: ["own-model"] })
   await mount(page("/settings/bots/bot-1/models"), async () => {
-    await modelRead()
+    await hostModelRead()
+    const sheets = watchSheets()
+    try {
+      await click(row("model"))
+    } finally {
+      sheets.stop()
+    }
+    assert.deepEqual(sheets.drawn, [], "no sheet was drawn, not even for a frame")
+    // The row draws the bot's own model and a tap writes it, so the only model the host offers is
+    // written there — the state a tap on the one row of the sheet would have left.
+    await until(
+      async () => (await db.profiles.get("bot-1"))?.model === "own-model",
+      "the bot's own model to take the host's one model",
+    )
+  })
+})
+
+test("a one-model host leaves its row quiet when the bot already runs that model", async () => {
+  const calls = await seed("models-one-model-in-force", { models: ["own-model"] })
+  // What the row draws, and what its tap writes: the bot's own model, already the host's one.
+  await db.profiles.update("bot-1", { model: "own-model" })
+  await mount(page("/settings/bots/bot-1/models"), async () => {
+    await hostModelRead()
+    const before = await db.profiles.get("bot-1")
     const sheets = watchSheets()
     try {
       await click(row("model"))
@@ -468,9 +475,9 @@ test("a one-model host applies it from the Models page's row, and draws no sheet
       "and nothing was written: the row already held the host's one model",
     )
     assert.equal(
-      (await db.profiles.get("bot-1"))?.model,
-      "test/model",
-      "the bot's own model is where it was",
+      (await db.profiles.get("bot-1"))?.updatedAt,
+      before?.updatedAt,
+      "the bot is untouched",
     )
   })
 })
@@ -478,10 +485,36 @@ test("a one-model host applies it from the Models page's row, and draws no sheet
 test("a host offering two models opens the Models page's sheet, with its rows", async () => {
   await seed("models-two-models")
   await mount(page("/settings/bots/bot-1/models"), async () => {
-    await modelRead()
+    await hostModelRead()
     await openPick("model")
     assert.ok(modelOption("own-model"), "the model in force")
     assert.ok(modelOption("cheap-model"), "and the one beside it, since there is a choice to make")
+  })
+})
+
+test("a host offering no models says so in the sheet, and writes nothing", async () => {
+  const calls = await seed("models-none", { models: [] })
+  await mount(page("/settings/bots/bot-1/models"), async () => {
+    // No host model is recorded for a host with nothing to offer, so the row's presence and a settle
+    // are what say the read has landed.
+    await until(async () => Boolean(row("model")), "the row")
+    await settle()
+    await click(row("model"))
+    await until(async () => Boolean(find("[data-popup-form]")), "the sheet")
+    await until(
+      async () => /offers no models/.test(wordsOf(find("[data-popup-form]"))),
+      "the sheet's empty sentence",
+    )
+    assert.match(
+      wordsOf(find("[data-popup-form]")),
+      /This bot's host offers no models\./,
+      "an empty list says it is empty, rather than reading as a failed one",
+    )
+    assert.deepEqual(
+      calls.filter((one) => one.method === "POST"),
+      [],
+      "and writes nothing",
+    )
   })
 })
 
@@ -517,7 +550,7 @@ test("a one-model host writes the Delegation row's model through the host, and d
   const shown = () => subagent()?.querySelector(".text-primary")?.textContent ?? null
   await mount(page("/settings/bots/bot-1/delegation"), async () => {
     await until(async () => Boolean(subagent()), "the Delegation page's model row")
-    await modelRead()
+    await hostModelRead()
     const sheets = watchSheets()
     try {
       await click(subagent())

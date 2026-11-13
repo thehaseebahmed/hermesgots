@@ -1153,3 +1153,27 @@ export async function mountMarkdown(element: React.ReactNode, body: () => Promis
   await warmMarkdown()
   await mount(element, body)
 }
+
+/**
+ * What a pick could draw, recorded from the moment it is armed: a sheet lives for one commit at
+ * worst, which a poll would miss. `drawn` is every `[data-popup-form]` added to the document since,
+ * and `stop()` ends the watching.
+ */
+export function watchSheets() {
+  const drawn: Element[] = []
+  const watcher = new MutationObserver((records) => {
+    for (const record of records)
+      for (const node of record.addedNodes)
+        if (
+          node instanceof Element &&
+          (node.matches("[data-popup-form]") || node.querySelector("[data-popup-form]"))
+        )
+          drawn.push(node)
+  })
+  watcher.observe(document.body, { childList: true, subtree: true })
+  return { drawn, stop: () => watcher.disconnect() }
+}
+
+/** Waits for the host's model list to land on the bot, which is what a tap decides against. */
+export const hostModelRead = (profileId = "bot-1") =>
+  until(async () => Boolean((await db.profiles.get(profileId))?.hostModel), "the host's model read")

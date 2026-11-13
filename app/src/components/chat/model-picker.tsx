@@ -434,7 +434,8 @@ export function ModelMenu({
   const [open, setOpen] = useState(false)
   const button = useRef<HTMLButtonElement>(null)
   const info = useModelInfo(profile)
-  const read = modelsRead(info)
+  // The host answers one list per connection, so the read the tap decides from is that one value.
+  const read = useMemo(() => modelsRead(info), [info])
   const providers = info?.providers ?? []
   // A row's pick and a tap's are one call, so a tap leaves the state a row's tap leaves.
   const choose = (next: ModelChoice | undefined) => {

@@ -21,6 +21,7 @@ import {
   seedSettings,
   settle,
   until,
+  watchSheets,
   wordsOf,
 } from "./component-kit.tsx"
 
@@ -91,28 +92,18 @@ test("a one-model host applies it from the composer's pill and draws no sheet", 
   await mount(<ModelMenu profile={profile} onChoose={(next) => chosen.push(next)} />, async () => {
     await until(async () => Boolean(pill()), "the pill, once the host's model is in")
     // Every sheet the tap could draw, from the moment before it, so a frame of one is caught too.
-    const drawn: Element[] = []
-    const watcher = new MutationObserver((records) => {
-      for (const record of records)
-        for (const node of record.addedNodes)
-          if (
-            node instanceof Element &&
-            (node.matches("[data-popup-form]") || node.querySelector("[data-popup-form]"))
-          )
-            drawn.push(node)
-    })
-    watcher.observe(document.body, { childList: true, subtree: true })
+    const sheets = watchSheets()
     try {
       await click(pill())
     } finally {
-      watcher.disconnect()
+      sheets.stop()
     }
     assert.deepEqual(
       chosen,
       [{ provider: "openrouter", model: "own-model" }],
       "the tap applied the host's one model, once",
     )
-    assert.equal(drawn.length, 0, "no sheet was drawn, not even for a frame")
+    assert.equal(sheets.drawn.length, 0, "no sheet was drawn, not even for a frame")
     absent("[data-popup-form]", "nothing the pill opened is on the screen")
   })
 })

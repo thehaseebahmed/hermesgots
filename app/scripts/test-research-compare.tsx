@@ -23,6 +23,7 @@ import {
   seedSettings,
   text,
   until,
+  watchSheets,
   withToasts,
 } from "./component-kit.tsx"
 
@@ -247,28 +248,18 @@ test("a judge pick applies the host's only model and draws no sheet", async () =
     <JudgePicker mission={mission()} choice={undefined} onChoose={(next) => chosen.push(next)} />,
     async () => {
       await until(() => Boolean(findText("button", "Default model")), "the judge's row")
-      const drawn: Element[] = []
-      const watcher = new MutationObserver((records) => {
-        for (const record of records)
-          for (const node of record.addedNodes)
-            if (
-              node instanceof Element &&
-              (node.matches("[data-popup-form]") || node.querySelector("[data-popup-form]"))
-            )
-              drawn.push(node)
-      })
-      watcher.observe(document.body, { childList: true, subtree: true })
+      const sheets = watchSheets()
       try {
         await click(findText("button", "Default model"))
       } finally {
-        watcher.disconnect()
+        sheets.stop()
       }
       assert.deepEqual(
         chosen,
         [{ provider: "openrouter", model: "one-judge" }],
         "the tap applied the host's one model, once",
       )
-      assert.equal(drawn.length, 0, "no sheet was drawn, not even for a frame")
+      assert.equal(sheets.drawn.length, 0, "no sheet was drawn, not even for a frame")
       missing("[data-popup-form]")
     },
   )

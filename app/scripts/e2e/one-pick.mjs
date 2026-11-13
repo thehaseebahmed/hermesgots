@@ -120,7 +120,16 @@ await flow("one-pick", async ({ page, profileId, held, seed, shot, until, watchP
         await shot(`${look}-applied`)
 
         // (b) quiet: a bot already running that one model writes nothing when its row is tapped.
+        // The row draws the bot's own model and a tap writes it, so the bot has to be running the
+        // one model for the tap to find nothing to do — which is the state this leg is about.
         await forgetHost()
+        await page.evaluate(
+          async ({ profileId, model }) => {
+            const { db } = await import("/src/lib/db.ts")
+            await db.profiles.update(profileId, { model })
+          },
+          { profileId, model: ONE },
+        )
         await page.goto(`${app}/settings/bots/${profileId}/models`)
         const row = page.locator(ROW)
         await row.waitFor({ timeout: 20_000 })

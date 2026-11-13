@@ -43,12 +43,14 @@ import {
   click,
   find,
   findAll,
+  hostModelRead,
   labelled,
   missing,
   mount,
   settle,
   type,
   until,
+  watchSheets,
   wordsOf,
 } from "./component-kit.tsx"
 import { connectionKey } from "@/lib/connection"
@@ -1095,25 +1097,7 @@ const ONE_MODEL = {
 }
 
 /** Every sheet drawn from the moment it is armed, so a tap's own is caught even for one frame. */
-function watchSheets() {
-  const drawn: Element[] = []
-  const watcher = new MutationObserver((records) => {
-    for (const record of records)
-      for (const node of record.addedNodes)
-        if (
-          node instanceof Element &&
-          (node.matches("[data-popup-form]") || node.querySelector("[data-popup-form]"))
-        )
-          drawn.push(node)
-  })
-  watcher.observe(document.body, { childList: true, subtree: true })
-  return { drawn, stop: () => watcher.disconnect() }
-}
-
 /** Waits for the host's model list to land on the bot, which is what a tap decides against. */
-const modelRead = () =>
-  until(async () => Boolean((await db.profiles.get("bot-1"))?.hostModel), "the host's model read")
-
 test("a one-model host applies the cleanup model from its row, and draws no pick", async () => {
   const calls = await seed(
     "cleanup-one-model",
@@ -1134,7 +1118,7 @@ test("a one-model host applies the cleanup model from its row, and draws no pick
   )
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
     await until(async () => Boolean(row("cleanup-model")), "the cleanup model's row")
-    await modelRead()
+    await hostModelRead()
     const sheets = watchSheets()
     try {
       await click(row("cleanup-model"))

@@ -689,12 +689,10 @@ function GeneralPage({
   const { block, problem, stale, seeded, keep, retry } = settings
   const [saving, setSaving] = useState<string>()
   const [pick, setPick] = useState<string>()
-  // The page's Model row and the sheet it opens make one write between them, so a tap on the row
-  // leaves exactly the state a tap on a row of the sheet leaves.
-  const writeModel = useModelPickWrite(
-    (next) => setDefaultModel(profile, next),
-    () => setPick(undefined),
-  )
+  // The page's Model row and the sheet it opens write through one function, so a tap on either
+  // leaves the same state behind.
+  const saveModel = (next?: ModelChoice) => setDefaultModel(profile, next)
+  const writeModel = useModelPickWrite(saveModel, () => setPick(undefined))
   const { tap: tapModel, busy: modelBusy } = usePickOne({
     read: modelsRead(info),
     same: (option) => samePick(option, own),
@@ -842,7 +840,7 @@ function GeneralPage({
           info={info}
           choice={own}
           fallback={{ label: "Default", model: info?.model }}
-          onPick={(next) => void setDefaultModel(profile, next)}
+          onPick={saveModel}
           onClose={() => setPick(undefined)}
         />
       </div>
@@ -912,10 +910,8 @@ function SubagentModelRow({
   own: ReturnType<typeof botModel>
 }) {
   const [open, setOpen] = useState(false)
-  const write = useModelPickWrite(
-    (next) => record.save(next),
-    () => setOpen(false),
-  )
+  const save = (next?: ModelChoice) => record.save(next)
+  const write = useModelPickWrite(save, () => setOpen(false))
   const { tap, busy } = usePickOne({
     read: modelsRead(info),
     // Nothing picked is the bot's own model, not a value this row holds: a lone model is written.
@@ -940,7 +936,7 @@ function SubagentModelRow({
         info={info}
         choice={record.pick}
         fallback={{ label: "Default model", model: own?.model }}
-        onPick={(next) => record.save(next)}
+        onPick={save}
         onClose={() => setOpen(false)}
       />
     </>
@@ -1141,15 +1137,15 @@ function ModelsPage({ profile }: { profile: Profile }) {
   const [pick, setPick] = useState<string>()
   const info = useModelInfo(profile)
   const own = botModel(profile, info)
-  // The row and the sheet make one write between them, so a lone model is applied the way a row
-  // of the sheet applies it.
-  const write = useModelPickWrite(
-    (next) => (next ? updateProfile(profile.id, { model: next.model }) : undefined),
-    () => setPick(undefined),
-  )
+  const save = (next?: ModelChoice) =>
+    next ? updateProfile(profile.id, { model: next.model }) : undefined
+  const write = useModelPickWrite(save, () => setPick(undefined))
   const { tap, busy } = usePickOne({
     read: modelsRead(info),
-    same: (option) => samePick(option, own),
+    // The row draws the bot's own model and its tap writes that same field, so that is the value in
+    // force here — not the host's report, which would leave a row reading one model and holding
+    // another.
+    same: (option) => option.model === profile.model,
     apply: write,
   })
 
@@ -1174,7 +1170,7 @@ function ModelsPage({ profile }: { profile: Profile }) {
         info={info}
         choice={own}
         fallback={{ label: "Default model", model: own?.model }}
-        onPick={(next) => (next ? updateProfile(profile.id, { model: next.model }) : undefined)}
+        onPick={save}
         onClose={() => setPick(undefined)}
       />
     </div>

@@ -26,7 +26,7 @@ import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { botSubPath, type BotSub } from "@/lib/bot-subs"
-import { getSettings, updateProfile, type Profile } from "@/lib/db"
+import { getSettings, updateProfile, type ModelChoice, type Profile } from "@/lib/db"
 import { useSpeech } from "@/lib/host-speech"
 import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
 import { modelsRead, samePick } from "@/lib/model-pick"
@@ -96,15 +96,12 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
   const info = useModelInfo(profile)
   const own = botModel(profile, info)
   const [pick, setPick] = useState<"speech" | "cleanup" | "level">()
-  // The Cleanup model's row and its pick make one write between them, so a lone model is applied
-  // the way a row of the pick applies it.
-  const writeCleanup = useModelPickWrite(
-    (next) => {
-      // A write already out is the page's own guard: the trigger lets go of its key either way.
-      if (!speech.saving) void speech.chooseCleanup(next ?? null)
-    },
-    () => setPick(undefined),
-  )
+  // The Cleanup model's row and its pick write through one function, so a tap on either leaves the
+  // same state. A write already out is the page's own guard, and the write's own promise is passed
+  // on, so `busy` — and the trigger's key — last as long as the host has it.
+  const saveCleanup = (next?: ModelChoice) =>
+    speech.saving ? undefined : speech.chooseCleanup(next ?? null)
+  const writeCleanup = useModelPickWrite(saveCleanup, () => setPick(undefined))
   const { tap: tapCleanup, busy: cleanupBusy } = usePickOne({
     read: modelsRead(info),
     same: (option) => samePick(option, settings?.cleanup.model ?? undefined),
@@ -304,7 +301,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
           info={info}
           choice={settings.cleanup.model ?? undefined}
           fallback={{ label: "Default", model: own?.model }}
-          onPick={(next) => (speech.saving ? undefined : void speech.chooseCleanup(next ?? null))}
+          onPick={saveCleanup}
           onClose={() => setPick(undefined)}
         />
       )}

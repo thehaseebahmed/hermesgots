@@ -32,6 +32,7 @@ import {
   settle,
   type,
   until,
+  watchSheets,
   wordsOf,
 } from "./component-kit.tsx"
 
@@ -382,21 +383,6 @@ const modelsOf = (models: string[]) => ({
 })
 
 /** Every sheet drawn from the moment it is armed, so a tap's own is caught even for one frame. */
-function watchSheets() {
-  const drawn: Element[] = []
-  const watcher = new MutationObserver((records) => {
-    for (const record of records)
-      for (const node of record.addedNodes)
-        if (
-          node instanceof Element &&
-          (node.matches("[data-popup-form]") || node.querySelector("[data-popup-form]"))
-        )
-          drawn.push(node)
-  })
-  watcher.observe(document.body, { childList: true, subtree: true })
-  return { drawn, stop: () => watcher.disconnect() }
-}
-
 test("a one-model host applies the General Model row's model, and draws no sheet", async () => {
   const server = await seed("general-model-one", { models: modelsOf(["own-model"]) })
   await mount(page(), async () => {

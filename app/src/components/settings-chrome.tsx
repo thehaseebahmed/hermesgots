@@ -785,6 +785,16 @@ export function EditForm({
   )
 }
 
+/** A pick's one-line state, under the rows a sheet would draw: what it is reading, or why it is bare. */
+function Note({ busy, children }: { busy?: boolean; children: ReactNode }) {
+  return (
+    <p className="flex items-center gap-2 px-1 py-2 text-sm text-muted-foreground">
+      {busy && <Spinner className="size-4" />}
+      {children}
+    </p>
+  )
+}
+
 /**
  * The write a model pick makes, wherever the tap came from: a row of the sheet, or the row that
  * opens it applying the one model it holds. One function per surface, so both taps leave exactly
@@ -793,7 +803,7 @@ export function EditForm({
  * `busy` for as long as the host has it.
  */
 export function useModelPickWrite(
-  onPick: (choice: ModelChoice | undefined) => void | Promise<void>,
+  onPick: (choice: ModelChoice | undefined) => void | Promise<unknown>,
   onClose: () => void,
 ) {
   const refusal = useScreenRefusal()
@@ -836,18 +846,16 @@ export function ModelPick({
   choice?: ModelChoice
   /** The row that clears the choice: its label and the model it runs. */
   fallback: { label: string; model?: string }
-  onPick: (choice: ModelChoice | undefined) => void | Promise<void>
+  onPick: (choice: ModelChoice | undefined) => void | Promise<unknown>
   onClose: () => void
 }) {
   const write = useModelPickWrite(onPick, onClose)
   return (
     <PickSurface open={open} onOpenChange={(next) => !next && onClose()} title={title}>
       {info === undefined ? (
-        <p className="flex items-center gap-2 px-1 py-2 text-sm text-muted-foreground">
-          <Spinner className="size-4" /> Reading this bot's models…
-        </p>
+        <Note busy>Reading this bot's models…</Note>
       ) : info === null ? (
-        <p className="px-1 py-2 text-sm text-muted-foreground">Couldn't read this bot's models.</p>
+        <Note>Couldn't read this bot's models.</Note>
       ) : info.providers.length ? (
         <ModelPicker
           header={false}
@@ -858,7 +866,7 @@ export function ModelPick({
           onChoose={write}
         />
       ) : (
-        <p className="px-1 py-2 text-sm text-muted-foreground">This bot's host offers no models.</p>
+        <Note>This bot's host offers no models.</Note>
       )}
     </PickSurface>
   )

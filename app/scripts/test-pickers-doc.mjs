@@ -12,11 +12,11 @@ const doc = () => readFileSync(new URL("../../docs/pickers.md", import.meta.url)
 /** The modules that only define a pick surface: their own markup is the surface, not a site. */
 const DEFINES = ["src/components/settings-chrome.tsx", "src/components/chat/model-picker.tsx"]
 
-/** What a file draws when it opens a pick. */
-const DRAWS = /<(PickSurface|PickList|ModelPicker|ModelMenu)\b/
-
 /** The surfaces a pick is drawn on, as the doc's rows name them. */
 const SURFACES = ["PickSurface", "PickList", "ModelPicker", "ModelMenu"]
+
+/** What a file draws when it opens a pick: one list, so a surface added above is checked below. */
+const DRAWS = new RegExp(`<(${SURFACES.join("|")})\\b`)
 
 const APP = new URL("../", import.meta.url)
 
