@@ -122,23 +122,31 @@ export function useOpenHostFile(config: HermesConfig): HostFileOpen {
           // place that isn't there.
           if (list.index < 0) {
             drawing.current = [item]
-            preview({
-              items: [item],
-              index: 0,
-              onShown: (one) => sign(one, false),
-              onRetry: (one) => sign(one, true),
-            })
+            preview(
+              {
+                items: [item],
+                index: 0,
+                onShown: (one) => sign(one, false),
+                onRetry: (one) => sign(one, true),
+              },
+              owner,
+            )
             return
           }
           drawing.current = list.items.map((one, place) => (place === list.index ? item : one))
-          preview({
-            items: drawing.current,
-            index: list.index,
-            // A file the reader steps onto is signed as it arrives, and one that won't come says why
-            // and can be asked again.
-            onShown: (one) => sign(one, false),
-            onRetry: (one) => sign(one, true),
-          })
+          // Under this opener's own name, which is what lets an answer for one of the folder's files
+          // land on the list that is open rather than on one a screen has closed.
+          preview(
+            {
+              items: drawing.current,
+              index: list.index,
+              // A file the reader steps onto is signed as it arrives, and one that won't come says why
+              // and can be asked again.
+              onShown: (one) => sign(one, false),
+              onRetry: (one) => sign(one, true),
+            },
+            owner,
+          )
         } catch (error) {
           openFailed(file.name, error)
         } finally {

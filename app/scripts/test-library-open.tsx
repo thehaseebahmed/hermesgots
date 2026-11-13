@@ -326,10 +326,20 @@ test("stepping signs the file now shown, and a step back onto the tapped file mi
       // The tree draws them newest first: sketch.png, then chart.png, then clip.mp4.
       await click(labelled("button", "Next"))
       await until(async () => viewing("clip.mp4", "3 of 3"), "the next file, signed as it arrives")
+      assert.equal(
+        document.querySelector('[role="dialog"] video')?.getAttribute("src")?.includes("token="),
+        true,
+        "the clip is drawn from the URL minted as it arrived, not a placeholder",
+      )
       await click(labelled("button", "Next"))
       await until(
         async () => viewing("sketch.png", "1 of 3"),
         "the last step, wrapping to the first",
+      )
+      assert.equal(
+        document.querySelector("img[alt='sketch.png']")?.getAttribute("src")?.includes("token="),
+        true,
+        "and the photo the wrap landed on, the same way",
       )
       assert.deepEqual(
         mediaReads(asked).map((path) => path.split("/").pop()),
@@ -344,6 +354,84 @@ test("stepping signs the file now shown, and a step back onto the tapped file mi
         mediaReads(asked).map((path) => path.split("/").pop()),
         ["chart.png", "clip.mp4", "sketch.png"],
         "a URL this page still holds is drawn from, not asked for again",
+      )
+    })
+  } finally {
+    mediaHost()
+  }
+})
+
+test("a step onto a file the host refuses says so, and Try again signs it", async () => {
+  // Two hosts, one log: the first refuses the clip, the second answers for it once the reader asks
+  // again, which is what the retry is for.
+  const asked = mediaHost({ fail: ["clip.mp4"] })
+  const refusing = globalThis.fetch
+  mediaHost({ asked })
+  const answering = globalThis.fetch
+  let refusingNow = true
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+    refusingNow
+      ? refusing(input as RequestInfo, init)
+      : answering(input as RequestInfo, init)) as typeof fetch
+  try {
+    await mount(severalScreen("refused"), async () => {
+      await click(row("library-tab"))
+      await until(async () => row("chart.png") !== null, "the folder's files")
+      await click(row("chart.png"))
+      await until(async () => viewing("chart.png", "2 of 3"), "the tapped file")
+
+      await click(labelled("button", "Next"))
+      await until(
+        async () => panelText().includes("The bot has no clip.mp4."),
+        "the host's own sentence for the file it has no copy of",
+      )
+      assert.equal(
+        missing('[role="dialog"] video'),
+        true,
+        "no player for a file that never arrived",
+      )
+
+      refusingNow = false
+      await click(findText("button", "Try again"))
+      await until(
+        async () =>
+          document
+            .querySelector('[role="dialog"] video')
+            ?.getAttribute("src")
+            ?.includes("token=") === true,
+        "the clip drawn from the URL the host signed when it was asked again",
+      )
+      assert.equal(
+        panelText().includes("The bot has no clip.mp4."),
+        false,
+        "the sentence goes with the failure it belonged to",
+      )
+    })
+  } finally {
+    mediaHost()
+  }
+})
+
+test("a file whose signed URL has run out is signed again", async () => {
+  // Every URL this host mints is already spent: a step back onto a file the page holds one for asks
+  // for another rather than drawing from the dead one.
+  const asked = mediaHost({ life: 0 })
+  try {
+    await mount(severalScreen("spent"), async () => {
+      await click(row("library-tab"))
+      await until(async () => row("chart.png") !== null, "the folder's files")
+      await click(row("chart.png"))
+      await until(async () => viewing("chart.png", "2 of 3"), "the tapped file")
+
+      await click(labelled("button", "Next"))
+      await until(async () => viewing("clip.mp4", "3 of 3"), "the next file")
+      await click(labelled("button", "Previous"))
+      await until(async () => viewing("chart.png", "2 of 3"), "the file stepped back onto")
+
+      assert.deepEqual(
+        mediaReads(asked).map((path) => path.split("/").pop()),
+        ["chart.png", "clip.mp4", "chart.png"],
+        "the file stepped back onto is signed again, because the URL this page held had run out",
       )
     })
   } finally {
