@@ -1,12 +1,12 @@
 """A canvas's data copied into an OKF vault, when that canvas's own switch is on.
 
-The vault is a bundle of markdown notes, one per document, under the bot's own home: a folder named
-by the canvas's id, a folder named by each collection, a note named by the document's id. What this
-holds is the rule that makes it a backup rather than a copy that grows: a note is written only where
-its document moved on the host's own clock, so a second tick writes nothing it already wrote and a
-note the user edited in the vault is left alone; a note whose document a completed walk no longer
-names is deleted; and a tick writes a bounded number of files, so five thousand documents converge
-over ticks rather than holding the host for a minute.
+The vault is a bundle of markdown notes, one per document, under the plugin's own data folder: a
+folder named by the canvas's id, a folder named by each collection, a note named by the document's
+id. What this holds is the rule that makes it a backup rather than a copy that grows: a note is
+written only where its document moved on the host's own clock, so a second tick writes nothing it
+already wrote and a note the user edited in the vault is left alone; a note whose document a
+completed walk no longer names is deleted; and a tick writes a bounded number of files, so five
+thousand documents converge over ticks rather than holding the host for a minute.
 
 Run: python3 -m unittest plugin.tests.test_canvas_vault -v
 """
@@ -42,6 +42,10 @@ BODY = {"input": [{"role": "user", "content": PROMPT}]}
 # writes a note whose document is newer than the file, and a fixture stamped with "now" would be
 # skipped the second time this host's clock has moved on.
 AT = 1_700_000_000_000
+
+# The vault's folder, spelled out: a test that asked `store.data_dir` could not catch the folder moving.
+VAULT_PATH = Path("plugin-data") / "gots" / "llm-wiki" / "canvas"
+OLD_VAULT = Path("llm-wiki")
 
 
 def frontmatter(text: str) -> Dict[str, Any]:
@@ -89,7 +93,7 @@ class Host:
 
     @property
     def vault(self) -> Path:
-        """Where this bot's vault is: the fixed folder under its home."""
+        """Where this bot's vault is: the fixed folder under the plugin's data folder."""
         return canvas_vault.root(self.home)
 
     @property
@@ -140,6 +144,55 @@ class Host:
         folder = self.folder_of(collection)
         return sorted(
             one.name for one in folder.glob("*.md") if one.name != canvas_vault.INDEX
+        )
+
+
+class VaultPathTest(unittest.TestCase):
+    """Where the vault is: the plugin's own data folder, beside the store rather than at the home root."""
+
+    def setUp(self) -> None:
+        self.home = temp_hermes_home(self)
+
+    def test_the_vault_lives_in_the_plugin_s_data_folder(self) -> None:
+        self.assertEqual(canvas_vault.root(self.home), self.home / VAULT_PATH)
+
+    def test_the_home_it_is_given_is_the_one_the_vault_sits_under(self) -> None:
+        self.assertEqual(
+            canvas_vault.root(self.home / "another"), (self.home / "another") / VAULT_PATH
+        )
+
+
+class VaultWriteTest(unittest.TestCase):
+    """A tick's files land in that folder, and nothing at the home's own root is touched."""
+
+    def setUp(self) -> None:
+        self.host = Host(self)
+
+    def test_a_tick_writes_its_files_in_the_plugin_s_data_folder(self) -> None:
+        self.host.switched(True)
+        self.host.put("bookmarks", "b1", {"title": "Rust"})
+        self.host.back_up()
+        folder = self.host.home / VAULT_PATH / canvas_vault.folder_name(self.host.id)
+        self.assertTrue((folder / canvas_vault.INDEX).exists(), "the canvas's own index is written there")
+        self.assertFalse(
+            (self.host.home / OLD_VAULT).exists(), "and nothing new appears at the home's own root"
+        )
+
+    def test_a_vault_an_older_build_wrote_at_the_root_is_left_exactly_as_it_is(self) -> None:
+        older = self.host.home / OLD_VAULT
+        (older / VAULT_PATH.name).mkdir(parents=True)
+        note = older / VAULT_PATH.name / "my-own.md"
+        note.write_text("mine, not the vault's\n", encoding="utf-8")
+        self.host.switched(True)
+        self.host.put("bookmarks", "b1", {"title": "Rust"})
+        self.host.back_up()
+        self.assertEqual(
+            sorted(one.relative_to(older) for one in older.rglob("*")),
+            [Path(VAULT_PATH.name), Path(VAULT_PATH.name) / "my-own.md"],
+            "the older vault keeps what it had, and gains nothing from this tick",
+        )
+        self.assertEqual(
+            note.read_text(encoding="utf-8"), "mine, not the vault's\n", "and its note is untouched"
         )
 
 

@@ -1,7 +1,12 @@
 import { useSyncExternalStore } from "react"
 import { liveQuery } from "dexie"
 
-import { ACCOUNT_SYNC_MS, READ_TIMEOUT_MS, CHATS_MERGE_WAIT_MS } from "@/lib/freshness"
+import {
+  ACCOUNT_SYNC_MS,
+  CHATS_MERGE_WAIT_MS,
+  HEARD_EVERY_MS,
+  READ_TIMEOUT_MS,
+} from "@/lib/freshness"
 import { noteFailure, quietly } from "@/lib/report"
 import { createSignal } from "@/lib/store"
 import { connectionKey } from "@/lib/connection"
@@ -10,7 +15,6 @@ import { onWake } from "@/lib/wake"
 import { syncsAccount, type SyncTrigger } from "@/lib/sync-scope"
 import { within } from "@/lib/within"
 import {
-  deleteDoc,
   getDoc,
   loadAccount,
   putDoc,
@@ -467,10 +471,9 @@ async function syncBots(key: CryptoKey) {
       if (seed && hasBots(remote)) await deleteProfile(seed.id, { remote: true })
     },
   )
-  // Pushed deletions live on in the merged document; their chat lists can go.
+  // Pushed deletions live on in the merged document; the row that says so can go.
   for (const tombstone of await botTombstones()) {
     if (merged[tombstone.profileId]?.at !== tombstone.deletedAt) continue
-    await deleteDoc(`chats/${tombstone.profileId}`).catch(() => undefined)
     await db.tombstones.delete(tombstone.id)
   }
 }
@@ -672,38 +675,6 @@ async function settleChatTombstones(profileId: string, merged: Doc<ChatValue>) {
 }
 
 /**
- * Moves what the bot's old Netlify chat list still holds onto this device, then takes the document
- * off and says it's moved: the plugin sync after it carries the rows over.
- */
-async function moveFallbackChats(key: CryptoKey, profileId: string) {
-  const remote = await readDoc<ChatValue>(key, `chats/${profileId}`)
-  if (!remote.etag) return false
-  const local = await localChats(profileId, false)
-  await applyChats(profileId, mergeDocs(remote.entries, local).pull)
-  await deleteDoc(`chats/${profileId}`).catch(() => undefined)
-  await recordMoved(profileId)
-  return true
-}
-
-/** Bots whose old list is being pulled: one attempt at a time, so no pass starts the same dead read. */
-const pulling = new Map<string, Promise<boolean>>()
-/** The moves landing side by side, written one after another: a read, an append, a write, each in turn. */
-let movedWriting: Promise<unknown> = Promise.resolve()
-
-/** Says the bot's old list is off this device, without losing a move that lands at the same moment. */
-function recordMoved(profileId: string) {
-  // A write that failed leaves the chain as it was, so the next move still gets its turn.
-  movedWriting = movedWriting
-    .catch(() => undefined)
-    .then(async () => {
-      const { movedChats = [] } = await getSettings()
-      if (movedChats.includes(profileId)) return
-      await saveSettings({ movedChats: [...movedChats, profileId] })
-    })
-  return movedWriting
-}
-
-/**
  * Merges the bot's chat list with its plugin's; the merged list, or undefined when the bot's server
  * didn't answer. Only the host read can say the bot is away — a local read that fails is this
  * device's problem and leaves the pass, rather than being blamed on the server.
@@ -786,7 +757,7 @@ function mergeOnce(profile: Profile) {
  * this pass ran. Its failures stay here — a bot's server being away is `chatStores`' news, not the
  * account's.
  */
-function startChatLane(key: CryptoKey | undefined, only?: Set<string>) {
+function startChatLane(only?: Set<string>) {
   if (chatLane) {
     againChatList(only)
     return chatLane
@@ -794,7 +765,7 @@ function startChatLane(key: CryptoKey | undefined, only?: Set<string>) {
   setState({ syncingChats: true })
   const run = async () => {
     for (let ids = only; ;) {
-      await syncChatLists(key, ids)
+      await syncChatLists(ids)
       // What the merge pulled in isn't a change of this device's to push back.
       syncedFingerprint = await fingerprint()
       if (!againChats) break
@@ -807,7 +778,7 @@ function startChatLane(key: CryptoKey | undefined, only?: Set<string>) {
       chatLane = undefined
       setState({ syncingChats: false })
       // Asked for in the breath between the loop ending and this: it still gets its pass.
-      if (againChats) void startChatLane(key, takeAgainChats())
+      if (againChats) void startChatLane(takeAgainChats())
     })
   return chatLane
 }
@@ -827,7 +798,7 @@ function startAccountLane(key: CryptoKey | undefined) {
     for (;;) {
       const added = key ? await syncAccountDocs(key) : []
       if (key) accountSyncedAt = Date.now()
-      if (added.length) await startChatLane(key, new Set(added))
+      if (added.length) await startChatLane(new Set(added))
       if (!againAccount) break
       againAccount = false
     }
@@ -867,7 +838,7 @@ async function requestSync(ask: SyncAsk, trigger?: SyncTrigger, only?: Set<strin
   const key = await currentKey()
   // A lane that is free starts now and one that is running takes this for once more, so the ask
   // never becomes a second pass: it's the lane's own state, not a decision taken outside it.
-  if (ask.chats) startChatLane(key, only)
+  if (ask.chats) startChatLane(only)
   if (readsAccount) startAccountLane(key)
   await Promise.all([ask.chats ? chatLane : undefined, readsAccount ? accountLane : undefined])
   await finishSync(key, readsAccount)
@@ -891,27 +862,12 @@ async function finishSync(key: CryptoKey | undefined, readDocuments: boolean) {
 }
 
 /** Merges each bot's chat list with its plugin's: every bot's, or only those `only` names. */
-async function syncChatLists(key: CryptoKey | undefined, only?: Set<string>) {
+async function syncChatLists(only?: Set<string>) {
   const seed = await pristineSeed()
-  const { movedChats = [] } = await getSettings()
-  const moved = [...movedChats]
   // Turned off: nothing checks on it. Without a key, Hermes keeps no session for our ids.
   const profiles = (await db.profiles.toArray()).filter(
     (p) => !p.disabled && p.apiKey && p.id !== seed?.id && (!only || only.has(p.id)),
   )
-  // A bot's old list moves itself off, out of the pass's way: a read that never answers costs this
-  // pass nothing, and a pass that starts while one is still out doesn't start a second.
-  if (key)
-    for (const profile of profiles) {
-      if (moved.includes(profile.id) || pulling.has(profile.id)) continue
-      const attempt = moveFallbackChats(key, profile.id)
-        .catch((error) => {
-          noteFailure(`Moving ${profile.name}'s old chat list`, error)
-          return false
-        })
-        .finally(() => pulling.delete(profile.id))
-      pulling.set(profile.id, attempt)
-    }
   // One group per server: bots on one server share its list, so they merge side by side and apply
   // in the order they were added, and a server that never answers holds up only its own bots.
   const groups = new Map<string, Profile[]>()
@@ -923,9 +879,13 @@ async function syncChatLists(key: CryptoKey | undefined, only?: Set<string>) {
   // What the rows say, written once the pass stops waiting rather than once per bot, and once more
   // for a bot that lands later: its rows are here, so it is no longer news that it was out.
   const stores = { ...state.chatStores }
+  // The bots this pass heard, written in one go when it reports rather than once each: the write is
+  // the pass's, so a live query over the bots re-runs once instead of once per row.
+  const heard: Profile[] = []
   let reported = false
   const report = async (late: boolean) => {
     reported = true
+    await markHeard(heard.splice(0))
     // Merged over what the state holds, since a later pass may have answered while this one waited.
     setState({ chatStores: { ...state.chatStores, ...stores } })
     // A merge that landed after the pass ended pulled rows in; they aren't ours to push back.
@@ -936,6 +896,7 @@ async function syncChatLists(key: CryptoKey | undefined, only?: Set<string>) {
     for (const [i, profile] of members.entries()) {
       const answer = merged[i] ? "plugin" : "unreachable"
       if (stores[profile.id] !== answer) stores[profile.id] = answer
+      if (merged[i]) heard.push(profile)
       await applyChatList(profile, merged[i])
     }
     if (reported) await report(true)
@@ -950,7 +911,23 @@ async function syncChatLists(key: CryptoKey | undefined, only?: Set<string>) {
   if (!reported) await report(false)
 }
 
-/** Applies one bot's answer: its rows and tombstones. Its old list moves off on its own. */
+/**
+ * Notes that this device heard the pass's bots — the time a bot that is away says, and what a
+ * screen's dot is read against. One write for the whole pass, and each bot kept to once a minute: a
+ * pass a few seconds later would repaint every row it just merged. Never pushed back: `seenAt` is
+ * this device's alone.
+ */
+async function markHeard(profiles: Profile[]) {
+  const now = Date.now()
+  const due = profiles.filter((bot) => !bot.seenAt || now - bot.seenAt >= HEARD_EVERY_MS)
+  if (!due.length) return
+  await db.profiles
+    .where("id")
+    .anyOf(due.map((bot) => bot.id))
+    .modify({ seenAt: now })
+}
+
+/** Applies one bot's answer: its rows and tombstones. */
 async function applyChatList(
   profile: Profile,
   result: Awaited<ReturnType<typeof mergePluginChats>>,
