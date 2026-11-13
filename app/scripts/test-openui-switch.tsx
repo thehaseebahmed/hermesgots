@@ -10,7 +10,7 @@ import test from "node:test"
 
 import { toast } from "sonner"
 
-import { AppearanceSettings } from "@/components/settings/appearance"
+import { LabSettings } from "@/components/settings/lab"
 import { Screen } from "@/components/settings-chrome"
 import { db } from "@/lib/db"
 import {
@@ -83,8 +83,8 @@ async function appearance(profileName: string, body: () => Promise<void>) {
   await db.profiles.put(botProfile(profileName))
   // The chrome a Settings section is drawn in: its one refusal is the Screen's to hold.
   await mount(
-    <Screen title="Appearance">
-      <AppearanceSettings />
+    <Screen title="Labs">
+      <LabSettings />
     </Screen>,
     body,
   )
@@ -96,7 +96,7 @@ test("Appearance reads the switch from the host when it opens", async () => {
   await appearance("switch-off", async () => {
     // Off is what the host holds: the section opening on the device's default would read as on.
     await until(async () => checked(switchOf()) === false, "the host's value")
-    assert.match(text(), /Interfaces/, "the row is on the screen")
+    assert.match(text(), /GenUI \(Powered by OpenUI\)/, "the row is on the screen")
     assert.deepEqual(
       fake.calls.filter((call) => call.path.endsWith("/openui")).map((call) => call.method),
       ["GET"],

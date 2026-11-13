@@ -1,16 +1,16 @@
 /**
- * *Show progress reminders*: the Developer switch that draws a progress reminder a thread would hide,
- * on both chat screens, where the refused call was, opening the note the host wrote — and nothing at
+ * *Show progress reminders*: the Lab switch that draws a progress reminder a thread would hide, on
+ * both chat screens, where the refused call was, opening the note the host wrote — and nothing at
  * all with the switch off (ADR 0068).
  */
 import assert from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter } from "react-router"
 
+import { DeveloperSettings } from "@/routes/settings"
 import { streamHandlers, type Turn } from "@/lib/chat"
 import { db, type Message } from "@/lib/db"
 import type { SessionMessage } from "@/lib/hermes"
-import { DeveloperSettings } from "@/routes/settings"
 import {
   botProfile,
   chatScreen,
@@ -111,8 +111,9 @@ test("the Developer switch is off until it is turned on, keeps the pick, and ask
       <DeveloperSettings />
     </MemoryRouter>,
     async () => {
-    assert.equal(checkedOf(row()), true, "a fresh read of the device finds it on")
-  })
+      assert.equal(checkedOf(row()), true, "a fresh read of the device finds it on")
+    },
+  )
 })
 
 test("a reply already folded with the row draws nothing once the switch is off", async () => {

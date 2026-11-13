@@ -60,7 +60,14 @@ export interface Settings {
    * `useLegacyChat` in `legacy-chat.ts`.
    */
   legacyChat?: boolean
-  /** Meetings: add a recording or transcript and read the host's notes. Developer, local. */
+  /**
+   * The master switch over every lab feature: on unless this device turns it off, and off means none
+   * of them runs — the page's own rows say which are on when it comes back.
+   */
+  labs?: boolean
+  /** Canvas: a page a bot builds and the app draws in a frame. Labs, local, on by default. */
+  canvas?: boolean
+  /** Meetings: add a recording or transcript and read the host's notes. Labs, local. */
   meetings?: boolean
   /**
    * Draws each progress reminder a thread would drop as a row of its own, opening the note the host
@@ -933,6 +940,8 @@ export const DEFAULT_SETTINGS: Settings & Appearance & Required<Pick<Settings, "
   breakReminders: true,
   navShortcuts: false,
   sendOnEnter: false,
+  labs: true,
+  canvas: true,
 }
 
 export const DEFAULT_PROFILE = {

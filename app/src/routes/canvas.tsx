@@ -22,7 +22,7 @@ import { BotPicker } from "@/components/chat/bot-picker"
 import { Composer } from "@/components/chat/composer"
 import { PreviewerProvider } from "@/components/chat/previewer"
 import { UsageSheet } from "@/components/chat/usage-sheet"
-import { ExperimentalBadge } from "@/components/experimental-badge"
+import { LabLabel } from "@/components/lab-badge"
 import { ItemGroup } from "@/components/item-list"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
@@ -55,6 +55,7 @@ import {
   undoCanvas,
   updateCanvas,
   useCanvas,
+  useCanvasEnabled,
   useCanvasRecord,
   useCanvases,
   writeCanvasData,
@@ -133,6 +134,15 @@ function CanvasTile({ canvas, now }: { canvas: Canvas; now: number }) {
 }
 
 /**
+ * Canvas is behind its Labs switch; with it off, its screens send you home and the nav draws no row.
+ */
+export function CanvasGate({ children }: { children: ReactNode }) {
+  const enabled = useCanvasEnabled()
+  if (enabled === undefined) return null
+  return enabled ? children : <Navigate to="/" replace />
+}
+
+/**
  * The create screen's own: a prompt and the files staged with it. The composer is the app's, in its
  * plain mode — a surface that is not a chat, which takes no `/` command and asks for words of its own
  * — so the ten-file cap, the dedupe, the refusal sentences, the tiles and their Remove are the ones
@@ -181,9 +191,7 @@ export function CanvasPage() {
         heading
         showBot={false}
         title={
-          <>
-            Canvas <ExperimentalBadge />
-          </>
+          <LabLabel>Canvas</LabLabel>
         }
       />
 
