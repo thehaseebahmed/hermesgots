@@ -58,6 +58,7 @@ import {
   rowOn,
   rowValue,
   sttGroups,
+  type ProviderChoice,
   type SttGroup,
   type SttSetting,
   type SttSettings,
@@ -111,6 +112,10 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
   })
   // The row whose form is open, wherever it sits on the page: one surface serves them all.
   const [open, setOpen] = useState<SttSetting>()
+  // One pick's write, handed to the surface and to the rows that open it, so both taps leave the
+  // state one row's tap leaves.
+  const chooseSetting = (row: SttSetting, id: string) =>
+    writePick(row, id, speech.writeStt, () => setOpen(undefined))
   const models = settings ? modelsFor(settings, block) : []
   const otherProviders = block ? providerRows(block) : []
   const heard = settings ? heardLine(settings.provider) : null
@@ -176,6 +181,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
           saving={speech.saving}
           muted={muted}
           onWrite={speech.writeStt}
+          onChoose={chooseSetting}
           onOpen={setOpen}
           onPick={(pick) => (pick === "speech" ? openSpeech() : setPick(pick))}
           profile={profile}
@@ -239,6 +245,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
           row={open}
           saving={speech.saving}
           onWrite={speech.writeStt}
+          onChoose={chooseSetting}
           onClose={() => setOpen(undefined)}
         />
       )}
@@ -314,6 +321,8 @@ type CardProps = {
   /** The page holds this device's cached answer: its rows take no taps until a fresh one lands. */
   muted: boolean
   onWrite: (key: string, value: SttValue) => Promise<boolean>
+  /** The write one pick makes, from the sheet's row or the row that opens it. */
+  onChoose: (row: SttSetting, id: string) => Promise<boolean>
   onOpen: (row: SttSetting) => void
   onPick: (pick: "speech" | "cleanup") => void
   profile: Profile
@@ -358,7 +367,8 @@ function GroupRows({
   rows,
   ...props
 }: CardProps & { group: SttGroup; rows: readonly SttSetting[] }) {
-  const { block, settings, models, saving, muted, onWrite, onOpen, onPick, profile, words } = props
+  const { block, settings, models, saving, muted, onWrite, onChoose, onOpen, onPick, profile, words } =
+    props
   // Vocabulary goes where the prompt it is appended after sits, and nowhere else.
   const after = rows.findIndex((row) => row.key === "stt.local.initial_prompt") + 1
   const cut = group === "local" && after > 0 ? after : rows.length
@@ -379,6 +389,7 @@ function GroupRows({
         saving={saving}
         muted={muted}
         onOpen={onOpen}
+        onChoose={onChoose}
       />
     ) : (
       <HostRow
@@ -388,6 +399,7 @@ function GroupRows({
         saving={saving}
         muted={muted}
         onWrite={onWrite}
+        onChoose={onChoose}
         onOpen={onOpen}
       />
     )
@@ -400,6 +412,57 @@ function GroupRows({
   )
 }
 
+/**
+ * A row whose value is picked from a list: its tap applies a lone option through the write the
+ * sheet's own rows make, and opens the sheet otherwise. The block is what draws this row at all, so
+ * the list is settled here by construction — neither a read still out nor one that failed can be
+ * reached, and the rule is asked over the options alone.
+ */
+function PickValueRow({
+  row,
+  block,
+  saving,
+  muted,
+  value,
+  purpose,
+  tinted,
+  onOpen,
+  onChoose,
+}: {
+  row: SttSetting
+  block: SttSettings
+  saving: boolean
+  muted: boolean
+  value: string
+  purpose?: string
+  /** The value is not this row's to claim as written here — the host's default, or a pick unmade. */
+  tinted: boolean
+  onOpen: (row: SttSetting) => void
+  onChoose: (row: SttSetting, id: string) => Promise<boolean>
+}) {
+  const { tap, busy } = usePickOne<ProviderChoice>({
+    read: { at: "ready", options: pickOptions(block, row) },
+    same: (option) => option.id === pickedFor(block, row),
+    // The row wears `busy` for as long as the host has the write, so the promise is passed on
+    // rather than dropped.
+    apply: async (option) => {
+      await onChoose(row, option.id)
+    },
+  })
+  return (
+    <ValueRow
+      title={row.label}
+      purpose={purpose}
+      value={value}
+      muted={tinted || muted}
+      busy={saving || busy}
+      disabled={muted}
+      onClick={() => tap(() => onOpen(row))}
+      data-setting={row.key}
+    />
+  )
+}
+
 /** The pick that decides who hears: its value says what Hermes resolved, or that it decides. */
 function ProviderRow({
   row,
@@ -407,31 +470,35 @@ function ProviderRow({
   saving,
   muted,
   onOpen,
+  onChoose,
 }: {
   row: SttSetting
   block: SttSettings
   saving: boolean
   muted: boolean
   onOpen: (row: SttSetting) => void
+  onChoose: (row: SttSetting, id: string) => Promise<boolean>
 }) {
   const line = providerLine(block)
   return (
-    <ValueRow
-      title={row.label}
-      purpose={line.note ?? row.purpose}
+    <PickValueRow
+      row={row}
+      block={block}
+      saving={saving}
+      muted={muted}
       value={line.value}
-      muted={line.muted || muted}
-      busy={saving}
-      disabled={muted}
-      onClick={() => onOpen(row)}
-      data-setting={row.key}
+      purpose={line.note ?? row.purpose}
+      tinted={line.muted}
+      onOpen={onOpen}
+      onChoose={onChoose}
     />
   )
 }
 
 /**
- * One of the host's rows, drawn by what it holds: a switch writes on its own and a value opens its
- * form, and a reset writes `null`, so the key leaves the file and Hermes's default takes over.
+ * One of the host's rows, drawn by what it holds: a switch writes on its own, a pick opens its
+ * sheet or applies the one option it holds, and a value opens its form — and a reset writes `null`,
+ * so the key leaves the file and Hermes's default takes over.
  */
 function HostRow({
   row,
@@ -439,6 +506,7 @@ function HostRow({
   saving,
   muted,
   onWrite,
+  onChoose,
   onOpen,
 }: {
   row: SttSetting
@@ -446,18 +514,35 @@ function HostRow({
   saving: boolean
   muted: boolean
   onWrite: (key: string, value: SttValue) => Promise<boolean>
+  onChoose: (row: SttSetting, id: string) => Promise<boolean>
   onOpen: (row: SttSetting) => void
 }) {
-  return row.control === "switch" ? (
-    <SwitchRow
-      id={`stt-${row.key}`}
-      title={row.label}
-      checked={rowOn(block, row.key)}
-      disabled={saving || muted}
-      onCheckedChange={(next) => void onWrite(row.key, next)}
-      data-setting={row.key}
-    />
-  ) : (
+  if (row.control === "switch")
+    return (
+      <SwitchRow
+        id={`stt-${row.key}`}
+        title={row.label}
+        checked={rowOn(block, row.key)}
+        disabled={saving || muted}
+        onCheckedChange={(next) => void onWrite(row.key, next)}
+        data-setting={row.key}
+      />
+    )
+  if (row.control === "pick")
+    return (
+      <PickValueRow
+        row={row}
+        block={block}
+        saving={saving}
+        muted={muted}
+        value={rowValue(block, row.key)}
+        purpose={row.purpose}
+        tinted={!explicitly(block, row.key)}
+        onOpen={onOpen}
+        onChoose={onChoose}
+      />
+    )
+  return (
     <ValueRow
       title={row.label}
       purpose={row.purpose}
@@ -481,6 +566,7 @@ function SettingRows({
   saving,
   muted,
   onWrite,
+  onChoose,
   open,
   setOpen,
 }: {
@@ -489,6 +575,7 @@ function SettingRows({
   saving: boolean
   muted: boolean
   onWrite: (key: string, value: SttValue) => Promise<boolean>
+  onChoose: (row: SttSetting, id: string) => Promise<boolean>
   open: SttSetting | undefined
   setOpen: (row: SttSetting | undefined) => void
 }) {
@@ -502,6 +589,7 @@ function SettingRows({
           saving={saving}
           muted={muted}
           onWrite={onWrite}
+          onChoose={onChoose}
           onOpen={setOpen}
         />
       ))}
@@ -510,6 +598,7 @@ function SettingRows({
         row={open}
         saving={saving}
         onWrite={onWrite}
+        onChoose={onChoose}
         onClose={() => setOpen(undefined)}
       />
     </>
@@ -547,18 +636,38 @@ function modelsFor(settings: SpeechSettings, block?: SttSettings): SpeechModel[]
   return modelOptions(settings.models, block.models.local ?? [], settings.model)
 }
 
+/**
+ * The write one pick makes, wherever its tap came from: a row of the surface, or the row that opens
+ * it applying the one option it holds. The surface shuts once the host has the key — a tap from a
+ * row shuts a surface that never opened — and the write's own answer is passed on, so a caller can
+ * wear `busy` for as long as the host has it.
+ */
+function writePick(
+  row: SttSetting,
+  id: string,
+  write: (key: string, value: SttValue) => Promise<boolean>,
+  close: () => void,
+): Promise<boolean> {
+  return write(row.key, id ? id : null).then((ok) => {
+    if (ok) close()
+    return ok
+  })
+}
+
 /** Whatever changes one setting: a pick over a closed set, or the form a value is typed in. */
 function SettingSurface({
   block,
   row,
   saving,
   onWrite,
+  onChoose,
   onClose,
 }: {
   block: SttSettings
   row: SttSetting | undefined
   saving: boolean
   onWrite: (key: string, value: SttValue) => Promise<boolean>
+  onChoose: (row: SttSetting, id: string) => Promise<boolean>
   onClose: () => void
 }) {
   const pick = row?.control === "pick"
@@ -575,11 +684,7 @@ function SettingSurface({
             searchable={false}
             selected={pickedFor(block, row)}
             options={pickOptions(block, row)}
-            onPick={(id) => {
-              void onWrite(row.key, id ? id : null).then((ok) => {
-                if (ok) onClose()
-              })
-            }}
+            onPick={(id) => void onChoose(row, id)}
           />
         )}
       </PickSurface>
@@ -724,6 +829,9 @@ function ProviderPage({
             saving={speech.saving}
             muted={speech.stale}
             onWrite={speech.writeStt}
+            onChoose={(row, id) =>
+              writePick(row, id, speech.writeStt, () => setOpen(undefined))
+            }
             open={open}
             setOpen={setOpen}
           />

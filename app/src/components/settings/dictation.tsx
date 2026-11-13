@@ -21,6 +21,7 @@ import {
   ValueRow,
   linkRowClass,
   useHeaderAction,
+  type PickOption,
 } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -61,6 +62,7 @@ import { botModelLine, levelName, namedLevel, type SpeechSettings } from "@/lib/
 import { READ_FAILED, getSpeech, useSpeech, type SpeechCheck } from "@/lib/host-speech"
 import { tell } from "@/lib/tell"
 import { useBotLabels } from "@/lib/use-bot-labels"
+import { usePickOne } from "@/lib/use-pick-one"
 import { cn } from "@/lib/utils"
 import { onReturn } from "@/lib/wake"
 
@@ -590,6 +592,45 @@ function BubbleCards() {
     }
   }, [refresh])
 
+  /**
+   * What the Bubble dictates with, written once: the sheet's own row and a tap that applies the
+   * device's only bot both come here, so the two leave the same state behind. A pick that names the
+   * bot already in force is nothing to write, and the sheet stays closed either way.
+   */
+  const applyBubbleBot = useCallback(
+    async (picked: Profile | undefined) => {
+      setPicking(false)
+      if (!picked || picked.id === bubbleBot?.id) return
+      await setBubbleProfile(picked.id)
+      await mirrorBubble(picked)
+      await refresh()
+    },
+    [bubbleBot?.id, refresh],
+  )
+
+  // Only the bots the selection can land on: a disabled bot is resolved away on the next read, so
+  // offering it would move the row and the phone to a bot nobody picked.
+  // The same order the Bots tab draws, and each row the bot's own picture with the model it answers
+  // with: a name alone said nothing about which bot a take would be heard by.
+  // `undefined` is this device still reading its bots, which the row and its sheet both say.
+  const botOptions: PickOption[] | undefined =
+    bots === undefined
+      ? undefined
+      : botsByLabel(bots, labels).map((profile) => ({
+          id: profile.id,
+          label: labelOf(labels, profile),
+          // What hears the take, not what answers a chat: this list decides the bot the Bubble
+          // dictates with, and its speech model is the one that matters here.
+          detail: heardLine(heard?.get(connectionKey(profile))),
+          leading: <Bot id={profile.botId} className="size-8 shrink-0" />,
+        }))
+
+  const { tap: tapBot, busy: writingBot } = usePickOne<PickOption>({
+    read: botOptions ? { at: "ready", options: botOptions } : { at: "reading" },
+    same: (option) => option.id === bubbleBot?.id,
+    apply: (option) => applyBubbleBot(bots?.find((profile) => profile.id === option.id)),
+  })
+
   // A browser has no service, no window over another app and no accessibility: the card is not drawn
   // at all rather than drawn dead.
   if (!bubbleAvailable()) return null
@@ -611,7 +652,8 @@ function BubbleCards() {
           title="Bot"
           purpose="Who hears the Bubble's takes"
           value={bubbleBot && labelOf(labels, bubbleBot)}
-          onClick={() => setPicking(true)}
+          busy={writingBot}
+          onClick={() => tapBot(() => setPicking(true))}
           data-setting="bubble-bot"
         />
       </Group>
@@ -620,28 +662,8 @@ function BubbleCards() {
           label="Bots"
           searchable={false}
           selected={bubbleBot?.id}
-          // Only the bots the selection can land on: a disabled bot is resolved away on the next
-          // read, so offering it would move the row and the phone to a bot nobody picked.
-          // The same order the Bots tab draws, and each row the bot's own picture with the model it
-          // answers with: a name alone said nothing about which bot a take would be heard by.
-          options={botsByLabel(bots ?? [], labels).map((profile) => ({
-            id: profile.id,
-            label: labelOf(labels, profile),
-            // What hears the take, not what answers a chat: this list decides the bot the Bubble
-            // dictates with, and its speech model is the one that matters here.
-            detail: heardLine(heard?.get(connectionKey(profile))),
-            leading: <Bot id={profile.botId} className="size-8 shrink-0" />,
-          }))}
-          onPick={(id) => {
-            setPicking(false)
-            const picked = (bots ?? []).find((profile) => profile.id === id)
-            if (!picked || picked.id === bubbleBot?.id) return
-            void (async () => {
-              await setBubbleProfile(picked.id)
-              await mirrorBubble(picked)
-              await refresh()
-            })()
-          }}
+          options={botOptions}
+          onPick={(id) => void applyBubbleBot((bots ?? []).find((profile) => profile.id === id))}
         />
       </PickSurface>
     </>

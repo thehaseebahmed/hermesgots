@@ -1172,3 +1172,70 @@ test("a host whose model read failed opens the cleanup pick with its sentence, a
     assert.deepEqual(writes(calls), [], "and nothing is written")
   })
 })
+
+/**
+ * A host declaring Mistral with one model, its file holding another: the row's lone option is a
+ * change, so a tap on it has something to apply rather than nothing to do.
+ */
+function oneModelProvider() {
+  const base = STT()
+  return STT({
+    values: { "stt.language": "es", "stt.mistral.model": "voxtral-legacy" },
+    providers: [...base.providers, { name: "mistral", key_set: true }],
+    choices: [...base.choices, { name: "mistral", key_set: true }],
+    models: { ...base.models, mistral: ["voxtral-mini-latest"] },
+  })
+}
+
+test("a provider holding one model applies it from its row, and draws no pick", async () => {
+  const stt = oneModelProvider()
+  const calls = await seed(
+    "provider-one-model",
+    ["dictation", "speech_model", "stt_settings"],
+    {},
+    {
+      speech: speech({ stt }),
+      nextStt: { ...stt, values: { ...stt.values, "stt.mistral.model": "voxtral-mini-latest" } },
+    },
+  )
+  await mount(editor("/settings/bots/bot-1/speech-to-text/providers/mistral"), async () => {
+    await until(async () => Boolean(row("stt.mistral.model")), "the provider's model row")
+    assert.equal(valueOf(row("stt.mistral.model")), "voxtral-legacy", "the model the file holds")
+    const sheets = watchSheets()
+    try {
+      await click(row("stt.mistral.model"))
+    } finally {
+      sheets.stop()
+    }
+    assert.deepEqual(sheets.drawn, [], "no pick was drawn, not even for a frame")
+    assert.deepEqual(
+      writes(calls)[0]?.body,
+      { key: "stt.mistral.model", value: "voxtral-mini-latest" },
+      "the one model the host declares, written as a row of its pick writes it",
+    )
+    await until(
+      async () => valueOf(row("stt.mistral.model")) === "voxtral-mini-latest",
+      "the row follows the write",
+    )
+  })
+})
+
+test("a provider holding two models opens the pick, with a row for each", async () => {
+  const calls = await seed(
+    "provider-two-models",
+    ["dictation", "speech_model", "stt_settings"],
+    {},
+    { speech: speech({ stt: STT() }) },
+  )
+  await mount(editor("/settings/bots/bot-1/speech-to-text/providers/groq"), async () => {
+    await until(async () => Boolean(row("stt.groq.model")), "the provider's model row")
+    await click(row("stt.groq.model"))
+    await until(async () => Boolean(find('[data-pick-list="Model"]')), "the pick")
+    assert.deepEqual(
+      findAll('[data-pick-list="Model"] li > button').map((one) => (one.textContent ?? "").trim()),
+      ["whisper-large-v3-turbo", "whisper-large-v3"],
+      "the models the host declares for it, since there is a choice to make",
+    )
+    assert.deepEqual(writes(calls), [], "and opening writes nothing")
+  })
+})

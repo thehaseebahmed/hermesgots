@@ -7,7 +7,7 @@
  * is refused. The bot is this device's own selection, so picking one moves the same pointer the rest
  * of the app reads.
  */
-import { bubbleAnswer, bridgeCalls } from "./android-bridge.ts"
+import { bubbleAnswer, bridgeCalls, bubbleConfigured } from "./android-bridge.ts"
 import assert from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter } from "react-router"
@@ -18,7 +18,7 @@ const { DictationSettings } = await import("@/components/settings/dictation")
 const { Screen } = await import("@/components/settings-chrome")
 const { connectionKey } = await import("@/lib/connection")
 const { db } = await import("@/lib/db")
-const { botProfile, click, find, missing, mount, seedSettings, text, until } =
+const { botProfile, click, find, findAll, missing, mount, seedSettings, text, until } =
   await import("./component-kit.tsx")
 const { speech } = await import("./dictation-page-kit.tsx")
 const { readSpeech } = await import("@/lib/speech")
@@ -338,4 +338,80 @@ test("picking a bot moves the Bubble's bot, not the chat selection, and mirrors 
   assert.equal(settings?.bubbleProfileId, "bot-2", "the Bubble's own bot moved")
   assert.equal(settings?.activeProfileId, "bot-1", "the chat selection did not")
   assert.ok(bridgeCalls.includes("Bubble.configure"), "and the phone was told who hears it")
+})
+
+/** Every sheet drawn from the moment it is armed, so a tap's own is caught even for one frame. */
+function watchSheets() {
+  const drawn: Element[] = []
+  const watcher = new MutationObserver((records) => {
+    for (const record of records)
+      for (const node of record.addedNodes)
+        if (
+          node instanceof Element &&
+          (node.matches("[data-popup-form]") || node.querySelector("[data-popup-form]"))
+        )
+          drawn.push(node)
+  })
+  watcher.observe(document.body, { childList: true, subtree: true })
+  return { drawn, stop: () => watcher.disconnect() }
+}
+
+test("a phone holding one bot draws no sheet from the Bot row, and writes nothing", async () => {
+  await seed()
+  // One bot left on the device, and it is the one the Bubble dictates with: the list the row would
+  // open holds exactly that bot, so the tap has nothing to choose and nothing to write.
+  // The list still reading has no leg here: it is a Dexie live query, which offers no seam to hold
+  // it back, so a tap cannot be caught before the first read lands.
+  await db.profiles.update("bot-2", { disabled: true })
+  await db.settings.update("settings", { bubbleProfileId: "bot-1" })
+  bubbleConfigured.length = 0
+  await mount(screen(), async () => {
+    await until(async () => said("bubble-bot").includes("Z bot"), "the bot in force")
+    const sheets = watchSheets()
+    try {
+      await click(row("bubble-bot"))
+    } finally {
+      sheets.stop()
+    }
+    assert.deepEqual(sheets.drawn, [], "no sheet was drawn, not even for a frame")
+    assert.equal(
+      (await db.settings.get("settings"))?.bubbleProfileId,
+      "bot-1",
+      "the Bubble's bot is where it was",
+    )
+    assert.deepEqual(bubbleConfigured, [], "and a tap that writes nothing tells the phone nothing")
+  })
+})
+
+test("a phone holding no bot opens the Bot sheet saying its list is empty", async () => {
+  await seed()
+  await db.profiles.update("bot-1", { disabled: true })
+  await db.profiles.update("bot-2", { disabled: true })
+  await mount(screen(), async () => {
+    await until(async () => Boolean(row("bubble-bot")), "the Bot row")
+    await click(row("bubble-bot"))
+    await until(async () => Boolean(find("[data-popup-form]")), "the sheet")
+    assert.match(text(), /Nothing to pick from\./, "the sheet says there is nothing to pick")
+    assert.equal(
+      text().includes("Nothing matches."),
+      false,
+      "not the word for a search that emptied a list of real bots",
+    )
+  })
+})
+
+test("a phone holding two bots still opens the sheet, and writes nothing until a row is tapped", async () => {
+  await seed()
+  bubbleConfigured.length = 0
+  await mount(screen(), async () => {
+    await until(async () => said("bubble-bot").includes("Z bot"), "the bot in force")
+    await click(row("bubble-bot"))
+    await until(async () => Boolean(find('[data-pick-list="Bots"]')), "the sheet's list")
+    assert.equal(
+      findAll('[data-pick-list="Bots"] li > button').length,
+      2,
+      "a row per bot, since there is a choice to make",
+    )
+    assert.deepEqual(bubbleConfigured, [], "and opening writes nothing")
+  })
 })

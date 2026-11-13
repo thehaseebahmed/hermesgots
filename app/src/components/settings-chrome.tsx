@@ -878,6 +878,11 @@ export type PickOption = {
 /**
  * The list a pick offers: searchable where there is much to search, a row per option with the chosen
  * one ticked. It is the same list whether it is pushed as a screen or shown in a card.
+ *
+ * The list is the surface's to hold, so `undefined` is a list still on its way and is drawn as the
+ * one sentence saying so. A settled list holding nothing says that in its own words, and *Nothing
+ * matches.* is kept for a search that emptied a list of real options — the reader is told which of
+ * the two they are looking at.
  */
 export function PickList({
   label,
@@ -887,13 +892,20 @@ export function PickList({
   searchable,
 }: {
   label: string
-  options: PickOption[]
+  /** The options the surface holds; `undefined` while its read is still out. */
+  options: PickOption[] | undefined
   selected?: string
   onPick: (id: string) => void
   /** Whether a search field sits on top; default is on once there are more than six. */
   searchable?: boolean
 }) {
   const [query, setQuery] = useState("")
+  if (!options)
+    return (
+      <p className="flex items-center gap-2 px-1 py-2 text-sm text-muted-foreground">
+        <Spinner className="size-4" /> Reading this list…
+      </p>
+    )
   const search = searchable ?? options.length > 6
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)
   const shown = options.filter((option) =>
@@ -930,7 +942,11 @@ export function PickList({
             />
           ))}
         </PickGroup>
-        {!shown.length && <p className="px-1 text-sm text-muted-foreground">Nothing matches.</p>}
+        {!shown.length && (
+          <p className="px-1 text-sm text-muted-foreground">
+            {options.length ? "Nothing matches." : "Nothing to pick from."}
+          </p>
+        )}
       </div>
     </div>
   )

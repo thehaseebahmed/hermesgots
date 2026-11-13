@@ -507,6 +507,45 @@ test("a pick offers no search over a list too short to need one", async () => {
   )
 })
 
+test("a list still reading says so, rather than drawing an empty one", async () => {
+  await mount(<PickList label="Fruit" options={undefined} onPick={() => {}} />, async () => {
+    assert.match(text(), /Reading this list…/, "the list says it is still out")
+    assert.equal(options("Fruit").length, 0, "and draws no rows it has not read")
+    assert.equal(
+      text().includes("Nothing matches."),
+      false,
+      "not the word a search that emptied a list of real options wears",
+    )
+  })
+})
+
+test("a settled list holding nothing says so in its own words", async () => {
+  await mount(<PickList label="Fruit" searchable={false} options={[]} onPick={() => {}} />, async () => {
+    assert.match(text(), /Nothing to pick from\./, "an empty list says it is empty")
+    assert.equal(
+      text().includes("Nothing matches."),
+      false,
+      "and keeps that word for a search that emptied one",
+    )
+  })
+})
+
+test("a search that empties a list of real options still says nothing matches", async () => {
+  await mount(
+    <PickList
+      label="Fruit"
+      options={FRUIT.map((name) => ({ id: name, label: name }))}
+      onPick={() => {}}
+    />,
+    async () => {
+      await typing(find('input[aria-label="Search fruit"]'), "zzz")
+      assert.equal(options("Fruit").length, 0, "no row matches")
+      assert.match(text(), /Nothing matches\./, "and the search's own sentence says so")
+      assert.equal(text().includes("Nothing to pick from."), false, "never the empty list's")
+    },
+  )
+})
+
 const pickShape = () => find("[data-popup-form]")?.getAttribute("data-popup-form")
 
 const aPick = (
