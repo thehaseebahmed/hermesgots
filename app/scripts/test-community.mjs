@@ -161,7 +161,7 @@ test("rows are split by the top five models and the rest", () => {
   assert.deepEqual(tokens[0].models, { a: 120, b: 100, c: 80, d: 60, e: 40 })
   assert.equal(tokens[0].others, 30)
   assert.equal(tokens[0].total, 430)
-  assert.equal(board.version, 3)
+  assert.equal(board.version, 4)
 })
 
 test("Theseus and Goal count as Auto", () => {
@@ -185,7 +185,7 @@ test("a cached board of an older shape is built again", async () => {
   const env = setup()
   env.store.data.set("board", { updatedAt: NOW, periods: {} })
   const board = await call(env, null, "GET", "board")
-  assert.equal(board.body.version, 3)
+  assert.equal(board.body.version, 4)
   assert.ok(Array.isArray(board.body.periods.today.topModels))
 })
 
@@ -287,4 +287,98 @@ test("fetchModelsDev reads the registry and refuses an error", async () => {
   } finally {
     globalThis.fetch = real
   }
+})
+
+// The catalogue, as the community function hands it to the rules: only these models exist.
+const LISTED = new Set(["claude-opus-5-5"])
+
+test("a report's unlisted models and custom providers are not stored", async () => {
+  const env = { ...setup(), catalog: async () => LISTED }
+  const host = await hostToken(env)
+  await call(env, user, "POST", "join")
+  const report = await call(env, host, "POST", "report", {
+    days: {
+      "2026-10-15": {
+        "claude-opus-5-5": { chat: counts(100) },
+        "totally-fake-model": { chat: counts(900) },
+      },
+    },
+    providers: {
+      "2026-10-15": {
+        anthropic: { "claude-opus-5-5": 200 },
+        "custom:acme": { "totally-fake-model": 1800 },
+        custom: { "totally-fake-model": 1800 },
+      },
+    },
+  })
+  assert.equal(report.status, 200)
+
+  const kept = env.registry.data.get("community/reports/u1/h1")
+  assert.deepEqual(Object.keys(kept.days["2026-10-15"]), ["claude-opus-5-5"])
+  assert.deepEqual(kept.providers, { "2026-10-15": { anthropic: { "claude-opus-5-5": 200 } } })
+
+  // The member record is folded from the same rules, so the standing counts only real models.
+  const member = env.store.data.get("users/octocat")
+  assert.deepEqual(Object.keys(member.days["2026-10-15"]), ["claude-opus-5-5"])
+  assert.deepEqual(member.providers, { "2026-10-15": { anthropic: { "claude-opus-5-5": 200 } } })
+  assert.deepEqual((await call(env, user, "GET", "me")).body.totals, { today: 200, week: 200, month: 200 })
+})
+
+test("a member stored before the rules serves no custom provider or unlisted model", async () => {
+  const env = { ...setup(), catalog: async () => LISTED }
+  // A record written when a custom endpoint was a provider and no model was checked.
+  env.store.data.set("users/octocat", {
+    login: "octocat",
+    days: {
+      "2026-10-15": {
+        "claude-opus-5-5": { chat: counts(100) },
+        "totally-fake-model": { chat: counts(900) },
+      },
+    },
+    providers: {
+      "2026-10-15": {
+        custom: { "totally-fake-model": 1800 },
+        anthropic: { "claude-opus-5-5": 200 },
+      },
+    },
+    updatedAt: NOW,
+  })
+  const board = await call(env, null, "GET", "board")
+  const today = board.body.periods.today
+  assert.deepEqual(today.models.map((row) => row.model), ["claude-opus-5-5"])
+  assert.deepEqual(today.providers.map((row) => row.provider), ["anthropic"])
+  assert.deepEqual(today.tokens, [{ login: "octocat", total: 200, models: { "claude-opus-5-5": 200 }, others: 0 }])
+})
+
+test("a model is counted only when the catalogue lists it", () => {
+  const models = {
+    "claude-opus-5-5": { chat: counts(5) },
+    // The catalogue spells it `claude-sonnet-4-5`; a host reports the dotted id.
+    "Claude-Sonnet-4.5": { chat: counts(9) },
+    "my-fake-model": { chat: counts(2) },
+  }
+  const listed = cleanDays({ "2026-10-15": models }, NOW, new Set(["claude-opus-5-5", "claude-sonnet-4-5"]))
+  assert.deepEqual(Object.keys(listed.days["2026-10-15"]), ["claude-opus-5-5", "claude-sonnet-4.5"])
+  // Without a catalogue nothing is filtered, which is what an unreachable models.dev means.
+  const unfiltered = cleanDays({ "2026-10-15": models }, NOW)
+  assert.deepEqual(Object.keys(unfiltered.days["2026-10-15"]), [
+    "claude-opus-5-5",
+    "claude-sonnet-4.5",
+    "my-fake-model",
+  ])
+
+  assert.deepEqual(
+    cleanProviders(
+      {
+        "2026-10-15": {
+          custom: { m: 5 },
+          "custom:acme": { n: 7 },
+          anthropic: { "claude-opus-5-5": 3, "totally-fake-model": 4 },
+        },
+      },
+      NOW,
+      LISTED,
+    ),
+    { "2026-10-15": { anthropic: { "claude-opus-5-5": 3 } } },
+  )
 })
