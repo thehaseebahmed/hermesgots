@@ -61,12 +61,18 @@ export function markIcons(): Promise<MarkIcons> {
 
 /**
  * The set as a row draws it: undefined until it lands, which is when every row that wants a mark
- * redraws. A row with a mark draws the frame in the meantime, and a row without one never asks.
+ * redraws and draws the frame in the meantime.
+ *
+ * `wanted` is the caller's own answer to whether it has a mark to draw at all: a row that draws the
+ * app's frame asks for nothing, which is what keeps the icons out of a start where no canvas wears
+ * one.
  */
-export function useMarkIcons(): MarkIcons | undefined {
+export function useMarkIcons(wanted = true): MarkIcons | undefined {
   const held = useSyncExternalStore(landed.subscribe, () => set)
   useEffect(() => {
-    if (!held) void markIcons()
-  }, [held])
+    // A chunk that never lands is no mark drawn: the frame stays, and the next row or picker that
+    // wants one asks again.
+    if (wanted && !held) markIcons().catch(() => undefined)
+  }, [wanted, held])
   return held
 }

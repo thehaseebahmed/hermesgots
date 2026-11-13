@@ -996,10 +996,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # until a user chooses one — a canvas nobody marked draws the app's own frame.
         if version < 71:
             canvas_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvases)")}
-            if "mark" not in canvas_columns:
-                conn.execute("ALTER TABLE canvases ADD COLUMN mark TEXT")
-            if "mark_tint" not in canvas_columns:
-                conn.execute("ALTER TABLE canvases ADD COLUMN mark_tint TEXT")
+            for column in ("mark", "mark_tint"):
+                if column not in canvas_columns:
+                    conn.execute(f"ALTER TABLE canvases ADD COLUMN {column} TEXT")
         # v63: the record's folded-away flag is the reader's "Archived" (canvases.py, #933). A store
         # written before the name carries the first one, and the state is the same state under it.
         if version < 63:

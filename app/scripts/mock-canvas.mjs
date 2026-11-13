@@ -17,7 +17,7 @@ const MARK_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 const MARK_CHARS = 40
 const MARK_TINTS = ["blue", "cyan", "green", "yellow", "coral", "pink", "purple"]
 const isMark = (mark) =>
-  mark.length <= MARK_CHARS && (MARK_NAME.test(mark) || !/[A-Za-z0-9\s]/.test(mark))
+  mark.length <= MARK_CHARS && (MARK_NAME.test(mark) || !/[\p{L}\p{N}\s]/u.test(mark))
 
 function titleOf(text) {
   const flat = String(text).trim().split(/\s+/).join(" ")

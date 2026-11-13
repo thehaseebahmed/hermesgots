@@ -226,7 +226,9 @@ function NameSheet({
  * its chat with it.
  *
  * The backup row is drawn only where the host advertises `canvas_vault` (`vaultable`): a plugin from
- * before it has no writer, and a switch that writes nothing is a promise the host can't keep.
+ * before it has no writer, and a switch that writes nothing is a promise the host can't keep. The
+ * mark row is drawn on the same rule (`markable`), since its picker writes a field an older record
+ * has no room for.
  *
  * Every control is disabled while one of the sheet's writes is out, so a second tap can't be lost:
  * two answers for one canvas would land in either order, and a switch that moves under a tap is no
@@ -237,6 +239,7 @@ export function CanvasOptions({
   onOpenChange,
   canvas,
   vaultable,
+  markable,
   onGrant,
   onUpdate,
   onDelete,
@@ -246,6 +249,8 @@ export function CanvasOptions({
   canvas: Canvas | undefined
   /** Whether this bot's host keeps a vault, which is what offers the backup switch. */
   vaultable: boolean
+  /** Whether this bot's host keeps a mark on the record, which is what offers the mark row. */
+  markable: boolean
   onGrant: (tool: string, allow: boolean) => Promise<boolean>
   /** Writes the canvas's own record; the host's answer is what the screens redraw from. */
   onUpdate: (changes: CanvasChanges) => Promise<void>
@@ -315,18 +320,20 @@ export function CanvasOptions({
               </button>
               {/* What its row in the sidebar draws: the mark is the record's, so the tap opens the
                   picker rather than choosing here (issue #1065). */}
-              <button
-                ref={markRow}
-                type="button"
-                data-canvas-mark-row
-                className={cn(linkRowClass, "disabled:opacity-60")}
-                disabled={!canvas || busy}
-                onClick={() => setMarking(true)}
-              >
-                <CanvasMark mark={canvas?.mark} tint={canvas?.markTint} />
-                <RowText title="Mark" subtitle="The icon or emoji its sidebar row shows." />
-                <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
-              </button>
+              {markable && (
+                <button
+                  ref={markRow}
+                  type="button"
+                  data-canvas-mark-row
+                  className={cn(linkRowClass, "disabled:opacity-60")}
+                  disabled={!canvas || busy}
+                  onClick={() => setMarking(true)}
+                >
+                  <CanvasMark mark={canvas?.mark} tint={canvas?.markTint} />
+                  <RowText title="Mark" subtitle="The icon or emoji its sidebar row shows." />
+                  <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
+                </button>
+              )}
             </Group>
 
             <Group>

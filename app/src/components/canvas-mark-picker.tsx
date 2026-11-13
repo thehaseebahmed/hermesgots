@@ -58,7 +58,7 @@ function Cell({
       disabled={disabled}
       onClick={onPick}
       className={cn(
-        "flex aspect-square items-center justify-center rounded-xl outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-50",
+        "flex aspect-square items-center justify-center rounded-xl transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-50",
         selected ? "bg-muted ring-1 ring-foreground/15" : "hover:bg-muted/60",
       )}
     >
@@ -126,24 +126,30 @@ export function CanvasMarkPicker({
   const [tab, setTab] = useState("icons")
   const [query, setQuery] = useState("")
   const [saving, setSaving] = useState(false)
-  const tint = readTint(canvas?.markTint)
+  // The colour the grid draws in and the next icon takes: the record's until a tap moves it, since a
+  // colour chosen before an icon is the colour that icon will wear.
+  const [tint, setTint] = useState<MarkTint | undefined>(readTint(canvas?.markTint))
   const chosen = canvas?.mark ?? ""
 
-  // Opened again, the picker stands on the tab the canvas's mark already lives in, so the answer it
-  // is about to change is the one on screen.
+  // Opened again, the picker stands on the tab the canvas's mark already lives in, with the colour it
+  // wears, so the answer it is about to change is the one on screen.
   useEffect(() => {
     if (!open) return
     setTab(readMark(canvas?.mark)?.kind === "emoji" ? "emojis" : "icons")
+    setTint(readTint(canvas?.markTint))
     setQuery("")
-  }, [open, canvas?.mark])
+  }, [open, canvas?.mark, canvas?.markTint])
 
-  const write = async (changes: CanvasChanges) => {
-    if (saving) return
+  /** Writes the change the picker means, and answers whether it landed. */
+  const save = async (changes: CanvasChanges) => {
+    if (saving) return false
     setSaving(true)
     try {
       await onUpdate(changes)
+      return true
     } catch {
-      // Said where it was read; the grids keep the record the host holds.
+      // Said where it was read, with the host's own words; the grids keep the record it holds.
+      return false
     } finally {
       setSaving(false)
     }
@@ -151,16 +157,13 @@ export function CanvasMarkPicker({
 
   /** A pick is the answer to what the picker was opened for, so the picker closes on the answer. */
   const pick = async (changes: CanvasChanges) => {
-    if (saving) return
-    setSaving(true)
-    try {
-      await onUpdate(changes)
-      onOpenChange(false)
-    } catch {
-      // A refusal keeps the picker up, with the host's words where they were said.
-    } finally {
-      setSaving(false)
-    }
+    if (await save(changes)) onOpenChange(false)
+  }
+
+  /** A colour is a change to the icon already chosen, so it is written the moment it is tapped. */
+  const chooseTint = (next: MarkTint | undefined) => {
+    setTint(next)
+    if (readMark(canvas?.mark)?.kind === "icon") void save({ mark_tint: next ?? "" })
   }
 
   const grid = useMemo(() => {
@@ -180,7 +183,14 @@ export function CanvasMarkPicker({
         <PopupHeader className="pb-0">
           <PopupTitle>Mark</PopupTitle>
         </PopupHeader>
-        <Tabs value={tab} onValueChange={setTab} className="min-h-0">
+        <Tabs
+          value={tab}
+          onValueChange={(next) => {
+            setTab(next)
+            setQuery("")
+          }}
+          className="min-h-0"
+        >
           <TabsList className="px-4">
             <TabsTrigger value="icons" className="flex-none">
               Icons
@@ -196,14 +206,7 @@ export function CanvasMarkPicker({
               label={tab === "icons" ? "Search icons" : "Search emojis"}
             />
             {tab === "icons" && (
-              <Tints
-                value={tint}
-                disabled={saving || !canvas}
-                onPick={(next) => {
-                  // A colour with no icon chosen yet is the colour the next pick takes.
-                  if (readMark(canvas?.mark)?.kind === "icon") void write({ mark_tint: next ?? "" })
-                }}
-              />
+              <Tints value={tint} disabled={saving || !canvas} onPick={chooseTint} />
             )}
           </div>
 

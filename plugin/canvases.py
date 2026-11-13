@@ -890,8 +890,8 @@ def _mark(raw: Any) -> str:
     """``raw`` as the mark a canvas's row draws, or a 400 naming why.
 
     A mark is one lucide icon's name — lower case and hyphenated, as lucide writes it — or one emoji,
-    which is any short run of characters holding no letter, digit or space. An empty string clears it,
-    which is how a canvas goes back to the app's own frame mark.
+    which is any short run of characters holding no letter or digit in any script, and no space. An
+    empty string clears it, which is how a canvas goes back to the app's own frame mark.
 
     The vocabulary is the app's rather than this store's: the icons it can draw move with its own
     dependency, so a list of names kept here would refuse a name after an upgrade. A record naming one
@@ -908,7 +908,7 @@ def _mark(raw: Any) -> str:
         )
     if MARK_NAME.match(raw):
         return raw
-    if any((character.isalnum() and character.isascii()) or character.isspace() for character in raw):
+    if any(character.isalnum() or character.isspace() for character in raw):
         raise CanvasError(
             "A canvas's mark is one icon's name, as lucide writes it, or one emoji — not a word."
         )

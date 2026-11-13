@@ -26,7 +26,7 @@ const ICON_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 export function readMark(raw: string | undefined): Mark | undefined {
   if (!raw) return undefined
   if (ICON_NAME.test(raw)) return { kind: "icon", name: raw }
-  if (/[A-Za-z0-9\s]/.test(raw)) return undefined
+  if (/[\p{L}\p{N}\s]/u.test(raw)) return undefined
   return { kind: "emoji", glyph: raw }
 }
 

@@ -616,6 +616,7 @@ class WriteTest(unittest.TestCase):
             ("heart red", "one emoji"),
             ("a" * 41, "one emoji"),
             ("grin 😀", "one emoji"),
+            ("漢", "one emoji"),
         ):
             with self.subTest(named=str(named)[:24]):
                 with self.assertRaises(canvases.CanvasError) as why:

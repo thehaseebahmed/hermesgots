@@ -28,6 +28,7 @@ test("a mark reads as the icon it names, or as the emoji it is", () => {
   // spelling it out in the row's 20px slot.
   assert.equal(readMark("Heart"), undefined)
   assert.equal(readMark("two words"), undefined)
+  assert.equal(readMark("漢"), undefined, "a letter in another script is a word too")
 })
 
 test("a tint is one of the palette's names, and nothing else is a colour", () => {
