@@ -32,9 +32,9 @@ export interface PresenceBot {
 export type PresenceAnswer = "plugin" | "unreachable"
 
 /**
- * How fresh the last time this device heard the host has to be to still count: while a launch's
- * first chat-list pass is still out, a bot heard from within this window reads as it did, and the
- * pass's own answer replaces that guess the moment it lands.
+ * How long this device's own last answer is trusted, while the chat-list pass that would replace it
+ * hasn't landed: a pass normally lands inside a minute, so this covers a cold start or a tab that was
+ * paused, and the pass's own answer decides the moment it does.
  */
 const ONLINE_MS = 25 * 60_000
 
@@ -70,10 +70,10 @@ export function presence(
  * of its own to say there (`Not seen yet` on a bot's Enabled row) says it, and no screen composes the
  * sentence itself.
  *
- * It reads what was heard and nothing else, so a bot with no host or hidden still has a sentence: the
- * two screens that draw it never draw it for one of those (Settings' row drops it, a bot's Enabled row
- * says `Hidden in Gots`), and `presence` is where "nothing this device can answer for" lives, for the
- * dot and the preview line that cannot say anything else.
+ * It reads what was heard and nothing else, so a bot with no host or hidden still has a sentence:
+ * Settings' row drops it for either, and a bot's Enabled row says `Hidden in Gots` for a hidden one.
+ * `presence` is where "nothing this device can answer for" lives, for the dot and the preview line
+ * that cannot say anything else.
  */
 export function presenceLine(
   bot: PresenceBot,

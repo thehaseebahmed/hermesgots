@@ -12,6 +12,8 @@ import { BotPicker } from "@/components/chat/bot-picker"
 import { ModelPicker } from "@/components/chat/model-picker"
 import { Popup, PopupContent } from "@/components/popup"
 import { db } from "@/lib/db"
+import { scoreFor, scoreMapOf } from "@/lib/model-match"
+import { RANKINGS } from "@/lib/rankings-data"
 
 import {
   botProfile,
@@ -159,12 +161,13 @@ test("the picker scores a model from the shipped payload", async () => {
     </Popup>,
     async () => {
       await until(async () => text().includes("claude-sonnet-4-6"), "the picker's model rows")
-      // One model's line, by the model it rows: the words a reader sees beside that model.
+      const scored = scoreFor(scoreMapOf(RANKINGS.items), "claude-sonnet-4-6")
+      assert.ok(scored !== undefined, "the shipped payload ranks claude-sonnet-4-6")
       const line = (model: string) =>
         wordsOf(findAll("li").find((row) => wordsOf(row).includes(model)) ?? null)
       assert.match(
         line("claude-sonnet-4-6"),
-        /BenchLM 45\b/,
+        new RegExp(`BenchLM ${Math.round(scored)}\\b`),
         "a model the shipped payload ranks draws its score",
       )
       assert.match(

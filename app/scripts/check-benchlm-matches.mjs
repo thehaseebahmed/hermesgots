@@ -71,7 +71,7 @@ async function main() {
   const catalogRes = await fetch(MODELS_DEV_URL)
   if (!catalogRes.ok) throw new Error(`models.dev returned ${catalogRes.status}`)
   const catalog = await catalogRes.json()
-  const rows = RANKINGS.items ?? []
+  const rows = RANKINGS.items
 
   const ids = chatIdsByProvider(catalog)
   const gaps = JSON.parse(readFileSync(GAPS_PATH, "utf8"))

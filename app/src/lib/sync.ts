@@ -1,7 +1,12 @@
 import { useSyncExternalStore } from "react"
 import { liveQuery } from "dexie"
 
-import { ACCOUNT_SYNC_MS, READ_TIMEOUT_MS, CHATS_MERGE_WAIT_MS } from "@/lib/freshness"
+import {
+  ACCOUNT_SYNC_MS,
+  CHATS_MERGE_WAIT_MS,
+  HEARD_EVERY_MS,
+  READ_TIMEOUT_MS,
+} from "@/lib/freshness"
 import { noteFailure, quietly } from "@/lib/report"
 import { createSignal } from "@/lib/store"
 import { connectionKey } from "@/lib/connection"
@@ -113,12 +118,6 @@ type ChatValue = Pick<Conversation, (typeof CHAT_FIELDS)[number]>
 
 /** Whether the bot's Gots plugin answered the last chat list sync. */
 export type ChatStore = "plugin" | "unreachable"
-
-/**
- * How often a pass rewrites when it last heard a bot. Every write repaints the list it just merged,
- * so a pass a minute after the last one leaves the timestamp where it is.
- */
-const HEARD_EVERY_MS = 60_000
 
 export interface SyncState {
   account: Account
@@ -869,9 +868,13 @@ async function syncChatLists(only?: Set<string>) {
   // What the rows say, written once the pass stops waiting rather than once per bot, and once more
   // for a bot that lands later: its rows are here, so it is no longer news that it was out.
   const stores = { ...state.chatStores }
+  // The bots this pass heard, written in one go when it reports rather than once each: the write is
+  // the pass's, so a live query over the bots re-runs once instead of once per row.
+  const heard: Profile[] = []
   let reported = false
   const report = async (late: boolean) => {
     reported = true
+    await markHeard(heard.splice(0))
     // Merged over what the state holds, since a later pass may have answered while this one waited.
     setState({ chatStores: { ...state.chatStores, ...stores } })
     // A merge that landed after the pass ended pulled rows in; they aren't ours to push back.
@@ -882,9 +885,7 @@ async function syncChatLists(only?: Set<string>) {
     for (const [i, profile] of members.entries()) {
       const answer = merged[i] ? "plugin" : "unreachable"
       if (stores[profile.id] !== answer) stores[profile.id] = answer
-      // The answer is presence now, and this is when this device got it: what a screen reads for
-      // the dot, and what it says when the bot is away.
-      if (merged[i]) await markHeard(profile)
+      if (merged[i]) heard.push(profile)
       await applyChatList(profile, merged[i])
     }
     if (reported) await report(true)
@@ -900,17 +901,22 @@ async function syncChatLists(only?: Set<string>) {
 }
 
 /**
- * Notes that this device heard the bot on the pass that just ran — the fact a screen's dot is, and
- * the time a bot that is away says. Its own write, kept to once a minute (a pass a few seconds
- * later would repaint every row it just merged), and never pushed: `seenAt` is this device's alone.
+ * Notes that this device heard the pass's bots — the time a bot that is away says, and what a
+ * screen's dot is read against. One write for the whole pass, and each bot kept to once a minute: a
+ * pass a few seconds later would repaint every row it just merged. Never pushed back: `seenAt` is
+ * this device's alone.
  */
-async function markHeard(profile: Profile) {
+async function markHeard(profiles: Profile[]) {
   const now = Date.now()
-  if (profile.seenAt && now - profile.seenAt < HEARD_EVERY_MS) return
-  await db.profiles.update(profile.id, { seenAt: now })
+  const due = profiles.filter((bot) => !bot.seenAt || now - bot.seenAt >= HEARD_EVERY_MS)
+  if (!due.length) return
+  await db.profiles
+    .where("id")
+    .anyOf(due.map((bot) => bot.id))
+    .modify({ seenAt: now })
 }
 
-/** Applies one bot's answer: its rows and tombstones. Its old list moves off on its own. */
+/** Applies one bot's answer: its rows and tombstones. */
 async function applyChatList(
   profile: Profile,
   result: Awaited<ReturnType<typeof mergePluginChats>>,

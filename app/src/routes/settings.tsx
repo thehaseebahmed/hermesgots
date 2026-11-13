@@ -396,7 +396,7 @@ function MenuScreen({
   )
 }
 
-/** A bot in the menu: its connectivity dot, then the bot itself, then when its host last checked in. */
+/** A bot in the menu: its connectivity dot, then the bot itself. */
 function BotRow({ profile, label }: { profile: Profile; label: string }) {
   const now = useNow()
   // The chat-list pass's answer for this bot, when one has run: the dot is that and nothing else.
@@ -425,7 +425,8 @@ function BotRow({ profile, label }: { profile: Profile; label: string }) {
 
 /** A bot's row subtext: a warning first, else when this device last heard its host answer. */
 function botStatus(profile: Profile, now: number, answer?: PresenceAnswer): string | undefined {
-  if (profile.disabled) return undefined
+  // The dot's own rule, so a row never says Online beside no dot.
+  if (!profile.hostId || profile.disabled) return undefined
   if (pluginOutdated(profile.pluginVersion)) return "Plugin out of date"
   return presenceLine(profile, now, answer)
 }

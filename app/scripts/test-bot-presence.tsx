@@ -1,7 +1,7 @@
 /**
  * A bot's presence is the pass that just ran: a host this device's chat-list pass heard answer reads
  * online, one it didn't reads away at the last time it did, and a bot neither has an answer for reads
- * nothing at all — a bot that was only ever quiet is never called offline (ADR 0090).
+ * nothing at all — a bot that was only ever quiet is never called offline.
  *
  * Three screens say it and they have to agree: the sidebar's row for the bot, Settings' row for it,
  * and the Enabled row on the bot's own page. Each is read here off the screen that draws it, with the
@@ -46,7 +46,7 @@ function held(name: string, id: string, seenAt?: number): Profile {
     id,
     name: "A bot",
     hostId: `host-${id}`,
-    // A bot whose clock hasn't moved is the untouched seed, which a pass leaves alone.
+    // Off the seed's clock, so the pass treats it as a bot this device linked.
     updatedAt: 2,
     ...(seenAt === undefined ? {} : { seenAt }),
   })
@@ -60,7 +60,6 @@ async function device(profile: Profile) {
   await db.conversations.clear()
 }
 
-/** A Settings screen, at the address it reads. */
 const settings = (entry: string) => (
   <MemoryRouter initialEntries={[entry]}>
     <Routes>

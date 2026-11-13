@@ -12,29 +12,10 @@ import {
   modelKey,
   modelKeys,
 } from "../netlify/lib/models-dev.ts"
+import { memoryStore } from "./netlify-store.mjs"
 
 const NOW = Date.UTC(2026, 9, 15, 12)
 const counts = (n) => ({ input: n, output: n, cacheWrite: 0, cacheRead: 0, calls: 1 })
-
-function memoryStore() {
-  const data = new Map()
-  return {
-    data,
-    async getWithMetadata(key) {
-      return data.has(key) ? { data: structuredClone(data.get(key)), etag: "e" } : null
-    },
-    async setJSON(key, value) {
-      data.set(key, structuredClone(value))
-      return { modified: true }
-    },
-    async delete(key) {
-      data.delete(key)
-    },
-    async list({ prefix }) {
-      return { blobs: [...data.keys()].filter((k) => k.startsWith(prefix)).map((key) => ({ key })) }
-    },
-  }
-}
 
 function setup() {
   const store = memoryStore()

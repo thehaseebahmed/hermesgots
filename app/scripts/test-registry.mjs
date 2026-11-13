@@ -1,14 +1,14 @@
 import assert from "node:assert/strict"
-import { createHash } from "node:crypto"
 import test from "node:test"
 
-import { handleRegistry } from "../netlify/lib/registry.ts"
+import { handleRegistry, sha256 } from "../netlify/lib/registry.ts"
+import { memoryStore } from "./netlify-store.mjs"
 
 const NOW = Date.UTC(2026, 10, 13, 12)
 const USER_ID = "u1"
 const TOKEN = "mh_registry_test"
-/** What the plugin's token hashes to: the one way a host caller is known. */
-const TOKEN_HASH = createHash("sha256").update(TOKEN).digest("hex")
+/** What the plugin's token hashes to, by the rule the handler reads it with. */
+const TOKEN_HASH = await sha256(TOKEN)
 const HOST_ID = "3f1c2a4e-5b6d-4e7f-8a9b-0c1d2e3f4a5b"
 const OTHER_HOST_ID = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
 const KEY_ID = "0123456789abcdef"
@@ -19,26 +19,6 @@ const INBOX = { keyId: KEY_ID, publicKey: "-----BEGIN PUBLIC KEY-----\nnot read 
 
 const user = { kind: "user", userId: USER_ID }
 const host = { kind: "host", token: TOKEN }
-
-function memoryStore() {
-  const data = new Map()
-  return {
-    data,
-    async getWithMetadata(key) {
-      return data.has(key) ? { data: structuredClone(data.get(key)), etag: "e" } : null
-    },
-    async setJSON(key, value) {
-      data.set(key, structuredClone(value))
-      return { modified: true }
-    },
-    async delete(key) {
-      data.delete(key)
-    },
-    async list({ prefix }) {
-      return { blobs: [...data.keys()].filter((k) => k.startsWith(prefix)).map((key) => ({ key })) }
-    },
-  }
-}
 
 /** A store holding this site's one linked host: the token the plugin was handed, and its record. */
 function setup() {

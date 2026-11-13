@@ -7,9 +7,9 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { RETIRED, SPACES, STORES, inventory, parseArgs, run } from "./inventory.mjs"
+import { RETIRED, SPACES, STORES, inventory, listingOf, parseArgs, run, sortStore } from "./inventory.mjs"
 
-/** The bytes one stored blob costs, as `--bytes` measures them. */
+/** The bytes one stored blob costs, as the inventory measures them. */
 const bodyOf = (key) => `{"key":${JSON.stringify(key)}}`
 
 /** A store as the script reads it, over a Map: the keys under a prefix, one blob's bytes, a delete. */
@@ -36,7 +36,6 @@ function storesFrom(listings = {}) {
   return Object.fromEntries(STORES.map((name) => [name, memoryStore(listings[name] ?? [])]))
 }
 
-/** The command as an operator runs it: the options parsed, then acted on. */
 const cli = (argv, stores, out = () => {}) => run(parseArgs(argv), stores, out)
 
 /** A listing with one surviving key space, one invented one and one retired one. */
@@ -90,7 +89,55 @@ test("a listing sorts into the key spaces that survive, with a count and its byt
   assert.equal(space("community/owners/<login>").count, 0)
 })
 
-test("nothing is measured unless the listing was, so a count costs no read", () => {
+test("the whole listing is measured by default, so a count comes with its bytes", async () => {
+  const stores = storesFrom({ "gots-registry": REGISTRY })
+  const lines = []
+  assert.equal(await cli([], stores, (line) => lines.push(line)), 0)
+  assert.ok(
+    lines.includes(`gots-registry: 6 keys, ${REGISTRY_BYTES} bytes`),
+    `no measured store line in:\n${lines.join("\n")}`,
+  )
+})
+
+test("--no-bytes lists the keys and reads no body", async () => {
+  const stores = storesFrom({ "gots-registry": REGISTRY })
+  let reads = 0
+  stores["gots-registry"].bytes = async () => {
+    reads += 1
+    return 0
+  }
+  const lines = []
+  assert.equal(await cli(["--no-bytes"], stores, (line) => lines.push(line)), 0)
+  assert.equal(reads, 0, "the cheap run downloads nothing")
+  assert.ok(lines.includes("gots-registry: 6 keys"), lines.join("\n"))
+})
+
+test("the listing reads every blob a few at a time, and one it did not read is unmeasured", async () => {
+  const keys = Array.from({ length: 20 }, (_, index) => `users/u1/bots/b${index}`)
+  let inFlight = 0
+  let most = 0
+  const handle = {
+    async list() {
+      return [...keys]
+    },
+    async bytes(key) {
+      inFlight += 1
+      most = Math.max(most, inFlight)
+      await new Promise((resolve) => setImmediate(resolve))
+      inFlight -= 1
+      // The last one went between the listing and the read.
+      return key === keys.at(-1) ? null : 26
+    },
+  }
+  const entries = await listingOf(handle, true)
+
+  assert.deepEqual(entries.map((entry) => entry.key), keys, "every key is in the listing, in order")
+  assert.equal(most, 8, "eight reads at a time, not one after another")
+  assert.equal(entries.at(-1).bytes, null, "a body that was not read is not zero bytes")
+  assert.equal(sortStore("gots-registry", entries).bytes, null, "so the store reads unmeasured")
+})
+
+test("a listing handed without bytes reads unmeasured, not empty", () => {
   const store = registryReport()
   assert.equal(store.bytes, null)
   for (const space of store.known) assert.equal(space.bytes, null)

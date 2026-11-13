@@ -103,7 +103,6 @@ test("the file it writes is the one overallScoreOf scores from", async () => {
     rmSync(dir, { recursive: true, force: true })
   }
 
-  // The committed payload, and the module the picker's scoring path reads it from.
   const committed = await import(pathToFileURL(DATA).href)
   assert.ok(
     Array.isArray(committed.RANKINGS.items) && committed.RANKINGS.items.length > 0,
@@ -114,10 +113,14 @@ test("the file it writes is the one overallScoreOf scores from", async () => {
     moduleText(committed.RANKINGS),
     "the committed file is exactly what the script writes for its own payload",
   )
-  const source = readFileSync(path.join(here, "../src/lib/rankings.ts"), "utf8")
-  assert.match(
-    source,
-    /^import \{ RANKINGS \} from "@\/lib\/rankings-data"$/m,
-    "and rankings.ts scores from that module",
+  // The module the picker scores through, over a row the committed payload really carries.
+  const { overallScoreOf } = await import(
+    pathToFileURL(path.join(here, "../src/lib/rankings.ts")).href
+  )
+  const [ranked] = committed.RANKINGS.items
+  assert.equal(
+    overallScoreOf({ model: ranked.modelKey }),
+    ranked.score,
+    "and overallScoreOf scores the payload's own row",
   )
 })

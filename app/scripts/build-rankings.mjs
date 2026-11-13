@@ -22,6 +22,12 @@ export const PAGE_SIZE = 100
 /** The module the app imports: a TS file, since the tsconfigs resolve no JSON. */
 export const DATA = fileURLToPath(new URL("../src/lib/rankings-data.ts", import.meta.url))
 
+/** The fields of a row the app reads: the ids a score is found by, and the score itself. */
+const ROW_FIELDS = ["modelKey", "slug", "name", "score"]
+
+/** The envelope fields the app reads; the rest of BenchLM's answer describes a fetch, not a file. */
+const ENVELOPE_FIELDS = ["dataAsOf"]
+
 /** The module's opening, which says where the file comes from so a reader never edits it by hand. */
 const HEADER = `/**
  * BenchLM's overall rankings, as this build ships them: the rows the model picker scores from.
@@ -45,7 +51,6 @@ export function isRankingsPayload(payload) {
   return Array.isArray(items) && items.every((item) => typeof item === "object" && item !== null)
 }
 
-/** What a refused payload says: one sentence, naming what was wrong. */
 function refusal(payload) {
   return new Error(
     `BenchLM answered no rankings: expected an object carrying an items array of rows, got ` +
@@ -87,20 +92,28 @@ export async function fetchAllRankings({ key, fetchImpl = fetch }) {
 }
 
 /** One row, as the module draws it: a line of its own, so a refresh's diff is the models that moved. */
-const row = (item) => `    ${JSON.stringify(item)},`
+const row = (item) => {
+  const kept = Object.fromEntries(
+    ROW_FIELDS.filter((name) => item[name] !== undefined).map((name) => [name, item[name]]),
+  )
+  return `    ${JSON.stringify(kept)},`
+}
 
-/** A key as TypeScript writes it: bare where it can be, quoted where it cannot. */
-const key = (name) => (/^[A-Za-z_$][\w$]*$/.test(name) ? name : JSON.stringify(name))
+/** A field as TypeScript writes it: bare where it can be, quoted where it cannot. */
+const fieldName = (name) => (/^[A-Za-z_$][\w$]*$/.test(name) ? name : JSON.stringify(name))
 
 /**
  * The module's text: the payload as a typed constant, with the rows one to a line. `items` is
  * written last whatever order the surface carries it in, so the file reads as an envelope and then
- * its models.
+ * its models, and only the fields the app reads are written: the rest of BenchLM's answer describes
+ * a fetch — a page limit and a next offset, a methodology, the surface's own name — not the file
+ * this becomes.
  */
 export function moduleText(payload) {
   if (!isRankingsPayload(payload)) throw refusal(payload)
-  const fields = Object.entries(payload).filter(([name]) => name !== "items")
-  const envelope = fields.map(([name, value]) => `  ${key(name)}: ${JSON.stringify(value)},`)
+  const envelope = Object.entries(payload)
+    .filter(([name]) => ENVELOPE_FIELDS.includes(name))
+    .map(([name, value]) => `  ${fieldName(name)}: ${JSON.stringify(value)},`)
   return `${HEADER}
 /** One row of BenchLM's overall surface, as the picker reads it. */
 export interface RankingRow {
@@ -110,8 +123,6 @@ export interface RankingRow {
   name?: string
   /** The overall score the picker draws and sorts by. */
   score?: number
-  /** Whatever else the surface says of a row; nothing in the app reads it. */
-  [field: string]: unknown
 }
 
 /** The overall surface as this build ships it. */
@@ -120,8 +131,6 @@ export interface RankingsData {
   dataAsOf?: string
   /** The ranked models. */
   items: RankingRow[]
-  /** Whatever else the envelope carries; nothing in the app reads it. */
-  [field: string]: unknown
 }
 
 export const RANKINGS: RankingsData = {

@@ -1,12 +1,11 @@
 /**
- * A bot's presence, as one rule and one sentence: the three answers today's screens read, and the
- * answer the chat lists' pass will hand it in place of the stored check-in.
+ * A bot's presence, as one rule and one sentence: the three answers the screens draw, and the one
+ * the chat lists' own pass hands it for the bot.
  *
- * A bot with a check-in inside the plugin's 25-minute window is online; one heard outside it is away,
- * and says when it was last heard; one with no host, hidden or never heard from is unknown, which is
- * not the same as away. With no answer passed — which is every screen today — the check-in decides,
- * so these are the three answers the conversation list, Settings' bot rows and a bot's Enabled row
- * read now. With an answer, the answer decides, whatever the stored check-in says.
+ * A bot this device heard inside the 25-minute window is online; one heard outside it is away, and
+ * says when it was last heard; one with no host, hidden or never heard from is unknown, which is not
+ * the same as away. With no answer passed the window decides, which is where a launch stands before
+ * its first pass lands; with an answer, the answer decides, whatever the window says.
  */
 
 import assert from "node:assert/strict"
@@ -17,10 +16,10 @@ import { presence, presenceLine } from "../src/lib/presence.ts"
 
 const NOW = 1_700_000_000_000
 const MINUTE = 60_000
-/** The plugin checks in every 10 minutes; two missed check-ins and a margin is the window. */
+/** This device's own last answer is trusted this long, and a pass normally lands inside a minute. */
 const WINDOW = 25 * MINUTE
 
-/** A bot that checked in five minutes ago, unless the case says otherwise. */
+/** A bot this device heard five minutes ago, unless the case says otherwise. */
 const bot = (fields = {}) => ({ hostId: "host-1", seenAt: NOW - 5 * MINUTE, ...fields })
 
 test("a bot heard inside the window is online and says so", () => {
@@ -61,11 +60,11 @@ test("the sentence reads only what was heard, so a hidden bot still says when", 
 
 test("the pass's answer decides where there is one", () => {
   const stale = bot({ seenAt: NOW - 90 * MINUTE })
-  assert.equal(presence(stale, NOW, "plugin"), true, "answered, though the check-in is old")
+  assert.equal(presence(stale, NOW, "plugin"), true, "answered, though this device heard it long ago")
   assert.equal(presenceLine(stale, NOW, "plugin"), "Online")
 
   const fresh = bot({ seenAt: NOW - MINUTE })
-  assert.equal(presence(fresh, NOW, "unreachable"), false, "no answer, though the check-in is new")
+  assert.equal(presence(fresh, NOW, "unreachable"), false, "no answer, though it was heard a minute ago")
   assert.equal(presenceLine(fresh, NOW, "unreachable"), `Last seen ${formatRelative(fresh.seenAt, NOW)}`)
 })
 
@@ -74,7 +73,7 @@ test("an answer changes nothing about a bot this device can't place", () => {
   assert.equal(presence(bot({ hostId: undefined }), NOW, "unreachable"), undefined, "still no host")
 })
 
-test("an answer with no check-in says how the bot is but not when it was heard", () => {
+test("an answer with nothing heard before says how the bot is but not when it was heard", () => {
   const unknown = bot({ seenAt: undefined })
   assert.equal(presence(unknown, NOW, "unreachable"), false)
   assert.equal(presenceLine(unknown, NOW, "unreachable"), undefined, "there is no when to say")

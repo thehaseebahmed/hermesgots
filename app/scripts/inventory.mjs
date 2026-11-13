@@ -11,7 +11,7 @@
  * needs no deploy. The listing, the sorting and the sweep are pure over the handle they are given,
  * which is what `scripts/test-inventory.mjs` drives over a Map.
  *
- *   NETLIFY_SITE_ID=... NETLIFY_AUTH_TOKEN=... pnpm inventory [--store <name>] [--bytes]
+ *   NETLIFY_SITE_ID=... NETLIFY_AUTH_TOKEN=... pnpm inventory [--store <name>] [--no-bytes]
  *   ... pnpm inventory --sweep <store>/<prefix> [--dry-run]
  *   ... pnpm inventory --expect-empty
  */
@@ -59,16 +59,18 @@ export const RETIRED = {
   "gots-rankings": ["overall"],
 }
 
-const USAGE = `inventory [--store <name>] [--bytes] [--expect-empty]
+/** How many blob reads a measured listing has in flight at once: a body is a whole download. */
+const READ_BATCH = 8
+
+const USAGE = `inventory [--store <name>] [--no-bytes] [--expect-empty]
           inventory --sweep <store>/<prefix> [--dry-run]
 
   --store <name>         read only this store (${STORES.join(", ")})
-  --bytes                measure every blob, one read each, and total it per space
+  --no-bytes             count the keys and read no blob
   --sweep <store>/<prefix>  delete every key under the prefix, printing each one
   --dry-run              print what a sweep would delete and delete nothing
   --expect-empty         fail while any of the four retired key spaces holds a key`
 
-/** An option or an environment the script refuses to run without. */
 export class UsageError extends Error {}
 
 const PLACEHOLDER = /^<\w+>$/
@@ -84,7 +86,6 @@ function segmentsOf(key) {
   return segments.includes("") ? null : segments
 }
 
-/** Whether a key answers to a space's pattern. */
 export function inSpace(space, key) {
   const pattern = space.split("/")
   const segments = segmentsOf(key)
@@ -183,7 +184,6 @@ export function inventory(listings) {
 const count = (number, noun) => `${number} ${noun}${number === 1 ? "" : "s"}`
 const measured = (bytes) => (bytes === null ? "" : `, ${bytes} bytes`)
 
-/** The report as the lines an operator reads. */
 export function render(report) {
   const lines = []
   for (const store of report.stores) {
@@ -230,7 +230,7 @@ function sweepNamed(value) {
 export function parseArgs(argv) {
   const args = {
     store: null,
-    bytes: false,
+    bytes: true,
     sweep: null,
     dryRun: false,
     expectEmpty: false,
@@ -248,7 +248,7 @@ export function parseArgs(argv) {
     }
     if (option === "--store") args.store = storeNamed(value())
     else if (option === "--sweep") args.sweep = sweepNamed(value())
-    else if (option === "--bytes") args.bytes = true
+    else if (option === "--no-bytes") args.bytes = false
     else if (option === "--dry-run") args.dryRun = true
     else if (option === "--expect-empty") args.expectEmpty = true
     else if (option === "--help" || option === "-h") args.help = true
@@ -278,61 +278,63 @@ export async function sweep(handle, prefix, { dryRun = false, out }) {
   return keys
 }
 
-/** One store's keys, each measured only where `--bytes` asked for it — a read per blob otherwise. */
-async function listingOf(handle, measure) {
-  const entries = []
-  for (const key of await handle.list("")) {
-    entries.push(measure ? { key, bytes: await handle.bytes(key) } : { key })
+/**
+ * One store's keys, each measured unless `--no-bytes` asked for the count alone. A body is a whole
+ * download, so the reads run a batch at a time rather than one after another; a body this never got
+ * — a key listed and gone by the read — is answered `null`, so the store reads unmeasured rather
+ * than empty.
+ */
+export async function listingOf(handle, measure) {
+  const keys = await handle.list("")
+  if (!measure) return keys.map((key) => ({ key }))
+  const entries = Array(keys.length)
+  let next = 0
+  const worker = async () => {
+    while (next < keys.length) {
+      const index = next
+      next += 1
+      entries[index] = { key: keys[index], bytes: await handle.bytes(keys[index]) }
+    }
   }
+  await Promise.all(Array.from({ length: Math.min(READ_BATCH, keys.length) }, worker))
   return entries
 }
 
 /**
  * The whole run: the sweep first when asked, then the listing of every store in scope, then
  * `--expect-empty`'s verdict. Answers the exit code — 0 for a report, 1 for a retired space that
- * still holds a key, 2 for a refusal.
+ * still holds a key — and throws `UsageError` for what is not a report at all.
  */
 export async function run(args, handles, out = () => {}) {
-  if (args.help) {
-    out(USAGE)
-    return 0
-  }
   // `--expect-empty` speaks for all four retired spaces, so it reads every store whatever is asked.
   const scope = args.expectEmpty ? STORES : args.store ? [args.store] : STORES
-  try {
-    for (const name of new Set([...scope, ...(args.sweep ? [args.sweep.store] : [])])) {
-      if (!handles[name]) throw new UsageError(`no handle for ${name}`)
-    }
-
-    if (args.sweep) {
-      const keys = await sweep(handles[args.sweep.store], args.sweep.prefix, {
-        dryRun: args.dryRun,
-        out,
-      })
-      const swept = `${count(keys.length, "key")} under ${args.sweep.store}/${args.sweep.prefix}`
-      out(`${args.dryRun ? "would sweep" : "swept"} ${swept}`)
-    }
-
-    const listings = {}
-    for (const name of scope) listings[name] = await listingOf(handles[name], args.bytes)
-    const report = inventory(listings)
-    for (const line of render(report)) out(line)
-
-    if (!args.expectEmpty) return 0
-    if (report.retired.length === 0) {
-      out("every retired key space is empty")
-      return 0
-    }
-    const left = report.retired.reduce((total, space) => total + space.count, 0)
-    const spaces = count(report.retired.length, "retired key space")
-    out(`${count(left, "key")} still in ${spaces}: sweep before this ships`)
-    return 1
-  } catch (err) {
-    if (!(err instanceof UsageError)) throw err
-    out(`inventory: ${err.message}`)
-    out(USAGE)
-    return 2
+  for (const name of new Set([...scope, ...(args.sweep ? [args.sweep.store] : [])])) {
+    if (!handles[name]) throw new UsageError(`no handle for ${name}`)
   }
+
+  if (args.sweep) {
+    const keys = await sweep(handles[args.sweep.store], args.sweep.prefix, {
+      dryRun: args.dryRun,
+      out,
+    })
+    const swept = `${count(keys.length, "key")} under ${args.sweep.store}/${args.sweep.prefix}`
+    out(`${args.dryRun ? "would sweep" : "swept"} ${swept}`)
+  }
+
+  const listings = {}
+  for (const name of scope) listings[name] = await listingOf(handles[name], args.bytes)
+  const report = inventory(listings)
+  for (const line of render(report)) out(line)
+
+  if (!args.expectEmpty) return 0
+  if (report.retired.length === 0) {
+    out("every retired key space is empty")
+    return 0
+  }
+  const left = report.retired.reduce((total, space) => total + space.count, 0)
+  const spaces = count(report.retired.length, "retired key space")
+  out(`${count(left, "key")} still in ${spaces}: sweep before this ships`)
+  return 1
 }
 
 /**
@@ -361,7 +363,8 @@ export async function netlifyHandles(env) {
           },
           async bytes(key) {
             const body = await store.get(key, { type: "arrayBuffer" })
-            return body?.byteLength ?? 0
+            // A blob that went between the listing and the read is unmeasured, never empty.
+            return body ? body.byteLength : null
           },
           async delete(key) {
             await store.delete(key)
@@ -372,32 +375,28 @@ export async function netlifyHandles(env) {
   )
 }
 
+/**
+ * The usage text, and the exit code it leaves: 0 where it was asked for, 2 where it says what was
+ * wrong with a run. The one place either is written.
+ */
+function usage(refusal) {
+  if (refusal) console.error(`inventory: ${refusal}`)
+  ;(refusal ? console.error : console.log)(USAGE)
+  return refusal ? 2 : 0
+}
+
 async function main() {
-  const argv = process.argv.slice(2)
-  let args
   try {
-    args = parseArgs(argv)
+    const args = parseArgs(process.argv.slice(2))
+    if (args.help) {
+      process.exitCode = usage()
+      return
+    }
+    process.exitCode = await run(args, await netlifyHandles(process.env), console.log)
   } catch (err) {
     if (!(err instanceof UsageError)) throw err
-    console.error(`inventory: ${err.message}`)
-    console.error(USAGE)
-    process.exitCode = 2
-    return
+    process.exitCode = usage(err.message)
   }
-  if (args.help) {
-    console.log(USAGE)
-    return
-  }
-  let handles
-  try {
-    handles = await netlifyHandles(process.env)
-  } catch (err) {
-    if (!(err instanceof UsageError)) throw err
-    console.error(`inventory: ${err.message}`)
-    process.exitCode = 2
-    return
-  }
-  process.exitCode = await run(args, handles, console.log)
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

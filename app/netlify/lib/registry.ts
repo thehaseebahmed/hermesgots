@@ -140,22 +140,33 @@ async function read<T>(store: RegistryStore, key: string) {
   return entry ? { data: entry.data as T, etag: entry.etag } : null
 }
 
-/** Read, change and write back on the etag read, retrying when someone wrote in between. */
+/** What an `update` did: the record as it now stands, and whether this call wrote it. */
+interface Update<T> {
+  value: T | null
+  wrote: boolean
+}
+
+/**
+ * Read, change and write back on the etag read, retrying when someone wrote in between. It answers
+ * the record as it now stands and whether this call wrote it, so a route that decided to leave the
+ * record alone — a throttle whose gap hasn't passed — reads that from its own answer rather than
+ * smuggling a flag out of the change.
+ */
 async function update<T>(
   store: RegistryStore,
   key: string,
   change: (current: T | null) => T | null,
-): Promise<T | null> {
+): Promise<Update<T>> {
   for (let attempt = 0; attempt < 4; attempt++) {
     const current = await read<T>(store, key)
     const next = change(current?.data ?? null)
-    if (next === null) return current?.data ?? null
+    if (next === null) return { value: current?.data ?? null, wrote: false }
     const result = await store.setJSON(
       key,
       next,
       current?.etag ? { onlyIfMatch: current.etag } : { onlyIfNew: true },
     )
-    if (result.modified) return next
+    if (result.modified) return { value: next, wrote: true }
   }
   throw new Error("Changed too often")
 }
@@ -335,17 +346,14 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
         stage: text(input?.stage, 32),
       }
       // The gap rides the host's own record, which this route already reads to learn whose push it
-      // is: one read-modify-write on its etag, instead of a key of its own beside it.
-      let refused = false
-      await update<Host>(store, `users/${userId}/hosts/${hostId}`, (current) => {
+      // is: one read-modify-write on its etag, instead of a key of its own beside it. A record that
+      // is there and unmodified is the gap refusing the push.
+      const host = await update<Host>(store, `users/${userId}/hosts/${hostId}`, (current) => {
         if (!current) return null
-        if (current.pushedAt !== undefined && now - current.pushedAt < PUSH_GAP_MS) {
-          refused = true
-          return null
-        }
+        if (current.pushedAt !== undefined && now - current.pushedAt < PUSH_GAP_MS) return null
         return { ...current, pushedAt: now }
       })
-      if (refused) return error("Slow down", 429)
+      if (host.value && !host.wrote) return error("Slow down", 429)
       let sent = 0
       let failed = 0
       let skipped = 0
@@ -431,7 +439,7 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
       return error("Invalid adopts", 400)
     }
     let missing = false
-    const record = await update<BotRecord>(store, `users/${userId}/bots/${id}`, (current) => {
+    const { value: record } = await update<BotRecord>(store, `users/${userId}/bots/${id}`, (current) => {
       if (!current) {
         missing = true
         return null
@@ -490,18 +498,14 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
     if (!ID.test(id)) return error("Invalid device id", 400)
     if (!ctx.fcm) return error("Push isn't set up on this site", 503)
     // The gap rides this device's own record, so one device's test never throttles another's.
-    let refused = false
     const device = await update<Device>(store, `users/${userId}/devices/${id}`, (current) => {
       if (!current) return null
-      if (current.testedAt !== undefined && now - current.testedAt < TEST_GAP_MS) {
-        refused = true
-        return null
-      }
+      if (current.testedAt !== undefined && now - current.testedAt < TEST_GAP_MS) return null
       return { ...current, testedAt: now }
     })
-    if (refused) return error("Slow down", 429)
-    if (!device) return error("This device isn't registered for push", 404)
-    const reason = await ctx.fcm.test(device.token)
+    if (device.value && !device.wrote) return error("Slow down", 429)
+    if (!device.value) return error("This device isn't registered for push", 404)
+    const reason = await ctx.fcm.test(device.value.token)
     return reason ? error(reason, 502) : json({ ok: true })
   }
 

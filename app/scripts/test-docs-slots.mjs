@@ -8,26 +8,9 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { handleDocs } from "../netlify/lib/docs.ts"
+import { memoryStore } from "./netlify-store.mjs"
 
 const USER = "11111111-2222-4333-8444-555555555555"
-
-/** The sync function's store, in memory: one document per key, answered over a fixed etag. */
-function memoryStore() {
-  const data = new Map()
-  return {
-    data,
-    async getWithMetadata(key) {
-      return data.has(key) ? { data: structuredClone(data.get(key)), etag: "e" } : null
-    },
-    async setJSON(key, value) {
-      data.set(key, structuredClone(value))
-      return { modified: true, etag: "e" }
-    },
-    async delete(key) {
-      data.delete(key)
-    },
-  }
-}
 
 async function get(store, doc) {
   const req = new Request(`https://x.test/.netlify/functions/sync?doc=${encodeURIComponent(doc)}`)

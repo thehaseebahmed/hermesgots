@@ -21,9 +21,8 @@ export interface SealedBot {
 }
 
 /**
- * The local fields one registry read writes. A field the record doesn't carry is left out rather
- * than written as `undefined`: Dexie's `update` deletes a key set to undefined, which would take
- * away a name an earlier read learned.
+ * The local fields one registry read writes. Dexie's `update` deletes a key set to undefined, which
+ * would take away a name an earlier read learned.
  *
  * The version is the sealed record's own, and only it: a check-in carries a version too, but a
  * record the account holds may be older than the plugin that just checked in, so the host's own
