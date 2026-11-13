@@ -14,6 +14,7 @@ import {
   CircleAlertIcon,
   CircleCheckIcon,
   CodeXmlIcon,
+  FlaskConicalIcon,
   FolderXIcon,
   GitMergeIcon,
   GitPullRequestArrowIcon,
@@ -55,6 +56,7 @@ import { OnlineDot } from "@/components/bot-card"
 import { LinkSheet } from "@/components/link-bots"
 import { AppearanceSettings } from "@/components/settings/appearance"
 import { DictationSettings } from "@/components/settings/dictation"
+import { LabSettings } from "@/components/settings/lab"
 import {
   ActionRow,
   Group,
@@ -122,6 +124,7 @@ const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
   community: { title: "Community", render: () => <CommunitySettings /> },
   notifications: { title: NOTIFICATION_SETTINGS, render: () => <NotificationTypes /> },
   data: { title: "Local data", render: () => <DataSettings /> },
+  lab: { title: "Labs", render: () => <LabSettings /> },
   developer: { title: "Developer", render: () => developerOnly(<DeveloperSettings />) },
   network: { title: "Network log", render: () => developerOnly(<NetworkLogScreen />) },
 }
@@ -383,6 +386,7 @@ function MenuScreen({
         <FeedbackRow />
       </Group>
       <Group>
+        <Row to="lab" icon={FlaskConicalIcon} title="Labs" />
         <Row to="data" icon={DatabaseIcon} title="Local data" />
         {settings?.developer && <Row to="developer" icon={TerminalIcon} title="Developer" />}
       </Group>
@@ -654,19 +658,9 @@ export function DeveloperSettings() {
           id="show-progress-reminders"
           icon={MessageSquareTextIcon}
           title="Show progress reminders"
-          experimental
           subtitle="Each reminder a thread hides, as a row of its own"
           checked={Boolean(settings?.showProgressReminders)}
           onCheckedChange={(checked) => saveSettings({ showProgressReminders: checked })}
-        />
-        <SwitchRow
-          id="meetings"
-          icon={AudioLinesIcon}
-          title="Meetings"
-          experimental
-          subtitle="Design only, with sample meetings"
-          checked={Boolean(settings?.meetings)}
-          onCheckedChange={(checked) => saveSettings({ meetings: checked })}
         />
       </Group>
       {isNative() && pushAvailable() && <TestPushRow />}

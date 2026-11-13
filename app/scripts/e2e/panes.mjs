@@ -30,7 +30,6 @@ for (const [width, collapsed, panes] of CASES) {
       await page.evaluate(
         async (collapsed) =>
           (await import("/src/lib/db.ts")).db.settings.update("settings", {
-            developer: true,
             meetings: true,
             sidebarCollapsed: collapsed,
           }),

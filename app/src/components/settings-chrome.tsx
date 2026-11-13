@@ -15,7 +15,7 @@ import { Link } from "react-router"
 
 import { Refusal } from "@/components/banner"
 import { ModelPicker } from "@/components/chat/model-picker"
-import { ExperimentalBadge } from "@/components/experimental-badge"
+import { LabBadge } from "@/components/lab-badge"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { PickGroup, PickRow } from "@/components/pick-row"
 import { SearchField } from "@/components/search-field"
@@ -260,7 +260,7 @@ export function SwitchRow({
   id,
   icon: Icon,
   title,
-  experimental,
+  lab,
   subtitle,
   extra,
   checked,
@@ -273,7 +273,7 @@ export function SwitchRow({
   /** A category header is a title alone, so a row without one draws nothing in the icon's place. */
   icon?: LucideIcon
   title: string
-  experimental?: boolean
+  lab?: boolean
   subtitle?: string
   /** Extra lines under the subtitle, inside the row's own column (a skill's health line). */
   extra?: ReactNode
@@ -299,10 +299,12 @@ export function SwitchRow({
       {Icon && <Icon className="size-5 shrink-0 text-muted-foreground" />}
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="flex min-w-0 items-center gap-2">
-          <span className={cn("truncate text-base", variant === "header" && "font-semibold")}>
+          <span
+            className={cn("line-clamp-2 text-base", variant === "header" && "font-semibold")}
+          >
             {title}
           </span>
-          {experimental && <ExperimentalBadge />}
+          {lab && <LabBadge />}
         </span>
         {subtitle && <span className="line-clamp-2 text-sm text-muted-foreground">{subtitle}</span>}
         {extra}

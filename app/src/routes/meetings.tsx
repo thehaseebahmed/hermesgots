@@ -30,7 +30,7 @@ import { Banner, Refusal } from "@/components/banner"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { Bot } from "@/components/bot"
-import { ExperimentalBadge } from "@/components/experimental-badge"
+import { LabLabel } from "@/components/lab-badge"
 import { ItemGroup, ItemRow, ItemSearch } from "@/components/item-list"
 import { itemGroups } from "@/lib/item-groups"
 import { FullscreenPopup, Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
@@ -132,7 +132,6 @@ import { cn } from "@/lib/utils"
 import { Chip } from "@/components/chip"
 import { BackButton } from "@/components/back-button"
 
-/** Meetings is behind a Developer switch; with it off, its screens send you home. */
 function Gate({ children }: { children: ReactNode }) {
   const enabled = useMeetingsEnabled()
   if (enabled === undefined) return null
@@ -330,10 +329,7 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <Header
         title={
-          <>
-            Meetings
-            <ExperimentalBadge />
-          </>
+          <LabLabel>Meetings</LabLabel>
         }
       />
 

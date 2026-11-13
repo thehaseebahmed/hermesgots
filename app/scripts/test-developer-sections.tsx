@@ -79,9 +79,9 @@ test("/settings/developer with the switch on draws it", async () => {
     assert.ok(switchOf(LEGACY), "the layout switch is drawn")
     assert.match(text(), /Enable legacy chat UX/, "under its own name")
     assert.equal(
-      rowOf(LEGACY)?.textContent?.includes("Experimental"),
-      false,
-      "and is no longer marked experimental: the layout is the app's own",
+      rowOf(LEGACY)?.querySelector('[data-slot="badge"]'),
+      null,
+      "and wears no mark: the layout is the app's own, not a lab feature",
     )
     assert.ok(!findText("label", "Bot threads"), "the old switch is gone")
     assert.ok(

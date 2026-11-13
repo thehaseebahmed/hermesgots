@@ -31,7 +31,6 @@ import { CompareBriefForm, CompareScopeForm, MemoCanvas, SourceKinds } from "@/c
 import { VerdictCanvas, VerifyBriefForm, VerifyScopeForm } from "@/components/verify"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ModelPicker, PICKER_HEIGHT } from "@/components/chat/model-picker"
-import { ExperimentalBadge } from "@/components/experimental-badge"
 import { ItemGroup, ItemRow, ItemSearch } from "@/components/item-list"
 import { itemGroups } from "@/lib/item-groups"
 import { useRefusal } from "@/lib/use-refusal"
@@ -234,11 +233,7 @@ function ResearchHome({ ask, list }: { ask?: boolean; list?: FeaturePane }) {
           pinned
           heading
           showBot={false}
-          title={
-            <>
-              Research <ExperimentalBadge />
-            </>
-          }
+          title="Research"
         />
       )}
 
