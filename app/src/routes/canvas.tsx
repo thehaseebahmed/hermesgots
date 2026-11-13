@@ -17,7 +17,7 @@ import { BackButton } from "@/components/back-button"
 import { CanvasConsentDialog, CanvasOptions, useCanvasConsent } from "@/components/canvas-consent"
 import { Refusal } from "@/components/banner"
 import { CanvasPointsProvider, type CanvasPoints } from "@/components/chat/canvas-points"
-import { ChatHeader } from "@/components/chat/chat-header"
+import { ChatHeader, SidebarButton } from "@/components/chat/chat-header"
 import { useChatSurface } from "@/components/chat/chat-actions"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { Composer } from "@/components/chat/composer"
@@ -70,7 +70,7 @@ import { serverConfig } from "@/lib/connection"
 import { usePluginFeature, usePluginFeatureOn } from "@/lib/features"
 import { HEADER_BUTTON } from "@/lib/layout"
 import type { CanvasPoint } from "@/lib/point-marker"
-import { useLarge } from "@/lib/media"
+import { useLarge, useWide } from "@/lib/media"
 import { openExternal } from "@/lib/native"
 import { useOnline } from "@/lib/online"
 import { useDark } from "@/lib/theme"
@@ -373,12 +373,18 @@ function CanvasHead({
   optionsOpen: boolean
   /** The title's press: the options' only door, on either screen (ADR 0130). */
   onOpenOptions: () => void
+  /** What leads the row where the sidebar stands: the canvas list's own way back, or nothing. */
   leading: ReactNode
   actions: ReactNode
 }) {
+  // A phone's sidebar is behind the drawer, so the head leads with the drawer's button there and the
+  // way back to the list leads it only where the sidebar stands on screen and cannot be opened. The
+  // two are one control in one slot either way, and the row is read from the left the same.
+  const wide = useWide()
   return (
     <ChatHeader
       className="relative pb-2"
+      leading={wide ? leading : <SidebarButton />}
       // The subtitle's away sentence stays outside the control: a live region inside a button
       // becomes part of its name.
       onTitlePress={canvas ? onOpenOptions : undefined}
@@ -421,7 +427,6 @@ function CanvasHead({
       }
       showBot={false}
       heading
-      leading={leading}
       actions={actions}
     />
   )

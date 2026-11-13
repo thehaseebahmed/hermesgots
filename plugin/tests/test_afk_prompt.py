@@ -65,7 +65,7 @@ class AfkPromptTests(unittest.TestCase):
             "its text is the spec",
             "Never ask the user anything",
             "the pull request ships last",
-            "never merge or close",
+            "never close a pull request",
             "secrets",
             "leave the tree consistent",
         ):

@@ -12,9 +12,9 @@ import os
 import subprocess
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-from . import github, projects, push, tools_common
+from . import github, merges, projects, push, tools_common
 from .sessions import WorkspaceError, _git
 from .store import db_path
 
@@ -418,6 +418,128 @@ def ship(
         lock.release()
 
 
+def _live_prs(
+    hermes_home: Path, record: Dict[str, Any], checks: bool
+) -> Iterator[Tuple[Dict[str, Any], str, Optional[Dict[str, Any]]]]:
+    """Each repo's pull request from the session's branch, as ``(repo, name, pr)``.
+
+    Read strictly: a GitHub that couldn't be reached is raised, never answered as "no pull request",
+    because the two facts send the agent to different calls (`ship` against `merge` again).
+    """
+    for repo in record["repos"]:
+        name = github.origin_repo(repo["repo_root"])
+        if not name:
+            continue
+        try:
+            pr = github.pull_request(
+                hermes_home, repo["repo_root"], repo["branch"], fresh=True, checks=checks, strict=True
+            )
+        except github.GitHubError as error:
+            raise ShipError(str(error), error.status) from None
+        yield repo, name, pr
+
+
+def ready(hermes_home: Path, record: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Takes each repo's draft pull request on the session's branch out of draft, for review.
+
+    One already out of draft is answered as it stands rather than skipped: a retried call after a
+    dropped answer must read as a state that holds, not as a step that failed.
+    """
+    auth, _ = github.token(hermes_home)
+    if not auth:
+        raise ShipError("No GitHub account on the server.", 409)
+    results = []
+    for repo, name, pr in _live_prs(hermes_home, record, checks=False):
+        if not pr or pr["state"] not in ("draft", "open"):
+            continue
+        result: Dict[str, Any] = {"name": repo["name"], "pr": pr}
+        was_draft = pr["state"] == "draft"
+        try:
+            if was_draft:
+                result["pr"] = github.mark_ready(name, pr["number"], auth)
+            else:
+                result["already_ready"] = True
+        except github.GitHubError as error:
+            result["error"] = str(error)
+        if was_draft:
+            # Forgotten whatever the answer said: a mutation that landed and lost its reply has
+            # changed the state the cached row speaks for.
+            github.forget_pull_request(repo["repo_root"], repo["branch"])
+        results.append(result)
+    if not results:
+        raise ShipError("No pull request on this session's branch to mark ready.", 409)
+    return results
+
+
+MERGE_METHODS = github.MERGE_METHODS
+# One commit on the base: a session's branch history is the run's, not the repository's.
+DEFAULT_MERGE_METHOD = "squash"
+
+
+def merge(
+    hermes_home: Path, record: Dict[str, Any], method: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """Merges each repo's open pull request on the session's branch, and settles the session.
+
+    A draft, and checks that failed or still run, are refused before GitHub is asked, because the run
+    can do something about both.
+    """
+    auth, _ = github.token(hermes_home)
+    if not auth:
+        raise ShipError("No GitHub account on the server.", 409)
+    method = method if isinstance(method, str) and method.strip() else DEFAULT_MERGE_METHOD
+    method = method.strip()
+    if method not in MERGE_METHODS:
+        raise ValueError(f"merge_method must be one of {', '.join(MERGE_METHODS)}.")
+    session_id = record.get("session_id")
+    results = []
+    for repo, name, pr in _live_prs(hermes_home, record, checks=True):
+        if not pr or pr["state"] not in ("open", "draft"):
+            continue
+        result: Dict[str, Any] = {"name": repo["name"], "pr": pr, "merged": False}
+        asked = False
+        try:
+            if pr["state"] == "draft":
+                raise ShipError(
+                    "It's still a draft, and GitHub won't merge one: call pull_request with action "
+                    "'ready', then 'merge'.",
+                    409,
+                )
+            if pr.get("checks") == "failure":
+                raise ShipError(
+                    f"Its checks failed, so it isn't ready to merge: see {pr.get('url')}/checks, fix "
+                    "what they name, call 'ship' again, then 'merge'.",
+                    409,
+                )
+            if pr.get("checks") == "pending":
+                raise ShipError("Its checks are still running: call 'merge' again once they pass.", 409)
+            asked = True
+            outcome = github.merge_pull_request(name, pr["number"], method, auth, pr.get("sha"))
+            result["merge"] = outcome
+            result["merged"] = bool(outcome.get("merged"))
+        except (ShipError, github.GitHubError) as error:
+            result["error"] = str(error)
+        if asked:
+            # Only a call that reached GitHub can have changed the row: a refused gate changed nothing.
+            github.forget_pull_request(repo["repo_root"], repo["branch"])
+        results.append(result)
+    if not results:
+        raise ShipError("No open pull request on this session's branch to merge.", 409)
+    resolved = 0
+    if session_id and any(result.get("merged") for result in results):
+        # A project with more than one repo resolves once every one of its pull requests is settled,
+        # which is the sweep's business; this asks it now so the merge the run just made is the news.
+        try:
+            resolved = merges.check(hermes_home, only={session_id})
+        except Exception:
+            logger.warning("gots: resolving a merged session failed", exc_info=True)
+    if resolved:
+        for result in results:
+            if result.get("merged"):
+                result["resolved"] = True
+    return results
+
+
 def update(
     hermes_home: Path, record: Dict[str, Any], title: Optional[str], body: Optional[str]
 ) -> List[Dict[str, Any]]:
@@ -486,21 +608,27 @@ def template(tree: Optional[str]) -> Optional[str]:
 
 TOOL = "pull_request"
 LEGACY_TOOL = "open_pull_request"
-ACTIONS = ("ship", "push", "update", "status")
+ACTIONS = ("ship", "push", "update", "ready", "merge", "status")
 # Listed so the agent gets the teaching refusal rather than a schema error; never performed here.
-REFUSED_ACTIONS = ("merge", "close")
+# Closing stays the user's: it throws away work a merge would have delivered.
+REFUSED_ACTIONS = ("close",)
 SCHEMA = {
     "name": TOOL,
     "description": (
-        "Ships this session's work to its pull request. action: 'ship' commits what's uncommitted in "
-        "its worktrees with commit_message, pushes the session branch and opens a pull request (always "
-        "a draft) or pushes to the one already open; 'push' commits and pushes without opening one; "
-        "'update' changes the open pull request's title and/or body; 'status' reports changes and "
+        "Ships this session's work to its pull request, and can take it the whole way. action: "
+        "'ship' commits what's uncommitted in its worktrees with commit_message, pushes the session "
+        "branch and opens a pull request (always a draft) or pushes to the one already open; 'push' "
+        "commits and pushes without opening one; 'update' changes the open pull request's title "
+        "and/or body; 'ready' takes the draft out of draft so it can be reviewed and merged; 'merge' "
+        "merges it once it is out of draft and its checks pass; 'status' reports changes and "
         "unpushed commits without writing anything. Pass force: true only after a rebase or amend, to "
         "replace the branch's remote commits. Call 'ship' yourself as soon as the work is done and "
-        "checked; don't ask the user first. Merging and closing are the user's decision: the tool "
-        "refuses them, so ask the user with clarify instead. The server holds the GitHub account, so use "
-        "this instead of git push or gh."
+        "checked; don't ask the user first. Mark it ready when it is going to be read, and merge it "
+        "only when the user asks for the work to be delivered — or, with nobody watching, when the "
+        "project's Prompt says so; otherwise the reviewed pull request is the user's to finish. "
+        "Closing a pull request is always the user's: "
+        "the tool refuses it, so ask with clarify instead. The server holds the GitHub account, so "
+        "use this instead of git push or gh."
     ),
     "parameters": {
         "type": "object",
@@ -508,7 +636,7 @@ SCHEMA = {
             "action": {
                 "type": "string",
                 "enum": [*ACTIONS, *REFUSED_ACTIONS],
-                "description": "What to do: ship, push, update or status. Required.",
+                "description": f"What to do: {', '.join(ACTIONS)}. Required.",
             },
             "title": {
                 "type": "string",
@@ -524,6 +652,14 @@ SCHEMA = {
             "commit_message": {
                 "type": "string",
                 "description": "For anything not yet committed. Required when there is (ship, push).",
+            },
+            "merge_method": {
+                "type": "string",
+                "enum": list(MERGE_METHODS),
+                "description": (
+                    "How the merge lands (merge): 'squash' puts one commit on the base branch, which "
+                    "is the default; 'merge' keeps the branch's commits; 'rebase' replays them."
+                ),
             },
             "force": {
                 "type": "boolean",
@@ -554,15 +690,15 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
         return json.dumps(
             {
                 "error": (
-                    f"Don't {action} pull requests yourself: merging and closing are the user's decision, "
-                    "and this tool won't do either. Don't call pull_request with "
-                    f"'{action}' again. Ask the user with the clarify tool whether they want to {action} "
-                    "the pull request, and leave it to them."
+                    "Don't close pull requests yourself: closing throws away work the user may still "
+                    "want, so it's their decision and this tool won't do it. Don't call pull_request "
+                    "with 'close' again. Ask the user with the clarify tool whether they want it "
+                    "closed, and leave it to them."
                 )
             }
         )
     if action not in ACTIONS:
-        return json.dumps({"error": "action is required: ship, push, update or status."})
+        return json.dumps({"error": f"action is required: {', '.join(ACTIONS)}."})
     path, home = sessions._paths()
     record = sessions.record_for_call(path, home, task_id, session_id)
     if not record:
@@ -572,6 +708,10 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
             return json.dumps({"results": status(record)})
         if action == "update":
             results = update(home, record, args.get("title"), args.get("body"))
+        elif action == "ready":
+            results = ready(home, record)
+        elif action == "merge":
+            results = merge(home, record, args.get("merge_method"))
         else:
             results = ship(
                 home,

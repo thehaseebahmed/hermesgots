@@ -421,6 +421,11 @@ export const FLOWS = {
     script: "e2e/research.mjs",
     about: "A research mission from question to guide, another format, and a citation's source",
   },
+  "research-literature": {
+    script: "e2e/research-literature.mjs",
+    about:
+      "A literature review from question to narrative review, its papers table scrolling inside its card at a phone's width",
+  },
   panes: {
     script: "e2e/panes.mjs",
     about:

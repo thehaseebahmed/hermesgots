@@ -36,37 +36,42 @@ const streamed = (extra = {}) => ({
 
 test("each pull request action reads as what it took, not as an opening", () => {
   assert.deepEqual(
-    phrases(["ship", "push", "update", "status"].map((action) => row(action))),
+    phrases(["ship", "push", "update", "ready", "merge", "status"].map((action) => row(action))),
     [
       "Opened a pull request",
       "Pushed the branch",
       "Updated a pull request",
+      "Marked a pull request ready",
+      "Merged a pull request",
       "Checked a pull request",
     ],
-    "four actions, four phrases, in the order they ran",
+    "every action, its own phrase, in the order they ran",
   )
 })
 
 test("the same action reads in the present while the call runs", () => {
   assert.deepEqual(
     phrases(
-      ["ship", "push", "update", "status"].map((action) => row(action, { status: "running" })),
+      ["ship", "push", "update", "ready", "merge", "status"].map((action) =>
+        row(action, { status: "running" }),
+      ),
     ),
     [
       "Opening a pull request",
       "Pushing the branch",
       "Updating a pull request",
+      "Marking a pull request ready",
+      "Merging a pull request",
       "Checking a pull request",
     ],
   )
 })
 
 test("an action the tool never took reads as the generic row, never as a claim", () => {
-  // Merging and closing are the user's decision, so the tool refuses them: a host that streams such
-  // a call anyway must not draw *Updated* over a write that never happened — nor *Opened* over
-  // anything.
-  assert.equal(activityOf(row("merge")), "Used a tool")
+  // Closing is the user's decision, so the tool refuses it: a host that streams such a call anyway
+  // must not draw *Updated* over a write that never happened — nor *Opened* over anything.
   assert.equal(activityOf(row("close")), "Used a tool")
+  assert.equal(activityOf(row("deliver")), "Used a tool", "and neither does an action no table knows")
   assert.equal(activityOf(streamed({ status: "completed" })), "Used a tool", "and no preview says")
 })
 
@@ -74,7 +79,7 @@ test("a row stored before the stamp reads its action from the label it fell back
   const done = (extra = {}) => streamed({ status: "completed", ...extra })
   // The transcript's JSON label, with no stamp: an old row, drawn as the call it was.
   assert.equal(activityOf(done({ label: args("status") })), "Checked a pull request")
-  assert.equal(activityOf(done({ label: '{"action":"merge","pr":27}' })), "Used a tool")
+  assert.equal(activityOf(done({ label: '{"action":"deliver","pr":27}' })), "Used a tool")
   // A streamed call's label is the call's title — the words of a pull request, not an action.
   assert.equal(activityOf(done({ label: TITLE })), "Used a tool")
   // A stamp outranks a label that would say more.

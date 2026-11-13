@@ -15,6 +15,7 @@ import {
   RESEARCH_STAGES,
   claimNumber,
   hostOf,
+  paperState,
   pieces,
   typeOf,
   type Claim,
@@ -343,10 +344,12 @@ export function Evidence({ ledger, active }: { ledger?: Ledger; active?: string 
   }, [active])
   const sources = new Map(ledger?.sources.map((source) => [source.id, source]))
   const claims = ledger?.claims ?? []
+  // The sources a claim was taken from: a review also lists papers it screened out, which gave none.
+  const cited = new Set(claims.map((claim) => claim.source)).size
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted-foreground">
-        {claims.length} claims from {sources.size} sources
+        {claims.length} claims from {cited} sources
       </p>
       <ol className="flex flex-col gap-3">
         {claims.map((claim) => (
@@ -372,16 +375,27 @@ function stageDetail(mission: Mission, stage: MissionStage) {
     : "Every claim to a source"
 }
 
-/** The sources read most recently, while reading. */
+/** The sources read most recently, while reading; a review's papers say where each one stands. */
 export function NowReading({ mission }: { mission: Mission }) {
-  const recent = (mission.ledger?.sources ?? []).slice(-3).reverse()
+  const sources = mission.ledger?.sources ?? []
+  // A review lists every candidate at once, so its newest are the ones last screened or read.
+  const touched = sources.some((source) => source.paper)
+    ? sources.filter((source) => source.paper && source.paper.screening !== "found")
+    : sources
+  const recent = touched.slice(-3).reverse()
   if (!recent.length) return null
   return (
     <ul className="flex flex-col gap-1">
       {recent.map((source) => (
         <li key={source.id} className="flex min-w-0 flex-col rounded-2xl bg-muted/50 px-3 py-2">
           <span className="truncate text-sm">{source.title}</span>
-          <span className="truncate text-xs text-muted-foreground">{hostOf(source.url)}</span>
+          <span className="truncate text-xs text-muted-foreground">
+            {source.paper
+              ? [source.paper.year, source.paper.venue, paperState(source.paper)]
+                  .filter(Boolean)
+                  .join(" · ")
+              : hostOf(source.url)}
+          </span>
         </li>
       ))}
     </ul>
