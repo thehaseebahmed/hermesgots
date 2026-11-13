@@ -195,15 +195,17 @@ export async function askThreadMediaUrl(conversationId: string, path: string): P
  * instead. The whole answer comes back — a file the host has not got, one it refused and why, a host
  * that didn't reply — so the screen can say which of those it met rather than guess (ADR 0111).
  *
- * `again` forgets a miss this page remembered: a listing that named the path a moment ago knows
- * better than a 404 the page got before the file was written.
+ * `again` forgets what this page remembers about the path — the miss a 404 settled, and the URL it
+ * holds — so a reader's own try again mints another rather than being handed back the same one. A
+ * listing that named the path a moment ago knows better than a 404 the page got before the file was
+ * written, and a URL that loaded badly is worth exactly one new mint.
  */
 export async function askMediaUrl(
   config: HermesConfig,
   path: string,
   { again = false }: { again?: boolean } = {},
 ): Promise<MediaAsk> {
-  if (again) gone.delete(cacheKey(config, path))
+  if (again) forget(cacheKey(config, path))
   const refused = await refusal(config)
   if (refused) return refused
   return ask(config, path)

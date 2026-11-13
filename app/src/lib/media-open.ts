@@ -55,8 +55,7 @@ export function useOpenHostFile(config: HermesConfig): HostFileOpen {
         const answer = await askMediaUrl(config, item.key, { again })
         drawing.current = drawing.current.map((one) => {
           if (one.key !== item.key) return one
-          // The host's own words for the ways it answers without a URL: a file it hasn't got, one it
-          // refused in the route's own sentence, a plugin too old to sign, a host that didn't reply.
+          // The host's own sentence for the way it answered without a URL.
           if (answer.state !== "ready")
             return { ...one, state: "failed", note: askNote(answer, one.name) }
           return {
@@ -139,7 +138,9 @@ export function useOpenHostFile(config: HermesConfig): HostFileOpen {
         } catch (error) {
           openFailed(file.name, error)
         } finally {
-          setBusy(null)
+          // Only this tap's own row stops saying it is working: a second tap that is still out keeps
+          // its own.
+          setBusy((current) => (current === file.path ? null : current))
         }
       })()
     },

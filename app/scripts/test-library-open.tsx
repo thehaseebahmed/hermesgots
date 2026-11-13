@@ -204,6 +204,16 @@ test("a library file opens through the app's previewer, from a URL the bot signs
         "drawn from the URL the host signed, not from bytes this device fetched",
       )
       assert.equal(browser.opened.length, 0, "a photo stays in the app")
+      assert.equal(
+        missing('[role="dialog"] [aria-label="Next"]'),
+        true,
+        "one drawable file in the folder is one file to step through: no chevrons",
+      )
+      assert.equal(
+        panelText().includes("1 of 1"),
+        false,
+        "and no count either, since a count of one says nothing",
+      )
 
       // A document is not a kind the Previewer draws, so the platform takes it — from the same
       // signed URL, which is what names the file as it serves it.
@@ -508,5 +518,41 @@ test("a file the host serves undrawably offers the platform, not a pane that nev
     )
   } finally {
     browser.restore()
+  }
+})
+
+test("a file that loads badly is signed again when the reader tries again", async () => {
+  const asked = mediaHost()
+  try {
+    await mount(severalScreen("reloads"), async () => {
+      await click(row("library-tab"))
+      await until(async () => row("chart.png") !== null, "the folder's files")
+      await click(row("chart.png"))
+      await until(async () => viewing("chart.png", "2 of 3"), "the tapped file")
+      assert.deepEqual(
+        mediaReads(asked).map((path) => path.split("/").pop()),
+        ["chart.png"],
+        "the tap minted one URL",
+      )
+
+      // A URL that loads nothing is the same failure a phone meets on a bad link: the picture is
+      // handed a src the browser can't decode, which this tier reaches by dispatching its error.
+      await act(async () => {
+        document.querySelector("img[alt='chart.png']")?.dispatchEvent(new Event("error"))
+      })
+      await until(async () => findText("button", "Try again") !== null, "the card's retry")
+      await click(findText("button", "Try again"))
+      await until(
+        async () => mediaReads(asked).length === 2,
+        "another URL minted for the same file",
+      )
+      assert.deepEqual(
+        mediaReads(asked).map((path) => path.split("/").pop()),
+        ["chart.png", "chart.png"],
+        "Try again mints another rather than handing back the URL that failed to load",
+      )
+    })
+  } finally {
+    mediaHost()
   }
 })

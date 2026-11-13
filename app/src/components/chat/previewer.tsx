@@ -76,10 +76,10 @@ export interface PreviewRequest {
   /** Asks a file whose read failed again, and draws what answers. */
   onRetry?: (item: PreviewItem) => void
   /**
-   * The file now on screen, reported when that changes and only while the Previewer is open. A screen
-   * whose list is drawn from URLs it signs itself — the library's folder — asks the host for the one
-   * the reader has arrived at, and passes the list back through `update`. The Previewer never asks for
-   * anything: it draws what a list gives it, and says which of them it is drawing.
+   * The file a step has arrived at, reported before the step is taken. A screen whose list is drawn
+   * from URLs it signs itself — the library's folder — asks the host for that one, and passes the list
+   * back through `update`. The Previewer never asks for anything: it draws what a list gives it, and
+   * says which of them it is drawing.
    */
   onShown?: (item: PreviewItem) => void
   /**
@@ -577,11 +577,14 @@ export function Previewer({
   const count = items.length
   const at = Math.min(Math.max(index, 0), count - 1)
   const item = items[at]
+  // The step is taken from the last one asked for, not from the index this render was drawn at, so two
+  // presses before React commits the first advance twice rather than once.
+  const stepping = useRef(at)
+  stepping.current = at
   const step = (by: number) => {
-    const next = (at + by + count) % count
-    // The reader has arrived at this file, so whoever holds the list hears about it — the one place
-    // the item on screen changes while the Previewer is open. It is said before the index moves, so
-    // the list is asked for the file that is about to be drawn.
+    const next = (stepping.current + by + count) % count
+    stepping.current = next
+    // Said before the index moves, so the list is asked for the file that is about to be drawn.
     onShown?.(items[next])
     onIndex(next)
   }
@@ -614,7 +617,8 @@ export function Previewer({
           </Button>
           <div className="min-w-0 flex-1">
             <PopupTitle className="justify-start text-left">{item.name}</PopupTitle>
-            <p className="text-sm text-muted-foreground tabular-nums">
+            {/* A step changes this line alone, so it is the one that has to be announced. */}
+            <p className="text-sm text-muted-foreground tabular-nums" aria-live="polite">
               {details.filter(Boolean).join(" · ")}
             </p>
           </div>
