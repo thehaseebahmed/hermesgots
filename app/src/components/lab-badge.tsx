@@ -9,13 +9,14 @@ export function LabBadge() {
 }
 
 /**
- * A lab feature's name and its mark, on one centred line. `fill` gives the name the row's spare width
- * and pins the pill to its end, which is how the sidebar draws it.
+ * A lab feature's name and its mark, on one centred line. The name truncates rather than pushing the
+ * mark out of the line, so a long title never clips it; `fill` gives the name the row's spare width and
+ * pins the pill to its end, which is how the sidebar draws it.
  */
 export function LabLabel({ children, fill }: { children: ReactNode; fill?: boolean }) {
   return (
     <span className={cn("flex items-center gap-2", fill && "min-w-0 flex-1")}>
-      {fill ? <span className="min-w-0 truncate">{children}</span> : children}
+      <span className="min-w-0 truncate">{children}</span>
       <LabBadge />
     </span>
   )
