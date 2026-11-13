@@ -22,6 +22,7 @@ import {
 } from "lucide-react"
 
 import { Bot } from "@/components/bot"
+import { CanvasMark } from "@/components/canvas-mark"
 import { LabLabel } from "@/components/lab-badge"
 import { RoomFaces } from "@/components/room/room-faces"
 import { SortMenu } from "@/components/sort-menu"
@@ -257,7 +258,7 @@ function CanvasRow({
       data-canvas-pinned=""
       className={(collapsed ? railClass : rowClass)({ isActive: opened })}
     >
-      <FrameIcon className="size-5 text-muted-foreground" />
+      <CanvasMark />
       {!collapsed && <span className="min-w-0 truncate">{canvas.title}</span>}
     </Link>
   )
