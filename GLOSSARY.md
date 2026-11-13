@@ -824,6 +824,10 @@ _Avoid_: thumbnail, preview, cover
 A canvas that has its own row in the sidebar, on every device.
 _Avoid_: favourite, starred, shortcut
 
+**Open canvas**:
+The canvas this tab opened from Canvas's own screens — the list's tile, or a start — and the one thing a canvas's row is marked by (ADR 0151). A canvas reached by its address, a reload, back or forward, or another tab's opening is no open canvas.
+_Avoid_: current canvas, active canvas, selected canvas
+
 **Declared tools**:
 The tools a version of a canvas says it may call, named by its bot when it writes that version and enforced where the canvas calls the host. A declared tool is asked about the first time the canvas calls it, and only an allowed one is called. Unrelated to an **Approval**, which a bot asks for mid-run.
 _Avoid_: permissions, agreed tools, scopes

@@ -128,7 +128,8 @@ const marked = () => findAll('nav[aria-label="Main"] [aria-current="page"]')
 /** The page on screen, as the sidebar reads it: the canvas's row and what it says it is. */
 const says = (id: string) => ({
   current: row(id)?.getAttribute("aria-current") ?? null,
-  filled: row(id)?.className.includes("bg-muted") ?? false,
+  // The row's own fill, never the hover it carries at rest (`hover:bg-muted`).
+  filled: row(id)?.classList.contains("bg-muted") ?? false,
 })
 
 test("a canvas reached by its address marks no row", async () => {
