@@ -77,7 +77,7 @@ for (const [width, dark] of [
       await page.goto(`${app}/meetings`)
       await page.waitForURL((url) => url.pathname === "/", { timeout: 10_000 })
       assert.equal(await page.getByRole("link", { name: "Meetings" }).count(), 0)
-      pass(`${width}: hidden until the Developer switch is on`)
+      pass(`${width}: hidden until the Lab switch is on`)
 
       await setSwitch(true)
       await page.goto(`${app}/meetings`)
