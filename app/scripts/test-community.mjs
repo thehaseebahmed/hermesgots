@@ -2,6 +2,16 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { buildBoard, cleanDays, cleanProviders, handleCommunity, modelName } from "../netlify/lib/community.ts"
+import {
+  CATALOG_RETRY_MS,
+  CATALOG_TTL_MS,
+  MODELS_DEV_URL,
+  catalogFrom,
+  fetchModelsDev,
+  knownCatalog,
+  modelKey,
+  modelKeys,
+} from "../netlify/lib/models-dev.ts"
 
 const NOW = Date.UTC(2026, 9, 15, 12)
 const counts = (n) => ({ input: n, output: n, cacheWrite: 0, cacheRead: 0, calls: 1 })
@@ -153,7 +163,7 @@ test("rows are split by the top five models and the rest", () => {
   assert.deepEqual(tokens[0].models, { a: 120, b: 100, c: 80, d: 60, e: 40 })
   assert.equal(tokens[0].others, 30)
   assert.equal(tokens[0].total, 430)
-  assert.equal(board.version, 3)
+  assert.equal(board.version, 4)
 })
 
 test("Theseus and Goal count as Auto", () => {
@@ -177,7 +187,7 @@ test("a cached board of an older shape is built again", async () => {
   const env = setup()
   env.store.data.set("board", { updatedAt: NOW, periods: {} })
   const board = await call(env, null, "GET", "board")
-  assert.equal(board.body.version, 3)
+  assert.equal(board.body.version, 4)
   assert.ok(Array.isArray(board.body.periods.today.topModels))
 })
 
@@ -203,4 +213,335 @@ test("providers are split by their own top five models; bad input is dropped, no
     cleanProviders({ "2026-10-15": { "Bad Name!": { m: 5 }, ok: { m: -1, n: 3 } }, "2020-01-01": { ok: { m: 1 } } }, NOW),
     { "2026-10-15": { ok: { n: 3 } } },
   )
+})
+
+test("a model id is looked up by its bare, lower-case spelling", () => {
+  assert.equal(modelKey("deepseek-v4-pro"), "deepseek-v4-pro")
+  assert.equal(modelKey("deepseek/deepseek-v4-pro"), "deepseek-v4-pro")
+  assert.equal(modelKey("deepseek/deepseek-v4.1-flash"), "deepseek-v4-1-flash")
+  assert.equal(modelKey("DeepSeek-V4.1-Flash"), "deepseek-v4-1-flash")
+})
+
+test("the catalogue is read as its models and the providers it names", () => {
+  const payload = {
+    anthropic: { models: { "claude-opus-5-5": {}, "claude-sonnet-4.5": {} } },
+    deepseek: { models: { "deepseek/deepseek-v4-pro": {}, "deepseek-v4.1-flash": {} } },
+    "  Acme  ": { models: { "acme-1": {} } },
+  }
+  const catalog = catalogFrom(payload)
+  // Models keyed by the lookup spelling, holding the name the catalogue serves — dots and all.
+  assert.deepEqual([...catalog.models].sort(), [
+    ["acme-1", "acme-1"],
+    ["claude-opus-5-5", "claude-opus-5-5"],
+    ["claude-sonnet-4-5", "claude-sonnet-4.5"],
+    ["deepseek-v4-1-flash", "deepseek-v4.1-flash"],
+    ["deepseek-v4-pro", "deepseek-v4-pro"],
+  ])
+  // Every provider the payload names, lower-cased, is one the board can vouch for.
+  assert.deepEqual([...catalog.providers].sort(), ["acme", "anthropic", "deepseek"])
+  // Anything that isn't the registry, or holds no id, is no answer at all.
+  for (const junk of ["nope", [], {}, { a: {} }, { a: { models: {} } }, { a: "nope" }]) {
+    assert.equal(catalogFrom(junk), null)
+  }
+})
+
+test("a fresh catalogue row answers without fetching", async () => {
+  const store = memoryStore()
+  store.data.set("models-dev", { models: ["claude-opus-5-5", "gpt-5"], providers: ["anthropic"], at: NOW })
+  const load = async () => {
+    throw new Error("a fresh row is not fetched")
+  }
+  assert.deepEqual(await knownCatalog(store, NOW, load), {
+    models: new Map([
+      ["claude-opus-5-5", "claude-opus-5-5"],
+      ["gpt-5", "gpt-5"],
+    ]),
+    providers: new Set(["anthropic"]),
+  })
+})
+
+test("a stale catalogue row is refreshed and written back", async () => {
+  const store = memoryStore()
+  store.data.set("models-dev", { models: ["gone-model"], providers: ["gone"], at: NOW - CATALOG_TTL_MS - 1 })
+  const load = async () => ({
+    anthropic: { models: { "claude-opus-5-5": {}, "claude-sonnet-4.5": {} } },
+  })
+  assert.deepEqual(await knownCatalog(store, NOW, load), {
+    models: new Map([
+      ["claude-opus-5-5", "claude-opus-5-5"],
+      ["claude-sonnet-4-5", "claude-sonnet-4.5"],
+    ]),
+    providers: new Set(["anthropic"]),
+  })
+  assert.deepEqual(store.data.get("models-dev"), {
+    models: ["claude-opus-5-5", "claude-sonnet-4.5"],
+    providers: ["anthropic"],
+    at: NOW,
+  })
+})
+
+test("a failed refresh keeps the stale ids and is not retried for every visitor", async () => {
+  const store = memoryStore()
+  store.data.set("models-dev", { models: ["claude-opus-5-5"], providers: ["anthropic"], at: NOW - CATALOG_TTL_MS - 1 })
+  const down = async () => {
+    throw new Error("models.dev is down")
+  }
+  const stale = { models: new Map([["claude-opus-5-5", "claude-opus-5-5"]]), providers: new Set(["anthropic"]) }
+  assert.deepEqual(await knownCatalog(store, NOW, down), stale)
+  // The failure is on file for its own, shorter window: a second request inside it fetches nothing.
+  let fetches = 0
+  const counted = async () => {
+    fetches += 1
+    throw new Error("models.dev is down")
+  }
+  assert.deepEqual(await knownCatalog(store, NOW + 60_000, counted), stale)
+  assert.equal(fetches, 0)
+  // A payload that isn't the registry is no better an answer than an error.
+  assert.deepEqual(await knownCatalog(store, NOW + CATALOG_RETRY_MS + 1, async () => "nope"), stale)
+  assert.equal(await knownCatalog(memoryStore(), NOW, down), null)
+})
+
+test("an empty catalogue row is read again rather than emptying the board", async () => {
+  const store = memoryStore()
+  store.data.set("models-dev", { models: [], providers: [], at: NOW })
+  const load = async () => ({ anthropic: { models: { "claude-opus-5-5": {} } } })
+  assert.deepEqual(await knownCatalog(store, NOW, load), {
+    models: new Map([["claude-opus-5-5", "claude-opus-5-5"]]),
+    providers: new Set(["anthropic"]),
+  })
+})
+
+test("a store that can't be read is a catalogue nobody knows", async () => {
+  const store = memoryStore()
+  store.getWithMetadata = async () => {
+    throw new Error("the blob read was refused")
+  }
+  store.setJSON = async () => {
+    throw new Error("the blob write was refused")
+  }
+  const down = async () => {
+    throw new Error("models.dev is down")
+  }
+  // A store that won't answer is no reason to fail the request that asked.
+  assert.equal(await knownCatalog(store, NOW, down), null)
+})
+
+test("fetchModelsDev reads the registry and refuses an error", async () => {
+  const real = globalThis.fetch
+  try {
+    globalThis.fetch = async (url, init) => {
+      assert.equal(url, MODELS_DEV_URL)
+      // A read inside a request has to be able to give up; see CATALOG_TIMEOUT_MS.
+      assert.ok(init?.signal instanceof AbortSignal)
+      return Response.json({ anthropic: { models: { m: {} } } })
+    }
+    assert.deepEqual(await fetchModelsDev(), { anthropic: { models: { m: {} } } })
+    globalThis.fetch = async () => new Response("down", { status: 503 })
+    await assert.rejects(fetchModelsDev, /503/)
+  } finally {
+    globalThis.fetch = real
+  }
+})
+
+test("a catalogue the store can't cache still answers", async () => {
+  const store = memoryStore()
+  store.setJSON = async () => {
+    throw new Error("the blob write was refused")
+  }
+  const load = async () => ({ anthropic: { models: { "claude-opus-5-5": {} } } })
+  assert.deepEqual(await knownCatalog(store, NOW, load), {
+    models: new Map([["claude-opus-5-5", "claude-opus-5-5"]]),
+    providers: new Set(["anthropic"]),
+  })
+})
+
+test("a cached board asks the catalogue nothing", async () => {
+  const env = { ...setup(), catalog: async () => LISTED }
+  env.store.data.set("users/octocat", {
+    login: "octocat",
+    days: { "2026-10-15": { "claude-opus-5-5": { chat: counts(1) } } },
+    updatedAt: NOW,
+  })
+  const first = await call(env, null, "GET", "board")
+  assert.equal(first.status, 200)
+  // Within the TTL the board is served as built, so an unreachable catalogue can't fail it.
+  env.catalog = async () => {
+    throw new Error("models.dev is down")
+  }
+  const again = await call(env, null, "GET", "board")
+  assert.equal(again.status, 200)
+  assert.equal(again.body.periods.today.tokens[0].total, 2)
+})
+
+// The catalogue, as the community function hands it to the rules: only these models and providers
+// exist, under these names.
+const LISTED = {
+  models: new Map([["claude-opus-5-5", "claude-opus-5-5"]]),
+  providers: new Set(["anthropic", "openrouter"]),
+}
+
+test("a report's unlisted models and custom providers are not stored", async () => {
+  const env = { ...setup(), catalog: async () => LISTED }
+  const host = await hostToken(env)
+  await call(env, user, "POST", "join")
+  const report = await call(env, host, "POST", "report", {
+    days: {
+      "2026-10-15": {
+        "claude-opus-5-5": { chat: counts(100) },
+        "totally-fake-model": { chat: counts(900) },
+      },
+    },
+    providers: {
+      "2026-10-15": {
+        anthropic: { "claude-opus-5-5": 200 },
+        "custom:acme": { "totally-fake-model": 1800 },
+        custom: { "totally-fake-model": 1800 },
+      },
+    },
+  })
+  assert.equal(report.status, 200)
+
+  const kept = env.registry.data.get("community/reports/u1/h1")
+  assert.deepEqual(Object.keys(kept.days["2026-10-15"]), ["claude-opus-5-5"])
+  assert.deepEqual(kept.providers, { "2026-10-15": { anthropic: { "claude-opus-5-5": 200 } } })
+
+  // The member record is folded from the same rules, so the standing counts only real models.
+  const member = env.store.data.get("users/octocat")
+  assert.deepEqual(Object.keys(member.days["2026-10-15"]), ["claude-opus-5-5"])
+  assert.deepEqual(member.providers, { "2026-10-15": { anthropic: { "claude-opus-5-5": 200 } } })
+  assert.deepEqual((await call(env, user, "GET", "me")).body.totals, { today: 200, week: 200, month: 200 })
+})
+
+test("a member stored before the rules serves no custom provider or unlisted model", async () => {
+  const env = { ...setup(), catalog: async () => LISTED }
+  // A record written when a custom endpoint was a provider and no model was checked. The fake model
+  // sits under a real provider too, so every panel has to know what the catalogue lists.
+  env.store.data.set("users/octocat", {
+    login: "octocat",
+    days: {
+      "2026-10-15": {
+        "claude-opus-5-5": { chat: counts(100) },
+        "totally-fake-model": { chat: counts(900) },
+      },
+    },
+    providers: {
+      "2026-10-15": {
+        custom: { "totally-fake-model": 1800 },
+        "buy-followers-here": { "claude-opus-5-5": 100 },
+        anthropic: { "claude-opus-5-5": 200, "totally-fake-model": 800 },
+      },
+    },
+    updatedAt: NOW,
+  })
+  // The account is on the leaderboard; only its record is older than the rules.
+  await call(env, user, "POST", "join")
+  const board = await call(env, null, "GET", "board")
+  const today = board.body.periods.today
+  assert.deepEqual(today.models.map((row) => row.model), ["claude-opus-5-5"])
+  assert.deepEqual(today.providers, [
+    {
+      provider: "anthropic",
+      tokens: 200,
+      users: 1,
+      models: [{ model: "claude-opus-5-5", tokens: 200 }],
+      others: 0,
+    },
+  ])
+  assert.deepEqual(today.tokens, [{ login: "octocat", total: 200, models: { "claude-opus-5-5": 200 }, others: 0 }])
+  // The standing is the same record under the same rules, so it can't disagree with the board.
+  assert.deepEqual((await call(env, user, "GET", "me")).body.totals, { today: 200, week: 200, month: 200 })
+})
+
+test("a model counts under the catalogue's own name, however it is spelled", () => {
+  // The catalogue spells one model two ways and a host may spell it a third: all three meet, and the
+  // board serves the catalogue's own name.
+  const known = {
+    models: new Map([
+      ["claude-opus-5-5", "claude-opus-5-5"],
+      ["claude-sonnet-4-5", "claude-sonnet-4.5"],
+    ]),
+    providers: new Set(["anthropic"]),
+  }
+  const day = cleanDays(
+    {
+      "2026-10-15": {
+        "Claude.opus-5-5": { chat: counts(3) },
+        "claude-opus-5-5-20250929": { chat: counts(5) },
+        "Claude-Sonnet-4.5": { chat: counts(9) },
+        "my-fake-model": { chat: counts(2) },
+      },
+    },
+    NOW,
+    known,
+  )
+  // Two spellings of one model are one row, and the snapshot counts as its family.
+  assert.deepEqual(Object.keys(day.days["2026-10-15"]), ["claude-opus-5-5", "claude-sonnet-4.5"])
+  assert.equal(day.days["2026-10-15"]["claude-opus-5-5"].chat.input, 8)
+
+  // Without a catalogue nothing can be checked, so the host's own spelling is what the board keeps.
+  const unfiltered = cleanDays(
+    { "2026-10-15": { "Claude.opus-5-5": { chat: counts(3) }, "my-fake-model": { chat: counts(2) } } },
+    NOW,
+  )
+  assert.deepEqual(Object.keys(unfiltered.days["2026-10-15"]), ["claude.opus-5-5", "my-fake-model"])
+
+  assert.deepEqual(
+    cleanProviders(
+      {
+        "2026-10-15": {
+          custom: { m: 5 },
+          "custom:acme": { n: 7 },
+          anthropic: { "claude-opus-5-5": 3, "totally-fake-model": 4 },
+        },
+      },
+      NOW,
+      known,
+    ),
+    { "2026-10-15": { anthropic: { "claude-opus-5-5": 3 } } },
+  )
+})
+
+test("a provider bar is only for a provider the board can vouch for", () => {
+  const catalog = {
+    models: new Map([["claude-opus-5-5", "claude-opus-5-5"]]),
+    providers: new Set(["anthropic", "openrouter"]),
+  }
+  const day = {
+    "2026-10-15": {
+      anthropic: { "claude-opus-5-5": 5 },
+      "buy-followers-here": { "claude-opus-5-5": 900 },
+      custom: { "claude-opus-5-5": 50 },
+      "custom:acme": { "claude-opus-5-5": 50 },
+      // Neither is in the catalogue, and both are names Hermes really reports.
+      nous: { "claude-opus-5-5": 3 },
+      "openai-codex": { "claude-opus-5-5": 4 },
+      together: { "claude-opus-5-5": 2 },
+      unknown: { "claude-opus-5-5": 1 },
+      "openrouter:beta": { "claude-opus-5-5": 6 },
+    },
+  }
+  assert.deepEqual(Object.keys(cleanProviders(day, NOW, catalog)["2026-10-15"]).sort(), [
+    "anthropic",
+    "nous",
+    "openai-codex",
+    "together",
+    "unknown",
+  ])
+  // No catalogue is no check, which is what an unreachable models.dev means: the host's slug stands.
+  assert.deepEqual(Object.keys(cleanProviders(day, NOW)["2026-10-15"]).sort(), [
+    "anthropic",
+    "buy-followers-here",
+    "nous",
+    "openai-codex",
+    "openrouter:beta",
+    "together",
+    "unknown",
+  ])
+})
+
+test("an id is looked up under its own spelling, then without a snapshot date", () => {
+  assert.deepEqual(modelKeys("Claude-Opus-5-5-20250929"), ["claude-opus-5-5-20250929", "claude-opus-5-5"])
+  assert.deepEqual(modelKeys("gpt-5-2025-08-07"), ["gpt-5-2025-08-07", "gpt-5"])
+  assert.deepEqual(modelKeys("claude-sonnet-4-5-latest"), ["claude-sonnet-4-5-latest", "claude-sonnet-4-5"])
+  assert.deepEqual(modelKeys("claude-opus-5-5"), ["claude-opus-5-5"])
 })

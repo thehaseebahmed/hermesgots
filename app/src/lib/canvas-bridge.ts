@@ -2,10 +2,10 @@
  * The one door between a canvas's page and the app (ADR 0114).
  *
  * The page is drawn in a frame with an opaque origin, so it reaches nothing of the app's and the
- * parent is its only door. Reads are answered from this device's copy of the canvas's data — the
- * copy a read of the canvas carries — so a page opens and lists what it holds with the host away
- * (ADR 0113); writes go to the host's one route, `POST canvases/<id>/call`, and the answer it
- * gives is what the copy keeps.
+ * parent is its only door. A read is asked of the reader the screen hands this bridge — today one over
+ * this device's copy of the canvas's data — so a page opens and lists what it holds with the host away
+ * (ADR 0113); writes go to the host's one route, `POST canvases/<id>/call`, and its answer is what
+ * the rows keep — or, with the bot away, the write itself, kept Pending (ADR 0149).
  *
  * Import-free but for the marker's own separator and the rule that cuts a label, so
  * `scripts/test-canvas-bridge.mjs` runs it as a pure rule.
@@ -34,11 +34,45 @@ export const POINT_LABEL_MAX = 80
 export const POINT_SELECTOR_MAX = 200
 
 /**
- * What a page may ask of its data, in the order the page's half offers them: the same four names the
- * guide tells a bot it may call, held here so a guide that names a fifth is a failing test rather
- * than a promise the app doesn't keep.
+ * What a page may ask of its data, in the order the page's half offers them: the same names the guide
+ * tells a bot it may call, held here so a guide that names one more is a failing test rather than a
+ * promise the app doesn't keep. `list` and `get` read a collection whole; `page` and `count` read it a
+ * page at a time, which is how a collection of five thousand is read at all; `partial` asks whether
+ * the rows the device holds are the canvas whole; `query` asks the host to filter, sort and page one,
+ * because a phone holding five thousand rows is not the place to search them.
  */
-export const BRIDGE_METHODS = ["list", "get", "put", "remove"] as const
+export const BRIDGE_METHODS = [
+  "list",
+  "get",
+  "page",
+  "count",
+  "partial",
+  "query",
+  "put",
+  "remove",
+] as const
+
+/**
+ * How many documents one `list` answers. Past it the call is refused whole and told to page, because a
+ * silently short array is a wrong answer no page can detect — and a collection of 5000 bookmarks is
+ * the size the data is held at.
+ */
+export const LIST_MAX = 5000
+
+/**
+ * The page a `page` call asks for when it names no `limit`, and the most it may ask for: the host's own
+ * two numbers (`PAGE_ROWS` and `PAGE_MAX` in `plugin/canvas_docs.py`), so a page reading its own rows
+ * and a page asking the host for one read the same way.
+ */
+export const PAGE_ROWS = 200
+export const PAGE_MAX = 500
+
+/**
+ * The `code` a read carries when it cannot say a document is missing: while no sweep has completed, the
+ * rows are a part of the canvas, and what they don't hold may simply not have been read yet. Absence is
+ * only evidence after a completed sweep (GLOSSARY "Partial").
+ */
+export const CANVAS_PARTIAL = "partial"
 
 /**
  * The host's own reads a page may make without declaring anything (ADR 0114): what its bot's
@@ -48,6 +82,32 @@ export const BRIDGE_METHODS = ["list", "get", "put", "remove"] as const
 export const CANVAS_READS = ["usage", "routines", "projects", "sessions"] as const
 
 export type CanvasReadShape = (typeof CANVAS_READS)[number]
+
+/**
+ * The comparisons a `query` may make, held here as `plugin/canvas_docs.py` holds them, because a
+ * name this app can't promise is a call it refuses at the door rather than a round trip the host
+ * refuses anyway.
+ */
+export const QUERY_OPS = ["eq", "contains", "prefix", "gt", "lt"] as const
+
+export type QueryOp = (typeof QUERY_OPS)[number]
+
+/**
+ * One test a query makes: a document's own top-level field, the comparison, and the value. The field's
+ * name is held to what a JSON path carries where it becomes one — on the host, which owns that path —
+ * and a value is text, a number or a flag, since a document has no other.
+ */
+export interface QueryWhere {
+  field: string
+  op: QueryOp
+  value: string | number | boolean
+}
+
+/** The one key a query's rows are sorted on — a document's field, or the id — and the way. */
+export interface QueryOrder {
+  field?: string
+  dir?: "asc" | "desc"
+}
 
 /**
  * The `code` a host's refusal carries when a page's tool was never allowed: the bridge asks the
@@ -92,6 +152,11 @@ export interface CanvasDoc {
   id: string
   doc: unknown
   at: number
+  /**
+   * This device's own write, kept because its host has not answered it (ADR 0149): read back at once
+   * as this device holds it, sent in order when the host returns, and never outranking its answer.
+   */
+  pending?: boolean
 }
 
 /** What every call carries: the number its reply names it by, and the page that asked. */
@@ -105,20 +170,87 @@ interface BridgeCallBase {
 export type BridgeCall =
   | (BridgeCallBase & { method: "list"; collection: string })
   | (BridgeCallBase & { method: "get"; collection: string; id: string })
+  | (BridgeCallBase & {
+      method: "page"
+      collection: string
+      /** The id the page starts after, or null for the first page. */
+      after: string | null
+      /** How many documents this page asks for, never more than `PAGE_MAX`. */
+      limit: number
+    })
+  | (BridgeCallBase & { method: "count"; collection: string })
+  | (BridgeCallBase & { method: "partial"; collection: string })
+  | (BridgeCallBase & {
+      method: "query"
+      collection: string
+      /** The tests a row has to pass, all of them, in the order the page named them. */
+      where: QueryWhere[]
+      /** The key the rows come back in. */
+      order: QueryOrder
+      /** How many rows this page asks for, never more than `PAGE_MAX`. */
+      limit: number
+      /** How many matching rows to skip — the page a caller is on, counted from none. */
+      offset: number
+    })
   | (BridgeCallBase & { method: "put"; collection: string; id: string; doc: unknown })
   | (BridgeCallBase & { method: "remove"; collection: string; id: string })
   | (BridgeCallBase & { method: "read"; shape: CanvasReadShape; args: Record<string, unknown> })
   | (BridgeCallBase & { method: "tool"; tool: string; args: Record<string, unknown> })
   | (BridgeCallBase & { method: "open"; url: string })
 
-/** A call answered from this device's copy of the canvas's data: no other method reads it. */
-export type BridgeDataCall = Extract<BridgeCall, { method: "list" | "get" | "put" | "remove" }>
+/** A call answered from this device's rows of the canvas's data: the five reads that never reach the
+ * host. */
+export type BridgeDataCall = Extract<BridgeCall, { method: "list" | "get" | "page" | "count" | "partial" }>
 
 /** A call the host answers: the canvas's own data, written through the host's one route. */
 export type BridgeWriteCall = Extract<BridgeCall, { method: "put" | "remove" }>
 
-/** A call that reaches the host: one of its free reads, or a declared tool the page calls. */
-export type BridgeHostCall = Extract<BridgeCall, { method: "read" | "tool" }>
+/**
+ * A write without the number a page's reply names it by: what the host's one route takes, and what a
+ * write kept on this device (`canvas-outbox.ts`) holds — a Pending write answers no page, since the
+ * page's promise was kept when it was made.
+ */
+export type CanvasWrite =
+  | { method: "put"; collection: string; id: string; doc: unknown }
+  | { method: "remove"; collection: string; id: string }
+
+/**
+ * The statuses a host refuses a canvas's write with — the one list a canvas's callers read: a document
+ * past its cap or a name it won't take (400), a write it won't allow (403), one it will not store as
+ * the canvas now stands (409), and the canvas being gone (404), which a put is refused by as a remove
+ * is: there is nowhere left to store it. Every other status a host can send is no answer at all.
+ */
+export const WRITE_REFUSALS: readonly number[] = [400, 403, 404, 409]
+
+/**
+ * What a failed call to a canvas's host is, in the one judgement every caller of that host reads
+ * (ADR 0149): `refused` when the host answered with a status it refuses a write by — its own words are
+ * the page's answer, and a write is never queued for it; `answered` when it answered with any other
+ * status, which is a read's answer and no refusal of a write, since a 5xx or a 429 is the bot not
+ * being there yet; and `away` when the request never landed, so nothing answered at all.
+ *
+ * `hostAnswered` in `hermes.ts` says only whether a status came back; this says which of the three a
+ * canvas's call is, so `withHost` in `canvases.ts`, a page's write and the queue beside them cannot
+ * disagree about what "away" means. Import-free: the status is read off the failure rather than
+ * tested with `instanceof`, since the only failures these callers see are the host's own
+ * (`request` in `hermes.ts`, which is the one place that builds them) and the transport's, and only
+ * the first carries a status.
+ */
+export type HostVerdict = "refused" | "answered" | "away"
+
+export function hostVerdict(failure: unknown): HostVerdict {
+  const status =
+    failure && typeof failure === "object" ? (failure as { status?: unknown }).status : undefined
+  if (typeof status !== "number") return "away"
+  return WRITE_REFUSALS.includes(status) ? "refused" : "answered"
+}
+
+/** A call the host answers: the canvas's own data read by the host, or a declared tool. */
+export type BridgeHostCall = Extract<BridgeCall, { method: "read" | "query" | "tool" }>
+
+/** A query of one collection the host answers: the filter, the sort and the page — the call carries no
+ * document. */
+export type BridgeQueryCall = Extract<BridgeCall, { method: "query" }>
 
 /** A host read's arguments: a named shape and whatever that shape takes. */
 export type BridgeReadCall = Extract<BridgeCall, { method: "read" }>
@@ -160,6 +292,41 @@ function httpUrl(value: unknown): string | null {
 }
 
 /**
+ * A query's tests, as a page sent them: every one a field, an op the host knows and a value that is
+ * text, a number or a flag. `undefined` is no tests at all — a query of the whole collection — and a
+ * shape this can't read is no call.
+ */
+function queryWhere(value: unknown): QueryWhere[] | null {
+  if (value === undefined || value === null) return []
+  if (!Array.isArray(value)) return null
+  const kept: QueryWhere[] = []
+  for (const test of value) {
+    if (!test || typeof test !== "object" || Array.isArray(test)) return null
+    const { field, op, value: held } = test as Record<string, unknown>
+    if (typeof field !== "string" || !field) return null
+    if (typeof op !== "string" || !QUERY_OPS.includes(op as QueryOp)) return null
+    const usable =
+      typeof held === "string" ||
+      typeof held === "boolean" ||
+      (typeof held === "number" && Number.isFinite(held))
+    if (!usable) return null
+    kept.push({ field, op: op as QueryOp, value: held as string | number | boolean })
+  }
+  return kept
+}
+
+/** A query's sort: a field or the id, and one of two directions. Anything else is no call. */
+function queryOrder(value: unknown): QueryOrder | null {
+  if (value === undefined || value === null) return { dir: "asc" }
+  if (typeof value !== "object" || Array.isArray(value)) return null
+  const { field, dir } = value as Record<string, unknown>
+  if (field !== undefined && field !== null && (typeof field !== "string" || !field)) return null
+  const way = dir === undefined || dir === null ? "asc" : dir
+  if (way !== "asc" && way !== "desc") return null
+  return { ...(typeof field === "string" ? { field } : {}), dir: way }
+}
+
+/**
  * A call the page sent, or null for anything else. Another window's idea of the message is not a
  * call: the type, the number, the method and the fields each method needs all have to be here.
  */
@@ -191,9 +358,58 @@ export function readCall(data: unknown): BridgeCall | null {
     if (!url) return null
     return { ...epoch, call: raw.call, method, url }
   }
-  if (method !== "list" && method !== "get" && method !== "put" && method !== "remove") return null
+  if (
+    method !== "list" &&
+    method !== "get" &&
+    method !== "page" &&
+    method !== "count" &&
+    method !== "partial" &&
+    method !== "query" &&
+    method !== "put" &&
+    method !== "remove"
+  )
+    return null
   if (typeof raw.collection !== "string" || !raw.collection) return null
-  if (method === "list") return { ...epoch, call: raw.call, method, collection: raw.collection }
+  if (method === "list" || method === "count" || method === "partial") {
+    return { ...epoch, call: raw.call, method, collection: raw.collection }
+  }
+  if (method === "query") {
+    const where = queryWhere(raw.where)
+    const order = queryOrder(raw.order)
+    if (!where || !order) return null
+    const limit = raw.limit === undefined || raw.limit === null ? PAGE_ROWS : raw.limit
+    const offset = raw.offset === undefined || raw.offset === null ? 0 : raw.offset
+    if (typeof limit !== "number" || !Number.isInteger(limit) || limit <= 0) return null
+    if (typeof offset !== "number" || !Number.isInteger(offset) || offset < 0) return null
+    return {
+      ...epoch,
+      call: raw.call,
+      method,
+      collection: raw.collection,
+      where,
+      order,
+      // The host's own cap is the most one query may ask for, as a page's is.
+      limit: Math.min(limit, PAGE_MAX),
+      offset,
+    }
+  }
+  if (method === "page") {
+    const asked = raw.after
+    if (asked !== undefined && asked !== null && (typeof asked !== "string" || !asked)) return null
+    const after = typeof asked === "string" ? asked : null
+    const limit = raw.limit === undefined || raw.limit === null ? PAGE_ROWS : raw.limit
+    // A page's limit is a whole number of documents, and the host's own cap is the most one may ask:
+    // a page asking for everything would defeat the call it is making.
+    if (typeof limit !== "number" || !Number.isInteger(limit) || limit <= 0) return null
+    return {
+      ...epoch,
+      call: raw.call,
+      method,
+      collection: raw.collection,
+      after,
+      limit: Math.min(limit, PAGE_MAX),
+    }
+  }
   if (typeof raw.id !== "string" || !raw.id) return null
   if (method === "put") {
     // The key decides, not what it holds: a stored null is a value the page wrote.
@@ -211,14 +427,116 @@ export function readCall(data: unknown): BridgeCall | null {
 }
 
 /**
- * What a data read answers, from the device's copy alone: the collection's documents in copy order,
- * or the one document, or null. No data read reaches the host.
+ * What a read is answered from: this device's rows of one canvas, asked as the call arrives, so a write
+ * landing never replaces a reader under a running page. `docs` and `count` are the two ways to ask for
+ * a collection — the documents, or only how many there are — `get` and `page` are the two ways to ask
+ * for less than one, and `whole` is what the sweep's mark says about them. Where those rows live is the
+ * reader's business (`canvasReader` in `canvases.ts`); this is only what a read needs to answer.
+ *
+ * Each read is the read its call is: a `get` is one row by its key, so it never carries a collection to
+ * find a document in, and a `page` is one page of a collection, so a page of five reads five.
  */
-export function answerRead(call: BridgeDataCall, copy: CanvasDoc[]): unknown {
-  if (call.method === "list") return copy.filter((row) => row.collection === call.collection)
-  if (call.method === "get")
-    return copy.find((row) => row.collection === call.collection && row.id === call.id) ?? null
-  return null
+export interface CanvasCopy {
+  /** One collection's documents, in the host's own order. */
+  docs(collection: string): Promise<CanvasDoc[]>
+  /** One document by its key — the point read a `get` answers from. */
+  get(collection: string, id: string): Promise<CanvasDoc | undefined>
+  /** One page of a collection: the documents after `after`, and where the next page starts. */
+  page(collection: string, after: string | null, limit: number): Promise<CanvasPageRows>
+  /** One collection's count, off the device's index: a read of the number, not of the documents. */
+  count(collection: string): Promise<number>
+  /** Whether the rows are the canvas whole — a sweep reached its last page, and none is under way. */
+  whole(): Promise<boolean>
+}
+
+/**
+ * One page of a collection as the copy reads it — what a `page` call receives: the documents, and the
+ * id the next page starts after — null where this was the collection's last page. Only the copy knows
+ * whether another page follows, since it is the copy that read one row more than the page needed to
+ * answer that. The host's own page of documents, off its route, is `CanvasDocsPage` in `hermes.ts`,
+ * which carries the wire's field names (`documents`, `count`).
+ */
+export interface CanvasPageRows {
+  rows: CanvasDoc[]
+  next: string | null
+}
+
+/**
+ * What a `page` call answers: one page of a collection's rows and where the next page starts, the
+ * collection's whole count, and whether those rows are the canvas whole. The one shape a page's half
+ * reads (`page` in `BRIDGE_SCRIPT`), built where the bridge answers a page and nowhere else.
+ */
+export interface CanvasPageAnswer {
+  rows: CanvasDoc[]
+  next: string | null
+  total: number
+  partial: boolean
+}
+
+/** A read that cannot answer, in the words a page is given and the code a caller can read. */
+function partial(call: BridgeDataCall): Error {
+  const said =
+    call.method === "get"
+      ? `This canvas's data is partial on this phone, so it can't say ${call.collection} / ${call.id} is gone. ` +
+        `A sweep has to finish first.`
+      : "This canvas's data is partial on this phone."
+  const error = new Error(said) as Error & { code: string }
+  error.code = CANVAS_PARTIAL
+  return error
+}
+
+/**
+ * What a data read answers, from the rows and the sweep's mark it is given. No data read reaches the
+ * host. A `list` is one collection's documents in the host's order — a bare array, which is the shape
+ * every canvas already written reads — and refuses past `LIST_MAX` rather than answering a short
+ * array no page could tell was short; a `page` is that collection a page at a time, from the id it
+ * was given, a `CanvasPageAnswer` with the total and where the next starts; a `count` is the index's
+ * number; `partial` is whether those rows are the canvas whole; and a `get` is one document —
+ * answering `null` only where a completed sweep says this device has seen the canvas whole, since
+ * before one a document the rows don't hold may simply not have been read yet (GLOSSARY "Partial").
+ */
+export async function answerRead(call: BridgeDataCall, copy: CanvasCopy): Promise<unknown> {
+  if (call.method === "count") return copy.count(call.collection)
+  // The one truth a list and a page are honest by, asked on its own: a page that needs to know
+  // whether an absence is evidence asks this rather than reading a field off a list.
+  if (call.method === "partial") return !(await copy.whole())
+  if (call.method === "get") {
+    const row = await copy.get(call.collection, call.id)
+    if (row) return row
+    if (!(await copy.whole())) throw partial(call)
+    return null
+  }
+  if (call.method === "list") {
+    // The count first, so a collection too big to answer is refused without carrying its documents.
+    const held = await copy.count(call.collection)
+    if (held > LIST_MAX) {
+      throw new Error(
+        `This collection holds ${held} documents and canvas.data.list answers at most ${LIST_MAX}. ` +
+          `Read it a page at a time with canvas.data.page.`,
+      )
+    }
+    return copy.docs(call.collection)
+  }
+  const [one, total, whole] = await Promise.all([
+    copy.page(call.collection, call.after, call.limit),
+    copy.count(call.collection),
+    copy.whole(),
+  ])
+  // Where the next page starts is the copy's answer, since it is the copy that read one row past this
+  // page: a page that reached the end names none, and `partial` is what says whether that end is the
+  // canvas's own.
+  const answer: CanvasPageAnswer = { rows: one.rows, next: one.next, total, partial: !whole }
+  return answer
+}
+
+/**
+ * The documents a host's answer carries, as the bridge can read them: what it holds of its shape,
+ * with anything it can't read dropped rather than put in the rows as a document no page could draw.
+ * One rule beside `storedDoc`, since a page of a sweep and a whole read are the same answer twice.
+ */
+export function storedDocs(values: unknown): CanvasDoc[] {
+  if (!Array.isArray(values)) return []
+  return values.map(storedDoc).filter((one): one is CanvasDoc => one !== null)
 }
 
 /** A document the host answered with, or null when the answer isn't the shape it documents. */
@@ -263,7 +581,7 @@ export function inOrder(copy: CanvasDoc[]): CanvasDoc[] {
  */
 export function applyWrite(
   copy: CanvasDoc[],
-  call: BridgeWriteCall,
+  call: CanvasWrite,
   value: unknown,
 ): CanvasDoc[] | null {
   if (!value || typeof value !== "object") return null
@@ -396,11 +714,16 @@ try{parent.postMessage({type:TYPE,ready:true},"*")}catch(e){}
 
 /**
  * The page's half, put in the head ahead of the page's own scripts: `window.canvas.data` with
- * `list`, `get`, `put` and `remove`, `window.canvas.read(shape, args)` for the host's four free
- * reads, and `window.canvas.tool.call(name, args)` for a tool the version declared. Each posts the
- * call to the parent and settles on the reply that names it — a tool call waits on the reader's
- * answer, which the app keeps for it. Every message carries this document's own epoch, so a reply
- * meant for the page drawn before this one can never settle a promise here. ES5, like the scroll
+ * `list`, `get`, `page`, `count`, `partial`, `query`, `put` and `remove` — a `page` settling on a
+ * `CanvasPageAnswer`, one page of the collection's rows with the total and whether they are the canvas
+ * whole — `window.canvas.read(shape, args)` for the host's four free reads, and
+ * `window.canvas.tool.call(name, args)` for a tool the version declared. `query` is the one data call
+ * the host answers, so it is the one a page needs the bot for. Each posts the call to the parent and
+ * settles on the reply that names it — a tool call waits on the reader's answer, which the app keeps
+ * for it. Every message carries this document's own epoch, so a reply meant for the page drawn before
+ * this one can never settle a promise here. A reply that fails carries the error's `code` where it has
+ * one, and the page's own error is given that code,
+ * so a page can ask whether its copy is partial without matching the words. ES5, like the scroll
  * bridge beside it: it runs before the page's own scripts and asks nothing of the page.
  *
  * A link is the page's second way out of the frame, and the reader's tap is how a page is meant to ask:
@@ -428,7 +751,7 @@ try{parent.postMessage({type:TYPE,ready:true},"*")}catch(e){}
 export const BRIDGE_SCRIPT =
   `(function(){var TYPE="` +
   BRIDGE_MESSAGE +
-  `";var EPOCH=Math.random().toString(36).slice(2);var waiting={};var calls=0;var ask=function(fields){var call=++calls;return new Promise(function(resolve,reject){waiting[call]={resolve:resolve,reject:reject};var message={type:TYPE,epoch:EPOCH,call:call};for(var key in fields){if(Object.prototype.hasOwnProperty.call(fields,key)){message[key]=fields[key]}}try{parent.postMessage(message,"*")}catch(e){delete waiting[call];reject(new Error("The canvas is not on the app's page."))}})};addEventListener("message",function(event){var data=event.data;if(!data||typeof data!=="object"||data.type!==TYPE||data.epoch!==EPOCH){return}var call=waiting[data.reply];if(!call){return}delete waiting[data.reply];if(data.ok){call.resolve(data.value)}else{call.reject(new Error(typeof data.error==="string"&&data.error?data.error:"The canvas's request didn't answer."))}});var web=function(url){try{var protocol=new URL(String(url==null?"":url)).protocol;return protocol==="http:"||protocol==="https:"}catch(e){return false}};var asked={};var anchor=function(node){while(node){if(String(node.tagName||"").toUpperCase()==="A"&&node.getAttribute&&node.getAttribute("href")){return node}node=node.parentNode}return null};var hrefOf=function(link){var raw="";try{raw=String(link.getAttribute("href")||"")}catch(e){raw=""}if(!web(raw)){return ""}var href="";try{href=link.href||""}catch(e){href=""}return web(href)?link.href:raw};var openAsk=function(url){ask({method:"open",url:url}).catch(function(){})};addEventListener("click",function(event){if(!event||event.isTrusted!==true||event.defaultPrevented||!event.target){return}var link=anchor(event.target);if(!link){return}var url=hrefOf(link);if(!url){return}event.preventDefault();if(asked[url]){return}openAsk(url)},false);window.open=function(url,target){var href=String(url==null?"":url);var name=String(target==null?"":target).toLowerCase();if(name==="_self"||!web(href)){return null}openAsk(href);asked[href]=true;setTimeout(function(){delete asked[href]},0);return {closed:false,opener:null,focus:function(){},blur:function(){},close:function(){},postMessage:function(){}}};window.canvas={data:{list:function(collection){return ask({method:"list",collection:collection})},get:function(collection,id){return ask({method:"get",collection:collection,id:id})},put:function(collection,id,doc){return ask({method:"put",collection:collection,id:id,doc:doc})},remove:function(collection,id){return ask({method:"remove",collection:collection,id:id})}},read:function(shape,args){return ask({method:"read",shape:shape,args:args||{}})},tool:{call:function(name,args){return ask({method:"tool",tool:name,args:args||{}})}}}})()` +
+  `";var EPOCH=Math.random().toString(36).slice(2);var waiting={};var calls=0;var ask=function(fields){var call=++calls;return new Promise(function(resolve,reject){waiting[call]={resolve:resolve,reject:reject};var message={type:TYPE,epoch:EPOCH,call:call};for(var key in fields){if(Object.prototype.hasOwnProperty.call(fields,key)){message[key]=fields[key]}}try{parent.postMessage(message,"*")}catch(e){delete waiting[call];reject(new Error("The canvas is not on the app's page."))}})};addEventListener("message",function(event){var data=event.data;if(!data||typeof data!=="object"||data.type!==TYPE||data.epoch!==EPOCH){return}var call=waiting[data.reply];if(!call){return}delete waiting[data.reply];if(data.ok){call.resolve(data.value)}else{var said=new Error(typeof data.error==="string"&&data.error?data.error:"The canvas's request didn't answer.");if(typeof data.code==="string"&&data.code){said.code=data.code}call.reject(said)}});var web=function(url){try{var protocol=new URL(String(url==null?"":url)).protocol;return protocol==="http:"||protocol==="https:"}catch(e){return false}};var asked={};var anchor=function(node){while(node){if(String(node.tagName||"").toUpperCase()==="A"&&node.getAttribute&&node.getAttribute("href")){return node}node=node.parentNode}return null};var hrefOf=function(link){var raw="";try{raw=String(link.getAttribute("href")||"")}catch(e){raw=""}if(!web(raw)){return ""}var href="";try{href=link.href||""}catch(e){href=""}return web(href)?link.href:raw};var openAsk=function(url){ask({method:"open",url:url}).catch(function(){})};addEventListener("click",function(event){if(!event||event.isTrusted!==true||event.defaultPrevented||!event.target){return}var link=anchor(event.target);if(!link){return}var url=hrefOf(link);if(!url){return}event.preventDefault();if(asked[url]){return}openAsk(url)},false);window.open=function(url,target){var href=String(url==null?"":url);var name=String(target==null?"":target).toLowerCase();if(name==="_self"||!web(href)){return null}openAsk(href);asked[href]=true;setTimeout(function(){delete asked[href]},0);return {closed:false,opener:null,focus:function(){},blur:function(){},close:function(){},postMessage:function(){}}};window.canvas={data:{list:function(collection){return ask({method:"list",collection:collection})},get:function(collection,id){return ask({method:"get",collection:collection,id:id})},page:function(collection,options){var opts=options||{};return ask({method:"page",collection:collection,after:opts.after==null?null:opts.after,limit:opts.limit})},count:function(collection){return ask({method:"count",collection:collection})},partial:function(collection){return ask({method:"partial",collection:collection})},query:function(spec){var held=spec||{};return ask({method:"query",collection:held.collection,where:held.where,order:held.order,limit:held.limit,offset:held.offset})},put:function(collection,id,doc){return ask({method:"put",collection:collection,id:id,doc:doc})},remove:function(collection,id){return ask({method:"remove",collection:collection,id:id})}},read:function(shape,args){return ask({method:"read",shape:shape,args:args||{}})},tool:{call:function(name,args){return ask({method:"tool",tool:name,args:args||{}})}}}})()` +
   ";" +
   POINT_SCRIPT
 
@@ -436,8 +759,11 @@ export const BRIDGE_SCRIPT =
 export interface BridgeHost {
   /** The frame as it is now: a message is heard only when this is its source. */
   frame(): Window | null
-  /** The device's copy of the canvas's data, as the last read or write left it. */
-  copy(): CanvasDoc[]
+  /**
+   * One read of the canvas's data, answered: what the page is told, or the error whose words it is
+   * told instead. Which copy the answer comes from is the reader's — today the one this device holds.
+   */
+  read(call: BridgeDataCall): Promise<unknown>
   /** A write through the host's route; its answer, or its error, is what the page is told. */
   write(call: BridgeWriteCall): Promise<unknown>
   /** A host read or a tool call; its answer, or its error, is what the page is told. */
@@ -485,12 +811,13 @@ function once(
 }
 
 /**
- * The parent's listener: a read of the canvas's data is answered at once from the device's copy, a
- * write is the host's, and a host read or a tool call is the host's too — a tool call held until the
- * reader allows it. A link the page's reader tapped is opened through the app's own way out, once
- * per call. Nothing from another window is answered or posted — a message is the canvas talking only
- * when it comes from this screen's own frame — and a call this rule cannot read is answered with the
- * reason rather than dropped, since the page's promise is waiting on it.
+ * The parent's listener: the four reads of the canvas's data this device answers are the reader's, and
+ * whatever it answers — a value or an error — is what the page is told; a write is the host's, and a
+ * host read, a `query` among them, or a tool call is the host's too — a tool call held until the
+ * reader allows it. A link the page's reader tapped is opened through the app's own way out, once per
+ * call. Nothing from another window is answered or posted — a message is the canvas talking only when
+ * it comes from this screen's own frame — and a call this rule cannot read is answered with the reason
+ * rather than dropped, since the page's promise is waiting on it.
  *
  * A tool refused for consent is asked about once, however many calls are waiting on it: the second
  * call waits on the same answer rather than opening a second dialog. Allow retries the call once and
@@ -559,21 +886,31 @@ export function bridgeHandler(host: BridgeHost): (event: MessageEvent) => void {
       reply(call.call, true, { value: null })
       return
     }
-    if (call.method === "list" || call.method === "get") {
-      reply(call.call, true, { value: answerRead(call, host.copy()) })
+    const settle = (asked: Promise<unknown>) =>
+      void asked.then(
+        (value) => reply(call.call, true, { value }),
+        (error: unknown) => {
+          // The words are what a page shows; the code, where the error carries one, is what it
+          // branches on — a partial copy is told apart from any other refusal without matching a
+          // sentence.
+          const code = codeOf(error)
+          reply(call.call, false, { error: wordsOf(error), ...(code ? { code } : {}) })
+        },
+      )
+    if (
+      call.method === "list" ||
+      call.method === "get" ||
+      call.method === "page" ||
+      call.method === "count" ||
+      call.method === "partial"
+    ) {
+      settle(host.read(call))
       return
     }
     if (call.method === "put" || call.method === "remove") {
-      void host.write(call).then(
-        (value) => reply(call.call, true, { value }),
-        (error: unknown) => reply(call.call, false, { error: wordsOf(error) }),
-      )
+      settle(host.write(call))
       return
     }
-    const asked = call.method === "tool" ? callTool(call) : host.call(call)
-    void asked.then(
-      (value) => reply(call.call, true, { value }),
-      (error: unknown) => reply(call.call, false, { error: wordsOf(error) }),
-    )
+    settle(call.method === "tool" ? callTool(call) : host.call(call))
   }
 }
