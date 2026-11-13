@@ -15,7 +15,7 @@ import { MemoryRouter, Route, Routes, type InitialEntry } from "react-router"
 import { Home } from "@/App"
 import { BotChatsPage, BotChatsPane } from "@/routes/bot-chats"
 import { BOT_CHATS } from "@/lib/chat-list"
-import { db, deleteConversation, getSettings, type Message } from "@/lib/db"
+import { db, deleteConversation, getSettings, saveChatFilter, saveSettings, type Message } from "@/lib/db"
 import { pressBack } from "@/lib/native"
 import { markRead } from "@/lib/read-marks"
 import {
@@ -924,12 +924,89 @@ test("the filter a device kept is the one its list opens on", async () => {
     assert.equal(filterPill("All")?.getAttribute("aria-pressed"), "true", "a device that never chose opens on All")
     await click(filterPill("Rooms"))
     assert.deepEqual(rowIds(), ["planning"], "the press narrows the rows")
-    assert.equal((await getSettings()).chatFilter, "rooms", "and is what this device keeps")
+    assert.equal((await getSettings()).chatFilters?.[bot.id], "rooms", "and is what this device keeps for this bot")
   })
   // The next visit is the pill it left, not the ground.
   await mount(screen(), async () => {
     await until(async () => rowIds().length === 1, "the list opened on the pill this device kept")
     assert.deepEqual(rowIds(), ["planning"], "the rows it keeps")
     assert.equal(filterPill("Rooms")?.getAttribute("aria-pressed"), "true", "with Rooms pressed")
+    assert.equal(
+      (await getSettings()).chatFilters?.[bot.id],
+      "rooms",
+      "and a fresh read answers the pill this device set",
+    )
   })
+})
+
+test("a pill pressed on one bot leaves every other bot's list on its own", async () => {
+  const other = botProfile("bot-chats-other", {
+    id: "bot-2",
+    name: "Otherly",
+    hermesProfile: "other",
+  })
+  await seed([
+    { id: "trip", title: "Trip to Lisbon", at: 300, said: "Booked the flights" },
+    { id: "planning", title: "Planning", at: 150, said: "All aboard", room: true },
+  ])
+  // A second bot, with a chat and a room of its own, that has never chosen a pill of its own: a
+  // device-wide key could not tell it from the first.
+  await db.profiles.put(other)
+  await db.conversations.bulkPut([
+    {
+      id: "other-chat",
+      profileId: other.id,
+      title: "Other chat",
+      createdAt: 200,
+      updatedAt: 200,
+      changedAt: 200,
+    },
+    {
+      id: "other-room",
+      profileId: other.id,
+      title: "Other room",
+      createdAt: 120,
+      updatedAt: 120,
+      changedAt: 120,
+      room: { id: "room-other", members: [{ profile: "other", displayName: "Otherly" }] },
+    },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 2, "the first bot's list")
+    await click(filterPill("Rooms"))
+    assert.deepEqual(rowIds(), ["planning"], "the press narrows the bot it was made in")
+  })
+  await mount(screen(`/b/${other.id}`), async () => {
+    await until(async () => rowIds().length > 0, "the second bot's rows")
+    assert.equal(
+      filterPill("All")?.getAttribute("aria-pressed"),
+      "true",
+      "a bot that never chose opens on All, not on the pill another bot kept",
+    )
+    assert.deepEqual(
+      rowIds().sort(),
+      ["other-chat", "other-room"],
+      "and lists every row it holds",
+    )
+  })
+  // And the pill the first bot kept is still its own, with nothing on it taken by the second.
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 1, "the first bot's list, on its own pill")
+    assert.deepEqual(rowIds(), ["planning"], "the rows the first bot kept")
+  })
+})
+
+test("a pill saved beside another write of the settings row survives it", async () => {
+  await seed([{ id: "planning", title: "Planning", at: 150, room: true }])
+  // The row is put whole, so a save that read it before the pill landed would restore the map it saw:
+  // the pill's own write and the row's are both transactions, and the later one keeps both fields.
+  let lost = 0
+  for (let i = 0; i < 20; i += 1) {
+    await Promise.all([
+      saveChatFilter(bot.id, "rooms"),
+      saveSettings({ appearanceAt: i + 1 }),
+    ])
+    if ((await getSettings()).chatFilters?.[bot.id] !== "rooms") lost += 1
+  }
+  assert.equal(lost, 0, "no pill is lost to a save of the switches beside it")
 })
