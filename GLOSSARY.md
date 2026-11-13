@@ -213,6 +213,13 @@ Read at render, never stored, and never written by the app: the name is the one 
 (ADR 0149).
 _Avoid_: display name, nickname, handle
 
+**Presence**:
+Whether a bot's host answered this device's last chat-list pass, and when this device last heard it: the
+pass's own answer decides online or away, and until a pass lands the time this device kept stands in for it.
+It is not a stored heartbeat — nothing on the server records a check-in — and the screens draw two words
+from it, `Online` or `Last seen 2 hr. ago`, or nothing at all about a bot this device cannot answer for.
+_Avoid_: heartbeat, online status, availability
+
 **Chat**:
 A bot's own conversation with you — where the app is: a bot's address lands in its chat, so the chat,
 not a list of them, is the screen the app opens on and the one a reload keeps the reader in. A bot's
@@ -795,7 +802,7 @@ A page's write the device kept because its bot was away: read back at once and s
 _Avoid_: queued write, outbox entry, draft, retry
 
 **Vault**:
-The OKF bundle a canvas's documents are copied into when that canvas's own switch is on — one markdown file per document, under the bot's home, written by its host and never read back.
+The OKF bundle a canvas's documents are copied into when that canvas's own switch is on — one markdown file per document, under the plugin's data folder (`$HERMES_HOME/plugin-data/gots/llm-wiki/canvas`), written by its host and never read back.
 _Avoid_: wiki, backup folder, export, mirror
 
 **Ask**:
