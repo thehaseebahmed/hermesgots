@@ -15,9 +15,14 @@ same tasks again is a second view of Working, not a fact of its own.
 The rules that follow:
 
 - **The count is the number of places the sheet draws.** The Working block draws the first `count`
-  holds, oldest first, and counts those against the count. Holds past it get a **Queued** section
-  directly under it — the tasks a lowered count left in flight, waiting for a place — so the project's
-  sheet is the count the user set and nothing of it goes unsaid.
+  holds, oldest first, under a heading that counts them against the count, `Working (n of m)`. Holds
+  past it get a **Queued** section directly under it — the tasks a lowered count left in flight,
+  waiting for a place — so the project's sheet is the count the user set and nothing of it goes
+  unsaid.
+- **Every heading counts what is under it.** `Working (n of m)`, `Queued (n)`, `Ready (n)`,
+  `Blocked (n)`: one shape, so a reader compares sections rather than reading a sentence under one of
+  them. A host from before the pick count names no count, so its single Working row is headed
+  `Working` alone.
 - **Lowering the count still abandons nothing** (ADR 0025). No hold is dropped and no claim is
   released: the row is also the record that releases the claim — the sweep's settled holds, a deleted
   project's, and a start that never got away all walk holds — so giving one back for a lower number

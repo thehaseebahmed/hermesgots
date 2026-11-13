@@ -521,17 +521,19 @@ function Working({
       )}
       {rows.length > 0 && (
         <section aria-label="Working" data-working>
-          <h3 className="px-1 pb-1 text-sm text-muted-foreground">Working</h3>
-          {/* Only a host that answered a list is counted: one task against a count of one is a
-              sentence about nothing. */}
-          {held && typeof pickCount === "number" && (
-            <p
-              data-holds={places?.length ?? 0}
+          {/* Every heading counts what is under it: the places taken against the count for Working,
+              and a plain number for Queued, Ready and Blocked. A host that answers no list of holds
+              — one from before the pick count — says nothing about a count. */}
+          {held && typeof pickCount === "number" ? (
+            <h3
+              data-holds={rows.length}
               data-pick-count={pickCount}
               className="px-1 pb-1 text-sm text-muted-foreground"
             >
-              {`${places?.length ?? 0} of ${pickCount} held`}
-            </p>
+              {`Working (${rows.length} of ${pickCount})`}
+            </h3>
+          ) : (
+            <h3 className="px-1 pb-1 text-sm text-muted-foreground">Working</h3>
           )}
           <ul>
             {rows.map(({ hold, kind }) => (
@@ -550,7 +552,9 @@ function Working({
           and waiting for a place. */}
       {queued.length > 0 && (
         <section aria-label="Queued" data-queued>
-          <h3 className="px-1 pb-1 text-sm text-muted-foreground">Queued</h3>
+          <h3 className="px-1 pb-1 text-sm text-muted-foreground">
+            {`Queued (${queued.length})`}
+          </h3>
           <ul>
             {queued.map((hold) => (
               <li key={`${hold.repo}#${hold.number}`} data-queued-task={hold.number}>

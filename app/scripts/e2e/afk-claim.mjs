@@ -156,17 +156,17 @@ const run = async ({ page, profileId, shot, until }) => {
       .isVisible(),
     "the pop-up names the task AFK is holding",
   )
-  // One place, one task: the count row says how many of them are held, against the count of one a
+  // One place, one task: the heading says how many of them are held, against the count of one a
   // project starts with.
   const count = working.locator("[data-holds]")
   await count.waitFor({ timeout: 15_000 })
-  assert.equal(await count.getAttribute("data-holds"), "1", "the count row counts the one hold")
+  assert.equal(await count.getAttribute("data-holds"), "1", "the heading counts the one hold")
   assert.equal(
     await count.getAttribute("data-pick-count"),
     "1",
     "against the count of one it holds by",
   )
-  assert.equal((await count.innerText()).trim(), "1 of 1 held", "and reads them as words")
+  assert.equal((await count.innerText()).trim(), "Working (1 of 1)", "and reads them as words")
   await shot("working")
 
   // The pick count sits under the switch as one pill per count, the count it holds already on.
@@ -210,7 +210,7 @@ const run = async ({ page, profileId, shot, until }) => {
   }
   assert.equal(
     (await count.innerText()).trim(),
-    "3 of 3 held",
+    "Working (3 of 3)",
     "three holds against a count of three",
   )
   await shot("three-holds")
