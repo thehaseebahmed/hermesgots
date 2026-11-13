@@ -1,5 +1,5 @@
 /**
- * Appearance: how the app draws, and the one switch the profile keeps on its host.
+ * Appearance: how the app draws.
  * It is here rather than in `routes/settings.tsx` so a component test can mount it on its own.
  */
 import { useLiveQuery } from "dexie-react-hooks"
@@ -8,7 +8,6 @@ import {
   CornerDownLeftIcon,
   CornerDownRightIcon,
   KeyboardIcon,
-  LayoutGridIcon,
   MonitorIcon,
   MoonIcon,
   SunIcon,
@@ -17,11 +16,8 @@ import {
 } from "lucide-react"
 import { useTheme } from "next-themes"
 
-import { Group, RowText, SwitchRow, rowClass, useScreenRefusal } from "@/components/settings-chrome"
-import { DEFAULT_SETTINGS, db, getActiveProfile, saveAppearance, saveSettings } from "@/lib/db"
-import { usePluginFeature, type PluginServer } from "@/lib/features"
-import { useHostRecord } from "@/lib/host-record"
-import { OPENUI_SWITCH, UNANSWERED_IS_ON } from "@/lib/openui-switch"
+import { Group, RowText, SwitchRow, rowClass } from "@/components/settings-chrome"
+import { DEFAULT_SETTINGS, db, saveAppearance, saveSettings } from "@/lib/db"
 import { THEMES, type ThemeValue } from "@/lib/theme"
 import { cn } from "@/lib/utils"
 
@@ -31,36 +27,6 @@ const ICONS: Record<ThemeValue, LucideIcon> = {
   dark: MoonIcon,
 }
 
-/**
- * Profile-wide on the host, because the cost it saves is paid there; a write the host refuses comes
- * back as the host's truth rather than a quiet local off.
- */
-function InterfaceSwitch({ server }: { server: PluginServer }) {
-  const answer = usePluginFeature(server, OPENUI_SWITCH.feature)
-  const { value, settled, supported, saving, save } = useHostRecord(
-    server,
-    OPENUI_SWITCH,
-    UNANSWERED_IS_ON,
-  )
-  const offered = answer === "yes" && supported
-  const refusal = useScreenRefusal()
-  return (
-    <SwitchRow
-      id="interfaces"
-      icon={LayoutGridIcon}
-      title="Interfaces"
-      subtitle={
-        answer === "no"
-          ? "Not available on this bot's host"
-          : "Replies draw the cards and charts they carry"
-      }
-      checked={settled && value}
-      disabled={!offered || saving}
-      onCheckedChange={(on) => void refusal.write("save that", () => save(on))}
-    />
-  )
-}
-
 export function AppearanceSettings() {
   const { theme, setTheme } = useTheme()
   const current = theme ?? "system"
@@ -68,7 +34,6 @@ export function AppearanceSettings() {
     async () => ({ ...DEFAULT_SETTINGS, ...(await db.settings.get("settings")) }),
     [],
   )
-  const profile = useLiveQuery(getActiveProfile, [])
   return (
     <>
       <Group>
@@ -126,7 +91,6 @@ export function AppearanceSettings() {
           checked={chatSettings?.navShortcuts ?? DEFAULT_SETTINGS.navShortcuts}
           onCheckedChange={(checked) => saveAppearance({ navShortcuts: checked })}
         />
-        <InterfaceSwitch server={profile} />
       </Group>
     </>
   )

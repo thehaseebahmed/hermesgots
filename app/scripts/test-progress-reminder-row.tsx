@@ -7,7 +7,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter } from "react-router"
 
-import { LabSettings } from "@/components/settings/lab"
+import { DeveloperSettings } from "@/routes/settings"
 import { streamHandlers, type Turn } from "@/lib/chat"
 import { db, type Message } from "@/lib/db"
 import type { SessionMessage } from "@/lib/hermes"
@@ -81,8 +81,8 @@ const checkedOf = (element: Element | null) => {
   return element.getAttribute("aria-checked") === "true"
 }
 
-test("the Lab switch is off until it is turned on, keeps the pick, and asks no host", async () => {
-  await seedSettings()
+test("the Developer switch is off until it is turned on, keeps the pick, and asks no host", async () => {
+  await seedSettings({ developer: true })
   const asked: string[] = []
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     asked.push(String(input))
@@ -92,7 +92,7 @@ test("the Lab switch is off until it is turned on, keeps the pick, and asks no h
   const row = () => find("#show-progress-reminders-label [data-slot='switch']")
   await mount(
     <MemoryRouter>
-      <LabSettings />
+      <DeveloperSettings />
     </MemoryRouter>,
     async () => {
       assert.equal(checkedOf(row()), false, "off until it is turned on")
@@ -108,11 +108,12 @@ test("the Lab switch is off until it is turned on, keeps the pick, and asks no h
   )
   await mount(
     <MemoryRouter>
-      <LabSettings />
+      <DeveloperSettings />
     </MemoryRouter>,
     async () => {
-    assert.equal(checkedOf(row()), true, "a fresh read of the device finds it on")
-  })
+      assert.equal(checkedOf(row()), true, "a fresh read of the device finds it on")
+    },
+  )
 })
 
 test("a reply already folded with the row draws nothing once the switch is off", async () => {

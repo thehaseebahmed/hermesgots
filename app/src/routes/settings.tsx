@@ -124,7 +124,7 @@ const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
   community: { title: "Community", render: () => <CommunitySettings /> },
   notifications: { title: NOTIFICATION_SETTINGS, render: () => <NotificationTypes /> },
   data: { title: "Local data", render: () => <DataSettings /> },
-  lab: { title: "Lab", render: () => <LabSettings /> },
+  lab: { title: "Labs", render: () => <LabSettings /> },
   developer: { title: "Developer", render: () => developerOnly(<DeveloperSettings />) },
   network: { title: "Network log", render: () => developerOnly(<NetworkLogScreen />) },
 }
@@ -386,7 +386,7 @@ function MenuScreen({
         <FeedbackRow />
       </Group>
       <Group>
-        <Row to="lab" icon={FlaskConicalIcon} title="Lab" />
+        <Row to="lab" icon={FlaskConicalIcon} title="Labs" />
         <Row to="data" icon={DatabaseIcon} title="Local data" />
         {settings?.developer && <Row to="developer" icon={TerminalIcon} title="Developer" />}
       </Group>
@@ -653,6 +653,14 @@ export function DeveloperSettings() {
           subtitle="Recents in the sidebar, chats in one list"
           checked={legacyChatOn(settings)}
           onCheckedChange={(checked) => saveSettings({ legacyChat: checked })}
+        />
+        <SwitchRow
+          id="show-progress-reminders"
+          icon={MessageSquareTextIcon}
+          title="Show progress reminders"
+          subtitle="Each reminder a thread hides, as a row of its own"
+          checked={Boolean(settings?.showProgressReminders)}
+          onCheckedChange={(checked) => saveSettings({ showProgressReminders: checked })}
         />
       </Group>
       {isNative() && pushAvailable() && <TestPushRow />}

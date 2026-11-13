@@ -204,7 +204,7 @@ test("the legacy switch brings the Recents list and the New chat button back", a
   )
 })
 
-test("the sidebar marks the lab features with the Lab pill, and its own screens with none", async () => {
+test("the sidebar marks the lab features with the pill, and its own screens with none", async () => {
   await seed({ meetings: true })
   globalThis.fetch = async () => json({})
   await mount(
@@ -214,15 +214,15 @@ test("the sidebar marks the lab features with the Lab pill, and its own screens 
     async () => {
       const row = (href: string) => find(`a[href="${href}"]`)
       await until(async () => Boolean(row("/meetings")), "the Meetings row")
-      for (const href of ["/canvas", "/research", "/meetings"]) {
+      for (const href of ["/canvas", "/meetings"]) {
         const mark = row(href)
         assert.ok(mark, `${href} is drawn`)
-        assert.equal(mark.textContent?.includes("Lab"), true, `${href} wears the pill`)
+        assert.equal(mark.textContent?.includes("Labs"), true, `${href} wears the pill`)
       }
-      for (const href of ["/projects", "/code"]) {
+      for (const href of ["/projects", "/code", "/research"]) {
         const own = row(href)
         assert.ok(own, `${href} is drawn`)
-        assert.equal(own.textContent?.includes("Lab"), false, `${href} is no lab feature`)
+        assert.equal(own.textContent?.includes("Labs"), false, `${href} is no lab feature`)
       }
     },
   )

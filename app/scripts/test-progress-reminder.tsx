@@ -82,8 +82,8 @@ test("a run's completion drops the refused card though it names no call", () => 
   assert.deepEqual(turn.draft.tools, [], "and leaves no card behind")
 })
 
-test("with the switch on and no Developer unlock, the live stream turns the refusal into a row", async () => {
-  await seedSettings({ showProgressReminders: true })
+test("with the switch on, the live stream turns the refusal into a row of its own", async () => {
+  await seedSettings({ developer: true, showProgressReminders: true })
   const turn = liveTurn()
   const onTool = streamHandlers(turn).onTool!
   onTool({ tool: "read_file", status: "running", toolCallId: "run:1" })

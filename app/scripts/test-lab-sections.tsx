@@ -6,6 +6,7 @@ import { db } from "@/lib/db"
 import { SettingsPage } from "@/routes/settings"
 import {
   Path,
+  absentText,
   click,
   find,
   findAll,
@@ -27,6 +28,7 @@ const at = (entry: string) => (
 )
 
 const MEETINGS = "Meetings"
+const GENUI = "GenUI (Powered by OpenUI)"
 const REMINDERS = "Show progress reminders"
 
 const rowOf = (title: string) =>
@@ -34,58 +36,71 @@ const rowOf = (title: string) =>
 const switchOf = (title: string) => rowOf(title)?.querySelector('[role="switch"]') ?? null
 const checkedOf = (title: string) => switchOf(title)?.getAttribute("aria-checked")
 
-test("/settings/lab draws both switches, and Meetings wears the Lab pill", async () => {
+test("/settings/lab draws the lab switches under the page's own line", async () => {
   await seedSettings({ developer: false })
   await mount(at("/settings/lab"), async () => {
     await settle()
     assert.equal(path(), "/settings/lab", "the address is kept without the Developer switch")
-    assert.ok(switchOf(MEETINGS), "the Meetings switch is drawn")
-    assert.ok(switchOf(REMINDERS), "and progress reminders'")
-    assert.match(text(), /Transcripts and recordings, written up as notes/, "under its own words")
-    assert.equal(
-      Boolean(rowOf("Meetings")?.textContent?.includes("Lab")),
-      true,
-      "and the row says it is a lab feature",
+    assert.match(
+      text(),
+      /Try experimental features\. Some features may not work correctly\./,
+      "the page says what it holds",
     )
+    absentText("p", "Features the app is still building")
+    assert.ok(switchOf(MEETINGS), "the Meetings switch is drawn")
+    assert.ok(switchOf(GENUI), "and GenUI's")
+    for (const title of [MEETINGS, GENUI])
+      assert.equal(
+        Boolean(rowOf(title)?.textContent?.includes("Labs")),
+        true,
+        `${title} wears the pill`,
+      )
   })
 })
 
-test("the Lab switches write their own keys to the device", async () => {
+test("the Meetings switch writes its own key to the device", async () => {
   await seedSettings({ developer: false })
   await mount(at("/settings/lab"), async () => {
     assert.equal(checkedOf(MEETINGS), "false", "off until it is turned on")
     await click(switchOf(MEETINGS))
     assert.equal(checkedOf(MEETINGS), "true", "and on once it is")
     assert.equal((await db.settings.get("settings"))?.meetings, true, "the device kept Meetings")
-    assert.equal(checkedOf(REMINDERS), "false", "progress reminders start off too")
-    await click(switchOf(REMINDERS))
-    assert.equal(checkedOf(REMINDERS), "true", "and turn on the same way")
-    assert.equal(
-      (await db.settings.get("settings"))?.showProgressReminders,
-      true,
-      "the device kept progress reminders",
-    )
   })
 })
 
-test("/settings/developer no longer draws either switch", async () => {
+test("/settings/developer holds the progress reminders switch, not Labs", async () => {
   await seedSettings({ developer: true })
   await mount(at("/settings/developer"), async () => {
     await settle()
     assert.equal(path(), "/settings/developer", "the Developer screen is on")
-    assert.equal(Boolean(switchOf(MEETINGS)), false, "Meetings has moved to Lab")
-    assert.equal(Boolean(switchOf(REMINDERS)), false, "and progress reminders with it")
+    assert.ok(switchOf(REMINDERS), "progress reminders stays its own switch")
+    assert.equal(
+      Boolean(rowOf(REMINDERS)?.textContent?.includes("Labs")),
+      false,
+      "with no pill: it is no lab feature",
+    )
+    assert.equal(Boolean(switchOf(MEETINGS)), false, "Meetings has moved to Labs")
+    assert.equal(Boolean(switchOf(GENUI)), false, "and GenUI with it")
     assert.ok(findText("label", "Enable legacy chat UX"), "its own switches stayed")
   })
 })
 
-test("the menu draws the Lab row with the Developer switch off", async () => {
+test("Appearance holds no GenUI switch any more", async () => {
+  await seedSettings({ developer: false })
+  await mount(at("/settings/appearance"), async () => {
+    await settle()
+    assert.equal(Boolean(switchOf(GENUI)), false, "GenUI is a lab feature now")
+    assert.ok(switchOf("Steer by default"), "the app's own switches stayed")
+  })
+})
+
+test("the menu draws the Labs row with the Developer switch off", async () => {
   await seedSettings({ developer: false })
   await mount(at("/settings"), async () => {
     await settle()
-    const lab = find('a[href="/settings/lab"]')
-    assert.ok(lab, "the Lab row is drawn")
-    assert.match(lab.textContent ?? "", /Lab/, "under its own name")
+    const labs = find('a[href="/settings/lab"]')
+    assert.ok(labs, "the Labs row is drawn")
+    assert.match(labs.textContent ?? "", /Labs/, "under its own name")
     assert.equal(Boolean(find('a[href="/settings/developer"]')), false, "Developer stays hidden")
   })
 })

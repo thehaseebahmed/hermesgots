@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge"
 
 /** Marks a lab feature, wherever it can be turned on or picked. */
 export function LabBadge() {
-  return <Badge className="h-[22px] bg-warning/15 px-2.5 text-warning-ink">Lab</Badge>
+  return <Badge className="h-[22px] bg-warning/15 px-2.5 text-warning-ink">Labs</Badge>
 }
 
 /**

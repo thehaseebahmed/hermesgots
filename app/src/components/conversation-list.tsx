@@ -705,7 +705,7 @@ export function ConversationList({
             className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
           >
             <TelescopeIcon className="size-5 text-muted-foreground" />
-            {!collapsed && <LabLabel fill>Research</LabLabel>}
+            {!collapsed && "Research"}
           </RootLink>
           {meetings && (
             <RootLink

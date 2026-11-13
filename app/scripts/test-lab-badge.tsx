@@ -7,11 +7,11 @@ import test from "node:test"
 import { LabBadge } from "@/components/lab-badge"
 import { find, mount, wordsOf } from "./component-kit.tsx"
 
-test("the Lab pill says Lab, in the warning tint", async () => {
+test("the Labs pill says Labs, in the warning tint", async () => {
   await mount(<LabBadge />, async () => {
     const pill = find('[data-slot="badge"]')
     assert.ok(pill, "the pill is drawn")
-    assert.equal(wordsOf(pill), "Lab", "it says the one word, and nothing else")
+    assert.equal(wordsOf(pill), "Labs", "it says the one word, and nothing else")
     const classes = (pill.getAttribute("class") ?? "").split(/\s+/)
     assert.ok(classes.includes("bg-warning/15"), "on the warning tint")
     assert.ok(classes.includes("text-warning-ink"), "in the ink that reads on that tint")
