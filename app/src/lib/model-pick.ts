@@ -8,7 +8,8 @@
  * No runtime imports: the rule is held on its own, without a database or a host.
  */
 import type { Conversation, ModelChoice, Profile } from "@/lib/db"
-import type { ModelProvider } from "@/lib/hermes"
+import type { ModelInfo, ModelProvider } from "@/lib/hermes"
+import type { PickRead } from "@/lib/pick-one"
 
 type Chat = Pick<Conversation, "modelChoice" | "main">
 type BotPick = Pick<Profile, "modelChoice">
@@ -44,6 +45,17 @@ export function modelChoices(providers: ModelProvider[]): ModelChoice[] {
   return providers.flatMap((provider) =>
     provider.models.map((model) => ({ provider: provider.slug, model })),
   )
+}
+
+/**
+ * A host's model list as a pick reads it: `undefined` is a read still out, `null` a read that
+ * failed, and anything else the picks the host offers. A surface deciding what a tap does asks
+ * this, so all three states are told apart before the sheet opens.
+ */
+export function modelsRead(info: ModelInfo | null | undefined): PickRead<ModelChoice> {
+  if (info === undefined) return { at: "reading" }
+  if (info === null) return { at: "failed" }
+  return { at: "ready", options: modelChoices(info.providers) }
 }
 
 /** Whether two picks name the same model, so a write can be told from the one it replaced. */

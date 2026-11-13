@@ -24,6 +24,8 @@ import { useFallbackModels } from "@/lib/fallbacks"
 import { formatTokens } from "@/lib/format"
 import type { ModelProvider } from "@/lib/hermes"
 import { botModel, fullModel, hostChoice, shortModel, useModelInfo } from "@/lib/model-info"
+import { modelsRead, samePick } from "@/lib/model-pick"
+import { usePickOne } from "@/lib/use-pick-one"
 import { MAX_COST_TIER, modelFacts, useModelCatalog, type Catalog } from "@/lib/models"
 import { overallScoreOf, useOverallRankings, type RankingsPayload } from "@/lib/rankings"
 import { tell } from "@/lib/tell"
@@ -432,7 +434,19 @@ export function ModelMenu({
   const [open, setOpen] = useState(false)
   const button = useRef<HTMLButtonElement>(null)
   const info = useModelInfo(profile)
+  const read = modelsRead(info)
   const providers = info?.providers ?? []
+  // A row's pick and a tap's are one call, so a tap leaves the state a row's tap leaves.
+  const choose = (next: ModelChoice | undefined) => {
+    onChoose(next)
+    if (next && profile) void rememberModel(profile.id, next)
+    setOpen(false)
+  }
+  const { tap, busy } = usePickOne({
+    read,
+    same: (option) => samePick(option, choice),
+    apply: choose,
+  })
   // The host's last reported model, shown greyed while it's read again. Only a bot whose host runs
   // the Gots plugin shows it; one without the plugin keeps showing nothing until the host answers.
   const remembered = profile?.pluginVersion ? profile.hostModel?.model : undefined
@@ -462,8 +476,8 @@ export function ModelMenu({
           "h-11 min-w-0 gap-1 rounded-full pr-2.5 pl-3.5",
           display === "block" ? "w-full justify-between" : "max-w-48 sm:max-w-64",
         )}
-        disabled={disabled || !providers.length}
-        onClick={() => setOpen(true)}
+        disabled={disabled || busy}
+        onClick={() => tap(() => setOpen(true))}
         aria-label={`Model: ${current ? label : "Unknown"}`}
       >
         <span className={cn("min-w-0 truncate", stale && "text-muted-foreground")}>{label}</span>
@@ -479,11 +493,7 @@ export function ModelMenu({
             }}
             recent={profile?.recentModels}
             choice={choice}
-            onChoose={(next) => {
-              onChoose(next)
-              if (next && profile) void rememberModel(profile.id, next)
-              setOpen(false)
-            }}
+            onChoose={choose}
           />
         </PopupContent>
       </Popup>
