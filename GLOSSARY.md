@@ -802,7 +802,7 @@ A page's write the device kept because its bot was away: read back at once and s
 _Avoid_: queued write, outbox entry, draft, retry
 
 **Vault**:
-The OKF bundle a canvas's documents are copied into when that canvas's own switch is on — one markdown file per document, under the bot's home, written by its host and never read back.
+The OKF bundle a canvas's documents are copied into when that canvas's own switch is on — one markdown file per document, under the plugin's data folder (`$HERMES_HOME/plugin-data/gots/llm-wiki/canvas`), written by its host and never read back.
 _Avoid_: wiki, backup folder, export, mirror
 
 **Ask**:
