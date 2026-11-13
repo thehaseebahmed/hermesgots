@@ -481,7 +481,9 @@ test("the Server key's edit masks the key, and Save waits for a change", async (
     )
     await click(button("Save"))
     assert.equal((await db.profiles.get("bot-1"))?.apiKey, "new-key", "and the write lands")
-    assert.equal(path(), "/settings/bots/bot-1", "back on the page")
+    // The page comes back once the write has landed, which is a tick or two after the click: waited
+    // for as the sheet's close is below, rather than assumed to have happened already.
+    await until(() => path() === "/settings/bots/bot-1", "back on the page")
   })
 })
 
