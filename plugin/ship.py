@@ -453,14 +453,18 @@ def ready(hermes_home: Path, record: Dict[str, Any]) -> List[Dict[str, Any]]:
         if not pr or pr["state"] not in ("draft", "open"):
             continue
         result: Dict[str, Any] = {"name": repo["name"], "pr": pr}
+        was_draft = pr["state"] == "draft"
         try:
-            if pr["state"] == "draft":
+            if was_draft:
                 result["pr"] = github.mark_ready(name, pr["number"], auth)
-                github.forget_pull_request(repo["repo_root"], repo["branch"])
             else:
                 result["already_ready"] = True
         except github.GitHubError as error:
             result["error"] = str(error)
+        if was_draft:
+            # Forgotten whatever the answer said: a mutation that landed and lost its reply has
+            # changed the state the cached row speaks for.
+            github.forget_pull_request(repo["repo_root"], repo["branch"])
         results.append(result)
     if not results:
         raise ShipError("No pull request on this session's branch to mark ready.", 409)
@@ -493,6 +497,7 @@ def merge(
         if not pr or pr["state"] not in ("open", "draft"):
             continue
         result: Dict[str, Any] = {"name": repo["name"], "pr": pr, "merged": False}
+        asked = False
         try:
             if pr["state"] == "draft":
                 raise ShipError(
@@ -508,12 +513,15 @@ def merge(
                 )
             if pr.get("checks") == "pending":
                 raise ShipError("Its checks are still running: call 'merge' again once they pass.", 409)
+            asked = True
             outcome = github.merge_pull_request(name, pr["number"], method, auth, pr.get("sha"))
             result["merge"] = outcome
             result["merged"] = bool(outcome.get("merged"))
         except (ShipError, github.GitHubError) as error:
             result["error"] = str(error)
-        github.forget_pull_request(repo["repo_root"], repo["branch"])
+        if asked:
+            # Only a call that reached GitHub can have changed the row: a refused gate changed nothing.
+            github.forget_pull_request(repo["repo_root"], repo["branch"])
         results.append(result)
     if not results:
         raise ShipError("No open pull request on this session's branch to merge.", 409)
@@ -615,8 +623,9 @@ SCHEMA = {
         "unpushed commits without writing anything. Pass force: true only after a rebase or amend, to "
         "replace the branch's remote commits. Call 'ship' yourself as soon as the work is done and "
         "checked; don't ask the user first. Mark it ready when it is going to be read, and merge it "
-        "when the project's Prompt asks for the work to be delivered — otherwise the merged or "
-        "reviewed pull request is the user's to finish. Closing a pull request is always the user's: "
+        "only when the user asks for the work to be delivered — or, with nobody watching, when the "
+        "project's Prompt says so; otherwise the reviewed pull request is the user's to finish. "
+        "Closing a pull request is always the user's: "
         "the tool refuses it, so ask with clarify instead. The server holds the GitHub account, so "
         "use this instead of git push or gh."
     ),

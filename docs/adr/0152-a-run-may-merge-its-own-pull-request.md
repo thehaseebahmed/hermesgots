@@ -32,9 +32,12 @@ refused rather than merged at a commit nobody looked at; a
 405, a 409 and a 422 each become the next call ("fix what GitHub names and ship again", "ship then
 merge again", the refusal in GitHub's words). Whether a run *should* is a different question, and
 the answer is not "always": a pull request exists so the user reads it when they come back, so the
-base prompt keeps a merge the user's **unless the project's Prompt asks for the work to be
-delivered**. The tool's schema says the same in one sentence, because a tool that offers what the
-prompt forbids teaches an agent to refuse something it can do.
+base prompt keeps a merge the user's **unless they ask for the work to be delivered**, and only a run
+with nobody watching — an AFK run, whose prompt is the one that carries `## The Project's Prompt` —
+takes its project's Prompt for that answer. A plain session's prompt has no Project's Prompt in it at
+all, so naming that alone would have given it an authority it never sees. The tool's schema says the
+same in one sentence, because a tool that offers what the prompt forbids teaches an agent to refuse
+something it can do.
 
 **What a merge invalidates, and where.** The branch's cached row is forgotten, so the app's next
 read is the merged row. `ship`'s next decision needs no change: `wants_pr` already reads a merged
@@ -45,3 +48,8 @@ merge sweep and the PR cache read (`_state`). The session is resolved through `m
 when the merge happens rather than on the next five-minute sweep; a sweep that runs afterwards sees
 the merge already marked and says nothing twice. `_described` does not change: a merge writes no
 description, and the watermark and `Closes #n` rules are the tool's on both paths that do (ADR 0089).
+
+**What the gate does not know.** `checks` is the one collapsed word the pull request row carries, and a
+GitHub whose check API can't be read answers as a repository with no checks — indistinguishable from
+one that has none. So the gate is what a run can act on, not a required check: a rule that insists on
+one is enforced by GitHub, and its refusal comes back through the 405 mapping like any other.

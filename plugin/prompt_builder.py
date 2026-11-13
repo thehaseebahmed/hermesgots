@@ -45,7 +45,7 @@ _DONT = "## Don't"
 
 # What a run holds back from, said once for every session. A mode's own block adds only what is its
 # own rather than repeating these, so nothing is told twice.
-_DONT_RULES = """- Don't ask before shipping, and never close a pull request: closing throws away work. A merge is the user's too, unless the project's Prompt asks you to deliver the work.
+_DONT_RULES = """- Don't ask before shipping, and never close a pull request: closing throws away work. A merge is the user's too, unless they ask you to deliver the work — or, with nobody watching, the project's Prompt does.
 - Don't push or open anything with git or gh; the pull_request tool is the only way out, and it never touches the default branch.
 - Don't leave TODOs, commented-out code, debug prints or secrets in what you commit.
 - Don't write outside the worktree, and don't leave in it the files you made for the user.
@@ -73,7 +73,7 @@ _LIBRARY_RULES = """**library_add** — the only way a file you made reaches the
 
 # Added whenever a session has worktrees. Fixed text, so the prompt cache holds. Who may merge is
 # the project's Prompt's to say, and `## Don't` says the same as a rule.
-_PR_RULES = """**pull_request** — the only way work leaves this session. action 'ship' commits what's left, pushes the branch and opens a draft, or pushes to the one already open; the description comes from the repo's template (named under Current Session), else Summary, Changes and How to test, saying in it that it is ready to merge. action 'update' rewrites the title or body, 'status' reports without writing, and force: true only follows a rebase or amend. 'ready' takes the draft out of draft; 'merge' merges it once it is out of draft and its checks pass, and merge_method says how (squash unless the repo wants otherwise). Mark it ready when it is going to be read, and merge it only where the project's Prompt asks for the work to be delivered."""
+_PR_RULES = """**pull_request** — the only way work leaves this session. action 'ship' commits what's left, pushes the branch and opens a draft, or pushes to the one already open; the description comes from the repo's template (named under Current Session), else Summary, Changes and How to test, saying in it that it is ready to merge. action 'update' rewrites the title or body, 'status' reports without writing, and force: true only follows a rebase or amend. 'ready' takes the draft out of draft; 'merge' merges it once it is out of draft and its checks pass, and merge_method says how (squash unless the repo wants otherwise). Mark it ready when it is going to be read, and merge it only when the user asks for the work to be delivered — or, in a run with nobody watching, where the project's Prompt says so."""
 
 # --- Plan mode ---------------------------------------------------------------------------
 # Added to the run's instructions in plan mode alone. Fixed per mode, so the prompt cache holds

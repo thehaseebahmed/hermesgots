@@ -522,6 +522,19 @@ class ReadyTests(_Base):
         self.assertNotIn("error", data)
         self.assertTrue(data["results"][0]["already_ready"], "it says the state holds rather than failing")
 
+    def test_ready_forgets_the_row_even_when_the_answer_was_lost(self):
+        """A mutation that landed but answered nothing still changed the state the app caches."""
+        with (
+            patch("plugin.github.token", return_value=("tok", "u")),
+            patch("plugin.github.origin_repo", return_value="o/r"),
+            patch("plugin.github.pull_request", return_value={"number": 7, "state": "draft", "title": "T", "url": "u"}),
+            patch("plugin.github.mark_ready", side_effect=github.GitHubError("GitHub answered without saying o/r#7 is out of draft.")),
+            patch("plugin.github.forget_pull_request") as forget,
+        ):
+            data = self._call({"action": "ready"})
+        self.assertTrue(forget.called, "the cached row is no longer known to be true")
+        self.assertIn("out of draft", data["error"])
+
     def test_ready_says_when_the_branch_has_no_pull_request(self):
         data, mark, _ = self._ready(state=None)
         mark.assert_not_called()
