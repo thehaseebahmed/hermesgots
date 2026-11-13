@@ -184,7 +184,6 @@ export function modelName(raw: unknown): string | null {
  */
 const listed = (model: string, known?: Known | null) => !known || known.has(modelKey(model))
 
-/** The catalogue a caller has, or null when it has none or it couldn't be read: nothing is filtered. */
 const catalogOf = async (ctx: CommunityContext): Promise<Known | null> =>
   (await ctx.catalog?.()) ?? null
 

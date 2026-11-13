@@ -15,7 +15,6 @@ export const CATALOG_TTL_MS = 24 * 60 * 60 * 1000
 /** The model ids models.dev lists: the set the board filters by (`community.ts`). */
 export type Known = ReadonlySet<string>
 
-/** The row the ids are cached in, in the community store. */
 const CATALOG_KEY = "models-dev"
 
 interface CatalogRow {

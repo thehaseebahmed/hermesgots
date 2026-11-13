@@ -41,7 +41,6 @@ export default async (req: Request) => {
     registry: getStore({ name: "gots-registry", consistency: "strong" }),
     caller,
     github: githubLogin,
-    // A day-long cache of the ids models.dev lists; an unreadable catalogue filters nothing.
     catalog: () => knownModelIds(store, Date.now()),
   })
 }
