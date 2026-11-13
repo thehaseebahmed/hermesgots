@@ -14,7 +14,7 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import github, projects, push, tools_common
+from . import github, merges, projects, push, tools_common
 from .sessions import WorkspaceError, _git
 from .store import db_path
 
@@ -450,6 +450,77 @@ def ready(hermes_home: Path, record: Dict[str, Any]) -> List[Dict[str, Any]]:
     return results
 
 
+MERGE_METHODS = github.MERGE_METHODS
+# What a merge does to the branch by default: one commit on the base, which is what a session's
+# branch is for — its own history is the run's, not the repository's.
+DEFAULT_MERGE_METHOD = "squash"
+
+
+def merge(
+    hermes_home: Path, record: Dict[str, Any], method: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """Merges each repo's open pull request on the session's branch, and settles the session.
+
+    Refused before GitHub is asked for the two states the run can do something about: a draft (call
+    ``ready`` first) and checks that failed or still run. Afterwards the branch's cached row is
+    forgotten and the session is resolved through ``merges.check``, so the state the app lists and
+    the notification a merge sends land now rather than on the next five-minute sweep.
+    """
+    auth, _ = github.token(hermes_home)
+    if not auth:
+        raise ShipError("No GitHub account on the server.", 409)
+    method = method if isinstance(method, str) and method.strip() else DEFAULT_MERGE_METHOD
+    method = method.strip()
+    if method not in MERGE_METHODS:
+        raise ValueError(f"merge_method must be one of {', '.join(MERGE_METHODS)}.")
+    session_id = record.get("session_id")
+    results = []
+    for repo in record["repos"]:
+        name = github.origin_repo(repo["repo_root"])
+        if not name:
+            continue
+        pr = github.pull_request(hermes_home, repo["repo_root"], repo["branch"], fresh=True)
+        if not pr or pr["state"] not in ("open", "draft"):
+            continue
+        result: Dict[str, Any] = {"name": repo["name"], "pr": pr, "merged": False}
+        try:
+            if pr["state"] == "draft":
+                raise ShipError(
+                    "It's still a draft, and GitHub won't merge one: call pull_request with action "
+                    "'ready', then 'merge'.",
+                    409,
+                )
+            if pr.get("checks") == "failure":
+                raise ShipError(
+                    "Its checks failed, so it isn't ready to merge: fix what they name, call 'ship' "
+                    "again, then 'merge'.",
+                    409,
+                )
+            if pr.get("checks") == "pending":
+                raise ShipError("Its checks are still running: call 'merge' again once they pass.", 409)
+            outcome = github.merge_pull_request(name, pr["number"], method, auth)
+            result["merge"] = outcome
+            result["merged"] = bool(outcome.get("merged"))
+        except (ShipError, github.GitHubError) as error:
+            result["error"] = str(error)
+        github.forget_pull_request(repo["repo_root"], repo["branch"])
+        results.append(result)
+    if not results:
+        raise ShipError("No open pull request on this session's branch to merge.", 409)
+    resolved = 0
+    if session_id and any(result.get("merged") for result in results):
+        # A project with more than one repo resolves once every one of its pull requests is settled,
+        # which is the sweep's business; this asks it now so the merge the run just made is the news.
+        try:
+            resolved = merges.check(hermes_home, only={session_id})
+        except Exception:
+            logger.warning("gots: resolving a merged session failed", exc_info=True)
+    for result in results:
+        if result.get("merged"):
+            result["resolved"] = bool(resolved)
+    return results
+
+
 def update(
     hermes_home: Path, record: Dict[str, Any], title: Optional[str], body: Optional[str]
 ) -> List[Dict[str, Any]]:
@@ -518,9 +589,10 @@ def template(tree: Optional[str]) -> Optional[str]:
 
 TOOL = "pull_request"
 LEGACY_TOOL = "open_pull_request"
-ACTIONS = ("ship", "push", "update", "ready", "status")
+ACTIONS = ("ship", "push", "update", "ready", "merge", "status")
 # Listed so the agent gets the teaching refusal rather than a schema error; never performed here.
-REFUSED_ACTIONS = ("merge", "close")
+# Closing stays the user's: it throws away work a merge would have delivered.
+REFUSED_ACTIONS = ("close",)
 SCHEMA = {
     "name": TOOL,
     "description": (
@@ -586,10 +658,10 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
         return json.dumps(
             {
                 "error": (
-                    f"Don't {action} pull requests yourself: merging and closing are the user's decision, "
-                    "and this tool won't do either. Don't call pull_request with "
-                    f"'{action}' again. Ask the user with the clarify tool whether they want to {action} "
-                    "the pull request, and leave it to them."
+                    "Don't close pull requests yourself: closing throws away work the user may still "
+                    "want, so it's their decision and this tool won't do it. Don't call pull_request "
+                    "with 'close' again. Ask the user with the clarify tool whether they want it "
+                    "closed, and leave it to them."
                 )
             }
         )
@@ -606,6 +678,8 @@ def handle(args: Any, task_id: Optional[str] = None, session_id: Optional[str] =
             results = update(home, record, args.get("title"), args.get("body"))
         elif action == "ready":
             results = ready(home, record)
+        elif action == "merge":
+            results = merge(home, record, args.get("merge_method"))
         else:
             results = ship(
                 home,

@@ -467,20 +467,21 @@ class CoAuthorTests(_Base):
 
 
 class RefusalTests(_Base):
-    def test_merge_and_close_are_refused_with_teaching_error(self):
-        for action in ("merge", "close"):
-            with self.subTest(action=action):
-                data = json.loads(ship.handle({"action": action}))
-                self.assertIn("user's decision", data["error"])
-                self.assertIn("clarify", data["error"])
-                self.assertIn(f"Don't call pull_request with '{action}' again", data["error"])
+    def test_close_is_refused_with_teaching_error(self):
+        data = json.loads(ship.handle({"action": "close"}))
+        self.assertIn("Don't close pull requests yourself", data["error"])
+        self.assertIn("clarify", data["error"])
+        self.assertIn("'" + "close' again", data["error"])
 
-    def test_merge_and_close_are_in_enum_but_not_actions(self):
+    def test_close_is_in_enum_but_not_actions_and_merge_is_performed(self):
+        """Closing throws work away, so it stays the user's; merging delivers it, so it is the tool's."""
         enum = ship.SCHEMA["parameters"]["properties"]["action"]["enum"]
-        self.assertIn("merge", enum)
         self.assertIn("close", enum)
-        self.assertNotIn("merge", ship.ACTIONS)
         self.assertNotIn("close", ship.ACTIONS)
+        self.assertIn("merge", enum)
+        self.assertIn("merge", ship.ACTIONS)
+        self.assertIn("ready", ship.ACTIONS)
+        self.assertEqual(ship.REFUSED_ACTIONS, ("close",))
 
     def test_missing_or_unknown_action_is_rejected(self):
         self.assertIn("action is required", json.loads(ship.handle({}))["error"])
