@@ -19,12 +19,23 @@ import {
   recordOf,
 } from "@/lib/canvas-cache"
 import { cachedDocs, keepDocs } from "@/lib/canvas-docs"
+import { drainCanvas } from "@/lib/canvas-outbox"
 import { refreshCanvas, refreshCanvases, undoCanvas, writeCanvasData } from "@/lib/canvases"
 import { connectionKey } from "@/lib/connection"
 import { db, deleteProfile, updateProfile } from "@/lib/db"
 import { CanvasPage, CanvasView } from "@/routes/canvas"
 
-import { atWidth, botProfile, find, json, mount, seedSettings, settle, until } from "./component-kit.tsx"
+import {
+  atWidth,
+  botProfile,
+  find,
+  json,
+  mount,
+  seedSettings,
+  settle,
+  until,
+  withToasts,
+} from "./component-kit.tsx"
 
 const PAGE = `<!doctype html>
 <html lang="en">
@@ -578,6 +589,103 @@ test(
         assert.doesNotMatch(words, /didn't answer/, "a refusal is not an outage")
         assert.match(words, new RegExp(KEPT.title), "and the copy it holds is still drawn")
       },
+    )
+  }),
+)
+
+test(
+  "a drain that cannot read its answer says so",
+  atWidth(390, async () => {
+    // The host answered, but not with a write's answer: this device learned nothing about the
+    // document, so the write stays queued — and a drain that stopped on that silence would leave the
+    // reader thinking the write landed.
+    const bot = await seedCanvasChat("canvas-unreadable-answer")
+    await db.canvasCache.put({
+      key: canvasCacheKey(bot, KEPT.id),
+      connection: connectionKey(bot),
+      canvasId: KEPT.id,
+      canvas: KEPT,
+    })
+    serveNothing([])
+    await writeCanvasData(KEPT.id, { method: "put", collection: "items", id: "one", doc: { n: 7 } })
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = new URL(String(input))
+      if (/\/canvases\/[^/]+\/call$/.test(url.pathname)) return json({ object: "gots.canvas.call" })
+      return json({ error: { message: "no route" } }, 404)
+    }) as unknown as typeof fetch
+    await withToasts(async (said) => {
+      assert.equal(await drainCanvas(bot, KEPT.id), false, "the drain says it didn't finish")
+      assert.equal(await db.canvasOutbox.count(), 1, "the write is still queued")
+      assert.equal(said.length, 1, "and the reader is told")
+      assert.match(said[0], /items \/ one/, "naming the document that is still waiting")
+    })
+  }),
+)
+
+test(
+  "a 503 on drain leaves the write queued",
+  atWidth(390, async () => {
+    // A bot that is starting up, a proxy in front of it, a rate limit: none of them is the host
+    // refusing the write, so the write waits — only a statused refusal is an answer that decides.
+    const bot = await seedCanvasChat("canvas-503")
+    await db.canvasCache.put({
+      key: canvasCacheKey(bot, KEPT.id),
+      connection: connectionKey(bot),
+      canvasId: KEPT.id,
+      canvas: KEPT,
+    })
+    serveNothing([])
+    await writeCanvasData(KEPT.id, { method: "put", collection: "items", id: "one", doc: { n: 7 } })
+    for (const status of [503, 429]) {
+      globalThis.fetch = (async (input: RequestInfo | URL) => {
+        const url = new URL(String(input))
+        if (/\/canvases\/[^/]+\/call$/.test(url.pathname))
+          return json({ error: { message: "Service Unavailable" } }, status)
+        return json({ error: { message: "no route" } }, 404)
+      }) as unknown as typeof fetch
+      await withToasts(async (said) => {
+        assert.equal(await drainCanvas(bot, KEPT.id), false, `a ${status} is the bot not answering`)
+        assert.equal(await db.canvasOutbox.count(), 1, "so the write stays queued")
+        assert.equal(said.length, 0, "and nothing is said about a refusal, because there was none")
+      })
+    }
+    assert.equal(
+      (await cachedDocs(bot, KEPT.id)).find((row) => row.id === "one")?.pending,
+      true,
+      "the page still reads back its own write",
+    )
+  }),
+)
+
+test(
+  "a 503 on a page's own write keeps it rather than refusing it",
+  atWidth(390, async () => {
+    // The same rule where the page writes directly: a bot that isn't answering has not refused the
+    // write, so the page reads its own write back and the queue takes it for the bot's return.
+    const bot = await seedCanvasChat("canvas-live-503")
+    await db.canvasCache.put({
+      key: canvasCacheKey(bot, KEPT.id),
+      connection: connectionKey(bot),
+      canvasId: KEPT.id,
+      canvas: KEPT,
+    })
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const url = new URL(String(input))
+      if (/\/canvases\/[^/]+\/call$/.test(url.pathname))
+        return json({ error: { message: "Service Unavailable" } }, 503)
+      return json({ error: { message: "no route" } }, 404)
+    }) as unknown as typeof fetch
+    const answered = (await writeCanvasData(KEPT.id, {
+      method: "put",
+      collection: "items",
+      id: "one",
+      doc: { n: 7 },
+    })) as CanvasDoc
+    assert.equal(answered.pending, true, "the page's promise is kept, marked pending")
+    assert.deepEqual(
+      (await db.canvasOutbox.toArray()).map((row) => row.method),
+      ["put"],
+      "and the write waits in the queue",
     )
   }),
 )

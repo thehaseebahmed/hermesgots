@@ -13,7 +13,8 @@
  *
  * A host from before the paged route answers 404 to the catalogue: today's one whole read of the
  * canvas carries its documents, and what it answers is written as a completed sweep — an updated app
- * on an old host behaves exactly as it did before the rows.
+ * on an old host behaves exactly as it did before the rows. Only the catalogue is asked that way: a
+ * page that answers 404 is the canvas moving under the sweep, never a route the host lacks.
  */
 
 import { PAGE_ROWS, storedDocs } from "@/lib/canvas-bridge"
@@ -38,18 +39,31 @@ export function sweepCanvas(profile: Profile, id: string): Promise<void> {
 
 async function run(profile: Profile, id: string) {
   const generation = await beginSweep(profile, id)
-  try {
-    const catalogue = await dataCatalogue(profile, id)
-    for (const { collection } of catalogue.collections)
-      await sweepCollection(profile, id, collection, generation)
-    const newest = catalogue.collections.reduce((at, one) => Math.max(at, one.newest_at ?? 0), 0)
-    await completeSweep(profile, id, generation, newest)
-  } catch (failure) {
-    // A plugin from before this route has no catalogue to answer: the canvas itself carries its
-    // documents, and they are kept as one completed sweep. Any other failure leaves the rows this
-    // sweep wrote and nothing pruned, since a sweep that didn't finish has seen no more than the last.
-    if (!(failure instanceof HermesError && failure.status === 404)) throw failure
+  // Only the catalogue is asked with the whole read in hand: a host from before the paged route has
+  // no `/data` at all, and today's one read of the canvas stands in for a sweep that couldn't begin.
+  // A 404 to a page of a canvas the host did catalogue is that canvas moving under the sweep, and it
+  // leaves the pages that landed and prunes nothing rather than answering as a whole read.
+  const catalogue = await catalogueOf(profile, id)
+  if (!catalogue) {
     await sweepWhole(profile, id, generation)
+    return
+  }
+  for (const { collection } of catalogue.collections)
+    await sweepCollection(profile, id, collection, generation)
+  const newest = catalogue.collections.reduce((at, one) => Math.max(at, one.newest_at ?? 0), 0)
+  await completeSweep(profile, id, generation, newest)
+}
+
+/**
+ * The host's catalogue of the canvas's data, or null for a host that has no such route: a plugin from
+ * before the paged read answers 404 to it, and nothing else is a route it lacks.
+ */
+async function catalogueOf(profile: Profile, id: string) {
+  try {
+    return await dataCatalogue(profile, id)
+  } catch (failure) {
+    if (failure instanceof HermesError && failure.status === 404) return null
+    throw failure
   }
 }
 

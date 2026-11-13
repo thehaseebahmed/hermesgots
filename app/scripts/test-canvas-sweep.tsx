@@ -22,12 +22,14 @@ import {
   completeSweep,
   holdDocBudget,
   keepDocs,
+  keepWrite,
   noteOpened,
   sweepMark,
+  sweptWhole,
 } from "@/lib/canvas-docs"
-import { enqueueWrite } from "@/lib/canvas-outbox"
+import { drainCanvas, enqueueWrite } from "@/lib/canvas-outbox"
 import { sweepCanvas } from "@/lib/canvas-sweep"
-import { refreshCanvases } from "@/lib/canvases"
+import { refreshCanvases, writeCanvasData } from "@/lib/canvases"
 import { db, canvasDocKey, type Profile } from "@/lib/db"
 import { connectionKey } from "@/lib/connection"
 import { CanvasView } from "@/routes/canvas"
@@ -41,6 +43,7 @@ import {
   seedSettings,
   settle,
   until,
+  withToasts,
 } from "./component-kit.tsx"
 
 const PAGE = `<!doctype html>
@@ -82,8 +85,14 @@ interface PagedHost {
   rows: number
   /** Pages answered before the host stops: a sweep cut part way. */
   pages?: number
+  /** The status every page after the first is answered with, instead of its documents. */
+  pageFails?: number
   /** A host from before the paged route: `/data` answers 404 and the whole read carries them. */
   whole?: boolean
+  /** The status a call is refused with, instead of the write being stored or removed. */
+  refuses?: number
+  /** Every call the host was asked, as the page made it. */
+  calls?: { shape: string; args: Record<string, unknown> }[]
   asked: string[]
 }
 
@@ -106,14 +115,33 @@ function servePaged(host: PagedHost) {
     docs_at: newest(),
     ...(host.whole ? { data: host.docs } : {}),
   })
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input))
     host.asked.push(url.pathname + url.search)
     if (url.pathname.endsWith("/info")) return json({ version: "0.113.0", features: ["canvas"] })
+    if (/\/canvases\/[^/]+\/call$/.test(url.pathname)) {
+      const body = JSON.parse(String(init?.body)) as {
+        shape: string
+        args: { collection: string; id: string; doc?: unknown }
+      }
+      host.calls?.push(body)
+      if (host.refuses) return json({ error: { message: "A document can hold 256 KB." } }, host.refuses)
+      const kept =
+        body.shape === "data.put"
+          ? { ...body.args, at: 100 }
+          : { collection: body.args.collection, id: body.args.id, removed: true }
+      host.docs =
+        body.shape === "data.put"
+          ? [...host.docs.filter((row) => row.id !== body.args.id), kept]
+          : host.docs.filter((row) => row.id !== body.args.id)
+      return json({ object: "gots.canvas.call", result: kept })
+    }
     if (host.whole && /\/data(\/|$)/.test(url.pathname))
       return json({ error: { message: "no route" } }, 404)
     if (/\/canvases\/[^/]+\/data\/[^/]+$/.test(url.pathname)) {
       pages += 1
+      if (host.pageFails && pages > 1)
+        return json({ error: { message: "no such collection" } }, host.pageFails)
       if (host.pages !== undefined && pages > host.pages) throw new TypeError("Failed to fetch")
       const after = url.searchParams.get("after")
       const rest = host.docs.filter((row) => after === null || row.id > after)
@@ -286,6 +314,32 @@ test("a host with no paged route fills the rows from one whole read", async () =
   assert.ok((await sweepMark(bot, CANVAS.id))?.completeAt, "written as a completed sweep")
 })
 
+test("a 404 mid-sweep does not mark a truncated whole read complete", async () => {
+  // Only the catalogue is asked with the whole read in hand — a host from before the paged route has
+  // no `/data` at all. A 404 to a page of a canvas the host did catalogue is that canvas moving under
+  // the sweep, and answering it with the 1 MB whole read would mark the pages that landed complete.
+  const bot = await seed("sweep-page-404")
+  const host: PagedHost = {
+    docs: [doc(0), doc(1), doc(2), doc(3)],
+    rows: 2,
+    pageFails: 404,
+    asked: [],
+  }
+  servePaged(host)
+  await assert.rejects(sweepCanvas(bot, CANVAS.id), "the sweep says it didn't finish")
+  assert.equal((await sweepMark(bot, CANVAS.id))?.completeAt, undefined, "and no sweep completed")
+  assert.deepEqual(
+    (await cachedDocs(bot, CANVAS.id)).map((row) => row.id),
+    ["d0000", "d0001"],
+    "the page that landed stays, and nothing it did not see is called gone",
+  )
+  assert.deepEqual(
+    host.asked.filter((path) => /\/canvases\/[^/]+$/.test(path)),
+    [],
+    "the whole read was never asked",
+  )
+})
+
 test("a sweep that completes over a pending row does not prune it", async () => {
   // This device wrote a document its host has not answered: a completed sweep that does not name it
   // is no evidence it is gone, because the host never saw the write (ADR 0149).
@@ -315,6 +369,88 @@ test("a sweep that completes over a pending row does not prune it", async () => 
   )
   assert.equal(rows[2].pending, true, "and it is still waiting for the host")
   assert.ok((await sweepMark(bot, CANVAS.id))?.completeAt, "the sweep did complete")
+})
+
+test("a refused queued write stops shadowing the host's document", async () => {
+  // The host refused the write, so it has spoken about that document: the write stops being pending,
+  // and the copy goes back to what the host holds — which is what the sweep that follows names.
+  // A Pending row no sweep may overwrite or prune would otherwise shadow the host's document forever.
+  const bot = await seed("sweep-refused-queued")
+  const held = doc(0, 3)
+  await keepDocs(bot, CANVAS.id, [held])
+  await keepWrite(bot, CANVAS.id, {
+    collection: "items",
+    id: held.id,
+    doc: { n: 7 },
+    at: Date.now(),
+    pending: true,
+  })
+  await enqueueWrite(bot, CANVAS.id, { method: "put", collection: "items", id: held.id, doc: { n: 7 } })
+  const host: PagedHost = { docs: [held], rows: 200, refuses: 409, asked: [] }
+  servePaged(host)
+  await withToasts(async (said) => {
+    assert.equal(await drainCanvas(bot, CANVAS.id), true, "the drain is done: nothing is left queued")
+    assert.equal(said.length, 1, "the refusal is said once")
+    assert.match(said[0], /items \/ d0000/, "naming the document it refused")
+  })
+  assert.deepEqual(await db.canvasOutbox.toArray(), [], "and the queue row is gone")
+
+  // The bot answers a sweep with the document it really holds: the refused write is not on the page.
+  await sweepCanvas(bot, CANVAS.id)
+  assert.deepEqual(
+    await cachedDocs(bot, CANVAS.id),
+    [held],
+    "the host's document is what reads back, not the write it refused",
+  )
+})
+
+test("a remove made while away stays removed through a sweep and lands when the bot returns", async () => {
+  // A remove the device kept is an intent the rows can't hold as a document: the row goes at once, and
+  // a sweep that still names it is no evidence it came back, since the host has not been told yet.
+  const bot = await seed("sweep-away-remove")
+  await db.canvasCache.put({
+    key: canvasCacheKey(bot, CANVAS.id),
+    connection: connectionKey(bot),
+    canvasId: CANVAS.id,
+    canvas: { ...CANVAS, profileId: bot.id },
+  })
+  const held = doc(0, 3)
+  await keepDocs(bot, CANVAS.id, [held])
+  serveNothing([])
+  const answered = await writeCanvasData(CANVAS.id, {
+    method: "remove",
+    collection: "items",
+    id: held.id,
+  })
+  assert.equal(answered.pending, true, "the page's promise is kept, marked pending")
+  assert.deepEqual(await cachedDocs(bot, CANVAS.id), [], "the document is gone at once")
+  assert.deepEqual(
+    (await db.canvasOutbox.toArray()).map((row) => row.method),
+    ["remove"],
+    "and the removal waits in the queue",
+  )
+
+  // The bot comes back and sweeps: it still holds the document, because the removal has not landed.
+  const host: PagedHost = { docs: [held], rows: 200, calls: [], asked: [] }
+  servePaged(host)
+  await sweepCanvas(bot, CANVAS.id)
+  assert.deepEqual(
+    await cachedDocs(bot, CANVAS.id),
+    [],
+    "a sweep does not put back what is being removed",
+  )
+  assert.ok((await sweepMark(bot, CANVAS.id))?.completeAt, "although the sweep completed")
+
+  // And the removal lands: the host is sent it, and neither side holds the document after.
+  assert.equal(await drainCanvas(bot, CANVAS.id), true, "the removal is sent")
+  assert.deepEqual(host.calls?.map((one) => one.shape), ["data.remove"], "as a removal")
+  assert.deepEqual(await db.canvasOutbox.toArray(), [], "and nothing is left queued")
+  await sweepCanvas(bot, CANVAS.id)
+  assert.deepEqual(
+    await cachedDocs(bot, CANVAS.id),
+    [],
+    "the sweep after it agrees the document is gone",
+  )
 })
 
 test("a v41 database opens its canvas's documents as rows", async () => {
@@ -353,8 +489,8 @@ test("a canvas whose documents moved is swept again by the list's poll", async (
   // listing says about documents it does not carry: a canvas swept at a clock the host has left is
   // swept again, and one nothing moved stays as it is.
   const bot = await seed("sweep-moved")
-  await keepDocs(bot, CANVAS.id, [doc(0, 1)])
-  await completeSweep(bot, CANVAS.id, 1, 1)
+  // A canvas this device has swept whole, at a clock the host has since left.
+  await swept(bot, CANVAS.id, [doc(0, 1)])
   const host: PagedHost = { docs: [doc(0, 3), doc(1, 4)], rows: 200, asked: [] }
   servePaged(host)
   await refreshCanvases()
@@ -467,6 +603,40 @@ test("a canvas with a queued write is never evicted", async () => {
     assert.ok((await sweepMark(bot, queued))?.completeAt, "and its mark, so its copy still reads whole")
     assert.deepEqual(await cachedDocs(bot, next), [], "the next coldest went instead")
     assert.equal(await sweepMark(bot, next), undefined, "with its mark")
+  } finally {
+    release()
+  }
+})
+
+test("an eviction during a sweep leaves the canvas unswept", async () => {
+  // An eviction takes a canvas whole, its sweep mark with it, so its next open sweeps again. A sweep
+  // already in flight when that happens reaches its last page over rows the eviction dropped: writing
+  // a mark then would say a copy is whole that holds only the pages that landed after the eviction.
+  const bot = await seed("budget-mid-sweep")
+  const [inFlight, other, screen] = ["c-inflight", "c-other", "c-screen"]
+  for (const id of [inFlight, other, screen]) await swept(bot, id, [bulky(0, 1), bulky(1, 2)])
+  const release = holdDocBudget(BUDGET)
+  try {
+    await openedAt(bot, inFlight, 1_000)
+    await openedAt(bot, other, 2_000)
+    await openedAt(bot, screen, 3_000)
+    // The coldest canvas begins a sweep and one of its pages lands.
+    const generation = await beginSweep(bot, inFlight)
+    await keepDocs(bot, inFlight, [bulky(0, 1)], generation)
+    // Another canvas's sweep carries the device past its budget, and the one under way is the coldest.
+    await swept(bot, screen, [bulky(0, 1), bulky(1, 2)])
+    assert.deepEqual(await cachedDocs(bot, inFlight), [], "the evicted canvas's rows went")
+    assert.equal(await sweepMark(bot, inFlight), undefined, "with its mark")
+
+    // The sweep in flight now reaches its last page, and may not say the canvas is whole.
+    await completeSweep(bot, inFlight, generation, 2)
+    assert.equal(
+      await sweepMark(bot, inFlight),
+      undefined,
+      "no mark is written for a canvas the eviction took",
+    )
+    assert.equal(await sweptWhole(bot, inFlight), false, "so a read still says the copy is partial")
+    assert.deepEqual(await cachedDocs(bot, inFlight), [], "and no document reappears")
   } finally {
     release()
   }

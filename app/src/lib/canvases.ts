@@ -40,6 +40,7 @@ import {
   drainOutbox,
   dropQueued,
   enqueueWrite,
+  refusedWrite,
   sendWrite,
 } from "@/lib/canvas-outbox"
 import { sweepCanvas } from "@/lib/canvas-sweep"
@@ -641,9 +642,10 @@ async function takeWrite(id: string, call: BridgeWriteCall): Promise<unknown> {
   try {
     value = await sendWrite(profile, id, call)
   } catch (failure) {
-    // A host that answered and refused said what it thinks of this write: that is the page's own
-    // answer, in its words. Only a request that never landed is a write kept for later.
-    if (hostAnswered(failure)) throw failure
+    // A host that refused said what it thinks of this write: that is the page's own answer, in its
+    // words. A bot that isn't answering — a 5xx, a 429, a timeout — has said nothing, and the write
+    // is one this device keeps for later (`refusedWrite` is the one rule).
+    if (refusedWrite(failure, call.method)) throw failure
     markAway(id)
     return keepOnDevice(profile, id, call)
   }

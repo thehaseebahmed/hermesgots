@@ -12,7 +12,8 @@
  * whose clock runs ahead cannot keep its own write on the page. A refusal the host gives is dropped and
  * said in the host's own words — it has spoken about that document, and sending it again would only be
  * refused again — while a request that never landed stops that canvas's drain and leaves the rest
- * queued for the next time the bot answers.
+ * queued for the next time the bot answers. What a refusal is, exactly, is `refusedWrite`: a statused
+ * 400, 403 or 409 (404 for a remove), since a 5xx, a 429 or a timeout is the bot not answering at all.
  *
  * It runs where the host is found again: the app's return or the network's (`onReturn`), the canvas
  * list's poll, and the opening of a canvas, which are the three moments a bot that was away has just
@@ -22,7 +23,7 @@
 import Dexie from "dexie"
 
 import type { CanvasWrite } from "@/lib/canvas-bridge"
-import { keepAnswer } from "@/lib/canvas-docs"
+import { forgetPending, keepAnswer } from "@/lib/canvas-docs"
 import { connectionKey, hostTargets } from "@/lib/connection"
 import {
   canvasOutboxKey,
@@ -31,11 +32,27 @@ import {
   type CanvasOutboxRow,
   type Profile,
 } from "@/lib/db"
-import { callCanvas, hostAnswered } from "@/lib/hermes"
+import { callCanvas, HermesError } from "@/lib/hermes"
 import { onlineNow } from "@/lib/online"
 import { quietly } from "@/lib/report"
 import { tell } from "@/lib/tell"
 import { onReturn } from "@/lib/wake"
+
+/**
+ * The statuses a host refuses a canvas's write with: a document past its cap or a name it won't take
+ * (400), a write it won't allow (403), one it will not store as the canvas now stands (409) — and, for
+ * a remove, the canvas being gone (404). Every other status a host can send is no answer at all: a
+ * 5xx, a 429 or a timeout is a bot that isn't there yet, and its write is still waiting.
+ */
+const WRITE_REFUSALS = new Set([400, 403, 409])
+
+/** Whether a host's failure is its answer about a write — a refusal — rather than no answer. */
+export const refusedWrite = (
+  failure: unknown,
+  method: CanvasWrite["method"],
+): failure is HermesError =>
+  failure instanceof HermesError &&
+  (WRITE_REFUSALS.has(failure.status ?? 0) || (method === "remove" && failure.status === 404))
 
 /**
  * The write's network half, and only that: one round-trip through the host's `call` route, which
@@ -119,19 +136,25 @@ async function send(profile: Profile, canvasId: string): Promise<boolean> {
     try {
       value = await sendWrite(profile, canvasId, call)
     } catch (failure) {
-      // A host that answered and refused has spoken about this document: the row goes and the reader
-      // is told which document and why, in the host's own words. A request that never landed leaves
-      // the queue where it is, for the next time the bot answers.
-      if (!hostAnswered(failure)) return false
-      await dropRow(row)
+      // Only a statused refusal is the host's answer about this document: the row goes, the Pending
+      // write it kept goes with it so the copy is the host's own again, and the reader is told which
+      // document and why, in the host's own words. Anything else — a 5xx, a 429, a timeout — is a
+      // bot that isn't answering, and the queue stays where it is for the next time it does.
+      if (!refusedWrite(failure, call.method)) return false
+      const sent = await dropRow(row)
+      if (sent) await forgetPending(profile, canvasId, row.collection, row.docId)
       tell.error(`${refusedWords(row)} ${failure.message}`)
       continue
     }
     const kept = await keepAnswer(profile, canvasId, call, value)
     if (!kept) {
       // An answer this device can't read says nothing about the document, so the row stays waiting
-      // rather than being thrown away on a guess.
-      return true
+      // rather than being thrown away on a guess — but the drain is not done, and a reader who is
+      // told nothing would think the write had landed.
+      tell.error(
+        `${refusedWords(row)} The bot answered something this app couldn't read, so it's still waiting.`,
+      )
+      return false
     }
     await dropRow(row)
   }
@@ -165,10 +188,12 @@ function refusedWords(row: CanvasOutboxRow) {
 }
 
 /** Drops the row this drain sent — unless a write to the same document replaced it meanwhile, since
- * that one has not been sent yet. */
+ * that one has not been sent yet. Answers whether the row it sent was still the one held. */
 async function dropRow(row: CanvasOutboxRow) {
   const held = await db.canvasOutbox.get(row.id)
-  if (held && held.seq === row.seq) await db.canvasOutbox.delete(row.id)
+  if (!held || held.seq !== row.seq) return false
+  await db.canvasOutbox.delete(row.id)
+  return true
 }
 
 /**

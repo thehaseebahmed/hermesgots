@@ -103,9 +103,11 @@ async function generationOf(profile: Profile, canvasId: string) {
  * landed must not put the row back on the document that write replaced, so the held row wins where it
  * is newer. That is the same rule `applyWrite` keeps for a copy, now kept for the rows.
  *
- * A Pending write is not something a page can answer (`keepWrite`/`settleDoc`): the host has never
- * seen it, so a page that does not carry it is no evidence about it, and the row stays as this device
- * wrote it.
+ * A write this device has not delivered is not something a page can answer: the host has never seen
+ * it, so a page that does not carry it is no evidence about it, and the row stays as this device
+ * wrote it. A **Pending** put is exempt from the page's answer, and a **queued remove** is exempt from
+ * it whole — the document is gone to every read here, and a page that still names it is the host not
+ * having been told yet (`canvas-outbox.ts`, ADR 0149).
  */
 export async function keepDocs(
   profile: Profile,
@@ -115,17 +117,30 @@ export async function keepDocs(
 ) {
   if (!docs.length) return
   const connection = connectionKey(profile)
-  await db.transaction("rw", db.canvasDocs, db.canvasSweeps, async () => {
+  await db.transaction("rw", db.canvasDocs, db.canvasSweeps, db.canvasOutbox, async () => {
     const under = generation ?? (await generationOf(profile, canvasId))
+    const removing = new Set(
+      (await db.canvasOutbox.where("canvasId").equals(canvasId).toArray())
+        .filter((row) => row.connection === connection && row.method === "remove")
+        .map((row) => `${row.collection}\n${row.docId}`),
+    )
     const keys = docs.map((one) => canvasDocKey(connection, canvasId, one.collection, one.id))
     const held = await db.canvasDocs.bulkGet(keys)
     const rows: CanvasDocRow[] = []
+    const stale: string[] = []
     docs.forEach((one, at) => {
       const kept = held[at]
       if (kept?.pending) return
+      if (removing.has(`${one.collection}\n${one.id}`)) {
+        // A document whose removal is still queued: the row goes if it somehow came back, since the
+        // read that names it is the host's copy of a document this device is taking out.
+        if (kept) stale.push(keys[at])
+        return
+      }
       if (!kept || kept.at <= one.at) rows.push(rowOf(profile, canvasId, one, under, false))
     })
     if (rows.length) await db.canvasDocs.bulkPut(rows)
+    if (stale.length) await db.canvasDocs.bulkDelete(stale)
   })
 }
 
@@ -237,6 +252,24 @@ export async function forgetDoc(
 }
 
 /**
+ * Drops this device's Pending write for one document — a write its host refused, which is the host
+ * answering after all: the copy goes back to the host's own truth, which is this row gone until a
+ * read of the canvas puts the host's document back. A row that is not Pending is a host answer already
+ * and stays (`canvas-outbox.ts`).
+ */
+export async function forgetPending(
+  profile: Profile,
+  canvasId: string,
+  collection: string,
+  id: string,
+) {
+  const key = canvasDocKey(connectionKey(profile), canvasId, collection, id)
+  await db.transaction("rw", db.canvasDocs, async () => {
+    if ((await db.canvasDocs.get(key))?.pending) await db.canvasDocs.delete(key)
+  })
+}
+
+/**
  * Every row of a canvas a completed sweep did not write. The one prune there is: a sweep is the only
  * read that has seen the canvas whole, so it is the only one that may say a document is gone — and a
  * Pending write is exempt, because the host never saw it, so no sweep it answers can say it is gone
@@ -303,6 +336,12 @@ export async function noteOpened(profile: Profile, canvasId: string) {
  * landed, so the rows this sweep did not write are the documents the host no longer names. `docsAt` is
  * the newest clock among them, which is what the canvas's record says its data is as fresh as.
  *
+ * Only a sweep whose mark still stands completes one. An eviction during a sweep takes the canvas
+ * whole — its rows and its mark — so a missing mark is this sweep having been overtaken: the pages it
+ * went on writing are a part of a canvas, and a mark here would say a copy is whole that holds only
+ * those. Two sweeps of one canvas never overlap (`canvas-sweep.ts`), so the mark being there is the
+ * whole test; the generation pruned by is this sweep's own.
+ *
  * `openedAt` is carried over: the mark this writes is a new one, and when a reader last opened the
  * canvas is nothing a sweep has an opinion about.
  */
@@ -312,9 +351,11 @@ export async function completeSweep(
   generation: number,
   docsAt: number,
 ) {
+  let completed = false
   await db.transaction("rw", db.canvasDocs, db.canvasSweeps, async () => {
     const key = canvasSweepKey(profile, canvasId)
-    const openedAt = (await db.canvasSweeps.get(key))?.openedAt
+    const held = await db.canvasSweeps.get(key)
+    if (!held) return
     await db.canvasSweeps.put({
       key,
       connection: connectionKey(profile),
@@ -322,10 +363,12 @@ export async function completeSweep(
       generation,
       completeAt: Date.now(),
       docsAt,
-      ...(openedAt ? { openedAt } : {}),
+      ...(held.openedAt ? { openedAt: held.openedAt } : {}),
     })
     await pruneDocs(profile, canvasId, generation)
+    completed = true
   })
+  if (!completed) return
   // The rows have just grown by everything the sweep read, which is one of the two moments this
   // device's total moves up: what it holds past its budget goes now.
   await enforceBudget()
