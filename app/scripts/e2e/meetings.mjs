@@ -4,7 +4,7 @@
 // line, a recording that fails once and is tried again, an upload nothing finished, search, and
 // Delete. At phone, tablet (dark) and laptop widths (the meeting beside the list from 1280px), with
 // no errors in the console.
-import { app, assert, flow, pass } from "./lib.mjs"
+import { app, assert, environmentNoise, flow, pass } from "./lib.mjs"
 
 /** A second of silence as a WAV file, so the browser can read its length. */
 function silence() {
@@ -46,7 +46,8 @@ for (const [width, dark] of [
     async ({ page, shot }) => {
       page.on("pageerror", (error) => errors.push(`${width}: ${error.message}`))
       page.on("console", (message) => {
-        if (message.type() === "error") errors.push(`${width}: ${message.text()}`)
+        if (message.type() === "error" && !environmentNoise(message.text()))
+          errors.push(`${width}: ${message.text()}`)
       })
       // Beside the meeting from 1280px, the list needs no way back to it.
       const toList = async () => {
@@ -70,7 +71,8 @@ for (const [width, dark] of [
       const setSwitch = (meetings) =>
         page.evaluate(async (meetings) => {
           const { db } = await import("/src/lib/db.ts")
-          await db.settings.update("settings", { developer: true, meetings })
+          // The Lab switch alone: no Developer unlock, which the feature no longer asks for.
+          await db.settings.update("settings", { meetings })
         }, meetings)
 
       // Off by default: no row, and the screen sends you home.

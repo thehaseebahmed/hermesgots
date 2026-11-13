@@ -732,7 +732,7 @@ async function warm() {
     // The feature switches open the routes and the chunks the flows drive.
     await page.evaluate(async () => {
       const { db } = await import("/src/lib/db.ts")
-      await db.settings.update("settings", { developer: true, meetings: true })
+      await db.settings.update("settings", { meetings: true })
     })
     for (const route of ["/projects", "/code", "/routines", "/meetings", "/research", "/settings"])
       await page.goto(`${app}${route}`)
