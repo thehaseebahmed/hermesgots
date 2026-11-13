@@ -234,6 +234,11 @@ test("a canvas the flow opened marks its row", async () => {
       await until(async () => Boolean(marked().length), "the row the flow marked")
       assert.deepEqual(says("p1"), { current: "page", filled: true }, "the canvas this tab opened")
       assert.equal(marked().length, 1, "one row is the page, never two")
+
+      // The edit screen is the same canvas (ADR 0130), so the mark goes with it.
+      await click(find('[data-canvas-flip="edit"]'))
+      await until(async () => Boolean(find('[data-canvas-flip="preview"]')), "the edit screen")
+      assert.deepEqual(says("p1"), { current: "page", filled: true }, "the canvas's own chat")
     })
   })
 })
