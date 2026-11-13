@@ -1,3 +1,5 @@
+import { pickWord, replaceSpan } from "./word-pick.ts"
+
 export type LocalCommand = "settings" | "cheatsheet"
 /** How a message sent while a reply runs goes: steered into it now, or queued behind it. */
 export type SendMode = "steer" | "queue"
@@ -123,10 +125,10 @@ export function nameSpread(name: string, query: string): number | null {
 /**
  * A picked skill lands where the cursor is: `/name` replaces what was typed of the token up to
  * the cursor, and everything after the cursor — including a word the token was typed into — stays
- * where it was.
+ * where it was. The landing itself is `word-pick.ts`'s rule, so `/` and `@` pick alike.
  */
 export function pickItem(text: string, token: SlashToken, name: string) {
-  return insert(text, token.start, token.start + 1 + token.query.length, name)
+  return pickWord(text, token, "/", name)
 }
 
 /**
@@ -135,17 +137,7 @@ export function pickItem(text: string, token: SlashToken, name: string) {
  * as one command only from the front of the message.
  */
 export function pickSendMode(text: string, token: SlashToken, name: string) {
-  return insert(text, token.start, token.end, name)
-}
-
-/** The end of the message has no character there, so it needs the space to keep typing with. */
-const needsSpace = (text: string, at: number) => !/\s/.test(text[at] ?? "")
-
-function insert(text: string, from: number, to: number, name: string) {
-  const hadSpace = !needsSpace(text, to)
-  const picked = `/${name}${hadSpace ? "" : " "}`
-  const next = text.slice(0, from) + picked + text.slice(to)
-  return { text: next, caret: from + picked.length + (hadSpace ? 1 : 0) }
+  return replaceSpan(text, token.start, token.end, "/", name)
 }
 
 export function optionId(listId: string, index: number) {

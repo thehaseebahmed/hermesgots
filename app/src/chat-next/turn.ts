@@ -4,7 +4,7 @@ import { db, updateConversation, type Attachment } from "@/lib/db"
 import { retireDraft } from "@/lib/drafts"
 import { addToQueue, hasPluginFeature, queueAction, runRequest } from "@/lib/hermes"
 import { modelOf, wantsPin } from "@/lib/model-pick"
-import { pointsIn } from "@/lib/point-marker"
+import { readRequest } from "@/lib/request-text"
 import { quietly } from "@/lib/report"
 import { openerFor, pinFromHost, pinModel, titleFrom, uploadAttachments } from "@/lib/send-turn"
 
@@ -44,12 +44,13 @@ async function built(chatId: string, text: string, attachments: Attachment[], at
   try {
     const config = serverConfig(bot)
     const words = text.trim()
-    // What the message says in a title or a card: a point's marker line is what the model reads, and
-    // no words a reader is shown.
-    const shown = pointsIn(words).text.trim()
+    // What the message says in a title or a card: a point's or a mention's marker line is what the
+    // model reads, and no words a reader is shown — nor a worktree's name, which a project session
+    // makes out of the same words.
+    const shown = readRequest(words).text.trim()
     // A project session works in its worktrees; the plugin can't be told about them any other way,
     // and a session whose repo is gone is refused here, before anything is posted.
-    const workspace = await ensureSessionWorkspace(chatId, words || attachments[0]?.name || "")
+    const workspace = await ensureSessionWorkspace(chatId, shown || attachments[0]?.name || "")
     // Read before the turn lands: the chat's first send is the one that titles it. Nothing sent in
     // on any device (the app's own test) and nothing held here, so a chat whose transcript this
     // device hasn't read yet keeps its title.
