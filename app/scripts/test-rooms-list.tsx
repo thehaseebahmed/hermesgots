@@ -207,7 +207,6 @@ async function fresh(
   await seedSettings({
     onboarded: true,
     legacyChat: layout === "legacy",
-    movedChats: bots.map((bot) => bot.id),
   })
   await db.profiles.clear()
   await db.profiles.bulkPut(bots)

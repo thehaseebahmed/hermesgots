@@ -1,6 +1,8 @@
 import type { Message } from "@/lib/db"
 import { activityOf } from "@/lib/tools"
 
+export { formatRelative } from "./relative.ts"
+
 export function formatDuration(ms: number) {
   if (ms < 60_000) return `${Math.max(0.1, ms / 1000).toFixed(1)}s`
   const minutes = Math.floor(ms / 60_000)
@@ -24,22 +26,6 @@ export function formatTokens(tokens: number) {
 export function formatCount(value: number) {
   if (!Number.isFinite(value)) return "0"
   return String(Math.round(value)).replace(/\B(?=(\d{3})+(?!\d))/g, ",")
-}
-
-const relative = new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "short" })
-
-/** "in 5 min", "3 hr. ago", "yesterday". */
-export function formatRelative(timestamp: number, now: number) {
-  const seconds = Math.round((timestamp - now) / 1000)
-  const units: [Intl.RelativeTimeFormatUnit, number][] = [
-    ["day", 86_400],
-    ["hour", 3_600],
-    ["minute", 60],
-  ]
-  for (const [unit, size] of units) {
-    if (Math.abs(seconds) >= size) return relative.format(Math.round(seconds / size), unit)
-  }
-  return relative.format(seconds, "second")
 }
 
 /** What the chat says while the run waits on a question: its status line and the thread's own. */

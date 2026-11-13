@@ -19,9 +19,14 @@ test("a record sealed without one writes no key at all, rather than deleting the
   assert.equal("hermesProfile" in local, false)
 })
 
-test("the host's own flags ride with it, the check-in's version winning", () => {
-  assert.deepEqual(
-    localFields({ enabled: false, seen: { at: 5, pluginVersion: "0.90" } }, { pluginVersion: "0.80" }),
-    { disabled: true, seenAt: 5, pluginVersion: "0.90" },
-  )
+test("the host's own flag rides with it, and the sealed record's version is the only one", () => {
+  assert.deepEqual(localFields({ enabled: false }, { pluginVersion: "0.80" }), {
+    disabled: true,
+    pluginVersion: "0.80",
+  })
+})
+
+test("a read writes nothing about when the host was heard: presence is the pass's answer", () => {
+  const local = localFields({ enabled: true }, {})
+  assert.equal("seenAt" in local, false, "no timestamp of the account's, ever")
 })

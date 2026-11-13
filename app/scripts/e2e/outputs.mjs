@@ -90,9 +90,20 @@ await flow("outputs", async ({ page, seed, send, stored, until, shot }) => {
   const photo = page.locator("img[alt='dashboard-light.png']")
   await photo.waitFor({ timeout: 15_000 })
   await shot("library-preview")
+  // The folder behind it is real: the tree draws dashboard-dark.png, chart.png, then this one newest
+  // first, and the chevrons step back through them where the counter says the reader is.
+  await page.getByRole("button", { name: "Previous" }).click()
+  await page.locator("img[alt='chart.png']").waitFor({ timeout: 15_000 })
+  assert.equal(
+    await page.getByText("2 of 3").count(),
+    1,
+    "stepping back lands on the file the tree draws above this one",
+  )
+  await shot("library-preview-stepped")
   await page.keyboard.press("Escape")
   await photo.waitFor({ state: "detached", timeout: 5_000 })
   pass("a library file opens in the app's Previewer, and closes with it")
+  pass("a folder's files step between each other, in the order the tree draws them")
 
   // The drawer in each of its forms — a bottom sheet on a phone, the same sheet capped and centred on
   // a tablet, a side drawer from 1024px — in both modes.
