@@ -25,7 +25,7 @@ import {
   applyWrite,
   inOrder,
   type CanvasDoc,
-  type CanvasPage,
+  type CanvasPageRows,
   type CanvasWrite,
 } from "@/lib/canvas-bridge"
 import { connectionKey } from "@/lib/connection"
@@ -324,7 +324,7 @@ export async function pageDocs(
   collection: string,
   after: string | null,
   limit: number,
-): Promise<CanvasPage> {
+): Promise<CanvasPageRows> {
   const connection = connectionKey(profile)
   const rows = await db.canvasDocs
     .where("[canvasId+collection+id]")

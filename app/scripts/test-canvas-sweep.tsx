@@ -30,7 +30,7 @@ import {
 import { drainCanvas, enqueueWrite } from "@/lib/canvas-outbox"
 import { sweepCanvas } from "@/lib/canvas-sweep"
 import { refreshCanvases, writeCanvasData } from "@/lib/canvases"
-import { db, canvasDocKey, type Profile } from "@/lib/db"
+import { db, canvasDocBytes, canvasDocKey, type Profile } from "@/lib/db"
 import { connectionKey } from "@/lib/connection"
 import { CanvasView } from "@/routes/canvas"
 
@@ -521,6 +521,55 @@ test("a v41 database opens its canvas's documents as rows", async () => {
     undefined,
     "and the array is gone",
   )
+  await settle()
+})
+
+test("a v43 database's rows are each weighed as the current version opens it", async () => {
+  // v44 gave a row the weight it carries beside its document, so no budget pass has to encode every
+  // document again. A device that was on v43 holds rows with no `bytes` at all: opening it here stamps
+  // each one with the weight of the row it is, and a row left unstamped would be weighed on every pass
+  // for the life of the device.
+  await db.close()
+  await Dexie.delete("gots")
+  const before = new Dexie("gots")
+  before.version(43).stores({
+    settings: "id",
+    profiles: "id, createdAt",
+    canvasDocs: "key, connection, canvasId, [canvasId+collection]",
+    canvasSweeps: "key, canvasId",
+    canvasOutbox: "id, canvasId, [canvasId+seq], connection",
+  })
+  await before.open()
+  const bot = botProfile("sweep-v43")
+  const rows = [
+    doc(1),
+    doc(2),
+    { collection: "notes", id: "n1", doc: "a note", at: 9 } as CanvasDoc,
+  ]
+  await before.table("canvasDocs").bulkPut(
+    rows.map((one) => ({
+      key: canvasDocKey(connectionKey(bot), CANVAS.id, one.collection, one.id),
+      connection: connectionKey(bot),
+      canvasId: CANVAS.id,
+      collection: one.collection,
+      id: one.id,
+      doc: one.doc,
+      at: one.at,
+      generation: 2,
+    })),
+  )
+  before.close()
+  await db.open()
+  const kept = await db.canvasDocs.toArray()
+  assert.equal(kept.length, rows.length, "every row is still there")
+  for (const row of kept) {
+    assert.equal(typeof row.bytes, "number", `${row.collection} / ${row.id} says what it weighs`)
+    assert.equal(
+      row.bytes,
+      canvasDocBytes(row.collection, row.id, row.doc),
+      `${row.collection} / ${row.id} weighs itself and nothing else`,
+    )
+  }
   await settle()
 })
 

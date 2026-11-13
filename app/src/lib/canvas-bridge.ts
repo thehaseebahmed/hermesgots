@@ -411,7 +411,7 @@ export interface CanvasCopy {
   /** One document by its key — the point read a `get` answers from. */
   get(collection: string, id: string): Promise<CanvasDoc | undefined>
   /** One page of a collection: the documents after `after`, and where the next page starts. */
-  page(collection: string, after: string | null, limit: number): Promise<CanvasPage>
+  page(collection: string, after: string | null, limit: number): Promise<CanvasPageRows>
   /** One collection's count, off the device's index: a read of the number, not of the documents. */
   count(collection: string): Promise<number>
   /** Whether the rows are the canvas whole — a sweep reached its last page, and none is under way. */
@@ -419,13 +419,27 @@ export interface CanvasCopy {
 }
 
 /**
- * One page of a collection as the copy reads it: the documents, and the id the next page starts after
- * — null where this was the collection's last page. Only the copy knows whether another page follows,
- * since it is the copy that read one row more than the page needed to answer that.
+ * One page of a collection as the copy reads it — what a `page` call receives: the documents, and the
+ * id the next page starts after — null where this was the collection's last page. Only the copy knows
+ * whether another page follows, since it is the copy that read one row more than the page needed to
+ * answer that. The host's own page of documents, off its route, is `CanvasDocsPage` in `hermes.ts`,
+ * which carries the wire's field names (`documents`, `count`).
  */
-export interface CanvasPage {
+export interface CanvasPageRows {
   rows: CanvasDoc[]
   next: string | null
+}
+
+/**
+ * What a `page` call answers: one page of a collection's rows and where the next page starts, the
+ * collection's whole count, and whether those rows are the canvas whole. The one shape a page's half
+ * reads (`page` in `BRIDGE_SCRIPT`), built where the bridge answers a page and nowhere else.
+ */
+export interface CanvasPageAnswer {
+  rows: CanvasDoc[]
+  next: string | null
+  total: number
+  partial: boolean
 }
 
 /** A read that cannot answer, in the words a page is given and the code a caller can read. */
@@ -445,10 +459,10 @@ function partial(call: BridgeDataCall): Error {
  * host. A `list` is one collection's documents in the host's order — a bare array, which is the shape
  * every canvas already written reads — and refuses past `LIST_MAX` rather than answering a short
  * array no page could tell was short; a `page` is that collection a page at a time, from the id it
- * was given, with the total and where the next starts; a `count` is the index's number; `partial` is
- * whether those rows are the canvas whole; and a `get` is one document — answering `null` only where a
- * completed sweep says this device has seen the canvas whole, since before one a document the rows
- * don't hold may simply not have been read yet (GLOSSARY "Partial").
+ * was given, a `CanvasPageAnswer` with the total and where the next starts; a `count` is the index's
+ * number; `partial` is whether those rows are the canvas whole; and a `get` is one document —
+ * answering `null` only where a completed sweep says this device has seen the canvas whole, since
+ * before one a document the rows don't hold may simply not have been read yet (GLOSSARY "Partial").
  */
 export async function answerRead(call: BridgeDataCall, copy: CanvasCopy): Promise<unknown> {
   if (call.method === "count") return copy.count(call.collection)
@@ -480,7 +494,8 @@ export async function answerRead(call: BridgeDataCall, copy: CanvasCopy): Promis
   // Where the next page starts is the copy's answer, since it is the copy that read one row past this
   // page: a page that reached the end names none, and `partial` is what says whether that end is the
   // canvas's own.
-  return { rows: one.rows, next: one.next, total, partial: !whole }
+  const answer: CanvasPageAnswer = { rows: one.rows, next: one.next, total, partial: !whole }
+  return answer
 }
 
 /**
@@ -668,13 +683,15 @@ try{parent.postMessage({type:TYPE,ready:true},"*")}catch(e){}
 
 /**
  * The page's half, put in the head ahead of the page's own scripts: `window.canvas.data` with
- * `list`, `get`, `page`, `count`, `partial`, `query`, `put` and `remove`, `window.canvas.read(shape,
- * args)` for the host's four free reads, and `window.canvas.tool.call(name, args)` for a tool the
- * version declared. `query` is the one data call the host answers, so it is the one a page needs the
- * bot for. Each posts the call to the parent and settles on the reply that names it — a tool call
- * waits on the reader's answer, which the app keeps for it. Every message carries this document's own
- * epoch, so a reply meant for the page drawn before this one can never settle a promise here. A reply
- * that fails carries the error's `code` where it has one, and the page's own error is given that code,
+ * `list`, `get`, `page`, `count`, `partial`, `query`, `put` and `remove` — a `page` settling on a
+ * `CanvasPageAnswer`, one page of the collection's rows with the total and whether they are the canvas
+ * whole — `window.canvas.read(shape, args)` for the host's four free reads, and
+ * `window.canvas.tool.call(name, args)` for a tool the version declared. `query` is the one data call
+ * the host answers, so it is the one a page needs the bot for. Each posts the call to the parent and
+ * settles on the reply that names it — a tool call waits on the reader's answer, which the app keeps
+ * for it. Every message carries this document's own epoch, so a reply meant for the page drawn before
+ * this one can never settle a promise here. A reply that fails carries the error's `code` where it has
+ * one, and the page's own error is given that code,
  * so a page can ask whether its copy is partial without matching the words. ES5, like the scroll
  * bridge beside it: it runs before the page's own scripts and asks nothing of the page.
  *

@@ -2476,8 +2476,13 @@ export async function dataCatalogue(
   }
 }
 
-/** One page of one collection, the id the next page starts after, and the collection's size. */
-export interface CanvasPage {
+/**
+ * The host's page of one collection's documents, off `GET canvases/<id>/data/<collection>`: the id the
+ * next page starts after, and the collection's size. The wire's own shape — `documents` and `count`
+ * are what the route names — where the device's copy answers a page of `rows` (`CanvasPageRows` in
+ * `canvas-bridge.ts`).
+ */
+export interface CanvasDocsPage {
   documents: unknown[]
   /** The last id this page holds, or null when it was the last page. */
   next: string | null
@@ -2496,7 +2501,7 @@ export async function dataPage(
   after: string | null = null,
   limit?: number,
   signal?: AbortSignal,
-): Promise<CanvasPage> {
+): Promise<CanvasDocsPage> {
   const query = new URLSearchParams()
   if (after) query.set("after", after)
   if (limit) query.set("limit", String(limit))
