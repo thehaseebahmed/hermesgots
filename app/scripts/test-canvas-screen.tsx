@@ -325,8 +325,8 @@ test(
     try {
       await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
         await until(() => /Reading the canvas…/.test(text()), "the reading line")
-        // A phone's sidebar is behind the drawer, so its button leads the head: the way back to the
-        // list is the wide screen's, where the sidebar stands on screen and cannot be opened.
+        // Nothing stands behind a cold address, so the head leads with the drawer the sidebar is
+        // collapsed into, and the list is one drawer away rather than a step back.
         const drawer = find('[aria-label="Open conversations"]')
         assert.ok(drawer, "the sidebar's button leads the header")
         assert.ok(
@@ -499,18 +499,25 @@ test(
       assert.equal(control!.getAttribute("aria-haspopup"), "dialog", "it opens a dialog")
       assert.equal(control!.getAttribute("aria-expanded"), "false", "closed, and it says so")
       assert.ok(
-        control!.className.includes("min-h-11"),
-        "tall enough for a thumb, where the ellipsis was (min-h-11)",
-      )
-      assert.ok(
         control!.classList.contains("w-full"),
-        "and as wide as the block gives it, so no press on the title line is dead (w-full)",
+        "as wide as the block gives it, so no press on the title line is dead (w-full)",
       )
       assert.ok(missing('button[aria-label="Canvas options"]'), "the header offers no ellipsis")
 
       const line = find('[data-slot="header-line"]')
       const block = heading!.parentElement
       assert.ok(block && block.contains(line), "the line is drawn in the block the press answers on")
+      // The head is one block: the thumb's 44px box is the block the press answers on, and the title's
+      // own box is its words' height — a 44px box drawn round them is what held the line away.
+      assert.ok(
+        block!.className.includes("min-h-11"),
+        "the block is as tall as a thumb, where the ellipsis was (min-h-11)",
+      )
+      assert.equal(
+        /\bmin-h-/.test(heading!.className),
+        false,
+        "and the title carries no minimum height of its own (its tightness is the sweep's)",
+      )
       assert.equal(control!.contains(line), false, "the line is no part of the control")
       saysTitleAlone(control, CANVAS.title)
       assert.ok(wordsOf(line).length > 0, "the line beside it draws words of its own")
@@ -1280,34 +1287,71 @@ test(
 )
 
 test(
-  "the canvas's header control steps back to the list rather than pushing it again",
+  "a wide screen's canvas head is led by nothing where the sidebar stands",
   laptop(async () => {
+    // The sidebar is drawn at this width, so a canvas the app opened needs no control in its head:
+    // the drawer's button is the phone's alone, and there is nothing behind the screen to step to.
     serveCanvases({ version: 3, undos: 0 })
     await seedCanvasChat("c1")
-    await mount(
-      <MemoryRouter initialEntries={["/canvas/c1"]}>
-        <Routes>
-          <Route path="/canvas/:id" element={<CanvasView />} />
-        </Routes>
-        <Nav />
-      </MemoryRouter>,
-      async () => {
-        await until(
-          () => Boolean(document.querySelector("iframe[data-canvas-frame]")),
-          "the canvas to draw",
-        )
-        const back = document.querySelector('[aria-label="All canvases"]')
-        assert.ok(back, "the header leads back to the list")
-        await click(back as HTMLElement)
-        await until(() => nav().startsWith("REPLACE:"), "a step back, not another entry")
-        assert.equal(nav(), "REPLACE:/canvas")
-      },
-    )
+    const history = atDepth(0)
+    try {
+      await mount(
+        <MemoryRouter initialEntries={["/canvas/c1"]}>
+          <Routes>
+            <Route path="/canvas/:id" element={<CanvasView />} />
+          </Routes>
+        </MemoryRouter>,
+        async () => {
+          await until(
+            () => Boolean(document.querySelector("iframe[data-canvas-frame]")),
+            "the canvas to draw",
+          )
+          assert.ok(
+            missing('[aria-label="All canvases"]'),
+            "no way back is drawn where the sidebar stands and nothing is behind",
+          )
+          assert.ok(
+            labelled("button", "Open conversations")?.className.includes("md:hidden"),
+            "and the drawer's button is the narrow screen's alone",
+          )
+          assert.equal(pressBack(), "app", "so the press is the app's, which leaves it")
+          assert.deepEqual(history.backs, [], "and steps nowhere")
+        },
+      )
+    } finally {
+      history.restore()
+    }
+    // Opened from the list at this width the head leads back to it, arrow and all: the sidebar
+    // standing does not take the step away, only the drawer's button it makes pointless.
+    const pushed = atDepth(1)
+    try {
+      await mount(
+        <MemoryRouter initialEntries={["/canvas/c1"]}>
+          <Routes>
+            <Route path="/canvas/:id" element={<CanvasView />} />
+          </Routes>
+        </MemoryRouter>,
+        async () => {
+          await until(
+            () => Boolean(document.querySelector("iframe[data-canvas-frame]")),
+            "the canvas to draw",
+          )
+          const back = labelled("button", "All canvases")
+          assert.ok(back, "a wide screen's canvas the list opened leads back to it")
+          assert.ok(
+            missing('[aria-label="Open conversations"]'),
+            "with no drawer drawn beside it, the sidebar already standing",
+          )
+        },
+      )
+    } finally {
+      pushed.restore()
+    }
   }),
 )
 
 test(
-  "a canvas the list opened steps back to the list",
+  "a canvas the list opened is led back to the list, and the back press steps there",
   atWidth(390, async () => {
     serveCanvases({ version: 3, undos: 0 })
     await seedCanvasChat("c1")
@@ -1324,8 +1368,21 @@ test(
             () => Boolean(document.querySelector("iframe[data-canvas-frame]")),
             "the canvas to draw",
           )
+          const back = labelled("button", "All canvases")
+          assert.ok(back, "the way back to the list leads a canvas the list opened")
+          assert.equal(
+            back!.getAttribute("aria-label"),
+            "All canvases",
+            "named for the screen it goes to",
+          )
+          assert.ok(
+            missing('[aria-label="Open conversations"]'),
+            "and the drawer is not drawn beside it",
+          )
           assert.equal(pressBack(), "screen", "the canvas takes the press")
           assert.deepEqual(history.backs, [1], "and steps back to the list behind it")
+          await click(back)
+          assert.deepEqual(history.backs, [1, 1], "and its own control takes the same step")
         },
       )
     } finally {
@@ -1421,8 +1478,11 @@ test(
 )
 
 test(
-  "a canvas the menu opened leaves the press to the app",
+  "a canvas the app opened is led by the drawer, and the back press is the app's",
   atWidth(390, async () => {
+    // Nothing stands behind the app's own entry, so its head leads with the drawer the sidebar is
+    // collapsed into, and the back press is the app's own: it arms the exit rather than stepping onto
+    // a screen that isn't there.
     serveCanvases({ version: 3, undos: 0 })
     await seedCanvasChat("c1")
     const history = atDepth(0)
@@ -1438,6 +1498,16 @@ test(
             () => Boolean(document.querySelector("iframe[data-canvas-frame]")),
             "the canvas to draw",
           )
+          const drawer = labelled("button", "Open conversations")
+          assert.ok(drawer, "the drawer's button leads a canvas with nothing behind it")
+          assert.ok(
+            document.querySelector('[data-slot="header-row"]')!.contains(drawer),
+            "and it is the head's first control",
+          )
+          assert.ok(
+            missing('[aria-label="All canvases"]'),
+            "no way back is drawn where there is no screen behind",
+          )
           assert.equal(pressBack(), "app", "the press is the app's, which leaves it")
           assert.deepEqual(history.backs, [], "nothing goes up")
         },
@@ -1445,6 +1515,59 @@ test(
     } finally {
       history.restore()
     }
+  }),
+)
+
+test(
+  "a canvas's chat is led by the drawer, and its corner is its way back to the page",
+  atWidth(390, async () => {
+    // A canvas with a page draws its chat with the one control to that page — the Preview corner,
+    // which replaces this entry — so no second arrow is drawn for the same move (ADR 0130), even on
+    // a screen the page pushed. A back press is still the chat's own, answered with the page.
+    serveCanvases({ version: 3, undos: 0 })
+    await seedCanvasChat(CANVAS.id)
+    const history = atDepth(1)
+    try {
+      await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
+        await until(() => Boolean(composerField()), "the chat to draw")
+        assert.ok(find('[data-canvas-flip="preview"]'), "the corner is the way back to the page")
+        assert.ok(
+          missing('[aria-label="All canvases"]'),
+          "and no arrow is drawn for the move the corner already makes",
+        )
+        assert.ok(labelled("button", "Open conversations"), "so the head leads with the drawer")
+        assert.equal(pressBack(), "screen", "and the press is the chat's, which the page answers")
+      })
+    } finally {
+      history.restore()
+    }
+  }),
+)
+
+test(
+  "a canvas with no page yet is led back to the list it came from",
+  atWidth(390, async () => {
+    // A canvas the bot is still building has no corner control, so its head is the only way back —
+    // and it leads to the list the reader came from (ADR 0130).
+    serveCanvases({ version: 0, undos: 0, listed: ["c12"] })
+    await seedCanvasChat("c12")
+    const history = atDepth(1)
+    try {
+      await drawCanvas(["/canvas/c12"], async () => {
+        await until(
+          () => nav() === "REPLACE:/canvas/c12/edit",
+          "the address to forward to the chat",
+        )
+        assert.deepEqual(history.backs, [], "forwarded in the list's own entry, never stepped to")
+        const back = labelled("button", "All canvases")
+        assert.ok(back, "the way back to the list leads the screen")
+        await click(back)
+        assert.deepEqual(history.backs, [1], "and pressing it steps back to the list")
+      })
+    } finally {
+      history.restore()
+    }
+    serveCanvases({ version: 3, undos: 0 })
   }),
 )
 

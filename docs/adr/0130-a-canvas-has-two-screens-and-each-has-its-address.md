@@ -5,7 +5,13 @@ screen, and on a phone a sheet raised from an Edit pill at half height and dragg
 session had no address of its own, so back from it was the app's back, a reload landed on the page,
 and a message being typed had half a screen to be typed in. **A canvas now has two screens — the
 preview, at `/canvas/:id`, and the edit screen, at `/canvas/:id/edit` — each with an address, one
-header row drawn by both, and one 44px control named for the screen it goes to.**
+header row drawn by both, one 44px control named for the screen it goes to, and a head that leads by
+how the reader arrived.**
+
+**Amended 2026-11-13**: the head's first control follows the arrival rather than the width, and the
+44px a thumb is given belongs to the block — the title with its line — rather than to a box drawn
+round the title's words. The decision above holds: two screens, two addresses, one row. What changed
+is the row.
 
 The edit screen is a phone's. A wide screen already has room for the session in a lane on the left of
 the page — the canvas's header above it in the same column, the page filling the pane to its right —
@@ -30,6 +36,17 @@ bot has not finished has a session to read and no page to look at, so a phone fo
 address and a wide screen stays on the lane. One owner decides, so the create cannot disagree with a
 link.
 
+The head leads by how the reader arrived, because the row is where a reader looks for the way out of a
+screen. An address the browser opened, a sidebar row and a pinned canvas are the app's own entry:
+nothing stands behind them, so the head leads with the drawer the sidebar is collapsed into — and on a
+wide screen, where the sidebar stands, with nothing at all — and the back press is the app's, which
+arms its exit. A screen the canvas list opened leads back to that list, and the same press steps
+there. A chat whose canvas has a page is the one head that draws no arrow: its corner control already
+goes to that page. The thumb's 44px is the block's — the title with the line under it — so the line
+sits as tight under the title as in a code session's head, and a press on either line, or beside a
+short title, opens the canvas's options. One component decides both, so the two screens cannot
+disagree about the row they wear.
+
 The one thing a phone cannot do on a single screen is tap the page, so pointing is a round trip. The
 edit screen's `+` sends the reader to the page with pointing armed, the page outlines the element
 under the finger, one tap answers it, and the app returns them to the chat with that element as a chip
@@ -48,7 +65,8 @@ small hand-over keyed by the canvas and taken once, so a point the reader remove
   canvas's first paint wrong.
 - **A back arrow on the edit screen once the canvas has a version.** The corner control already goes
   to the preview; two controls for one move is a header with a dead button. A canvas with no version
-  has no corner control, so that case does keep one, to the list.
+  has no corner control, so that case does keep one, to the list — drawn where the list opened it,
+  which on a phone is where the head follows the arrival rather than the width.
 - **Arming the page under the chat.** Keeping the frame behind the edit screen, outlined and tappable,
   would save the trip — and it is the sheet again: a page half-covered by the screen that exists to
   replace it.

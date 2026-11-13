@@ -48,7 +48,8 @@ export function SidebarButton({ className }: { className?: string }) {
  * `onTitlePress` makes the whole block — the title and the line under it — one press, for a screen
  * whose title opens something: a thumb on the line, on the space between the lines or beside a short
  * title lands as one on the title does, while the control the caller draws inside stays the one a
- * reader and a keyboard press.
+ * reader and a keyboard press. The block is also what the thumb is given, so it is 44px tall whatever
+ * its two lines come to, with the free space above and below them rather than between.
  * `className` can pin it in the page's flow instead.
  */
 export function ChatHeader({
@@ -136,10 +137,13 @@ export function ChatHeader({
             className={cn(
               "flex min-w-0 flex-1 flex-col",
               centered && "items-center",
-              // The ring lives here, not on the caller's button, so the block can outline a focus the
-              // button owns: one tab stop, one ring.
+              // The block is the press, so it is the thumb's: 44px whatever its two lines come to,
+              // with the free space above and below them rather than between, so the line sits as
+              // tight under the title as in a head that draws no control at all. The ring lives here,
+              // not on the caller's button, so the block can outline a focus the button owns: one
+              // tab stop, one ring.
               onTitlePress &&
-                "cursor-pointer rounded-lg hover:bg-muted/60 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-inset",
+                "min-h-11 cursor-pointer justify-center rounded-lg hover:bg-muted/60 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-inset",
             )}
             onClick={onTitlePress}
           >
