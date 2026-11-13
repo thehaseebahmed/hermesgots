@@ -29,6 +29,7 @@ import {
   mount,
   path,
   seedSettings,
+  settle,
   type,
   until,
   wordsOf,
@@ -75,12 +76,15 @@ function host({
   block = GENERAL,
   features = ["general_page"],
   away = false,
+  models,
   refuse,
 }: {
   block?: Block | null
   features?: string[]
   /** A host that didn't answer at all. */
   away?: boolean
+  /** The bot's Hermes models, as `/api/model/options` answers them; absent, this host has no route. */
+  models?: unknown
   /** A key this host refuses to write, in its own words. */
   refuse?: { key: string; message: string }
 } = {}) {
@@ -109,6 +113,7 @@ function host({
       }
       return json({ object: "gots.general", general: held })
     }
+    if (url.pathname.endsWith("/api/model/options")) return models ? json(models) : json({}, 404)
     return json({}, 404)
   }
   return { calls, fetch: fetch as unknown as typeof globalThis.fetch, block: () => held }
@@ -358,5 +363,105 @@ test("a page opened again with the host away draws the rows the host last gave, 
   await mount(page(), async () => {
     await until(async () => Boolean(find('[data-setting="timezone"]')), "the held rows")
     assert.ok(missing("[data-general-loading]"), "no spinner stands over them")
+  })
+})
+
+/** The bot's Hermes models, as `/api/model/options` answers them, under one provider. */
+const modelsOf = (models: string[]) => ({
+  model: models[0],
+  provider: "openrouter",
+  providers: [
+    {
+      slug: "openrouter",
+      name: "OpenRouter",
+      is_current: true,
+      authenticated: true,
+      models,
+    },
+  ],
+})
+
+/** Every sheet drawn from the moment it is armed, so a tap's own is caught even for one frame. */
+function watchSheets() {
+  const drawn: Element[] = []
+  const watcher = new MutationObserver((records) => {
+    for (const record of records)
+      for (const node of record.addedNodes)
+        if (
+          node instanceof Element &&
+          (node.matches("[data-popup-form]") || node.querySelector("[data-popup-form]"))
+        )
+          drawn.push(node)
+  })
+  watcher.observe(document.body, { childList: true, subtree: true })
+  return { drawn, stop: () => watcher.disconnect() }
+}
+
+test("a one-model host applies the General Model row's model, and draws no sheet", async () => {
+  const server = await seed("general-model-one", { models: modelsOf(["own-model"]) })
+  await mount(page(), async () => {
+    await until(
+      async () => /openrouter\/own-model/.test(rowText("model")),
+      "the host's model on the row",
+    )
+    const sheets = watchSheets()
+    try {
+      await click(row("model"))
+    } finally {
+      sheets.stop()
+    }
+    assert.deepEqual(sheets.drawn, [], "no sheet was drawn, not even for a frame")
+    assert.deepEqual(
+      server.calls.filter((one) => one.method === "POST"),
+      [],
+      "and nothing was written: the row already held the one model",
+    )
+    assert.equal(
+      row("model")?.querySelector(".text-primary")?.textContent,
+      "openrouter/own-model",
+      "the row still reads the model in force",
+    )
+  })
+})
+
+test("a host whose model read failed opens the sheet with its sentence, and writes nothing", async () => {
+  const server = await seed("general-model-failed")
+  await mount(page(), async () => {
+    await until(async () => Boolean(row("model")), "the row")
+    // The read's refusal has to have landed, or the tap would catch the list still out.
+    await settle()
+    await click(row("model"))
+    await until(async () => Boolean(find("[data-popup-form]")), "the sheet")
+    assert.match(
+      wordsOf(find("[data-popup-form]")),
+      /Couldn't read this bot's models\./,
+      "the sheet says what failed rather than drawing rows it never read",
+    )
+    assert.deepEqual(
+      server.calls.filter((one) => one.method === "POST"),
+      [],
+      "and writes nothing",
+    )
+  })
+})
+
+test("a host offering two models opens the General Model row's sheet, with its rows", async () => {
+  await seed("general-model-two", { models: modelsOf(["own-model", "cheap-model"]) })
+  await mount(page(), async () => {
+    await until(
+      async () => /openrouter\/own-model/.test(rowText("model")),
+      "the host's model on the row",
+    )
+    await click(row("model"))
+    await until(async () => Boolean(find("[role=radiogroup]")), "the pick")
+    const drawn = findAll("[role=radio]").map(wordsOf)
+    assert.ok(
+      drawn.some((row) => row.includes("own-model")),
+      "the model in force",
+    )
+    assert.ok(
+      drawn.some((row) => row.includes("cheap-model")),
+      "and the one beside it, since there is a choice to make",
+    )
   })
 })

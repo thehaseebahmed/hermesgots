@@ -43,6 +43,7 @@ import {
   linkRowClass,
   rowClass,
   useHeaderAction,
+  useModelPickWrite,
   useScreenRefusal,
 } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
@@ -86,7 +87,7 @@ import {
   REMINDER_LEVELS,
   setGeneralSetting,
   type GeneralTab,
-  type ModelProvider,
+  type ModelInfo,
   type ReminderLevel,
 } from "@/lib/hermes"
 import { cachedHost, keepHost } from "@/lib/host-cache"
@@ -95,6 +96,8 @@ import { LLM_PROVIDERS } from "@/lib/llm-providers"
 import { MCP_FEATURES } from "@/lib/mcps"
 import { effective, explicitly, rowOn } from "@/lib/settings-values"
 import { botModel, fullModel, setDefaultModel, useModelInfo } from "@/lib/model-info"
+import { modelsRead, samePick } from "@/lib/model-pick"
+import { usePickOne } from "@/lib/use-pick-one"
 import { setBotMuted } from "@/lib/push"
 import { seedsFromCache, useReadAttempt } from "@/lib/read-attempt"
 import { useReminders } from "@/lib/reminders"
@@ -679,7 +682,6 @@ function GeneralPage({
   const answers = usePluginFeatureAnswers(profile, GENERAL_ANSWERS)
   const delegation = tab === "delegation"
   const info = useModelInfo(profile)
-  const providers = info?.providers ?? []
   const own = botModel(profile, info)
   const chain = useFallbackModels(delegation ? null : profile)
   const subagent = useDelegationModel(delegation ? profile : null)
@@ -687,6 +689,17 @@ function GeneralPage({
   const { block, problem, stale, seeded, keep, retry } = settings
   const [saving, setSaving] = useState<string>()
   const [pick, setPick] = useState<string>()
+  // The page's Model row and the sheet it opens make one write between them, so a tap on the row
+  // leaves exactly the state a tap on a row of the sheet leaves.
+  const writeModel = useModelPickWrite(
+    (next) => setDefaultModel(profile, next),
+    () => setPick(undefined),
+  )
+  const { tap: tapModel, busy: modelBusy } = usePickOne({
+    read: modelsRead(info),
+    same: (option) => samePick(option, own),
+    apply: writeModel,
+  })
 
   // Every write answers the host's fresh block, so the row a person just changed is the row the
   // host now holds — and a refused write leaves the page as it was, with the host's sentence drawn
@@ -790,14 +803,15 @@ function GeneralPage({
           {/* The row is the page's own lead row, drawn only over a page the host let this app read: a
               refused page says so in its banner and carries no row (#992). */}
           {delegation && subagent.supported && block && (
-            <SubagentModelRow profile={profile} providers={providers} record={subagent} own={own} />
+            <SubagentModelRow profile={profile} info={info} record={subagent} own={own} />
           )}
           {!delegation && (
             <ValueRow
               title="Model"
               purpose="The host's main model, on every surface"
               value={own ? fullModel(own) : ""}
-              onClick={() => setPick("model")}
+              busy={modelBusy}
+              onClick={() => tapModel(() => setPick("model"))}
               data-setting="model"
             />
           )}
@@ -825,7 +839,7 @@ function GeneralPage({
           open={pick === "model"}
           title="Model"
           profile={profile}
-          providers={providers}
+          info={info}
           choice={own}
           fallback={{ label: "Default", model: info?.model }}
           onPick={(next) => void setDefaultModel(profile, next)}
@@ -888,16 +902,26 @@ function GeneralPage({
 // so the raw `delegation.*` keys are never rows.
 function SubagentModelRow({
   profile,
-  providers,
+  info,
   record,
   own,
 }: {
   profile: Profile
-  providers: ModelProvider[]
+  info: ModelInfo | null | undefined
   record: ReturnType<typeof useDelegationModel>
   own: ReturnType<typeof botModel>
 }) {
   const [open, setOpen] = useState(false)
+  const write = useModelPickWrite(
+    (next) => record.save(next),
+    () => setOpen(false),
+  )
+  const { tap, busy } = usePickOne({
+    read: modelsRead(info),
+    // Nothing picked is the bot's own model, not a value this row holds: a lone model is written.
+    same: (option) => samePick(option, record.pick),
+    apply: write,
+  })
   return (
     <>
       <ValueRow
@@ -905,15 +929,15 @@ function SubagentModelRow({
         purpose="The model every subagent runs on"
         value={record.pick ? fullModel(record.pick) : record.custom ? "Custom" : "Default model"}
         disabled={record.saving}
-        busy={record.saving}
-        onClick={() => setOpen(true)}
+        busy={record.saving || busy}
+        onClick={() => tap(() => setOpen(true))}
         data-setting="subagent-model"
       />
       <ModelPick
         open={open}
         title="Subagent model"
         profile={profile}
-        providers={providers}
+        info={info}
         choice={record.pick}
         fallback={{ label: "Default model", model: own?.model }}
         onPick={(next) => record.save(next)}
@@ -1116,8 +1140,18 @@ function BotCard({ profile, onOpen }: { profile: Profile; onOpen: (id: string) =
 function ModelsPage({ profile }: { profile: Profile }) {
   const [pick, setPick] = useState<string>()
   const info = useModelInfo(profile)
-  const providers = info?.providers ?? []
   const own = botModel(profile, info)
+  // The row and the sheet make one write between them, so a lone model is applied the way a row
+  // of the sheet applies it.
+  const write = useModelPickWrite(
+    (next) => (next ? updateProfile(profile.id, { model: next.model }) : undefined),
+    () => setPick(undefined),
+  )
+  const { tap, busy } = usePickOne({
+    read: modelsRead(info),
+    same: (option) => samePick(option, own),
+    apply: write,
+  })
 
   return (
     <div className="flex flex-col gap-4" data-bot-models>
@@ -1127,7 +1161,8 @@ function ModelsPage({ profile }: { profile: Profile }) {
           title="Model"
           purpose="The model a chat runs when it has no pick of its own"
           value={profile.model}
-          onClick={() => setPick("model")}
+          busy={busy}
+          onClick={() => tap(() => setPick("model"))}
           data-setting="model"
         />
       </Group>
@@ -1136,7 +1171,7 @@ function ModelsPage({ profile }: { profile: Profile }) {
         open={pick === "model"}
         title="Model"
         profile={profile}
-        providers={providers}
+        info={info}
         choice={own}
         fallback={{ label: "Default model", model: own?.model }}
         onPick={(next) => (next ? updateProfile(profile.id, { model: next.model }) : undefined)}
@@ -1215,7 +1250,7 @@ function FallbacksPage({ profile }: { profile: Profile }) {
         open={pick !== undefined}
         title="Fallback provider"
         profile={profile}
-        providers={providers}
+        info={info}
         choice={pick === undefined ? undefined : list[pick]}
         fallback={{ label: "None" }}
         onPick={(next) => {

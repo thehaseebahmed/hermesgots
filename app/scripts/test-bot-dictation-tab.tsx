@@ -46,6 +46,7 @@ import {
   labelled,
   missing,
   mount,
+  settle,
   type,
   until,
   wordsOf,
@@ -1075,5 +1076,99 @@ test("a host that carries no level keeps the page it had, cloud route or not", a
   await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
     await until(async () => Boolean(row("cleanup-model")), "the cleanup's card")
     assert.equal(off(row("cleanup-model")), false, "and the model row stays as it was")
+  })
+})
+
+/** The bot's Hermes models as a host listing exactly one answers them. */
+const ONE_MODEL = {
+  model: "own-model",
+  provider: "openrouter",
+  providers: [
+    {
+      slug: "openrouter",
+      name: "OpenRouter",
+      is_current: true,
+      authenticated: true,
+      models: ["own-model"],
+    },
+  ],
+}
+
+/** Every sheet drawn from the moment it is armed, so a tap's own is caught even for one frame. */
+function watchSheets() {
+  const drawn: Element[] = []
+  const watcher = new MutationObserver((records) => {
+    for (const record of records)
+      for (const node of record.addedNodes)
+        if (
+          node instanceof Element &&
+          (node.matches("[data-popup-form]") || node.querySelector("[data-popup-form]"))
+        )
+          drawn.push(node)
+  })
+  watcher.observe(document.body, { childList: true, subtree: true })
+  return { drawn, stop: () => watcher.disconnect() }
+}
+
+/** Waits for the host's model list to land on the bot, which is what a tap decides against. */
+const modelRead = () =>
+  until(async () => Boolean((await db.profiles.get("bot-1"))?.hostModel), "the host's model read")
+
+test("a one-model host applies the cleanup model from its row, and draws no pick", async () => {
+  const calls = await seed(
+    "cleanup-one-model",
+    ["dictation", "speech_model"],
+    {},
+    {
+      speech: speech(),
+      models: ONE_MODEL,
+      next: speech({
+        cleanup: {
+          model: { provider: "openrouter", model: "own-model" },
+          allowed: true,
+          reason: null,
+          level: "light",
+        },
+      }),
+    },
+  )
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    await until(async () => Boolean(row("cleanup-model")), "the cleanup model's row")
+    await modelRead()
+    const sheets = watchSheets()
+    try {
+      await click(row("cleanup-model"))
+    } finally {
+      sheets.stop()
+    }
+    assert.deepEqual(sheets.drawn, [], "no pick was drawn, not even for a frame")
+    assert.deepEqual(
+      writes(calls)[0]?.body,
+      { cleanup_model: { provider: "openrouter", model: "own-model" } },
+      "one write, the model a row's pick writes",
+    )
+    assert.equal(valueOf(row("cleanup-model")), "openrouter/own-model", "and the row names it")
+  })
+})
+
+test("a host whose model read failed opens the cleanup pick with its sentence, and writes nothing", async () => {
+  const calls = await seed(
+    "cleanup-read-failed",
+    ["dictation", "speech_model"],
+    {},
+    { speech: speech(), models: null },
+  )
+  await mount(editor("/settings/bots/bot-1/speech-to-text"), async () => {
+    await until(async () => Boolean(row("cleanup-model")), "the cleanup model's row")
+    // The read's refusal has to have landed, or the tap would catch the list still out.
+    await settle()
+    await click(row("cleanup-model"))
+    await until(async () => Boolean(find("[data-popup-form]")), "the pick")
+    assert.match(
+      wordsOf(find("[data-popup-form]")),
+      /Couldn't read this bot's models\./,
+      "the pick says what failed rather than drawing models it never read",
+    )
+    assert.deepEqual(writes(calls), [], "and nothing is written")
   })
 })

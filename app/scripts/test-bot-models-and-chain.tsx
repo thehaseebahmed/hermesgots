@@ -1,8 +1,10 @@
 /**
  * A bot's models, over a seeded device database and a faked host (ADR 0055, ADR 0104): the Models
- * page's model a chat runs, and — on General, where Hermes's Dashboard keeps them — the host's main
- * model and the chain it falls back on, the chain drilling into a screen of its own. Every setting is a title over the line saying what it is for and the value it holds in
- * the accent colour, each value opening its pick as a bottom sheet.
+ * page's model a chat runs, the Delegation page's subagent model, and — on General, where Hermes's
+ * Dashboard keeps them — the host's main model and the chain it falls back on, the chain drilling
+ * into a screen of its own. Every setting is a title over the line saying what it is for and the
+ * value it holds in the accent colour, each value opening its pick as a bottom sheet — or applying
+ * the one model its host offers, without opening one at all.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -27,12 +29,20 @@ import {
   mount,
   path,
   seedSettings,
+  settle,
   until,
   wordsOf,
 } from "./component-kit.tsx"
 
 type Choice = { provider: string; model: string }
 type Sent = { method: string; path: string; body: Record<string, unknown> | null }
+
+/** The host's Delegation block, as its schema offers it: one key, so the page draws its own rows. */
+const DELEGATION = {
+  fields: [{ key: "delegation.backend", kind: "string" as const, section: "" }],
+  values: {},
+  defaults: { "delegation.backend": "default" },
+}
 
 function LivePage() {
   const { tab, sub } = useParams()
@@ -59,6 +69,9 @@ const page = (entry: string) => (
   </MemoryRouter>
 )
 
+/** The models a host lists when a test doesn't say otherwise: two, so a pick has a choice to offer. */
+const TWO_MODELS = ["own-model", "cheap-model"]
+
 /**
  * A host answering the plugin's `info` (its features and version), the fallback route, its model
  * list and the write that makes a model its main one — and recording every request, so a test can
@@ -66,11 +79,12 @@ const page = (entry: string) => (
  */
 function host({
   features = ["general_page", "fallbacks", "host_model"],
-  models = ["own-model", "cheap-model"],
+  models = TWO_MODELS,
   fallbacks = [] as Choice[],
 }: {
   features?: string[]
-  models?: string[]
+  /** The models the bot's Hermes lists; `null` is a host whose read failed. */
+  models?: string[] | null
   fallbacks?: Choice[]
 } = {}) {
   const calls: Sent[] = []
@@ -86,13 +100,19 @@ function host({
         version: "0.81.0",
         features,
       })
+    // The Delegation page's own schema, and the subagent model its row picks.
+    if (url.pathname.endsWith("/plugins/gots/delegation-settings"))
+      return json({ object: "gots.delegation_settings", delegation: DELEGATION })
+    if (url.pathname.endsWith("/plugins/gots/delegation"))
+      return json({ delegation: method === "POST" && body ? body.delegation : null })
     if (url.pathname.endsWith("/plugins/gots/fallbacks")) {
       if (method === "POST") chain = body?.fallbacks ?? []
       return json({ fallbacks: chain })
     }
-    if (url.pathname.endsWith("/api/model/options"))
+    if (url.pathname.endsWith("/api/model/options")) {
+      if (!models) return json({}, 404)
       return json({
-        model: "own-model",
+        model: models[0],
         provider: "openrouter",
         providers: [
           {
@@ -104,7 +124,9 @@ function host({
           },
         ],
       })
-    if (url.pathname.endsWith("/models")) return json({ data: models.map((id) => ({ id })) })
+    }
+    if (url.pathname.endsWith("/models"))
+      return json({ data: (models ?? []).map((id) => ({ id })) })
     return json({})
   }
   return { calls, fetch: fetch as unknown as typeof globalThis.fetch, chain: () => chain }
@@ -406,5 +428,111 @@ test("picking General's Model makes it the host's main model", async () => {
       { provider: "openrouter", model: "cheap-model" },
       "the host is told which model to run everywhere",
     )
+  })
+})
+
+/** Every sheet drawn from the moment it is armed, so a tap's own is caught even for one frame. */
+function watchSheets() {
+  const drawn: Element[] = []
+  const watcher = new MutationObserver((records) => {
+    for (const record of records)
+      for (const node of record.addedNodes)
+        if (
+          node instanceof Element &&
+          (node.matches("[data-popup-form]") || node.querySelector("[data-popup-form]"))
+        )
+          drawn.push(node)
+  })
+  watcher.observe(document.body, { childList: true, subtree: true })
+  return { drawn, stop: () => watcher.disconnect() }
+}
+
+/** Waits for the host's model list to land on the bot, which is what a tap decides against. */
+const modelRead = () =>
+  until(async () => Boolean((await db.profiles.get("bot-1"))?.hostModel), "the host's model read")
+
+test("a one-model host applies it from the Models page's row, and draws no sheet", async () => {
+  const calls = await seed("models-one-model", { models: ["own-model"] })
+  await mount(page("/settings/bots/bot-1/models"), async () => {
+    await modelRead()
+    const sheets = watchSheets()
+    try {
+      await click(row("model"))
+    } finally {
+      sheets.stop()
+    }
+    assert.deepEqual(sheets.drawn, [], "no sheet was drawn, not even for a frame")
+    assert.deepEqual(
+      calls.filter((one) => one.method === "POST"),
+      [],
+      "and nothing was written: the row already held the host's one model",
+    )
+    assert.equal(
+      (await db.profiles.get("bot-1"))?.model,
+      "test/model",
+      "the bot's own model is where it was",
+    )
+  })
+})
+
+test("a host offering two models opens the Models page's sheet, with its rows", async () => {
+  await seed("models-two-models")
+  await mount(page("/settings/bots/bot-1/models"), async () => {
+    await modelRead()
+    await openPick("model")
+    assert.ok(modelOption("own-model"), "the model in force")
+    assert.ok(modelOption("cheap-model"), "and the one beside it, since there is a choice to make")
+  })
+})
+
+test("a host whose model read failed opens the Model sheet with its sentence, and writes nothing", async () => {
+  const calls = await seed("models-read-failed", { models: null })
+  await mount(page("/settings/bots/bot-1/models"), async () => {
+    await until(async () => Boolean(row("model")), "the row")
+    // The read's refusal has to have landed, or the tap would catch the list still out.
+    await settle()
+    await click(row("model"))
+    await until(async () => Boolean(find("[data-popup-form]")), "the sheet")
+    assert.match(
+      wordsOf(find("[data-popup-form]")),
+      /Couldn't read this bot's models\./,
+      "the sheet says what failed rather than drawing rows it never read",
+    )
+    assert.deepEqual(
+      calls.filter((one) => one.method === "POST"),
+      [],
+      "and writes nothing",
+    )
+  })
+})
+
+test("a one-model host writes the Delegation row's model through the host, and draws no sheet", async () => {
+  const calls = await seed("delegation-one-model", {
+    models: ["own-model"],
+    features: ["general_page", "delegation_model", "delegation_page"],
+  })
+  // The Delegation page draws its own block, so its row is read off the document rather than the
+  // Models page's or General's.
+  const subagent = () => find("[data-bot-delegation] [data-setting='subagent-model']")
+  const shown = () => subagent()?.querySelector(".text-primary")?.textContent ?? null
+  await mount(page("/settings/bots/bot-1/delegation"), async () => {
+    await until(async () => Boolean(subagent()), "the Delegation page's model row")
+    await modelRead()
+    const sheets = watchSheets()
+    try {
+      await click(subagent())
+    } finally {
+      sheets.stop()
+    }
+    assert.deepEqual(sheets.drawn, [], "no sheet was drawn, not even for a frame")
+    const write = calls.find(
+      (one) => one.method === "POST" && one.path.endsWith("/plugins/gots/delegation"),
+    )
+    assert.deepEqual(
+      write?.body,
+      { delegation: { provider: "openrouter", model: "own-model" } },
+      "the one model, through the write a row's tap makes",
+    )
+    await until(async () => shown() === "openrouter/own-model", "the row the write left")
   })
 })

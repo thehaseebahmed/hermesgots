@@ -199,7 +199,7 @@ export function host(
     speechRefusals?: number
     refuse?: string
     writers?: { model: boolean; provider: boolean }
-    /** The bot's models, as the cleanup pick's own picker reads them. */
+    /** The bot's models, as the cleanup pick's own picker reads them; `null` is a failed read. */
     models?: unknown
     /** The fresh `stt` block a write answers with: the one the page draws after it. */
     nextStt?: unknown
@@ -226,7 +226,8 @@ export function host(
       })
     // The bot's Hermes, which the cleanup pick's own picker lists: two providers, so the picker
     // offers its "Default" row over them rather than drilling into the only one it has.
-    if (path.endsWith("/api/model/options")) return json(options.models ?? BOT_MODELS)
+    if (path.endsWith("/api/model/options"))
+      return options.models === null ? json({}, 404) : json(options.models ?? BOT_MODELS)
     if (path.endsWith("/api/plugins/gots/stt")) {
       const body = init?.body ? JSON.parse(String(init.body)) : undefined
       calls.push({ path, method, body })

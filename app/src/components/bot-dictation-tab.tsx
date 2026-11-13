@@ -16,6 +16,7 @@ import {
   PickSurface,
   SwitchRow,
   useHeaderAction,
+  useModelPickWrite,
   ValueRow,
 } from "@/components/settings-chrome"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
@@ -28,6 +29,8 @@ import { botSubPath, type BotSub } from "@/lib/bot-subs"
 import { getSettings, updateProfile, type Profile } from "@/lib/db"
 import { useSpeech } from "@/lib/host-speech"
 import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
+import { modelsRead, samePick } from "@/lib/model-pick"
+import { usePickOne } from "@/lib/use-pick-one"
 import {
   CLEANUP_LEVEL_ROWS,
   heardLine,
@@ -90,9 +93,22 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
   const navigate = useNavigate()
   const words = readVocabulary(profile.vocabulary)
   const info = useModelInfo(profile)
-  const providers = info?.providers ?? []
   const own = botModel(profile, info)
   const [pick, setPick] = useState<"speech" | "cleanup" | "level">()
+  // The Cleanup model's row and its pick make one write between them, so a lone model is applied
+  // the way a row of the pick applies it.
+  const writeCleanup = useModelPickWrite(
+    (next) => {
+      // A write already out is the page's own guard: the trigger lets go of its key either way.
+      if (!speech.saving) void speech.chooseCleanup(next ?? null)
+    },
+    () => setPick(undefined),
+  )
+  const { tap: tapCleanup, busy: cleanupBusy } = usePickOne({
+    read: modelsRead(info),
+    same: (option) => samePick(option, settings?.cleanup.model ?? undefined),
+    apply: writeCleanup,
+  })
   // The row whose form is open, wherever it sits on the page: one surface serves them all.
   const [open, setOpen] = useState<SttSetting>()
   const models = settings ? modelsFor(settings, block) : []
@@ -212,7 +228,8 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
           developer={Boolean(developer)}
           onLevel={() => setPick("level")}
           onHearing={(sent) => (speech.saving ? undefined : void speech.setHearing(sent))}
-          onPick={() => setPick("cleanup")}
+          onPick={() => tapCleanup(() => setPick("cleanup"))}
+          busy={cleanupBusy}
         />
       )}
 
@@ -277,7 +294,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
           open={pick === "cleanup"}
           title="Cleanup model"
           profile={profile}
-          providers={providers}
+          info={info}
           choice={settings.cleanup.model ?? undefined}
           fallback={{ label: "Default", model: own?.model }}
           onPick={(next) => (speech.saving ? undefined : void speech.chooseCleanup(next ?? null))}
@@ -744,12 +761,15 @@ function CleanupRow({
   tag,
   settings,
   shut,
+  busy,
   onClick,
 }: {
   tag?: string
   settings: SpeechSettings | undefined
   /** The card's rows are shut: a write is out, the page is stale, or cleanup cannot run here. */
   shut: boolean
+  /** The lone model this row applied is on its way to the host. */
+  busy?: boolean
   onClick: () => void
 }) {
   const pick = settings?.cleanup.model
@@ -775,6 +795,7 @@ function CleanupRow({
       value={pick ? fullModel(pick) : "Default"}
       muted={shut}
       disabled={shut}
+      busy={busy}
       onClick={onClick}
       data-setting="cleanup-model"
     />
@@ -792,6 +813,7 @@ function CleanupSection({
   onLevel,
   onHearing,
   onPick,
+  busy,
 }: {
   settings: SpeechSettings
   saving: boolean
@@ -802,6 +824,8 @@ function CleanupSection({
   onLevel: () => void
   onHearing: (sent: boolean) => void
   onPick: () => void
+  /** The cleanup model a tap applied is on its way to the host. */
+  busy?: boolean
 }) {
   // The take leaves the host: Cleanup never runs on one a vendor transcribed (ADR 0082). A host that
   // carries no level keeps the page it had: the rule is drawn by the build that knows it, and one
@@ -827,7 +851,7 @@ function CleanupSection({
             data-setting="cleanup-level"
           />
         )}
-        <CleanupRow tag="Gots" settings={settings} shut={shut} onClick={onPick} />
+        <CleanupRow tag="Gots" settings={settings} shut={shut} busy={busy} onClick={onPick} />
         {hearing && developer && (
           <SwitchRow
             id="stt-hearing-prompt"

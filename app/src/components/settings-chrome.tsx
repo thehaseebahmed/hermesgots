@@ -31,7 +31,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import type { ModelChoice, Profile } from "@/lib/db"
-import type { ModelProvider } from "@/lib/hermes"
+import type { ModelInfo } from "@/lib/hermes"
 import type { RefusalHold } from "@/lib/refusal"
 import { useRefusal, useSaidRefusal } from "@/lib/use-refusal"
 import { holdsUnsavedChanges, useUnsavedChanges } from "@/lib/unsaved"
@@ -786,8 +786,33 @@ export function EditForm({
 }
 
 /**
- * One model pick, wherever a setting offers one: its surface, the sentence a host that answered no
- * models leaves, and the close every pick makes. `onPick`'s refusal is said once, over the page.
+ * The write a model pick makes, wherever the tap came from: a row of the sheet, or the row that
+ * opens it applying the one model it holds. One function per surface, so both taps leave exactly
+ * the state one row's tap leaves — the refusal said where the page draws its refusals, and the
+ * sheet closed as the write goes out. It answers the write's own promise, so a caller can wear
+ * `busy` for as long as the host has it.
+ */
+export function useModelPickWrite(
+  onPick: (choice: ModelChoice | undefined) => void | Promise<void>,
+  onClose: () => void,
+) {
+  const refusal = useScreenRefusal()
+  return useCallback(
+    (choice: ModelChoice | undefined) => {
+      const written = refusal.write("save that", async () => onPick(choice))
+      onClose()
+      // Held for as long as the host has the write, and answering nothing: whether it landed is
+      // the refusal's to say where the page draws it.
+      return written.then(() => undefined)
+    },
+    [refusal.write, onPick, onClose],
+  )
+}
+
+/**
+ * One model pick, wherever a setting offers one: its surface, the sentence for each state its list
+ * can be in — still reading, a read that failed, a host offering nothing — and the close every pick
+ * makes. `onPick`'s refusal is said once, over the page.
  *
  * The host's models arrive from the opener rather than being read here: the row that opens this
  * sheet is the one deciding whether to open it, and it holds the list already.
@@ -796,7 +821,7 @@ export function ModelPick({
   open,
   title,
   profile,
-  providers,
+  info,
   choice,
   fallback,
   onPick,
@@ -805,8 +830,8 @@ export function ModelPick({
   open: boolean
   title: string
   profile: Profile
-  /** The host's models as the opener read them: empty while nothing usable came back. */
-  providers: ModelProvider[]
+  /** The host's models as the opener read them: still out, failed, or the list it offers. */
+  info: ModelInfo | null | undefined
   /** The model the pick marks as in force. */
   choice?: ModelChoice
   /** The row that clears the choice: its label and the model it runs. */
@@ -814,24 +839,26 @@ export function ModelPick({
   onPick: (choice: ModelChoice | undefined) => void | Promise<void>
   onClose: () => void
 }) {
-  // The pick closes as it writes, so the words land on the page the pick was opened from.
-  const refusal = useScreenRefusal()
+  const write = useModelPickWrite(onPick, onClose)
   return (
     <PickSurface open={open} onOpenChange={(next) => !next && onClose()} title={title}>
-      {providers.length ? (
+      {info === undefined ? (
+        <p className="flex items-center gap-2 px-1 py-2 text-sm text-muted-foreground">
+          <Spinner className="size-4" /> Reading this bot's models…
+        </p>
+      ) : info === null ? (
+        <p className="px-1 py-2 text-sm text-muted-foreground">Couldn't read this bot's models.</p>
+      ) : info.providers.length ? (
         <ModelPicker
           header={false}
-          providers={providers}
+          providers={info.providers}
           fallback={fallback}
           recent={profile.recentModels}
           choice={choice}
-          onChoose={(next) => {
-            void refusal.write("save that", async () => onPick(next))
-            onClose()
-          }}
+          onChoose={write}
         />
       ) : (
-        <p className="px-1 py-2 text-sm text-muted-foreground">Couldn't read this bot's models.</p>
+        <p className="px-1 py-2 text-sm text-muted-foreground">This bot's host offers no models.</p>
       )}
     </PickSurface>
   )
