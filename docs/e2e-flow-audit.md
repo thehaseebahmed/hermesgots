@@ -17,17 +17,17 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **94 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 94 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **95 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 95 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --------- | ------ |
-| stay | 39 |
+| stay | 40 |
 | component | 51 |
 | plugin | 2 |
 | delete | 2 |
-| **total** | **94** |
+| **total** | **95** |
 
 Of those 94, 88 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
 reuses `todos.mjs`, so 87 distinct files) and 6 point at the older
@@ -199,16 +199,25 @@ grows into is mermaid's own `getBBox` measurement and the sheet a tap opens, nei
 component tier's. So the registry holds 93 + 1 = **94** keys, the component verdicts unchanged at
 **51**, the plugin verdicts **2**, the deletes **2**, and the stays are 38 + 1: **39**.
 
+The literature review's branch adds one key, `research-literature`, and it is a stay. A review's
+papers table holds six columns, which is wider than a phone, and the decision is that it scrolls
+sideways inside its own card rather than dropping one: whether the card overflows, whether the page
+around it stays still, and whether the last column can be reached are all widths, which a DOM
+without a layout engine cannot measure. The words, the counts and the posts are the component
+tier's (`scripts/test-research-literature.tsx`). So the registry holds 94 + 1 = **95** keys, the
+component verdicts unchanged at **51**, the plugin verdicts **2**, the deletes **2**, and the stays
+are 39 + 1: **40**.
+
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above
-that its rows don't add up to, or a stay beyond the thirty-nine fails the app's gates. A new flow is
+that its rows don't add up to, or a stay beyond the forty fails the app's gates. A new flow is
 then an argument this page has to carry, never a default (ADR 0019).
 
 Check any of it in one line:
 
 ```bash
-grep -c '^| `' docs/e2e-flow-audit.md                           # 94 rows, one per registry key
-grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 39
+grep -c '^| `' docs/e2e-flow-audit.md                           # 95 rows, one per registry key
+grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 40
 grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 51
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 2
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
@@ -502,6 +511,15 @@ pieces land, so its body and its closer are two states of one page.
 | Key | Verdict | What it asserts today | Why it moves | What replaces it |
 | ----------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `mermaid` | stay | A reply carrying a closed `mermaid` fence draws a `[data-slot=diagram]` frame where the fence stood — between the reply's paragraph above it and the one below — with no `[data-md-code]` left for that fence, the frame labelled `mermaid` and carrying the copy control a code block does; the reply then being held by the mock with that fence still open, so the held screen is read rather than raced: the fence stands as a code block, no frame is drawn, and not one of mermaid's chunks has been asked for; released to its closer the frame draws where the fence stood while the mock holds the words after it, and only then does the reply end, with every state recorded from the send on showing the fence as a code block first, the frame from the closing fence on, and no code block drawn again after it. | Both halves are the page's own writing and the app's own batching. A fence's body and its closer reach the device as separate writes, so the code-before-frame arrangement exists only while a reply is really arriving: a component test handed the finished string has one state, and it would pass whether or not the streaming path draws the fence as the code it is first. The mock's own gate (`POST /__mock/diagram`) is what makes the held state a state the flow can read rather than a window it has to be quick enough to see. The frame's place between the reply's own words is layout, which a DOM without a layout engine cannot put. What the same flow grows into — mermaid's own `getBBox` measurement of a drawing, and the sheet a tap opens — is a browser's as well. | Nothing yet: `scripts/test-mermaid.tsx` holds the frame, the tone a bubble's frame takes, the copy control's source, and the fences that stay code (`mermaid extra`, an indented one, a list's, an unterminated one). The streaming window and the frame's place in the reply are only here. |
+
+### A literature review's papers table — the literature review branch
+
+One key, a stay. The review is drawn from the plugin's stored output and its words are a component
+test's; what that test cannot see is a six-column table at a phone's width.
+
+| Key | Verdict | What it asserts today | Why it moves | What replaces it |
+| --------------------- | ------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ---------------- |
+| `research-literature` | stay | A literature review on the mock at 390px (light and dark), 820px and 1440px: the card is no placeholder, the brief reads back the years and the criteria, the Scope Gate the queries; while it reads the funnel and a paper's row are drawn with no theme yet; delivered, the funnel's four counts, a row per included paper and the plugin's reference list. The papers table is wider than its card wherever the card is narrower than the table's 56rem and scrolls inside it, the page and the reading column never scroll sideways, the last column starts off screen and is fully in view once the card is scrolled to its end, and each row's control is a 44px target; a row opens its quotes and a cell's chip opens the Sources drawer on its claim. No errors in the console. | The table's overflow, the page's stillness around it and a column's reach are layout, which only a browser has; the join from the route through the store to the canvas is exercised on the way. | Nothing: it stays. |
 
 ## The coverage a demotion leaves with no home
 

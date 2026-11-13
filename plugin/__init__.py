@@ -694,6 +694,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "research_rewrite",
                     "research_compare",
                     "research_verify",
+                    "research_literature",
                     "meetings",
                     "meetings_ask",
                     "community",
@@ -3538,6 +3539,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         """Starts each of the mission's lanes that has no run as an ordinary run, with the key the app
         asked with. A lane that can't be started fails the mission and starts nothing after it."""
         profile = _request_profile()
+        if research.reads_itself(found):
+            # The plugin reads a review itself, on its own thread: no run is posted for it.
+            research.spawn(path, found["id"], profile)
+            return
         research.watch(path, found["id"], profile)
         for lane in await asyncio.to_thread(research.unstarted_lanes, path, found):
             try:

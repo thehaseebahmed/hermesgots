@@ -4267,6 +4267,7 @@ http
                 "research_rewrite",
                 "research_compare",
                 "research_verify",
+                "research_literature",
               ]
             : []),
           // The vault's switch rides with canvases: a mock whose record carries `vault` and whose

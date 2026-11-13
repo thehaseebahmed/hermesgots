@@ -1,0 +1,1286 @@
+{
+  "results": [
+    {
+      "id": "https://openalex.org/W2741809807",
+      "doi": "https://doi.org/10.7717/peerj.4375",
+      "display_name": "The state of OA: a large-scale analysis of the prevalence and impact of Open Access articles",
+      "publication_year": 2018,
+      "type": "article",
+      "is_retracted": false,
+      "authorships": [
+        {
+          "author_position": "first",
+          "author": {
+            "display_name": "Heather Piwowar"
+          }
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "display_name": "Jason R Priem"
+          }
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "display_name": "Vincent Larivière"
+          }
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "display_name": "Juan Pablo Alperín"
+          }
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "display_name": "Lisa Matthias"
+          }
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "display_name": "Bree Norlander"
+          }
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "display_name": "Ashley Farley"
+          }
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "display_name": "Jevin D. West"
+          }
+        },
+        {
+          "author_position": "last",
+          "author": {
+            "display_name": "Stefanie Haustein"
+          }
+        }
+      ],
+      "primary_location": {
+        "id": "doi:10.7717/peerj.4375",
+        "doi": "https://doi.org/10.7717/peerj.4375",
+        "is_oa": true,
+        "landing_page_url": "https://doi.org/10.7717/peerj.4375",
+        "pdf_url": null,
+        "source": {
+          "id": "https://openalex.org/S1983995261",
+          "display_name": "PeerJ",
+          "issn_l": "2167-8359",
+          "issn": [
+            "2167-8359"
+          ],
+          "is_oa": true,
+          "is_in_doaj": true,
+          "is_core": true,
+          "listed_in": [
+            "anvur-scientific",
+            "cwts-core",
+            "doaj",
+            "dongbi-d",
+            "jufo-1",
+            "ki-jl-1",
+            "medline",
+            "norway-1",
+            "oarl",
+            "poland-100",
+            "russia-white-list-1",
+            "vabb-shw"
+          ],
+          "host_organization": "https://openalex.org/P4310320104",
+          "host_organization_name": "PeerJ, Inc.",
+          "host_organization_lineage": [
+            "https://openalex.org/P4310320104"
+          ],
+          "host_organization_lineage_names": [
+            "PeerJ, Inc."
+          ],
+          "type": "journal"
+        },
+        "license": "cc-by",
+        "license_id": "https://openalex.org/licenses/cc-by",
+        "version": "publishedVersion",
+        "is_accepted": true,
+        "is_published": true,
+        "raw_source_name": "PeerJ",
+        "raw_type": "journal-article"
+      },
+      "best_oa_location": {
+        "id": "doi:10.7717/peerj.4375",
+        "doi": "https://doi.org/10.7717/peerj.4375",
+        "is_oa": true,
+        "landing_page_url": "https://doi.org/10.7717/peerj.4375",
+        "pdf_url": null,
+        "source": {
+          "id": "https://openalex.org/S1983995261",
+          "display_name": "PeerJ",
+          "issn_l": "2167-8359",
+          "issn": [
+            "2167-8359"
+          ],
+          "is_oa": true,
+          "is_in_doaj": true,
+          "is_core": true,
+          "listed_in": [
+            "anvur-scientific",
+            "cwts-core",
+            "doaj",
+            "dongbi-d",
+            "jufo-1",
+            "ki-jl-1",
+            "medline",
+            "norway-1",
+            "oarl",
+            "poland-100",
+            "russia-white-list-1",
+            "vabb-shw"
+          ],
+          "host_organization": "https://openalex.org/P4310320104",
+          "host_organization_name": "PeerJ, Inc.",
+          "host_organization_lineage": [
+            "https://openalex.org/P4310320104"
+          ],
+          "host_organization_lineage_names": [
+            "PeerJ, Inc."
+          ],
+          "type": "journal"
+        },
+        "license": "cc-by",
+        "license_id": "https://openalex.org/licenses/cc-by",
+        "version": "publishedVersion",
+        "is_accepted": true,
+        "is_published": true,
+        "raw_source_name": "PeerJ",
+        "raw_type": "journal-article"
+      },
+      "abstract_inverted_index": {
+        "Despite": [
+          0
+        ],
+        "growing": [
+          1
+        ],
+        "interest": [
+          2
+        ],
+        "in": [
+          3,
+          57,
+          73,
+          110,
+          122
+        ],
+        "Open": [
+          4,
+          201
+        ],
+        "Access": [
+          5
+        ],
+        "(OA)": [
+          6
+        ],
+        "to": [
+          7,
+          54,
+          252
+        ],
+        "scholarly": [
+          8,
+          105
+        ],
+        "literature,": [
+          9
+        ],
+        "there": [
+          10
+        ],
+        "is": [
+          11,
+          107,
+          116,
+          176
+        ],
+        "an": [
+          12,
+          34,
+          85,
+          185,
+          199,
+          231
+        ],
+        "unmet": [
+          13
+        ],
+        "need": [
+          14,
+          31
+        ],
+        "for": [
+          15,
+          42,
+          174,
+          219
+        ],
+        "large-scale,": [
+          16
+        ],
+        "up-to-date,": [
+          17
+        ],
+        "and": [
+          18,
+          24,
+          77,
+          112,
+          124,
+          144,
+          221,
+          237,
+          256
+        ],
+        "reproducible": [
+          19
+        ],
+        "studies": [
+          20
+        ],
+        "assessing": [
+          21
+        ],
+        "the": [
+          22,
+          104,
+          134,
+          145,
+          170,
+          195,
+          206,
+          213,
+          245
+        ],
+        "prevalence": [
+          23
+        ],
+        "characteristics": [
+          25
+        ],
+        "of": [
+          26,
+          51,
+          75,
+          83,
+          103,
+          137,
+          141,
+          163,
+          209
+        ],
+        "OA.": [
+          27,
+          168,
+          239
+        ],
+        "We": [
+          28,
+          46,
+          97,
+          203,
+          240
+        ],
+        "address": [
+          29
+        ],
+        "this": [
+          30,
+          114,
+          142
+        ],
+        "using": [
+          32,
+          95,
+          244
+        ],
+        "oaDOI,": [
+          33
+        ],
+        "open": [
+          35
+        ],
+        "online": [
+          36
+        ],
+        "service": [
+          37
+        ],
+        "that": [
+          38,
+          89,
+          99,
+          113,
+          147,
+          155
+        ],
+        "determines": [
+          39
+        ],
+        "OA": [
+          40,
+          56,
+          93,
+          108,
+          138,
+          159,
+          175,
+          210,
+          223,
+          254
+        ],
+        "status": [
+          41
+        ],
+        "67": [
+          43
+        ],
+        "million": [
+          44
+        ],
+        "articles.": [
+          45
+        ],
+        "use": [
+          47
+        ],
+        "three": [
+          48,
+          58
+        ],
+        "samples,": [
+          49
+        ],
+        "each": [
+          50
+        ],
+        "100,000": [
+          52
+        ],
+        "articles,": [
+          53,
+          152,
+          211
+        ],
+        "investigate": [
+          55
+        ],
+        "populations:": [
+          59
+        ],
+        "(1)": [
+          60
+        ],
+        "all": [
+          61
+        ],
+        "journal": [
+          62,
+          70
+        ],
+        "articles": [
+          63,
+          71,
+          79,
+          94,
+          164,
+          191,
+          224
+        ],
+        "assigned": [
+          64
+        ],
+        "a": [
+          65,
+          250
+        ],
+        "Crossref": [
+          66
+        ],
+        "DOI,": [
+          67
+        ],
+        "(2)": [
+          68
+        ],
+        "recent": [
+          69,
+          128
+        ],
+        "indexed": [
+          72
+        ],
+        "Web": [
+          74
+        ],
+        "Science,": [
+          76
+        ],
+        "(3)": [
+          78
+        ],
+        "viewed": [
+          80
+        ],
+        "by": [
+          81,
+          120,
+          235
+        ],
+        "users": [
+          82,
+          91,
+          157
+        ],
+        "Unpaywall,": [
+          84
+        ],
+        "open-source": [
+          86
+        ],
+        "browser": [
+          87
+        ],
+        "extension": [
+          88
+        ],
+        "lets": [
+          90
+        ],
+        "find": [
+          92,
+          154
+        ],
+        "oaDOI.": [
+          96
+        ],
+        "estimate": [
+          98
+        ],
+        "at": [
+          100
+        ],
+        "least": [
+          101
+        ],
+        "28%": [
+          102
+        ],
+        "literature": [
+          106
+        ],
+        "(19M": [
+          109
+        ],
+        "total)": [
+          111
+        ],
+        "proportion": [
+          115
+        ],
+        "growing,": [
+          117
+        ],
+        "driven": [
+          118,
+          233
+        ],
+        "particularly": [
+          119
+        ],
+        "growth": [
+          121
+        ],
+        "Gold": [
+          123
+        ],
+        "Hybrid.": [
+          125
+        ],
+        "The": [
+          126
+        ],
+        "most": [
+          127,
+          171
+        ],
+        "year": [
+          129
+        ],
+        "analyzed": [
+          130
+        ],
+        "(2015)": [
+          131
+        ],
+        "also": [
+          132,
+          204
+        ],
+        "has": [
+          133
+        ],
+        "highest": [
+          135
+        ],
+        "percentage": [
+          136
+        ],
+        "(45%).": [
+          139
+        ],
+        "Because": [
+          140
+        ],
+        "growth,": [
+          143
+        ],
+        "fact": [
+          146
+        ],
+        "readers": [
+          148
+        ],
+        "disproportionately": [
+          149
+        ],
+        "access": [
+          150
+        ],
+        "newer": [
+          151
+        ],
+        "we": [
+          153,
+          188
+        ],
+        "Unpaywall": [
+          156
+        ],
+        "encounter": [
+          158
+        ],
+        "quite": [
+          160
+        ],
+        "frequently:": [
+          161
+        ],
+        "47%": [
+          162
+        ],
+        "they": [
+          165
+        ],
+        "view": [
+          166
+        ],
+        "are": [
+          167
+        ],
+        "Notably,": [
+          169
+        ],
+        "common": [
+          172
+        ],
+        "mechanism": [
+          173
+        ],
+        "not": [
+          177
+        ],
+        "Gold,": [
+          178
+        ],
+        "Green,": [
+          179
+        ],
+        "or": [
+          180
+        ],
+        "Hybrid": [
+          181,
+          238
+        ],
+        "OA,": [
+          182
+        ],
+        "but": [
+          183
+        ],
+        "rather": [
+          184
+        ],
+        "under-discussed": [
+          186
+        ],
+        "category": [
+          187
+        ],
+        "dub": [
+          189
+        ],
+        "Bronze:": [
+          190
+        ],
+        "made": [
+          192
+        ],
+        "free-to-read": [
+          193
+        ],
+        "on": [
+          194
+        ],
+        "publisher": [
+          196
+        ],
+        "website,": [
+          197
+        ],
+        "without": [
+          198
+        ],
+        "explicit": [
+          200
+        ],
+        "license.": [
+          202
+        ],
+        "examine": [
+          205
+        ],
+        "citation": [
+          207,
+          216
+        ],
+        "impact": [
+          208
+        ],
+        "corroborating": [
+          212
+        ],
+        "so-called": [
+          214
+        ],
+        "open-access": [
+          215
+        ],
+        "advantage:": [
+          217
+        ],
+        "accounting": [
+          218
+        ],
+        "age": [
+          220
+        ],
+        "discipline,": [
+          222
+        ],
+        "receive": [
+          225
+        ],
+        "18%": [
+          226
+        ],
+        "more": [
+          227
+        ],
+        "citations": [
+          228
+        ],
+        "than": [
+          229
+        ],
+        "average,": [
+          230
+        ],
+        "effect": [
+          232
+        ],
+        "primarily": [
+          234
+        ],
+        "Green": [
+          236
+        ],
+        "encourage": [
+          241
+        ],
+        "further": [
+          242
+        ],
+        "research": [
+          243
+        ],
+        "free": [
+          246
+        ],
+        "oaDOI": [
+          247
+        ],
+        "service,": [
+          248
+        ],
+        "as": [
+          249
+        ],
+        "way": [
+          251
+        ],
+        "inform": [
+          253
+        ],
+        "policy": [
+          255
+        ],
+        "practice.": [
+          257
+        ]
+      }
+    },
+    {
+      "id": "https://openalex.org/W2626778328",
+      "doi": "https://doi.org/10.48550/arxiv.1706.03762",
+      "display_name": "Attention Is All You Need",
+      "publication_year": 2017,
+      "type": "preprint",
+      "is_retracted": false,
+      "authorships": [
+        {
+          "author_position": "first",
+          "author": {
+            "display_name": "Ashish Vaswani"
+          }
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "display_name": "Noam Shazeer"
+          }
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "display_name": "Niki Parmar"
+          }
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "display_name": "Jakob Uszkoreit"
+          }
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "display_name": "Llion Jones"
+          }
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "display_name": "Aidan N. Gomez"
+          }
+        },
+        {
+          "author_position": "middle",
+          "author": {
+            "display_name": "Łukasz Kaiser"
+          }
+        },
+        {
+          "author_position": "last",
+          "author": {
+            "display_name": "Illia Polosukhin"
+          }
+        }
+      ],
+      "primary_location": {
+        "id": "pmh:oai:arXiv.org:1706.03762",
+        "doi": null,
+        "is_oa": true,
+        "landing_page_url": "http://arxiv.org/abs/1706.03762",
+        "pdf_url": "https://arxiv.org/pdf/1706.03762",
+        "source": {
+          "id": "https://openalex.org/S4306400194",
+          "display_name": "arXiv (Cornell University)",
+          "issn_l": "2331-8422",
+          "issn": [
+            "2331-8422"
+          ],
+          "is_oa": true,
+          "is_in_doaj": false,
+          "is_core": false,
+          "listed_in": [],
+          "host_organization": "https://openalex.org/I205783295",
+          "host_organization_name": "Cornell University",
+          "host_organization_lineage": [
+            "https://openalex.org/I205783295"
+          ],
+          "host_organization_lineage_names": [],
+          "type": "repository"
+        },
+        "license": null,
+        "license_id": null,
+        "version": "submittedVersion",
+        "is_accepted": false,
+        "is_published": false,
+        "raw_source_name": null,
+        "raw_type": "text"
+      },
+      "best_oa_location": {
+        "id": "pmh:oai:arXiv.org:1706.03762",
+        "doi": null,
+        "is_oa": true,
+        "landing_page_url": "http://arxiv.org/abs/1706.03762",
+        "pdf_url": "https://arxiv.org/pdf/1706.03762",
+        "source": {
+          "id": "https://openalex.org/S4306400194",
+          "display_name": "arXiv (Cornell University)",
+          "issn_l": "2331-8422",
+          "issn": [
+            "2331-8422"
+          ],
+          "is_oa": true,
+          "is_in_doaj": false,
+          "is_core": false,
+          "listed_in": [],
+          "host_organization": "https://openalex.org/I205783295",
+          "host_organization_name": "Cornell University",
+          "host_organization_lineage": [
+            "https://openalex.org/I205783295"
+          ],
+          "host_organization_lineage_names": [],
+          "type": "repository"
+        },
+        "license": null,
+        "license_id": null,
+        "version": "submittedVersion",
+        "is_accepted": false,
+        "is_published": false,
+        "raw_source_name": null,
+        "raw_type": "text"
+      },
+      "abstract_inverted_index": {
+        "The": [
+          0,
+          18
+        ],
+        "dominant": [
+          1
+        ],
+        "sequence": [
+          2
+        ],
+        "transduction": [
+          3
+        ],
+        "models": [
+          4,
+          21,
+          60,
+          137
+        ],
+        "are": [
+          5
+        ],
+        "based": [
+          6,
+          41
+        ],
+        "on": [
+          7,
+          43,
+          53,
+          82,
+          124
+        ],
+        "complex": [
+          8
+        ],
+        "recurrent": [
+          9
+        ],
+        "or": [
+          10
+        ],
+        "convolutional": [
+          11
+        ],
+        "neural": [
+          12
+        ],
+        "networks": [
+          13
+        ],
+        "in": [
+          14,
+          64
+        ],
+        "an": [
+          15,
+          29
+        ],
+        "encoder-decoder": [
+          16
+        ],
+        "configuration.": [
+          17
+        ],
+        "best": [
+          19,
+          93,
+          136
+        ],
+        "performing": [
+          20
+        ],
+        "also": [
+          22
+        ],
+        "connect": [
+          23
+        ],
+        "the": [
+          24,
+          39,
+          83,
+          91,
+          102,
+          131,
+          135,
+          139,
+          144
+        ],
+        "encoder": [
+          25
+        ],
+        "and": [
+          26,
+          49,
+          70,
+          162
+        ],
+        "decoder": [
+          27
+        ],
+        "through": [
+          28
+        ],
+        "attention": [
+          30,
+          44
+        ],
+        "mechanism.": [
+          31
+        ],
+        "We": [
+          32,
+          141
+        ],
+        "propose": [
+          33
+        ],
+        "a": [
+          34,
+          111,
+          127
+        ],
+        "new": [
+          35,
+          112
+        ],
+        "simple": [
+          36
+        ],
+        "network": [
+          37
+        ],
+        "architecture,": [
+          38
+        ],
+        "Transformer,": [
+          40
+        ],
+        "solely": [
+          42
+        ],
+        "mechanisms,": [
+          45
+        ],
+        "dispensing": [
+          46
+        ],
+        "with": [
+          47,
+          160
+        ],
+        "recurrence": [
+          48
+        ],
+        "convolutions": [
+          50
+        ],
+        "entirely.": [
+          51
+        ],
+        "Experiments": [
+          52
+        ],
+        "two": [
+          54
+        ],
+        "machine": [
+          55
+        ],
+        "translation": [
+          56,
+          87,
+          106
+        ],
+        "tasks": [
+          57,
+          150
+        ],
+        "show": [
+          58,
+          142
+        ],
+        "these": [
+          59
+        ],
+        "to": [
+          61,
+          75,
+          148,
+          155
+        ],
+        "be": [
+          62
+        ],
+        "superior": [
+          63
+        ],
+        "quality": [
+          65
+        ],
+        "while": [
+          66
+        ],
+        "being": [
+          67
+        ],
+        "more": [
+          68
+        ],
+        "parallelizable": [
+          69
+        ],
+        "requiring": [
+          71
+        ],
+        "significantly": [
+          72
+        ],
+        "less": [
+          73
+        ],
+        "time": [
+          74
+        ],
+        "train.": [
+          76
+        ],
+        "Our": [
+          77
+        ],
+        "model": [
+          78,
+          109
+        ],
+        "achieves": [
+          79
+        ],
+        "28.4": [
+          80
+        ],
+        "BLEU": [
+          81,
+          115
+        ],
+        "WMT": [
+          84,
+          103
+        ],
+        "2014": [
+          85,
+          104
+        ],
+        "English-to-German": [
+          86
+        ],
+        "task,": [
+          88,
+          107
+        ],
+        "improving": [
+          89
+        ],
+        "over": [
+          90,
+          98
+        ],
+        "existing": [
+          92
+        ],
+        "results,": [
+          94
+        ],
+        "including": [
+          95
+        ],
+        "ensembles": [
+          96
+        ],
+        "by": [
+          97,
+          151
+        ],
+        "2": [
+          99
+        ],
+        "BLEU.": [
+          100
+        ],
+        "On": [
+          101
+        ],
+        "English-to-French": [
+          105
+        ],
+        "our": [
+          108
+        ],
+        "establishes": [
+          110
+        ],
+        "single-model": [
+          113
+        ],
+        "state-of-the-art": [
+          114
+        ],
+        "score": [
+          116
+        ],
+        "of": [
+          117,
+          130,
+          134
+        ],
+        "41.8": [
+          118
+        ],
+        "after": [
+          119
+        ],
+        "training": [
+          120,
+          132,
+          164
+        ],
+        "for": [
+          121
+        ],
+        "3.5": [
+          122
+        ],
+        "days": [
+          123
+        ],
+        "eight": [
+          125
+        ],
+        "GPUs,": [
+          126
+        ],
+        "small": [
+          128
+        ],
+        "fraction": [
+          129
+        ],
+        "costs": [
+          133
+        ],
+        "from": [
+          138
+        ],
+        "literature.": [
+          140
+        ],
+        "that": [
+          143
+        ],
+        "Transformer": [
+          145
+        ],
+        "generalizes": [
+          146
+        ],
+        "well": [
+          147
+        ],
+        "other": [
+          149
+        ],
+        "applying": [
+          152
+        ],
+        "it": [
+          153
+        ],
+        "successfully": [
+          154
+        ],
+        "English": [
+          156
+        ],
+        "constituency": [
+          157
+        ],
+        "parsing": [
+          158
+        ],
+        "both": [
+          159
+        ],
+        "large": [
+          161
+        ],
+        "limited": [
+          163
+        ],
+        "data.": [
+          165
+        ]
+      }
+    }
+  ]
+}
