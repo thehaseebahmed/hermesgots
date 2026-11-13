@@ -1,8 +1,4 @@
-/**
- * Lab: the app's lab features, and the switches that turn them on. It sits outside Developer
- * Settings because a lab feature is one a reader can try without unlocking anything, so these rows
- * are here rather than behind Developer's switch.
- */
+/** Settings > Lab: the switches for the features the app is still building. */
 import { useLiveQuery } from "dexie-react-hooks"
 import { AudioLinesIcon, MessageSquareTextIcon } from "lucide-react"
 
@@ -29,7 +25,7 @@ export function LabSettings() {
           icon={AudioLinesIcon}
           title="Meetings"
           lab
-          subtitle="Design only, with sample meetings"
+          subtitle="Transcripts and recordings, written up as notes"
           checked={Boolean(settings?.meetings)}
           onCheckedChange={(checked) => saveSettings({ meetings: checked })}
         />

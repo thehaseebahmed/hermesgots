@@ -1,9 +1,3 @@
-/**
- * The Lab section: the app's lab features' switches, moved out of Developer so a reader turns one on
- * without unlocking anything. Each switch writes its own key to the device, the Meetings row wears
- * the Lab pill, Developer holds neither switch any more, and the menu's Lab row opens the section
- * whether or not the Developer switch is on.
- */
 import assert from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
@@ -35,7 +29,6 @@ const at = (entry: string) => (
 const MEETINGS = "Meetings"
 const REMINDERS = "Show progress reminders"
 
-/** The row a title names, as the label Base UI wraps its switch in. */
 const rowOf = (title: string) =>
   findAll("label").find((one) => (one.textContent ?? "").includes(title)) ?? null
 const switchOf = (title: string) => rowOf(title)?.querySelector('[role="switch"]') ?? null
@@ -48,10 +41,9 @@ test("/settings/lab draws both switches, and Meetings wears the Lab pill", async
     assert.equal(path(), "/settings/lab", "the address is kept without the Developer switch")
     assert.ok(switchOf(MEETINGS), "the Meetings switch is drawn")
     assert.ok(switchOf(REMINDERS), "and progress reminders'")
-    assert.match(text(), /Design only, with sample meetings/, "under the words it has always had")
-    // A boolean, not a node: a failing assertion must not print a whole DOM tree.
+    assert.match(text(), /Transcripts and recordings, written up as notes/, "under its own words")
     assert.equal(
-      Boolean(rowOf(MEETINGS)?.textContent?.includes("Lab")),
+      Boolean(rowOf("Meetings")?.textContent?.includes("Lab")),
       true,
       "and the row says it is a lab feature",
     )
