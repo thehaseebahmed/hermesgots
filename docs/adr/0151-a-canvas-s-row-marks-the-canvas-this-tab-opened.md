@@ -16,15 +16,22 @@ arrive with no canvas open: each is a new document, and none of them is an openi
 
 The flag is written in exactly two places, both the flow's own open (`routes/canvas.tsx`): the tile a
 reader presses, which asks `plainPress` first so a press meant for a new tab opens nothing in this
-one, and the arrival of a canvas a start made, which has no press to ask about. It is forgotten in
-one place, the app shell: leaving the canvas's screens closes it, which is what makes back and
-forward onto a canvas mark nothing. The shell is the host rather than the sidebar, because the
-sidebar is a phone's drawer and a drawer that is shut runs no effect — and because a mark is the
-app's answer, not the list's.
+one, and the arrival of a canvas a start made, which has no press to ask about.
+
+It is forgotten in two places. The app shell forgets it when the app leaves the canvas's screens,
+which is what makes back and forward onto a canvas mark nothing. A pinned row's own press forgets it
+too, because that press is a way onto the canvas like any other and no open — so a reader standing on
+a canvas it opened, and pressing that canvas's row, is given a row at rest. Leaving that to the shell
+alone would make the mark depend on how deep the history was: a top-level move lands on the list on
+its way to the canvas, and the same press would be an arrival or not depending on where the reader
+started. The shell is the host for the rest rather than the sidebar, because the sidebar is a phone's
+drawer and a drawer that is shut runs no effect — and because a mark is the app's answer, not the
+list's.
 
 The route decides *whether* a canvas is on screen, and the flag decides *whether this tab opened
 it*. Both halves are needed: the flag alone would have to be trusted for its own timing, and the
-route alone is the bug.
+route alone is the bug. The route half is exactly the two screens the app draws — the preview and the
+edit screen — so an address under a canvas's name that no screen claims is no canvas to the mark.
 
 Canvas's own section row is made exact on the way: a canvas's screens mark the canvas's row and not
 the section it lives in, since a row's mark says *this is the one drawn here* (ADR 0146) and two rows
@@ -35,7 +42,7 @@ nothing at all — which is the same rule as a list that marks no row over an op
 
 | The reader | The sidebar | A screen reader |
 |---|---|---|
-| presses a pinned canvas's row | the row at rest | "A pinned timetable, link" |
+| presses a pinned canvas's row | the row at rest, even the row of the canvas it just opened | "A pinned timetable, link" |
 | lands on a canvas by a link, a reload or another tab | no row marked | each row a plain link |
 | goes back or forward onto a canvas | no row marked | as above |
 | opens a pinned canvas through the flow | its row filled | "A pinned timetable, link, current page" |
@@ -67,6 +74,10 @@ nothing at all — which is the same rule as a list that marks no row over an op
   chat's row is no part of the Canvas flow.
 - Moving between two canvases' screens without leaving them keeps the tab's flag naming the first,
   so returning to it by back marks it again even though nothing was re-opened. The flag is only
-  forgotten by leaving the canvas's screens, which is what the reader's own leaving means.
+  forgotten by leaving the canvas's screens or by pressing a pinned row.
+- A canvas's own chat row (`/c/:id`) draws no chat — it replaces itself with the canvas — so a reader
+  who opened a canvas and then pressed that chat's row lands back on the canvas with the mark gone.
+  The app made that exit, not the reader, but the state it lands on is the one an address gives, and
+  the flow did not open it a second time.
 - Canvas's section row no longer marks a canvas's screens, which is a visible change beyond the
   pinned row: it is what "the sidebar at rest" means on an address.

@@ -29,7 +29,7 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { botChatsPath } from "@/lib/bot-tabs"
 import { previewLine } from "@/lib/bot-chrome"
-import { useCanvasOpened } from "@/lib/canvas-open"
+import { closeCanvas, useCanvasOpened } from "@/lib/canvas-open"
 import { useCanvasEnabled, usePinnedCanvases, type Canvas } from "@/lib/canvases"
 import { chatOwner } from "@/lib/chat-owner"
 import { compareChatOrder, waitsOnUser } from "@/lib/chat-list"
@@ -41,7 +41,7 @@ import { useCanMakeRoom, useRoomNeeds, type RoomNeedsRow } from "@/lib/room"
 import { roomMembersLine, roomNeedsOf } from "@/lib/rooms"
 import { useLegacyChat } from "@/lib/legacy-chat"
 import { useMeetingsEnabled } from "@/lib/meetings"
-import { pressOpeningRoot, useNav } from "@/lib/nav"
+import { pressOpeningRoot, plainPress, useNav } from "@/lib/nav"
 import { useSyncState } from "@/lib/sync"
 import { BOT_SORTS, sortBots, useBotSort, useBotSummaries, useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
@@ -247,7 +247,12 @@ function CanvasRow({
     <Link
       to={to}
       replace
-      onClick={pressOpeningRoot(root, to, onNavigate)}
+      onClick={pressOpeningRoot(root, to, (event) => {
+        onNavigate?.()
+        // A row's press is a way onto the canvas like any other and no open, so the mark the flow
+        // wrote goes with it (ADR 0151) — a press meant for a new tab leaves this tab as it was.
+        if (plainPress(event)) closeCanvas()
+      })}
       aria-label={collapsed ? canvas.title : undefined}
       aria-current={opened ? "page" : undefined}
       data-canvas-pinned=""

@@ -243,6 +243,27 @@ test("a canvas the flow opened marks its row", async () => {
   })
 })
 
+test("a marked canvas's row is an arrival, not an open", async () => {
+  serveCanvases()
+  await seed()
+  freshDocument()
+
+  await tablet(async () => {
+    await mount(app(["/canvas"]), async () => {
+      await until(async () => Boolean(find("[data-canvas-tile]")), "the canvas's tile")
+      await click(find("[data-canvas-tile]"))
+      await until(async () => Boolean(find("[data-canvas-frame]")), "the canvas's own screen")
+      assert.equal(says("p1").current, "page", "the flow's open marks the row")
+
+      // The row the reader pressed is a way onto the canvas like any other, and only the flow opens
+      // one — so its press leaves the sidebar at rest, however deep the history it lands from.
+      await click(row("p1"))
+      assert.deepEqual(says("p1"), { current: null, filled: false }, "the row the reader pressed")
+      assert.equal(marked().length, 0, "the sidebar marks nothing at all")
+    })
+  })
+})
+
 test("a start marks the canvas it opened", async () => {
   serveCanvases()
   await seed()
@@ -282,8 +303,8 @@ test("the Canvas row marks its list, and a canvas's screens mark no section", as
 test("a canvas's two screens are one canvas to the mark", async () => {
   assert.equal(canvasAt("/canvas/p1"), "p1", "the preview")
   assert.equal(canvasAt("/canvas/p1/edit"), "p1", "the edit screen beside it (ADR 0130)")
-  assert.equal(canvasAt("/canvas/p1/other"), "p1", "anything under the canvas's own address")
   assert.equal(canvasAt("/canvas"), undefined, "the list is no canvas")
   assert.equal(canvasAt("/canvas/"), undefined, "and neither is its address")
+  assert.equal(canvasAt("/canvas/p1/other"), undefined, "nor an address the app has no screen for")
   assert.equal(canvasAt("/settings"), undefined, "nor another screen")
 })

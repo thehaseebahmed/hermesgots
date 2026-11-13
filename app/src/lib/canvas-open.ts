@@ -21,9 +21,14 @@ export const openCanvas = (id: string) => opened.set(id)
 /** No canvas is open: the reader left the canvas's screens, which is also a document that has just loaded. */
 export const closeCanvas = () => opened.set(null)
 
-/** The canvas a path stands on: its preview, and the edit screen beside it (ADR 0130). */
+/**
+ * The canvas a path stands on: its preview, and the edit screen beside it (ADR 0130). Exactly those
+ * two addresses — anything else under a canvas's name is no screen the app draws, and is no canvas
+ * for the mark.
+ */
 export function canvasAt(path: string): string | undefined {
-  return matchPath({ path: "/canvas/:id", end: false }, path)?.params.id
+  const screen = matchPath("/canvas/:id", path) ?? matchPath("/canvas/:id/edit", path)
+  return screen?.params.id
 }
 
 /** The one rule a canvas's row is marked by: the canvas on screen is the one this tab opened. */
