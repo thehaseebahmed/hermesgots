@@ -213,10 +213,9 @@ await flow(
     await optionsTitle.waitFor({ state: "detached", timeout: 10_000 })
     pass("the preview screen: the options sheet's heading starts 16px below its drag handle")
 
-    // The line under the title is the control's too: the block that opens the options holds both
-    // lines and the space beside them, so a press at the subtitle's own pixel opens the sheet. Only a
-    // browser can say where that pixel lands, which is why the press is here and not in a component.
-    await page.locator('[data-slot="header-line"]').click()
+    // A press on the words of the line rather than on a box a component test painted: hit-testing
+    // lands on the block that answers it, which only a browser can prove.
+    await page.locator('[data-slot="header-line"]').getByText(/^v\d+$/).click()
     await optionsTitle.waitFor({ timeout: 10_000 })
     await page.keyboard.press("Escape")
     await optionsTitle.waitFor({ state: "detached", timeout: 10_000 })

@@ -59,7 +59,7 @@ export function ChatHeader({
   actions?: ReactNode
   /** What a pinned bar holds under its row, inside the same sticky box. */
   below?: ReactNode
-  /** A press anywhere on the title block, for a title that is a way somewhere by the whole block. */
+  /** The press the whole title block answers, for a title that is a control. */
   onTitlePress?: () => void
   className?: string
 }) {
@@ -126,8 +126,8 @@ export function ChatHeader({
             className={cn(
               "flex min-w-0 flex-1 flex-col",
               centered && "items-center",
-              // The block is the press, and the surface it draws is the surface a thumb hits: hover
-              // and focus are the block's, so the ring is drawn around the line the press answers.
+              // The ring lives here, not on the caller's button, so the block can outline a focus the
+              // button owns: one tab stop, one ring.
               onTitlePress &&
                 "cursor-pointer rounded-lg hover:bg-muted/60 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-inset",
             )}
