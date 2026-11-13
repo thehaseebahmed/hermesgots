@@ -33,10 +33,13 @@ export type PresenceAnswer = "plugin" | "unreachable"
 
 /**
  * How long this device's own last answer is trusted, while the chat-list pass that would replace it
- * hasn't landed: a pass normally lands inside a minute, so this covers a cold start or a tab that was
- * paused, and the pass's own answer decides the moment it does.
+ * hasn't landed: two missed heartbeats of the plugin that keeps a bot's host present, and a margin.
+ * A pass normally lands inside a minute, so this covers a cold start or a tab that was paused, and
+ * the pass's answer decides the moment it does. `scripts/test-presence.mjs` reads the plugin's own
+ * `HEARTBEAT_SECONDS` and fails when the two drift apart, so the number cannot quietly outlive its
+ * reason.
  */
-const ONLINE_MS = 25 * 60_000
+export const ONLINE_MS = 25 * 60_000
 
 /**
  * Whether this device has heard from the bot: the pass's answer where there is one, else the last

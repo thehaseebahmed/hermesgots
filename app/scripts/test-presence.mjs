@@ -9,15 +9,16 @@
  */
 
 import assert from "node:assert/strict"
+import { readFile } from "node:fs/promises"
 import test from "node:test"
 
 import { formatRelative } from "../src/lib/relative.ts"
-import { presence, presenceLine } from "../src/lib/presence.ts"
+import { ONLINE_MS, presence, presenceLine } from "../src/lib/presence.ts"
 
 const NOW = 1_700_000_000_000
 const MINUTE = 60_000
 /** This device's own last answer is trusted this long, and a pass normally lands inside a minute. */
-const WINDOW = 25 * MINUTE
+const WINDOW = ONLINE_MS
 
 /** A bot this device heard five minutes ago, unless the case says otherwise. */
 const bot = (fields = {}) => ({ hostId: "host-1", seenAt: NOW - 5 * MINUTE, ...fields })
@@ -78,4 +79,15 @@ test("an answer with nothing heard before says how the bot is but not when it wa
   assert.equal(presence(unknown, NOW, "unreachable"), false)
   assert.equal(presenceLine(unknown, NOW, "unreachable"), undefined, "there is no when to say")
   assert.equal(presenceLine(unknown, NOW, "plugin"), "Online")
+})
+
+test("the window is two missed heartbeats and a margin", async () => {
+  const link = await readFile(new URL("../../plugin/link.py", import.meta.url), "utf8")
+  const heartbeat = Number(/^HEARTBEAT_SECONDS = (\d+)$/m.exec(link)?.[1])
+  assert.ok(heartbeat > 0, "the plugin's heartbeat is a number of seconds")
+  assert.equal(
+    ONLINE_MS,
+    2.5 * heartbeat * 1000,
+    "a host that has missed two heartbeats and a margin is gone",
+  )
 })
