@@ -196,8 +196,8 @@ state of the page, and a `Markdown` handed the finished string passes whether or
 path draws that fence as the code it is before the frame takes its place. The frame's place, between
 the reply's own words, is layout, which a DOM without a layout engine cannot put. What the same flow
 grows into is mermaid's own `getBBox` measurement and the sheet a tap opens, neither of them a
-component tier's. So the registry holds 93 + 1 = **94** keys, the component verdicts unchanged at
-**51**, the plugin verdicts **2**, the deletes **2**, and the stays are 38 + 1: **39**.
+component tier's. So the registry holds 94 + 1 = **95** keys, the component verdicts unchanged at
+**51**, the plugin verdicts **2**, the deletes **2**, and the stays are 39 + 1: **40**.
 
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above

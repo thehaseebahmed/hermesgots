@@ -10,10 +10,14 @@ import { fileURLToPath } from "node:url"
 const doc = () => readFileSync(new URL("../../docs/pickers.md", import.meta.url), "utf8")
 
 /** The modules that only define a pick surface: their own markup is the surface, not a site. */
-const DEFINES = ["src/components/settings-chrome.tsx", "src/components/chat/model-picker.tsx"]
+const DEFINES = [
+  "src/components/settings-chrome.tsx",
+  "src/components/chat/model-picker.tsx",
+  "src/components/ui/select.tsx",
+]
 
 /** The surfaces a pick is drawn on, as the doc's rows name them. */
-const SURFACES = ["PickSurface", "PickList", "ModelPicker", "ModelMenu"]
+const SURFACES = ["PickSurface", "PickList", "ModelPicker", "ModelMenu", "Select"]
 
 /** What a file draws when it opens a pick: one list, so a surface added above is checked below. */
 const DRAWS = new RegExp(`<(${SURFACES.join("|")})\\b`)

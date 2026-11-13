@@ -27,14 +27,16 @@ which of the three states its list is in.
 One row per site. **Applied** means a tap on the site's row applies its lone entry itself; **settled**
 means the site keeps opening, with the options recorded under *The settlement* below; **never 1**
 means a fixed inventory that cannot hold exactly one; **no caller** means the surface is exported and
-imported nowhere, so no tap reaches it. `S8a`–`S8e` are five call sites of one sheet, `ModelPick`.
+imported nowhere, so no tap reaches it; **not a sheet** means the list is the platform's own popup (a
+`Select`), which the rule cannot skip and which still shows the value in force. `S8a`–`S8e` are five
+call sites of one sheet, `ModelPick`.
 
 | # | Site | Surface | Option source | Per-bot count | Also in the sheet | Verdict |
 |---|---|---|---|---|---|---|
 | S1 | `app/src/components/bot-settings.tsx` `picked()` — a General key the host declares choices for | `PickSurface` + `PickList` | the host's `block.fields[].options` | the host's list; can be 1 | the `restart` note, *Applies when this bot's Hermes restarts.* | **settled** |
 | S2 | `app/src/components/bot-settings.tsx` Image | `PickSurface` + `PickList` | `BOTS` (`app/src/components/bots.tsx`) | fixed 8 | — | never 1 |
 | S3 | `app/src/components/bot-llm-providers-tab.tsx` Transport | `PickSurface` + `PickList` | `TRANSPORTS` (`app/src/lib/llm-providers.ts`) | fixed 4 (`Automatic` and three) | — | never 1 |
-| S4 | `app/src/components/settings/dictation.tsx` the Bubble's Bot row | `PickSurface` + `PickList` | `listEnabledProfiles`, as `botOptions` | 1 bot is the common case | — | **applied** |
+| S4 | `app/src/components/settings/dictation.tsx` the Bubble's Bot row | `PickSurface` + `PickList` | `listEnabledProfiles`, as `botOptions` | 1 bot is the common case | each row's `detail` line — what that bot hears with | **applied** (quiet on a one-bot device; the detail line is settled below) |
 | S5 | `app/src/components/bot-dictation-tab.tsx` Speech model | `PickSurface` + `PickList` | `modelsFor(settings, block)` | can be 1 | `ProbeNote`, and opening is what asks for the probe | **settled** |
 | S6 | `app/src/components/bot-dictation-tab.tsx` `SettingSurface` — a host setting whose control is a pick | `PickSurface` + `PickList` | `pickOptions(block, row)` (`app/src/lib/stt-settings.ts`): the host's STT providers, or one provider's models | can be 1 | — | **applied** |
 | S7 | `app/src/components/chat/model-picker.tsx` `ModelMenu`, drawn by `app/src/routes/chat.tsx`, `app/src/chat-next/chat-body.tsx` and `app/src/components/chat/chat-composer.tsx` | `Popup` + `ModelPicker` | `useModelInfo(profile).providers` | can be 1 | the Default row, the recent picks | **applied** |
@@ -51,6 +53,8 @@ imported nowhere, so no tap reaches it. `S8a`–`S8e` are five call sites of one
 | S14 | `app/src/components/chat/model-picker.tsx` `DefaultModelSetting`, `FallbackModelsSetting` | `Popup` + `ModelPicker` | as S7 | — | — | no caller |
 | S15 | `app/src/components/prompt-library-sheet.tsx` | `Popup` + `PickGroup` | the device's prompt library | can be 1 | a body preview and a pencil action per row | **settled** |
 | S16 | `app/src/components/chat/mode-menu.tsx` `ModeOptions` | `PickGroup` in the Add-context sheet | `MODES` | fixed 3 (2 without the plugin) | each row's note | never 1 |
+| S17 | `app/src/components/new-project.tsx` the project's bot | `Select` | the device's bots | 1 bot is the common case | the bot's name only | **not a sheet** |
+| S18 | `app/src/routes/meetings.tsx` a meeting's project | `Select` | `No project` and the device's projects | 1 with no projects at all (`No project` alone) | — | **not a sheet** |
 
 The applied sites are those whose sheet holds the list and nothing else: every row's second line is
 part of the option, not a second thing to read.
@@ -84,6 +88,30 @@ without opening is chosen with nothing measured.
    measurement of a setting already written.
 3. Auto-apply only a model the host already recommends, keeping the sheet where there is no
    measurement — two rules for one row.
+
+**S4 — the Bubble's Bot row.** Hides: each row of the sheet carries the muted line naming what that
+bot hears with (*Speech-to-text off* where it can't), which is how a reader picks a bot at all rather
+than by name alone. On a device with one bot the tap is quiet and nothing is lost; it is the sheet
+for two or more that carries the line. Applied, because the list is bots and nothing else, and named
+here because G5 asks for every place a skip can conceal a line.
+
+1. *(taken)* Keep applying, and keep the detail line on the row where one bot makes the sheet
+   unreachable — the row already holds the bot's picture and name.
+2. Settle it: keep opening, so the line is always read before the pick. Two or more bots already
+   open, so this only changes the one-bot device, where nothing is written either way.
+3. Apply and draw the line on the row itself for every count — a second line under a settings value
+   that reads like a status rather than a choice.
+
+**S17, S18 — the two `Select` pickers.** Hides: nothing, but the rule cannot reach them: a `Select`'s
+list is the platform's own popup, not a sheet this app draws, so there is no sheet to skip, and a
+select holding one entry still shows what is in force.
+
+1. *(taken)* Leave both. The rule's own words — skip the sheet and apply the entry — have nothing to
+   act on where no sheet is drawn.
+2. Draw a plain value in place of the select when it holds one entry — a control that changes shape
+   with the data, for a popup the reader may never open anyway.
+3. Bring the two onto `PickSurface` and `usePickOne` — a real change of control on two screens, and
+   not this change's.
 
 **S8e — the fallbacks' provider row and add row.** Hides: the None row is how a fallback is removed
 and how an add is cancelled, and the add row's held value is deliberately empty, so a skip appends a
@@ -153,7 +181,8 @@ and the only "choose a skill" surface is the `/` palette (S12), typed into the c
 ## What holds this page to the code
 
 `app/scripts/test-pickers-doc.mjs` reads `app/src/` for every file that renders `<PickSurface`,
-`<PickList`, `<ModelPicker` or `<ModelMenu` — leaving out the two modules that only define them,
+`<PickList`, `<ModelPicker`, `<ModelMenu` or `<Select` — leaving out the modules that only define
+them (`app/src/components/ui/select.tsx` among them),
 `app/src/components/settings-chrome.tsx` and `app/src/components/chat/model-picker.tsx` — and reads
 this page for the files it names. It fails on a file that draws one of those surfaces with no row
 here, on a row whose surface column says it draws one while its file no longer does, and on a site
