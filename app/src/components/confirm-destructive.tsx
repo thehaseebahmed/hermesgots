@@ -12,6 +12,7 @@
  */
 import { useState } from "react"
 
+import { Refusal } from "@/components/banner"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -46,8 +47,9 @@ export function ConfirmDestructive({
   /** The caller closes the question itself, once its write has an answer worth reading. */
   staysOpen?: boolean
   onOpenChange: (open: boolean) => void
-  /** Does it. A rejection keeps the dialog open and prints its message. */
-  onConfirm: () => unknown
+  /** Does it, answering with the promise its write made: a rejection keeps the dialog open and
+   * prints its message, so the promise has to be the write's own rather than one thrown away. */
+  onConfirm: () => Promise<unknown>
 }) {
   const [running, setRunning] = useState(false)
   const [failure, setFailure] = useState<string>()
@@ -81,11 +83,7 @@ export function ConfirmDestructive({
           <AlertDialogTitle>{title}</AlertDialogTitle>
           <AlertDialogDescription>{description}</AlertDialogDescription>
         </AlertDialogHeader>
-        {failure && (
-          <p role="alert" className="text-sm text-destructive">
-            {failure}
-          </p>
-        )}
+        <Refusal hold={{ words: failure, dismiss: () => setFailure(undefined) }} />
         <AlertDialogFooter>
           <AlertDialogCancel disabled={held}>{cancelLabel}</AlertDialogCancel>
           <AlertDialogAction

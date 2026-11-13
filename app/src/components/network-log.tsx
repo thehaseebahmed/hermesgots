@@ -1,17 +1,17 @@
 import { useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CopyIcon, Trash2Icon } from "lucide-react"
-import { toast } from "sonner"
 
 import { Chip, ChipRow } from "@/components/chip"
 import { Group, useHeaderAction } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
 import { copyText } from "@/lib/copied"
-import { labelOf } from "@/lib/bot-name"
+import { botsByLabel, labelOf } from "@/lib/bot-name"
 import { db, listProfiles, type NetRequest } from "@/lib/db"
 import { useBotLabels } from "@/lib/use-bot-labels"
 import { clockText, DRAWN, endingLabel, figuresOf, formatNetLog, waitText } from "@/lib/net-log"
 import { clearNetLog } from "@/lib/net-recorder"
+import { tell } from "@/lib/tell"
 
 /**
  * Settings > Developer > Network log: this device's own requests to each bot's host, with the
@@ -25,11 +25,12 @@ export function NetworkLogScreen() {
   const bots = useLiveQuery(listProfiles, [])
   const [chosen, setChosen] = useState<string>()
 
-  // This screen is exactly where a slow host is told apart from a fast one, so a pill and a row
-  // name the bot by its host (ADR 0148).
   const labels = useBotLabels()
   const all = rows ?? []
-  const heard = (bots ?? []).filter((bot) => all.some((row) => row.bots.includes(bot.id)))
+  const heard = botsByLabel(
+    (bots ?? []).filter((bot) => all.some((row) => row.bots.includes(bot.id))),
+    labels,
+  )
   // A pick only holds while its bot is still in the log: a cleared log leaves no filter to get stuck in.
   const picked = chosen && heard.some((bot) => bot.id === chosen) ? chosen : undefined
   const shown = picked ? all.filter((row) => row.bots.includes(picked)) : all
@@ -45,7 +46,7 @@ export function NetworkLogScreen() {
         className="size-11 rounded-full"
         aria-label="Copy the network log"
         disabled={!all.length}
-        onClick={() => void copyText(formatNetLog(all), () => toast("Network log copied"))}
+        onClick={() => void copyText(formatNetLog(all), () => tell.note("Network log copied"))}
       >
         <CopyIcon />
       </Button>
@@ -57,8 +58,8 @@ export function NetworkLogScreen() {
         disabled={!all.length}
         onClick={() =>
           void clearNetLog().then(
-            () => toast("Network log cleared"),
-            () => toast.error("Couldn't clear the log."),
+            () => tell.note("Network log cleared"),
+            () => tell.error("Couldn't clear the log."),
           )
         }
       >

@@ -5,8 +5,8 @@ import {
   ChevronRightIcon,
   MessageCircleQuestionIcon,
 } from "lucide-react"
-import { toast } from "sonner"
 
+import { Refusal } from "@/components/banner"
 import { CARD } from "@/components/chat/session-cards"
 import { useCodeFace } from "@/components/chat/code-face"
 import { Badge } from "@/components/ui/badge"
@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { answerClarify } from "@/lib/chat"
 import { prefersReducedMotion } from "@/lib/media"
 import type { ClarifyAnswers, ClarifyQuestion, Message } from "@/lib/db"
+import { useRefusal } from "@/lib/use-refusal"
 import { cn } from "@/lib/utils"
 
 const OTHER = "\u0000other"
@@ -186,8 +187,11 @@ const HALF_SCREEN = "max-h-[50dvh]"
  * than the screen never takes the card's own buttons off it.
  *
  * `askedId` is what a host that asks one prompt at a time needs (Hermes's own route): the question
- * the host waits on, of every question the agent put in one call. The card opens on it, follows it
- * as the host moves on, and sends only it. The questions after it can be chosen ahead and wait until the host asks them; the ones before it are answered.
+ * the host waits on, of every question the agent put in one call. The card is still one form — Next
+ * until the last page, Send there — and opens on the asked question, whose pages before it the host
+ * has already taken. Sending commits the form: the card answers the asked question, then each one
+ * the host asks after it, with no tap, never while `held`. A refusal ends that and leaves the form
+ * filled on the asked page.
  */
 export function QuestionCard({
   message,
@@ -211,7 +215,12 @@ export function QuestionCard({
   const askedPage = askedId ? questions.findIndex((one) => one.id === askedId) : -1
   const oneAtATime = askedPage >= 0
   const [sending, setPending] = useState(false)
-  const pending = sending || held
+  const refusal = useRefusal()
+  // The form as sent, still owed to a host that asks one question at a time.
+  const [committed, setCommitted] = useState<ClarifyAnswers | null>(null)
+  /** The asked question the committed form last answered, so no question is answered twice. */
+  const sentFor = useRef<string>(undefined)
+  const pending = sending || held || committed !== null
   const [page, setPage] = useState(oneAtATime ? askedPage : 0)
   const card = useRef<HTMLDivElement>(null)
   const head = useRef<HTMLDivElement>(null)
@@ -317,24 +326,41 @@ export function QuestionCard({
 
   // Leaves this question unanswered (a skipped question is null to Hermes) and moves on.
   const current = questions[page]
-  const answerable = oneAtATime ? questions[askedPage] : current
   const skip = () => {
-    setPicked((all) => ({ ...all, [answerable.id]: NOTHING_PICKED }))
-    if (oneAtATime) void send({ [answerable.id]: null })
-    else if (last) void send({ ...answers, [current.id]: null })
+    setPicked((all) => ({ ...all, [current.id]: NOTHING_PICKED }))
+    if (last) commit({ ...answers, [current.id]: null })
     else goTo(page + 1)
   }
 
-  const send = async (given: ClarifyAnswers = answers) => {
+  const send = async (given: ClarifyAnswers) => {
     setPending(true)
     try {
-      await onAnswer(given)
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't send your answer.")
+      return await refusal.write("send your answer", () => onAnswer(given))
     } finally {
       setPending(false)
     }
   }
+
+  // A host asking one at a time takes only the question it asks; the rest wait in the commit.
+  const answerAsked = async (form: ClarifyAnswers) => {
+    sentFor.current = askedId
+    if (await send({ [askedId!]: form[askedId!] ?? null })) return
+    setCommitted(null)
+    goTo(askedPage)
+  }
+
+  const commit = (form: ClarifyAnswers) => {
+    if (!oneAtATime) return void send(form)
+    setCommitted(form)
+    void answerAsked(form)
+  }
+
+  // The host asks the next question of the call a moment after the last answer: it is answered from
+  // the commit, since the reader already gave it.
+  useEffect(() => {
+    if (!committed || held || sending || !oneAtATime || sentFor.current === askedId) return
+    void answerAsked(committed)
+  })
 
   const onChange = (id: string) => (next: Picked) => setPicked((all) => ({ ...all, [id]: next }))
 
@@ -419,23 +445,24 @@ export function QuestionCard({
           />
         </CardContent>
       )}
+      <Refusal hold={refusal} className="mx-(--card-spacing)" />
       <CardFooter ref={foot} className="shrink-0 gap-2">
         <Button
           type="button"
           variant="outline"
           size="lg"
           className="h-11 flex-1 sm:min-w-28 sm:flex-none"
-          disabled={pending || (oneAtATime && page !== askedPage)}
+          disabled={pending}
           onClick={skip}
         >
           Skip
         </Button>
-        {paged && !last && !oneAtATime ? (
+        {paged && !last ? (
           <Button
             type="button"
             size="lg"
             className="h-11 flex-1 sm:min-w-40 sm:flex-none"
-            disabled={!answers[current.id]}
+            disabled={pending || !answers[current.id]}
             onClick={() => goTo(page + 1)}
           >
             Next
@@ -444,10 +471,8 @@ export function QuestionCard({
           <Button
             size="lg"
             className="h-11 flex-1 sm:min-w-40 sm:flex-none"
-            disabled={pending || !answers[answerable.id] || (oneAtATime && page !== askedPage)}
-            onClick={() =>
-              void send(oneAtATime ? { [answerable.id]: answers[answerable.id] } : answers)
-            }
+            disabled={pending || !answers[current.id]}
+            onClick={() => commit(answers)}
           >
             Send
           </Button>

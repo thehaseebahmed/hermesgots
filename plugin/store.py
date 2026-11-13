@@ -43,7 +43,17 @@ logger = logging.getLogger(__name__)
 # version or undo touches it. 62 adds the answers a canvas's page got for the tools its version
 # declared (`canvases.py`'s grants, ADR 0114) — one new table, and a pass over the names an earlier
 # build stored in `canvas_versions.tools` to drop the ones the rule refuses now.
-SCHEMA_VERSION = 65
+# 65 keeps a research mission's runs one per lane (`research.py`): one new table, and a mission's old
+# single run copied in as its one lane's, so a mission reading at the upgrade is still watched.
+# 66 keeps a verification's read-back on its mission (`research.py`): four new columns.
+# 67 keeps a verification's strictness on its mission (`research.py`): one new column.
+# 68 keeps the stance, part and lane of a verification's claim, and how each lane's run ended
+# (`research.py`): four new columns.
+# 69 keeps what each of a verification's lanes searched (`research.py`): one new table.
+# 70 keeps whether a canvas's data is copied into its host's OKF vault (`canvases.py`'s record,
+# `canvas_vault.py`): one column, off for every canvas an older store holds, since a backup nobody
+# asked for is not one to start.
+SCHEMA_VERSION = 70
 
 
 def data_dir(hermes_home: Path) -> Path:
@@ -527,6 +537,46 @@ def _migrate(conn: sqlite3.Connection) -> None:
         for column in ("option_id", "criterion_id"):
             if column not in claim_columns:
                 conn.execute(f"ALTER TABLE research_claims ADD COLUMN {column} TEXT")
+        # v65: a mission's runs, one per lane (research.py). A mission had one run on its own row
+        # before; that run is its one lane's, the lane named "" whose session is research-<id>.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS research_runs (
+                   mission_id TEXT NOT NULL,
+                   lane TEXT NOT NULL,
+                   run_id TEXT NOT NULL,
+                   PRIMARY KEY (mission_id, lane)
+               )"""
+        )
+        if version < 65:
+            conn.execute(
+                """INSERT OR IGNORE INTO research_runs (mission_id, lane, run_id)
+                   SELECT id, '', run_id FROM research_missions WHERE run_id IS NOT NULL"""
+            )
+        # v66: a verification's read-back (research.py): the claim restated, its parts, the terms
+        # taken literally, and why it can't be checked when it can't.
+        mission_columns = {row[1] for row in conn.execute("PRAGMA table_info(research_missions)")}
+        # v67: how strict its lanes are about their sources.
+        for column in ("restatement", "parts", "terms", "uncheckable", "strictness"):
+            if column not in mission_columns:
+                conn.execute(f"ALTER TABLE research_missions ADD COLUMN {column} TEXT")
+        # v68: a verification's claim says which way it bears on which part, and which lane read it;
+        # a lane's run keeps how it ended, so Try again restarts only the lanes that didn't complete.
+        claim_columns = {row[1] for row in conn.execute("PRAGMA table_info(research_claims)")}
+        for column in ("stance", "part_id", "lane"):
+            if column not in claim_columns:
+                conn.execute(f"ALTER TABLE research_claims ADD COLUMN {column} TEXT")
+        run_columns = {row[1] for row in conn.execute("PRAGMA table_info(research_runs)")}
+        if "ended" not in run_columns:
+            conn.execute("ALTER TABLE research_runs ADD COLUMN ended TEXT")
+        # v69: the queries each of a verification's lanes searched, in the order it searched them.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS research_searches (
+                   mission_id TEXT NOT NULL,
+                   lane TEXT NOT NULL,
+                   query TEXT NOT NULL,
+                   PRIMARY KEY (mission_id, lane, query)
+               )"""
+        )
         # v32: the messages triage sent out of a Main thread, for its Moved markers (moves.py).
         # v33: a v32 store also had a thread_session column nothing read; it is rebuilt without it.
         move_columns = {row[1] for row in conn.execute("PRAGMA table_info(main_moves)")}
@@ -924,10 +974,10 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    created_at INTEGER NOT NULL
                )"""
         )
-        # v65: whether this canvas's data is copied into the host's OKF vault, the canvas's own
+        # v70: whether this canvas's data is copied into the host's OKF vault, the canvas's own
         # switch and no setting of the app's (canvas_vault.py). Off for every canvas an older store
         # holds, since a backup nobody asked for is not one to start.
-        if version < 65:
+        if version < 70:
             canvas_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvases)")}
             if "vault" not in canvas_columns:
                 conn.execute("ALTER TABLE canvases ADD COLUMN vault INTEGER NOT NULL DEFAULT 0")

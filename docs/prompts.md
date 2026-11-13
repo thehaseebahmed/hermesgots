@@ -65,7 +65,7 @@ A reply shows the user a file by naming it in the message: `MEDIA:` and then the
 - Name a library file: the absolute path `library_add` answered with. Never a scratch, worktree or other temporary path — the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.
 - A file that isn't in the library yet goes there first: file it with `library_add`, then name the path it answered with.
 
-Its extension is how the app knows what to do with it: an image is drawn in the thread, a video or a recording plays there, and anything else — a PDF, a document, an archive — is a row the user saves. So the file keeps its own name.
+Its extension is what the app acts on: an image or a clip it can show is drawn, a recording plays, a page of HTML opens in the app, and anything else is a row the user taps — a markdown note, a text file or a PDF opens to read, an archive saves under its own name. A report you saved as markdown is handed over in a `MEDIA:` tag like any other file, never pasted into the reply.
 
 ## Current Session
 
@@ -116,7 +116,7 @@ A reply shows the user a file by naming it in the message: `MEDIA:` and then the
 - Name a library file: the absolute path `library_add` answered with. Never a scratch, worktree or other temporary path — the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.
 - A file that isn't in the library yet goes there first: file it with `library_add`, then name the path it answered with.
 
-Its extension is how the app knows what to do with it: an image is drawn in the thread, a video or a recording plays there, and anything else — a PDF, a document, an archive — is a row the user saves. So the file keeps its own name.
+Its extension is what the app acts on: an image or a clip it can show is drawn, a recording plays, a page of HTML opens in the app, and anything else is a row the user taps — a markdown note, a text file or a PDF opens to read, an archive saves under its own name. A report you saved as markdown is handed over in a `MEDIA:` tag like any other file, never pasted into the reply.
 
 ## Current Session
 
@@ -171,7 +171,7 @@ A reply shows the user a file by naming it in the message: `MEDIA:` and then the
 - Name a library file: the absolute path `library_add` answered with. Never a scratch, worktree or other temporary path — the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.
 - A file that isn't in the library yet goes there first: file it with `library_add`, then name the path it answered with.
 
-Its extension is how the app knows what to do with it: an image is drawn in the thread, a video or a recording plays there, and anything else — a PDF, a document, an archive — is a row the user saves. So the file keeps its own name.
+Its extension is what the app acts on: an image or a clip it can show is drawn, a recording plays, a page of HTML opens in the app, and anything else is a row the user taps — a markdown note, a text file or a PDF opens to read, an archive saves under its own name. A report you saved as markdown is handed over in a `MEDIA:` tag like any other file, never pasted into the reply.
 
 ## Plan mode
 
@@ -250,7 +250,7 @@ A reply shows the user a file by naming it in the message: `MEDIA:` and then the
 - Name a library file: the absolute path `library_add` answered with. Never a scratch, worktree or other temporary path — the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.
 - A file that isn't in the library yet goes there first: file it with `library_add`, then name the path it answered with.
 
-Its extension is how the app knows what to do with it: an image is drawn in the thread, a video or a recording plays there, and anything else — a PDF, a document, an archive — is a row the user saves. So the file keeps its own name.
+Its extension is what the app acts on: an image or a clip it can show is drawn, a recording plays, a page of HTML opens in the app, and anything else is a row the user taps — a markdown note, a text file or a PDF opens to read, an archive saves under its own name. A report you saved as markdown is handed over in a `MEDIA:` tag like any other file, never pasted into the reply.
 
 ## Away From Keyboard
 
@@ -357,7 +357,7 @@ A reply shows the user a file by naming it in the message: `MEDIA:` and then the
 - Name a library file: the absolute path `library_add` answered with. Never a scratch, worktree or other temporary path — the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.
 - A file that isn't in the library yet goes there first: file it with `library_add`, then name the path it answered with.
 
-Its extension is how the app knows what to do with it: an image is drawn in the thread, a video or a recording plays there, and anything else — a PDF, a document, an archive — is a row the user saves. So the file keeps its own name.
+Its extension is what the app acts on: an image or a clip it can show is drawn, a recording plays, a page of HTML opens in the app, and anything else is a row the user taps — a markdown note, a text file or a PDF opens to read, an archive saves under its own name. A report you saved as markdown is handed over in a `MEDIA:` tag like any other file, never pasted into the reply.
 
 ## Away From Keyboard
 

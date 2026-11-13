@@ -1,17 +1,18 @@
 /**
- * What a list calls a bot: the host it answers at, not the name that host sealed for it. A Hermes
- * host names its default profile "Hermes" (`plugin/link.py`), so two linked hosts drew two identical
- * rows in every picker.
+ * What a list calls a bot: the name its host gave it, and the host it answers at only where another bot
+ * of that name answers somewhere else (ADR 0149).
  *
- * The label is read, never stored (ADR 0148):
- * - a host's short name is its first DNS label, `hermes.domain.com` → `hermes`;
- * - where two hosts wear one short name, they read as the domain part instead, `domain` and `example`;
- * - a host holding more than one bot appends the Hermes profile it is reached at, `hermes/work`.
+ * A host seals its default profile "Hermes" (`plugin/link.py`), so two linked hosts read alike — and
+ * the address is what tells them apart, but as a suffix on the name rather than as the name itself:
+ * - two bots of one name on different hosts read `Hermes (domain)`, `Hermes (example)`;
+ * - a name nobody else wears reads bare, `Studio`, whatever host it is on;
+ * - two bots of one name on one host both read bare too, since no host tells those two apart.
  *
- * `host-url.ts` holds the one rule for where a bot's routes live; this reads its `/p/<profile>` from
- * there rather than keeping a second copy that could drift.
+ * The host a suffix shows is read through ADR 0148's ladder, never stored: the first DNS label, the
+ * domain part where two hosts wear that name, the whole host where even that collides. `host-url.ts`
+ * holds the one rule for where a bot's routes live, and nothing here keeps a second copy of it.
  */
-import { multiplexedProfile } from "./host-url.ts"
+import { byName } from "./compare.ts"
 
 /** The three fields a label is read from: `Profile` carries them and so does a list's row. */
 export interface NamedBot {
@@ -20,8 +21,8 @@ export interface NamedBot {
   baseUrl: string
 }
 
-/** The app's own name for a host's default profile, which is no bot's label. */
-const APP_NAME = "Hermes"
+/** What a bot with no name at all is called, so a row always says something. */
+const ANONYMOUS = "Bot"
 
 /**
  * A bot's address with any scheme and path taken off, for the strings `new URL` reads as no host: a
@@ -75,46 +76,37 @@ function domainOf(host: string) {
   return labels.length > 2 ? labels.slice(1, -1).join(".") : undefined
 }
 
-/** The Hermes profile a bot is, where its host serves it under `/p/<profile>`; else the default one. */
-const placeOf = (baseUrl: string) => multiplexedProfile(baseUrl)
-
-/** A bot with no server to be named by keeps its own name, unless that is only the app's. */
-function ownName(bot: NamedBot) {
-  const name = bot.name.trim()
-  return name && name !== APP_NAME ? name : "Bot"
+/**
+ * The host a suffix shows, measured against the hosts it has to be told apart from: its short name,
+ * their domain parts where one short name is worn twice, and the whole host where even those collide.
+ */
+function hostAgainst(host: string, rivals: string[]): string {
+  const short = shortOf(host)
+  const sameShort = rivals.filter((other) => shortOf(other) === short)
+  if (!sameShort.length) return short
+  const part = domainOf(host)
+  if (!part) return host
+  return sameShort.some((other) => (domainOf(other) ?? other) === part) ? host : part
 }
 
-/** Where a bot answers, read once: its label is built from this and its peers'. */
-const seatOf = (bot: NamedBot) => ({ host: hostOf(bot.baseUrl), place: placeOf(bot.baseUrl) })
+/** The name a bot reads as: what its host sealed, or `Bot` where it sealed nothing. */
+const labelName = (bot: NamedBot) => bot.name.trim() || ANONYMOUS
 
 /**
- * The label a list gives `bot`, among the bots that list holds: read alone, a bot is named by its
- * host's short name and nothing else.
+ * The label a list gives `bot`, among the bots that list holds: its own name, and — only where another
+ * bot of that name answers at a different host — the host that tells the two apart.
  */
 export function botLabel(bot: NamedBot, peers: NamedBot[]): string {
-  const { host, place } = seatOf(bot)
-  if (!host) return ownName(bot)
-  const others = peers.filter((peer) => peer.id !== bot.id).map(seatOf)
-  const short = shortOf(host)
-  let base = short
-  const clash = others.some(
-    (other) => other.host && other.host !== host && shortOf(other.host) === short,
-  )
-  if (clash) {
-    // Two hosts' domain parts can be one name too, and then only the whole host tells them apart —
-    // measured against the hosts that wear the same short name, since no other host is this one's
-    // rival.
-    const part = domainOf(host)
-    base = part ?? host
-    const rivals = others.filter((other) => other.host !== host && shortOf(other.host) === short)
-    if (part && rivals.some((other) => (domainOf(other.host) ?? other.host) === part)) base = host
-  }
-  const sameHost = others.filter((other) => other.host === host)
-  // Two bots linked at one host and one profile are the same link twice: their own name is all
-  // there is to tell them apart.
-  if (sameHost.some((other) => other.place === place)) base = ownName(bot)
-  else if (sameHost.length && place) base = `${base}/${place}`
-  return base
+  const name = labelName(bot)
+  const host = hostOf(bot.baseUrl)
+  if (!host) return name
+  const rivals = peers
+    .filter((peer) => peer.id !== bot.id && byName(labelName(peer), name) === 0)
+    .map((peer) => hostOf(peer.baseUrl))
+    // A peer with no server has no host to draw, so it is no namesake a list has to answer for.
+    .filter((other) => other && other !== host)
+  if (!rivals.length) return name
+  return `${name} (${hostAgainst(host, rivals)})`
 }
 
 /** Every bot of a list, labelled against the others: what a picker draws its rows from. */
@@ -123,9 +115,24 @@ export function botLabels(bots: NamedBot[]) {
 }
 
 /**
- * A list's label for `bot`, or its host read alone where the list drew no label for it — never the
- * name its host sealed, which is what this rule exists to keep out of a list.
+ * A list's label for `bot`, or its name read alone where the list drew no label for it — which is what
+ * a bot the list never saw reads as, since a host is only ever drawn against a namesake.
  */
 export function labelOf(labels: Map<string, string> | undefined, bot: NamedBot) {
-  return labels?.get(bot.id) ?? botLabel(bot, [])
+  return labels?.get(bot.id) ?? labelName(bot)
+}
+
+/**
+ * The order every list of bots runs in: by what its rows say, case-blind and with numbers read as
+ * numbers, and by id where two rows say the same thing — so a list that is drawn twice keeps one
+ * order between them.
+ */
+export function byBotLabel(labels: Map<string, string> | undefined) {
+  return (one: NamedBot, other: NamedBot) =>
+    byName(labelOf(labels, one), labelOf(labels, other)) || one.id.localeCompare(other.id)
+}
+
+/** A list of bots in that order — a copy, so no query's own array is the one sorted. */
+export function botsByLabel<T extends NamedBot>(bots: readonly T[], labels?: Map<string, string>) {
+  return [...bots].sort(byBotLabel(labels))
 }

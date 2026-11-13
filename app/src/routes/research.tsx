@@ -3,6 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { Navigate, useLocation, useNavigate, useParams } from "react-router"
 import {
   ArrowUpIcon,
+  BadgeCheckIcon,
   BookAIcon,
   BookMarkedIcon,
   BookOpenTextIcon,
@@ -21,19 +22,19 @@ import {
   Trash2Icon,
   XIcon,
 } from "lucide-react"
-import { toast } from "sonner"
 
-import { attempt } from "@/lib/attempt"
-import { Banner } from "@/components/banner"
+import { Banner, Refusal } from "@/components/banner"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { Bot } from "@/components/bot"
 import { CompareBriefForm, CompareScopeForm, MemoCanvas, SourceKinds } from "@/components/compare"
+import { VerdictCanvas, VerifyBriefForm, VerifyScopeForm } from "@/components/verify"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ModelPicker, PICKER_HEIGHT } from "@/components/chat/model-picker"
 import { ExperimentalBadge } from "@/components/experimental-badge"
 import { ItemGroup, ItemRow, ItemSearch } from "@/components/item-list"
 import { itemGroups } from "@/lib/item-groups"
+import { useRefusal } from "@/lib/use-refusal"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import {
   Evidence,
@@ -89,6 +90,7 @@ import {
   revisionReason,
   rewriteMission,
   toMarkdown,
+  typeOf,
   useMission,
   useMissions,
   type Mission,
@@ -96,6 +98,7 @@ import {
   type OutputFormat,
   type Revision,
 } from "@/lib/research"
+import { tell } from "@/lib/tell"
 import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { BackButton } from "@/components/back-button"
@@ -105,14 +108,56 @@ const FORMAT_ICONS: Record<OutputFormat, typeof BookOpenTextIcon> = {
   quiz: ListChecksIcon,
   glossary: BookAIcon,
   memo: ScaleIcon,
+  verdict: BadgeCheckIcon,
 }
 
 /** The picture of the bot running the mission. */
 const useMissionBotId = (mission: Mission) =>
   useLiveQuery(() => db.profiles.get(mission.profileId), [mission.profileId])?.botId
 
+type MissionView = {
+  Brief: (props: { mission: Mission }) => ReactNode
+  Scope: (props: { mission: Mission; botId?: string }) => ReactNode
+  /** The one canvas a delivered mission draws; without one it draws its formats'. */
+  Canvas?: (props: { mission: Mission; onCite: (id: string) => void }) => ReactNode
+  /** The confirmed brief's line and the facts under it. */
+  summary: (mission: Mission) => { line: string; facts: (string | undefined)[] }
+}
+
+const guideSummary: MissionView["summary"] = (mission) => ({
+  line: mission.goal,
+  facts: [
+    formatName(mission.format),
+    mission.depth === "deep" ? "In depth" : "Overview",
+    mission.audience,
+  ],
+})
+
+/** The forms and canvas a type draws: a type not listed is briefed and scoped as a guide. */
+const VIEWS: Partial<Record<MissionType, MissionView>> = {
+  compare: {
+    Brief: CompareBriefForm,
+    Scope: CompareScopeForm,
+    Canvas: MemoCanvas,
+    summary: guideSummary,
+  },
+  verify: {
+    Brief: VerifyBriefForm,
+    Scope: VerifyScopeForm,
+    Canvas: VerdictCanvas,
+    summary: (mission) => ({
+      line: mission.verify?.restatement || mission.goal,
+      facts: [formatName(mission.format)],
+    }),
+  },
+}
+const viewOf = (type: MissionType): MissionView =>
+  VIEWS[type] ?? { Brief: BriefForm, Scope: ScopeForm, summary: guideSummary }
+
+/** The one format a comparison or a verification delivers, which isn't among `FORMATS`. */
+const SOLE_FORMATS: Partial<Record<OutputFormat, string>> = { memo: "Memo", verdict: "Verdict" }
 const formatName = (format: OutputFormat) =>
-  format === "memo" ? "Memo" : FORMATS.find((f) => f.id === format)!.name
+  SOLE_FORMATS[format] ?? FORMATS.find((f) => f.id === format)!.name
 
 /**
  * Research: start a mission from a question, and the missions so far by what they need. Where the
@@ -162,12 +207,13 @@ function ResearchHome({ ask, list }: { ask?: boolean; list?: FeaturePane }) {
   const [starting, setStarting] = useState(false)
   const example = MISSION_TYPES.find((t) => t.id === type)!.example
   const blocked = profile ? unsupported[profile.id] : undefined
+  const refusal = useRefusal(profile?.id)
 
   const start = async () => {
     if (!text.trim() || !profile || starting) return
     setStarting(true)
     let started: Mission | undefined
-    await attempt("start the mission", async () => {
+    await refusal.write("start the mission", async () => {
       started = await createMission(profile, text, type)
     })
     setStarting(false)
@@ -244,6 +290,7 @@ function ResearchHome({ ask, list }: { ask?: boolean; list?: FeaturePane }) {
                 </InputGroupAddon>
               </InputGroup>
             </form>
+            <Refusal hold={refusal} />
             {blocked && <Banner>{blocked}</Banner>}
             <MissionTypes value={type} onChange={setType} />
           </section>
@@ -314,7 +361,9 @@ function MissionTypes({
             role="radio"
             aria-checked={active}
             aria-disabled={!type.ready}
-            onClick={() => (type.ready ? onChange(type.id) : toast(`${type.name} is coming soon`))}
+            onClick={() =>
+              type.ready ? onChange(type.id) : tell.note(`${type.name} is coming soon`)
+            }
             className={cn(
               "flex min-h-11 shrink-0 items-center gap-2 rounded-full border px-3.5 text-sm transition-colors",
               active
@@ -487,28 +536,32 @@ export function MissionPage() {
 /** A step the plugin couldn't do, and the way to run it again. */
 function MissionError({ mission }: { mission: Mission }) {
   const [retrying, setRetrying] = useState(false)
+  const refusal = useRefusal(mission.id)
   if (!mission.error) return null
   return (
-    <Banner
-      action={
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-9 rounded-full"
-          disabled={retrying}
-          onClick={async () => {
-            setRetrying(true)
-            await attempt("try again", () => retryMission(mission))
-            setRetrying(false)
-          }}
-        >
-          {retrying ? <Spinner /> : <RotateCcwIcon data-icon="inline-start" />}
-          Try again
-        </Button>
-      }
-    >
-      {mission.error}
-    </Banner>
+    <>
+      <Banner
+        action={
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 rounded-full"
+            disabled={retrying}
+            onClick={async () => {
+              setRetrying(true)
+              await refusal.write("try again", () => retryMission(mission))
+              setRetrying(false)
+            }}
+          >
+            {retrying ? <Spinner /> : <RotateCcwIcon data-icon="inline-start" />}
+            Try again
+          </Button>
+        }
+      >
+        {mission.error}
+      </Banner>
+      <Refusal hold={refusal} />
+    </>
   )
 }
 
@@ -527,15 +580,16 @@ function MissionMenu({
   const [asking, setAsking] = useState(false)
   const [rewriting, setRewriting] = useState(false)
   const made = format && mission.formats.includes(format)
+  const { reworks } = typeOf(mission.type)
   const canAsk =
-    mission.type === "learn" &&
+    reworks &&
     mission.stage === "delivered" &&
     Boolean(mission.followups) &&
     mission.outline.length < MAX_OUTLINE &&
     !mission.making
-  // Learn & understand only; a rewrite that failed can be taken over by another model.
+  // A rewrite that failed can be taken over by another model.
   const canRewrite =
-    mission.type === "learn" &&
+    reworks &&
     Boolean(mission.revisions) &&
     !mission.making &&
     (mission.stage === "delivered" ||
@@ -574,8 +628,8 @@ function MissionMenu({
                 onClick={() =>
                   void navigator.clipboard
                     .writeText(toMarkdown(mission, format))
-                    .then(() => toast("Copied"))
-                    .catch(() => toast.error("Couldn't copy."))
+                    .then(() => tell.note("Copied"))
+                    .catch(() => tell.error("Couldn't copy."))
                 }
               >
                 <ClipboardCopyIcon />
@@ -639,9 +693,11 @@ function MissionMenu({
         title="Delete this mission?"
         description="Its sources, claims and everything written from them go too."
         confirmLabel="Delete"
+        // The dialog holds its own failure, so the promise has to reach it: awaiting the removal
+        // here is what keeps the host's refusal in the question that asked.
         onConfirm={async () => {
-          if (await attempt("delete the mission", () => deleteMission(mission)))
-            navigate("/research", { replace: true })
+          await deleteMission(mission)
+          navigate("/research", { replace: true })
         }}
       />
     </>
@@ -653,6 +709,7 @@ function RewritePicker({ mission, onDone }: { mission: Mission; onDone: () => vo
   const profile = useLiveQuery(() => db.profiles.get(mission.profileId), [mission.profileId])
   const info = useModelInfo(profile)
   const [writers, setWriters] = useState<{ model: boolean; provider: boolean }>()
+  const refusal = useRefusal(mission.id)
   useEffect(() => {
     if (!profile) return
     let cancelled = false
@@ -664,10 +721,10 @@ function RewritePicker({ mission, onDone }: { mission: Mission; onDone: () => vo
     }
   }, [profile])
 
-  const choose = (choice?: ModelChoice) => {
-    onDone()
+  const choose = async (choice?: ModelChoice) => {
     if (choice && profile) void rememberModel(profile.id, choice)
-    void attempt("rewrite it", () => rewriteMission(mission, choice))
+    // The picker stays up until the host has it: a refused rewrite is read where the pick was made.
+    if (await refusal.write("rewrite it", () => rewriteMission(mission, choice))) onDone()
   }
 
   return (
@@ -678,12 +735,15 @@ function RewritePicker({ mission, onDone }: { mission: Mission; onDone: () => vo
           <code className="font-mono text-[13px]">hermes plugins enable gots</code>.
         </Banner>
       )}
+      <div className="px-4">
+        <Refusal hold={refusal} />
+      </div>
       <ModelPicker
         providers={info?.providers ?? []}
         fallback={{ label: "Default", model: info?.model }}
         recent={profile?.recentModels}
         choice={mission.writer}
-        onChoose={choose}
+        onChoose={(next) => void choose(next)}
       />
     </>
   )
@@ -698,7 +758,7 @@ function MissionHeader({
   onBack?: () => void
   actions?: ReactNode
 }) {
-  const type = MISSION_TYPES.find((t) => t.id === mission.type)!
+  const type = typeOf(mission.type)
   const profile = useLiveQuery(() => db.profiles.get(mission.profileId), [mission.profileId])
   const by = [profile?.name, mission.researcher?.model].filter(Boolean).join(" · ")
   return (
@@ -746,6 +806,7 @@ function Thinking({ label }: { label: string }) {
 /** What the bot took from the question, all of it editable, before anything is committed. */
 function ReadBack({ mission }: { mission: Mission }) {
   const botId = useMissionBotId(mission)
+  const { Brief } = viewOf(mission.type)
   return (
     <div className="flex flex-col gap-5 rounded-3xl border bg-card p-4 md:p-5">
       <h2 className="flex items-center gap-2.5 font-semibold">
@@ -756,12 +817,7 @@ function ReadBack({ mission }: { mission: Mission }) {
       {mission.busy === "brief" ? (
         <Thinking label="Reading your question" />
       ) : (
-        !mission.error &&
-        (mission.type === "compare" ? (
-          <CompareBriefForm key={mission.goal} mission={mission} />
-        ) : (
-          <BriefForm key={mission.goal} mission={mission} />
-        ))
+        !mission.error && <Brief key={mission.goal} mission={mission} />
       )}
     </div>
   )
@@ -773,9 +829,12 @@ function BriefForm({ mission }: { mission: Mission }) {
   const [audience, setAudience] = useState(mission.audience)
   const [depth, setDepth] = useState(mission.depth)
   const [saving, setSaving] = useState(false)
+  const refusal = useRefusal(mission.id)
   const save = async () => {
     setSaving(true)
-    await attempt("save the brief", () => confirmBrief(mission, { goal, format, audience, depth }))
+    await refusal.write("save the brief", () =>
+      confirmBrief(mission, { goal, format, audience, depth }),
+    )
     setSaving(false)
   }
 
@@ -816,6 +875,7 @@ function BriefForm({ mission }: { mission: Mission }) {
           onChange={setDepth}
         />
       </div>
+      <Refusal hold={refusal} />
       <Button
         size="lg"
         className="h-11 rounded-full md:self-end md:px-6"
@@ -832,27 +892,31 @@ function BriefForm({ mission }: { mission: Mission }) {
 /** The confirmed brief, folded to two lines, with a way back into it. */
 function BriefSummary({ mission }: { mission: Mission }) {
   const Icon = FORMAT_ICONS[mission.format]
+  const { line, facts } = viewOf(mission.type).summary(mission)
+  const refusal = useRefusal(mission.id)
   return (
-    <div className="flex items-start gap-3 rounded-3xl border bg-card px-4 py-3">
-      <Icon className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
-      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-        <p className="line-clamp-2 text-sm">{mission.goal}</p>
-        <p className="truncate text-xs text-muted-foreground">
-          {formatName(mission.format)} · {mission.depth === "deep" ? "In depth" : "Overview"} ·{" "}
-          {mission.audience}
-        </p>
+    <>
+      <div className="flex items-start gap-3 rounded-3xl border bg-card px-4 py-3">
+        <Icon className="mt-0.5 size-5 shrink-0 text-muted-foreground" />
+        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+          <p className="line-clamp-2 text-sm">{line}</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {facts.filter(Boolean).join(" · ")}
+          </p>
+        </div>
+        <Button
+          variant="ghost"
+          size="icon-lg"
+          className="-my-1 -mr-2 size-11 shrink-0 rounded-full"
+          disabled={Boolean(mission.busy)}
+          onClick={() => void refusal.write("edit the brief", () => editBrief(mission))}
+          aria-label="Edit the brief"
+        >
+          <PencilIcon />
+        </Button>
       </div>
-      <Button
-        variant="ghost"
-        size="icon-lg"
-        className="-my-1 -mr-2 size-11 shrink-0 rounded-full"
-        disabled={Boolean(mission.busy)}
-        onClick={() => void attempt("edit the brief", () => editBrief(mission))}
-        aria-label="Edit the brief"
-      >
-        <PencilIcon />
-      </Button>
-    </div>
+      <Refusal hold={refusal} />
+    </>
   )
 }
 
@@ -861,6 +925,7 @@ const MAX_POINTS = 6
 /** The Scope Gate: the outline and the kinds of source, and nothing is researched until approved. */
 function ScopeGate({ mission }: { mission: Mission }) {
   const botId = useMissionBotId(mission)
+  const { Scope } = viewOf(mission.type)
   return (
     <div className="flex flex-col gap-5 rounded-3xl border bg-card p-4 md:p-5">
       <MissionError mission={mission} />
@@ -873,12 +938,7 @@ function ScopeGate({ mission }: { mission: Mission }) {
           <Thinking label="Proposing an outline" />
         </>
       ) : (
-        !mission.error &&
-        (mission.type === "compare" ? (
-          <CompareScopeForm key={mission.outline.join("\n")} mission={mission} botId={botId} />
-        ) : (
-          <ScopeForm key={mission.outline.join("\n")} mission={mission} botId={botId} />
-        ))
+        !mission.error && <Scope key={mission.outline.join("\n")} mission={mission} botId={botId} />
       )}
     </div>
   )
@@ -888,6 +948,7 @@ function ScopeForm({ mission, botId }: { mission: Mission; botId?: string }) {
   const [points, setPoints] = useState(mission.outline)
   const [sources, setSources] = useState(mission.sources)
   const [starting, setStarting] = useState(false)
+  const refusal = useRefusal(mission.id)
   const filled = points.filter((p) => p.trim())
 
   return (
@@ -941,13 +1002,14 @@ function ScopeForm({ mission, botId }: { mission: Mission; botId?: string }) {
         <h2 className="font-semibold">Sources</h2>
         <SourceKinds value={sources} onChange={setSources} />
       </div>
+      <Refusal hold={refusal} />
       <Button
         size="lg"
         className="h-11 rounded-full md:self-end md:px-6"
         disabled={!filled.length || !sources.length || starting}
         onClick={async () => {
           setStarting(true)
-          await attempt("start the research", () => approveScope(mission, filled, sources))
+          await refusal.write("start the research", () => approveScope(mission, filled, sources))
           setStarting(false)
         }}
       >
@@ -965,6 +1027,7 @@ function ScopeForm({ mission, botId }: { mission: Mission; botId?: string }) {
 function WorkView({ mission, onBack }: { mission: Mission; onBack?: () => void }) {
   const delivered = mission.stage === "delivered"
   const [format, setFormat] = useState<OutputFormat>(mission.formats[0] ?? mission.format)
+  const refusal = useRefusal(mission.id)
   // The Sources drawer, and the claim a tapped citation opened it on.
   const [sources, setSources] = useState<{ cited?: string }>()
   const [revisions, setRevisions] = useState(false)
@@ -985,7 +1048,8 @@ function WorkView({ mission, onBack }: { mission: Mission; onBack?: () => void }
   const kept: OutputFormat[] = revision
     ? FORMATS.map((f) => f.id).filter((f) => revision.outputs[f]?.length)
     : []
-  const compared = mission.type === "compare"
+  const { reworks } = typeOf(mission.type)
+  const { Canvas } = viewOf(mission.type)
   const viewed = revision && !kept.includes(format) ? (kept[0] ?? format) : format
   const canvas: OutputFormat | "making" = revision
     ? viewed
@@ -1007,7 +1071,7 @@ function WorkView({ mission, onBack }: { mission: Mission; onBack?: () => void }
   }
 
   const make = async (next: OutputFormat) => {
-    if (await attempt("make it", () => makeFormat(mission, next))) setFormat(next)
+    if (await refusal.write("make it", () => makeFormat(mission, next))) setFormat(next)
   }
 
   const actions = (
@@ -1042,6 +1106,7 @@ function WorkView({ mission, onBack }: { mission: Mission; onBack?: () => void }
             {!delivered && <StageStrip mission={mission} />}
             {mission.stage === "reading" && <NowReading mission={mission} />}
             <MissionError mission={mission} />
+            <Refusal hold={refusal} />
             {revision ? (
               <Banner
                 tone="info"
@@ -1061,19 +1126,20 @@ function WorkView({ mission, onBack }: { mission: Mission; onBack?: () => void }
               </Banner>
             ) : (
               delivered &&
-              !compared && (
+              reworks && (
                 <FormatTabs mission={mission} value={format} onChange={setFormat} onMake={make} />
               )
             )}
             <div className="flex flex-col gap-1">
               <h2 className="text-2xl font-semibold tracking-tight">{mission.title}</h2>
               <p className="text-sm text-muted-foreground">
-                {formatName(viewed)} · {mission.found || "…"} sources · For{" "}
-                {mission.audience.charAt(0).toLowerCase() + mission.audience.slice(1)}
+                {formatName(viewed)} · {mission.found || "…"} sources
+                {mission.audience &&
+                  ` · For ${mission.audience.charAt(0).toLowerCase() + mission.audience.slice(1)}`}
               </p>
             </div>
-            {compared ? (
-              <MemoCanvas mission={shown} onCite={cite} />
+            {Canvas ? (
+              <Canvas mission={shown} onCite={cite} />
             ) : canvas === "making" ? (
               <MakingCanvas found={mission.found} />
             ) : canvas === "quiz" ? (
@@ -1122,6 +1188,7 @@ function MissedQuestions({ mission, onSent }: { mission: Mission; onSent: () => 
   const [picked, setPicked] = useState<string[]>([])
   const [text, setText] = useState("")
   const [sending, setSending] = useState(false)
+  const refusal = useRefusal(mission.id)
   const room = Math.min(MAX_FOLLOWUPS, MAX_OUTLINE - mission.outline.length)
   const own = text.trim()
   const questions = [...picked, ...(own ? [own] : [])]
@@ -1131,7 +1198,7 @@ function MissedQuestions({ mission, onSent }: { mission: Mission; onSent: () => 
   const send = async () => {
     if (!questions.length || questions.length > room || busy) return
     setSending(true)
-    const sent = await attempt("ask it", () => followUp(mission, questions))
+    const sent = await refusal.write("ask it", () => followUp(mission, questions))
     setSending(false)
     if (sent) onSent()
   }
@@ -1167,6 +1234,7 @@ function MissedQuestions({ mission, onSent }: { mission: Mission; onSent: () => 
           })}
         </div>
       )}
+      <Refusal hold={refusal} />
       <form
         onSubmit={(event) => {
           event.preventDefault()

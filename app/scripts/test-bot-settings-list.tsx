@@ -162,8 +162,8 @@ test("the bot's page is what the bot is under Bot, then every setting in one car
     )
     assert.deepEqual(
       titles(),
-      ["list-order"],
-      "the list screen is named by the host the fixture answers at",
+      ["A bot"],
+      "the list screen is named by the bot's own name (ADR 0149)",
     )
     const control = findAll("button").find((one) => wordsOf(one) === "Delete bot")
     assert.ok(
@@ -283,15 +283,15 @@ test("on a phone a row pushes its page, and the page's back returns to the list"
   await mount(settings("/settings/bots/bot-1"), async () => {
     assert.deepEqual(
       titles(),
-      ["push"],
-      "the list is a screen of its own, named by the fixture's host",
+      ["A bot"],
+      "the list is a screen of its own, named by the bot's own name",
     )
     await click(row("models"))
     assert.equal(path(), "/settings/bots/bot-1/models", "the page has an address of its own")
     assert.deepEqual(titles(), ["Models"], "named for the page it opened")
     await click(back())
     assert.equal(path(), "/settings/bots/bot-1", "back returns to the list")
-    assert.deepEqual(titles(), ["push"], "which the fixture's host names")
+    assert.deepEqual(titles(), ["A bot"], "which is the bot's own name")
   })
 })
 
@@ -302,12 +302,12 @@ test(
     await mount(settings("/settings/bots/bot-1"), async () => {
       assert.ok(find("[data-bot-settings-list]"), "the list is the pane the menu was in")
       absent('a[href="/settings/appearance"]')
-      assert.deepEqual(titles(), ["wide", "General"], "the bot's list beside General")
+      assert.deepEqual(titles(), ["A bot", "General"], "the bot's list beside General")
 
       await click(row("models"))
       assert.equal(path(), "/settings/bots/bot-1/models", "the address carries the segment")
       assert.ok(find("[data-bot-settings-list]"), "the list stays where it was")
-      assert.deepEqual(titles(), ["wide", "Models"], "and the pane beside it swapped")
+      assert.deepEqual(titles(), ["A bot", "Models"], "and the pane beside it swapped")
       assert.match(
         text(),
         /The model a chat runs when it has no pick of its own/,
@@ -326,10 +326,13 @@ test("a page still holds what its page held, each setting over its value", async
   const CHAT = [...ALL, "delegation_model", "fallbacks"]
   await seed("pages", ALL, { hostId: "host-1" })
   await mount(settings("/settings/bots/bot-1"), async () => {
-    assert.deepEqual(titles(), ["pages"], "the bot's own page, named by the fixture's host")
-    for (const label of ["Enabled", "Name", "Image", "Plugin"])
+    assert.deepEqual(titles(), ["A bot"], "the bot's own page, named by its own name")
+    for (const label of ["Enabled", "Image", "Plugin"])
       assert.ok(text().includes(label), `it still has ${label}`)
-    assert.ok(find('[data-setting="name"]'), "its Name is a value that opens its edit")
+    assert.ok(
+      missing('[data-setting="name"]'),
+      "and no Name: the bot's name is its host's, with no field to write another (ADR 0149)",
+    )
     absent('[data-setting="subagent-model"]', "and nothing of the Hermes side is forced on it")
   })
   await seed("pages-models", CHAT, { hostId: "host-1" })
@@ -345,17 +348,17 @@ test("a page still holds what its page held, each setting over its value", async
 
 test("a page's own edit is a screen the list's page pushes, with the list under it", async () => {
   await seed("pages-edit", ALL)
-  await mount(settings("/settings/bots/bot-1/bot/name"), async () => {
+  await mount(settings("/settings/bots/bot-1/bot/base-url"), async () => {
     assert.deepEqual(
       titles(),
-      ["Edit Name"],
+      ["Edit API base URL"],
       "the screen says what it does, not what the field says",
     )
-    assert.ok(find("#edit-name"), "holding the bot's name in a field")
-    assert.equal(path(), "/settings/bots/bot-1/bot/name", "at an address of its own")
+    assert.ok(find("#edit-api-base-url"), "holding the bot's address in a field")
+    assert.equal(path(), "/settings/bots/bot-1/bot/base-url", "at an address of its own")
     await click(back())
     assert.equal(path(), "/settings/bots/bot-1", "and Back returns to the page it came from")
-    assert.deepEqual(titles(), ["pages-edit"], "which the fixture's host names")
+    assert.deepEqual(titles(), ["A bot"], "which is the bot's own name")
   })
 
   // Every drill-in form says what it does, the host's own keys included.
@@ -363,6 +366,38 @@ test("a page's own edit is a screen the list's page pushes, with the list under 
   await mount(settings("/settings/bots/bot-1/general/timezone"), async () => {
     await until(async () => Boolean(find("#edit-timezone")), "the field")
     assert.deepEqual(titles(), ["Edit Timezone"], "a key's form is named the same way")
+  })
+})
+
+test("the menu's bots run by name, and a name two hosts share says which host", async () => {
+  await seedSettings()
+  await db.profiles.clear()
+  await db.profiles.bulkPut([
+    botProfile("hermes.zeta", { id: "bot-z", name: "Hermes" }),
+    botProfile("hermes.alpha", { id: "bot-a", name: "Hermes" }),
+    botProfile("studio.acme", { id: "bot-s", name: "Studio" }),
+  ])
+  await mount(settings("/settings"), async () => {
+    const bots = () => findAll('a[href^="/settings/bots/"]')
+    assert.deepEqual(
+      bots().map((one) => one.getAttribute("href")),
+      ["/settings/bots/bot-a", "/settings/bots/bot-z", "/settings/bots/bot-s"],
+      "A to Z by label, against the order the store hands them back in",
+    )
+    assert.deepEqual(
+      bots().map((one) => wordsOf(one)),
+      ["Hermes (alpha)", "Hermes (zeta)", "Studio"],
+      "the two bots of one name name their hosts, and the name nobody shares reads bare",
+    )
+  })
+})
+
+test("the address that named the Name edit is the bot's page now", async () => {
+  await seed("name-edit-gone", ALL)
+  await mount(settings("/settings/bots/bot-1/bot/name"), async () => {
+    assert.equal(path(), "/settings/bots/bot-1", "the bot's own page, in place")
+    assert.ok(missing("#edit-name"), "with no field for a name (ADR 0149)")
+    assert.ok(find("[data-bot-card]"), "and the card the row opened from")
   })
 })
 
@@ -392,9 +427,9 @@ test(
   "an edit drawn as a card is a pop-up: closing it asks nothing",
   laptop(async () => {
     await seed("wide-edit", ALL)
-    await mount(settings("/settings/bots/bot-1/bot/name"), async () => {
-      await until(async () => Boolean(find("#edit-name")), "the card's field")
-      await type(find("#edit-name"), "Renamed")
+    await mount(settings("/settings/bots/bot-1/bot/base-url"), async () => {
+      await until(async () => Boolean(find("#edit-api-base-url")), "the card's field")
+      await type(find("#edit-api-base-url"), "http://typed-and-abandoned.test/v1")
       // Clicking out of the card — Escape here — is the whole of saying no.
       await shutSheet(() => find('[role="dialog"]'))
       assert.equal(
@@ -406,7 +441,11 @@ test(
         missing('[role="alertdialog"]'),
         "with nothing asked: closing a pop-up is the whole of saying no",
       )
-      assert.equal((await db.profiles.get("bot-1"))?.name, "A bot", "and nothing was written")
+      assert.equal(
+        (await db.profiles.get("bot-1"))?.baseUrl,
+        botProfile("wide-edit").baseUrl,
+        "and nothing was written",
+      )
     })
   }),
 )

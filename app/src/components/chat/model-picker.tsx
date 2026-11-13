@@ -6,7 +6,6 @@ import {
   PlusIcon,
   XIcon,
 } from "lucide-react"
-import { toast } from "sonner"
 
 import { MODEL_SORTS, sortByFacts, type ModelSort } from "@/components/chat/model-sort"
 import { SortMenu } from "@/components/sort-menu"
@@ -27,6 +26,7 @@ import type { ModelProvider } from "@/lib/hermes"
 import { botModel, fullModel, hostChoice, shortModel, useModelInfo } from "@/lib/model-info"
 import { MAX_COST_TIER, modelFacts, useModelCatalog, type Catalog } from "@/lib/models"
 import { overallScoreOf, useOverallRankings, type RankingsPayload } from "@/lib/rankings"
+import { tell } from "@/lib/tell"
 import { cn } from "@/lib/utils"
 
 /**
@@ -405,7 +405,6 @@ function modelDetail(
   )
 }
 
-
 // A fixed height, so the sheet doesn't grow and shrink between the lists.
 export const PICKER_HEIGHT = "h-[min(36rem,85dvh)]"
 
@@ -497,7 +496,7 @@ const SETTLE_MS = 4000
 
 function reportWrite(write: Promise<unknown>) {
   void write.catch((error: unknown) => {
-    toast.error(error instanceof Error ? error.message : String(error))
+    tell.error(error instanceof Error ? error.message : String(error))
   })
 }
 

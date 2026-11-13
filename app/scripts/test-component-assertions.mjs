@@ -11,6 +11,8 @@ import { join } from "node:path"
 import test from "node:test"
 import ts from "typescript"
 
+import { parseSource } from "./source-tree.mjs"
+
 /** Assert's equality family: each builds its failure by inspecting both arguments. */
 const EQUALITY = new Set([
   "equal",
@@ -135,19 +137,6 @@ function assertionName(call) {
   return EQUALITY.has(expression.name.text) ? expression.name.text : null
 }
 
-/** A file read as a tree, or the parse error that stopped it, named where it sits. */
-function parsed(source, file) {
-  const sourceFile = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
-  const errors = sourceFile.parseDiagnostics ?? []
-  if (errors.length > 0) {
-    const [error] = errors
-    const { line, character } = sourceFile.getLineAndCharacterOfPosition(error.start ?? 0)
-    const why = ts.flattenDiagnosticMessageText(error.messageText, " ")
-    throw new Error(`${file}:${line + 1}:${character + 1} could not be parsed: ${why}`)
-  }
-  return sourceFile
-}
-
 /**
  * The words an `absentText` call looks for are a control's own label, which this suite writes as
  * capitalised copy. A sentence opening as its messages do — "and nothing else on the page is typed
@@ -160,7 +149,7 @@ function readsAsLabel(text) {
 }
 
 function sentencesInLabelSlot(source, file = "<source>") {
-  const sourceFile = parsed(source, file)
+  const sourceFile = parseSource(source, file)
   const sites = []
   const visit = (node) => {
     if (
@@ -182,7 +171,7 @@ function sentencesInLabelSlot(source, file = "<source>") {
 }
 
 function offendersIn(source, file = "<source>") {
-  const sourceFile = parsed(source, file)
+  const sourceFile = parseSource(source, file)
   const helpers = elementHelpers(sourceFile)
   const sites = []
   const visit = (node) => {

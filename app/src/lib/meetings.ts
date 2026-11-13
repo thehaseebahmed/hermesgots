@@ -1,6 +1,5 @@
 import { useEffect } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { toast } from "sonner"
 
 import { connectionKey, hostTargets, serverConfig } from "@/lib/connection"
 import { db, getActiveProfile, getSettings, listEnabledProfiles, type Profile } from "@/lib/db"
@@ -20,6 +19,7 @@ import { usePoll } from "@/lib/poll"
 import { readProjects, useAllProjects } from "@/lib/projects"
 import { quietly } from "@/lib/report"
 import { createStore } from "@/lib/store"
+import { tell } from "@/lib/tell"
 
 export { clock, length, parseTranscript, type TranscriptLine } from "@/lib/meeting-text"
 
@@ -507,7 +507,7 @@ async function send(profile: Profile, meeting: Meeting, file: File) {
     // Nothing will finish a half-sent upload, so it doesn't stay behind to be tried again.
     await meetingAction(profile, meeting.id, "remove").catch(quietly("Removing a failed upload"))
     drop(meeting)
-    toast.error(
+    tell.error(
       `Couldn't upload ${meeting.title}: ${error instanceof Error ? error.message : "it failed"}`,
     )
   } finally {

@@ -17,7 +17,7 @@ import {
 } from "@/lib/db"
 import { registerPush, setPushMuted, unregisterPush } from "@/lib/hermes"
 import { connectionKey, reconnectLive } from "@/lib/live"
-import { isNative } from "@/lib/native"
+import { isNative } from "@/lib/platform"
 import { quietly } from "@/lib/report"
 import { callFunction, failure, functionUrl } from "@/lib/account"
 import {
@@ -53,13 +53,13 @@ export type PushPermission = NotificationPermission | "unsupported"
 
 /** Whether this device can get push: a browser with the Push API, or the Android app. */
 export function pushAvailable() {
-  return isNative ? nativeConfigured : webSupported()
+  return isNative() ? nativeConfigured : webSupported()
 }
 
 /** The Android app's WebView has no Push API; it gets Firebase messaging (see below) instead. */
 function webSupported() {
   return (
-    !isNative &&
+    !isNative() &&
     typeof Notification !== "undefined" &&
     "serviceWorker" in navigator &&
     "PushManager" in window
@@ -204,7 +204,7 @@ function useWebPush() {
 async function dismiss(subject: string) {
   if (!subject) return
   try {
-    if (isNative) {
+    if (isNative()) {
       const { push } = await plugin()
       const { notifications } = await push.getDeliveredNotifications()
       const answered = notifications.filter((entry) => aboutSubject(entry, subject))
@@ -595,7 +595,7 @@ function startNative() {
 /** Asks the registry to push to this phone now, with the app open or not. */
 export async function sendTestPush() {
   const { fcm } = await getSettings()
-  if (!isNative || !fcm?.on) throw new Error("Notifications are off")
+  if (!isNative() || !fcm?.on) throw new Error("Notifications are off")
   // Its channel is made here, on the tap that sends one, so a device that never sends a test never
   // lists it. Before the POST: a push must never arrive ahead of the channel it names.
   const { push } = await plugin()
@@ -612,7 +612,7 @@ export async function sendTestPush() {
 /** Turns some categories of push on or off where the app's own list is the switch: the web. */
 async function setCategories(ids: PushCategory[], on: boolean) {
   // A phone reads its own channels instead, so a list stored there would have no reader (ADR 0050).
-  if (isNative) return
+  if (isNative()) return
   const { pushCategories } = await getSettings()
   await saveSettings({
     pushCategories: { ...pushCategories, ...Object.fromEntries(ids.map((id) => [id, on])) },
@@ -657,7 +657,7 @@ export function usePushFeatures() {
 function useNativePermission(): PushPermission {
   const [permission, setPermission] = useState<PushPermission>("default")
   useEffect(() => {
-    if (!isNative) return
+    if (!isNative()) return
     let cancelled = false
     const check = async () => {
       const { receive } = await (await plugin()).push.checkPermissions()
@@ -677,11 +677,11 @@ function useNativePermission(): PushPermission {
 }
 
 export function enablePush() {
-  return isNative ? enableNative() : enableWeb()
+  return isNative() ? enableNative() : enableWeb()
 }
 
 export function disablePush() {
-  return isNative ? disableNative() : disableWeb()
+  return isNative() ? disableNative() : disableWeb()
 }
 
 /**
@@ -733,7 +733,7 @@ export function setThreadMuted(conversationId: string, muted: boolean) {
 
 export function startPush() {
   startMutes()
-  if (isNative) startNative()
+  if (isNative()) startNative()
   else startWeb()
 }
 
@@ -742,6 +742,6 @@ export function usePush() {
   const web = useWebPush()
   const nativePermission = useNativePermission()
   const fcm = useLiveQuery(async () => (await getSettings()).fcm, [])
-  if (!isNative) return web
+  if (!isNative()) return web
   return { permission: nativePermission, on: Boolean(fcm?.on) && nativePermission !== "denied" }
 }

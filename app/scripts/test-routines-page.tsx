@@ -216,7 +216,10 @@ test("the page says nothing of its bot: a routine belongs to the bot whose list 
   await seed()
   await mount(routinesScreen(BOT_A.id), async () => {
     await until(async () => Boolean(findText("h3", "Morning watch")), "the bot's routine")
-    assert.ok(!text().includes("Mainly"), "the bot's own name is nowhere on the page")
+    assert.ok(
+      !(find("header")?.textContent ?? "").includes("Mainly"),
+      "the bar says nothing of the bot, though its lane's row carries its name",
+    )
     assert.ok(!text().includes("1 routine"), "nor its count of routines")
     assert.equal(find("header h1")?.textContent, "Routines", "the bar names the screen alone")
     absent(
@@ -398,8 +401,7 @@ test(
         const lane = find('[data-slot="list-lane"]')
         assert.ok(lane, "the bot's list keeps its lane")
         assert.ok(
-          // The lane's row is named by the host its bot answers at (ADR 0148).
-          lane.textContent?.includes("routine-a"),
+          lane.textContent?.includes("Mainly"),
           "the list of the bot whose routines these are",
         )
         assert.ok(

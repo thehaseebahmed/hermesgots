@@ -6,10 +6,9 @@
  * a report once, against a mark of its own kept in local storage, the same shape as a read mark.
  */
 
-import { toast } from "sonner"
-
 import {
   closeLines,
+  closeSay,
   closeToldKey,
   closeUntold,
   type CloseReport,
@@ -18,6 +17,7 @@ import { type Profile } from "@/lib/db"
 import { getSessionCloses } from "@/lib/hermes"
 import { quietly } from "@/lib/report"
 import { createStore } from "@/lib/store"
+import { tell } from "@/lib/tell"
 
 const KEY = "gots:close-reports"
 /** The store only ever grows: the oldest marks drop past this many. */
@@ -71,10 +71,8 @@ function markTold(profileId: string, close: CloseReport) {
 export function tellClose(profile: Pick<Profile, "id">, close: CloseReport) {
   if (!closeUntold(marks.get(), profile.id, close)) return false
   markTold(profile.id, close)
-  for (const line of closeLines(close, close.repos.length > 1)) {
-    if (line.tone === "error") toast.error(line.text)
-    else toast.info(line.text)
-  }
+  const said = closeSay(closeLines(close, close.repos.length > 1))
+  if (said) tell[said.tone](said.text)
   return true
 }
 

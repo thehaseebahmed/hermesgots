@@ -307,7 +307,7 @@ async function send(profile: Profile, canvasId: string): Promise<boolean> {
       // rather than being thrown away on a guess — but the drain is not done, and a reader who is
       // told nothing would think the write had landed.
       tell.error(
-        `${refusedWords(row)} The bot answered something this app couldn't read, so it's still waiting.`,
+        `Couldn't save ${row.collection} / ${row.docId}: the bot answered something this app couldn't read, so it's still waiting.`,
       )
       return false
     }

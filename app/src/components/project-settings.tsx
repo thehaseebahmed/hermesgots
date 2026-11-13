@@ -9,7 +9,6 @@ import {
   RotateCcwIcon,
   XIcon,
 } from "lucide-react"
-import { toast } from "sonner"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { Button } from "@/components/ui/button"
@@ -26,6 +25,7 @@ import {
   type HermesProject,
   type HermesProjectFolder,
 } from "@/lib/hermes"
+import { tell } from "@/lib/tell"
 import { cn } from "@/lib/utils"
 
 const REPO_RE = /^[\w-]+\/[\w.-]+$/
@@ -140,7 +140,11 @@ function SettingsForm({
     setAdded((current) => [...current, repo])
   }
 
-  const save = async () => {
+  /**
+   * The form's one write. It answers by throwing, so the question that asked prints the host's
+   * words in itself; a save with no question in front of it is said in passing by `save` below.
+   */
+  const write = async () => {
     if (!name.trim() || busy) return
     setBusy(true)
     try {
@@ -151,12 +155,19 @@ function SettingsForm({
       onChanged()
       onClose()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Couldn't save the project.")
+      // A save that failed halfway still changed what the list holds, so it is read again.
       onChanged()
+      throw error
     } finally {
       setBusy(false)
     }
   }
+
+  /** The bare Save: there is no dialog to hold its words, so a refusal is said in passing. */
+  const save = () =>
+    write().catch((error) => {
+      tell.error(error instanceof Error ? error.message : "Couldn't save the project.")
+    })
 
   const act = async (action: () => Promise<void>, fallback: string) => {
     setBusy(true)
@@ -164,7 +175,7 @@ function SettingsForm({
       await action()
       onChanged()
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : fallback)
+      tell.error(error instanceof Error ? error.message : fallback)
     } finally {
       setBusy(false)
     }
@@ -290,7 +301,7 @@ function SettingsForm({
         }
         confirmLabel="Remove"
         busy={busy}
-        onConfirm={() => save()}
+        onConfirm={write}
       />
     </form>
   )

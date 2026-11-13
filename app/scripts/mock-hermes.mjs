@@ -1154,7 +1154,7 @@ const DONT_RULES = "- Don't ask before shipping, and never merge or close: mergi
 // The plugin's media rule (prompt_builder._MEDIA_RULES), word for word: how a reply names a
 // file the user is shown, and why it is never a path from outside the library.
 // prettier-ignore
-const MEDIA_RULES = "A reply shows the user a file by naming it in the message: `MEDIA:` and then the file's absolute path, starting at the root of the filesystem \u2014 `MEDIA:/opt/data/files/dashboard-light.png`, never a path relative to the folder you are in, which draws nothing. The app draws the file under the message and keeps it in the thread, so naming the same path again shows that same file, never a new one.\n\n- Name a library file: the absolute path `library_add` answered with. Never a scratch, worktree or other temporary path \u2014 the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.\n- A file that isn't in the library yet goes there first: file it with `library_add`, then name the path it answered with.\n\nIts extension is how the app knows what to do with it: an image is drawn in the thread, a video or a recording plays there, and anything else \u2014 a PDF, a document, an archive \u2014 is a row the user saves. So the file keeps its own name."
+const MEDIA_RULES = "A reply shows the user a file by naming it in the message: `MEDIA:` and then the file's absolute path, starting at the root of the filesystem \u2014 `MEDIA:/opt/data/files/dashboard-light.png`, never a path relative to the folder you are in, which draws nothing. The app draws the file under the message and keeps it in the thread, so naming the same path again shows that same file, never a new one.\n\n- Name a library file: the absolute path `library_add` answered with. Never a scratch, worktree or other temporary path \u2014 the app caches what it fetches, so a temporary file draws a stale copy once it changes, and naming it again can't make it new.\n- A file that isn't in the library yet goes there first: file it with `library_add`, then name the path it answered with.\n\nIts extension is what the app acts on: an image or a clip it can show is drawn, a recording plays, a page of HTML opens in the app, and anything else is a row the user taps \u2014 a markdown note, a text file or a PDF opens to read, an archive saves under its own name. A report you saved as markdown is handed over in a `MEDIA:` tag like any other file, never pasted into the reply."
 const MODES = ["accept_edits", "auto", "plan"]
 
 // The routine deliveries this mock has published, newest last: one chat record per run, as the
@@ -3164,6 +3164,16 @@ const LIVE_CLARIFY = process.env.MOCK_LIVE_CLARIFY === "1"
 // question on the run's stream before the answer's own response is written. Both are this mode's.
 const SKIP_HINT = '\nReply "skip" to skip this question.'
 const CLARIFY_REPLY_MS = 100
+
+/** A multi-select answer as Hermes reads one: a JSON list, else the one typed answer. */
+function listOf(said) {
+  try {
+    const parsed = JSON.parse(said)
+    if (Array.isArray(parsed)) return parsed.filter((one) => String(one).trim())
+  } catch {}
+  return [said]
+}
+
 const runs = new Map()
 // Sessions a finished subagent still owes a wake turn to — `waking` on runs/live, what the plugin
 // reports between a turn ending and its wake turn starting, so no screen reads the session at rest
@@ -3967,9 +3977,16 @@ function startRun(req, body, options = {}) {
           outcome = settled.outcome
           break
         }
-        // Hermes reads the word "skip" as a question skipped, as it does an answer with no words.
-        const said = (settled.answer ?? "").trim()
-        answers[question.id] = !said || said.toLowerCase() === "skip" ? null : settled.answer
+        // Hermes's run route records its own skip value as a question skipped, and stores any other
+        // reply as sent — the word "skip" included; a multi-select answer is split only from a JSON
+        // list (`_clean_answer` in `tools/clarify_tool.py`).
+        const said = settled.answer ?? ""
+        answers[question.id] =
+          !said.trim() || said === "\u0000skipped"
+            ? null
+            : question.multi_select
+              ? listOf(said)
+              : said
         push("clarify.settled", { prompt_id: run.clarify.prompt_id, execution_generation: 0 })
       }
       pendingClarifies.delete(id)
@@ -4244,7 +4261,13 @@ http
           "afk_prompt",
           "afk_picks",
           ...(RESEARCH
-            ? ["research", "research_followup", "research_rewrite", "research_compare"]
+            ? [
+                "research",
+                "research_followup",
+                "research_rewrite",
+                "research_compare",
+                "research_verify",
+              ]
             : []),
           // The vault's switch rides with canvases: a mock whose record carries `vault` and whose
           // update takes it answers the row as the plugin does. (The paged data read is not

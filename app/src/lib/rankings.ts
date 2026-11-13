@@ -2,10 +2,11 @@ import { useLiveQuery } from "dexie-react-hooks"
 
 import { db } from "@/lib/db"
 import type { ModelInfo } from "@/lib/hermes"
-import { isNative, SITE_URL } from "@/lib/native"
+import { SITE_URL } from "@/lib/native"
+import { isNative } from "@/lib/platform"
 import { scoreFor, scoreMapOf, type ScoredRow } from "@/lib/model-match"
 
-const RANKINGS_URL = `${isNative ? SITE_URL : ""}/.netlify/functions/benchlm`
+const RANKINGS_URL = `${isNative() ? SITE_URL : ""}/.netlify/functions/benchlm`
 const RANKINGS_ROW = "overall"
 const TTL_MS = 24 * 60 * 60 * 1000
 

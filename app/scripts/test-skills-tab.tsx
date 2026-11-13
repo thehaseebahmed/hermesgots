@@ -6,6 +6,7 @@ import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-route
 import { toast } from "sonner"
 
 import { BotSettingsPage } from "@/components/bot-settings"
+import { Screen } from "@/components/settings-chrome"
 import { botSubOf } from "@/lib/bot-subs"
 import { botPageOf, botTabOf, type BotTab } from "@/lib/bot-tabs"
 import { connectionKey } from "@/lib/connection"
@@ -102,8 +103,7 @@ function host(
     const method = (init?.method ?? "GET").toUpperCase()
     const body = init?.body ? JSON.parse(String(init.body)) : null
     calls.push({ path: url.pathname, method, body })
-    if (url.pathname.endsWith("/api/plugins/gots/info"))
-      return json({ name: "gots", features })
+    if (url.pathname.endsWith("/api/plugins/gots/info")) return json({ name: "gots", features })
     const write = /\/api\/plugins\/gots\/skills\/([^/]+)\/enabled$/.exec(url.pathname)
     if (write && method === "POST") {
       if (refuse) return json({ error: { message: refuse } }, 400)
@@ -163,9 +163,10 @@ function LiveEditor() {
   if (!profile) return null
   const page = botTabOf(tab) ?? "bot"
   return (
-    <>
+    // The chrome a bot's page is drawn in: the page's one refusal is the Screen's to hold.
+    <Screen title="Skills">
       <BotSettingsPage key={profile.id} profile={profile} tab={page} sub={botSubOf(page, sub)} />
-    </>
+    </Screen>
   )
 }
 
@@ -402,8 +403,13 @@ test("a write the Host refuses is its own sentence, with the row as it was", asy
     await mount(editor("/settings/bots/bot-1/skills"), async () => {
       await drawn()
       await click(switchIn("pr-review"))
-      await until(async () => errors.length === 1, "the toast")
-      assert.deepEqual(errors, [ESSENTIAL], "the Host's own words, nothing added")
+      await until(async () => Boolean(find('[role="alert"]')), "the refusal")
+      assert.equal(
+        wordsOf(find('[role="alert"]')),
+        ESSENTIAL,
+        "the Host's own words, nothing added",
+      )
+      assert.deepEqual(errors, [], "and nothing said in passing")
       await settle()
       assert.equal(on(switchIn("pr-review")), true, "and the switch keeps the Host's truth")
       assert.match(row("pr-review")?.textContent ?? "", /Ready/, "the row is as it was")
@@ -531,7 +537,11 @@ test("the Host's readiness and setup are the note's next lines, both where it ha
   await mount(editor("/settings/bots/bot-1/skills"), async () => {
     await drawn()
     await openNote("pr-land")
-    assert.equal(findAll("[data-skill-setup]").length, 0, "a host that says neither draws neither line")
+    assert.equal(
+      findAll("[data-skill-setup]").length,
+      0,
+      "a host that says neither draws neither line",
+    )
   })
 })
 
@@ -634,7 +644,10 @@ test("a skill whose row says no origin offers no Remove, and no guess at one", a
     await drawn()
     await openNote("stray")
     assert.ok(missing("[data-skill-origin]"), "the note says nothing it wasn't told")
-    assert.ok(missing("[data-skill-properties]"), "and a skill holding neither frontmatter nor host facts draws no block at all")
+    assert.ok(
+      missing("[data-skill-properties]"),
+      "and a skill holding neither frontmatter nor host facts draws no block at all",
+    )
     assert.equal(removeButton(), null, "and offers no removal behind an origin it can't name")
   })
 })
@@ -696,11 +709,16 @@ test("a removal the Host refuses is its own sentence, with the row as it was", a
       await openNote("pr-review")
       await click(removeButton())
       await click(alertButton("Remove"))
-      await until(async () => errors.length === 1, "the toast")
-      assert.deepEqual(errors, [refusal], "the Host's own words, nothing added")
+      await until(async () => Boolean(find('[role="alert"]')), "the refusal")
+      assert.equal(
+        wordsOf(find('[role="alert"]')),
+        refusal,
+        "the Host's own words, read where the question was asked",
+      )
+      assert.deepEqual(errors, [], "and nothing said in passing")
       await settle()
-      assert.ok(missing('[role="alertdialog"]'), "the confirmation closes with the refusal")
-      assert.ok(noteBody(), "back on the skill's own note")
+      assert.ok(find('[role="alertdialog"]'), "the question keeps itself open on the refusal")
+      assert.ok(noteBody(), "with the skill's own note behind it")
       assert.equal(noteSkill(), "pr-review", "still that skill's page")
       assert.ok(removeButton(), "and it still offers the removal the Host refused")
       const stored = (await db.skills.toArray()).flatMap((cached) => cached.skills)
@@ -985,8 +1003,13 @@ test("a category's write the Host refuses is its own sentence, and the rows stay
     await mount(editor("/settings/bots/bot-1/skills"), async () => {
       await drawn()
       await click(categorySwitch("ops"))
-      await until(async () => errors.length === 1, "the toast")
-      assert.deepEqual(errors, [ESSENTIAL], "the Host's own words, nothing added")
+      await until(async () => Boolean(find('[role="alert"]')), "the refusal")
+      assert.equal(
+        wordsOf(find('[role="alert"]')),
+        ESSENTIAL,
+        "the Host's own words, nothing added",
+      )
+      assert.deepEqual(errors, [], "and nothing said in passing")
       await settle()
       assert.equal(posts(calls).length, 1, "and it stops at the first refusal")
       assert.equal(on(categorySwitch("ops")), true, "the category keeps the Host's truth")

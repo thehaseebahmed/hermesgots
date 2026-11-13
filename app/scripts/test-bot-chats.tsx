@@ -43,8 +43,7 @@ import {
 } from "./component-kit.tsx"
 
 const bot = botProfile("bot-chats", { id: "bot-1", name: "Mainly", hermesProfile: "default" })
-/** What the app calls it: the host it answers at, never the name its host sealed (ADR 0148). */
-const LABEL = "bot-chats"
+const LABEL = "Mainly"
 
 /**
  * A filter pill, by the word it wears. Named by its group rather than by `header [role="group"] button`,
@@ -496,7 +495,7 @@ test("a row deleted here is not resurrected by a record written ahead of this de
   )
 })
 
-test("the header's title is the host the bot answers at, and it is the way to its settings", async () => {
+test("the header's title is the bot's own name, and it is the way to its settings", async () => {
   await seed([{ id: "a", title: "A chat", at: 100, said: "Hello" }])
   await mount(screen(), async () => {
     await until(
@@ -505,7 +504,7 @@ test("the header's title is the host the bot answers at, and it is the way to it
     )
     const title = find('a[href="/settings/bots/bot-1"]')
     assert.ok(title, "the title leads to Bot settings")
-    assert.equal(wordsOf(title), LABEL, "and it is the host it answers at")
+    assert.equal(wordsOf(title), LABEL, "and it is the name the bot has")
     assert.equal(find("h1")?.textContent, LABEL, "the heading the screen is known by")
     assert.equal(
       findAll('[data-slot="header-row"] button').length,

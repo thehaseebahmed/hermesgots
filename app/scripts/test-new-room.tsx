@@ -371,20 +371,15 @@ async function freshHosts() {
   return bots
 }
 
-test("a seat is named by the Host it answers at, not by the name both Hosts sealed", async () => {
+test("a seat says which Host it is where two bots share a name", async () => {
   await freshHosts()
   await mount(screen(), async () => {
     await openSeats()
     const rows = seats().map((row) => row.textContent?.trim() ?? "")
     assert.deepEqual(
-      rows.map((words) => /^(domain|example)/.exec(words)?.[0]),
-      ["domain", "example"],
-      "the two hosts read as their own names, the model it answers with following (ADR 0148)",
-    )
-    assert.equal(
-      rows.filter((words) => words.startsWith("Hermes")).length,
-      0,
-      "and the name every host seals for itself names no seat",
+      rows.map((words) => /^Hermes \((domain|example)\)/.exec(words)?.[0]),
+      ["Hermes (domain)", "Hermes (example)"],
+      "both hosts sealed one name, so each seat names its own host beside it (ADR 0149)",
     )
   })
 })

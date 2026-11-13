@@ -15,6 +15,7 @@ import { useState } from "react"
 import { MemoryRouter, Route, Routes, useParams } from "react-router"
 
 import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
+import { Screen } from "@/components/settings-chrome"
 import { useReadAttempt } from "@/lib/read-attempt"
 import { botSubOf } from "@/lib/bot-subs"
 import { botTabOf } from "@/lib/bot-tabs"
@@ -33,7 +34,6 @@ import {
   path,
   refuseFirst,
   seedSettings,
-  settle,
   type,
   until,
   wordsOf,
@@ -104,15 +104,24 @@ function LivePage() {
   // The bot's page is the entry itself; its edits are addressed under its own segment.
   if (!tab)
     return (
-      <div data-general-page>
-        <BotSettingsList key={profile.id} profile={profile} />
-      </div>
+      <Screen title={profile.name}>
+        <div data-general-page>
+          <BotSettingsList key={profile.id} profile={profile} />
+        </div>
+      </Screen>
     )
   const shown = botTabOf(tab) ?? "bot"
   return (
-    <div data-general-page>
-      <BotSettingsPage key={profile.id} profile={profile} tab={shown} sub={botSubOf(shown, sub)} />
-    </div>
+    <Screen title={shown}>
+      <div data-general-page>
+        <BotSettingsPage
+          key={profile.id}
+          profile={profile}
+          tab={shown}
+          sub={botSubOf(shown, sub)}
+        />
+      </div>
+    </Screen>
   )
 }
 
@@ -304,8 +313,8 @@ test("General is the bot's own switches, then Bot Profile over its card, then it
     )
     assert.deepEqual(
       rowsIn("Bot Profile"),
-      ["name", "image", "reminders"],
-      "what the bot is called, how it looks, and how often it says what it is doing",
+      ["image", "reminders"],
+      "how it looks, and how often it says what it is doing — its name is its host's, and no row edits it",
     )
     assert.ok(
       !caption("Hermes"),
@@ -316,14 +325,7 @@ test("General is the bot's own switches, then Bot Profile over its card, then it
       "and no caption over the switches, which are the bot's own",
     )
 
-    const order = [
-      "Enabled",
-      "Mute notifications",
-      "Plugin",
-      "Bot Profile",
-      "Name",
-      "Image",
-    ]
+    const order = ["Enabled", "Mute notifications", "Plugin", "Bot Profile", "Image"]
     assert.ok(
       order.every((one) => at(one) >= 0),
       "every one of them is drawn",
@@ -339,8 +341,10 @@ test("General is the bot's own switches, then Bot Profile over its card, then it
 test("every setting is a title over the line saying what it is for, and the value it holds", async () => {
   await seed("general-values", { botId: "tri" })
   await mount(general(), async () => {
-    assert.equal(rowText("name"), "NameA bot", "Name is the bot's own name, with no line under it")
-    assert.equal(accent("name"), "A bot", "and its value sits in the accent colour")
+    assert.ok(
+      missing('[data-setting="name"]'),
+      "no Name row: the name is the host's, so there is no field to write another",
+    )
 
     assert.equal(rowText("image"), "ImageTri", "Image is the character the bot wears")
     assert.equal(accent("image"), "Tri")
@@ -437,46 +441,17 @@ test("a disabled bot still reads as hidden in Gots", async () => {
   })
 })
 
-test("the Name row opens the Name edit, and Save writes the bot's name", async () => {
-  await seed("general-name-edit")
-  await mount(general(), async () => {
-    await click(row("name"))
-    assert.equal(path(), "/settings/bots/bot-1/bot/name", "the edit has an address of its own")
-    assert.doesNotMatch(wordsOf(page()), /Mute notifications/, "and the page under it is not drawn")
-
-    const field = find("#edit-name") as HTMLInputElement | null
-    assert.ok(field, "a labelled field holding the current value")
-    assert.equal(field?.value, "A bot", "which is the bot's name")
-    assert.equal(
-      wordsOf(find("[data-general-page] label")),
-      "Name",
-      "and the field names what is edited",
-    )
-    assert.equal(
-      (button("Save") as HTMLButtonElement | null)?.disabled,
-      true,
-      "and nothing is saved until the value moves",
-    )
-
-    await type(field, "Renamed")
-    await click(button("Save"))
-    assert.equal(
-      (await db.profiles.get("bot-1"))?.name,
-      "Renamed",
-      "the write lands on the profile",
-    )
-    assert.equal(path(), "/settings/bots/bot-1", "and the page comes back")
-    assert.equal(accent("name"), "Renamed", "showing the name the bot now holds")
-  })
-})
-
 test("Cancel writes nothing at all, and returns to the page", async () => {
   await seed("general-name-cancel")
   await mount(general(), async () => {
-    await click(row("name"))
-    await type(find("#edit-name"), "Typed and abandoned")
+    await click(row("base-url"))
+    await type(find("#edit-api-base-url"), "http://typed-and-abandoned.test/v1")
     await click(button("Cancel"))
-    assert.equal((await db.profiles.get("bot-1"))?.name, "A bot", "the profile is untouched")
+    assert.equal(
+      (await db.profiles.get("bot-1"))?.baseUrl,
+      botProfile("general-name-cancel").baseUrl,
+      "the profile is untouched",
+    )
     assert.equal(path(), "/settings/bots/bot-1", "and the page is back")
   })
 })
@@ -741,12 +716,9 @@ test("the bot's own page names the plugin its host runs, and asks nothing else a
 })
 
 test("a host that answers without a plugin says No plugin, and nothing is written", async () => {
-  await seed(
-    "plugin-absent",
-    { hostId: "host-1", pluginVersion: "0.1.0" },
-    FEATURES,
-    { version: null },
-  )
+  await seed("plugin-absent", { hostId: "host-1", pluginVersion: "0.1.0" }, FEATURES, {
+    version: null,
+  })
   await mount(general(), async () => {
     await until(() => rowText("plugin") === "PluginNo plugin", "the host's answer")
     assert.equal(accent("plugin"), null, "an absence reads muted rather than as a value")
@@ -883,8 +855,13 @@ test("a level the host refuses says so, and the row keeps what the host holds", 
         () => calls.some((one) => one.method === "POST" && one.path.endsWith("/reminders")),
         "the level's write",
       )
-      await until(() => said.length > 0, "the host's refusal")
-      assert.match(String(said[0]), /level must be one of/, "the host's words reach the user")
+      await until(() => Boolean(find('[role="alert"]')), "the host's refusal")
+      assert.match(
+        wordsOf(find('[role="alert"]')),
+        /level must be one of/,
+        "the host's words reach the reader, at the row",
+      )
+      assert.deepEqual(said, [], "and nothing said in passing")
       const chosen = () =>
         findAll('[data-setting="reminders"] [aria-checked="true"]').map((one) => wordsOf(one))
       assert.deepEqual(chosen(), ["Normal"], "and the row still draws the level the host holds")

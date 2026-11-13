@@ -275,9 +275,8 @@ export async function flow(
 }
 
 /**
- * The address a flow's bot answers at, as the app reads it. A bot is named by its host (ADR 0148),
- * and a lane's port would land in every assertion about a row, so the mock is reached under a name
- * of its own: every request to it is handed to the mock by `flow`.
+ * The address a flow's bot answers at: a `.test` host, which `flow` answers with the mock. A row
+ * names a bot by its own name (ADR 0149), so this address stands in for a host and never a name.
  */
 export const botHost = "http://test-bot.test"
 
@@ -409,17 +408,18 @@ export const choiceButton = (scope, choice) =>
 export const questionPage = (scope) => scope.locator("[data-question-page]:not([inert])")
 
 /**
- * Answers the question in `scope` — by picking one of its choices, or by typing into it — and sends
- * it, waiting on nothing further. A card holding a call's questions shows one page of them, and an
- * answer belongs to that page: the others are questions the host is not asking yet.
+ * Answers the question in `scope` — by picking one of its choices, or by typing into it — and
+ * presses `press`, waiting on nothing further. A card holding a call's questions is one form shown a
+ * page at a time: the answer goes on the page showing, and a page before the last presses Next.
  */
-export async function answerWith(scope, { pick, type }) {
+export async function answerWith(scope, { pick, type }, press = "Send") {
   const page = (await questionPage(scope).count()) ? questionPage(scope) : scope
   if (pick) await choiceButton(page, pick).first().click()
   else await page.getByPlaceholder("Type your answer").fill(type)
-  // Send is the card's, not the page's: the footer sits outside the pages — and never a composer's
-  // own Send, which a bot's Main beside the chat draws too.
-  await scope.locator("[data-slot=card]").getByRole("button", { name: "Send", exact: true }).click()
+  // The press is the card's, not the page's: the footer sits outside the pages — and never a
+  // composer's own Send, which a bot's Main beside the chat draws too. A page before a form's last
+  // moves on with Next; only the last sends.
+  await scope.locator("[data-slot=card]").getByRole("button", { name: press, exact: true }).click()
 }
 
 /** Answers the question the host asked with `choice`, and waits for the thread's card to read it. */

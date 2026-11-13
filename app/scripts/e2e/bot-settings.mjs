@@ -313,7 +313,7 @@ const wide = async ({ page, profileId, shot }) => {
   await page.goto(`${app}/settings/dictation`)
   await page.getByRole("tab", { name: "Bots" }).waitFor({ timeout: 15_000 })
   await page.getByRole("tab", { name: "Bots" }).click()
-  const fromSection = page.locator("[data-dictation-bot]").first()
+  const fromSection = page.locator(`[data-dictation-bot="${profileId}"]`).first()
   await fromSection.waitFor({ timeout: 15_000 })
   await fromSection.click()
   await page.waitForURL((url) => url.pathname.startsWith(`/settings/bots/${profileId}/`), {
