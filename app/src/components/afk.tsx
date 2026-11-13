@@ -1,6 +1,8 @@
 /**
  * AFK: a project's switch for working its own tasks, and the tasks it would work — the frontier,
- * what's ready oldest first, what somebody has already claimed, and what an open task still blocks.
+ * what's ready oldest first, what somebody else has already claimed, and what an open task still
+ * blocks. A task AFK claimed itself is never in that list: it is Working while the host holds it,
+ * and a session in Code once its work is in review.
  * The switch is the host's setting for the project, so it reads back the same on every device. It is
  * always shown: a project that can't be left to work (or a Bot on a plugin too old to switch one) has
  * it off and disabled, with the reason underneath. The frontier is there where the plugin advertises
@@ -192,22 +194,17 @@ export function AfkPopup({
 
   const holds = afk?.holds ?? (afk?.task ? [afk.task] : [])
   const heldKey = holds.map((one) => `${one.repo}#${one.number}`).join(",")
-  const everyHoldAlreadyClaimed =
-    holds.length > 0 &&
-    holds.every((one) =>
-      Boolean(
-        tasks?.claimed.some((row) => `${row.repo}#${row.number}` === `${one.repo}#${one.number}`),
-      ),
-    )
+  // A hold means a task just left the ready list, so the sheet reads the frontier again to drop it.
+  // The host doesn't name the task it claimed under Claimed — that group is somebody else's work —
+  // which is why a fresh hold always changes what the frontier answers.
   const seen = useRef(heldKey)
   useEffect(() => {
     if (seen.current === heldKey) return
     seen.current = heldKey
-    if (everyHoldAlreadyClaimed) return
     const controller = new AbortController()
     read(controller.signal)
     return () => controller.abort()
-  }, [heldKey, everyHoldAlreadyClaimed, read])
+  }, [heldKey, read])
 
   // Every write shows the host's answer: a write it refused never reads back as done.
   const save = async (write: () => Promise<ProjectAfk>) => {
@@ -486,6 +483,10 @@ function PromptRow({
  * Where the host holds several tasks, its answer names them all and the block is a row each, oldest
  * first, over the count of them against the project's pick count. A host that names none of that
  * holds at most the one task, and keeps the single row the app has always drawn.
+ *
+ * The pick count is the number of places, so the list is the places: a project whose count was
+ * lowered keeps the tasks it already holds and finishes them (ADR 0025), and the ones past the count
+ * are named in one line under the list rather than drawn against a count they no longer fit.
  */
 function Working({
   task,
@@ -503,8 +504,11 @@ function Working({
   manyRepos: boolean
 }) {
   const held = holds && holds.length > 0 ? holds : null
-  const rows: ({ hold: AfkHold; kind: "hold" } | { hold: AfkHold; kind: "task" })[] = held
-    ? held.map((hold) => ({ hold, kind: "hold" as const }))
+  // The places the count names, and the holds past them: what a lowered count left finishing.
+  const places = held && typeof pickCount === "number" ? held.slice(0, pickCount) : held
+  const above = held && places ? held.length - places.length : 0
+  const rows: ({ hold: AfkHold; kind: "hold" } | { hold: AfkHold; kind: "task" })[] = places
+    ? places.map((hold) => ({ hold, kind: "hold" as const }))
     : task
       ? [{ hold: { ...task, stalled: null }, kind: "task" as const }]
       : []
@@ -523,11 +527,11 @@ function Working({
               sentence about nothing. */}
           {held && typeof pickCount === "number" && (
             <p
-              data-holds={held.length}
+              data-holds={places?.length ?? 0}
               data-pick-count={pickCount}
               className="px-1 pb-1 text-sm text-muted-foreground"
             >
-              {`${held.length} of ${pickCount} held`}
+              {`${places?.length ?? 0} of ${pickCount} held`}
             </p>
           )}
           <ul>
@@ -540,6 +544,13 @@ function Working({
               </li>
             ))}
           </ul>
+          {/* A lowered count finishes what it already claimed rather than handing it back, so the
+              tasks past the count are said here: still AFK's work, still claimed on GitHub. */}
+          {above > 0 && (
+            <p data-above className="px-1 pt-1 text-sm text-muted-foreground">
+              {`${above} more claimed above the count`}
+            </p>
+          )}
         </section>
       )}
     </div>

@@ -44,6 +44,26 @@ const chosen = () => pills().find((one) => one.getAttribute("aria-checked") === 
 const afkWrites = (host: { calls: { method: string; path: string; body: unknown }[] }) =>
   host.calls.filter((call) => call.method === "POST" && call.path.endsWith("/afk"))
 
+test("a project holding more than its count draws the places and names the rest", async () => {
+  // A count lowered below what the project already holds finishes what it claimed (ADR 0025), so the
+  // list is the count's places and the surplus is said in one line rather than drawn above the count.
+  globalThis.fetch = afkHost({ features: FEATURES, holds: THREE, pickCount: 1 })
+    .fetch as unknown as typeof fetch
+  await picksOn(async () => {
+    assert.deepEqual(
+      findAll("[data-hold]").map((row) => row.getAttribute("data-hold")),
+      ["265"],
+      "one row for the one place the count names, oldest first",
+    )
+    assert.equal(find("[data-holds]")?.textContent, "1 of 1 held", "the count row counts the places")
+    assert.equal(
+      find("[data-above]")?.textContent,
+      "2 more claimed above the count",
+      "and the holds past the count are named, not hidden",
+    )
+  })
+})
+
 test("the Working block lists every task it holds, over the count against its pick count", async () => {
   globalThis.fetch = afkHost({ features: FEATURES, holds: THREE, pickCount: 3 })
     .fetch as unknown as typeof fetch
