@@ -24,6 +24,8 @@ import { useRefusal } from "@/lib/use-refusal"
 import { db, rememberModel, type ModelChoice } from "@/lib/db"
 import { getResearchWriters } from "@/lib/hermes"
 import { useModelInfo } from "@/lib/model-info"
+import { modelsRead, samePick } from "@/lib/model-pick"
+import { usePickOne } from "@/lib/use-pick-one"
 import {
   MAX_CRITERIA,
   MAX_OPTIONS,
@@ -245,7 +247,7 @@ export function SourceKinds({
 }
 
 /** The models of the host to judge with; the first row is the bot's own. */
-function JudgePicker({
+export function JudgePicker({
   mission,
   choice,
   onChoose,
@@ -269,6 +271,18 @@ function JudgePicker({
     }
   }, [profile])
 
+  // The judge's pick and a row of its sheet make one write between them, so a host offering a
+  // single model is applied by the tap and no sheet is drawn.
+  const choose = (next: ModelChoice | undefined) => {
+    setOpen(false)
+    if (next && profile) void rememberModel(profile.id, next)
+    onChoose(next)
+  }
+  const { tap } = usePickOne({
+    read: modelsRead(info),
+    same: (option) => samePick(option, choice),
+    apply: choose,
+  })
   // A host that doesn't let Gots pick the model judges with the bot's own.
   if (!allowed) return null
   return (
@@ -278,7 +292,7 @@ function JudgePicker({
         <Button
           variant="outline"
           className="h-11 justify-start gap-2 rounded-full px-4 font-normal"
-          onClick={() => setOpen(true)}
+          onClick={() => tap(() => setOpen(true))}
         >
           <SparklesIcon data-icon="inline-start" />
           {choice?.model ?? "Default model"}
@@ -291,11 +305,7 @@ function JudgePicker({
             fallback={{ label: "Default", model: info?.model }}
             recent={profile?.recentModels}
             choice={choice}
-            onChoose={(next) => {
-              setOpen(false)
-              if (next && profile) void rememberModel(profile.id, next)
-              onChoose(next)
-            }}
+            onChoose={choose}
           />
         </PopupContent>
       </Popup>
