@@ -537,8 +537,10 @@ async function syncPrompts(key: CryptoKey) {
  * won't. `appearanceAt` is 0 until the user changes a switch here, so a choice made on another device
  * wins until then.
  *
- * Exported for the case that reads the record without unsealing a document, since it is the one place
- * the list of fields that cross devices is spelled.
+ * It is the document's only record now: a device still running a build with the retired chat threads
+ * record writes it beside this one, and this build neither reads nor re-adopts it. Exported for the
+ * case that reads the record without unsealing a document, since it is the one place the list of
+ * fields that cross devices is spelled.
  */
 export function syncedAppearance(settings: Settings): Doc<Appearance> {
   const { appearanceAt, steerByDefault, breakReminders, navShortcuts } = settings
@@ -554,23 +556,19 @@ export function syncedAppearance(settings: Settings): Doc<Appearance> {
   }
 }
 
-/**
- * The `settings` document: the Appearance switches as one record. It is the document's only record
- * now — a device still running a build with the retired chat threads record writes it beside this
- * one, and this build neither reads nor re-adopts it.
- */
-async function localSettings(): Promise<Doc<Appearance>> {
-  return syncedAppearance(await getSettings())
-}
-
 async function syncAppearance(key: CryptoKey) {
   try {
-    await syncDoc<Appearance>(key, "settings", localSettings, async (pull) => {
-      for (const [, entry] of pull) {
-        if (entry.value && typeof entry.value === "object")
-          await adoptAppearance(entry.value, entry.at)
-      }
-    })
+    await syncDoc<Appearance>(
+      key,
+      "settings",
+      async () => syncedAppearance(await getSettings()),
+      async (pull) => {
+        for (const [, entry] of pull) {
+          if (entry.value && typeof entry.value === "object")
+            await adoptAppearance(entry.value, entry.at)
+        }
+      },
+    )
   } catch (error) {
     // The switches aren't worth the bots, the registry and every chat list this pass carries, so a
     // settings document this deployment doesn't know yet, or a plain failure, is noted and goes by.

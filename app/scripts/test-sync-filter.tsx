@@ -28,8 +28,9 @@ test("the settings document carries the appearance switches and no bot's filter"
     [...APPEARANCE_FIELDS].sort(),
     "the appearance switches, named by hand and nothing beside them",
   )
+  const written = JSON.stringify(record)
   assert.ok(
-    !JSON.stringify(record).includes("rooms") && !JSON.stringify(record).includes("bot-1"),
+    !written.includes("rooms") && !written.includes("bot-1"),
     "and nothing of a bot's pill is in the record that crosses devices",
   )
 })

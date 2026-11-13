@@ -229,9 +229,7 @@ function ChatList({
   const [query, setQuery] = useState("")
   // The pill this bot's list keeps on this device, read as the key itself rather than the settings
   // row: a live query that answered a fresh object would re-render the list on every sync write (the
-  // reason `useStoredSort` records), and a key an older build wrote is no pill at all. Read by this
-  // bot's id, so a press in another bot's list is not this list's news — and no document carries it,
-  // since a pill is how this device reads one bot's rows, not a fact about the account (ADR 0145).
+  // reason `useStoredSort` records), and anything that is not one of the pills reads as All.
   const keptKey = useLiveQuery(async () => (await chatFilterOf(bot.id)) ?? null, [bot.id])
   const filter: ChatFilter = isChatFilter(keptKey) ? keptKey : "all"
   const chooseFilter = (next: ChatFilter) =>
