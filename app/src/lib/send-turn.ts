@@ -4,6 +4,7 @@
  * saved on the host.
  */
 import {
+  NEW_CHAT_TITLE,
   db,
   updateConversation,
   type Attachment,
@@ -170,5 +171,5 @@ export function openerFor(
 /** A chat's title from its first message: the first line, cut to fit a row. */
 export function titleFrom(text: string) {
   const line = text.trim().split("\n")[0]
-  return line.length > 48 ? `${line.slice(0, 47).trimEnd()}…` : line || "New chat"
+  return line.length > 48 ? `${line.slice(0, 47).trimEnd()}…` : line || NEW_CHAT_TITLE
 }

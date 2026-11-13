@@ -4,6 +4,8 @@ import test from "node:test"
 import { foldTurns } from "../src/chat-next/fold.ts"
 import { messagesOf } from "../src/chat-next/messages.ts"
 import { attachmentsText, marker } from "../src/lib/attachment-text.ts"
+import { mentionText } from "../src/lib/mention-marker.ts"
+import { pointText } from "../src/lib/point-marker.ts"
 import { retryText } from "../src/lib/retry-message.ts"
 import { durableUserRow } from "./host-row.mjs"
 import { kinds, recorded } from "./chat-next-fixtures.ts"
@@ -231,6 +233,41 @@ test("a failed turn's row ends the turn and keeps the host's words, not as a rep
       [true, "Your request was not processed.", 0],
     ],
   )
+})
+
+test("a marked row folds to its words, its points and its mentions, and no row draws their markers", () => {
+  const total = { label: "The total", selector: "#total" }
+  const pick = { name: "Weekly review", kind: "session", id: "gots-abc" }
+  const notes = {
+    id: "f",
+    name: "notes.md",
+    type: "text/markdown",
+    size: 40,
+    image: false,
+    path: "/h/notes.md",
+  }
+  // Written the way every send writes it, and peeled the way every reader peels it: the words, then
+  // the point lines, then the mention lines, then the files.
+  const content = attachmentsText(mentionText(pointText("Split the total by week", [total]), [pick]), [
+    notes,
+  ])
+  const turns = foldTurns([
+    row(1, "user", content),
+    row(2, "assistant", "Done.", { finish_reason: "stop" }),
+  ])
+  assert.equal(turns[0].user, "Split the total by week", "the words alone")
+  assert.deepEqual(turns[0].points, [total], "the point the words pointed at")
+  assert.deepEqual(turns[0].mentions, [pick], "and the session they named")
+  assert.deepEqual(
+    turns[0].files?.map((file) => file.name),
+    ["notes.md"],
+    "the files still ride with them",
+  )
+  const drawn = messagesOf("chat", turns)
+    .map((one) => one.content)
+    .join("\n")
+  assert.equal(drawn.includes("[POINT"), false, "no row of the thread draws the point's line")
+  assert.equal(drawn.includes("[MENTION"), false, "and no row draws the mention's")
 })
 
 test("a retry row opens its own turn and draws no bubble for it", () => {
