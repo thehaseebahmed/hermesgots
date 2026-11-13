@@ -2,6 +2,7 @@ import { getStore } from "@netlify/blobs"
 
 import { handleCommunity, type Caller } from "../lib/community.ts"
 import { requireUser } from "../lib/identity.ts"
+import { knownCatalog } from "../lib/models-dev.ts"
 
 /** GitHub answers this without a key for public profiles; a token only lifts the rate limit. */
 async function githubLogin(id: string) {
@@ -34,10 +35,12 @@ export default async (req: Request) => {
     if (user instanceof Response) return user
     caller = { kind: "user", userId: user.id, pictureUrl: user.pictureUrl }
   }
+  const store = getStore({ name: "gots-community", consistency: "strong" })
   return handleCommunity(req, {
-    store: getStore({ name: "gots-community", consistency: "strong" }),
+    store,
     registry: getStore({ name: "gots-registry", consistency: "strong" }),
     caller,
     github: githubLogin,
+    catalog: () => knownCatalog(store, Date.now()),
   })
 }

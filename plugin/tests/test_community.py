@@ -65,8 +65,28 @@ class CommunityTest(unittest.TestCase):
         self.call()
         (day,) = community.payload(self.home)["providers"].values()
         self.assertEqual(day["anthropic"], {"anthropic/claude-opus-5-5": 126})
-        self.assertEqual(day["custom"], {"llama-4": 126})
         self.assertEqual(day["unknown"], {"anthropic/claude-opus-5-5": 126})
+        self.assertNotIn("custom", day)
+
+    def test_a_custom_row_an_older_build_wrote_is_not_reported(self) -> None:
+        """A custom endpoint names no provider, so a row a build from before that rule left is not
+        reported; the day's own counts still are."""
+        import sqlite3
+
+        self.call(provider="anthropic")
+        conn = sqlite3.connect(db_path(self.home))
+        try:
+            (day,) = conn.execute("SELECT day FROM community_usage").fetchone()
+            conn.execute(
+                "INSERT INTO community_providers (day, provider, model, tokens) VALUES (?, ?, ?, ?)",
+                (day, "custom", "llama-4", 900),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        body = community.payload(self.home)
+        self.assertEqual(body["providers"], {day: {"anthropic": {"anthropic/claude-opus-5-5": 126}}})
+        self.assertEqual(body["days"][day]["anthropic/claude-opus-5-5"]["chat"]["calls"], 1)
 
     def test_other_surfaces_and_empty_usage_are_ignored(self) -> None:
         self.call(platform="telegram")
