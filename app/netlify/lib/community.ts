@@ -413,7 +413,7 @@ export function buildBoard(members: Member[], now: number, known?: Known | null)
       topModels,
       tokens,
       models: ranked.slice(0, MODEL_ROWS),
-      providers: providerRows(members, since),
+      providers: providerRows(members, since, known),
     }
   }
   return { version: BOARD_VERSION, updatedAt: now, periods }
@@ -526,15 +526,20 @@ async function board(ctx: CommunityContext, now: number): Promise<Board> {
   return fresh
 }
 
-/** The summed tokens of one member over each period, for the app's own standing. */
-function standing(member: Member | null, now: number) {
+/**
+ * The summed tokens of one member over each period, for the app's own standing — under the same
+ * rules the board counts by, so a record written before them can't say one number here and another
+ * there.
+ */
+function standing(member: Member | null, now: number, known?: Known | null) {
   const out = {} as Record<PeriodId, number>
   for (const period of Object.keys(PERIOD_DAYS) as PeriodId[]) {
     const since = dateOf(now, PERIOD_DAYS[period] - 1)
     let total = 0
     for (const [date, day] of Object.entries(member?.days ?? {})) {
       if (date < since) continue
-      for (const modes of Object.values(day)) {
+      for (const [model, modes] of Object.entries(day)) {
+        if (!listed(model, known)) continue
         for (const counts of Object.values(modes)) total += sum(counts)
       }
     }
@@ -594,7 +599,7 @@ export async function handleCommunity(req: Request, ctx: CommunityContext) {
 
   const joined = async (login: string) => {
     const member = await read<Member>(ctx.store, memberKey(login))
-    return json({ joined: true, login, totals: standing(member, now) })
+    return json({ joined: true, login, totals: standing(member, now, await catalogOf(ctx)) })
   }
 
   if (op === "GET me") {

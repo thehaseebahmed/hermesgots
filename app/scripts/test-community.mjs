@@ -326,7 +326,8 @@ test("a report's unlisted models and custom providers are not stored", async () 
 
 test("a member stored before the rules serves no custom provider or unlisted model", async () => {
   const env = { ...setup(), catalog: async () => LISTED }
-  // A record written when a custom endpoint was a provider and no model was checked.
+  // A record written when a custom endpoint was a provider and no model was checked. The fake model
+  // sits under a real provider too, so every panel has to know what the catalogue lists.
   env.store.data.set("users/octocat", {
     login: "octocat",
     days: {
@@ -338,16 +339,28 @@ test("a member stored before the rules serves no custom provider or unlisted mod
     providers: {
       "2026-10-15": {
         custom: { "totally-fake-model": 1800 },
-        anthropic: { "claude-opus-5-5": 200 },
+        anthropic: { "claude-opus-5-5": 200, "totally-fake-model": 800 },
       },
     },
     updatedAt: NOW,
   })
+  // The account is on the leaderboard; only its record is older than the rules.
+  await call(env, user, "POST", "join")
   const board = await call(env, null, "GET", "board")
   const today = board.body.periods.today
   assert.deepEqual(today.models.map((row) => row.model), ["claude-opus-5-5"])
-  assert.deepEqual(today.providers.map((row) => row.provider), ["anthropic"])
+  assert.deepEqual(today.providers, [
+    {
+      provider: "anthropic",
+      tokens: 200,
+      users: 1,
+      models: [{ model: "claude-opus-5-5", tokens: 200 }],
+      others: 0,
+    },
+  ])
   assert.deepEqual(today.tokens, [{ login: "octocat", total: 200, models: { "claude-opus-5-5": 200 }, others: 0 }])
+  // The standing is the same record under the same rules, so it can't disagree with the board.
+  assert.deepEqual((await call(env, user, "GET", "me")).body.totals, { today: 200, week: 200, month: 200 })
 })
 
 test("a model is counted only when the catalogue lists it", () => {
