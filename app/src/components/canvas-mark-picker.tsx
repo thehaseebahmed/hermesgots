@@ -189,7 +189,7 @@ export function CanvasMarkPicker({
             setTab(next)
             setQuery("")
           }}
-          className="min-h-0"
+          className="min-h-0 flex-1 gap-0"
         >
           <TabsList className="px-4">
             <TabsTrigger value="icons" className="flex-none">
@@ -210,7 +210,7 @@ export function CanvasMarkPicker({
             )}
           </div>
 
-          <TabsContent value="icons" className="px-2 pt-2">
+          <TabsContent value="icons" className="min-h-0 overflow-y-auto px-2 pt-2">
             {!icons ? (
               <div className="flex justify-center py-8">
                 <Spinner />
@@ -246,7 +246,7 @@ export function CanvasMarkPicker({
             )}
           </TabsContent>
 
-          <TabsContent value="emojis" className="px-2 pt-2">
+          <TabsContent value="emojis" className="min-h-0 overflow-y-auto px-2 pt-2">
             <div data-canvas-mark-grid="emojis" className="grid grid-cols-8 gap-1 px-2">
               {emojis.map((emoji) => (
                 <Cell
@@ -268,8 +268,9 @@ export function CanvasMarkPicker({
           </TabsContent>
 
           {/* The way back: a canvas nobody has marked draws the app's own frame, as every canvas did
-              before a mark could be chosen. */}
-          <div className="px-4 pt-2">
+              before a mark could be chosen. Under the grid's own scroll rather than inside it, so
+              clearing a mark is never a scroll through every icon to find. */}
+          <div className="border-t px-4 py-2">
             <PickGroup mode="choose" surface="plate" label="No mark">
               <PickRow
                 leading={<FrameIcon className="size-5 text-muted-foreground" />}

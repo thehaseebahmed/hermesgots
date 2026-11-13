@@ -241,6 +241,22 @@ await flow(
       1,
       "a phone draws the picker as a sheet",
     )
+    // The grid is the thing that scrolls: the way back to the app's own mark is pinned under it, so
+    // clearing a mark is never a scroll past every icon to find.
+    const pinnedClear = await page.evaluate(() => {
+      const picker = document.querySelector('[data-slot="canvas-mark-picker"]')?.closest("[data-popup-form]")
+      const clear = [...document.querySelectorAll('[data-slot="canvas-mark-picker"] li button')].find(
+        (button) => (button.textContent ?? "").includes("Use the app's own mark"),
+      )
+      if (!picker || !clear) return null
+      const box = picker.getBoundingClientRect()
+      const row = clear.getBoundingClientRect()
+      return { popup: Math.round(box.bottom), row: Math.round(row.bottom), top: Math.round(row.top), popupTop: Math.round(box.top) }
+    })
+    assert.ok(
+      pinnedClear && pinnedClear.row <= pinnedClear.popup && pinnedClear.top >= pinnedClear.popupTop,
+      `the clear row is inside the picker without scrolling (row ${JSON.stringify(pinnedClear)})`,
+    )
     await shot("mark-picker")
     await page.getByRole("button", { name: "Heart", exact: true }).click()
     await page.locator("[data-canvas-mark-row] svg.lucide-heart").waitFor({ timeout: 20_000 })
