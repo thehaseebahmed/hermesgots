@@ -584,12 +584,9 @@ class WriteTest(unittest.TestCase):
 
     def test_a_mark_is_chosen_read_back_and_cleared(self) -> None:
         # The mark a pinned canvas's row draws is the record's, like its place in the list (#1065):
-        # one lucide icon's name with the palette name its colour comes from, or one emoji, which
-        # carries its own colour.
-        marked = canvases.update(
-            self.path, self.canvas["id"], {"mark": "heart", "mark_tint": "coral"}
-        )
-        self.assertEqual((marked["mark"], marked["mark_tint"]), ("heart", "coral"))
+        # one lucide icon's name, or one emoji.
+        marked = canvases.update(self.path, self.canvas["id"], {"mark": "heart"})
+        self.assertEqual(marked["mark"], "heart")
         self.assertEqual(canvases.listing(self.path)[0]["mark"], "heart")
         # The two updates that already write this row leave the mark where it is.
         canvases.update(self.path, self.canvas["id"], {"title": "Split the bill"})
@@ -597,11 +594,10 @@ class WriteTest(unittest.TestCase):
         canvases.update(self.path, self.canvas["id"], {"archived": False})
         kept = canvases.record(self.path, self.canvas["id"])
         self.assertEqual(
-            (kept["mark"], kept["mark_tint"], kept["title"], kept["archived"]),
-            ("heart", "coral", "Split the bill", False),
+            (kept["mark"], kept["title"], kept["archived"]), ("heart", "Split the bill", False)
         )
-        emoji = canvases.update(self.path, self.canvas["id"], {"mark": "🎉", "mark_tint": ""})
-        self.assertEqual((emoji["mark"], emoji["mark_tint"]), ("🎉", ""))
+        emoji = canvases.update(self.path, self.canvas["id"], {"mark": "🎉"})
+        self.assertEqual(emoji["mark"], "🎉")
         # An empty name clears the mark, which is the one thing COALESCE cannot do with a null: it
         # keeps what the row holds, so the clear has to be a value of its own.
         cleared = canvases.update(self.path, self.canvas["id"], {"mark": ""})
@@ -622,10 +618,6 @@ class WriteTest(unittest.TestCase):
                 with self.assertRaises(canvases.CanvasError) as why:
                     canvases.update(self.path, self.canvas["id"], {"mark": named})
                 self.assertIn(refused, str(why.exception))
-        # A colour that is no name of the palette is refused too, since the row could not draw it.
-        with self.assertRaises(canvases.CanvasError) as why:
-            canvases.update(self.path, self.canvas["id"], {"mark_tint": "chartreuse"})
-        self.assertIn("chartreuse", str(why.exception))
         # Refused whole: the record holds no mark, and the refusal left nothing behind.
         self.assertIsNone(canvases.record(self.path, self.canvas["id"])["mark"])
 
@@ -2464,6 +2456,7 @@ class RouteTest(unittest.TestCase):
             ({}, None),
             ({"pinned": "yes"}, "pinned"),
             ({"archived": 1}, "archived"),
+            ({"mark_tint": "coral"}, "mark"),
             ({"title": 3}, "title"),
             ({"title": "   "}, "title"),
         ):

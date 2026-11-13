@@ -16,11 +16,9 @@ import {
   DestructiveButton,
   FormActions,
   Group,
-  RowText,
   SwitchRow,
   fieldInputClass,
   fieldLabelClass,
-  linkRowClass,
 } from "@/components/settings-chrome"
 import { Input } from "@/components/ui/input"
 import {
@@ -34,7 +32,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import type { Canvas, CanvasChanges } from "@/lib/canvases"
-import { cn } from "@/lib/utils"
 
 /** The plugin's own cap on a canvas's title (`canvases.py`'s `TITLE_CHARS`), mirrored by the field. */
 const TITLE_CHARS = 60
@@ -261,8 +258,8 @@ export function CanvasOptions({
   const [asking, setAsking] = useState(false)
   const [naming, setNaming] = useState(false)
   const [marking, setMarking] = useState(false)
-  // The Mark row is where the mark picker opens from, so a wide screen draws it beside that row.
-  const markRow = useRef<HTMLButtonElement>(null)
+  // The mark's own box in the name block, which the picker opens from.
+  const markButton = useRef<HTMLButtonElement>(null)
   const busy = saving !== null
   const deleting = saving === "delete"
 
@@ -306,35 +303,33 @@ export function CanvasOptions({
             <PopupTitle>Options</PopupTitle>
           </PopupHeader>
           <div data-canvas-options className="flex flex-col gap-4 px-4 pb-4">
-            <Group>
-              <button
-                type="button"
-                className={cn(linkRowClass, "disabled:opacity-60")}
-                disabled={!canvas || busy}
-                onClick={() => setNaming(true)}
-              >
-                <RowText title="Name" />
-                <span className="max-w-[50%] truncate text-sm text-muted-foreground">
-                  {canvas?.title}
-                </span>
-              </button>
-              {/* What its row in the sidebar draws: the mark is the record's, so the tap opens the
-                  picker rather than choosing here (issue #1065). */}
-              {markable && (
+            {/* The name and the mark beside it, as a project's Edit screen draws its own: the box at
+                the head is the mark, and a tap on it picks another (issue #1065). */}
+            <div data-canvas-name-block className="flex flex-col gap-2">
+              <span className="px-1 text-sm font-medium">Name</span>
+              <div className="flex items-center gap-3 rounded-3xl bg-muted p-2">
                 <button
-                  ref={markRow}
+                  ref={markButton}
                   type="button"
-                  data-canvas-mark-row
-                  className={cn(linkRowClass, "disabled:opacity-60")}
-                  disabled={!canvas || busy}
+                  data-canvas-mark-open
+                  aria-label={markable ? "Change mark" : "Mark"}
+                  disabled={!canvas || busy || !markable}
                   onClick={() => setMarking(true)}
+                  className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-background/60 outline-none transition-colors hover:bg-background focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-60"
                 >
-                  <CanvasMark mark={canvas?.mark} tint={canvas?.markTint} />
-                  <RowText title="Mark" subtitle="The icon or emoji its sidebar row shows." />
-                  <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
+                  <CanvasMark mark={canvas?.mark} />
                 </button>
-              )}
-            </Group>
+                <button
+                  type="button"
+                  disabled={!canvas || busy}
+                  onClick={() => setNaming(true)}
+                  className="h-11 min-w-0 flex-1 truncate pr-3 text-left text-base outline-none disabled:opacity-60"
+                >
+                  {canvas?.title}
+                </button>
+                <ChevronRightIcon className="mr-2 size-4 shrink-0 text-muted-foreground" />
+              </div>
+            </div>
 
             <Group>
               <SwitchRow
@@ -423,7 +418,6 @@ export function CanvasOptions({
           key={canvas.id}
           open={marking}
           onOpenChange={setMarking}
-          anchor={markRow}
           canvas={canvas}
           onUpdate={onUpdate}
         />

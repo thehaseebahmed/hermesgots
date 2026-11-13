@@ -7,12 +7,11 @@
  */
 import { FrameIcon } from "lucide-react"
 
-import { TINT_INK, readMark, readTint } from "@/lib/canvas-marks"
+import { readMark } from "@/lib/canvas-marks"
 import { useMarkIcons } from "@/lib/canvas-mark-icons"
-import { cn } from "@/lib/utils"
 
-/** The row's own head: one 20px slot, whatever draws in it. */
-export function CanvasMark({ mark, tint }: { mark?: string; tint?: string }) {
+/** The row's own head: one 20px slot, whatever draws in it, in the ink every row's mark takes. */
+export function CanvasMark({ mark }: { mark?: string }) {
   const chosen = readMark(mark)
   const icons = useMarkIcons(chosen?.kind === "icon")
   if (chosen?.kind === "emoji")
@@ -25,8 +24,5 @@ export function CanvasMark({ mark, tint }: { mark?: string; tint?: string }) {
   // draws, and a name from a build that shipped one is the only case that lands here.
   const found = chosen?.kind === "icon" ? icons?.get(chosen.name) : undefined
   if (!found) return <FrameIcon className="size-5 text-muted-foreground" />
-  const ink = readTint(tint)
-  return (
-    <found.Icon className={cn("size-5 shrink-0", ink ? TINT_INK[ink] : "text-muted-foreground")} />
-  )
+  return <found.Icon className="size-5 shrink-0 text-muted-foreground" />
 }

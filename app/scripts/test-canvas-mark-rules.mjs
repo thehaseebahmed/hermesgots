@@ -1,20 +1,12 @@
 /**
- * What a stored mark means (issue #1065): one lucide icon's name or one emoji, the palette name an
- * icon's colour comes from, and the words a search reads. The rules are the host's too
- * (`plugin/canvases.py`'s `_mark` and `_tint`), so they are checked here rather than through a screen.
+ * What a stored mark means (issue #1065): one lucide icon's name or one emoji, and the words a search
+ * reads. The rule is the host's too (`plugin/canvases.py`'s `_mark`), so it is checked here rather
+ * than through a screen.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import {
-  MARK_TINTS,
-  TINT_FILL,
-  TINT_INK,
-  markMatches,
-  markWords,
-  readMark,
-  readTint,
-} from "../src/lib/canvas-marks.ts"
+import { markMatches, markWords, readMark } from "../src/lib/canvas-marks.ts"
 
 test("a mark reads as the icon it names, or as the emoji it is", () => {
   assert.deepEqual(readMark("heart"), { kind: "icon", name: "heart" })
@@ -29,19 +21,6 @@ test("a mark reads as the icon it names, or as the emoji it is", () => {
   assert.equal(readMark("Heart"), undefined)
   assert.equal(readMark("two words"), undefined)
   assert.equal(readMark("漢"), undefined, "a letter in another script is a word too")
-})
-
-test("a tint is one of the palette's names, and nothing else is a colour", () => {
-  assert.deepEqual([...MARK_TINTS], ["blue", "cyan", "green", "yellow", "coral", "pink", "purple"])
-  assert.equal(readTint("coral"), "coral")
-  assert.equal(readTint("chartreuse"), undefined)
-  assert.equal(readTint(""), undefined)
-  assert.equal(readTint(undefined), undefined)
-  // Every name the palette carries is drawn: an ink for the icon and a fill for the picker's swatch.
-  for (const tint of MARK_TINTS) {
-    assert.equal(typeof TINT_INK[tint], "string")
-    assert.equal(typeof TINT_FILL[tint], "string")
-  }
 })
 
 test("an icon's name reads as words a search and a label can use", () => {

@@ -2,6 +2,10 @@
  * The mark a pinned canvas draws (issue #1065): the icon or the emoji its user chose, kept on the
  * canvas's own record so every device's sidebar shows the same one — and the app's frame mark where
  * nobody has chosen one, which is the row every canvas drew before a mark could be picked.
+ *
+ * The picker is the centred dialog a tablet and a laptop open and the sheet a phone does, with the
+ * tabs the Outputs sheet draws; its card is the name block's own mark, and the way back to the frame
+ * is the one button under the grid.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -34,7 +38,6 @@ const MARKED = {
   pinned: true,
   archived: false,
   mark: "heart",
-  mark_tint: "coral",
   at: 30,
   created_at: 1,
 }
@@ -112,16 +115,15 @@ test("a pinned canvas draws the mark its user chose", async () => {
     async () => {
       await until(async () => Boolean(row("m1") && row("m2") && row("m3")), "the pinned rows")
 
-      // The icon its record names, in the colour the record names, once the icons have landed.
+      // The icon its record names, once the icons have landed, in the ink every row's mark takes.
       await until(
-        async () =>
-          head("m1")?.tagName.toLowerCase() === "svg" && classes("m1").includes("lucide-heart"),
+        async () => head("m1")?.tagName.toLowerCase() === "svg" && classes("m1").includes("lucide-heart"),
         "the heart its record names",
       )
-      assert.match(classes("m1"), /\btext-orange-500\b/, "drawn in the coral its record names")
+      assert.match(classes("m1"), /\btext-muted-foreground\b/, "drawn in the row's own ink")
       assert.match(classes("m1"), /\bsize-5\b/, "one 20px slot, like every row's head")
 
-      // An emoji is a mark too, and carries its own colour: no icon, no tint.
+      // An emoji is a mark too: the glyph itself, in the same slot.
       const emoji = head("m2")
       assert.equal(emoji?.tagName.toLowerCase(), "span", "an emoji draws as the glyph itself")
       assert.equal(emoji?.textContent, "🎉")
@@ -137,29 +139,38 @@ test("a pinned canvas draws the mark its user chose", async () => {
   )
 })
 
+const options = (onUpdate: (changes: Record<string, unknown>) => Promise<void>, markable = true) => (
+  <MemoryRouter initialEntries={["/canvas"]}>
+    <CanvasOptions
+      open
+      onOpenChange={() => {}}
+      canvas={CANVAS}
+      vaultable={false}
+      markable={markable}
+      onGrant={async () => true}
+      onUpdate={onUpdate}
+      onDelete={async () => {}}
+    />
+  </MemoryRouter>
+)
+
+const openPicker = async () => {
+  await until(async () => find("[data-canvas-options]") !== null, "the options")
+  await click(find("[data-canvas-mark-open]"))
+  await until(
+    async () => find('[data-canvas-mark-grid="icons"], [data-canvas-mark-grid="emojis"]') !== null,
+    "the picker",
+  )
+}
+
 test("the options pick a mark, an emoji, and the app's own mark", async () => {
-  // The picker is the options' own sheet: what it posts is the record's, so the sidebar redraws from
-  // the host's answer rather than from anything this device kept.
   const changes: Record<string, unknown>[] = []
 
   await atWidth(390, async () => {
     await mount(
-      <MemoryRouter initialEntries={["/canvas"]}>
-        <CanvasOptions
-          open
-          onOpenChange={() => {}}
-          canvas={CANVAS}
-          vaultable={false}
-          markable
-          onGrant={async () => true}
-          onUpdate={async (next) => void changes.push(next)}
-          onDelete={async () => {}}
-        />
-      </MemoryRouter>,
+      options(async (next) => void changes.push(next)),
       async () => {
-        await until(async () => find("[data-canvas-options]") !== null, "the options")
-        await click(find("[data-canvas-mark-row]"))
-        await until(async () => find('[data-canvas-mark-grid="icons"]') !== null, "the icons")
+        await openPicker()
 
         // A search narrows the set, and the icon it names is the mark that is posted.
         await type(find('input[aria-label="Search icons"]'), "heart")
@@ -167,10 +178,11 @@ test("the options pick a mark, an emoji, and the app's own mark", async () => {
         await until(async () => heart !== null, "the heart")
         await click(heart)
         await until(async () => changes.length === 1, "the mark to be posted")
-        assert.deepEqual(changes[0], { mark: "heart", mark_tint: "" })
+        assert.deepEqual(changes[0], { mark: "heart" })
 
-        // The emojis are the other tab of the same picker, and an emoji carries its own colour.
-        await click(find("[data-canvas-mark-row]"))
+        // The emojis are the other tab of the same picker, and an emoji is the character itself.
+        await click(find("[data-canvas-mark-open]"))
+        await until(async () => find('[data-slot="tabs-trigger"]') !== null, "the picker again")
         await click(findText('[data-slot="tabs-trigger"]', "Emojis"))
         await type(find('input[aria-label="Search emojis"]'), "party")
         const popper = find('[data-canvas-mark-grid="emojis"] button[aria-label^="Party popper"]')
@@ -179,54 +191,35 @@ test("the options pick a mark, an emoji, and the app's own mark", async () => {
         await until(async () => changes.length === 2, "the emoji to be posted")
         assert.deepEqual(changes[1], { mark: "🎉" })
 
-        // A colour chosen before an icon is the colour that icon takes.
-        await click(find("[data-canvas-mark-row]"))
-        await click(find('[data-canvas-mark-tints] button[aria-label="coral"]'))
-        await type(find('input[aria-label="Search icons"]'), "heart")
-        const tinted = find('[data-canvas-mark-grid="icons"] button[aria-label="Heart"]')
-        await until(async () => tinted !== null, "the heart again")
-        await click(tinted)
-        await until(async () => changes.length === 3, "the tinted mark to be posted")
-        assert.deepEqual(changes[2], { mark: "heart", mark_tint: "coral" })
-
-        // And the way back to the app's own frame mark.
-        await click(find("[data-canvas-mark-row]"))
-        await click(findText("button", "Use the app's own mark"))
-        await until(async () => changes.length === 4, "the clear to be posted")
-        assert.deepEqual(changes[3], { mark: "" })
+        // And the one button under the grid is the way back to the app's own frame mark.
+        await click(find("[data-canvas-mark-open]"))
+        await until(async () => find("[data-canvas-mark-unset]") !== null, "the unset button")
+        await click(find("[data-canvas-mark-unset]"))
+        await until(async () => changes.length === 3, "the clear to be posted")
+        assert.deepEqual(changes[2], { mark: "" })
       },
     )
   })
 })
 
-test("the picker is a floating menu on a big screen and a sheet on a phone", async () => {
-  const form = () => find("[data-popup-form]")?.getAttribute("data-popup-form")
-  for (const [width, expected] of [
-    [1280, "menu"],
+test("the picker is a dialog from a tablet and a sheet on a phone", async () => {
+  // The dialog's card and the sheet's card are one body: the width decides which frame it is drawn in.
+  const dialog = () => find("[data-slot=\"dialog-content\"][data-canvas-mark-picker]")
+  const sheet = () => find('[data-slot="canvas-mark-picker"]')
+  for (const [width, drawn] of [
+    [1280, "dialog"],
+    [768, "dialog"],
     [390, "sheet"],
   ] as const) {
     await atWidth(width, async () => {
       await mount(
-        <MemoryRouter initialEntries={["/canvas"]}>
-          <CanvasOptions
-            open
-            onOpenChange={() => {}}
-            canvas={CANVAS}
-            vaultable={false}
-            markable
-            onGrant={async () => true}
-            onUpdate={async () => {}}
-            onDelete={async () => {}}
-          />
-        </MemoryRouter>,
+        options(async () => {}),
         async () => {
-          await until(async () => find("[data-canvas-options]") !== null, "the options")
-          await click(find("[data-canvas-mark-row]"))
-          await until(async () => form() !== undefined, "the picker")
+          await openPicker()
           assert.equal(
-            form(),
-            expected,
-            `${width}px draws the picker as the ${expected} it is there`,
+            drawn === "dialog" ? Boolean(dialog()) : Boolean(sheet()),
+            true,
+            `${width}px draws the picker as a ${drawn}`,
           )
         },
       )
@@ -234,76 +227,27 @@ test("the picker is a floating menu on a big screen and a sheet on a phone", asy
   }
 })
 
-test("a colour is written at once on an icon already chosen, and waits for one that isn't", async () => {
+test("the mark's own box opens the picker, and is inert where the host has no mark", async () => {
   const changes: Record<string, unknown>[] = []
-  const open = async (canvas: typeof CANVAS) =>
-    mount(
-      <MemoryRouter initialEntries={["/canvas"]}>
-        <CanvasOptions
-          open
-          onOpenChange={() => {}}
-          canvas={canvas}
-          vaultable={false}
-          markable
-          onGrant={async () => true}
-          onUpdate={async (next) => void changes.push(next)}
-          onDelete={async () => {}}
-        />
-      </MemoryRouter>,
-      async () => {
-        await until(async () => find("[data-canvas-options]") !== null, "the options")
-        await click(find("[data-canvas-mark-row]"))
-        await until(async () => find("[data-canvas-mark-tints]") !== null, "the palette")
-      },
-    )
-
   await atWidth(390, async () => {
-    // An icon is wearing a colour, so a swatch is a change to the record the moment it is tapped.
-    await open({ ...CANVAS, mark: "heart", markTint: "coral" })
-    await click(find('[data-canvas-mark-tints] button[aria-label="blue"]'))
-    await until(async () => changes.length === 1, "the colour to be posted")
-    assert.deepEqual(changes[0], { mark_tint: "blue" })
-    assert.equal(
-      find('[data-canvas-mark-tints] button[aria-label="blue"]')?.getAttribute("aria-pressed"),
-      "true",
-      "the swatch reads as the one chosen",
-    )
-
-    // With no mark yet there is nothing to recolour: the swatch waits, and the icon picked next
-    // takes the colour it was given.
-    const before = changes.length
-    await open(CANVAS)
-    await click(find('[data-canvas-mark-tints] button[aria-label="green"]'))
-    assert.equal(changes.length, before, "no write for a colour on a canvas with no mark")
-    assert.equal(
-      find('[data-canvas-mark-tints] button[aria-label="green"]')?.getAttribute("aria-pressed"),
-      "true",
-      "and the swatch still reads as chosen for the pick that follows",
-    )
+    // The card at the head of the name block is the mark: with nothing chosen the unset button is
+    // doing nothing, so it is off.
+    await mount(options(async (next) => void changes.push(next)), async () => {
+      await openPicker()
+      assert.equal(
+        find("[data-canvas-mark-unset]")?.hasAttribute("disabled"),
+        true,
+        "no mark to unset on a canvas drawn with the app's own",
+      )
+    })
   })
-})
 
-test("a host whose record has no mark offers no mark row", async () => {
-  // A picker whose writes the host would refuse is a promise it can't keep, so the row is the
-  // host's to offer — the vault switch's own rule.
   await atWidth(390, async () => {
-    await mount(
-      <MemoryRouter initialEntries={["/canvas"]}>
-        <CanvasOptions
-          open
-          onOpenChange={() => {}}
-          canvas={CANVAS}
-          vaultable={false}
-          markable={false}
-          onGrant={async () => true}
-          onUpdate={async () => {}}
-          onDelete={async () => {}}
-        />
-      </MemoryRouter>,
-      async () => {
-        await until(async () => find("[data-canvas-options]") !== null, "the options")
-        assert.equal(missing("[data-canvas-mark-row]"), true, "no mark row without the host's answer")
-      },
-    )
+    await mount(options(async () => {}, false), async () => {
+      await until(async () => find("[data-canvas-options]") !== null, "the options")
+      const box = find("[data-canvas-mark-open]")
+      assert.ok(box, "the mark's box is still drawn")
+      assert.equal(box.hasAttribute("disabled"), true, "and it picks nothing a host can't keep")
+    })
   })
 })

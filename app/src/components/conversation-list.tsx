@@ -258,7 +258,7 @@ function CanvasRow({
       data-canvas-pinned=""
       className={(collapsed ? railClass : rowClass)({ isActive: opened })}
     >
-      <CanvasMark mark={canvas.mark} tint={canvas.markTint} />
+      <CanvasMark mark={canvas.mark} />
       {!collapsed && <span className="min-w-0 truncate">{canvas.title}</span>}
     </Link>
   )

@@ -2552,8 +2552,6 @@ export type CanvasChanges = {
   image?: string
   /** The mark this canvas's pinned row draws (#1065); an empty string clears it. */
   mark?: string
-  /** The palette colour an icon's mark takes; an empty string clears it. */
-  mark_tint?: string
 }
 
 export async function updateCanvas(

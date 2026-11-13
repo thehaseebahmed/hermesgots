@@ -126,10 +126,6 @@ IMAGE_CHARS = 192 * 1024
 # An icon's name is bounded like a tool's; an emoji is a handful of code points, and one with a
 # joiner in it — a family, a flag — is still one emoji, so the cap has room for them.
 MARK_CHARS = 40
-# The colours an icon's mark may take. A palette name rather than a colour value, so the app draws
-# it from its own tokens and a theme change moves the mark with the rest of the row. The palette's
-# first answer is no name at all: the row's own muted ink, which is what a mark with no colour is.
-MARK_TINTS = ("blue", "cyan", "green", "yellow", "coral", "pink", "purple")
 # An icon's name, as lucide writes one: lower case, hyphenated, and nothing else.
 MARK_NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*\Z")
 
@@ -543,10 +539,9 @@ _COLUMNS = (
     # (canvas_vault.py): off unless the user turned it on for this canvas, in this bot's options.
     "vault",
     "image",
-    # The mark a pinned canvas's row draws (#1065): one icon's name or one emoji, and the palette
-    # name its colour comes from. The record's, not the pin's, so every device draws the same row.
+    # The mark a pinned canvas's row draws (#1065): one icon's name or one emoji. The record's, not
+    # the pin's, so every device draws the same row.
     "mark",
-    "mark_tint",
     "at",
     "created_at",
 )
@@ -915,21 +910,6 @@ def _mark(raw: Any) -> str:
     return raw
 
 
-def _tint(raw: Any) -> str:
-    """``raw`` as the name of the colour an icon's mark takes, or a 400 naming the ones it may be."""
-    if not isinstance(raw, str):
-        raise CanvasError(
-            f"A canvas's mark colour is one of {', '.join(MARK_TINTS)}, or none; this one is not text."
-        )
-    if not raw:
-        return ""
-    if raw not in MARK_TINTS:
-        raise CanvasError(
-            f"A canvas's mark colour is one of {', '.join(MARK_TINTS)}; {raw!r} is not."
-        )
-    return raw
-
-
 def declarable(name: Any) -> bool:
     """Whether a version may declare ``name``: ``_tool_name``'s rule, asked as a question."""
     try:
@@ -1169,12 +1149,9 @@ def update(path: Path, canvas_id: str, body: Any) -> Dict[str, Any]:
     than a refusal it can show. The record's clock moves on the host's, taken under the write lock
     like every other write here, since the list is ordered by it.
     """
-    if not any(
-        field in body for field in ("title", "pinned", "archived", "vault", "image", "mark", "mark_tint")
-    ):
+    if not any(field in body for field in ("title", "pinned", "archived", "vault", "image", "mark")):
         raise CanvasError(
-            "A canvas's update names what changes: a title, pinned, archived, vault, image, mark, "
-            "or mark_tint."
+            "A canvas's update names what changes: a title, pinned, archived, vault, image, or mark."
         )
     changes: Dict[str, Any] = {}
     if "title" in body:
@@ -1188,8 +1165,6 @@ def update(path: Path, canvas_id: str, body: Any) -> Dict[str, Any]:
         changes["image"] = _image(body["image"])
     if "mark" in body:
         changes["mark"] = _mark(body["mark"])
-    if "mark_tint" in body:
-        changes["mark_tint"] = _tint(body["mark_tint"])
     with _writing(path) as conn:
         found = _record(conn, canvas_id)
         if found is None:
@@ -1202,8 +1177,7 @@ def update(path: Path, canvas_id: str, body: Any) -> Dict[str, Any]:
             """UPDATE canvases
                SET title = COALESCE(?, title), pinned = COALESCE(?, pinned),
                    archived = COALESCE(?, archived), vault = COALESCE(?, vault),
-                   image = COALESCE(?, image), mark = COALESCE(?, mark),
-                   mark_tint = COALESCE(?, mark_tint), at = ?
+                   image = COALESCE(?, image), mark = COALESCE(?, mark), at = ?
                WHERE id = ?""",
             (
                 changes.get("title"),
@@ -1212,7 +1186,6 @@ def update(path: Path, canvas_id: str, body: Any) -> Dict[str, Any]:
                 changes.get("vault"),
                 changes.get("image"),
                 changes.get("mark"),
-                changes.get("mark_tint"),
                 now,
                 canvas_id,
             ),

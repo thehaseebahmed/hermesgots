@@ -56,9 +56,9 @@ logger = logging.getLogger(__name__)
 # 71 keeps a literature review's papers (`research.py`): the review's own brief and funnel on its
 # mission, a paper's metadata, screening and evidence level on its source, and the field and theme
 # of a claim. New columns only, so every other mission reads as it did.
-# 72 keeps the mark a pinned canvas's row draws (`canvases.py`'s record, #1065): two columns — the
-# icon's name or the emoji, and the palette name its colour comes from — empty for every canvas an
-# older store holds, since a canvas nobody has marked draws the app's own frame.
+# 72 keeps the mark a pinned canvas's row draws (`canvases.py`'s record, #1065): one column — the
+# icon's name or the emoji — empty for every canvas an older store holds, since a canvas nobody has
+# marked draws the app's own frame.
 SCHEMA_VERSION = 72
 
 
@@ -1019,14 +1019,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
             if "image" not in canvas_columns:
                 conn.execute("ALTER TABLE canvases ADD COLUMN image TEXT")
         # v72: the mark a canvas's pinned row draws (canvases.py, #1065). `mark` is one lucide icon's
-        # name or one emoji, and `mark_tint` the palette name its colour comes from; both are the
-        # record's rather than the pin's, so every device draws the same row, and both are absent
-        # until a user chooses one — a canvas nobody marked draws the app's own frame.
+        # name or one emoji; it is the record's rather than the pin's, so every device draws the same
+        # row, and it is absent until a user chooses one — a canvas nobody marked draws the app's own
+        # frame.
         if version < 72:
             canvas_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvases)")}
-            for column in ("mark", "mark_tint"):
-                if column not in canvas_columns:
-                    conn.execute(f"ALTER TABLE canvases ADD COLUMN {column} TEXT")
+            if "mark" not in canvas_columns:
+                conn.execute("ALTER TABLE canvases ADD COLUMN mark TEXT")
         # v63: the record's folded-away flag is the reader's "Archived" (canvases.py, #933). A store
         # written before the name carries the first one, and the state is the same state under it.
         if version < 63:
