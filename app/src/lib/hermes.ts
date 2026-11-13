@@ -4187,13 +4187,13 @@ export interface ProjectIssue {
 }
 
 /**
- * A project's tasks as AFK reads them: the frontier — what's ready, oldest first — and what is out
- * of it, claimed or blocked by an open task. Needs plugin 0.49.
+ * A project's tasks as the AFK sheet draws them: the frontier — what's ready, oldest first — and what
+ * an open task still blocks. A task somebody has taken is in neither list: AFK will never pick it,
+ * and the host leaves it out of the frontier. Needs plugin 0.49.
  */
 export interface ProjectTasks {
   repos: string[]
   ready: ProjectTask[]
-  claimed: ProjectTask[]
   blocked: ProjectTask[]
 }
 
@@ -4254,7 +4254,6 @@ export async function getProjectTasks(
       ? repos.filter((repo): repo is string => typeof repo === "string")
       : [],
     ready: parseTasks(body.ready),
-    claimed: parseTasks(body.claimed),
     blocked: parseTasks(body.blocked),
   }
 }
