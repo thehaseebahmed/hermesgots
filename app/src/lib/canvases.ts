@@ -4,14 +4,12 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { wireContent } from "@/lib/attachments"
 import {
   answerRead,
-  applyWrite,
   mergeGrants,
   type BridgeDataCall,
   type BridgeHostCall,
   type BridgeQueryCall,
   type BridgeToolCall,
   type BridgeWriteCall,
-  type CanvasDoc,
   type CanvasCopy,
   type CanvasGrant,
   type CanvasReadShape,
@@ -31,9 +29,9 @@ import {
   cachedCount,
   cachedDocs,
   forgetDoc,
+  keepAnswer,
   keepWrite,
   noteOpened,
-  settleDoc,
   sweptWhole,
   sweepMarks,
 } from "@/lib/canvas-docs"
@@ -314,19 +312,6 @@ function put(profile: Profile, canvas: Canvas) {
   })
   keepRecord(profile, current)
   if (drawn) keepCanvas(profile, drawn)
-}
-
-/**
- * The device's copy of a canvas's documents, as its rows hold them: the one door the reader and the
- * write fold both read, so where a document lives is answered here and nowhere else. `collection`
- * narrows the read to one — a page's `list` asks for its own — and nothing is read for a canvas this
- * device has no bot for.
- */
-export async function canvasData(id: string, collection?: string): Promise<CanvasDoc[]> {
-  const profileId = profileOf(id)
-  if (!profileId) return []
-  const profile = await db.profiles.get(profileId)
-  return profile ? cachedDocs(profile, id, collection) : []
 }
 
 /**
@@ -662,12 +647,10 @@ async function takeWrite(id: string, call: BridgeWriteCall): Promise<unknown> {
     markAway(id)
     return keepOnDevice(profile, id, call)
   }
-  const kept = applyWrite([], call, value)
   // An answer the bridge can't read applied nothing: the page's promise is refused rather than told a
   // write landed that this device holds no evidence of.
-  if (!kept) throw new Error("The host answered a write the app couldn't read.")
-  if (call.method === "remove") await forgetDoc(profile, id, call.collection, call.id)
-  else await settleDoc(profile, id, kept[0])
+  if (!(await keepAnswer(profile, id, call, value)))
+    throw new Error("The host answered a write the app couldn't read.")
   // The host has answered this document, so anything still queued for it is older and has nothing left
   // to say.
   await dropQueued(profile, id, call.collection, call.id)
@@ -784,7 +767,7 @@ export function useCanvas(id: string) {
   useEffect(() => {
     if (!profile) return
     void noteOpened(profile, id).catch(quietly("Noting a canvas's open"))
-    void sweepCanvas(profile, id).catch(() => undefined)
+    void sweepCanvas(profile, id).catch(quietly("Sweeping a canvas's documents"))
     void drainCanvas(profile, id).catch(quietly("Sending a canvas's saved writes"))
   }, [profile, id])
   const live = useLive(profile)

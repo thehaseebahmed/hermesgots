@@ -107,7 +107,7 @@ def tick(store: Path, home: Path) -> int:
         try:
             _back_up(store, base, canvas, budget)
         except Exception:
-            logger.debug("gots: couldn't back up canvas %s", canvas["id"], exc_info=True)
+            logger.warning("gots: couldn't back up canvas %s", canvas["id"], exc_info=True)
     return budget.written
 
 
@@ -150,23 +150,17 @@ def _back_up_collection(
 ) -> None:
     """One collection's folder: its ``index.md``, then the notes a page at a time.
 
-    The walk is ``canvas_docs.page``'s own — the read a sweep makes — so a collection of five
-    thousand documents costs twenty-five statements and holds one page of them. A walk the budget
-    cut short has not seen the collection whole: it starts again on the next tick, and it deletes
-    nothing, since a note it did not meet is no evidence of a document removed.
+    The walk is ``canvas_docs.each``'s — the one rule every read of a canvas's documents shares — so
+    a collection of five thousand documents costs twenty-five statements and holds one page of them.
+    A walk the budget cut short has not seen the collection whole: it starts again on the next tick,
+    and it deletes nothing, since a note it did not meet is no evidence of a document removed.
     """
     _keep(folder / INDEX, _collection_index(collection, count), budget)
     names: Set[str] = set()
-    after: Optional[str] = None
-    while True:
-        answer = canvas_docs.page(conn, canvas["id"], collection, after, canvas_docs.PAGE_ROWS)
-        for document in answer["documents"]:
-            names.add(_note(folder, canvas, collection, document, budget))
-            if budget.spent:
-                return
-        if answer["next"] is None:
-            break
-        after = answer["next"]
+    for document in canvas_docs.each(conn, canvas["id"], collection, canvas_docs.PAGE_ROWS):
+        names.add(_note(folder, canvas, collection, document, budget))
+        if budget.spent:
+            return
     _prune(folder, names)
 
 

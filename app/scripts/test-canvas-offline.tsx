@@ -19,7 +19,7 @@ import {
   recordOf,
 } from "@/lib/canvas-cache"
 import { cachedDocs, keepDocs } from "@/lib/canvas-docs"
-import { canvasData, refreshCanvas, refreshCanvases, undoCanvas, writeCanvasData } from "@/lib/canvases"
+import { refreshCanvas, refreshCanvases, undoCanvas, writeCanvasData } from "@/lib/canvases"
 import { connectionKey } from "@/lib/connection"
 import { db, deleteProfile, updateProfile } from "@/lib/db"
 import { CanvasPage, CanvasView } from "@/routes/canvas"
@@ -422,7 +422,7 @@ test(
     // The host handles the calls in the order it is asked, so two in flight could come back in the
     // other order: a remove's answer has no clock to sort it against a put's, and the copy would hold
     // a document the host doesn't — or lose one it does.
-    await seedCanvasChat("canvas-writes")
+    const bot = await seedCanvasChat("canvas-writes")
     const host: Host = { docs: [DOC], calls: [] }
     serveCanvases(host)
     await mount(screen, async () => {
@@ -447,7 +447,7 @@ test(
         ["data.put", "data.remove"],
         "and the two are asked in the order the page wrote them",
       )
-      assert.deepEqual(await canvasData("c1"), [], "the copy holds what the host kept")
+      assert.deepEqual(await cachedDocs(bot, "c1"), [], "the copy holds what the host kept")
     })
   }),
 )

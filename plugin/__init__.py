@@ -230,17 +230,6 @@ def _request_profile():
         return None
 
 
-def _asked(request: "web.Request", name: str, absent: str = "") -> str:
-    """One of a request's query parameters, or ``absent`` where it named none.
-
-    A request from the API server always carries its query, and one built field by field — a
-    harness driving a handler — may not; a request with no query is a caller who asked for nothing,
-    which is the answer ``absent`` already is, so it is read that way rather than raising.
-    """
-    query = getattr(request, "query", None)
-    return query.get(name, absent) if query is not None else absent
-
-
 def _plugin_route(
     web: Any,
     call: Any,
@@ -3293,8 +3282,19 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             logger.debug("gots: couldn't follow a new canvas's queue", exc_info=True)
         return web.json_response({"object": "gots.canvas", "canvas": found}, status=202)
 
-    async def canvas_view(request: "web.Request", read, *args) -> "web.Response":
-        """A canvas answered by one read of it: the GET and the undo both say what the app draws."""
+    async def canvas_answer(
+        request: "web.Request",
+        read,
+        *args,
+        kind: str = "gots.canvas",
+        key: Optional[str] = "canvas",
+    ) -> "web.Response":
+        """A canvas's route answered by one read of it — the auth, the read and the refusal in one
+        place, so a new read of a canvas cannot answer differently from the rest.
+
+        ``kind`` is the object the answer says it is, and ``key`` the field a record of it rides: none
+        where the read's own answer is the body, which is what a catalogue and a page of documents are.
+        """
         denied = unauthorized(request)
         if denied is not None:
             return denied
@@ -3304,7 +3304,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             )
         except canvases.CanvasError as error:
             return _error(web, str(error), error.status)
-        return web.json_response({"object": "gots.canvas", "canvas": found})
+        return web.json_response({"object": kind, **({key: found} if key else found)})
 
     async def get_canvas(request: "web.Request") -> "web.Response":
         """One canvas: the version its record points at, which is what the app draws.
@@ -3314,7 +3314,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         then sweeps each collection a page at a time — a canvas of five thousand documents is never
         one answer. Either way the whole-array read is bounded to what that older app could hold.
         """
-        return await canvas_view(request, canvases.current, _asked(request, "docs") != "none")
+        return await canvas_answer(
+            request, canvases.current, request.query.get("docs") != "none"
+        )
 
     async def canvas_data(request: "web.Request") -> "web.Response":
         """A canvas's data as a catalogue: one row a collection, and what the whole of it weighs.
@@ -3323,16 +3325,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         it, so it costs the same for five thousand documents as for five — the documents themselves
         are asked for a page at a time, one collection at a time, from the route below.
         """
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        try:
-            found = await asyncio.to_thread(
-                canvases.data_catalogue, store_path(), request.match_info["canvas_id"]
-            )
-        except canvases.CanvasError as error:
-            return _error(web, str(error), error.status)
-        return web.json_response({"object": "gots.canvas.data", **found})
+        return await canvas_answer(
+            request, canvases.data_catalogue, kind="gots.canvas.data", key=None
+        )
 
     async def canvas_documents(request: "web.Request") -> "web.Response":
         """One page of one collection, the key the next page starts after, and the collection's size.
@@ -3342,25 +3337,19 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         ``PAGE_MAX`` past it, and refused where it is not a whole number of documents (``_limit``,
         canvases.py). A page past the collection's end is an empty one with ``next`` null.
         """
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
-        try:
-            found = await asyncio.to_thread(
-                canvases.data_page,
-                store_path(),
-                request.match_info["canvas_id"],
-                request.match_info["collection"],
-                _asked(request, "after") or None,
-                _asked(request, "limit") or None,
-            )
-        except canvases.CanvasError as error:
-            return _error(web, str(error), error.status)
-        return web.json_response({"object": "gots.canvas.documents", **found})
+        return await canvas_answer(
+            request,
+            canvases.data_page,
+            request.match_info["collection"],
+            request.query.get("after") or None,
+            request.query.get("limit") or None,
+            kind="gots.canvas.documents",
+            key=None,
+        )
 
     async def undo_canvas(request: "web.Request") -> "web.Response":
         """Moves a canvas back one version, which is what the app's Undo asks (canvases.py)."""
-        return await canvas_view(request, canvases.undo)
+        return await canvas_answer(request, canvases.undo)
 
     async def update_canvas(request: "web.Request") -> "web.Response":
         """A canvas's name and its place in the list, written on the host so every device agrees.
@@ -3374,7 +3363,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         body = await json_body(request)
         if body is None:
             return _error(web, "Body must be a JSON object", 400)
-        return await canvas_view(request, canvases.update, body)
+        return await canvas_answer(request, canvases.update, body)
 
     async def delete_canvas(request: "web.Request") -> "web.Response":
         """Takes a canvas out of the store, and its chat and Hermes session with it (canvases.py)."""

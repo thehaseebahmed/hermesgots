@@ -21,8 +21,8 @@
 
 import Dexie from "dexie"
 
-import { applyWrite, type CanvasWrite } from "@/lib/canvas-bridge"
-import { forgetDoc, settleDoc } from "@/lib/canvas-docs"
+import type { CanvasWrite } from "@/lib/canvas-bridge"
+import { keepAnswer } from "@/lib/canvas-docs"
 import { connectionKey, hostTargets } from "@/lib/connection"
 import {
   canvasOutboxKey,
@@ -74,13 +74,12 @@ export async function enqueueWrite(profile: Profile, canvasId: string, call: Can
       docId: call.id,
       method: call.method,
       ...(call.method === "put" ? { doc: call.doc } : {}),
-      at: Date.now(),
     })
   })
 }
 
 /**
- * Forgets a queued write for one document. A write the host just answered is the latest word on that
+ * Forgets a Pending write for one document. A write the host just answered is the latest word on that
  * document, so anything still waiting to be sent for it is older and has nothing left to say.
  */
 export async function dropQueued(
@@ -128,19 +127,20 @@ async function send(profile: Profile, canvasId: string): Promise<boolean> {
       tell.error(`${refusedWords(row)} ${failure.message}`)
       continue
     }
-    const kept = applyWrite([], call, value)
+    const kept = await keepAnswer(profile, canvasId, call, value)
     if (!kept) {
       // An answer this device can't read says nothing about the document, so the row stays waiting
       // rather than being thrown away on a guess.
       return true
     }
-    if (call.method === "remove") await forgetDoc(profile, canvasId, row.collection, row.docId)
-    else await settleDoc(profile, canvasId, kept[0])
     await dropRow(row)
   }
 }
 
-/** The next write of one canvas, by the place in the queue it was given. */
+/**
+ * The next write of one canvas, by the place in the queue it was given. The index is `[canvasId+seq]`,
+ * so its rows already come in queue order: the first of them this bot filed is the next to send.
+ */
 async function nextQueued(
   connection: string,
   canvasId: string,
@@ -149,7 +149,7 @@ async function nextQueued(
     .where("[canvasId+seq]")
     .between([canvasId, Dexie.minKey], [canvasId, Dexie.maxKey])
     .toArray()
-  return rows.filter((row) => row.connection === connection).sort((a, b) => a.seq - b.seq)[0]
+  return rows.find((row) => row.connection === connection)
 }
 
 /** The call a queued row holds, as the page made it. */

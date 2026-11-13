@@ -458,6 +458,16 @@ export async function answerRead(call: BridgeDataCall, copy: CanvasCopy): Promis
   }
 }
 
+/**
+ * The documents a host's answer carries, as the bridge can read them: what it holds of its shape,
+ * with anything it can't read dropped rather than put in the rows as a document no page could draw.
+ * One rule beside `storedDoc`, since a page of a sweep and a whole read are the same answer twice.
+ */
+export function storedDocs(values: unknown): CanvasDoc[] {
+  if (!Array.isArray(values)) return []
+  return values.map(storedDoc).filter((one): one is CanvasDoc => one !== null)
+}
+
 /** A document the host answered with, or null when the answer isn't the shape it documents. */
 export function storedDoc(value: unknown): CanvasDoc | null {
   if (!value || typeof value !== "object") return null
@@ -801,29 +811,26 @@ export function bridgeHandler(host: BridgeHost): (event: MessageEvent) => void {
       reply(call.call, true, { value: null })
       return
     }
+    // Whatever the call was answered by, the page is told the value or the reason: the reader's
+    // answer, the host's, or a tool's once consent has settled it.
+    const settle = (asked: Promise<unknown>) =>
+      void asked.then(
+        (value) => reply(call.call, true, { value }),
+        (error: unknown) => reply(call.call, false, { error: wordsOf(error) }),
+      )
     if (
       call.method === "list" ||
       call.method === "get" ||
       call.method === "page" ||
       call.method === "count"
     ) {
-      void host.read(call).then(
-        (value) => reply(call.call, true, { value }),
-        (error: unknown) => reply(call.call, false, { error: wordsOf(error) }),
-      )
+      settle(host.read(call))
       return
     }
     if (call.method === "put" || call.method === "remove") {
-      void host.write(call).then(
-        (value) => reply(call.call, true, { value }),
-        (error: unknown) => reply(call.call, false, { error: wordsOf(error) }),
-      )
+      settle(host.write(call))
       return
     }
-    const asked = call.method === "tool" ? callTool(call) : host.call(call)
-    void asked.then(
-      (value) => reply(call.call, true, { value }),
-      (error: unknown) => reply(call.call, false, { error: wordsOf(error) }),
-    )
+    settle(call.method === "tool" ? callTool(call) : host.call(call))
   }
 }

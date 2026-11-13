@@ -529,21 +529,21 @@ _COLUMNS = (
     "image",
     "at",
     "created_at",
-    # The newest clock among the canvas's documents, read with the record rather than stored on it:
-    # a count kept beside the rows is an invariant every write and remove could break, and a device
-    # polling the list only needs to know whether the data it swept has moved since (canvas_docs.py).
-    "docs_at",
 )
-# Every column but `docs_at` is the canvas's own row; that one is a seek into its documents, so a
-# record answers how fresh the data is without reading a single document.
+# What a record answers beyond the canvas's own row: `docs_at` is a seek into the canvas's documents
+# rather than a column of its own — a count kept beside the rows is an invariant every write and
+# remove could break, and a device polling the list only needs to know whether the data it swept has
+# moved since (canvas_docs.py). Kept apart from `_COLUMNS` so adding a column cannot silently shift
+# the record's SQL.
+_DERIVED = ("docs_at",)
 _RECORD = (
-    ", ".join(_COLUMNS[:-1])
+    ", ".join(_COLUMNS)
     + ", (SELECT MAX(at) FROM canvas_docs WHERE canvas_docs.canvas_id = canvases.id) AS docs_at"
 )
 
 
 def _row(row: Any) -> Dict[str, Any]:
-    record = dict(zip(_COLUMNS, row))
+    record = dict(zip(_COLUMNS + _DERIVED, row))
     record["pinned"] = bool(record["pinned"])
     record["archived"] = bool(record["archived"])
     record["vault"] = bool(record["vault"])
@@ -1391,6 +1391,22 @@ def _cap(size: int) -> str:
     return f"{-(-size // 1024)} KB"
 
 
+def _weigh(collection: str, doc_id: str, value: str) -> int:
+    """One document's weight: its collection, its id, its JSON value as UTF-8 bytes, and ``DOC_BYTES``
+    for the envelope a read carries for it.
+
+    The term a canvas's total counts for that document, and the whole of its own cap — so a document
+    that fits in the canvas always fits on its own, and there is one measure rather than two that must
+    agree.
+    """
+    return (
+        DOC_BYTES
+        + len(collection.encode("utf-8"))
+        + len(doc_id.encode("utf-8"))
+        + len(value.encode("utf-8"))
+    )
+
+
 def _stored_bytes(
     conn: sqlite3.Connection, canvas_id: str, collection: str, doc_id: str, value: str
 ) -> int:
@@ -1408,13 +1424,7 @@ def _stored_bytes(
            FROM canvas_docs WHERE canvas_id = ? AND NOT (collection = ? AND id = ?)""",
         (DOC_BYTES, canvas_id, collection, doc_id),
     ).fetchone()[0]
-    return (
-        counted
-        + DOC_BYTES
-        + len(collection.encode("utf-8"))
-        + len(doc_id.encode("utf-8"))
-        + len(value.encode("utf-8"))
-    )
+    return counted + _weigh(collection, doc_id, value)
 
 
 def _moved() -> None:
@@ -1451,12 +1461,7 @@ def put_doc(path: Path, canvas_id: str, collection: Any, doc_id: Any, doc: Any) 
         now = int(time.time() * 1000)
         # The document's own weight is its row as a read carries it, which is the term the canvas's
         # total counts for it: one measure, so a document that fits in the canvas always fits here.
-        weighed = (
-            DOC_BYTES
-            + len(collection.encode("utf-8"))
-            + len(doc_id.encode("utf-8"))
-            + len(value.encode("utf-8"))
-        )
+        weighed = _weigh(collection, doc_id, value)
         if weighed > DOC_MAX_BYTES:
             raise CanvasError(
                 f"A document is capped at {_cap(DOC_MAX_BYTES)}; this one would be "

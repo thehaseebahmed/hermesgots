@@ -25,7 +25,14 @@ from unittest import mock
 import plugin
 from plugin import canvas_vault, canvases
 from plugin.store import connect, db_path
-from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
+from plugin.tests._helpers import (
+    FakeWeb,
+    RouteAdapter,
+    plant,
+    route,
+    temp_hermes_home,
+    wire,
+)
 
 PROMPT = "A bookmark board, one collection of five thousand links"
 BODY = {"input": [{"role": "user", "content": PROMPT}]}
@@ -34,27 +41,6 @@ BODY = {"input": [{"role": "user", "content": PROMPT}]}
 # writes a note whose document is newer than the file, and a fixture stamped with "now" would be
 # skipped the second time this host's clock has moved on.
 AT = 1_700_000_000_000
-
-
-def plant(path: Path, canvas_id: str, rows: List[Tuple[str, str, Any, int]]) -> None:
-    """Rows written straight into one canvas's data, as ``(collection, id, document, at)``.
-
-    One transaction, because a write the connection never committed is invisible to the read that
-    follows it, and a five-thousand-document fixture put one at a time is a quadratic one.
-    """
-    conn = connect(path)
-    try:
-        conn.execute("BEGIN")
-        conn.executemany(
-            "INSERT INTO canvas_docs (canvas_id, collection, id, value, at) VALUES (?, ?, ?, ?, ?)",
-            [
-                (canvas_id, collection, doc_id, json.dumps(doc), at)
-                for collection, doc_id, doc, at in rows
-            ],
-        )
-        conn.execute("COMMIT")
-    finally:
-        conn.close()
 
 
 def frontmatter(text: str) -> Dict[str, Any]:

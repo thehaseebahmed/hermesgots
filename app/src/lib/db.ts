@@ -1149,6 +1149,7 @@ export interface CanvasSweepRow {
   connection: string
   canvasId: string
   generation: number
+  /** Unset while no sweep of this canvas has ever reached its last page. */
   completeAt?: number
   /** When the sweep under way began: unset before one begins, and cleared by the one that finishes. */
   startedAt?: number
@@ -1192,8 +1193,6 @@ export interface CanvasOutboxRow {
   method: "put" | "remove"
   /** What a put carries; a remove carries none. */
   doc?: unknown
-  /** When this device made the write. */
-  at: number
 }
 
 /** The key one queued write is filed under, which is also what makes it one row a document. */

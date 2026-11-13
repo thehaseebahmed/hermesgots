@@ -16,13 +16,10 @@
  * on an old host behaves exactly as it did before the rows.
  */
 
-import { storedDoc, type CanvasDoc } from "@/lib/canvas-bridge"
+import { PAGE_ROWS, storedDocs } from "@/lib/canvas-bridge"
 import { beginSweep, completeSweep, keepDocs } from "@/lib/canvas-docs"
 import type { Profile } from "@/lib/db"
 import { dataCatalogue, dataPage, getCanvas, HermesError } from "@/lib/hermes"
-
-/** How many documents one page of a sweep asks for: the page the host answers without being told. */
-export const SWEEP_PAGE = 200
 
 // One sweep of one canvas at a time: a screen opening a canvas and the list's poll asking for the same
 // one is one read of the host, and the second joins the first rather than racing it into the rows.
@@ -65,9 +62,8 @@ async function sweepCollection(
 ) {
   let after: string | null = null
   for (;;) {
-    const page = await dataPage(profile, id, collection, after, SWEEP_PAGE)
-    const docs = page.documents.map(storedDoc).filter((one): one is CanvasDoc => one !== null)
-    await keepDocs(profile, id, docs, generation)
+    const page = await dataPage(profile, id, collection, after, PAGE_ROWS)
+    await keepDocs(profile, id, storedDocs(page.documents), generation)
     if (page.next === null) return
     after = page.next
   }
@@ -76,9 +72,7 @@ async function sweepCollection(
 /** The whole read a host without the paged route answers, kept as a completed sweep. */
 async function sweepWhole(profile: Profile, id: string, generation: number) {
   const raw = await getCanvas(profile, id, { docs: true })
-  const docs = Array.isArray(raw?.data)
-    ? raw.data.map(storedDoc).filter((one): one is CanvasDoc => one !== null)
-    : []
+  const docs = storedDocs(raw?.data)
   await keepDocs(profile, id, docs, generation)
   await completeSweep(
     profile,

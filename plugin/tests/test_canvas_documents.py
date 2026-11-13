@@ -22,33 +22,17 @@ from unittest import mock
 import plugin
 from plugin import canvas_docs, canvases
 from plugin.store import connect, db_path
-from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
+from plugin.tests._helpers import (
+    FakeWeb,
+    RouteAdapter,
+    plant,
+    route,
+    temp_hermes_home,
+    wire,
+)
 
 PROMPT = "A bookmark board, one collection of five thousand links"
 BODY = {"input": [{"role": "user", "content": PROMPT}]}
-
-
-def plant(path: Path, canvas_id: str, rows: List[Tuple[str, str, Any, int]]) -> None:
-    """Rows written straight into one canvas's data, as ``(collection, id, document, at)``.
-
-    A fixture of five thousand documents is planted rather than put one at a time: every ``put_doc``
-    weighs the whole of the canvas, which is the rule its cap rests on, so a write each is a
-    quadratic fixture. One transaction, because a write the connection never committed is invisible
-    to the read that follows it.
-    """
-    conn = connect(path)
-    try:
-        conn.execute("BEGIN")
-        conn.executemany(
-            "INSERT INTO canvas_docs (canvas_id, collection, id, value, at) VALUES (?, ?, ?, ?, ?)",
-            [
-                (canvas_id, collection, doc_id, json.dumps(doc), at)
-                for collection, doc_id, doc, at in rows
-            ],
-        )
-        conn.execute("COMMIT")
-    finally:
-        conn.close()
 
 
 class Host:

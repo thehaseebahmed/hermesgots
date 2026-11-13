@@ -175,16 +175,23 @@ def page(
 # own syntax, and a name that is not one is refused rather than handed to that parser.
 QUERY_FIELD = re.compile(r"[A-Za-z0-9_]{1,64}")
 
+
+def _path(field: str) -> str:
+    """One field's JSON path: the only place a name becomes a statement's own words, so every
+    comparison and the sort read a field the one way, after the same check."""
+    return f"json_extract(value, '$.{field}')"
+
+
 # The five comparisons a query may make, each as the SQL it is. Every value is bound rather than
 # written into the statement, so a page's words are never the statement's. `eq`, `gt` and `lt` compare
 # the field as JSON stores it — a number by its own order, text by its own — while `contains` and
 # `prefix` read the field as text, which is why only text is asked of those two.
 QUERY_OPS = {
-    "eq": "json_extract(value, '$.{field}') = ?",
-    "contains": "instr(CAST(json_extract(value, '$.{field}') AS TEXT), ?) > 0",
-    "prefix": "substr(CAST(json_extract(value, '$.{field}') AS TEXT), 1, length(?)) = ?",
-    "gt": "json_extract(value, '$.{field}') > ?",
-    "lt": "json_extract(value, '$.{field}') < ?",
+    "eq": "{path} = ?",
+    "contains": "instr(CAST({path} AS TEXT), ?) > 0",
+    "prefix": "substr(CAST({path} AS TEXT), 1, length(?)) = ?",
+    "gt": "{path} > ?",
+    "lt": "{path} < ?",
 }
 
 
@@ -249,7 +256,7 @@ def _where(canvas_id: str, collection: str, where: Any) -> Tuple[str, List[Any]]
         if "value" not in test:
             raise ValueError(f"A query's {op} test needs the value it compares the field to.")
         value = _value(test["value"], op)
-        clause += " AND " + QUERY_OPS[op].format(field=field)
+        clause += " AND " + QUERY_OPS[op].format(path=_path(field))
         values.extend([value] * QUERY_OPS[op].count("?"))
     return clause, values
 
@@ -287,7 +294,7 @@ def _sorted(order: Any) -> Tuple[str, str]:
     if field is None:
         key = "id"
     elif isinstance(field, str) and QUERY_FIELD.fullmatch(field):
-        key = f"json_extract(value, '$.{field}')"
+        key = _path(field)
     else:
         raise ValueError(
             "A query's order field is a name of 1 to 64 letters, digits or underscores, or nothing "
