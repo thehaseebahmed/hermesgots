@@ -22,6 +22,7 @@ import {
 } from "lucide-react"
 
 import { Bot } from "@/components/bot"
+import { LabBadge } from "@/components/lab-badge"
 import { RoomFaces } from "@/components/room/room-faces"
 import { SortMenu } from "@/components/sort-menu"
 import { Button } from "@/components/ui/button"
@@ -693,7 +694,12 @@ export function ConversationList({
             className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
           >
             <FrameIcon className="size-5 text-muted-foreground" />
-            {!collapsed && "Canvas"}
+            {!collapsed && (
+              <>
+                <span className="min-w-0 flex-1 truncate">Canvas</span>
+                <LabBadge />
+              </>
+            )}
           </RootLink>
           <RootLink
             to="/research"
@@ -702,7 +708,12 @@ export function ConversationList({
             className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
           >
             <TelescopeIcon className="size-5 text-muted-foreground" />
-            {!collapsed && "Research"}
+            {!collapsed && (
+              <>
+                <span className="min-w-0 flex-1 truncate">Research</span>
+                <LabBadge />
+              </>
+            )}
           </RootLink>
           {meetings && (
             <RootLink
@@ -712,7 +723,12 @@ export function ConversationList({
               className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
             >
               <AudioLinesIcon className="size-5 text-muted-foreground" />
-              {!collapsed && "Meetings"}
+              {!collapsed && (
+                <>
+                  <span className="min-w-0 flex-1 truncate">Meetings</span>
+                  <LabBadge />
+                </>
+              )}
             </RootLink>
           )}
           {legacy === true && (
