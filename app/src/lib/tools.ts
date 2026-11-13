@@ -71,9 +71,11 @@ const OPENED_PR: Kind = { id: "pr", verb: "Opened", doing: "Opening", title: "a 
 const PUSHED_BRANCH: Kind = { id: "pr", verb: "Pushed", doing: "Pushing", title: "the branch" }
 const UPDATED_PR: Kind = { id: "pr", verb: "Updated", doing: "Updating", title: "a pull request" }
 const CHECKED_PR: Kind = { id: "pr", verb: "Checked", doing: "Checking", title: "a pull request" }
+const READY_PR: Kind = { id: "pr", verb: "Marked", doing: "Marking", title: "a pull request ready" }
+const MERGED_PR: Kind = { id: "pr", verb: "Merged", doing: "Merging", title: "a pull request" }
 
 /** Every action Hermes's `pull_request` tool takes, so a new one cannot arrive without words. */
-const PR_ACTIONS = ["ship", "push", "update", "status"] as const
+const PR_ACTIONS = ["ship", "push", "update", "ready", "merge", "status"] as const
 
 type PrAction = (typeof PR_ACTIONS)[number]
 
@@ -86,6 +88,8 @@ const PR_KINDS: Record<PrAction, Kind> = {
   ship: OPENED_PR,
   push: PUSHED_BRANCH,
   update: UPDATED_PR,
+  ready: READY_PR,
+  merge: MERGED_PR,
   status: CHECKED_PR,
 }
 
@@ -218,7 +222,7 @@ export function kindOf(tool: ToolEvent): Kind {
   if (TODO_TOOLS.has(tool.tool)) return taskCount(tool) === undefined ? CHECKED_PLAN : PLANNED
   // A call whose row is the action it took: a cron or a pull request call says what it did, and one
   // whose action the table doesn't know draws the generic row rather than a claim it can't back
-  // (merging and closing are refused by the tool).
+  // (closing is refused by the tool).
   const acts = ACTION_TOOLS[tool.tool]
   if (acts) return actionKind(tool, acts) ?? USED
   // One delegation, three shapes: a spawn is the work it started, a control call says which action

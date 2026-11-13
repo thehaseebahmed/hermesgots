@@ -1,5 +1,5 @@
 """Tests for the pull_request tool: its actions, always-draft pull requests, force pushes,
-title/body updates, and the refusal of merge and close."""
+title/body updates, the ready and merge actions, and the refusal of close."""
 
 import json
 import tempfile
@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from plugin import ship
+from plugin import github, ship
 from plugin.store import db_path
 
 
@@ -497,7 +497,7 @@ class ReadyTests(_Base):
     """A draft is taken out of draft, so the pull request can be reviewed and then merged."""
 
     def _ready(self, state="draft", record=None):
-        pr = {"number": 7, "state": state, "title": "T", "url": "u"}
+        pr = None if state is None else {"number": 7, "state": state, "title": "T", "url": "u"}
         ready = {"number": 7, "state": "open", "title": "T", "url": "u"}
         with (
             patch("plugin.github.token", return_value=("tok", "u")),
@@ -515,17 +515,41 @@ class ReadyTests(_Base):
         self.assertEqual(data["results"][0]["pr"]["state"], "open")
         self.assertNotIn("error", data["results"][0])
 
-    def test_ready_says_there_is_no_draft_to_mark(self):
+    def test_ready_again_says_it_is_already_ready(self):
+        """A dropped answer, retried, must not read as a failed step: the state is what it is."""
         data, mark, _ = self._ready(state="open")
         mark.assert_not_called()
-        self.assertIn("No draft pull request", data["error"])
+        self.assertNotIn("error", data)
+        self.assertTrue(data["results"][0]["already_ready"], "it says the state holds rather than failing")
+
+    def test_ready_says_when_the_branch_has_no_pull_request(self):
+        data, mark, _ = self._ready(state=None)
+        mark.assert_not_called()
+        self.assertIn("No pull request", data["error"])
+
+    def test_a_read_that_could_not_reach_github_is_not_an_empty_branch(self):
+        """An outage and "no pull request" are different facts, and the next call depends on which."""
+
+        def read(*args, **kwargs):
+            if not kwargs.get("strict"):
+                return None
+            raise github.GitHubError("Couldn't reach GitHub from the server.")
+
+        with (
+            patch("plugin.github.token", return_value=("tok", "u")),
+            patch("plugin.github.origin_repo", return_value="o/r"),
+            patch("plugin.github.pull_request", side_effect=read),
+        ):
+            data = self._call({"action": "ready"})
+        self.assertIn("Couldn't reach GitHub", data["error"])
+        self.assertNotIn("No pull request", data["error"])
 
 
 class MergeTests(_Base):
     """The end of the road: the pull request is merged, and everything that cached it lets go."""
 
-    def _pr(self, state="open", checks="success"):
-        return {"number": 7, "state": state, "checks": checks, "title": "T", "url": "u"}
+    def _pr(self, state="open", checks="success", sha="gated123"):
+        return {"number": 7, "state": state, "checks": checks, "sha": sha, "title": "T", "url": "u"}
 
     def _merge(self, pr=None, merged=None, failure=None, method=None):
         """The merge action's answer, and what it did: the call, the forget and the resolution."""
@@ -547,9 +571,26 @@ class MergeTests(_Base):
 
     def test_merge_merges_the_live_pull_request_on_a_squash_by_default(self):
         data, call, forget, resolve = self._merge()
-        call.assert_called_once_with("o/r", 7, "squash", "tok")
+        call.assert_called_once_with("o/r", 7, "squash", "tok", "gated123")
         self.assertTrue(forget.called, "a merged row is not the row the app should list")
         self.assertTrue(data["results"][0]["merged"])
+
+    def test_a_merge_read_that_could_not_reach_github_is_not_an_empty_branch(self):
+        """Told there is nothing to merge, the obvious next move is `ship`, which opens a second one."""
+
+        def read(*args, **kwargs):
+            if not kwargs.get("strict"):
+                return None
+            raise github.GitHubError("Couldn't reach GitHub from the server.")
+
+        with (
+            patch("plugin.github.token", return_value=("tok", "u")),
+            patch("plugin.github.origin_repo", return_value="o/r"),
+            patch("plugin.github.pull_request", side_effect=read),
+        ):
+            data = self._call({"action": "merge"})
+        self.assertIn("Couldn't reach GitHub", data["error"])
+        self.assertNotIn("No open pull request", data["error"])
 
     def test_merge_names_another_method_when_asked_for_one(self):
         _, call, _, _ = self._merge(method="rebase")
@@ -581,7 +622,7 @@ class MergeTests(_Base):
         call.assert_not_called()
         self.assertIn("still running", data["error"])
 
-    def test_a_merge_git_hub_refused_is_reported_and_nothing_is_resolved(self):
+    def test_a_merge_github_refused_is_reported_and_nothing_is_resolved(self):
         refused = ship.ShipError("GitHub won't merge o/r#7: Pull Request is not mergeable.", 409)
         data, _, _, resolve = self._merge(failure=refused)
         resolve.assert_not_called()

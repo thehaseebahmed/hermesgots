@@ -12,7 +12,7 @@ import os
 import subprocess
 import threading
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from . import github, merges, projects, push, tools_common
 from .sessions import WorkspaceError, _git
@@ -418,41 +418,57 @@ def ship(
         lock.release()
 
 
+def _live_prs(
+    hermes_home: Path, record: Dict[str, Any], checks: bool
+) -> Iterator[Tuple[Dict[str, Any], str, Optional[Dict[str, Any]]]]:
+    """Each repo's pull request from the session's branch, as ``(repo, name, pr)``.
+
+    Read strictly: a GitHub that couldn't be reached is raised, never answered as "no pull request",
+    because the two facts send the agent to different calls (`ship` against `merge` again).
+    """
+    for repo in record["repos"]:
+        name = github.origin_repo(repo["repo_root"])
+        if not name:
+            continue
+        try:
+            pr = github.pull_request(
+                hermes_home, repo["repo_root"], repo["branch"], fresh=True, checks=checks, strict=True
+            )
+        except github.GitHubError as error:
+            raise ShipError(str(error), error.status) from None
+        yield repo, name, pr
+
+
 def ready(hermes_home: Path, record: Dict[str, Any]) -> List[Dict[str, Any]]:
     """Takes each repo's draft pull request on the session's branch out of draft, for review.
 
-    The step between shipping and merging: a draft is what a run opens, and a merge GitHub will
-    accept is one it has been told to accept. One result per repo that had a draft; a repo whose
-    draft GitHub wouldn't move carries the failure rather than stopping the others.
+    One already out of draft is answered as it stands rather than skipped: a retried call after a
+    dropped answer must read as a state that holds, not as a step that failed.
     """
     auth, _ = github.token(hermes_home)
     if not auth:
         raise ShipError("No GitHub account on the server.", 409)
     results = []
-    for repo in record["repos"]:
-        name = github.origin_repo(repo["repo_root"])
-        if not name:
-            continue
-        pr = github.pull_request(
-            hermes_home, repo["repo_root"], repo["branch"], fresh=True, checks=False
-        )
-        if not pr or pr["state"] != "draft":
+    for repo, name, pr in _live_prs(hermes_home, record, checks=False):
+        if not pr or pr["state"] not in ("draft", "open"):
             continue
         result: Dict[str, Any] = {"name": repo["name"], "pr": pr}
         try:
-            result["pr"] = github.mark_ready(name, pr["number"], auth)
-            github.forget_pull_request(repo["repo_root"], repo["branch"])
+            if pr["state"] == "draft":
+                result["pr"] = github.mark_ready(name, pr["number"], auth)
+                github.forget_pull_request(repo["repo_root"], repo["branch"])
+            else:
+                result["already_ready"] = True
         except github.GitHubError as error:
             result["error"] = str(error)
         results.append(result)
     if not results:
-        raise ShipError("No draft pull request on this session's branch to mark ready.", 409)
+        raise ShipError("No pull request on this session's branch to mark ready.", 409)
     return results
 
 
 MERGE_METHODS = github.MERGE_METHODS
-# What a merge does to the branch by default: one commit on the base, which is what a session's
-# branch is for — its own history is the run's, not the repository's.
+# One commit on the base: a session's branch history is the run's, not the repository's.
 DEFAULT_MERGE_METHOD = "squash"
 
 
@@ -461,10 +477,8 @@ def merge(
 ) -> List[Dict[str, Any]]:
     """Merges each repo's open pull request on the session's branch, and settles the session.
 
-    Refused before GitHub is asked for the two states the run can do something about: a draft (call
-    ``ready`` first) and checks that failed or still run. Afterwards the branch's cached row is
-    forgotten and the session is resolved through ``merges.check``, so the state the app lists and
-    the notification a merge sends land now rather than on the next five-minute sweep.
+    A draft, and checks that failed or still run, are refused before GitHub is asked, because the run
+    can do something about both.
     """
     auth, _ = github.token(hermes_home)
     if not auth:
@@ -475,11 +489,7 @@ def merge(
         raise ValueError(f"merge_method must be one of {', '.join(MERGE_METHODS)}.")
     session_id = record.get("session_id")
     results = []
-    for repo in record["repos"]:
-        name = github.origin_repo(repo["repo_root"])
-        if not name:
-            continue
-        pr = github.pull_request(hermes_home, repo["repo_root"], repo["branch"], fresh=True)
+    for repo, name, pr in _live_prs(hermes_home, record, checks=True):
         if not pr or pr["state"] not in ("open", "draft"):
             continue
         result: Dict[str, Any] = {"name": repo["name"], "pr": pr, "merged": False}
@@ -492,13 +502,13 @@ def merge(
                 )
             if pr.get("checks") == "failure":
                 raise ShipError(
-                    "Its checks failed, so it isn't ready to merge: fix what they name, call 'ship' "
-                    "again, then 'merge'.",
+                    f"Its checks failed, so it isn't ready to merge: see {pr.get('url')}/checks, fix "
+                    "what they name, call 'ship' again, then 'merge'.",
                     409,
                 )
             if pr.get("checks") == "pending":
                 raise ShipError("Its checks are still running: call 'merge' again once they pass.", 409)
-            outcome = github.merge_pull_request(name, pr["number"], method, auth)
+            outcome = github.merge_pull_request(name, pr["number"], method, auth, pr.get("sha"))
             result["merge"] = outcome
             result["merged"] = bool(outcome.get("merged"))
         except (ShipError, github.GitHubError) as error:

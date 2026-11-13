@@ -26,8 +26,9 @@ answer costs nothing.
 **Merge is the tool's, but who may merge is the Prompt's.** `merge` refuses a draft (call `ready`),
 and a pull request whose checks failed or still run — the two states a run can do something about,
 and better said by the tool than by GitHub's 405 "not mergeable". It then `PUT`s the merge route
-with the merge method (`squash` by default) and the head commit it has just read as GitHub's own
-`sha` guard, so a branch that moved is refused rather than merged at a commit nobody looked at; a
+with the merge method (`squash` by default) and the sha the row was read on — the one its checks and
+draft state were judged at, not a fresher one — as GitHub's own guard, so a branch that moved is
+refused rather than merged at a commit nobody looked at; a
 405, a 409 and a 422 each become the next call ("fix what GitHub names and ship again", "ship then
 merge again", the refusal in GitHub's words). Whether a run *should* is a different question, and
 the answer is not "always": a pull request exists so the user reads it when they come back, so the

@@ -509,6 +509,8 @@ def _pr(repo: str, row: Any, auth: Optional[str], checks: bool = True) -> Option
         "title": row.get("title") if isinstance(row.get("title"), str) else "",
         "url": row.get("html_url") if isinstance(row.get("html_url"), str) else None,
         "state": _state(row),
+        # The commit the checks above were read on, so the merge can guard the one the gate judged.
+        "sha": sha if isinstance(sha, str) else None,
         "checks": _checks(repo, sha, auth) if checks and isinstance(sha, str) and sha else None,
     }
 
@@ -657,7 +659,7 @@ def forget_pull_request(repo_root: str, branch: str) -> None:
 
 
 # GitHub's only supported way to take a draft out of draft: the REST update endpoint documents no
-# `draft` field, so this mutation is the call, posted through the same seam as every other one.
+# `draft` field, so this mutation is the call.
 READY_MUTATION = (
     "mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) "
     "{ pullRequest { id isDraft } } }"
@@ -665,7 +667,7 @@ READY_MUTATION = (
 
 
 def _pull(repo: str, number: int, auth: str) -> Dict[str, Any]:
-    """One pull request, as GitHub answers it for its own number: the row a write is checked on."""
+    """One pull request's own row: what a write is checked against before GitHub is asked."""
     row = _request(f"/repos/{repo}/pulls/{number}", auth)
     if not isinstance(row, dict):
         raise GitHubError(f"GitHub didn't return {repo}#{number}.")
@@ -690,24 +692,33 @@ def mark_ready(repo: str, number: int, auth: str) -> Dict[str, Any]:
         first = errors[0] if isinstance(errors[0], dict) else {}
         said = first.get("message")
         raise GitHubError(said if isinstance(said, str) and said else f"GitHub didn't mark {repo}#{number} ready.")
-    # The mutation answers the node, not the row the app reads, so the state it becomes is ours: a
-    # pull request out of draft is open on GitHub's row and open in the app either way.
+    made = answer.get("data") if isinstance(answer, dict) else None
+    made = made.get("markPullRequestReadyForReview") if isinstance(made, dict) else None
+    made = made.get("pullRequest") if isinstance(made, dict) else None
+    if not isinstance(made, dict) or made.get("isDraft") is not False:
+        # A 200 that never says the draft is gone is no evidence it is: the app would list a pull
+        # request as ready while GitHub still held a draft, and the next merge would eat GitHub's 405.
+        raise GitHubError(
+            f"GitHub answered without saying {repo}#{number} is out of draft. Call pull_request with "
+            "action 'ready' again."
+        )
+    # The mutation answers a node, not a row, so the row this function read is returned with the
+    # draft state it has just been told is cleared.
     return _pr_or_error(repo, {**row, "draft": False}, None)
 
 
 MERGE_METHODS = ("merge", "squash", "rebase")
 
 
-def merge_pull_request(repo: str, number: int, method: str, auth: str) -> Dict[str, Any]:
-    """Merges a pull request, on the head this call read, and says whether GitHub merged it.
+def merge_pull_request(
+    repo: str, number: int, method: str, auth: str, sha: Optional[str] = None
+) -> Dict[str, Any]:
+    """Merges a pull request, on the head the caller judged, and says whether GitHub merged it.
 
-    The head sha is passed as the guard GitHub documents: a branch that moved since the read is
-    refused with a 409 rather than merging a commit nobody looked at. What GitHub answers when it
-    won't merge — 405 for a conflict or a rule, 409 for a moved head, 422 for the request itself —
-    becomes the step the agent takes next, because each one is a different next call.
+    ``sha`` is the commit the caller read the checks and the draft state on: GitHub refuses the
+    merge if the branch has moved since, rather than merging a commit nobody looked at. Left out, the
+    head this call reads is the guard.
     """
-    if method not in MERGE_METHODS:
-        raise GitHubError(f"merge_method must be one of {', '.join(MERGE_METHODS)}.", 400)
     row = _pull(repo, number, auth)
     if row.get("draft"):
         raise GitHubError(
@@ -716,9 +727,10 @@ def merge_pull_request(repo: str, number: int, method: str, auth: str) -> Dict[s
             409,
         )
     head = row.get("head")
-    sha = head.get("sha") if isinstance(head, dict) else None
+    head_sha = head.get("sha") if isinstance(head, dict) else None
+    sha = sha if isinstance(sha, str) and sha else head_sha if isinstance(head_sha, str) else None
     fields: Dict[str, Any] = {"merge_method": method}
-    if isinstance(sha, str) and sha:
+    if sha:
         fields["sha"] = sha
     try:
         answer = _request(f"/repos/{repo}/pulls/{number}/merge", auth, "PUT", fields)
@@ -729,7 +741,7 @@ def merge_pull_request(repo: str, number: int, method: str, auth: str) -> Dict[s
     return {
         "repo": repo,
         "number": number,
-        "sha": sha if isinstance(sha, str) else None,
+        "sha": sha,
         "merged": bool(answer.get("merged")),
         "message": said if isinstance(said, str) else None,
     }
@@ -741,8 +753,9 @@ def _merge_refused(repo: str, number: int, error: "GitHubError") -> "GitHubError
     if error.code == 405:
         return GitHubError(
             f"GitHub won't merge {repo}#{number}: {said}. A conflict, a required review or a check "
-            "it says failed is in the way — fix what GitHub names, call 'ship' again, then 'merge'. "
-            "Leave a rule the user set on the branch alone, and say what it asks for.",
+            "it says failed is in the way — open its Checks tab, fix what GitHub names, call 'ship' "
+            "again, then 'merge'. Leave a rule the user set on the branch alone, and say what it "
+            "asks for.",
             409,
             error.code,
         )
@@ -755,7 +768,12 @@ def _merge_refused(repo: str, number: int, error: "GitHubError") -> "GitHubError
             error.code,
         )
     if error.code == 422:
-        return GitHubError(f"GitHub refused the merge of {repo}#{number}: {said}", 409, error.code)
+        return GitHubError(
+            f"GitHub refused the merge of {repo}#{number}: {said}. The repository may not allow this "
+            "merge_method — try 'merge' or 'rebase', else ask the user with clarify.",
+            409,
+            error.code,
+        )
     if error.code == 404:
         return GitHubError(f"GitHub has no pull request #{number} in {repo}.", 409, 404)
     return error
