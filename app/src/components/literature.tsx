@@ -1,6 +1,7 @@
 import { Fragment, useState } from "react"
 import { ChevronDownIcon, ExternalLinkIcon } from "lucide-react"
 
+import { Refusal } from "@/components/banner"
 import { Bot } from "@/components/bot"
 import { Bars, CiteChip, Spans } from "@/components/research"
 import { Segmented } from "@/components/segmented"
@@ -10,7 +11,6 @@ import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { ListEditor, Section } from "@/components/verify"
-import { attempt } from "@/lib/attempt"
 import {
   DEFAULT_CAP,
   LEVEL_NAMES,
@@ -30,6 +30,7 @@ import {
   type PaperRow,
   type ReviewField,
 } from "@/lib/research"
+import { useRefusal } from "@/lib/use-refusal"
 import { cn } from "@/lib/utils"
 
 /** A year typed into a field: a whole number, or nothing for no limit. */
@@ -47,13 +48,14 @@ export function LiteratureBriefForm({ mission }: { mission: Mission }) {
   const [to, setTo] = useState(review?.toYear ? String(review.toYear) : "")
   const [criteria, setCriteria] = useState(review?.criteria ?? [])
   const [saving, setSaving] = useState(false)
+  const refusal = useRefusal(mission.id)
   const kept = criteria.filter((line) => line.trim())
   const years = [from, to].every((value) => !value.trim() || yearOf(value))
   const ready = goal.trim() && kept.length >= 1 && years && !saving
 
   const save = async () => {
     setSaving(true)
-    await attempt("save the brief", () =>
+    await refusal.write("save the brief", () =>
       confirmReview(mission, {
         goal,
         field,
@@ -117,6 +119,7 @@ export function LiteratureBriefForm({ mission }: { mission: Mission }) {
           onChange={setCriteria}
         />
       </Section>
+      <Refusal hold={refusal} />
       <Button
         size="lg"
         className="h-11 rounded-full md:self-end md:px-6"
@@ -146,10 +149,12 @@ export function LiteratureScopeForm({ mission, botId }: { mission: Mission; botI
   const [cap, setCap] = useState(review?.cap ?? DEFAULT_CAP)
   const [preprints, setPreprints] = useState(review?.preprints === false ? "out" : "in")
   const [starting, setStarting] = useState(false)
+  const refusal = useRefusal(mission.id)
   const kept = queries.filter((query) => query.trim())
 
   return (
     <>
+      <Refusal hold={refusal} />
       <h2 className="flex items-center gap-2.5 font-semibold">
         <Bot id={botId} className="size-7" />
         What I'll search
@@ -179,7 +184,7 @@ export function LiteratureScopeForm({ mission, botId }: { mission: Mission; botI
         disabled={!kept.length || starting}
         onClick={async () => {
           setStarting(true)
-          await attempt("start the research", () =>
+          await refusal.write("start the research", () =>
             approveReview(mission, { queries: kept, cap, preprints: preprints === "in" }),
           )
           setStarting(false)
