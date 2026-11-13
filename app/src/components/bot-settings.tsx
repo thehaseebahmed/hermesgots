@@ -67,7 +67,6 @@ import { MAX_FALLBACKS } from "@/lib/fallback-list"
 import { useFallbackModels } from "@/lib/fallbacks"
 import { usePluginFeatureAnswers, usePluginVersion } from "@/lib/features"
 import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
-import { formatRelative } from "@/lib/format"
 import {
   DELEGATION_PAGE,
   GENERAL_PAGE,
@@ -97,7 +96,8 @@ import { botModel, fullModel, setDefaultModel, useModelInfo } from "@/lib/model-
 import { setBotMuted } from "@/lib/push"
 import { seedsFromCache, useReadAttempt } from "@/lib/read-attempt"
 import { useReminders } from "@/lib/reminders"
-import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
+import { presenceLine } from "@/lib/presence"
+import { removeHost, setBotEnabled } from "@/lib/registry"
 import { SKILL_FEATURES } from "@/lib/skills"
 import { AppWords } from "@/lib/refusal"
 import { useNow } from "@/lib/threads"
@@ -155,11 +155,7 @@ function EnabledSetting({ profile }: { profile: Profile }) {
   const now = useNow()
   const [saving, setSaving] = useState(false)
   const refusal = useScreenRefusal()
-  const seen = profile.seenAt
-    ? isOnline(profile, now)
-      ? "Online"
-      : `Last seen ${formatRelative(profile.seenAt, Math.max(now, profile.seenAt))}`
-    : "Not seen yet"
+  const seen = presenceLine(profile, now) ?? "Not seen yet"
 
   return (
     <SwitchRow

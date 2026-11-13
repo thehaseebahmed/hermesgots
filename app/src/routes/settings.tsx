@@ -83,7 +83,6 @@ import {
   saveSettings,
   type Profile,
 } from "@/lib/db"
-import { formatRelative } from "@/lib/format"
 import { wordsLabel } from "@/lib/dictation-log"
 import { useDictationTotals } from "@/lib/dictations"
 import { useLiveStatus, type LiveStatus } from "@/lib/live"
@@ -103,7 +102,8 @@ import {
   usePushFeatures,
 } from "@/lib/push"
 import type { PushCategory, PushFeature } from "@/lib/push-kinds"
-import { isOnline, presence, siteUrl } from "@/lib/registry"
+import { presence, presenceLine } from "@/lib/presence"
+import { siteUrl } from "@/lib/registry"
 import { AppWords } from "@/lib/refusal"
 import { tell } from "@/lib/tell"
 import { themeLabel } from "@/lib/theme"
@@ -424,10 +424,7 @@ function BotRow({ profile, label }: { profile: Profile; label: string }) {
 function botStatus(profile: Profile, now: number): string | undefined {
   if (profile.disabled) return undefined
   if (pluginOutdated(profile.pluginVersion)) return "Plugin out of date"
-  if (!profile.seenAt) return undefined
-  return isOnline(profile, now)
-    ? "Online"
-    : `Last seen ${formatRelative(profile.seenAt, Math.max(now, profile.seenAt))}`
+  return presenceLine(profile, now)
 }
 
 /** The row that opens the link sheet, at the end of the bots. */
