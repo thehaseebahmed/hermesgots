@@ -835,6 +835,10 @@ _Avoid_: thumbnail, preview, cover
 A canvas that has its own row in the sidebar, on every device.
 _Avoid_: favourite, starred, shortcut
 
+**Mark**:
+The icon or emoji a pinned canvas's row draws in the sidebar, chosen by the reader in the canvas's options and kept on the canvas's own record rather than on this device, so every device draws the same one. An icon takes one of the palette's colour names; an emoji carries its own colour; a canvas with no mark draws the app's frame mark.
+_Avoid_: icon, avatar, badge, glyph, sticker
+
 **Open canvas**:
 The canvas this tab opened from Canvas's own screens — the list's tile, or a start — and the one thing a canvas's row is marked by (ADR 0151). A canvas reached by its address, a reload, back or forward, or another tab's opening is no open canvas.
 _Avoid_: current canvas, active canvas, selected canvas

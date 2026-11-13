@@ -5,9 +5,12 @@
  * declared. Every change but a tool's is the canvas's record on the host, so the same page is named,
  * pinned and archived the same way on every device; nothing here is kept on this one alone.
  */
-import { useCallback, useState } from "react"
+import { useCallback, useRef, useState } from "react"
+import { ChevronRightIcon } from "lucide-react"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { CanvasMark } from "@/components/canvas-mark"
+import { CanvasMarkPicker } from "@/components/canvas-mark-picker"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import {
   DestructiveButton,
@@ -252,6 +255,9 @@ export function CanvasOptions({
   const [saving, setSaving] = useState<string | null>(null)
   const [asking, setAsking] = useState(false)
   const [naming, setNaming] = useState(false)
+  const [marking, setMarking] = useState(false)
+  // The Mark row is where the mark picker opens from, so a wide screen draws it beside that row.
+  const markRow = useRef<HTMLButtonElement>(null)
   const busy = saving !== null
   const deleting = saving === "delete"
 
@@ -306,6 +312,20 @@ export function CanvasOptions({
                 <span className="max-w-[50%] truncate text-sm text-muted-foreground">
                   {canvas?.title}
                 </span>
+              </button>
+              {/* What its row in the sidebar draws: the mark is the record's, so the tap opens the
+                  picker rather than choosing here (issue #1065). */}
+              <button
+                ref={markRow}
+                type="button"
+                data-canvas-mark-row
+                className={cn(linkRowClass, "disabled:opacity-60")}
+                disabled={!canvas || busy}
+                onClick={() => setMarking(true)}
+              >
+                <CanvasMark mark={canvas?.mark} tint={canvas?.markTint} />
+                <RowText title="Mark" subtitle="The icon or emoji its sidebar row shows." />
+                <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
               </button>
             </Group>
 
@@ -388,6 +408,17 @@ export function CanvasOptions({
           onOpenChange={setNaming}
           title={canvas.title}
           onSave={(title) => onUpdate({ title })}
+        />
+      )}
+
+      {canvas && (
+        <CanvasMarkPicker
+          key={canvas.id}
+          open={marking}
+          onOpenChange={setMarking}
+          anchor={markRow}
+          canvas={canvas}
+          onUpdate={onUpdate}
         />
       )}
 
