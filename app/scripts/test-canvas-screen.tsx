@@ -9,6 +9,7 @@ import test from "node:test"
 import { StrictMode, act } from "react"
 import { Link, MemoryRouter, Route, Routes } from "react-router"
 
+import { DrawerContext } from "@/components/drawer-context"
 import { BRIDGE_MESSAGE, POINT_MESSAGE, type CanvasDoc } from "@/lib/canvas-bridge"
 import { SCROLL_MESSAGE } from "@/lib/canvas-document"
 import { takePoint, keepPoint } from "@/lib/canvas-point-pick"
@@ -31,6 +32,7 @@ import {
   find,
   findText,
   json,
+  laptop,
   missing,
   mount,
   nav,
@@ -318,12 +320,15 @@ test(
     try {
       await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
         await until(() => /Reading the canvas…/.test(text()), "the reading line")
-        const back = find('[aria-label="All canvases"]')
-        assert.ok(back, "the way back to the list leads the header")
+        // A phone's sidebar is behind the drawer, so its button leads the head: the way back to the
+        // list is the wide screen's, where the sidebar stands on screen and cannot be opened.
+        const drawer = find('[aria-label="Open conversations"]')
+        assert.ok(drawer, "the sidebar's button leads the header")
         assert.ok(
-          back.compareDocumentPosition(find("h1")!) & Node.DOCUMENT_POSITION_FOLLOWING,
+          drawer.compareDocumentPosition(find("h1")!) & Node.DOCUMENT_POSITION_FOLLOWING,
           "and it is drawn before the title",
         )
+        assert.ok(missing('[aria-label="All canvases"]'), "with no way back beside it")
         assert.ok(missing("[data-canvas-flip]"), "with no flip before there is a record")
         await act(async () => release())
         await settle()
@@ -402,8 +407,12 @@ test(
         const row = find('[data-slot="header-row"]')
         assert.ok(row, "the header's one row")
         assert.ok(
-          row.contains(find('[aria-label="All canvases"]')),
-          "the back control sits in the row",
+          row.contains(find('[aria-label="Open conversations"]')),
+          "the sidebar's button sits in the row",
+        )
+        assert.ok(
+          missing('[aria-label="All canvases"]'),
+          "and no way back, where the sidebar is a drawer",
         )
         await until(() => Boolean(find('button[aria-label="Undo"]')), "the Undo the version offers")
         const actions = find('[data-slot="header-actions"]')
@@ -417,6 +426,33 @@ test(
           missing('button[aria-label="Canvas options"]'),
           "no ellipsis offers the canvas's options",
         )
+      },
+    )
+  }),
+)
+
+test(
+  "a phone's canvas head opens the app's sidebar, where the canvas list stands",
+  atWidth(390, async () => {
+    // The head's way out on a phone is the sidebar: it holds the canvas list, and the drawer is the
+    // only door to it while the sidebar is collapsed (ADR 0130's row, read from the left).
+    serveCanvases({ version: 3, undos: 0 })
+    await seedCanvasChat(CANVAS.id)
+    const opened: string[] = []
+    await mount(
+      <DrawerContext.Provider value={() => opened.push("sidebar")}>
+        <MemoryRouter initialEntries={[`/canvas/${CANVAS.id}`]}>
+          <Routes>
+            <Route path="/canvas/:id" element={<CanvasView />} />
+          </Routes>
+        </MemoryRouter>
+      </DrawerContext.Provider>,
+      async () => {
+        await until(() => Boolean(find("iframe[data-canvas-frame]")), "the canvas to draw")
+        const drawer = find('[aria-label="Open conversations"]')
+        assert.ok(drawer, "the sidebar's button leads the header")
+        await click(drawer)
+        assert.deepEqual(opened, ["sidebar"], "and pressing it opens the sidebar")
       },
     )
   }),
@@ -836,11 +872,11 @@ test("a canvas with no version opens on Edit and gains Preview when the first ve
       assert.ok(composerField(), "the chat is what that address draws")
       assert.match(text(), /Your bot is building it…/, "and it says the bot is building it")
       assert.ok(missing("[data-canvas-flip]"), "with nothing to flip to")
-      const back = find('[aria-label="All canvases"]')
-      assert.ok(back, "the way back to the list is drawn")
+      const drawer = find('[aria-label="Open conversations"]')
+      assert.ok(drawer, "the sidebar's button leads the header")
       assert.ok(
-        back.compareDocumentPosition(find("h1")!) & Node.DOCUMENT_POSITION_FOLLOWING,
-        "and it leads the header",
+        drawer.compareDocumentPosition(find("h1")!) & Node.DOCUMENT_POSITION_FOLLOWING,
+        "and it is drawn before the title",
       )
 
       // The first version lands through the live record: Preview appears where it was absent and
@@ -1180,7 +1216,7 @@ test(
 
 test(
   "the canvas's header control steps back to the list rather than pushing it again",
-  atWidth(390, async () => {
+  laptop(async () => {
     serveCanvases({ version: 3, undos: 0 })
     await seedCanvasChat("c1")
     await mount(
