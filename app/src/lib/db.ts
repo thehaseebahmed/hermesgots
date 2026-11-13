@@ -108,8 +108,6 @@ export interface Settings {
   onboarded?: boolean
   /** Soft-wrap in tool output; unset until the user flips it (wrapped by default). */
   wrapToolOutput?: boolean
-  /** Bots whose old Netlify chat list was moved onto their Gots plugin and deleted. */
-  movedChats?: string[]
   /** This device's Web Push identity, local only: its id, its VAPID key pair and whether it's on. */
   push?: { device: string; vapidKey: string; vapidPublic: string; on: boolean }
   /** The Android app's push identity, local only: Firebase gives the token, this is its device id. */
@@ -166,7 +164,11 @@ export interface Profile {
   muted?: boolean
   /** Turned off in the app: hidden, and nothing checks on it. Local copy of the registry's flag. */
   disabled?: boolean
-  /** When its host last checked in with the registry. Local only. */
+  /**
+   * When this device's chat-list pass last heard the bot's host answer — the pass's own answer,
+   * written here at most once a minute. Local only: it is this device's record of what its own pass
+   * saw, never the account's, and the dot itself reads the answer the pass is holding.
+   */
   seenAt?: number
   /** The Gots plugin version its host last reported. Local only. */
   pluginVersion?: string
@@ -914,14 +916,6 @@ export interface ModelsDevCatalog {
   fetchedAt: number
 }
 
-/** BenchLM overall rankings cached on this device, with a 24-hour freshness window. */
-export interface OverallRankings {
-  id: "overall"
-  /** The rankings payload; its shape lives in `rankings.ts`. */
-  data: unknown
-  fetchedAt: number
-}
-
 /** The skills one bot last listed, kept so the composer's `/` menu opens on them (`skills.ts`). */
 export interface CachedSkills {
   /** The connection the list belongs to (one bot's server and key). */
@@ -1269,7 +1263,6 @@ export const db = new Dexie("gots") as Dexie & {
   vault: EntityTable<VaultKey, "id">
   drafts: EntityTable<Draft, "id">
   modelsDevCatalog: EntityTable<ModelsDevCatalog, "id">
-  overallRankings: EntityTable<OverallRankings, "id">
   dictations: EntityTable<SavedDictation, "id">
   dictationLog: EntityTable<DictationRecord, "id">
   dictationStats: EntityTable<DictationStats, "id">
@@ -1778,6 +1771,29 @@ db.version(45).stores({
 })
 
 /**
+ * v46: the setting that recorded each bot's move off the legacy chat document, gone with the move.
+ * A bot's chat list lives only with its plugin now, so no device has a bot to read once from Netlify
+ * and `Settings.movedChats` is a list nothing asks. The field is deleted rather than left behind:
+ * every save writes the settings row whole, but a row nobody rewrites would hold the list forever.
+ */
+db.version(46).upgrade((tx) =>
+  tx
+    .table("settings")
+    .filter((settings: Record<string, unknown>) => "movedChats" in settings)
+    .modify((settings: Record<string, unknown>) => {
+      delete settings.movedChats
+    }),
+)
+
+/**
+ * v47: the BenchLM rankings ship with the build, so the table this device cached them in goes
+ * (`src/lib/rankings-data.ts`). Nothing reads a row any more — the payload arrives with the app —
+ * so the cache has nothing left to serve, and dropping the store takes the rows a device still
+ * holds with it.
+ */
+db.version(47).stores({ overallRankings: null })
+
+/**
  * How many rows of one room's log this device keeps: the page a reader can scroll back through.
  * A room's log lives on its Host and is read by sequence, so a page is what a screen needs and no
  * more — without a bound, every fold and every read mark would pay for the room's whole history.
@@ -2014,6 +2030,13 @@ export function conversationsOf(profileId: string) {
     .between([profileId, Dexie.minKey], [profileId, Dexie.maxKey])
 }
 
+/**
+ * The title a chat wears until something is said in it: what a new one is made with, and what a
+ * list that names one reads as "nothing said here yet" — so a menu offering sessions to tag leaves
+ * these out rather than listing three rows all called the same thing.
+ */
+export const NEW_CHAT_TITLE = "New chat"
+
 export async function createConversation(
   profileId: string,
   fields: Partial<Pick<Conversation, "title" | "projectId" | "mode" | "modelChoice">> = {},
@@ -2022,7 +2045,7 @@ export async function createConversation(
   const conversation: Conversation = {
     id: randomId(),
     profileId,
-    title: "New chat",
+    title: NEW_CHAT_TITLE,
     hermesSessionId: `gots-${randomId()}`,
     createdAt: now,
     updatedAt: now,

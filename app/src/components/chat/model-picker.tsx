@@ -27,7 +27,7 @@ import { botModel, fullModel, hostChoice, shortModel, useModelInfo } from "@/lib
 import { modelsRead, samePick } from "@/lib/model-pick"
 import { usePickOne } from "@/lib/use-pick-one"
 import { MAX_COST_TIER, modelFacts, useModelCatalog, type Catalog } from "@/lib/models"
-import { overallScoreOf, useOverallRankings, type RankingsPayload } from "@/lib/rankings"
+import { overallScoreOf, useOverallRankings, type RankingsData } from "@/lib/rankings"
 import { tell } from "@/lib/tell"
 import { cn } from "@/lib/utils"
 
@@ -85,7 +85,7 @@ export function ModelPicker({
               ...modelFacts(catalog, { provider: p.slug, model: m }),
               benchlm:
                 sort.key === "benchlm"
-                  ? overallScoreOf(rankings, { provider: p.slug, model: m })
+                  ? overallScoreOf({ provider: p.slug, model: m })
                   : undefined,
             }),
             matched,
@@ -93,7 +93,7 @@ export function ModelPicker({
         }
       })
       .filter((p) => p.models.length)
-  }, [sorted, drilled, query, sort, catalog, rankings])
+  }, [sorted, drilled, query, sort, catalog])
 
   const form = usePopupForm()
   // A menu has no sheet to stack on, so a provider's models take its place, with a way back.
@@ -224,7 +224,7 @@ function ProviderModels({
 }: {
   provider: ModelProvider
   catalog: Catalog | undefined
-  rankings: RankingsPayload | undefined
+  rankings: RankingsData
   isChosen: (m: ModelChoice) => boolean
   onChoose: (choice: ModelChoice | undefined) => void
   /** Back to the providers, where the models take the picker's place rather than stack on it. */
@@ -240,11 +240,11 @@ function ProviderModels({
       sort,
       (m) => ({
         ...modelFacts(catalog, { provider: provider.slug, model: m }),
-        benchlm: overallScoreOf(rankings, { provider: provider.slug, model: m }),
+        benchlm: overallScoreOf({ provider: provider.slug, model: m }),
       }),
       matched,
     )
-  }, [provider, query, sort, catalog, rankings])
+  }, [provider, query, sort, catalog])
   return (
     <>
       <PopupHeader className={cn(onBack && "pl-16")}>
@@ -364,10 +364,9 @@ function CostSigns({ tier }: { tier: number | undefined }) {
   )
 }
 
-/** `BenchLM 87`, `BenchLM ?` for a loaded payload with no row, nothing before the payload lands. */
-function benchlmLabel(score: number | undefined, rankings: RankingsPayload | undefined) {
+/** `BenchLM 87`, or `BenchLM ?` where the shipped payload has no row for the model. */
+function benchlmLabel(score: number | undefined, rankings: RankingsData) {
   if (score !== undefined) return `BenchLM ${Math.round(score)}`
-  // "?" only once the payload is loaded: before that, no score is shown rather than a false miss.
   return rankings ? "BenchLM ?" : null
 }
 
@@ -380,12 +379,12 @@ function benchlmLabel(score: number | undefined, rankings: RankingsPayload | und
  */
 function modelDetail(
   catalog: Catalog | undefined,
-  rankings: RankingsPayload | undefined,
+  rankings: RankingsData,
   choice: ModelChoice,
 ) {
   if (!catalog) return undefined
   const facts = modelFacts(catalog, choice)
-  const benchlm = benchlmLabel(overallScoreOf(rankings, choice), rankings)
+  const benchlm = benchlmLabel(overallScoreOf(choice), rankings)
   // The score stands on its own: models.dev knows nothing else about an unlisted model.
   if (!facts.listed) return benchlm ? `${benchlm} · —` : "—"
   return (

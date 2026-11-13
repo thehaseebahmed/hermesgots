@@ -8,7 +8,8 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  # The payload the app ships is committed, so the refresh below writes to the repository.
+  contents: write
   issues: write
 
 jobs:
@@ -27,10 +28,27 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
         working-directory: app
+      # The scores the app ships are a committed file, so this is where they are kept fresh: one
+      # fetch of the overall surface, validated and written, and committed only when it moved.
+      - name: Refresh the shipped rankings
+        env:
+          BENCHLM_DATA_KEY: ${{ secrets.BENCHLM_DATA_KEY }}
+        run: node --experimental-strip-types scripts/build-rankings.mjs
+        working-directory: app
+      - name: Commit the refreshed payload
+        working-directory: app
+        run: |
+          if git diff --quiet -- src/lib/rankings-data.ts; then
+            echo "BenchLM's surface is the one already committed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/lib/rankings-data.ts
+          git commit -m "chore(rankings): refresh the BenchLM payload"
+          git push
       - name: Check model ids against BenchLM
         id: check
-        env:
-          MEMENTO_SITE_URL: ${{ vars.MEMENTO_CANDIDATE_URL || vars.MEMENTO_SITE_URL }}
         run: node --experimental-strip-types scripts/check-benchlm-matches.mjs --report "$RUNNER_TEMP/benchlm-report.json"
         working-directory: app
         continue-on-error: true
@@ -42,7 +60,7 @@ jobs:
         with:
           script: |
             const fs = require("fs")
-            // The check writes its report only once both hosts answered, so a missing file is a
+            // The check writes its report only once models.dev answered, so a missing file is a
             // fetch that failed — say so instead of failing to parse.
             let report
             try {
@@ -58,7 +76,7 @@ jobs:
                   "Unlisted unmatched ids (add a fix in model-match.ts or a reason in scripts/benchlm-known-gaps.json):",
                   ...report.failing.map((id) => `- ${id}`),
                 ]
-              : ["The check wrote no report, so BenchLM or models.dev could not be read. See the job log."]
+              : ["The check wrote no report, so models.dev could not be read. See the job log."]
             const body = lines.join("\n")
             const { data: found } = await github.rest.search.issuesAndPullRequests({
               q: `repo:${context.repo.owner}/${context.repo.repo} is:issue is:open label:benchlm-match in:title "${title}"`,

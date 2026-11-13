@@ -1,6 +1,6 @@
 import { useLiveQuery } from "dexie-react-hooks"
 import type { ReactNode } from "react"
-import { matchPath, NavLink, useLocation, type NavLinkProps } from "react-router"
+import { Link, matchPath, NavLink, useLocation, type NavLinkProps } from "react-router"
 import {
   AudioLinesIcon,
   BellOffIcon,
@@ -29,10 +29,11 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { botChatsPath } from "@/lib/bot-tabs"
 import { previewLine } from "@/lib/bot-chrome"
-import { useCanvasEnabled, usePinnedCanvases } from "@/lib/canvases"
+import { closeCanvas, useCanvasOpened } from "@/lib/canvas-open"
+import { useCanvasEnabled, usePinnedCanvases, type Canvas } from "@/lib/canvases"
 import { chatOwner } from "@/lib/chat-owner"
 import { compareChatOrder, waitsOnUser } from "@/lib/chat-list"
-import { presence } from "@/lib/registry"
+import { presence } from "@/lib/presence"
 import type { Conversation, Message, Profile } from "@/lib/db"
 import { db, isReply, newestMessage } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
@@ -40,7 +41,7 @@ import { useCanMakeRoom, useRoomNeeds, type RoomNeedsRow } from "@/lib/room"
 import { roomMembersLine, roomNeedsOf } from "@/lib/rooms"
 import { useLegacyChat } from "@/lib/legacy-chat"
 import { useMeetingsEnabled } from "@/lib/meetings"
-import { opensAsRoot, useNav } from "@/lib/nav"
+import { pressOpeningRoot, plainPress, useNav } from "@/lib/nav"
 import { useSyncState } from "@/lib/sync"
 import { BOT_SORTS, sortBots, useBotSort, useBotSummaries, useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
@@ -73,10 +74,7 @@ function RootLink({
     <NavLink
       to={to}
       replace
-      onClick={(event) => {
-        onClick?.(event)
-        opensAsRoot(() => root(to))(event)
-      }}
+      onClick={pressOpeningRoot(root, to, onClick)}
       {...props}
     />
   )
@@ -218,19 +216,51 @@ function PinnedCanvases({
   return (
     <>
       {pinned.map((canvas) => (
-        <RootLink
+        <CanvasRow
           key={canvas.id}
-          to={`/canvas/${canvas.id}`}
-          onClick={onNavigate}
-          aria-label={collapsed ? canvas.title : undefined}
-          data-canvas-pinned=""
-          className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
-        >
-          <FrameIcon className="size-5 text-muted-foreground" />
-          {!collapsed && <span className="min-w-0 truncate">{canvas.title}</span>}
-        </RootLink>
+          canvas={canvas}
+          collapsed={collapsed}
+          onNavigate={onNavigate}
+        />
       ))}
     </>
+  )
+}
+
+/**
+ * A pinned canvas's row. No `NavLink`: the canvas this tab opened marks it, not the address
+ * (`lib/canvas-open.ts`, ADR 0151).
+ */
+function CanvasRow({
+  canvas,
+  collapsed,
+  onNavigate,
+}: {
+  canvas: Canvas
+  collapsed: boolean
+  onNavigate?: () => void
+}) {
+  const { root } = useNav()
+  const to = `/canvas/${canvas.id}`
+  const opened = useCanvasOpened(canvas.id)
+  return (
+    <Link
+      to={to}
+      replace
+      onClick={pressOpeningRoot(root, to, (event) => {
+        onNavigate?.()
+        // A row's press is a way onto the canvas like any other and no open, so the mark the flow
+        // wrote goes with it (ADR 0151) — a press meant for a new tab leaves this tab as it was.
+        if (plainPress(event)) closeCanvas()
+      })}
+      aria-label={collapsed ? canvas.title : undefined}
+      aria-current={opened ? "page" : undefined}
+      data-canvas-pinned=""
+      className={(collapsed ? railClass : rowClass)({ isActive: opened })}
+    >
+      <FrameIcon className="size-5 text-muted-foreground" />
+      {!collapsed && <span className="min-w-0 truncate">{canvas.title}</span>}
+    </Link>
   )
 }
 
@@ -354,6 +384,8 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
     return found ? chatOwner(found).answerer : undefined
   }, [chat])
   const now = useNow()
+  // What this device's last chat-list pass answered for each bot: the dot's whole evidence.
+  const { chatStores } = useSyncState()
 
   return (
     <nav
@@ -421,7 +453,7 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
                         {previewLine({
                           line: preview,
                           title: latest?.title,
-                          online: presence(bot, now),
+                          online: presence(bot, now, chatStores[bot.id]),
                         })}
                       </span>
                       {waiting > 0 && (
@@ -693,6 +725,7 @@ export function ConversationList({
           {canvas && (
             <RootLink
               to="/canvas"
+              end
               onClick={onNavigate}
               aria-label={collapsed ? "Canvas" : undefined}
               className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}

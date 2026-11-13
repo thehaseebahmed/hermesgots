@@ -68,7 +68,6 @@ import { MAX_FALLBACKS } from "@/lib/fallback-list"
 import { useFallbackModels } from "@/lib/fallbacks"
 import { usePluginFeatureAnswers, usePluginVersion } from "@/lib/features"
 import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
-import { formatRelative } from "@/lib/format"
 import {
   DELEGATION_PAGE,
   GENERAL_PAGE,
@@ -101,9 +100,11 @@ import { usePickOne } from "@/lib/use-pick-one"
 import { setBotMuted } from "@/lib/push"
 import { seedsFromCache, useReadAttempt } from "@/lib/read-attempt"
 import { useReminders } from "@/lib/reminders"
-import { isOnline, removeHost, setBotEnabled } from "@/lib/registry"
+import { presenceLine } from "@/lib/presence"
+import { removeHost, setBotEnabled } from "@/lib/registry"
 import { SKILL_FEATURES } from "@/lib/skills"
 import { AppWords } from "@/lib/refusal"
+import { useSyncState } from "@/lib/sync"
 import { useNow } from "@/lib/threads"
 import { plural } from "@/lib/tools"
 import { cn } from "@/lib/utils"
@@ -154,16 +155,13 @@ function gated(page: BotTab): boolean {
 
 const GENERAL_ANSWERS = { fallbacks: "fallbacks" } as const
 
-/** The registry's Enabled flag, with when the bot's host last checked in. */
+/** The registry's Enabled flag, with when this device's last pass heard the bot's host answer. */
 function EnabledSetting({ profile }: { profile: Profile }) {
   const now = useNow()
   const [saving, setSaving] = useState(false)
   const refusal = useScreenRefusal()
-  const seen = profile.seenAt
-    ? isOnline(profile, now)
-      ? "Online"
-      : `Last seen ${formatRelative(profile.seenAt, Math.max(now, profile.seenAt))}`
-    : "Not seen yet"
+  const { chatStores } = useSyncState()
+  const seen = presenceLine(profile, now, chatStores[profile.id]) ?? "Not seen yet"
 
   return (
     <SwitchRow

@@ -157,7 +157,7 @@ async function resetRoom(bots: Profile[]) {
   seated = undefined
   held.id = undefined
   held.name = ""
-  await seedSettings({ onboarded: true, legacyChat: true, movedChats: bots.map((bot) => bot.id) })
+  await seedSettings({ onboarded: true, legacyChat: true })
   await db.profiles.clear()
   await db.profiles.bulkPut(bots)
   await db.conversations.clear()

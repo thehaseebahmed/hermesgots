@@ -83,7 +83,6 @@ import {
   saveSettings,
   type Profile,
 } from "@/lib/db"
-import { formatRelative } from "@/lib/format"
 import { wordsLabel } from "@/lib/dictation-log"
 import { useDictationTotals } from "@/lib/dictations"
 import { useLiveStatus, type LiveStatus } from "@/lib/live"
@@ -103,7 +102,8 @@ import {
   usePushFeatures,
 } from "@/lib/push"
 import type { PushCategory, PushFeature } from "@/lib/push-kinds"
-import { isOnline, presence, siteUrl } from "@/lib/registry"
+import { presence, presenceLine, type PresenceAnswer } from "@/lib/presence"
+import { siteUrl } from "@/lib/registry"
 import { AppWords } from "@/lib/refusal"
 import { tell } from "@/lib/tell"
 import { themeLabel } from "@/lib/theme"
@@ -396,10 +396,13 @@ function MenuScreen({
   )
 }
 
-/** A bot in the menu: its connectivity dot, then the bot itself, then when its host last checked in. */
+/** A bot in the menu: its connectivity dot, then the bot itself. */
 function BotRow({ profile, label }: { profile: Profile; label: string }) {
   const now = useNow()
-  const online = presence(profile, now)
+  // The chat-list pass's answer for this bot, when one has run: the dot is that and nothing else.
+  const { chatStores } = useSyncState()
+  const answer = chatStores[profile.id]
+  const online = presence(profile, now, answer)
   return (
     <Row
       to={`bots/${profile.id}`}
@@ -415,19 +418,17 @@ function BotRow({ profile, label }: { profile: Profile; label: string }) {
         </>
       }
       title={label}
-      subtitle={botStatus(profile, now)}
+      subtitle={botStatus(profile, now, answer)}
     />
   )
 }
 
-/** A bot's row subtext: a warning first, else when its host last checked in. */
-function botStatus(profile: Profile, now: number): string | undefined {
-  if (profile.disabled) return undefined
+/** A bot's row subtext: a warning first, else when this device last heard its host answer. */
+function botStatus(profile: Profile, now: number, answer?: PresenceAnswer): string | undefined {
+  // The dot's own rule, so a row never says Online beside no dot.
+  if (!profile.hostId || profile.disabled) return undefined
   if (pluginOutdated(profile.pluginVersion)) return "Plugin out of date"
-  if (!profile.seenAt) return undefined
-  return isOnline(profile, now)
-    ? "Online"
-    : `Last seen ${formatRelative(profile.seenAt, Math.max(now, profile.seenAt))}`
+  return presenceLine(profile, now, answer)
 }
 
 /** The row that opens the link sheet, at the end of the bots. */

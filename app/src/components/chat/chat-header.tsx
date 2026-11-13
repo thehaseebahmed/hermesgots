@@ -26,6 +26,10 @@ import { cn } from "@/lib/utils"
  * its line, the actions, every icon control a frosted outline circle.
  * `title` takes a node as well as a string, for a screen whose heading is also its way somewhere: the
  * chat list's name is the link to the bot's settings.
+ * `onTitlePress` makes the whole block — the title and the line under it — one press, for a screen
+ * whose title opens something: a thumb on the line, on the space between the lines or beside a short
+ * title lands as one on the title does, while the control the caller draws inside stays the one a
+ * reader and a keyboard press.
  * `className` can pin it in the page's flow instead.
  */
 export function ChatHeader({
@@ -40,6 +44,7 @@ export function ChatHeader({
   leading,
   actions,
   below,
+  onTitlePress,
   className,
 }: {
   title: ReactNode
@@ -54,6 +59,8 @@ export function ChatHeader({
   actions?: ReactNode
   /** What a pinned bar holds under its row, inside the same sticky box. */
   below?: ReactNode
+  /** The press the whole title block answers, for a title that is a control. */
+  onTitlePress?: () => void
   className?: string
 }) {
   const openDrawer = useOpenDrawer()
@@ -115,7 +122,17 @@ export function ChatHeader({
             centered && "justify-center",
           )}
         >
-          <div className={cn("flex min-w-0 flex-1 flex-col", centered && "items-center")}>
+          <div
+            className={cn(
+              "flex min-w-0 flex-1 flex-col",
+              centered && "items-center",
+              // The ring lives here, not on the caller's button, so the block can outline a focus the
+              // button owns: one tab stop, one ring.
+              onTitlePress &&
+                "cursor-pointer rounded-lg hover:bg-muted/60 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:focus-visible]:ring-inset",
+            )}
+            onClick={onTitlePress}
+          >
             {title &&
               (pinned || heading ? (
                 <h1 data-slot="header-title" className={titleClass}>
