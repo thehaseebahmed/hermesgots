@@ -96,13 +96,15 @@ test("each pull request action reads as what it took, not as an opening", async 
       transcriptRow("ship"),
       transcriptRow("push"),
       transcriptRow("update"),
+      transcriptRow("ready"),
+      transcriptRow("merge"),
       transcriptRow("status"),
     ],
     async () => {
       assert.equal(
         summary(),
-        "Opened a pull request, pushed the branch, updated a pull request, checked a pull request",
-        "four actions, four phrases, in the order they ran",
+        "Opened a pull request, pushed the branch, updated a pull request, marked a pull request ready, merged a pull request, checked a pull request",
+        "every action, its own phrase, in the order they ran",
       )
       // The sheet's own rows, where the arguments-as-JSON label used to be drawn in mono.
       await click(find('[data-slot="tool-group"]'))
@@ -113,6 +115,8 @@ test("each pull request action reads as what it took, not as an opening", async 
           "Opened a pull request",
           "Pushed the branch",
           "Updated a pull request",
+          "Marked a pull request ready",
+          "Merged a pull request",
           "Checked a pull request",
         ],
         "each row says what it did, and never the arguments it fell back to",
@@ -128,12 +132,14 @@ test("a call still running reads in the present, phrased by its action", async (
       transcriptRow("ship", { status: "running", endedAt: undefined }),
       transcriptRow("push", { status: "running", endedAt: undefined }),
       transcriptRow("update", { status: "running", endedAt: undefined }),
+      transcriptRow("ready", { status: "running", endedAt: undefined }),
+      transcriptRow("merge", { status: "running", endedAt: undefined }),
       transcriptRow("status", { status: "running", endedAt: undefined }),
     ],
     async () => {
       assert.equal(
         summary(),
-        "Opening a pull request, pushing the branch, updating a pull request, checking a pull request",
+        "Opening a pull request, pushing the branch, updating a pull request, marking a pull request ready, merging a pull request, checking a pull request",
         "each action in the present while it runs",
       )
     },
@@ -141,11 +147,11 @@ test("a call still running reads in the present, phrased by its action", async (
 })
 
 test("an action the tool never took reads as the generic row, never as a claim", async () => {
-  // Merging and closing are the user's decision, so the tool refuses them: a host that streams such a
-  // call anyway must not draw *Updated* over a write that never happened — nor *Opened* over anything.
+  // Closing is the user's decision, so the tool refuses it: a host that streams such a call anyway
+  // must not draw *Updated* over a write that never happened — nor *Opened* over anything.
   await drawn(
     [
-      transcriptRow("merge"),
+      transcriptRow("deliver"),
       transcriptRow("close"),
       streamedRow({ status: "completed", endedAt: STARTED * 1000 + 1000 }),
     ],
@@ -163,7 +169,7 @@ test("a row stored before the stamp reads its action from the label it fell back
       streamedRow({ label: args("status"), status: "completed", endedAt: STARTED * 1000 + 1000 }),
       // The same shape for a call the tool never took.
       streamedRow({
-        label: '{"action":"merge","pr":27}',
+        label: '{"action":"deliver","pr":27}',
         status: "completed",
         endedAt: STARTED * 1000,
       }),
