@@ -60,9 +60,18 @@ def git_auth_args(auth: Optional[str]) -> list[str]:
 
 
 class GitHubError(Exception):
-    def __init__(self, message: str, status: int = 502):
+    """GitHub refused a call, or couldn't be reached.
+
+    ``status`` is the answer this plugin gives for that failure, which is why every HTTP failure but
+    a 401 is a 502: the app reads a 404 as a plugin that isn't there. ``code`` keeps the status
+    GitHub itself answered where there was one, so a caller whose next step depends on *which*
+    refusal it was — the merge's 405, 409 and 422 — can act on it instead of reading prose.
+    """
+
+    def __init__(self, message: str, status: int = 502, code: Optional[int] = None):
         super().__init__(message)
         self.status = status
+        self.code = code
 
 
 class GitHubBusy(GitHubError):
@@ -186,7 +195,9 @@ def _fetch(
     except urllib.error.HTTPError as error:
         if error.code == 401:
             raise GitHubError("GitHub rejected the server's token.", 401) from None
-        raise GitHubError(_error_message(error) or f"GitHub answered {error.code}.") from None
+        raise GitHubError(
+            _error_message(error) or f"GitHub answered {error.code}.", 502, error.code
+        ) from None
     except (urllib.error.URLError, TimeoutError, ValueError):
         raise GitHubError("Couldn't reach GitHub from the server.") from None
     finally:
@@ -643,6 +654,45 @@ def forget_pull_request(repo_root: str, branch: str) -> None:
         del _pr_cache[key]
     for key in [key for key in _pr_failed if key[:2] == (repo_root, branch)]:
         del _pr_failed[key]
+
+
+# GitHub's only supported way to take a draft out of draft: the REST update endpoint documents no
+# `draft` field, so this mutation is the call, posted through the same seam as every other one.
+READY_MUTATION = (
+    "mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) "
+    "{ pullRequest { id isDraft } } }"
+)
+
+
+def _pull(repo: str, number: int, auth: str) -> Dict[str, Any]:
+    """One pull request, as GitHub answers it for its own number: the row a write is checked on."""
+    row = _request(f"/repos/{repo}/pulls/{number}", auth)
+    if not isinstance(row, dict):
+        raise GitHubError(f"GitHub didn't return {repo}#{number}.")
+    return row
+
+
+def mark_ready(repo: str, number: int, auth: str) -> Dict[str, Any]:
+    """Takes a draft pull request out of draft, so it can be reviewed (and then merged).
+
+    Read first for the pull request's node id, which is what the mutation names it by. One already
+    out of draft is answered as it is, so a retry after a dropped answer costs no call.
+    """
+    row = _pull(repo, number, auth)
+    if not row.get("draft"):
+        return _pr_or_error(repo, row, None)
+    node = row.get("node_id")
+    if not isinstance(node, str) or not node:
+        raise GitHubError(f"GitHub didn't name {repo}#{number} in a way it can be marked ready by.")
+    answer = _fetch("/graphql", auth, "POST", {"query": READY_MUTATION, "variables": {"id": node}})[0]
+    errors = answer.get("errors") if isinstance(answer, dict) else None
+    if isinstance(errors, list) and errors:
+        first = errors[0] if isinstance(errors[0], dict) else {}
+        said = first.get("message")
+        raise GitHubError(said if isinstance(said, str) and said else f"GitHub didn't mark {repo}#{number} ready.")
+    # The mutation answers the node, not the row the app reads, so the state it becomes is ours: a
+    # pull request out of draft is open on GitHub's row and open in the app either way.
+    return _pr_or_error(repo, {**row, "draft": False}, None)
 
 
 def create_pull_request(
