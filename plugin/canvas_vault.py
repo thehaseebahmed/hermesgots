@@ -1,10 +1,10 @@
 """A canvas's data copied into an OKF vault on its host, when that canvas's own switch is on.
 
-The vault is one fixed folder under the bot's own home — ``llm-wiki/canvas`` — and, under it, one
-folder a canvas, one a collection, and one markdown note a document (``VAULT`` is the fixed half,
-and ``canvases.py``'s ``vault`` the switch that says which canvases are copied). It is OKF's shape:
-a bundle of markdown files with YAML frontmatter, ``type`` the one key that has to be there, a
-concept's id being its path without the ``.md``, and ``index.md`` the folder's own file. So a
+The vault is one fixed folder under the plugin's data folder — ``plugin-data/gots/llm-wiki/canvas`` —
+and, under it, one folder a canvas, one a collection, and one markdown note a document (``VAULT`` is
+the fixed half, and ``canvases.py``'s ``vault`` the switch that says which canvases are copied). It is
+OKF's shape: a bundle of markdown files with YAML frontmatter, ``type`` the one key that has to be
+there, a concept's id being its path without the ``.md``, and ``index.md`` the folder's own file. So a
 bookmark is a file a vault's own tools can list and link, and the folder is named by a canvas's id
 rather than its title — escaped and digested as a note's name is — since a title is the user's to
 change and a rename would orphan every note, and a collection is a page's to name with anything at all.
@@ -35,7 +35,8 @@ the file and the host stamped the document:
 Turning the switch off stops the writing and deletes nothing already written, since a wiki the user
 may have linked and edited is not the app's to take away; a canvas the store no longer holds is
 never walked, so its notes stay as they are. The one thing deleted is a document the store itself
-stopped naming, because the vault exists to say what the store holds.
+stopped naming, because the vault exists to say what the store holds. A build before the folder
+moved wrote its vault at ``<home>/llm-wiki``: that copy stays where it is.
 """
 
 from __future__ import annotations
@@ -53,12 +54,12 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 from . import canvas_docs, canvases, ticker
-from .store import connect, db_path
+from .store import connect, data_dir, db_path
 
 logger = logging.getLogger(__name__)
 
-# Where a bot's vault is, under its home: one fixed path rather than a folder the user chose, since
-# a path in settings is a second thing to validate and the home already names whose vault it is.
+# Where a bot's vault is, under the plugin's own data folder — one fixed folder rather than a path the
+# user chose, which would be a second thing to validate.
 VAULT = ("llm-wiki", "canvas")
 
 # A folder's own file, which every folder in an OKF bundle carries and no document is ever written
@@ -106,8 +107,8 @@ _woken_at: float = float("-inf")
 
 
 def root(home: Path) -> Path:
-    """Where this bot's vault is: ``<its home>/llm-wiki/canvas``, and nowhere the user chose."""
-    return home.joinpath(*VAULT)
+    """Where this bot's vault is, under the plugin's own data folder, and nowhere the user chose."""
+    return data_dir(home).joinpath(*VAULT)
 
 
 def wake() -> None:

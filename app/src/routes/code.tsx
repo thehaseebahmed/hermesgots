@@ -4,7 +4,6 @@ import {
   CheckIcon,
   CircleAlertIcon,
   CodeXmlIcon,
-  FolderIcon,
   GitPullRequestArrowIcon,
   LockIcon,
   PlusIcon,
@@ -374,7 +373,6 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
                       active={chip === key}
                       onClick={() => setChip(chip === key ? undefined : key)}
                     >
-                      <FolderIcon className="size-4" />
                       {project.name}
                     </Chip>
                   ))}

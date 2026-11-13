@@ -8,7 +8,6 @@ import { botChatsPath } from "@/lib/bot-tabs"
 import { getActiveProfile } from "@/lib/db"
 import { useLaunchRestore, useRecordLastChat } from "@/lib/launch"
 import { warmCatalog } from "@/lib/models"
-import { warmRankings } from "@/lib/rankings"
 import { useShareReceiver } from "@/lib/share"
 import { toHex } from "@/lib/theme"
 import { useLegacyChat } from "@/lib/legacy-chat"
@@ -103,11 +102,11 @@ function MovedProject() {
 function AppRoutes() {
   useRecordLastChat()
   useShareReceiver()
-  // The model sheet reads the catalog and rankings on every open, so warm them here: a
-  // returning user's facts and scores refresh in the background without the sheet fetching.
+  // The model sheet reads the models.dev catalog on every open, so warm it here: a returning
+  // user's facts refresh in the background without the sheet fetching. The scores need no warm of
+  // their own — the payload they come from ships with the build.
   useEffect(() => {
     void warmCatalog()
-    void warmRankings()
   }, [])
   if (!useLaunchRestore()) return null
   return (

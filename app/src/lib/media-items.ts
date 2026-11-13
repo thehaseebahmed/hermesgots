@@ -37,6 +37,34 @@ export function previewItem(item: MediaItem, extra: Partial<PreviewItem> = {}): 
 }
 
 /**
+ * A folder's files as the Previewer takes them: the ones it draws, in the order the folder draws
+ * them, each still to be signed, and where one of them sits among them. The filter is the app's one
+ * rule (`drawnCell`), asked of the name because the host has not been asked yet — so a note, an
+ * archive and a phone's HEIC are stepped over rather than drawn as a pane that can never fill, and
+ * the tap that lands on one is still the platform's (ADR 0111). Nothing here carries the library
+ * folder's *name*: a page's `folder` is a path on the host, and the host's own answer fills it.
+ *
+ * A place of `-1` is a file this list leaves out — its tap opens alone, as it always did.
+ */
+export function folderItems(
+  files: { name: string; path: string }[],
+  at: number,
+): { items: PreviewItem[]; index: number } {
+  const drawn = files.filter((file) => drawnCell(undefined, file.name) !== "file")
+  return {
+    items: drawn.map((file) => ({
+      key: file.path,
+      name: file.name,
+      // The host hasn't said what it is yet; the name said enough to place it.
+      type: "",
+      kind: mediaKind(undefined, file.name) as PreviewItem["kind"],
+      state: "reading",
+    })),
+    index: drawn.findIndex((file) => file.path === files[at]?.path),
+  }
+}
+
+/**
  * A thread's files as it draws them, from what the host answered for each — a reply's `MEDIA:` tags,
  * or a room row's manifest — a file still being read carries no URL yet, and its type (or, where it
  * names none, its extension) decides what kind of cell holds its place. A file the host has no copy
