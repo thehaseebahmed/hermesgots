@@ -1,4 +1,4 @@
-import { splitAttachments, steerWords } from "../lib/attachment-text.ts"
+import { steerWords } from "../lib/attachment-text.ts"
 import {
   boundaryOf,
   isSeamScaffolding,
@@ -6,11 +6,11 @@ import {
   type SummaryRows,
 } from "../lib/compaction-seam.ts"
 import type { Attachment, MessageStats } from "../lib/db.ts"
-import { mentionsIn, type Mention } from "../lib/mention-marker.ts"
+import type { Mention } from "../lib/mention-marker.ts"
 import { progressReminderNotes } from "../lib/progress-reminder.ts"
-import { pointsIn, type CanvasPoint } from "../lib/point-marker.ts"
+import type { CanvasPoint } from "../lib/point-marker.ts"
 import { isRoutineRow } from "../lib/routine-message.ts"
-import { requestIn } from "../lib/retry-message.ts"
+import { readRequest } from "../lib/request-text.ts"
 import { rowText, rowWords, type RowContent } from "../lib/row-text.ts"
 
 import type { Timing } from "../lib/reply-stats.ts"
@@ -116,18 +116,13 @@ export interface Turn {
 export function requestOf(
   content: string,
 ): Pick<Turn, "user" | "files" | "retry" | "points" | "mentions"> {
-  const request = requestIn(content)
-  // The marker blocks are peeled in the reverse of the order a send writes them — the files, then
-  // the mentions, then the points — since each decode trims only its own trailing block.
-  const { text, attachments } = splitAttachments(request)
-  const { text: withoutMentions, mentions } = mentionsIn(text)
-  const { text: words, points } = pointsIn(withoutMentions)
+  const request = readRequest(content)
   return {
-    user: words,
-    ...(attachments.length ? { files: attachments.map(sentFileOf) } : {}),
-    ...(points.length ? { points } : {}),
-    ...(mentions.length ? { mentions } : {}),
-    ...(request === content ? {} : { retry: true as const }),
+    user: request.text,
+    ...(request.attachments.length ? { files: request.attachments.map(sentFileOf) } : {}),
+    ...(request.points.length ? { points: request.points } : {}),
+    ...(request.mentions.length ? { mentions: request.mentions } : {}),
+    ...(request.retry ? { retry: true as const } : {}),
   }
 }
 

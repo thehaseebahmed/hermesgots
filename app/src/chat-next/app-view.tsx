@@ -39,11 +39,9 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { AgentsContext, runningAgents, type AgentsSource } from "@/lib/agents"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
-import { attachmentsText } from "@/lib/attachment-text"
 import { chatFlow } from "@/lib/chat-flow"
-import { pointText } from "@/lib/point-marker"
+import { markRequest } from "@/lib/request-text"
 import { compactionMarks } from "@/lib/compactions"
-import { mentionText } from "@/lib/mention-marker"
 import { clarifyWire, questionAt, questionsIn } from "@/lib/clarify"
 import { db, type ApprovalChoice, type ClarifyQuestion, type Message } from "@/lib/db"
 import type { DelegatedAgent } from "@/lib/hermes"
@@ -139,8 +137,12 @@ export function AppThreadView({
       // the same request, and the element it named is part of that request. The mentions ride there
       // for the same reason: the fold peeled their ids off the words the turn kept, so the session
       // the request named is only asked again if the retry writes the line back.
-      const request = attachmentsText(
-        mentionText(pointText(failedTurn.user, failedTurn.points ?? []), failedTurn.mentions ?? []),
+      const request = markRequest(
+        {
+          text: failedTurn.user,
+          points: failedTurn.points ?? [],
+          mentions: failedTurn.mentions ?? [],
+        },
         files,
       )
       await latestSend.current(retryText(request), [], { retry: true })

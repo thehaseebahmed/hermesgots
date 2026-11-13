@@ -37,8 +37,8 @@ import { attachmentUrl, drawable } from "@/lib/attachment-url"
 import { drawnCell, mediaKind } from "@/lib/media-kind"
 import { previewItem } from "@/lib/media-items"
 import type { Attachment, Profile } from "@/lib/db"
-import { mentionText, type Mention } from "@/lib/mention-marker"
-import { pointText, type CanvasPoint } from "@/lib/point-marker"
+import type { Mention } from "@/lib/mention-marker"
+import type { CanvasPoint } from "@/lib/point-marker"
 import type { PluginFeatureAnswer } from "@/lib/features"
 
 import { flushDrafts, loadDraft, saveDraft, saveDraftToChat, useDraftText } from "@/lib/drafts"
@@ -74,6 +74,7 @@ import {
 import { enterSends, isDoubleEscape, isInterrupt, isSendChord } from "@/lib/keys"
 import { mentionToken, pickMention, rankMentions } from "@/lib/mention"
 import { useMentionRows, type MentionRow } from "@/lib/mentions"
+import { markRequest } from "@/lib/request-text"
 import { useSkills } from "@/lib/skills"
 import { midReply, steerAsked } from "@/lib/steer"
 import { runnableSkills } from "@/lib/skills-cache"
@@ -114,7 +115,7 @@ export function Composer({
   onCommand,
   connection,
   botName = "Hermes",
-  mentions,
+  mentionable,
   dictationHint,
   dictationWords,
   model,
@@ -155,10 +156,10 @@ export function Composer({
   connection: HermesConfig
   botName?: string
   /**
-   * What this composer may tag under an `@`: the bot it speaks to, and the chat it is, so that
-   * neither the bot's own chats nor this chat is offered. Absent on a surface that tags nothing.
+   * What may be tagged under an `@`: the bot whose sessions the menu offers, and the chat this is,
+   * which is never one of them. Absent on a surface that tags nothing.
    */
-  mentions?: { bot: Profile; here?: string }
+  mentionable?: { bot: Profile; here?: string }
   /** Names the chat may mention (its title, a project's repos), to help the host hear them. */
   dictationHint?: string
   /** The bot's vocabulary: the names and words its dictation is written with. */
@@ -318,7 +319,7 @@ export function Composer({
   // When the last Escape that had nothing else to close was pressed, for the double that clears.
   const lastEscape = useRef<number | null>(null)
   const listId = useId()
-  const atListId = useId()
+  const tagListId = useId()
   const dictationInfo = useDictationInfo(connection)
   const placeLanded = useRef<(landed: string, takeId: TakeId) => void>(() => {})
   const dictation = useChunkedDictation(
@@ -401,10 +402,14 @@ export function Composer({
   // The menu follows the caret: a `/` or an `@` that begins a word opens one, wherever in the message
   // it is. A caret sits in one token or none, so exactly one list can stand at a time.
   const token = slashToken(value, caret)
-  const at = plain || !mentions ? null : mentionToken(value, caret)
+  const tag = plain || !mentionable ? null : mentionToken(value, caret)
   const skills = useSkills(connection, !plain && Boolean(token) && !disabled)
-  const offered = useMentionRows(mentions?.bot, mentions?.here, !plain && Boolean(at) && !disabled)
-  const atRows = at ? rankMentions(offered.rows, at.query) : []
+  const offered = useMentionRows(
+    mentionable?.bot,
+    mentionable?.here,
+    !plain && Boolean(tag) && !disabled,
+  )
+  const tagRows = tag ? rankMentions(offered, tag.query) : []
   const skillItems: SlashItem[] =
     skills.status === "ok"
       ? runnableSkills(skills.skills).map((skill) => ({ kind: "skill", ...skill }))
@@ -413,18 +418,19 @@ export function Composer({
     plain || !token
       ? []
       : rankSlashItems([...localCommands(), ...(busy ? SEND_COMMANDS : []), ...skillItems], token)
-  // Escape closes a menu until the text changes: any edit opens it again, and so does a new `/`.
+  // Escape closes a menu until the text changes: any edit opens it again, whichever token it types.
   const slashOpen =
     !plain &&
     token !== null &&
     !dismissed &&
     !disabled &&
     (slashItems.length > 0 || skills.status !== "ok")
-  // The `@` menu stands only over a row, so a query nothing matches leaves the field as it was.
-  const mentionOpen = !plain && Boolean(at) && !dismissed && !disabled && atRows.length > 0
+  // The `/` menu opens while its host read is out; a mention's rows are this device's own, so a
+  // query that matches none of them has nothing to stand over and no menu opens.
+  const mentionOpen = !plain && Boolean(tag) && !dismissed && !disabled && tagRows.length > 0
   const menu: "slash" | "mention" | null = slashOpen ? "slash" : mentionOpen ? "mention" : null
-  const shown = menu === "mention" ? atRows : slashItems
-  const openId = menu === "mention" ? atListId : listId
+  const shown = menu === "mention" ? tagRows : slashItems
+  const openId = menu === "mention" ? tagListId : listId
   const activeIndex = Math.min(active, Math.max(shown.length - 1, 0))
   // The caret follows the field. A pick places it (`caretWanted`); anything else that writes the
   // value — a restored draft, dictation, a message handed back after a failed send — leaves it
@@ -465,9 +471,9 @@ export function Composer({
     setValue(next.text)
   }
 
-  const pickAt = (row: MentionRow) => {
-    if (!at) return
-    const next = pickMention(value, at, row.name)
+  const pickTag = (row: MentionRow) => {
+    if (!tag) return
+    const next = pickMention(value, tag, row.name)
     caretWanted.current = next.caret
     setDismissed(false)
     setValue(next.text)
@@ -489,7 +495,7 @@ export function Composer({
     // on in the order every reader peels them — the words, the point lines, then the mentions. A
     // steer is a nudge at the reply already running, so it carries neither.
     const live = mentionsHeld.filter((mention) => text.includes(`@${mention.name}`))
-    const marked = steer ? text : mentionText(pointText(text, points), live)
+    const marked = steer ? text : markRequest({ text, points, mentions: live })
     const carried = steer ? [] : points
     const carriedPicks = steer ? [] : live
     setValue("")
@@ -768,7 +774,7 @@ export function Composer({
         event.key === "Tab"
       ) {
         event.preventDefault()
-        if (menu === "mention") pickAt(atRows[activeIndex])
+        if (menu === "mention") pickTag(tagRows[activeIndex])
         else pick(slashItems[activeIndex])
         return
       }
@@ -880,11 +886,10 @@ export function Composer({
       )}
       {menu === "mention" && (
         <MentionMenu
-          id={atListId}
-          rows={atRows}
+          id={tagListId}
+          rows={tagRows}
           active={activeIndex}
-          status={offered.status}
-          onPick={pickAt}
+          onPick={pickTag}
           onActive={setActive}
         />
       )}

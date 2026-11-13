@@ -45,6 +45,7 @@ import {
   type TurnUsage,
 } from "@/lib/hermes"
 import { attachmentsText, splitAttachments } from "@/lib/attachment-text"
+import { readRequest } from "@/lib/request-text"
 import { progressReminderNote, progressRemindersShown } from "@/lib/progress-reminder"
 import { measureReply } from "@/lib/reply-stats"
 import { wireContent } from "@/lib/attachments"
@@ -1537,7 +1538,7 @@ async function syncQueue(conversationId: string) {
       const mine = byId.get(item.id)
       // The host's stored text may carry the marker lines the send wrote, which are never the
       // message's words — a row in the thread draws the same way whether it is queued or sent.
-      const folded = splitAttachments(item.text)
+      const folded = readRequest(item.text)
       // This device's copy first, then what the host answered for, then what the text's own markers
       // name.
       const own = mine?.attachments?.length ? mine.attachments : attachmentsOf(item)

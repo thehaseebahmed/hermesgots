@@ -13,10 +13,8 @@ import { NOT_SENT } from "../lib/words.ts"
 import { clip, describeCall, parseArgs, writeStats } from "../lib/tool-calls.ts"
 import { appendThinking, type ReasoningRun } from "../lib/thinking.ts"
 import { actionOfPreview, settleTool } from "../lib/tools.ts"
-import { pointsIn, type CanvasPoint } from "../lib/point-marker.ts"
-import { mentionsIn } from "../lib/mention-marker.ts"
-import { requestIn } from "../lib/retry-message.ts"
-import { splitAttachments } from "../lib/attachment-text.ts"
+import type { CanvasPoint } from "../lib/point-marker.ts"
+import { readRequest } from "../lib/request-text.ts"
 
 import { drawsRequest, type ToolCall, type Turn } from "./fold.ts"
 
@@ -69,7 +67,8 @@ export const replyId = (chat: string, index: number) => `${turnId(chat, index)}-
  * them — attachments last, so they go first, then the mentions, then the points.
  */
 export function messageParts(text: string): { text: string; points: CanvasPoint[] } {
-  return pointsIn(mentionsIn(splitAttachments(requestIn(text)).text).text)
+  const request = readRequest(text)
+  return { text: request.text, points: request.points }
 }
 
 /** A not-sent row's words and points. */
