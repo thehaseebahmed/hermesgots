@@ -35,12 +35,12 @@ import {
 } from "@/lib/chat-list"
 import { labelOf } from "@/lib/bot-name"
 import {
+  chatFilterOf,
   conversationsOf,
   db,
-  getSettings,
   isReply,
   newestMessage,
-  saveSettings,
+  saveChatFilter,
   type Profile,
 } from "@/lib/db"
 import type { LiveRunStatus } from "@/lib/hermes"
@@ -227,13 +227,15 @@ function ChatList({
   // search at all there: one field, in the one place this width puts it (ADR 0145).
   const wide = useXLarge()
   const [query, setQuery] = useState("")
-  // The pill this device keeps, read as the key itself rather than the settings row: a live query that
-  // answered a fresh object would re-render the list on every sync write (the reason `useStoredSort`
-  // records), and a key an older build wrote is no pill at all.
-  const keptKey = useLiveQuery(async () => (await getSettings()).chatFilter ?? null, [])
+  // The pill this bot's list keeps on this device, read as the key itself rather than the settings
+  // row: a live query that answered a fresh object would re-render the list on every sync write (the
+  // reason `useStoredSort` records), and a key an older build wrote is no pill at all. Read by this
+  // bot's id, so a press in another bot's list is not this list's news — and no document carries it,
+  // since a pill is how this device reads one bot's rows, not a fact about the account (ADR 0145).
+  const keptKey = useLiveQuery(async () => (await chatFilterOf(bot.id)) ?? null, [bot.id])
   const filter: ChatFilter = isChatFilter(keptKey) ? keptKey : "all"
   const chooseFilter = (next: ChatFilter) =>
-    void saveSettings({ chatFilter: next }).catch(quietly("Saving the filter"))
+    void saveChatFilter(bot.id, next).catch(quietly("Saving the filter"))
   // The pill narrows first and the search narrows what it kept, so the two emptinesses stay apart: a pill
   // that holds nothing says its own sentence, and a pill whose rows the words miss says the search's.
   const kept = useMemo(() => filterChatRows(rows, filter, marks), [rows, filter, marks])

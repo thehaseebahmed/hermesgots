@@ -95,10 +95,14 @@ export interface Settings {
   codeSort?: CodeSort
   codeSortDir?: SortDir
   /**
-   * The pill a bot's list narrows its rows by, as `chat-list.ts`'s own key; unset is All. Local, like the
-   * sorts beside it: a filter is how this device is being read, not a fact about the account (ADR 0145).
+   * The pill each bot's list narrows its rows by, as `chat-list.ts`'s own key, by the bot it was
+   * pressed in; a bot with no entry is All. Local, like the sorts beside it: a filter is how this
+   * device is being read, not a fact about the account (ADR 0145). Per bot, because a pill pressed in
+   * one list says nothing about another — and on the settings row rather than in a record of its own
+   * because sync carries an appearance record named by hand from `APPEARANCE_FIELDS`, so nothing else
+   * on this row can reach another device.
    */
-  chatFilter?: ChatFilter
+  chatFilters?: Record<string, ChatFilter>
   activeProfileId?: string
   /** The bot the Bubble hears with; chat navigation never moves it. */
   bubbleProfileId?: string
@@ -1778,6 +1782,29 @@ db.version(45).stores({
 })
 
 /**
+ * v46: a bot's list keeps its own pill. The single `chatFilter` a build before this one kept was every
+ * bot's — pressing Rooms in one list pressed it in all of them — so it seeds every bot that exists,
+ * which is what each of their lists showed a moment before, and the key goes rather than being left
+ * beside the map for a reader to fall back to. A bot added later has no entry and opens on All.
+ *
+ * The key is deliberately not in `RETIRED_SETTINGS_KEYS`: that list is also what v23's upgrade strips,
+ * so a device arriving from that far back would lose its pill before this upgrade could seed it, and
+ * no build older than this one can open the database to write the key again.
+ */
+db.version(46).upgrade(async (tx) => {
+  const settings = tx.table("settings")
+  const row = (await settings.get("settings")) as Record<string, unknown> | undefined
+  if (!row || !("chatFilter" in row)) return
+  const { chatFilter, ...rest } = row
+  const chatFilters: Record<string, unknown> = {
+    ...(rest.chatFilters as Record<string, unknown> | undefined),
+  }
+  const bots = (await tx.table("profiles").toCollection().primaryKeys()) as string[]
+  for (const id of bots) if (chatFilters[id] === undefined) chatFilters[id] = chatFilter
+  await settings.put({ ...rest, chatFilters })
+})
+
+/**
  * How many rows of one room's log this device keeps: the page a reader can scroll back through.
  * A room's log lives on its Host and is read by sequence, so a page is what a screen needs and no
  * more — without a bound, every fold and every read mark would pay for the room's whole history.
@@ -1822,6 +1849,25 @@ export async function saveSettings(patch: Partial<Omit<Settings, "id">>) {
 /** Saves an appearance switch; the clock moves so sync carries the change to the account's devices. */
 export async function saveAppearance(patch: Partial<Appearance>) {
   await saveSettings({ ...patch, appearanceAt: Date.now() })
+}
+
+/** The pill this device keeps for one bot's list, or undefined where it has never pressed one. */
+export async function chatFilterOf(profileId: string) {
+  const { chatFilters = {} } = await getSettings()
+  return chatFilters[profileId]
+}
+
+/**
+ * Keeps the pill pressed in one bot's list, and only that bot's: the map is read and put back inside
+ * one transaction, so a press in two lists at once — or a save of the appearance switches beside it —
+ * cannot lose the other's entry. A filter is this device's reading of a list, never a fact about the
+ * account, so nothing here is named in sync's `settings` document (ADR 0145).
+ */
+export async function saveChatFilter(profileId: string, filter: ChatFilter) {
+  await db.transaction("rw", db.settings, async () => {
+    const { chatFilters = {} } = await getSettings()
+    await saveSettings({ chatFilters: { ...chatFilters, [profileId]: filter } })
+  })
 }
 
 /**
@@ -1966,6 +2012,7 @@ export async function deleteProfile(id: string, { remote = false, last = false }
     db.canvasDocs,
     db.canvasSweeps,
     db.canvasOutbox,
+    db.settings,
   ]
   return db.transaction("rw", tables, async () => {
     const alone = (await db.profiles.count()) <= 1
@@ -2001,6 +2048,13 @@ export async function deleteProfile(id: string, { remote = false, last = false }
     }
     await db.conversations.bulkDelete(ids)
     await db.profiles.delete(id)
+    // This device's reading of the bot's list goes with the bot, so one added again starts on All
+    // rather than on a pill pressed in a list the reader has forgotten.
+    const { chatFilters } = await getSettings()
+    if (chatFilters?.[id]) {
+      const { [id]: _gone, ...kept } = chatFilters
+      await saveSettings({ chatFilters: kept })
+    }
     if (!remote) await db.tombstones.put({ id: `bot:${id}`, deletedAt: Date.now(), profileId: id })
     if (alone) await db.profiles.add(newProfile({}, []))
     return true
