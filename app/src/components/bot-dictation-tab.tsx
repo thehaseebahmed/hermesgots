@@ -90,6 +90,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
   const navigate = useNavigate()
   const words = readVocabulary(profile.vocabulary)
   const info = useModelInfo(profile)
+  const providers = info?.providers ?? []
   const own = botModel(profile, info)
   const [pick, setPick] = useState<"speech" | "cleanup" | "level">()
   // The row whose form is open, wherever it sits on the page: one surface serves them all.
@@ -276,6 +277,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
           open={pick === "cleanup"}
           title="Cleanup model"
           profile={profile}
+          providers={providers}
           choice={settings.cleanup.model ?? undefined}
           fallback={{ label: "Default", model: own?.model }}
           onPick={(next) => (speech.saving ? undefined : void speech.chooseCleanup(next ?? null))}

@@ -86,6 +86,7 @@ import {
   REMINDER_LEVELS,
   setGeneralSetting,
   type GeneralTab,
+  type ModelProvider,
   type ReminderLevel,
 } from "@/lib/hermes"
 import { cachedHost, keepHost } from "@/lib/host-cache"
@@ -678,6 +679,7 @@ function GeneralPage({
   const answers = usePluginFeatureAnswers(profile, GENERAL_ANSWERS)
   const delegation = tab === "delegation"
   const info = useModelInfo(profile)
+  const providers = info?.providers ?? []
   const own = botModel(profile, info)
   const chain = useFallbackModels(delegation ? null : profile)
   const subagent = useDelegationModel(delegation ? profile : null)
@@ -788,7 +790,7 @@ function GeneralPage({
           {/* The row is the page's own lead row, drawn only over a page the host let this app read: a
               refused page says so in its banner and carries no row (#992). */}
           {delegation && subagent.supported && block && (
-            <SubagentModelRow profile={profile} record={subagent} own={own} />
+            <SubagentModelRow profile={profile} providers={providers} record={subagent} own={own} />
           )}
           {!delegation && (
             <ValueRow
@@ -823,6 +825,7 @@ function GeneralPage({
           open={pick === "model"}
           title="Model"
           profile={profile}
+          providers={providers}
           choice={own}
           fallback={{ label: "Default", model: info?.model }}
           onPick={(next) => void setDefaultModel(profile, next)}
@@ -885,10 +888,12 @@ function GeneralPage({
 // so the raw `delegation.*` keys are never rows.
 function SubagentModelRow({
   profile,
+  providers,
   record,
   own,
 }: {
   profile: Profile
+  providers: ModelProvider[]
   record: ReturnType<typeof useDelegationModel>
   own: ReturnType<typeof botModel>
 }) {
@@ -908,6 +913,7 @@ function SubagentModelRow({
         open={open}
         title="Subagent model"
         profile={profile}
+        providers={providers}
         choice={record.pick}
         fallback={{ label: "Default model", model: own?.model }}
         onPick={(next) => record.save(next)}
@@ -1110,6 +1116,7 @@ function BotCard({ profile, onOpen }: { profile: Profile; onOpen: (id: string) =
 function ModelsPage({ profile }: { profile: Profile }) {
   const [pick, setPick] = useState<string>()
   const info = useModelInfo(profile)
+  const providers = info?.providers ?? []
   const own = botModel(profile, info)
 
   return (
@@ -1129,6 +1136,7 @@ function ModelsPage({ profile }: { profile: Profile }) {
         open={pick === "model"}
         title="Model"
         profile={profile}
+        providers={providers}
         choice={own}
         fallback={{ label: "Default model", model: own?.model }}
         onPick={(next) => (next ? updateProfile(profile.id, { model: next.model }) : undefined)}
@@ -1207,6 +1215,7 @@ function FallbacksPage({ profile }: { profile: Profile }) {
         open={pick !== undefined}
         title="Fallback provider"
         profile={profile}
+        providers={providers}
         choice={pick === undefined ? undefined : list[pick]}
         fallback={{ label: "None" }}
         onPick={(next) => {

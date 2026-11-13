@@ -31,8 +31,8 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import type { ModelChoice, Profile } from "@/lib/db"
+import type { ModelProvider } from "@/lib/hermes"
 import type { RefusalHold } from "@/lib/refusal"
-import { useModelInfo } from "@/lib/model-info"
 import { useRefusal, useSaidRefusal } from "@/lib/use-refusal"
 import { holdsUnsavedChanges, useUnsavedChanges } from "@/lib/unsaved"
 import { cn } from "@/lib/utils"
@@ -788,11 +788,15 @@ export function EditForm({
 /**
  * One model pick, wherever a setting offers one: its surface, the sentence a host that answered no
  * models leaves, and the close every pick makes. `onPick`'s refusal is said once, over the page.
+ *
+ * The host's models arrive from the opener rather than being read here: the row that opens this
+ * sheet is the one deciding whether to open it, and it holds the list already.
  */
 export function ModelPick({
   open,
   title,
   profile,
+  providers,
   choice,
   fallback,
   onPick,
@@ -801,6 +805,8 @@ export function ModelPick({
   open: boolean
   title: string
   profile: Profile
+  /** The host's models as the opener read them: empty while nothing usable came back. */
+  providers: ModelProvider[]
   /** The model the pick marks as in force. */
   choice?: ModelChoice
   /** The row that clears the choice: its label and the model it runs. */
@@ -808,8 +814,6 @@ export function ModelPick({
   onPick: (choice: ModelChoice | undefined) => void | Promise<void>
   onClose: () => void
 }) {
-  const info = useModelInfo(profile)
-  const providers = info?.providers ?? []
   // The pick closes as it writes, so the words land on the page the pick was opened from.
   const refusal = useScreenRefusal()
   return (

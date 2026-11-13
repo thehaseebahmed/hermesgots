@@ -6,7 +6,14 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { modelOf, pickOf, pinOf, storedPick, wantsPin } from "../src/lib/model-pick.ts"
+import {
+  modelChoices,
+  modelOf,
+  pickOf,
+  pinOf,
+  storedPick,
+  wantsPin,
+} from "../src/lib/model-pick.ts"
 
 const sonnet = { provider: "anthropic", model: "claude-sonnet-4.5" }
 const gpt = { provider: "openai", model: "gpt-5" }
@@ -79,4 +86,19 @@ test("with no model from the host there's nothing to pin, and the chat still wan
   assert.equal(pinOf(chat(), undefined), undefined)
   assert.equal(wantsPin(chat()), true, "the one case where the host is asked for a model")
   assert.deepEqual(modelOf(chat(), bot(undefined)), { model: "test/model", provider: undefined })
+})
+
+test("a host's models flatten to one pick each, and the Default row is never one of them", () => {
+  const providers = [
+    { slug: "anthropic", name: "Anthropic", models: ["claude-sonnet-4.5", "claude-opus-4.1"] },
+    // A provider Hermes lists with nothing to pick offers no option at all.
+    { slug: "local", name: "Local", models: [] },
+    { slug: "openai", name: "OpenAI", models: ["gpt-5"] },
+  ]
+  assert.deepEqual(
+    modelChoices(providers),
+    [sonnet, { provider: "anthropic", model: "claude-opus-4.1" }, gpt],
+    "each model as the pick it is, in the host's order, the empty provider skipped",
+  )
+  assert.deepEqual(modelChoices([]), [], "no models read yet is nothing to choose between")
 })

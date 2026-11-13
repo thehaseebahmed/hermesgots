@@ -8,6 +8,7 @@
  * No runtime imports: the rule is held on its own, without a database or a host.
  */
 import type { Conversation, ModelChoice, Profile } from "@/lib/db"
+import type { ModelProvider } from "@/lib/hermes"
 
 type Chat = Pick<Conversation, "modelChoice" | "main">
 type BotPick = Pick<Profile, "modelChoice">
@@ -31,6 +32,18 @@ export function storedPick(choice: ModelChoice | undefined): ModelChoice {
 /** That pick as the rest of the app reads it: the Default row's marker is no pick at all. */
 export function chosenOf(choice: ModelChoice | undefined) {
   return choice?.model ? choice : undefined
+}
+
+/**
+ * A host's models as the picks they are, in the order the host lists them: one per model, across
+ * every provider. A provider with no models offers nothing to pick, so it contributes no row — and
+ * the Default row is never among them, since it is a way to clear a pick rather than one of the
+ * models on offer. A surface reading this list can therefore count the choices a pick would hold.
+ */
+export function modelChoices(providers: ModelProvider[]): ModelChoice[] {
+  return providers.flatMap((provider) =>
+    provider.models.map((model) => ({ provider: provider.slug, model })),
+  )
 }
 
 /** Whether two picks name the same model, so a write can be told from the one it replaced. */
