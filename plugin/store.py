@@ -53,7 +53,10 @@ logger = logging.getLogger(__name__)
 # 70 keeps whether a canvas's data is copied into its host's OKF vault (`canvases.py`'s record,
 # `canvas_vault.py`): one column, off for every canvas an older store holds, since a backup nobody
 # asked for is not one to start.
-SCHEMA_VERSION = 70
+# 71 keeps the mark a pinned canvas's row draws (`canvases.py`'s record, #1065): two columns — the
+# icon's name or the emoji, and the palette name its colour comes from — empty for every canvas an
+# older store holds, since a canvas nobody has marked draws the app's own frame.
+SCHEMA_VERSION = 71
 
 
 def data_dir(hermes_home: Path) -> Path:
@@ -987,6 +990,16 @@ def _migrate(conn: sqlite3.Connection) -> None:
             canvas_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvases)")}
             if "image" not in canvas_columns:
                 conn.execute("ALTER TABLE canvases ADD COLUMN image TEXT")
+        # v71: the mark a canvas's pinned row draws (canvases.py, #1065). `mark` is one lucide icon's
+        # name or one emoji, and `mark_tint` the palette name its colour comes from; both are the
+        # record's rather than the pin's, so every device draws the same row, and both are absent
+        # until a user chooses one — a canvas nobody marked draws the app's own frame.
+        if version < 71:
+            canvas_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvases)")}
+            if "mark" not in canvas_columns:
+                conn.execute("ALTER TABLE canvases ADD COLUMN mark TEXT")
+            if "mark_tint" not in canvas_columns:
+                conn.execute("ALTER TABLE canvases ADD COLUMN mark_tint TEXT")
         # v63: the record's folded-away flag is the reader's "Archived" (canvases.py, #933). A store
         # written before the name carries the first one, and the state is the same state under it.
         if version < 63:
