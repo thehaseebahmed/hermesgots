@@ -8,16 +8,42 @@ import { useNavigate } from "react-router"
 export const BACK_ON_LIST = { listed: true }
 
 /**
+ * Whether a press is the reader's own: the left button, with nothing held. A press meant for a new
+ * tab or window belongs to the browser, so the app leaves it alone.
+ */
+export const plainPress = (event: MouseEvent<HTMLAnchorElement>) =>
+  !event.defaultPrevented &&
+  event.button === 0 &&
+  !event.metaKey &&
+  !event.ctrlKey &&
+  !event.shiftKey &&
+  !event.altKey
+
+/**
  * The `onClick` for a link that opens a top-level screen: the plain press opens it as the app's only
  * entry, and a press meant for a new tab or window — a modifier held, or a button other than the
  * left — is left to the link the browser already has.
  */
 export const opensAsRoot = (open: () => void) => (event: MouseEvent<HTMLAnchorElement>) => {
-  if (event.defaultPrevented || event.button !== 0) return
-  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+  if (!plainPress(event)) return
   event.preventDefault()
   open()
 }
+
+/**
+ * A row's own press where it also opens as the app's one entry: what the row does first, then
+ * `opensAsRoot`. The sidebar's rows all do both, so the order lives here rather than in each of them.
+ */
+export const pressOpeningRoot =
+  (
+    root: (to: string) => void,
+    to: string,
+    first?: (event: MouseEvent<HTMLAnchorElement>) => void,
+  ) =>
+  (event: MouseEvent<HTMLAnchorElement>) => {
+    first?.(event)
+    opensAsRoot(() => root(to))(event)
+  }
 
 /**
  * History mirrors the screen hierarchy: a top-level screen (a chat, Code, Settings) is the first

@@ -452,6 +452,9 @@ test("Cancel writes nothing at all, and returns to the page", async () => {
       botProfile("general-name-cancel").baseUrl,
       "the profile is untouched",
     )
+    // Coming back is a step of its own, taken once the screen has settled: a bare read here loses
+    // the race when the whole tier runs together.
+    await until(async () => path() === "/settings/bots/bot-1", "the page to come back")
     assert.equal(path(), "/settings/bots/bot-1", "and the page is back")
   })
 })
@@ -481,9 +484,10 @@ test("the Server key's edit masks the key, and Save waits for a change", async (
     )
     await click(button("Save"))
     assert.equal((await db.profiles.get("bot-1"))?.apiKey, "new-key", "and the write lands")
-    // The page comes back once the write has landed, which is a tick or two after the click: waited
-    // for as the sheet's close is below, rather than assumed to have happened already.
-    await until(() => path() === "/settings/bots/bot-1", "back on the page")
+    // Save writes, then leaves: the way back is a tick after the write, and asserting the address
+    // straight away read the old one under a loaded runner (this test failed that way on main).
+    await until(async () => path() === "/settings/bots/bot-1", "the page to come back")
+    assert.equal(path(), "/settings/bots/bot-1", "back on the page")
   })
 })
 

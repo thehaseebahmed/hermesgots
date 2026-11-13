@@ -531,7 +531,7 @@ The row of media in a thread: images and video side by side, each opened in the 
 _Avoid_: carousel, thumbnails, media strip, lightbox
 
 **Previewer**:
-The app's own full-screen look at one piece of media, holding the name, the size and where the reader is in the media it was opened on — a message's, or the one file a Library row opened: a photo at its own shape — magnified by a pinch or a double tap about the point touched, and dragged only as far as it overflows the pane — a clip on a player that starts paused, a recording on a player. A **page** is drawn in a sandboxed frame. A file the app can't show is handed to the platform instead — a new tab on the web, the phone's own app in the Android app — and never drawn in the Previewer.
+The app's own full-screen look at one piece of media, holding the name, the size and where the reader is in the media it was opened on — a message's, or the files of the folder a **Library** row opened, which it steps between one at a time: a photo at its own shape — magnified by a pinch or a double tap about the point touched, and dragged only as far as it overflows the pane — a clip on a player that starts paused, a recording on a player. A **page** is drawn in a sandboxed frame. A file the app can't show is handed to the platform instead — a new tab on the web, the phone's own app in the Android app — and never drawn in the Previewer.
 _Avoid_: lightbox, image viewer, gallery popup, media sheet
 
 **Page**:
@@ -539,7 +539,7 @@ An HTML file the app shows in the **Previewer** rather than hands over, run in a
 _Avoid_: HTML preview, web view, document, site
 
 **Library**:
-The files an agent made, kept in a project's own tree and listed by folder — the tab a project opens them from, and the outputs a session filed. A tap opens the file the way a thread does: in the **Previewer** from a **Signed URL**, or handed to the platform where the Previewer can't draw it.
+The files an agent made, kept in a project's own tree and listed by folder — the tab a project opens them from, and the outputs a session filed. A tap opens the file the way a thread does: in the **Previewer** from a **Signed URL**, with the folder's other files it draws behind it so the reader can step through them, or handed to the platform where the Previewer can't draw it. Each of those files is signed when it is looked at, never the folder up front.
 _Avoid_: outputs folder, artifacts, files tab, downloads
 
 **Signed URL**:
@@ -830,6 +830,10 @@ _Avoid_: thumbnail, preview, cover
 **Pinned canvas**:
 A canvas that has its own row in the sidebar, on every device.
 _Avoid_: favourite, starred, shortcut
+
+**Open canvas**:
+The canvas this tab opened from Canvas's own screens — the list's tile, or a start — and the one thing a canvas's row is marked by (ADR 0151). A canvas reached by its address, a reload, back or forward, or another tab's opening is no open canvas.
+_Avoid_: current canvas, active canvas, selected canvas
 
 **Declared tools**:
 The tools a version of a canvas says it may call, named by its bot when it writes that version and enforced where the canvas calls the host. A declared tool is asked about the first time the canvas calls it, and only an allowed one is called. Unrelated to an **Approval**, which a bot asks for mid-run.
