@@ -916,14 +916,6 @@ export interface ModelsDevCatalog {
   fetchedAt: number
 }
 
-/** BenchLM overall rankings cached on this device, with a 24-hour freshness window. */
-export interface OverallRankings {
-  id: "overall"
-  /** The rankings payload; its shape lives in `rankings.ts`. */
-  data: unknown
-  fetchedAt: number
-}
-
 /** The skills one bot last listed, kept so the composer's `/` menu opens on them (`skills.ts`). */
 export interface CachedSkills {
   /** The connection the list belongs to (one bot's server and key). */
@@ -1271,7 +1263,6 @@ export const db = new Dexie("gots") as Dexie & {
   vault: EntityTable<VaultKey, "id">
   drafts: EntityTable<Draft, "id">
   modelsDevCatalog: EntityTable<ModelsDevCatalog, "id">
-  overallRankings: EntityTable<OverallRankings, "id">
   dictations: EntityTable<SavedDictation, "id">
   dictationLog: EntityTable<DictationRecord, "id">
   dictationStats: EntityTable<DictationStats, "id">
@@ -1793,6 +1784,14 @@ db.version(46).upgrade((tx) =>
       delete settings.movedChats
     }),
 )
+
+/**
+ * v47: the BenchLM rankings ship with the build, so the table this device cached them in goes
+ * (`src/lib/rankings-data.ts`). Nothing reads a row any more — the payload arrives with the app —
+ * so the cache has nothing left to serve, and dropping the store takes the rows a device still
+ * holds with it.
+ */
+db.version(47).stores({ overallRankings: null })
 
 /**
  * How many rows of one room's log this device keeps: the page a reader can scroll back through.

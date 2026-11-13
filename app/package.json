@@ -10,6 +10,7 @@
     "build:android": "pnpm build:canvas-libraries && pnpm typecheck && vite build --mode native && cap sync android",
     "build:canvas-catalogue": "node --experimental-strip-types scripts/build-canvas-catalogue.mjs",
     "build:canvas-libraries": "node --experimental-strip-types scripts/build-canvas-libraries.mjs",
+    "build:rankings": "node --experimental-strip-types scripts/build-rankings.mjs",
     "build:openui-prompt": "node --import ./scripts/component-hooks.mjs scripts/build-openui-prompt.mjs",
     "preview": "vite preview",
     "lint": "oxlint",

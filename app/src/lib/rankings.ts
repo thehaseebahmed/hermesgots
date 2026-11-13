@@ -1,86 +1,31 @@
-import { useLiveQuery } from "dexie-react-hooks"
-
-import { db } from "@/lib/db"
 import type { ModelInfo } from "@/lib/hermes"
-import { SITE_URL } from "@/lib/native"
-import { isNative } from "@/lib/platform"
 import { scoreFor, scoreMapOf, type ScoredRow } from "@/lib/model-match"
+import { RANKINGS } from "@/lib/rankings-data"
 
-const RANKINGS_URL = `${isNative() ? SITE_URL : ""}/.netlify/functions/benchlm`
-const RANKINGS_ROW = "overall"
-const TTL_MS = 24 * 60 * 60 * 1000
-
-/** The shape we expect from the BenchLM overall surface, validated before caching. */
+/**
+ * The BenchLM overall surface the picker scores from. It ships with the build — the committed copy
+ * `scripts/build-rankings.mjs` writes, refreshed by the weekly BenchLM job — so a score costs no
+ * fetch, no cache row, no freshness window and no key, and a build, a typecheck or a test needs
+ * neither the network nor `BENCHLM_DATA_KEY`.
+ */
 export interface RankingsPayload {
   items?: unknown
 }
 
-/** The cached payload must carry an items array to be useful. */
+/** The payload must carry an items array to be worth scoring from. */
 function isRankings(data: unknown): data is RankingsPayload {
   if (typeof data !== "object" || data === null || Array.isArray(data)) return false
   const items = (data as Record<string, unknown>).items
   return Array.isArray(items)
 }
 
-/** Fetches the rankings from the Netlify proxy. */
-async function fetchRankings(): Promise<RankingsPayload> {
-  const response = await fetch(RANKINGS_URL)
-  if (!response.ok) throw new Error(`BenchLM proxy responded ${response.status}`)
-  const data: unknown = await response.json()
-  if (!isRankings(data)) throw new Error("BenchLM returned an unexpected payload")
-  return data
-}
-
-/** One shared background refresh at a time. */
-let refreshing: Promise<void> | undefined
-
-function refreshRankings() {
-  refreshing ??= (async () => {
-    try {
-      const data = await fetchRankings()
-      await db.overallRankings.put({ id: RANKINGS_ROW, data, fetchedAt: Date.now() })
-    } catch {
-      // The stale row keeps serving; the next load past the TTL tries again.
-    } finally {
-      refreshing = undefined
-    }
-  })()
-}
-
-/** One shared cold fetch, reset on failure so the next lookup retries. */
-let coldFetch: Promise<RankingsPayload> | undefined
-
-async function fetchAndCache(): Promise<RankingsPayload> {
-  const data = await fetchRankings()
-  await db.overallRankings.put({ id: RANKINGS_ROW, data, fetchedAt: Date.now() })
-  return data
-}
-
-/** BenchLM's overall rankings, read from the device cache. */
-async function loadRankings(): Promise<RankingsPayload> {
-  const row = await db.overallRankings.get(RANKINGS_ROW)
-  if (row) {
-    if (Date.now() - row.fetchedAt >= TTL_MS) refreshRankings()
-    return row.data as RankingsPayload
-  }
-  if (!coldFetch) {
-    coldFetch = fetchAndCache().catch((error: unknown) => {
-      coldFetch = undefined
-      throw error
-    })
-  }
-  return coldFetch
-}
-
-/** Warms the cache when the app opens, beside the models.dev catalog. */
-export function warmRankings() {
-  void loadRankings().catch(() => {})
-}
-
-/** The cached rankings payload, live: the model sheet renders scores from this. */
-export function useOverallRankings(): RankingsPayload | undefined {
-  const row = useLiveQuery(() => db.overallRankings.get(RANKINGS_ROW))
-  return row?.data as RankingsPayload | undefined
+/**
+ * The shipped rankings: the one payload a model's score comes from. It answers synchronously, since
+ * there is nothing to wait for, so the picker draws its scores on the first paint; the name it is
+ * called by is kept, so the sheet that reads it needs no change.
+ */
+export function useOverallRankings(): RankingsPayload {
+  return RANKINGS
 }
 
 type ModelRef = Pick<ModelInfo, "provider" | "model">

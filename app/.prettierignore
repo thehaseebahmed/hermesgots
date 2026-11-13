@@ -1,0 +1,3 @@
+# Generated artifacts: written by a script in its own shape, so formatting one is a change the script
+# would undo — and `scripts/test-rankings-bake.mjs` fails on a payload it would not have written.
+src/lib/rankings-data.ts
