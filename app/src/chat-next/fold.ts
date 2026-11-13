@@ -1,4 +1,4 @@
-import { splitAttachments, steerWords } from "../lib/attachment-text.ts"
+import { steerWords } from "../lib/attachment-text.ts"
 import {
   boundaryOf,
   isSeamScaffolding,
@@ -6,10 +6,11 @@ import {
   type SummaryRows,
 } from "../lib/compaction-seam.ts"
 import type { Attachment, MessageStats } from "../lib/db.ts"
+import type { Mention } from "../lib/mention-marker.ts"
 import { progressReminderNotes } from "../lib/progress-reminder.ts"
-import { pointsIn, type CanvasPoint } from "../lib/point-marker.ts"
+import type { CanvasPoint } from "../lib/point-marker.ts"
 import { isRoutineRow } from "../lib/routine-message.ts"
-import { requestIn } from "../lib/retry-message.ts"
+import { readRequest } from "../lib/request-text.ts"
 import { rowText, rowWords, type RowContent } from "../lib/row-text.ts"
 
 import type { Timing } from "../lib/reply-stats.ts"
@@ -80,6 +81,8 @@ export interface Turn {
   files?: SentFile[]
   /** The elements of a canvas's page the user pointed at, read off the same marker lines. */
   points?: CanvasPoint[]
+  /** The sessions and bots the request named, read off the same marker lines. */
+  mentions?: Mention[]
   /** The host archived this turn's request when it compacted: what is left is the work, from the seam on. */
   carried?: boolean
   /** The request is in rows not read yet: the reply is drawn alone, and the turn is whole once they are. */
@@ -107,17 +110,19 @@ export interface Turn {
 
 /**
  * A user row's request as the thread keeps it, read once for the fold and for the turn this device
- * streams — so both copies of a turn carry the same words, files, points and retry flag (ADR 0112).
+ * streams — so both copies of a turn carry the same words, files, points, mentions and retry flag
+ * (ADR 0112).
  */
-export function requestOf(content: string): Pick<Turn, "user" | "files" | "retry" | "points"> {
-  const request = requestIn(content)
-  const { text, attachments } = splitAttachments(request)
-  const { text: words, points } = pointsIn(text)
+export function requestOf(
+  content: string,
+): Pick<Turn, "user" | "files" | "retry" | "points" | "mentions"> {
+  const request = readRequest(content)
   return {
-    user: words,
-    ...(attachments.length ? { files: attachments.map(sentFileOf) } : {}),
-    ...(points.length ? { points } : {}),
-    ...(request === content ? {} : { retry: true as const }),
+    user: request.text,
+    ...(request.attachments.length ? { files: request.attachments.map(sentFileOf) } : {}),
+    ...(request.points.length ? { points: request.points } : {}),
+    ...(request.mentions.length ? { mentions: request.mentions } : {}),
+    ...(request.retry ? { retry: true as const } : {}),
   }
 }
 
