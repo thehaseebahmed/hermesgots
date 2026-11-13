@@ -94,10 +94,10 @@ DOC_MAX_BYTES = 256 * 1024
 LEGACY_DATA_BYTES = 1024 * 1024
 # What one agent answer may carry. `canvas_data_read` is the tool a model reads a canvas's data with,
 # and a canvas is capped at DATA_BYTES now — so an unbounded whole-array read is a tool result of up to
-# 64 MB. One answer is bounded to one page's worth, the size a canvas's page draws and a document is
-# capped at, and a read past it is refused in words naming the read that does answer: one collection,
-# or a page of one.
-READ_MAX_BYTES = DOC_MAX_BYTES
+# 64 MB. One answer is bounded to what a whole canvas could hold before this change, so no read that
+# worked then is refused now, and a read past it is refused in words naming the read that does answer:
+# one collection, or a page of one.
+READ_MAX_BYTES = LEGACY_DATA_BYTES
 # What one document weighs beside its content: the keys, the clock and the punctuation a read of the
 # data carries for it. One number, in the module that reads the row — the cap, a catalogue's bytes
 # and the bound a whole-array read is cut at are the same measure.
@@ -1257,10 +1257,10 @@ def data(
     no such canvas", whichever part of it was asked for.
 
     One answer carries at most ``READ_MAX_BYTES``: a canvas is capped at ``DATA_BYTES`` (64 MB) and this
-    is the tool a model reads it with, so what is past one page's worth is refused whole — in words
-    naming the collection read and the paged one — rather than handed over as an answer nobody can read
-    or cut short into an array no caller could tell was short. One document is never past the bound: a
-    document is capped at ``DOC_MAX_BYTES``, which is the bound.
+    is the tool a model reads it with, so what is past the bound is refused whole — in words naming the
+    collection read and the paged one — rather than handed over as an answer nobody can read or cut
+    short into an array no caller could tell was short. The bound is what a whole canvas could hold
+    before the cap moved, so a read that answered then still answers.
     """
     if not canvas_id or not path.exists():
         raise CanvasError("There is no such canvas.", 404)
@@ -2041,9 +2041,9 @@ DATA_READ_SCHEMA = {
         "session leave `canvas` out to mean this canvas. No more arguments answers every "
         "collection; a collection answers that one; a collection and an id answers one document, "
         "or null when there is none. One answer carries at most "
-        f"{_cap(READ_MAX_BYTES)} — one page's worth, the size a document and a canvas's page are "
-        "capped at — so a canvas or a collection past that is refused with the read that answers "
-        "it: one collection, or a page of one from the data route."
+        f"{_cap(READ_MAX_BYTES)} — what a whole canvas could hold before its cap moved — so a canvas "
+        "or a collection past that is refused with the read that answers it: one collection, or a "
+        "page of one from the data route."
     ),
     "parameters": {
         "type": "object",

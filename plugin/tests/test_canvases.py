@@ -1558,11 +1558,12 @@ class NamingTest(unittest.TestCase):
     def test_a_whole_read_is_bounded_and_says_which_read_answers(self) -> None:
         # A canvas's data is capped at 64 MB now that it is read a page at a time, so the tool that
         # answers a canvas whole could hand a model 64 MB in one result. What one answer carries is
-        # bounded to a page's worth, and a read past that bound is refused in words naming the read
-        # that does answer it — one collection, or a page of one — rather than cut short.
+        # bounded to what a whole canvas could hold before the cap moved, and a read past that bound
+        # is refused in words naming the read that does answer it — one collection, or a page of one —
+        # rather than cut short.
         canvas_id = self.canvas["id"]
         for n in range(10):
-            canvases.put_doc(self.path, canvas_id, "bookmarks", f"b{n}", {"text": "x" * 40_000})
+            canvases.put_doc(self.path, canvas_id, "bookmarks", f"b{n}", {"text": "x" * 120_000})
         canvases.put_doc(self.path, canvas_id, "notes", "n", {"text": "hello"})
 
         refused = json.loads(
@@ -1605,7 +1606,7 @@ class NamingTest(unittest.TestCase):
                 {"canvas": canvas_id, "collection": "bookmarks", "id": "b0"}, session_id=self.plain
             )
         )
-        self.assertEqual(one["document"]["doc"], {"text": "x" * 40_000})
+        self.assertEqual(one["document"]["doc"], {"text": "x" * 120_000})
 
         # The schema is what a model reads before it calls: it says what the answer is bounded to.
         self.assertIn(
