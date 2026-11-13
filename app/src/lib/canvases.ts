@@ -25,7 +25,7 @@ import {
   upsert,
 } from "@/lib/canvas-cache"
 import { hostTargets, serverConfig } from "@/lib/connection"
-import { db, listEnabledProfiles, type Attachment, type ModelChoice, type Profile } from "@/lib/db"
+import { db, getSettings, listEnabledProfiles, type Attachment, type ModelChoice, type Profile } from "@/lib/db"
 import { equal } from "@/lib/equal"
 import { LIST_MS, SAFETY_MS } from "@/lib/freshness"
 import {
@@ -618,6 +618,17 @@ export function useCanvasStore() {
       unsupported: state.unsupported,
     }
   }, [state])
+}
+
+/**
+ * Whether Canvas is on: its Labs switch, under the page's own master switch, on by default. The nav
+ * and the three screens ask this one question, so a canvas is either everywhere or nowhere.
+ */
+export function useCanvasEnabled() {
+  return useLiveQuery(async () => {
+    const settings = await getSettings()
+    return settings.labs !== false && settings.canvas !== false
+  }, [])
 }
 
 /** Every bot's canvases, newest first, kept fresh while a screen draws them. */

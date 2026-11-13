@@ -64,6 +64,8 @@ export interface Settings {
    * of them runs — the page's own rows say which are on when it comes back.
    */
   labs?: boolean
+  /** Canvas: a page a bot builds and the app draws in a frame. Labs, local, on by default. */
+  canvas?: boolean
   /** Meetings: add a recording or transcript and read the host's notes. Labs, local. */
   meetings?: boolean
   /**
@@ -938,6 +940,7 @@ export const DEFAULT_SETTINGS: Settings & Appearance & Required<Pick<Settings, "
   navShortcuts: false,
   sendOnEnter: false,
   labs: true,
+  canvas: true,
 }
 
 export const DEFAULT_PROFILE = {

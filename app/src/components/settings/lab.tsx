@@ -1,6 +1,6 @@
 /** Settings > Labs: the switches for the features the app is still building, and the page's line. */
 import { useLiveQuery } from "dexie-react-hooks"
-import { AudioLinesIcon, FlaskConicalIcon, LayoutGridIcon } from "lucide-react"
+import { AudioLinesIcon, FlaskConicalIcon, FrameIcon, LayoutGridIcon } from "lucide-react"
 
 import { Group, SwitchRow, useScreenRefusal } from "@/components/settings-chrome"
 import { getActiveProfile, getSettings, saveSettings } from "@/lib/db"
@@ -59,6 +59,17 @@ export function LabSettings() {
           subtitle={labsOn ? "Every feature on this page" : "Off: no lab feature runs"}
           checked={labsOn}
           onCheckedChange={(checked) => saveSettings({ labs: checked })}
+        />
+        <SwitchRow
+          id="canvas"
+          variant="nested"
+          icon={FrameIcon}
+          title="Canvas"
+          lab
+          subtitle="Pages a bot builds, drawn in the app"
+          checked={labsOn && settings?.canvas !== false}
+          disabled={!labsOn}
+          onCheckedChange={(checked) => saveSettings({ canvas: checked })}
         />
         <GenUISwitch server={profile} labsOn={labsOn} />
         <SwitchRow

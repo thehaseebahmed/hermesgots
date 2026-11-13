@@ -28,6 +28,7 @@ const at = (entry: string) => (
 )
 
 const MEETINGS = "Meetings"
+const CANVAS = "Canvas"
 const GENUI = "GenUI (Powered by OpenUI)"
 const REMINDERS = "Show progress reminders"
 
@@ -70,8 +71,18 @@ test("the page's own switch is on by default, and off turns its features off", a
     assert.equal(checkedOf("Labs"), "true", "on with nothing stored")
     await click(switchOf("Labs"))
     assert.equal((await db.settings.get("settings"))?.labs, false, "the device kept it off")
-    assert.equal(disabledOf(MEETINGS), true, "and Meetings cannot be turned on under it")
+    assert.equal(disabledOf(CANVAS), true, "and Canvas cannot be turned on under it")
+    assert.equal(disabledOf(MEETINGS), true, "nor Meetings")
     assert.equal(disabledOf(GENUI), true, "nor GenUI")
+  })
+})
+
+test("Canvas is on until it is turned off, and writes its own key", async () => {
+  await seedSettings({ developer: false })
+  await mount(at("/settings/lab"), async () => {
+    assert.equal(checkedOf(CANVAS), "true", "on with nothing stored")
+    await click(switchOf(CANVAS))
+    assert.equal((await db.settings.get("settings"))?.canvas, false, "the device kept it off")
   })
 })
 
@@ -79,10 +90,10 @@ test("the page's features are alphabetical", async () => {
   await seedSettings({ developer: false })
   await mount(at("/settings/lab"), async () => {
     const order = findAll("label").map((row) => row.textContent ?? "")
-    const genui = order.findIndex((one) => one.includes(GENUI))
-    const meetings = order.findIndex((one) => one.includes(MEETINGS))
-    assert.ok(genui >= 0 && meetings >= 0, "both rows are drawn")
-    assert.ok(genui < meetings, "GenUI stands above Meetings")
+    const at = (title: string) => order.findIndex((one) => one.includes(title))
+    for (const title of [CANVAS, GENUI, MEETINGS]) assert.ok(at(title) >= 0, `${title} is drawn`)
+    assert.ok(at(CANVAS) < at(GENUI), "Canvas stands above GenUI")
+    assert.ok(at(GENUI) < at(MEETINGS), "and GenUI above Meetings")
   })
 })
 

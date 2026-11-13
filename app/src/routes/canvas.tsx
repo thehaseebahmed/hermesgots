@@ -55,6 +55,7 @@ import {
   undoCanvas,
   updateCanvas,
   useCanvas,
+  useCanvasEnabled,
   useCanvasRecord,
   useCanvases,
   writeCanvasData,
@@ -130,6 +131,15 @@ function CanvasTile({ canvas, now }: { canvas: Canvas; now: number }) {
       </div>
     </Link>
   )
+}
+
+/**
+ * Canvas is behind its Labs switch; with it off, its screens send you home and the nav draws no row.
+ */
+export function CanvasGate({ children }: { children: ReactNode }) {
+  const enabled = useCanvasEnabled()
+  if (enabled === undefined) return null
+  return enabled ? children : <Navigate to="/" replace />
 }
 
 /**

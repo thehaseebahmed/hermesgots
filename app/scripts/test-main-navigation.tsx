@@ -35,7 +35,9 @@ const mainRow = () => ({
   updatedAt: 10,
   changedAt: 0,
 })
-async function seed(patch: { developer?: boolean; legacyChat?: boolean; meetings?: boolean } = {}) {
+async function seed(
+  patch: { developer?: boolean; legacyChat?: boolean; meetings?: boolean; canvas?: boolean } = {},
+) {
   await seedSettings({
     activeProfileId: bot.id,
     ...patch,
@@ -199,6 +201,34 @@ test("the legacy switch brings the Recents list and the New chat button back", a
         findAll("a").some((row) => row.getAttribute("href") === `/c/${MAIN}`),
         false,
         "nothing opens a bot's Main: the list is Recents",
+      )
+    },
+  )
+})
+
+test("the sidebar's Canvas row follows its Labs switch", async () => {
+  await seed({ canvas: false })
+  globalThis.fetch = async () => json({})
+  await mount(
+    <MemoryRouter initialEntries={["/"]}>
+      <ConversationList />
+    </MemoryRouter>,
+    async () => {
+      await until(async () => Boolean(find('a[href="/research"]')), "the nav")
+      assert.equal(Boolean(find('a[href="/canvas"]')), false, "Canvas is off, so no row")
+    },
+  )
+  await seed()
+  await mount(
+    <MemoryRouter initialEntries={["/"]}>
+      <ConversationList />
+    </MemoryRouter>,
+    async () => {
+      await until(async () => Boolean(find('a[href="/canvas"]')), "the Canvas row")
+      assert.equal(
+        find('a[href="/canvas"]')?.textContent?.includes("Labs"),
+        true,
+        "on by default, and wearing the pill",
       )
     },
   )

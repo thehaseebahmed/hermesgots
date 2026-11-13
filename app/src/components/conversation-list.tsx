@@ -29,7 +29,7 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { botChatsPath } from "@/lib/bot-tabs"
 import { previewLine } from "@/lib/bot-chrome"
-import { usePinnedCanvases } from "@/lib/canvases"
+import { useCanvasEnabled, usePinnedCanvases } from "@/lib/canvases"
 import { chatOwner } from "@/lib/chat-owner"
 import { compareChatOrder, waitsOnUser } from "@/lib/chat-list"
 import { presence } from "@/lib/registry"
@@ -635,6 +635,7 @@ export function ConversationList({
   const { root } = useNav()
   const legacy = useLegacyChat()
   const meetings = useMeetingsEnabled()
+  const canvas = useCanvasEnabled()
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -689,15 +690,17 @@ export function ConversationList({
             <CodeXmlIcon className="size-5 text-muted-foreground" />
             {!collapsed && "Code"}
           </RootLink>
-          <RootLink
-            to="/canvas"
-            onClick={onNavigate}
-            aria-label={collapsed ? "Canvas" : undefined}
-            className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
-          >
-            <FrameIcon className="size-5 text-muted-foreground" />
-            {!collapsed && <LabLabel fill>Canvas</LabLabel>}
-          </RootLink>
+          {canvas && (
+            <RootLink
+              to="/canvas"
+              onClick={onNavigate}
+              aria-label={collapsed ? "Canvas" : undefined}
+              className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
+            >
+              <FrameIcon className="size-5 text-muted-foreground" />
+              {!collapsed && <LabLabel fill>Canvas</LabLabel>}
+            </RootLink>
+          )}
           <RootLink
             to="/research"
             onClick={onNavigate}
@@ -729,7 +732,7 @@ export function ConversationList({
               {!collapsed && "Routines"}
             </RootLink>
           )}
-          <PinnedCanvases onNavigate={onNavigate} collapsed={collapsed} />
+          {canvas && <PinnedCanvases onNavigate={onNavigate} collapsed={collapsed} />}
         </nav>
         <Separator className="mx-1 my-3 data-horizontal:w-auto" />
         <Waiting onNavigate={onNavigate} collapsed={collapsed} />
