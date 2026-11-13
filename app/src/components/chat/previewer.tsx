@@ -82,6 +82,11 @@ export interface PreviewRequest {
    * anything: it draws what a list gives it, and says which of them it is drawing.
    */
   onShown?: (item: PreviewItem) => void
+  /**
+   * Hands a file the Previewer can't draw to the platform — a library's row passes it, so a file whose
+   * host type no browser draws is reachable from the card rather than a pane that never fills.
+   */
+  onElsewhere?: (item: PreviewItem) => void
 }
 
 /** What a screen can ask of its one Previewer: open it, and keep the list it was opened on current. */
@@ -232,7 +237,15 @@ interface Gesture {
  * `touch-none`, and every measurement a move needs is taken when the touch lands — a `pointermove`
  * that reads the layout forces a style recalculation on the gesture that has to hold frame rate.
  */
-function Zoomed({ item, onRetry }: { item: PreviewItem; onRetry?: (item: PreviewItem) => void }) {
+function Zoomed({
+  item,
+  onRetry,
+  onElsewhere,
+}: {
+  item: PreviewItem
+  onRetry?: (item: PreviewItem) => void
+  onElsewhere?: () => void
+}) {
   const surface = useRef<HTMLDivElement | null>(null)
   const frame = useRef<HTMLDivElement | null>(null)
   const [view, setView] = useState<ZoomView>(UNZOOMED)
@@ -387,6 +400,7 @@ function Zoomed({ item, onRetry }: { item: PreviewItem; onRetry?: (item: Preview
           setAttempt((count) => count + 1)
           onRetry?.(item)
         }}
+        onElsewhere={onElsewhere}
       />
     )
 
@@ -504,12 +518,21 @@ function Page({ item, onRetry }: { item: PreviewItem; onRetry?: (item: PreviewIt
 }
 
 /** What the Previewer draws for one file: a photo at its shape, a clip or a recording on a player. */
-function Shown({ item, onRetry }: { item: PreviewItem; onRetry?: (item: PreviewItem) => void }) {
+function Shown({
+  item,
+  onRetry,
+  onElsewhere,
+}: {
+  item: PreviewItem
+  onRetry?: (item: PreviewItem) => void
+  onElsewhere?: () => void
+}) {
   if (item.state === "failed" || (item.state === "ready" && !item.src))
-    return <Retry item={item} onRetry={onRetry} />
+    return <Retry item={item} onRetry={onRetry} onElsewhere={onElsewhere} />
   if (!item.src || item.state === "reading") return <Skeleton className="h-2/3 w-2/3 rounded-2xl" />
   if (item.kind === "page") return <Page key={item.key} item={item} onRetry={onRetry} />
-  if (item.kind === "image") return <Zoomed key={item.key} item={item} onRetry={onRetry} />
+  if (item.kind === "image")
+    return <Zoomed key={item.key} item={item} onRetry={onRetry} onElsewhere={onElsewhere} />
   // A player the platform draws: it starts paused because nothing here asks it to play, and it
   // streams, seeks and buffers by its own rules rather than by anything this app holds.
   if (item.kind === "video")
@@ -550,7 +573,7 @@ export function Previewer({
   open: boolean
   onIndex: (index: number | null) => void
 }) {
-  const { items, index, onRemove, onRetry, onShown } = request
+  const { items, index, onRemove, onRetry, onShown, onElsewhere } = request
   const count = items.length
   const at = Math.min(Math.max(index, 0), count - 1)
   const item = items[at]
@@ -597,7 +620,11 @@ export function Previewer({
           </div>
         </header>
         <div className="[container-type:size] mx-4 flex min-h-0 flex-1 items-center justify-center sm:mx-6">
-          <Shown item={item} onRetry={onRetry} />
+          <Shown
+            item={item}
+            onRetry={onRetry}
+            onElsewhere={onElsewhere && (() => onElsewhere(item))}
+          />
         </div>
         {(count > 1 || onRemove) && (
           <div className="flex items-center gap-2 px-4 pt-3 sm:px-6">

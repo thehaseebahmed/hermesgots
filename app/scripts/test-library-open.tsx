@@ -7,6 +7,8 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
+import { act } from "react"
+
 import { LibraryTree, SessionLibrary } from "@/components/library"
 import type { HermesConfig, LibraryFolder } from "@/lib/hermes"
 
@@ -110,6 +112,31 @@ const several: LibraryFolder[] = [
       {
         name: "photo.heic",
         path: "/home/h/.hermes/library/library-tab/photo.heic",
+        folder: "library-tab",
+        worktree: "a-session",
+        size: 4096,
+        at: 1,
+      },
+    ],
+  },
+]
+
+/** A folder whose second file the host serves as a type no browser draws, though its name says photo. */
+const undrawable: LibraryFolder[] = [
+  {
+    name: "library-tab",
+    files: [
+      {
+        name: "chart.png",
+        path: "/home/h/.hermes/library/library-tab/chart.png",
+        folder: "library-tab",
+        worktree: "a-session",
+        size: 2048,
+        at: 2,
+      },
+      {
+        name: "snap.png",
+        path: "/home/h/.hermes/library/library-tab/snap.png",
         folder: "library-tab",
         worktree: "a-session",
         size: 4096,
@@ -436,5 +463,50 @@ test("a file whose signed URL has run out is signed again", async () => {
     })
   } finally {
     mediaHost()
+  }
+})
+
+test("a file the host serves undrawably offers the platform, not a pane that never fills", async () => {
+  const asked = mediaHost({
+    type: (path) => (path.endsWith("snap.png") ? "image/heic" : undefined),
+  })
+  const browser = spyOpen()
+  try {
+    await mount(
+      <LibraryTree
+        config={botFor("undrawable")}
+        folders={undrawable}
+        order={{ key: "date", dir: "desc" }}
+      />,
+      async () => {
+        await click(row("library-tab"))
+        await until(async () => row("chart.png") !== null, "the folder's files")
+        await click(row("chart.png"))
+        await until(async () => viewing("chart.png", "1 of 2"), "the tapped file")
+
+        await click(labelled("button", "Next"))
+        await until(async () => viewing("snap.png", "2 of 2"), "the file the host serves as a HEIC")
+        // A DOM without layout loads no picture, so the failure a browser would report is what reaches
+        // the card — which is the shape the reader meets when the host's type is one nothing draws.
+        await act(async () => {
+          document.querySelector("img[alt='snap.png']")?.dispatchEvent(new Event("error"))
+        })
+        await until(async () => findText("button", "Open elsewhere") !== null, "the card's way out")
+        await click(findText("button", "Open elsewhere"))
+        await until(async () => browser.opened.length === 1, "the file handed to the platform")
+        assert.equal(
+          browser.opened[0].includes("snap.png"),
+          true,
+          "the file the reader could not be shown, opened where it can be",
+        )
+        assert.deepEqual(
+          mediaReads(asked).map((path) => path.split("/").pop()),
+          ["chart.png", "snap.png"],
+          "the step still cost one mint, and the way out cost none",
+        )
+      },
+    )
+  } finally {
+    browser.restore()
   }
 })

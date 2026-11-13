@@ -48,36 +48,27 @@ export function useOpenHostFile(config: HermesConfig): HostFileOpen {
   // The list the Previewer is drawing, kept here because a step fills one of its files after it was
   // opened: a step writes the whole list back through the provider's own `update`.
   const drawing = useRef<PreviewItem[]>([])
-  // The paths whose URL is being asked for right now, so a quick press of Next asks for one file once.
-  const asking = useRef(new Set<string>())
-
   /** Signs one file of the open list and writes the list back with what answered. */
   const sign = useCallback(
     (item: PreviewItem, again: boolean) => {
-      if (asking.current.has(item.key)) return
-      asking.current.add(item.key)
       void (async () => {
-        try {
-          const answer = await askMediaUrl(config, item.key, { again })
-          drawing.current = drawing.current.map((one) => {
-            if (one.key !== item.key) return one
-            // The host's own words for the ways it answers without a URL: a file it hasn't got, one it
-            // refused in the route's own sentence, a plugin too old to sign, a host that didn't reply.
-            if (answer.state !== "ready")
-              return { ...one, state: "failed", note: askNote(answer, one.name) }
-            return {
-              ...one,
-              type: answer.read.type,
-              size: answer.read.size ?? one.size,
-              src: answer.read.url,
-              folder: answer.read.folder,
-              state: "ready",
-            }
-          })
-          update(owner, drawing.current)
-        } finally {
-          asking.current.delete(item.key)
-        }
+        const answer = await askMediaUrl(config, item.key, { again })
+        drawing.current = drawing.current.map((one) => {
+          if (one.key !== item.key) return one
+          // The host's own words for the ways it answers without a URL: a file it hasn't got, one it
+          // refused in the route's own sentence, a plugin too old to sign, a host that didn't reply.
+          if (answer.state !== "ready")
+            return { ...one, state: "failed", note: askNote(answer, one.name) }
+          return {
+            ...one,
+            type: answer.read.type,
+            size: answer.read.size ?? one.size,
+            src: answer.read.url,
+            folder: answer.read.folder,
+            state: "ready",
+          }
+        })
+        update(owner, drawing.current)
       })()
     },
     [config, owner, update],
@@ -103,8 +94,7 @@ export function useOpenHostFile(config: HermesConfig): HostFileOpen {
             await openAttachment(null, { name: file.name, type: read.type, src: read.url })
             return
           }
-          // The tapped file as the host answered for it — its own type, size and, for a page, the
-          // folder on the host it loads its own files from.
+          // The tapped file as the host answered for it.
           const item = previewItem({
             key: file.path,
             kind: mediaKind(read.type, file.name),
@@ -118,8 +108,6 @@ export function useOpenHostFile(config: HermesConfig): HostFileOpen {
             state: "ready",
           })
           const list = folderItems(files, at)
-          // A tapped file the name left out of its folder's list opens on its own, rather than at a
-          // place that isn't there.
           if (list.index < 0) {
             drawing.current = [item]
             preview(
@@ -128,6 +116,7 @@ export function useOpenHostFile(config: HermesConfig): HostFileOpen {
                 index: 0,
                 onShown: (one) => sign(one, false),
                 onRetry: (one) => sign(one, true),
+                onElsewhere: (one) => void openAttachment(null, one),
               },
               owner,
             )
@@ -140,10 +129,10 @@ export function useOpenHostFile(config: HermesConfig): HostFileOpen {
             {
               items: drawing.current,
               index: list.index,
-              // A file the reader steps onto is signed as it arrives, and one that won't come says why
-              // and can be asked again.
+              // A file the reader steps onto is signed as it arrives.
               onShown: (one) => sign(one, false),
               onRetry: (one) => sign(one, true),
+              onElsewhere: (one) => void openAttachment(null, one),
             },
             owner,
           )
@@ -154,7 +143,7 @@ export function useOpenHostFile(config: HermesConfig): HostFileOpen {
         }
       })()
     },
-    [config, preview, sign],
+    [config, owner, preview, sign],
   )
   return { open, busy }
 }
