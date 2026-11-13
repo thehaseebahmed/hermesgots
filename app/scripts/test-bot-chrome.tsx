@@ -81,7 +81,11 @@ async function seedSidebar() {
 const row = (botId: string) =>
   findAll("a").find((one) => one.getAttribute("href") === `/b/${botId}`) ?? null
 
-test("the sidebar's bot row previews what its newest chat last said, not an older chat's", async () => {
+/**
+ * The row's line is its state, never a chat's words: the age under the name is the newest chat's,
+ * and what that chat said is nowhere in the row (ADR 0151).
+ */
+test("the sidebar's bot row is aged by its newest chat, and says nothing of what it said", async () => {
   const now = await seedSidebar()
   globalThis.fetch = async () => json({})
   await mount(
@@ -91,17 +95,17 @@ test("the sidebar's bot row previews what its newest chat last said, not an olde
     async () => {
       await until(async () => Boolean(row(bot.id)), "the bot row")
       const line = row(bot.id)?.textContent ?? ""
-      assert.ok(line.includes("The newest chat's opener"), "what the newest chat last said")
-      assert.ok(!line.includes("An old thing said in Main"), "not an older chat's words")
       assert.ok(
         line.includes(formatRelative(now - 60_000, Date.now())),
-        "aged by that chat, since that is what it previews",
+        "aged by the newest chat, since that is the one the row is about",
       )
+      assert.ok(!line.includes("The newest chat's opener"), "and not what that chat last said")
+      assert.ok(!line.includes("An old thing said in Main"), "nor an older chat's words")
     },
   )
 })
 
-test("a bot never opened still previews its newest chat", async () => {
+test("a bot whose chats this device has never opened says none of their words either", async () => {
   await seedSidebar()
   globalThis.fetch = async () => json({})
   await mount(
@@ -110,7 +114,7 @@ test("a bot never opened still previews its newest chat", async () => {
     </MemoryRouter>,
     async () => {
       await until(async () => Boolean(row(other.id)), "the other bot's row")
-      assert.ok((row(other.id)?.textContent ?? "").includes("Its only chat"))
+      assert.ok(!(row(other.id)?.textContent ?? "").includes("Its only chat"))
     },
   )
 })

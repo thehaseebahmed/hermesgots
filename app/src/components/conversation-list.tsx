@@ -28,7 +28,7 @@ import { SortMenu } from "@/components/sort-menu"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { botChatsPath } from "@/lib/bot-tabs"
-import { previewLine } from "@/lib/bot-chrome"
+import { stateLine } from "@/lib/bot-chrome"
 import { closeCanvas, useCanvasOpened } from "@/lib/canvas-open"
 import { useCanvasEnabled, usePinnedCanvases, type Canvas } from "@/lib/canvases"
 import { chatOwner } from "@/lib/chat-owner"
@@ -363,7 +363,8 @@ function Recents({
 
 /**
  * With bot threads on, in place of Recents: every bot that's turned on, each with its newest thread
- * and a count of the threads waiting on the user. A bot opens as one chat holding its threads.
+ * and its state — something unread, or whether its host is checking in (ADR 0151). A bot opens as one
+ * chat holding its threads.
  *
  * The Host's rooms are rows of the same list, after the bots: a room is nobody's thread, so it
  * belongs to no bot's row, and it is not a section of its own either — it is drawn by the chat
@@ -408,7 +409,7 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
         </div>
       )}
       <ul className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>
-        {bots?.map(({ bot, label, latest, preview, waiting, unread }) => {
+        {bots?.map(({ bot, label, latest, unread }) => {
           const age = latest?.updatedAt
           return (
             <li key={bot.id}>
@@ -424,8 +425,10 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
               >
                 <span className="relative shrink-0">
                   <Bot id={bot.botId} className="size-9" />
-                  {/* New since this device last looked at one of the bot's threads (ADR 0110). */}
-                  {unread && (
+                  {/* The rail draws no line under the name, so its mark is the only one a row has
+                      there: news since this device last looked at one of the bot's conversations
+                      (ADR 0110, ADR 0151). */}
+                  {collapsed && unread > 0 && (
                     <>
                       <span className="sr-only">New activity</span>
                       <span
@@ -448,19 +451,26 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
                       )}
                       {age && <RowAge at={age} now={now} />}
                     </span>
+                    {/* The bot's state, and never a chat's words: something unread first, else
+                        whether its host is checking in, and nothing where this device can't tell
+                        (ADR 0151). The dot says the same thing the count does, so it is drawn and
+                        not read out. */}
                     <span className="flex items-center gap-2">
-                      <span className="min-w-0 flex-1 truncate text-xs font-normal text-muted-foreground">
-                        {previewLine({
-                          line: preview,
-                          title: latest?.title,
+                      <span
+                        data-bot-state
+                        className="min-w-0 flex-1 truncate text-xs font-normal text-muted-foreground"
+                      >
+                        {stateLine({
+                          unread,
                           online: presence(bot, now, chatStores[bot.id]),
                         })}
                       </span>
-                      {waiting > 0 && (
-                        <span className="shrink-0 rounded-full bg-warning/15 px-1.5 text-xs leading-5 font-semibold text-warning tabular-nums">
-                          {waiting}
-                          <span className="sr-only"> waiting for you</span>
-                        </span>
+                      {unread > 0 && (
+                        <span
+                          data-unread
+                          aria-hidden
+                          className="size-2.5 shrink-0 rounded-full bg-warning"
+                        />
                       )}
                     </span>
                   </span>

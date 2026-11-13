@@ -14,7 +14,7 @@ import {
 import { labelOf } from "@/lib/bot-name"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { byName } from "@/lib/compare"
-import { plainLine } from "@/lib/words"
+import { useRoomNeeds } from "@/lib/room"
 import { withDir, type Sort, type SortKey } from "@/lib/sort"
 import { useStoredSort } from "@/lib/use-sort"
 import { isUnread } from "@/lib/session-work"
@@ -49,11 +49,12 @@ export interface BotSummary {
   /** What the row calls it: the bot's own name, and its host only against a namesake (ADR 0149). */
   label: string
   latest?: Conversation
-  /** The newest chat's latest message, cut to a line. */
-  preview?: string
   waiting: number
-  /** A chat this device holds past its read mark, and never a coding session's (ADR 0110). */
-  unread: boolean
+  /**
+   * How many of the bot's conversations this device holds past its read mark: its chats, and the
+   * rooms its roster seats — one conversation, one of the count (ADR 0110, ADR 0115).
+   */
+  unread: number
 }
 
 /** The keys the sidebar's bots rank by, each with the way it reads best (ADR 0091). */
@@ -90,13 +91,17 @@ export function sortBots(bots: BotSummary[], sort: Sort<BotSort>): BotSummary[] 
 }
 
 /**
- * Every bot that's turned on, with its newest chat and the line it last said, for the sidebar, in the
- * order linked. Its dot reads the same chats, never a coding session's: a row that leads to the bot's
- * screen must not say its news is in a screen it cannot reach.
+ * Every bot that's turned on, with its newest chat and how much of its list this device hasn't read,
+ * for the sidebar, in the order linked. Its count reads the same conversations that list draws, never
+ * a coding session's: a row that leads to the bot's screen must not say its news is in a screen it
+ * cannot reach. The row's words are `stateLine`'s, and this is only what they count (ADR 0151).
  */
 export function useBotSummaries(): BotSummary[] | undefined {
   const live = useWaiting()
   const marks = useReadMarks()
+  // The rooms this device lists, by their membership: a room is nobody's chat, and it lists in every
+  // bot its roster seats (ADR 0115), so it is one of the bot's conversations here as it is there.
+  const rooms = useRoomNeeds()
   const rows = useLiveQuery(async () => {
     const bots = await listEnabledProfiles()
     return Promise.all(
@@ -106,34 +111,25 @@ export function useBotSummaries(): BotSummary[] | undefined {
           .filter(listsAsChat)
           .limit(BOT_CHATS)
           .toArray()
-        // Only a chat's newest reply can wait on the user, so only that one is read, and the row the
-        // bot previews is read beside it rather than after the batch — unless that row is a
-        // routine's, whose line is on its record and which holds no message here at all.
-        const newestChat = chats[0]
-        const [newest, words] = await Promise.all([
-          Promise.all(chats.map((c) => newestMessage(c.id, isReply))),
-          newestChat && !newestChat.routine ? newestMessage(newestChat.id) : undefined,
-        ])
+        // Only a chat's newest reply can wait on the user, so only that one is read.
+        const newest = await Promise.all(chats.map((c) => newestMessage(c.id, isReply)))
         const local = new Set(newest.filter((m) => waitsOnUser(m)).map((m) => m!.conversationId))
-        // What the row previews: what the bot's newest chat last said — a run says it on its own
-        // record, as the bot's list draws it — and a chat with no words of its own answering with
-        // its name rather than nothing at all (ADR 0090).
-        const preview = newestChat?.routine
-          ? newestChat.line
-          : words
-            ? plainLine(words.content)
-            : undefined
-        return { bot, chats, local, preview }
+        return { bot, chats, local }
       }),
     )
   }, [])
   const labels = useBotLabels()
-  return rows?.map(({ bot, chats, local, preview }) => ({
+  return rows?.map(({ bot, chats, local }) => ({
     bot,
     label: labelOf(labels, bot),
     latest: chats[0],
-    preview,
     waiting: chats.filter((c) => local.has(c.id) || live[c.hermesSessionId]).length,
-    unread: chats.some((chat) => isUnread(chat.updatedAt, marks[chat.id])),
+    // A chat this device has never opened holds no mark and so counts for nothing, exactly as its row
+    // draws no dot; a room's own row is unread by that same rule, and its record is the one to ask.
+    unread:
+      chats.filter((chat) => isUnread(chat.updatedAt, marks[chat.id])).length +
+      (rooms ?? []).filter(
+        (room) => room.seated.includes(bot.id) && isUnread(room.chat.updatedAt, marks[room.chat.id]),
+      ).length,
   }))
 }

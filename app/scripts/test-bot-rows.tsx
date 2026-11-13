@@ -3,7 +3,7 @@ import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { ConversationList } from "@/components/conversation-list"
-import { db } from "@/lib/db"
+import { db, type Profile } from "@/lib/db"
 import { markRead, readMark } from "@/lib/read-marks"
 import { ChatPage } from "@/routes/chat"
 import {
@@ -30,10 +30,10 @@ const MAIN = "main-bot-1"
  * One bot with Main, a thread of its own and a coding session, and nothing else in the device. The
  * thread's own clock is `thread.at`, so a case can put its activity either side of a read mark.
  */
-async function seed(thread: { id: string; at: number; sessionAt?: number }) {
+async function seed(thread: { id: string; at: number; sessionAt?: number }, patch: Partial<Profile> = {}) {
   await seedSettings({ developer: true, activeProfileId: bot.id })
   await db.profiles.clear()
-  await db.profiles.put(bot)
+  await db.profiles.put({ ...bot, ...patch })
   await db.messages.clear()
   await db.conversations.clear()
   await db.conversations.bulkPut([
@@ -76,6 +76,8 @@ const botRow = () => find(`a[href="/b/${bot.id}"]`)
 const selected = (row: Element | null) => Boolean(row?.className.split(/\s+/).includes("bg-muted"))
 /** The row's unread mark, as the list draws it. */
 const dotted = (row: Element | null) => Boolean(row?.querySelector("[data-unread]"))
+/** The words the row puts under the bot's name, which are its state. */
+const stateOf = (row: Element | null) => row?.querySelector("[data-bot-state]")?.textContent ?? null
 
 /** The sidebar over a screen, so a case can open a chat by the row that leads to it. */
 const screen = (entry: string, also?: { to: string }) => (
@@ -109,16 +111,102 @@ test("the bot's own thread is the row that reads as open", async () => {
   })
 })
 
-test("a bot with something newer than this device's mark dots its row", async () => {
+test("a bot with something newer than this device's mark says how many, and dots its row", async () => {
   await seed({ id: "dot-thread", at: 500 })
+  // A second conversation past its own mark: the count is conversations, not messages.
+  await db.conversations.put({
+    id: "other-thread",
+    profileId: bot.id,
+    title: "Another thread",
+    hermesSessionId: "gots-other-thread",
+    createdAt: 4,
+    updatedAt: 600,
+    changedAt: 4,
+  })
   markRead("dot-thread", 100)
+  markRead("other-thread", 100)
+  await mount(screen("/"), async () => {
+    await until(async () => stateOf(botRow()) === "2 unread", "the row to count both of them")
+    assert.equal(dotted(botRow()), true, "a thread read before its last turn is news")
+    assert.equal(
+      find("[data-unread]")?.getAttribute("aria-hidden"),
+      "true",
+      "and the mark is the dot, so the words carry the state",
+    )
+  })
+})
+
+test("a quiet bot's row says its host is checking in", async () => {
+  await seed({ id: "quiet-online", at: 2 }, { hostId: "host-1", seenAt: Date.now() })
+  await mount(screen("/"), async () => {
+    await until(async () => stateOf(botRow()) === "Online", "the row to say its host is here")
+    assert.equal(dotted(botRow()), false, "nothing unread draws no mark")
+  })
+})
+
+test("a quiet bot's row says Offline once its host goes stale", async () => {
+  // Past `ONLINE_MS`, the host's own last answer is what this device reads the bot by.
+  await seed({ id: "quiet-stale", at: 2 }, { hostId: "host-1", seenAt: Date.now() - 26 * 60_000 })
+  await mount(screen("/"), async () => {
+    await until(async () => stateOf(botRow()) === "Offline", "the row to say its host is gone")
+    assert.equal(dotted(botRow()), false, "a stale host is not something unread")
+  })
+})
+
+test("a quiet bot's row says nothing at all where this device cannot tell", async () => {
+  // No host: `presence` answers `undefined`, and Settings stays silent about the same bot, so the row
+  // says no state rather than calling a bot it has never heard from Offline.
+  await seed({ id: "quiet-unknown", at: 2 })
   await mount(screen("/"), async () => {
     await until(async () => Boolean(botRow()), "the bot's row")
-    assert.equal(dotted(botRow()), true, "a thread read before its last turn is news")
-    assert.ok(
-      botRow()?.textContent?.includes("New activity"),
-      "and the dot says so to a reader who cannot see it",
-    )
+    assert.equal(stateOf(botRow()), "", "an unknown host is not Offline")
+    assert.equal(dotted(botRow()), false, "and nothing unread draws no mark")
+  })
+})
+
+test("the collapsed rail marks unread on the avatar, where no line says it", async () => {
+  // The rail draws no subtitle, so the avatar's corner is the row's only way to say it has news —
+  // and it says it to a reader by the words that carry it (ADR 0151).
+  await seed({ id: "rail-thread", at: 500 })
+  markRead("rail-thread", 100)
+  await mount(
+    <MemoryRouter initialEntries={["/"]}>
+      <ConversationList collapsed />
+    </MemoryRouter>,
+    async () => {
+      await until(async () => dotted(botRow()), "the rail's mark")
+      assert.equal(stateOf(botRow()), null, "a rail draws no line under the name")
+      assert.ok(botRow()?.textContent?.includes("New activity"), "so the words say it instead")
+    },
+  )
+})
+
+test("a room its roster seats counts toward the bot's unread", async () => {
+  await seed(
+    { id: "room-thread", at: 2 },
+    { hostId: "host-1", seenAt: Date.now(), hermesProfile: "main" },
+  )
+  // A room is nobody's chat: it lists in every bot its roster seats (ADR 0115), and its row is
+  // unread by the same rule a chat's is — one conversation, one count. `roomNeeds` is already at the
+  // record's own clock, so the list asks the Host for nothing while this case runs.
+  await db.conversations.put({
+    id: "room-1",
+    profileId: bot.id,
+    title: "A room",
+    hermesSessionId: "room-1",
+    room: {
+      id: "room-1",
+      members: [{ memberId: "m1", profile: "main", handle: "main", displayName: "Mainly" }],
+    },
+    roomNeeds: { at: 600 },
+    createdAt: 5,
+    updatedAt: 600,
+    changedAt: 600,
+  })
+  markRead("room-1", 100)
+  await mount(screen("/"), async () => {
+    await until(async () => stateOf(botRow()) === "1 unread", "the room to count as one conversation")
+    assert.equal(dotted(botRow()), true, "with the mark that says so")
   })
 })
 
@@ -185,47 +273,6 @@ test("the bot layout's sidebar has no Routines row, and the legacy one keeps its
   await mount(screen("/"), async () => {
     await until(async () => Boolean(find('a[href="/routines"]')), "the legacy sidebar's routines row")
     assert.equal(wordsOf(find('a[href="/routines"]')), "Routines", "named as the screen it opens")
-  })
-})
-
-test("a bot's newest row being a routine's, the sidebar says the line the list says", async () => {
-  // A routine's row has no message on this device: its line is the record's. The sidebar reads the
-  // newest chat's tail, which a run doesn't have, so without its record's line the row falls back
-  // to the routine's name — one thing in the sidebar and another in the list.
-  await seedSettings({ developer: true, activeProfileId: bot.id })
-  await db.profiles.clear()
-  await db.profiles.put(bot)
-  await db.messages.clear()
-  await db.conversations.clear()
-  await db.conversations.bulkPut([
-    {
-      id: "routine-job-1-cron_9",
-      profileId: bot.id,
-      title: "Morning watch",
-      routine: true,
-      line: "The tide turns at 06:40, and the wind is from the west.",
-      hermesSessionId: "cron_9",
-      createdAt: 1,
-      updatedAt: 500,
-      changedAt: 1,
-    },
-    {
-      id: "older-chat",
-      profileId: bot.id,
-      title: "An older chat",
-      hermesSessionId: "gots-older-chat",
-      createdAt: 2,
-      updatedAt: 400,
-      changedAt: 2,
-    },
-  ])
-  globalThis.fetch = async () => json({})
-  await mount(screen("/"), async () => {
-    await until(async () => Boolean(botRow()), "the bot's row")
-    assert.ok(
-      wordsOf(botRow()).includes("The tide turns at 06:40"),
-      "the run's own line, as the bot's list draws it",
-    )
   })
 })
 
