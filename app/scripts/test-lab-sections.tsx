@@ -35,6 +35,12 @@ const rowOf = (title: string) =>
   findAll("label").find((one) => (one.textContent ?? "").includes(title)) ?? null
 const switchOf = (title: string) => rowOf(title)?.querySelector('[role="switch"]') ?? null
 const checkedOf = (title: string) => switchOf(title)?.getAttribute("aria-checked")
+/** A shut switch says so twice: the control's own attribute, and Base UI's data flag. */
+const disabledOf = (title: string) =>
+  Boolean(
+    switchOf(title)?.hasAttribute("disabled") ||
+      switchOf(title)?.getAttribute("data-disabled") !== null,
+  )
 
 test("/settings/lab draws the lab switches under the page's own line", async () => {
   await seedSettings({ developer: false })
@@ -55,6 +61,28 @@ test("/settings/lab draws the lab switches under the page's own line", async () 
         true,
         `${title} wears the pill`,
       )
+  })
+})
+
+test("the page's own switch is on by default, and off turns its features off", async () => {
+  await seedSettings({ developer: false })
+  await mount(at("/settings/lab"), async () => {
+    assert.equal(checkedOf("Labs"), "true", "on with nothing stored")
+    await click(switchOf("Labs"))
+    assert.equal((await db.settings.get("settings"))?.labs, false, "the device kept it off")
+    assert.equal(disabledOf(MEETINGS), true, "and Meetings cannot be turned on under it")
+    assert.equal(disabledOf(GENUI), true, "nor GenUI")
+  })
+})
+
+test("the page's features are alphabetical", async () => {
+  await seedSettings({ developer: false })
+  await mount(at("/settings/lab"), async () => {
+    const order = findAll("label").map((row) => row.textContent ?? "")
+    const genui = order.findIndex((one) => one.includes(GENUI))
+    const meetings = order.findIndex((one) => one.includes(MEETINGS))
+    assert.ok(genui >= 0 && meetings >= 0, "both rows are drawn")
+    assert.ok(genui < meetings, "GenUI stands above Meetings")
   })
 })
 

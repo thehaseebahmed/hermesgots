@@ -59,6 +59,11 @@ export interface Settings {
    * `useLegacyChat` in `legacy-chat.ts`.
    */
   legacyChat?: boolean
+  /**
+   * The master switch over every lab feature: on unless this device turns it off, and off means none
+   * of them runs — the page's own rows say which are on when it comes back.
+   */
+  labs?: boolean
   /** Meetings: add a recording or transcript and read the host's notes. Labs, local. */
   meetings?: boolean
   /**
@@ -932,6 +937,7 @@ export const DEFAULT_SETTINGS: Settings & Appearance & Required<Pick<Settings, "
   breakReminders: true,
   navShortcuts: false,
   sendOnEnter: false,
+  labs: true,
 }
 
 export const DEFAULT_PROFILE = {

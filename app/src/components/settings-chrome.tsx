@@ -299,7 +299,9 @@ export function SwitchRow({
       {Icon && <Icon className="size-5 shrink-0 text-muted-foreground" />}
       <span className="flex min-w-0 flex-1 flex-col">
         <span className="flex min-w-0 items-center gap-2">
-          <span className={cn("truncate text-base", variant === "header" && "font-semibold")}>
+          <span
+            className={cn("line-clamp-2 text-base", variant === "header" && "font-semibold")}
+          >
             {title}
           </span>
           {lab && <LabBadge />}

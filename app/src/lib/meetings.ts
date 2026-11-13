@@ -336,11 +336,11 @@ function useDecorated(meetings: Meeting[]): Listed[] {
   }))
 }
 
-/** Whether Meetings is on: the Lab switch, off by default. */
+/** Whether Meetings is on: its Lab switch, under the page's own master switch, off by default. */
 export function useMeetingsEnabled() {
   return useLiveQuery(async () => {
     const settings = await getSettings()
-    return Boolean(settings.meetings)
+    return Boolean(settings.labs !== false && settings.meetings)
   }, [])
 }
 
