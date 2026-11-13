@@ -12,7 +12,7 @@
  * person, and leaving deletes the lot.
  */
 
-import { modelKey, type Known } from "./models-dev.ts"
+import { modelKeys, type Known } from "./models-dev.ts"
 import { sha256, type RegistryStore } from "./registry.ts"
 
 export const MODES = ["plan", "auto", "accept_edits", "chat"] as const
@@ -177,25 +177,36 @@ export function modelName(raw: unknown): string | null {
   return MODEL.test(name) ? name : null
 }
 
-/**
- * Whether the board may count this model. A report carries whatever the host's endpoint called the
- * model it ran, and a host's own word is all it is: a name the catalogue doesn't list is a model
- * nobody can look up, so it stays off the board. Nothing is filtered without a catalogue.
- */
-const listed = (model: string, known?: Known | null) => !known || known.has(modelKey(model))
-
+/** The catalogue a caller has, or null when it has none or it couldn't be read: nothing is filtered. */
 const catalogOf = async (ctx: CommunityContext): Promise<Known | null> =>
   (await ctx.catalog?.()) ?? null
 
 /**
- * A provider as the board names it: lower case, without a custom endpoint's own name
- * (`custom:acme` stays nobody's) and null for `custom` itself, since a person's own endpoint is not
- * a provider the board can stand behind.
+ * The name the board counts a model under: the catalogue's own spelling (`models-dev.ts`), so a host
+ * that respells a real id — `Claude.opus-5-5`, or a snapshot like `claude-opus-5-5-20250929` — lands on
+ * a name the catalogue lists. Undefined for a model no catalogue knows: a host's own word is all that
+ * name is, and the board doesn't count what nobody can look up. Without a catalogue the host's name
+ * is the answer, since nothing can be checked and nothing is filtered.
+ */
+function servedAs(model: string, known?: Known | null): string | undefined {
+  if (!known) return model
+  for (const key of modelKeys(model)) {
+    const served = known.get(key)
+    if (served) return served
+  }
+  return undefined
+}
+
+/**
+ * A provider as the board names it: lower case, and nothing at all for a custom endpoint — `custom`
+ * itself, or `custom:acme` — since a person's own endpoint is not a provider the board can stand
+ * behind.
  */
 function providerName(raw: unknown): string | null {
   if (typeof raw !== "string") return null
-  const name = raw.trim().toLowerCase().split(":", 1)[0]
-  return name !== "custom" && MODEL.test(name) ? name : null
+  const name = raw.trim().toLowerCase()
+  if (name.split(":", 1)[0] === "custom") return null
+  return MODEL.test(name) ? name : null
 }
 
 function count(value: unknown, max: number): number | null {
@@ -244,8 +255,9 @@ export function cleanDays(
     let tokens = 0
     let calls = 0
     for (const [raw, modes] of Object.entries(models as Record<string, unknown>)) {
-      const model = modelName(raw)
-      if (!model || !listed(model, known) || !modes || typeof modes !== "object") continue
+      const name = modelName(raw)
+      const model = name && servedAs(name, known)
+      if (!model || !modes || typeof modes !== "object") continue
       for (const [raw, rawCounts] of Object.entries(modes as Record<string, unknown>)) {
         const mode = modeOf(raw)
         if (!mode) continue
@@ -287,9 +299,10 @@ export function cleanProviders(value: unknown, now: number, known?: Known | null
       const provider = providerName(raw)
       if (!provider || !models || typeof models !== "object") continue
       for (const [rawModel, rawTokens] of Object.entries(models as Record<string, unknown>)) {
-        const model = modelName(rawModel)
+        const spelled = modelName(rawModel)
+        const model = spelled && servedAs(spelled, known)
         const n = count(rawTokens, MAX_DAY_TOKENS)
-        if (!model || !listed(model, known) || !n) continue
+        if (!model || !n) continue
         const slot = (day[provider] ??= {})
         slot[model] = (slot[model] ?? 0) + n
         tokens += n
@@ -367,8 +380,9 @@ export function buildBoard(members: Member[], now: number, known?: Known | null)
       const person = { login: member.login, total: 0, byModel: new Map<string, number>() }
       for (const [date, day] of Object.entries(member.days)) {
         if (date < since) continue
-        for (const [model, modes] of Object.entries(day)) {
-          if (!listed(model, known)) continue
+        for (const [spelled, modes] of Object.entries(day)) {
+          const model = servedAs(spelled, known)
+          if (!model) continue
           const entry = models.get(model) ?? { tokens: 0, users: new Set<string>(), modes: empty() }
           for (const [raw, counts] of Object.entries(modes) as [string, Counts][]) {
             // A record stored before a mode was renamed still counts, under its new name.
@@ -428,8 +442,9 @@ function providerRows(members: Member[], since: string, known?: Known | null): P
         const provider = providerName(raw)
         if (!provider) continue
         const entry = providers.get(provider) ?? { models: new Map(), users: new Set<string>() }
-        for (const [model, n] of Object.entries(models)) {
-          if (n <= 0 || !listed(model, known)) continue
+        for (const [spelled, n] of Object.entries(models)) {
+          const model = servedAs(spelled, known)
+          if (!model || n <= 0) continue
           entry.models.set(model, (entry.models.get(model) ?? 0) + n)
           entry.users.add(member.login)
         }
@@ -537,8 +552,9 @@ function standing(member: Member | null, now: number, known?: Known | null) {
     let total = 0
     for (const [date, day] of Object.entries(member?.days ?? {})) {
       if (date < since) continue
-      for (const [model, modes] of Object.entries(day)) {
-        if (!listed(model, known)) continue
+      for (const [spelled, modes] of Object.entries(day)) {
+        const model = servedAs(spelled, known)
+        if (!model) continue
         for (const counts of Object.values(modes)) total += sum(counts)
       }
     }
@@ -572,17 +588,20 @@ export async function handleCommunity(req: Request, ctx: CommunityContext) {
     if (op === "POST report") {
       // Counts are only taken from accounts that joined; anything else is asked not to send them.
       if (!account) return error("This account hasn't joined the leaderboard", 403)
-      const known = await catalogOf(ctx)
+      // A body that can't be read, or a host sending too often, costs no catalogue read: the ids are
+      // a fetched resource, and this is a public endpoint.
       const input = await body(req)
-      const cleaned = cleanDays(input?.days, now, known)
-      if (!cleaned) return error("Invalid report", 400)
+      if (!input) return error("Invalid report", 400)
       const gapKey = `community/gap/${hostId}`
       const last = await read<{ at: number }>(ctx.registry, gapKey)
       if (last && now - last.at < REPORT_GAP_MS) return error("Slow down", 429)
+      const known = await catalogOf(ctx)
+      const cleaned = cleanDays(input.days, now, known)
+      if (!cleaned) return error("Invalid report", 400)
       await ctx.registry.setJSON(gapKey, { at: now })
       await ctx.registry.setJSON(reportKey(userId, hostId), {
         days: cleaned.days,
-        providers: cleanProviders(input?.providers, now, known),
+        providers: cleanProviders(input.providers, now, known),
         at: now,
       } satisfies Report)
       await recompute(ctx, userId, account.login, now, known)
