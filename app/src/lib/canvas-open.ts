@@ -4,7 +4,7 @@
  * tab are no mark. Held in the tab's memory and nothing else — a device store would keep a canvas
  * marked for a reader who only visited it, and mark a second tab's canvas in the first.
  */
-import { useEffect, useRef } from "react"
+import { useEffect } from "react"
 import { matchPath, useLocation } from "react-router"
 
 import { createStore } from "@/lib/store"
@@ -26,11 +26,7 @@ export function canvasAt(path: string): string | undefined {
   return matchPath({ path: "/canvas/:id", end: false }, path)?.params.id
 }
 
-/**
- * The one rule a canvas's row is marked by: the canvas on screen is the one this tab opened. A row
- * is otherwise at rest, however the reader arrived — the address is no evidence that anything was
- * opened, and a filled row that says `aria-current="page"` claims there was.
- */
+/** The one rule a canvas's row is marked by: the canvas on screen is the one this tab opened. */
 export function useCanvasOpened(id: string): boolean {
   const open = opened.use()
   const { pathname } = useLocation()
@@ -38,20 +34,15 @@ export function useCanvasOpened(id: string): boolean {
 }
 
 /**
- * Forgets the tab's open canvas once the app is *off* the canvas's screens, so coming back to it by
- * an address, by back or forward, or by its pinned row marks nothing. A move between the canvas's own
- * screens keeps it — the preview and the edit screen are one canvas (ADR 0130). The shell calls this:
- * the sidebar is a phone's drawer, and a drawer that is shut runs no effect.
+ * Forgets the tab's open canvas once the app is off the canvas's screens, so coming back to it by an
+ * address, by back or forward, or by its pinned row marks nothing. The shell calls this: the sidebar
+ * is a phone's drawer, and a drawer that is shut runs no effect.
  */
 export function useForgetOpenCanvas(pathname: string) {
-  const open = opened.use()
-  // Where the app stood when this ran last. The close is a journey's ending, not a state: a store
-  // change React draws before the navigation that follows it stands on the list for one commit, and
-  // that is no reason to forget the canvas being opened.
-  const seen = useRef(pathname)
+  // The route alone, not the flag: an open is written on a canvas's screen, so the only commit this
+  // has to answer for is a journey off one, and a write that arrives just before its navigation
+  // leaves the effect beside it.
   useEffect(() => {
-    const left = canvasAt(seen.current) !== undefined
-    seen.current = pathname
-    if (open !== null && left && canvasAt(pathname) === undefined) closeCanvas()
-  }, [open, pathname])
+    if (canvasAt(pathname) === undefined) closeCanvas()
+  }, [pathname])
 }

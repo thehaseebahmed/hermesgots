@@ -15,11 +15,12 @@ arrive with no canvas open: each is a new document, and none of them is an openi
 ## Where the two halves live
 
 The flag is written in exactly two places, both the flow's own open (`routes/canvas.tsx`): the tile a
-reader presses, and the arrival of a canvas a start made. Both ask `plainPress` first, so a press
-meant for a new tab opens nothing in this one. It is forgotten in one place, the app shell: leaving
-the canvas's screens closes it, which is what makes back and forward onto a canvas mark nothing.
-The shell is the host rather than the sidebar, because the sidebar is a phone's drawer and a drawer
-that is shut runs no effect — and because a mark is the app's answer, not the list's.
+reader presses, which asks `plainPress` first so a press meant for a new tab opens nothing in this
+one, and the arrival of a canvas a start made, which has no press to ask about. It is forgotten in
+one place, the app shell: leaving the canvas's screens closes it, which is what makes back and
+forward onto a canvas mark nothing. The shell is the host rather than the sidebar, because the
+sidebar is a phone's drawer and a drawer that is shut runs no effect — and because a mark is the
+app's answer, not the list's.
 
 The route decides *whether* a canvas is on screen, and the flag decides *whether this tab opened
 it*. Both halves are needed: the flag alone would have to be trusted for its own timing, and the

@@ -100,9 +100,8 @@ const CHAT_LANE = "flex min-h-0 flex-1 flex-col"
 const NO_LIBRARIES: Record<string, CanvasLibrarySource> = {}
 
 /**
- * The flow's own open: the reader picked this canvas on Canvas's own screens, which is the one fact
- * that marks a canvas's row (ADR 0151). A press meant for a new tab opens nothing here, since this
- * tab stays where it is.
+ * The flow's own open: the reader picked this canvas on Canvas's own screens. A press meant for a new
+ * tab opens nothing here, since this tab stays where it is.
  */
 const openedBy = (id: string) => (event: MouseEvent<HTMLAnchorElement>) => {
   if (plainPress(event)) openCanvas(id)
@@ -190,8 +189,7 @@ export function CanvasPage() {
       // The canvas's own address, not its chat's: the preview decides which screen a canvas opens on
       // (a phone sends a canvas with no version to its chat from there), so only one screen owns that
       // rule, and the desktop no longer mounts the chat it will not draw beside the page (ADR 0130).
-      // A start is the flow's open as much as a tile is, so the canvas it made is the one this tab
-      // has open (ADR 0151).
+      // A start is the flow's open too (ADR 0151).
       openCanvas(started.id)
       navigate(`/canvas/${started.id}`)
     } finally {

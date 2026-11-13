@@ -203,9 +203,6 @@ export function AppShell({ children }: { children?: ReactNode }) {
   useEffect(() => (wide ? undefined : setMenuOpener(openDrawer)), [openDrawer, wide])
   const [collapsed, toggleCollapsed] = useSidebarCollapsed()
   const { pathname } = useLocation()
-  // Leaving a canvas's screens forgets the canvas this tab opened, so coming back to it by an
-  // address, by back or forward, or by its pinned row marks nothing (ADR 0151). The shell does it
-  // rather than the sidebar, which is a phone's drawer and runs nothing while it is shut.
   useForgetOpenCanvas(pathname)
   const main = useRef<HTMLElement>(null)
   // Code is asked first: a session's address is a chat's too, and the pane it belongs to is Code's

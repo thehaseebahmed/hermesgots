@@ -31,6 +31,21 @@ export const opensAsRoot = (open: () => void) => (event: MouseEvent<HTMLAnchorEl
 }
 
 /**
+ * A row's own press where it also opens as the app's one entry: what the row does first, then
+ * `opensAsRoot`. The sidebar's rows all do both, so the order lives here rather than in each of them.
+ */
+export const pressOpeningRoot =
+  (
+    root: (to: string) => void,
+    to: string,
+    first?: (event: MouseEvent<HTMLAnchorElement>) => void,
+  ) =>
+  (event: MouseEvent<HTMLAnchorElement>) => {
+    first?.(event)
+    opensAsRoot(() => root(to))(event)
+  }
+
+/**
  * History mirrors the screen hierarchy: a top-level screen (a chat, Code, Settings) is the first
  * entry, and each entry after it is a child of the one before. So back from a top-level screen
  * leaves the app, and back from a deeper one returns to its parent.

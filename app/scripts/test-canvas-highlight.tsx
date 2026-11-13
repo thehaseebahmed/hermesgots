@@ -91,8 +91,8 @@ const freshDocument = () => closeCanvas()
  * 768px, and what a phone's drawer holds), and Canvas's three addresses. 900px is a width where the
  * sidebar stands and a canvas still draws no chat lane beside its page.
  */
-const app = (entries: string[], index = entries.length - 1) => (
-  <MemoryRouter initialEntries={entries} initialIndex={index}>
+const app = (entries: string[]) => (
+  <MemoryRouter initialEntries={entries}>
     <Back />
     <SwitchTo to="/settings" />
     <Routes>

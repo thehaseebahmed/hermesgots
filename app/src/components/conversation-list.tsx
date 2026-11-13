@@ -41,7 +41,7 @@ import { useCanMakeRoom, useRoomNeeds, type RoomNeedsRow } from "@/lib/room"
 import { roomMembersLine, roomNeedsOf } from "@/lib/rooms"
 import { useLegacyChat } from "@/lib/legacy-chat"
 import { useMeetingsEnabled } from "@/lib/meetings"
-import { opensAsRoot, useNav } from "@/lib/nav"
+import { pressOpeningRoot, useNav } from "@/lib/nav"
 import { useSyncState } from "@/lib/sync"
 import { BOT_SORTS, sortBots, useBotSort, useBotSummaries, useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
@@ -74,10 +74,7 @@ function RootLink({
     <NavLink
       to={to}
       replace
-      onClick={(event) => {
-        onClick?.(event)
-        opensAsRoot(() => root(to))(event)
-      }}
+      onClick={pressOpeningRoot(root, to, onClick)}
       {...props}
     />
   )
@@ -231,9 +228,8 @@ function PinnedCanvases({
 }
 
 /**
- * A pinned canvas's row. It is no `NavLink`: what marks it is the canvas this tab opened
- * (`lib/canvas-open.ts`, ADR 0151), not the address, so a reader who merely arrives is given a row at
- * rest and a screen reader is told nothing is the page. Its press still opens as the app's one entry.
+ * A pinned canvas's row. No `NavLink`: the canvas this tab opened marks it, not the address
+ * (`lib/canvas-open.ts`, ADR 0151).
  */
 function CanvasRow({
   canvas,
@@ -251,10 +247,7 @@ function CanvasRow({
     <Link
       to={to}
       replace
-      onClick={(event) => {
-        onNavigate?.()
-        opensAsRoot(() => root(to))(event)
-      }}
+      onClick={pressOpeningRoot(root, to, onNavigate)}
       aria-label={collapsed ? canvas.title : undefined}
       aria-current={opened ? "page" : undefined}
       data-canvas-pinned=""
