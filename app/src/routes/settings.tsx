@@ -654,7 +654,7 @@ export function DeveloperSettings() {
           id="show-progress-reminders"
           icon={MessageSquareTextIcon}
           title="Show progress reminders"
-          experimental
+          lab
           subtitle="Each reminder a thread hides, as a row of its own"
           checked={Boolean(settings?.showProgressReminders)}
           onCheckedChange={(checked) => saveSettings({ showProgressReminders: checked })}
@@ -663,7 +663,7 @@ export function DeveloperSettings() {
           id="meetings"
           icon={AudioLinesIcon}
           title="Meetings"
-          experimental
+          lab
           subtitle="Design only, with sample meetings"
           checked={Boolean(settings?.meetings)}
           onCheckedChange={(checked) => saveSettings({ meetings: checked })}

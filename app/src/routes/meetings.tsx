@@ -30,7 +30,7 @@ import { Banner, Refusal } from "@/components/banner"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { Bot } from "@/components/bot"
-import { ExperimentalBadge } from "@/components/experimental-badge"
+import { LabBadge } from "@/components/lab-badge"
 import { ItemGroup, ItemRow, ItemSearch } from "@/components/item-list"
 import { itemGroups } from "@/lib/item-groups"
 import { FullscreenPopup, Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
@@ -332,7 +332,7 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
         title={
           <>
             Meetings
-            <ExperimentalBadge />
+            <LabBadge />
           </>
         }
       />

@@ -22,7 +22,7 @@ import { BotPicker } from "@/components/chat/bot-picker"
 import { Composer } from "@/components/chat/composer"
 import { PreviewerProvider } from "@/components/chat/previewer"
 import { UsageSheet } from "@/components/chat/usage-sheet"
-import { ExperimentalBadge } from "@/components/experimental-badge"
+import { LabBadge } from "@/components/lab-badge"
 import { ItemGroup } from "@/components/item-list"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
@@ -182,7 +182,7 @@ export function CanvasPage() {
         showBot={false}
         title={
           <>
-            Canvas <ExperimentalBadge />
+            Canvas <LabBadge />
           </>
         }
       />

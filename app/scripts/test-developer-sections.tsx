@@ -78,11 +78,14 @@ test("/settings/developer with the switch on draws it", async () => {
     assert.equal(path(), "/settings/developer", "the address is kept")
     assert.ok(switchOf(LEGACY), "the layout switch is drawn")
     assert.match(text(), /Enable legacy chat UX/, "under its own name")
-    assert.equal(
-      rowOf(LEGACY)?.textContent?.includes("Experimental"),
-      false,
-      "and is no longer marked experimental: the layout is the app's own",
-    )
+    // Neither word: the pill's own is Lab now, and this row is the app's own layout rather than a
+    // lab feature, so it wears no mark at all.
+    for (const word of ["Experimental", "Lab"])
+      assert.equal(
+        rowOf(LEGACY)?.textContent?.includes(word),
+        false,
+        `and is no longer marked experimental: the layout is the app's own, never "${word}"`,
+      )
     assert.ok(!findText("label", "Bot threads"), "the old switch is gone")
     assert.ok(
       !findText("label", "New chat screen"),
