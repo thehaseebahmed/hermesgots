@@ -74,9 +74,13 @@ test("an answer changes nothing about a bot this device can't place", () => {
   assert.equal(presence(bot({ hostId: undefined }), NOW, "unreachable"), undefined, "still no host")
 })
 
-test("an answer with nothing heard before says how the bot is but not when it was heard", () => {
+test("an answer with nothing heard before leaves the bot unplaced, and says nothing of when", () => {
   const unknown = bot({ seenAt: undefined })
-  assert.equal(presence(unknown, NOW, "unreachable"), false)
+  assert.equal(
+    presence(unknown, NOW, "unreachable"),
+    undefined,
+    "a host this device has never heard is unknown, not away",
+  )
   assert.equal(presenceLine(unknown, NOW, "unreachable"), undefined, "there is no when to say")
   assert.equal(presenceLine(unknown, NOW, "plugin"), "Online")
 })

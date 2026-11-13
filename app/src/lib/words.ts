@@ -5,7 +5,7 @@
 
 /**
  * What a row says where there is nothing to say yet: a chat nothing has been said in, and a room with
- * no line of its own. The bot's list and the sidebar's preview draw the same words.
+ * no line of its own. Every list that draws such a row reads the same words.
  */
 export const NO_MESSAGES = "No messages yet"
 

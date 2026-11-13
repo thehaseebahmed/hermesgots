@@ -213,6 +213,14 @@ await flow(
     await optionsTitle.waitFor({ state: "detached", timeout: 10_000 })
     pass("the preview screen: the options sheet's heading starts 16px below its drag handle")
 
+    // A press on the words of the line rather than on a box a component test painted: hit-testing
+    // lands on the block that answers it, which only a browser can prove.
+    await page.locator('[data-slot="header-line"]').getByText(/^v\d+$/).click()
+    await optionsTitle.waitFor({ timeout: 10_000 })
+    await page.keyboard.press("Escape")
+    await optionsTitle.waitFor({ state: "detached", timeout: 10_000 })
+    pass("the preview screen: a press on the line under the title opens the options")
+
     // Pointing is the phone's round trip: the edit screen draws no page, so its Point row sends the
     // reader to the page with pointing armed, and the tap that answers happens inside the sandboxed
     // document — the outline under the finger and the element's words are the page's own script

@@ -18,10 +18,13 @@ carries it too: at the bot's picture's corner, from the same read marks, on the 
 has to exist before a dot can show, and activity newer than it draws one.
 
 **Which threads the dot reads.** Main and every thread the bot has, and never a coding session of
-that bot's, though a session is a conversation of its own. The row leads to Main and its preview is
-the bot's own words (ADR 0090); a dot raised by a session would send the reader to Main to look for
-something Main cannot draw, and tapping the row would not clear it, because opening Main marks Main
-and not the session. The Code row already reports a session's news where the session is listed.
+that bot's, though a session is a conversation of its own. The row leads to Main, and its line under
+the name is the bot's state rather than a preview — Main's words were the line until
+[ADR 0151](0151-a-bots-row-says-its-state-not-its-chats-words.md) replaced it, which the count below
+now measures over every conversation of the bot's; a dot raised by a session would send the reader to
+Main to look for something Main cannot draw, and tapping the row would not clear it, because opening
+Main marks Main and not the session. The Code row already reports a session's news where the session
+is listed.
 
 **The marks, then, are every chat's, not only a session's.** `chat.tsx` wrote a read mark for a
 session only, because a session's row was the only dot in the app; a chat's own thread now writes one

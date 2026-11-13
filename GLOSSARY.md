@@ -217,7 +217,11 @@ _Avoid_: display name, nickname, handle
 Whether a bot's host answered this device's last chat-list pass, and when this device last heard it: the
 pass's own answer decides online or away, and until a pass lands the time this device kept stands in for it.
 It is not a stored heartbeat — nothing on the server records a check-in — and the screens draw two words
-from it, `Online` or `Last seen 2 hr. ago`, or nothing at all about a bot this device cannot answer for.
+from it, `Online` or `Last seen 2 hr. ago`, and the sidebar's bot row the third, `Offline`, since a row
+one line tall has no room for when it was heard. Where it cannot answer for a bot the row says what is
+missing rather than falling silent — `Not seen yet` for a host nothing has answered from, `Not linked`
+for a bot no host registered — while Settings keeps its own silence about the same bot, since its rows
+have room to say what the bot is instead (ADR 0151).
 _Avoid_: heartbeat, online status, availability
 
 **Chat**:
@@ -830,6 +834,10 @@ _Avoid_: thumbnail, preview, cover
 **Pinned canvas**:
 A canvas that has its own row in the sidebar, on every device.
 _Avoid_: favourite, starred, shortcut
+
+**Open canvas**:
+The canvas this tab opened from Canvas's own screens — the list's tile, or a start — and the one thing a canvas's row is marked by (ADR 0151). A canvas reached by its address, a reload, back or forward, or another tab's opening is no open canvas.
+_Avoid_: current canvas, active canvas, selected canvas
 
 **Declared tools**:
 The tools a version of a canvas says it may call, named by its bot when it writes that version and enforced where the canvas calls the host. A declared tool is asked about the first time the canvas calls it, and only an allowed one is called. Unrelated to an **Approval**, which a bot asks for mid-run.
