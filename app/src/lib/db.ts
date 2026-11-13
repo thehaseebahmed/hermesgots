@@ -59,11 +59,11 @@ export interface Settings {
    * `useLegacyChat` in `legacy-chat.ts`.
    */
   legacyChat?: boolean
-  /** Meetings: add a recording or transcript and read the host's notes. Developer, local. */
+  /** Meetings: add a recording or transcript and read the host's notes. Lab, local. */
   meetings?: boolean
   /**
    * Draws each progress reminder a thread would drop as a row of its own, opening the note the host
-   * wrote (`progress-reminder.ts`, ADR 0068). Developer, local, off by default.
+   * wrote (`progress-reminder.ts`, ADR 0068). Lab, local, off by default.
    */
   showProgressReminders?: boolean
   /**

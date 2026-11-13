@@ -22,7 +22,7 @@ import { BotPicker } from "@/components/chat/bot-picker"
 import { Composer } from "@/components/chat/composer"
 import { PreviewerProvider } from "@/components/chat/previewer"
 import { UsageSheet } from "@/components/chat/usage-sheet"
-import { LabBadge } from "@/components/lab-badge"
+import { LabLabel } from "@/components/lab-badge"
 import { ItemGroup } from "@/components/item-list"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
@@ -181,9 +181,7 @@ export function CanvasPage() {
         heading
         showBot={false}
         title={
-          <span className="flex items-center gap-2">
-            Canvas <LabBadge />
-          </span>
+          <LabLabel>Canvas</LabLabel>
         }
       />
 

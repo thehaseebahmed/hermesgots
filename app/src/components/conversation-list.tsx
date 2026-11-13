@@ -60,6 +60,17 @@ const railClass = ({ isActive }: { isActive: boolean }) =>
     isActive && "bg-muted font-medium",
   )
 
+/**
+ * A lab feature's row: its name, then the pill that marks it, pinned to the row's end. The name keeps
+ * the room the pill leaves, so a long one truncates instead of pushing the mark out of the row.
+ */
+const labNavLabel = (word: string) => (
+  <>
+    <span className="min-w-0 flex-1 truncate">{word}</span>
+    <LabBadge />
+  </>
+)
+
 /** A sidebar destination: top-level, so it opens as the only entry and back leaves the app. */
 function RootLink({
   to,
@@ -694,12 +705,7 @@ export function ConversationList({
             className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
           >
             <FrameIcon className="size-5 text-muted-foreground" />
-            {!collapsed && (
-              <>
-                <span className="min-w-0 flex-1 truncate">Canvas</span>
-                <LabBadge />
-              </>
-            )}
+            {!collapsed && labNavLabel("Canvas")}
           </RootLink>
           <RootLink
             to="/research"
@@ -708,12 +714,7 @@ export function ConversationList({
             className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
           >
             <TelescopeIcon className="size-5 text-muted-foreground" />
-            {!collapsed && (
-              <>
-                <span className="min-w-0 flex-1 truncate">Research</span>
-                <LabBadge />
-              </>
-            )}
+            {!collapsed && labNavLabel("Research")}
           </RootLink>
           {meetings && (
             <RootLink
@@ -723,12 +724,7 @@ export function ConversationList({
               className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
             >
               <AudioLinesIcon className="size-5 text-muted-foreground" />
-              {!collapsed && (
-                <>
-                  <span className="min-w-0 flex-1 truncate">Meetings</span>
-                  <LabBadge />
-                </>
-              )}
+              {!collapsed && labNavLabel("Meetings")}
             </RootLink>
           )}
           {legacy === true && (

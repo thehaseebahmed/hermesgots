@@ -29,8 +29,8 @@ export function isProgressReminder(content: unknown): boolean {
 
 /**
  * Whether this device draws a reminder as a row of its own: *Show progress reminders*, the Lab
- * switch. One spelling of the pair, because the fold, the live stream, both chat screens and the
- * renderer all have to agree on it (ADR 0068).
+ * switch. One spelling of it, because the fold, the live stream, both chat screens and the renderer
+ * all have to agree (ADR 0068).
  */
 export function progressRemindersShown(
   settings: { showProgressReminders?: boolean } | null | undefined,

@@ -31,7 +31,7 @@ import { CompareBriefForm, CompareScopeForm, MemoCanvas, SourceKinds } from "@/c
 import { VerdictCanvas, VerifyBriefForm, VerifyScopeForm } from "@/components/verify"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ModelPicker, PICKER_HEIGHT } from "@/components/chat/model-picker"
-import { LabBadge } from "@/components/lab-badge"
+import { LabLabel } from "@/components/lab-badge"
 import { ItemGroup, ItemRow, ItemSearch } from "@/components/item-list"
 import { itemGroups } from "@/lib/item-groups"
 import { useRefusal } from "@/lib/use-refusal"
@@ -235,9 +235,7 @@ function ResearchHome({ ask, list }: { ask?: boolean; list?: FeaturePane }) {
           heading
           showBot={false}
           title={
-            <span className="flex items-center gap-2">
-              Research <LabBadge />
-            </span>
+            <LabLabel>Research</LabLabel>
           }
         />
       )}

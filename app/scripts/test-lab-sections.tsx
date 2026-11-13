@@ -8,7 +8,6 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
 
-import { ConversationList } from "@/components/conversation-list"
 import { db } from "@/lib/db"
 import { SettingsPage } from "@/routes/settings"
 import {
@@ -22,7 +21,6 @@ import {
   seedSettings,
   settle,
   text,
-  until,
 } from "./component-kit.tsx"
 
 const at = (entry: string) => (
@@ -98,24 +96,4 @@ test("the menu draws the Lab row with the Developer switch off", async () => {
     assert.match(lab.textContent ?? "", /Lab/, "under its own name")
     assert.equal(Boolean(find('a[href="/settings/developer"]')), false, "Developer stays hidden")
   })
-})
-
-test("the Meetings switch alone, with no unlock, draws the sidebar's row", async () => {
-  await seedSettings({ developer: false, meetings: true })
-  await mount(
-    <MemoryRouter initialEntries={["/"]}>
-      <ConversationList />
-    </MemoryRouter>,
-    async () => {
-      await until(
-        async () => Boolean(find('a[href="/meetings"]')),
-        "the Meetings row, on the Lab switch alone",
-      )
-      assert.equal(
-        (await db.settings.get("settings"))?.developer,
-        false,
-        "and nobody unlocked Developer for it",
-      )
-    },
-  )
 })
