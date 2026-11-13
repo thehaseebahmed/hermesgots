@@ -38,7 +38,7 @@ const LAPTOP = 1024
  */
 const openVault = async (page, profileId) => {
   await seedVault(page, accountUser.id)
-  const docs = ["bots", "prompts", "settings", `chats/${profileId}`]
+  const docs = ["bots", "prompts", "settings"]
   const sealed = await page.evaluate(
     async ({ userId, docs }) => {
       const vault = await import("/src/lib/vault.ts")

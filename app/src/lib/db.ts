@@ -108,8 +108,6 @@ export interface Settings {
   onboarded?: boolean
   /** Soft-wrap in tool output; unset until the user flips it (wrapped by default). */
   wrapToolOutput?: boolean
-  /** Bots whose old Netlify chat list was moved onto their Gots plugin and deleted. */
-  movedChats?: string[]
   /** This device's Web Push identity, local only: its id, its VAPID key pair and whether it's on. */
   push?: { device: string; vapidKey: string; vapidPublic: string; on: boolean }
   /** The Android app's push identity, local only: Firebase gives the token, this is its device id. */
@@ -1776,6 +1774,21 @@ db.version(45).stores({
   canvasDocs: "key, connection, [canvasId+collection], [canvasId+collection+id]",
   canvasSweeps: "key",
 })
+
+/**
+ * v46: the setting that recorded each bot's move off the legacy chat document, gone with the move.
+ * A bot's chat list lives only with its plugin now, so no device has a bot to read once from Netlify
+ * and `Settings.movedChats` is a list nothing asks. The field is deleted rather than left behind:
+ * every save writes the settings row whole, but a row nobody rewrites would hold the list forever.
+ */
+db.version(46).upgrade((tx) =>
+  tx
+    .table("settings")
+    .filter((settings: Record<string, unknown>) => "movedChats" in settings)
+    .modify((settings: Record<string, unknown>) => {
+      delete settings.movedChats
+    }),
+)
 
 /**
  * How many rows of one room's log this device keeps: the page a reader can scroll back through.
