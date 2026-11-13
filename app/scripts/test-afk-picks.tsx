@@ -18,7 +18,6 @@ import {
   missing,
   mountAfk,
   seedSettings,
-  settle,
   type HoldRow,
 } from "./component-kit.tsx"
 
@@ -45,9 +44,9 @@ const chosen = () => pills().find((one) => one.getAttribute("aria-checked") === 
 const afkWrites = (host: { calls: { method: string; path: string; body: unknown }[] }) =>
   host.calls.filter((call) => call.method === "POST" && call.path.endsWith("/afk"))
 
-test("a project holding more than its count draws the places and names the rest", async () => {
-  // A count lowered below what the project already holds finishes what it claimed (ADR 0025), so the
-  // list is the count's places and the surplus is said in one line rather than drawn above the count.
+test("a project holding more than its count works the places and queues the rest", async () => {
+  // A count lowered below what the project holds finishes what it claimed (ADR 0025): the Working
+  // block is the count's places, and the tasks past it are Queued, oldest first, waiting for one.
   globalThis.fetch = afkHost({ features: FEATURES, holds: THREE, pickCount: 1 })
     .fetch as unknown as typeof fetch
   await picksOn(async () => {
@@ -57,53 +56,13 @@ test("a project holding more than its count draws the places and names the rest"
       "one row for the one place the count names, oldest first",
     )
     assert.equal(find("[data-holds]")?.textContent, "1 of 1 held", "the count row counts the places")
-    assert.equal(
-      find("[data-above]")?.textContent,
-      "2 more claimed above the count",
-      "and the holds past the count are named, not hidden",
-    )
-  })
-})
-
-test("a task AFK holds is not drawn again as somebody else's", async () => {
-  // A host from before the claim mark was excluded answers a held task in both groups. Working is
-  // where it belongs, and one task in two places is exactly the confusion this replaced (ADR 0150).
-  globalThis.fetch = afkHost({
-    features: FEATURES,
-    // The same repository the frontier rows name: a project's tasks all live in one.
-    holds: THREE.map((hold) => ({ ...hold, repo: "mock-user/gots" })),
-    pickCount: 3,
-    frontier: {
-      ready: [{ number: 271, title: "A task nobody has" }],
-      claimed: [
-        { number: 265, title: "Read the frontier", assignees: ["someone"] },
-        { number: 270, title: "A task another hand took", assignees: ["someone"] },
-      ],
-    },
-  }).fetch as unknown as typeof fetch
-  await picksOn(async () => {
-    // The frontier is a read of its own: the sheet opens on Working and fills the groups after it.
-    await settle()
     assert.deepEqual(
-      await findAll('[data-group="claimed"] li').map((row) => row.textContent?.match(/#\d+/)?.[0]),
-      ["#270"],
-      "only the task somebody else has is claimed",
+      findAll("[data-queued-task]").map((row) => row.getAttribute("data-queued-task")),
+      ["266", "267"],
+      "and the holds past the count are Queued under it, oldest first",
     )
-    assert.match(
-      find('[data-group="claimed"]')?.textContent ?? "",
-      /\(1\)/,
-      "and the group counts the one row it draws",
-    )
-    assert.equal(
-      findAll('[data-hold="265"]').length,
-      1,
-      "the held task is drawn once, in Working",
-    )
-    assert.equal(
-      await find('[data-group="ready"]')?.textContent?.includes("#271"),
-      true,
-      "a task nobody has is still offered",
-    )
+    assert.equal(find("[data-queued] h3")?.textContent, "Queued", "under a heading of its own")
+    assert.ok(missing("[data-above]"), "with no line about a count it is past")
   })
 })
 

@@ -1476,9 +1476,10 @@ const projectTasks = (project) => {
     ready: afkPool()
       .filter(([number]) => !held.has(number))
       .map(([number, title]) => task(number, title)),
-    // Nobody needs to be told what AFK holds twice: a task its own sweep claimed is drawn in
-    // Working, so this group is a task somebody else took.
-    claimed: [task(267, "AFK claims the next ready task", { assignees: ["mock-user"] })],
+    claimed: [
+      ...holds.map(([number, title]) => task(number, title, { assignees: ["mock-user"] })),
+      task(267, "AFK claims the next ready task", { assignees: ["mock-user"] }),
+    ],
     blocked: [
       task(268, "The claimed task is worked in its own session", {
         blockers: [

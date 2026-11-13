@@ -27,8 +27,8 @@ The rules that follow:
   finish and picks the next one when it is down to none. Releasing the surplus would put claimed work
   back in the frontier, where the same sweep — or a person — would pick it up again and start over on
   work that may already have a draft pull request. (Amended by ADR 0150: a hold is also the record
-  that releases the claim, so nothing is given back — the sheet draws the count's places and names the
-  tasks past it.)
+  that releases the claim, so nothing is given back — the sheet draws the count's places in Working
+  and the tasks past it in Queued.)
 - **A stalled hold keeps its place.** A task nothing is working waits for the user (ADR 0015), and it
   is still the project's work in flight; its slot goes when the task is given back.
 - **Giving a task back gives back one row.** A session the user closes releases the task that session

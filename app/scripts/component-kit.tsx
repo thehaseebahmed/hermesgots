@@ -901,15 +901,6 @@ export type HoldRow = {
   stalled?: string | null
 }
 
-/** One task of the frontier as a test gives it: its number and title, and who has it where anyone
- * does — the assignee a claimed row shows. */
-export type FrontierRow = {
-  number: number
-  repo?: string
-  title?: string
-  assignees?: string[]
-}
-
 /**
  * The account's prompt library as this device holds it, cleared and then seeded: entries go in with
  * their own clock, and no `prompt:` tombstone from an earlier test is left behind to fight them.
@@ -951,7 +942,6 @@ export function afkHost({
   hostProvider = "anthropic",
   windows = null,
   deciding = null,
-  frontier = null,
 }: {
   projectId?: string
   features?: string[]
@@ -991,15 +981,6 @@ export function afkHost({
   windows?: { label: string; usedPercent: number }[] | null
   /** The window the host judged deciding, or null where none does — a balance with room is capacity. */
   deciding?: { label: string; usedPercent: number } | null
-  /**
-   * The frontier the sheet reads, as the host answers `projects/{id}/tasks`; null is a project with
-   * no tasks, which is a host answering three empty groups.
-   */
-  frontier?: {
-    ready?: FrontierRow[]
-    claimed?: FrontierRow[]
-    blocked?: FrontierRow[]
-  } | null
 } = {}) {
   const calls: Call[] = []
   let words = prompt
@@ -1135,25 +1116,8 @@ export function afkHost({
       }
       return json(answer())
     }
-    if (url.pathname.endsWith(`/projects/${projectId}/tasks`)) {
-      // A row as the app parses it: the repo and address a sheet opens the task with, and the
-      // assignees only a claimed row reads.
-      const row = (task: FrontierRow) => ({
-        repo: task.repo ?? "mock-user/gots",
-        number: task.number,
-        title: task.title ?? `Task ${task.number}`,
-        url: `https://github.com/${task.repo ?? "mock-user/gots"}/issues/${task.number}`,
-        assignees: task.assignees ?? [],
-        blockers: [],
-      })
-      const group = (tasks: FrontierRow[] | undefined) => (tasks ?? []).map(row)
-      return json({
-        repos: frontier ? ["mock-user/gots"] : [],
-        ready: group(frontier?.ready),
-        claimed: group(frontier?.claimed),
-        blocked: group(frontier?.blocked),
-      })
-    }
+    if (url.pathname.endsWith(`/projects/${projectId}/tasks`))
+      return json({ repos: [], ready: [], claimed: [], blocked: [] })
     return json({ error: { message: `No route for ${method} ${url.pathname}` } }, 404)
   }
   /**

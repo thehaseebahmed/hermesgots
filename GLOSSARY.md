@@ -387,15 +387,15 @@ The ready tasks that can be started now: their blockers are all closed, and nobo
 _Avoid_: backlog, queue, ready list, board
 
 **Claim**:
-Taking a task so nothing else picks it up. A claimed task is out of the frontier. Gots's own claim is its **hold** on the task, so a task AFK holds is never drawn as claimed by somebody else — the sheet's Claimed group is a task a person or another tool has.
+Taking a task so nothing else picks it up. A claimed task is out of the frontier.
 _Avoid_: assign, lock, pickup; and claim for what research checks or records, which is a **checked claim** or an **evidence claim**
 
 **Hold**:
-One of the tasks a project's AFK switch has claimed, with the session working it: the host's own record, one row per task in flight, kept until the task's work is in review. A finished task lets go of its hold and leaves the claim, and a session the user closes gives both back. Lowering a project's **pick count** takes no hold back: the tasks it already has finish, and the sheet draws the count's places and names the rest.
+One of the tasks a project's AFK switch has claimed, with the session working it: the host's own record, one row per task in flight, kept until the task's work is in review. A finished task lets go of its hold and leaves the claim, and a session the user closes gives both back. Lowering a project's **pick count** takes no hold back: the tasks it already has finish, and the sheet draws the count's places in **Working** and the rest in **Queued**.
 _Avoid_: lock, lease, slot
 
 **Pick count**:
-How many tasks a project's AFK will hold at once, from one to five, set in its AFK pop-up. It is the number of places the sheet draws: a hold past a lowered count is still AFK's work and still claimed, and the Working block names it in one line under the list rather than drawing it against a count it no longer fits.
+How many tasks a project's AFK will hold at once, from one to five, set in its AFK pop-up. It is the number of places the sheet draws: a hold past a lowered count is still AFK's work and still claimed, and it waits in **Queued** rather than being drawn against a count it no longer fits.
 _Avoid_: concurrency, parallelism, workers, slots
 
 **Pick budget**:

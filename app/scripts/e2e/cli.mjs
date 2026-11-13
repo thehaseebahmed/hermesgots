@@ -281,7 +281,7 @@ export const FLOWS = {
   afk: {
     script: "e2e/afk.mjs",
     about:
-      "A project's options menu opens AFK's frontier: ready oldest first, claimed marked, blocked naming its open blocker, with no row for a plugin that can't read it",
+      "A project's options menu opens AFK's frontier: ready oldest first, blocked naming its open blocker, and no group of somebody else's claims, with no row for a plugin that can't read it",
   },
   "afk-switch": {
     script: "e2e/afk-switch.mjs",

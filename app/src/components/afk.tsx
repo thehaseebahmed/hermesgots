@@ -1,8 +1,8 @@
 /**
  * AFK: a project's switch for working its own tasks, and the tasks it would work — the frontier,
- * what's ready oldest first, what somebody else has already claimed, and what an open task still
- * blocks. A task AFK claimed itself is never in that list: it is Working while the host holds it,
- * and a session in Code once its work is in review.
+ * what's ready oldest first and what an open task still blocks. The tasks the host holds are Working,
+ * up to the project's pick count, and any past that count are Queued: work a lowered count left in
+ * flight, waiting for a place.
  * The switch is the host's setting for the project, so it reads back the same on every device. It is
  * always shown: a project that can't be left to work (or a Bot on a plugin too old to switch one) has
  * it off and disabled, with the reason underneath. The frontier is there where the plugin advertises
@@ -71,7 +71,6 @@ const unsupported = cooldown()
 
 const GROUPS = [
   { key: "ready", label: "Ready" },
-  { key: "claimed", label: "Claimed" },
   { key: "blocked", label: "Blocked" },
 ] as const
 
@@ -194,9 +193,8 @@ export function AfkPopup({
 
   const holds = afk?.holds ?? (afk?.task ? [afk.task] : [])
   const heldKey = holds.map((one) => `${one.repo}#${one.number}`).join(",")
-  // A hold means a task just left the ready list, so the sheet reads the frontier again to drop it.
-  // The host doesn't name the task it claimed under Claimed — that group is somebody else's work —
-  // which is why a fresh hold always changes what the frontier answers.
+  // A hold means a task just left the ready list, so the sheet reads the frontier again to drop it —
+  // and a hold given back puts it there again.
   const seen = useRef(heldKey)
   useEffect(() => {
     if (seen.current === heldKey) return
@@ -294,7 +292,6 @@ export function AfkPopup({
           )}
           <Tasks
             tasks={tasks}
-            held={new Set(holds.map((one) => `${one.repo}#${one.number}`))}
             error={error}
             // Said twice only when it is the same thing said: the switch's reason can differ from why
             // the frontier failed, and then it is two different facts, not one repeated.
@@ -505,15 +502,16 @@ function Working({
   manyRepos: boolean
 }) {
   const held = holds && holds.length > 0 ? holds : null
-  // The places the count names, and the holds past them: what a lowered count left finishing.
+  // The places the count names, and the holds past them: what a lowered count left finishing, drawn
+  // as Queued rather than against a count they no longer fit.
   const places = held && typeof pickCount === "number" ? held.slice(0, pickCount) : held
-  const above = held && places ? held.length - places.length : 0
+  const queued = held && places ? held.slice(places.length) : []
   const rows: ({ hold: AfkHold; kind: "hold" } | { hold: AfkHold; kind: "task" })[] = places
     ? places.map((hold) => ({ hold, kind: "hold" as const }))
     : task
       ? [{ hold: { ...task, stalled: null }, kind: "task" as const }]
       : []
-  if (!refusal && !rows.length) return null
+  if (!refusal && !rows.length && !queued.length) return null
   return (
     <div className="flex flex-col gap-3">
       {refusal && (
@@ -545,13 +543,21 @@ function Working({
               </li>
             ))}
           </ul>
-          {/* A lowered count finishes what it already claimed rather than handing it back, so the
-              tasks past the count are said here: still AFK's work, still claimed on GitHub. */}
-          {above > 0 && (
-            <p data-above className="px-1 pt-1 text-sm text-muted-foreground">
-              {`${above} more claimed above the count`}
-            </p>
-          )}
+        </section>
+      )}
+      {/* A lowered count finishes what it already claimed rather than handing it back (ADR 0025), so
+          the tasks past the count are their own section: still AFK's work, still claimed on GitHub,
+          and waiting for a place. */}
+      {queued.length > 0 && (
+        <section aria-label="Queued" data-queued>
+          <h3 className="px-1 pb-1 text-sm text-muted-foreground">Queued</h3>
+          <ul>
+            {queued.map((hold) => (
+              <li key={`${hold.repo}#${hold.number}`} data-queued-task={hold.number}>
+                <TaskLink task={hold} note={manyRepos ? hold.repo : undefined} />
+              </li>
+            ))}
+          </ul>
         </section>
       )}
     </div>
@@ -561,18 +567,11 @@ function Working({
 /** The groups that hold something, or the one line that says why none does. */
 function Tasks({
   tasks,
-  held,
   error,
   duplicate,
   manyRepos,
 }: {
   tasks: ProjectTasks | undefined
-  /**
-   * The tasks AFK holds, as `repo#number`. Working draws them, so they are never drawn again as
-   * somebody else's — a host from before the claim mark was excluded still lists them under
-   * claimed, and one task in two places is the confusion this replaced (ADR 0150).
-   */
-  held: ReadonlySet<string>
   error: string | undefined
   duplicate: boolean
   manyRepos: boolean
@@ -587,27 +586,18 @@ function Tasks({
       </p>
     )
   }
-  const rowsOf = (key: (typeof GROUPS)[number]["key"]) =>
-    (tasks[key] ?? []).filter(
-      (task) => key !== "claimed" || !held.has(`${task.repo}#${task.number}`),
-    )
-  const groups = GROUPS.filter((group) => rowsOf(group.key).length > 0)
+  const groups = GROUPS.filter((group) => tasks[group.key].length > 0)
   if (!groups.length) return <p className="px-1 text-sm text-muted-foreground">No ready tasks.</p>
   return (
     <>
       {groups.map((group) => (
         <section key={group.key} aria-label={group.label} data-group={group.key}>
           <h3 className="px-1 pb-1 text-sm text-muted-foreground">
-            {group.label} ({rowsOf(group.key).length})
+            {group.label} ({tasks[group.key].length})
           </h3>
           <ul>
-            {rowsOf(group.key).map((task) => (
-              <TaskRow
-                key={`${task.repo}#${task.number}`}
-                task={task}
-                claimed={group.key === "claimed"}
-                manyRepos={manyRepos}
-              />
+            {tasks[group.key].map((task) => (
+              <TaskRow key={`${task.repo}#${task.number}`} task={task} manyRepos={manyRepos} />
             ))}
           </ul>
         </section>
@@ -617,15 +607,7 @@ function Tasks({
 }
 
 /** One issue as the sheet shows it: its number and its title, opening it on GitHub, a note under it. */
-function TaskLink({
-  task,
-  note,
-  badge,
-}: {
-  task: ProjectIssue
-  note?: ReactNode
-  badge?: ReactNode
-}) {
+function TaskLink({ task, note }: { task: ProjectIssue; note?: ReactNode }) {
   return (
     <a
       href={task.url ?? undefined}
@@ -637,38 +619,19 @@ function TaskLink({
       <span className="flex min-w-0 items-start gap-2">
         <span className="shrink-0 font-mono text-base text-muted-foreground">#{task.number}</span>
         <span className="min-w-0 flex-1 text-base leading-snug break-words">{task.title}</span>
-        {badge}
       </span>
       {note && <span className="pl-8 text-sm text-muted-foreground">{note}</span>}
     </a>
   )
 }
 
-function TaskRow({
-  task,
-  claimed,
-  manyRepos,
-}: {
-  task: ProjectTask
-  claimed: boolean
-  manyRepos: boolean
-}) {
+function TaskRow({ task, manyRepos }: { task: ProjectTask; manyRepos: boolean }) {
   const note: ReactNode[] = []
   if (manyRepos && task.repo) note.push(task.repo)
   if (task.blockers.length) note.push(`Blocked by ${blockerNames(task)}`)
   return (
     <li>
-      <TaskLink
-        task={task}
-        note={note.length > 0 ? note.join(" · ") : undefined}
-        badge={
-          claimed ? (
-            <span className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">
-              {task.assignees[0] ?? "Claimed"}
-            </span>
-          ) : undefined
-        }
-      />
+      <TaskLink task={task} note={note.length > 0 ? note.join(" · ") : undefined} />
     </li>
   )
 }
