@@ -84,7 +84,7 @@ KEEP_VERSIONS = 20
 TITLE_CHARS = 60
 # The whole of a canvas's data. The cap is the canvas's rather than one document's: a page reads its
 # collection a page at a time, so the whole of a canvas no longer rides every open, and 5000
-# bookmarks at about 250 B each are 1.6 MB of a 64 MB cap.
+# bookmarks at about 320 B a row are 1.6 MB of a 64 MB cap.
 DATA_BYTES = 64 * 1024 * 1024
 # What one write may store, and no more: a document is what one page draws, and a page is already
 # capped at ``MAX_BYTES`` — the same 256 KB, kept as its own number because it is its own rule.
@@ -537,7 +537,7 @@ _COLUMNS = (
     "created_at",
 )
 # What a record answers beyond the canvas's own row: `docs_at` is a seek into the canvas's documents
-# rather than a column of its own — a count kept beside the rows is an invariant every write and
+# rather than a column of its own — a clock kept beside the rows is an invariant every write and
 # remove could break, and a device polling the list only needs to know whether the data it swept has
 # moved since (canvas_docs.py). Kept apart from `_COLUMNS` so adding a column cannot silently shift
 # the record's SQL.
@@ -635,7 +635,7 @@ def vaulting(path: Path) -> List[Dict[str, Any]]:
     """Every canvas whose data is backed up, by its id and its title, in one stable order.
 
     The vault's own read (``canvas_vault``), and the only one it makes of the record: a canvas holds
-    a folder named by its id and an ``index.md`` named by its title, and nothing else of the record
+    a folder named by its id and an ``index.md`` carrying its title, and nothing else of the record
     is the vault's to draw. The order is the store's key rather than the clock, so a backup that a
     tick's budget cut short resumes on the canvases it did not reach instead of following whichever
     one was written to last.
@@ -1095,7 +1095,7 @@ def _flag(value: Any, field: str) -> bool:
 def update(path: Path, canvas_id: str, body: Any) -> Dict[str, Any]:
     """Changes a canvas's name and its place in the list, and answers its record as it now is.
 
-    The four are the host's, not the app's: a device that pins a canvas and one that hides it
+    The record is the host's, not the app's: a device that pins a canvas and one that hides it
     write one record, so every device draws the same list. A title renames the chat too — a canvas
     and its thread are one name, as ``_commit`` writes them — and ``chats.set_title`` keeps
     ``titleEdited``, so Hermes's auto-title never takes the canvas's name away.
@@ -1422,7 +1422,7 @@ def _json(doc: Any) -> str:
 
 
 def _cap(size: int) -> str:
-    """A byte cap as a refusal names it: whole MB where it is a whole number of them, else whole KB.
+    """A byte cap as a refusal names it: whole MB where it is a whole number of them, else KB rounded up.
 
     Read off the constant rather than written into the sentence, so a cap that moves moves the words
     a write is refused in — a message naming a cap the host no longer enforces is a bot told a rule
@@ -1472,7 +1472,7 @@ def _stored_bytes(
 def _moved() -> None:
     """A canvas's data has moved, so the vault's next tick looks again (``canvas_vault``).
 
-    Every write and every remove that took a row comes through here, whichever asked for it — a
+    Every write and every remove of a document comes through here, whichever asked for it — a
     page's call, the agent's tool, the route a device posts — so one call site is the wake and no
     path can write a document the backup never hears about. Imported where it is used: the vault
     reads a canvas's documents and its records through this module.
@@ -1501,8 +1501,6 @@ def put_doc(path: Path, canvas_id: str, collection: Any, doc_id: Any, doc: Any) 
         # The clock is read under the lock, so `at` follows the order the writes landed in: two
         # racing writers can't store the later stamp first and be read as the older one.
         now = int(time.time() * 1000)
-        # The document's own weight is its row as a read carries it, which is the term the canvas's
-        # total counts for it: one measure, so a document that fits in the canvas always fits here.
         weighed = _weigh(collection, doc_id, value)
         if weighed > DOC_MAX_BYTES:
             raise CanvasError(

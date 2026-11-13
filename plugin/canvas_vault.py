@@ -15,8 +15,9 @@ the file and the host stamped the document:
 - A note is written only where its document's ``at`` is newer than the file's mtime, so a second
   tick writes nothing it already wrote, and a note the user edited in the vault (whose mtime is now
   later than any clock the store holds for it) is left exactly as they left it.
-- A note is deleted only where a walk that reached the end of its collection no longer names it. A
-  remove writes no tombstone, so a walk cut short is no evidence that a document is gone.
+- A note is deleted only where the store no longer names its document: a walk that reached the end of
+  its collection, or a collection the catalogue has stopped listing. A remove writes no tombstone, so
+  a walk cut short is no evidence that a document is gone.
 - A tick writes at most ``VAULT_PER_TICK`` files and stops after ``VAULT_SECONDS``: five thousand
   documents converge over ticks instead of holding the host for a minute, and a steady-state tick
   writes the one note that moved.
@@ -100,8 +101,8 @@ def wake() -> None:
 
     Called by every data write and remove (``canvases._moved``), so this is where a burst is coalesced:
     the first write of a burst starts a tick and the rest ride it, since the tick re-reads the store and
-    writes what moved — what a dropped wake would have asked for is what the next tick finds. Returns
-    None: whether a wake was taken is the vault's business, not the writer's.
+    writes what moved — what a dropped wake would have asked for is what the next tick finds. Whether a
+    wake was taken is the vault's business, not the writer's.
     """
     global _woken_at
     now = time.monotonic()
@@ -150,8 +151,8 @@ def _back_up(store: Path, base: Path, canvas: Dict[str, Any], budget: "_Bounded"
         held = canvas_docs.catalogue(conn, canvas["id"])
         _keep(folder / INDEX, _canvas_index(canvas, held["collections"]), budget)
         # A collection the catalogue no longer names is a collection whose every document the store
-        # has stopped holding, so its folder goes with them — and anything beside the notes, which
-        # is the user's, stays.
+        # has stopped holding, so its notes go with them — and anything beside them, which is the
+        # user's, keeps the folder.
         _prune_folders(folder, {_folder(row["collection"]) for row in held["collections"]})
         for row in held["collections"]:
             if budget.spent:
@@ -282,7 +283,7 @@ def _folder(name: str) -> str:
 
 
 def _digest(value: str) -> str:
-    """Six characters of the id's own hash: enough to keep two names apart, short enough to read."""
+    """Six characters of the name's own hash: enough to keep two names apart, short enough to read."""
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:6]
 
 

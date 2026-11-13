@@ -3321,7 +3321,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     async def canvas_data(request: "web.Request") -> "web.Response":
         """A canvas's data as a catalogue: one row a collection, and what the whole of it weighs.
 
-        The first read of a sweep (``canvases.data_catalogue``, canvas_docs.py). No document rides
+        The first read of a sweep (``canvases.data_catalogue``, canvases.py). No document rides
         it, so it costs the same for five thousand documents as for five — the documents themselves
         are asked for a page at a time, one collection at a time, from the route below.
         """

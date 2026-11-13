@@ -4,8 +4,8 @@
  * The page is drawn in a frame with an opaque origin, so it reaches nothing of the app's and the
  * parent is its only door. A read is asked of the reader the screen hands this bridge — today one over
  * this device's copy of the canvas's data — so a page opens and lists what it holds with the host away
- * (ADR 0113); writes go to the host's one route, `POST canvases/<id>/call`, and the answer it
- * gives is what the copy keeps.
+ * (ADR 0113); writes go to the host's one route, `POST canvases/<id>/call`, and its answer is what
+ * the rows keep — or, with the bot away, the write itself, kept Pending (ADR 0149).
  *
  * Import-free but for the marker's own separator and the rule that cuts a label, so
  * `scripts/test-canvas-bridge.mjs` runs it as a pure rule.
@@ -75,9 +75,9 @@ export const CANVAS_READS = ["usage", "routines", "projects", "sessions"] as con
 export type CanvasReadShape = (typeof CANVAS_READS)[number]
 
 /**
- * The comparisons a `query` may make, held here as `plugin/canvas_docs.py` holds them: two copies of
- * one list on either side of the host's door, kept because a name this app can't promise is a call it
- * refuses at the door rather than a round trip the host refuses anyway.
+ * The comparisons a `query` may make, held here as `plugin/canvas_docs.py` holds them, because a
+ * name this app can't promise is a call it refuses at the door rather than a round trip the host
+ * refuses anyway.
  */
 export const QUERY_OPS = ["eq", "contains", "prefix", "gt", "lt"] as const
 
@@ -188,7 +188,8 @@ export type BridgeCall =
   | (BridgeCallBase & { method: "tool"; tool: string; args: Record<string, unknown> })
   | (BridgeCallBase & { method: "open"; url: string })
 
-/** A call answered from this device's rows of the canvas's data: the four reads a page makes. */
+/** A call answered from this device's rows of the canvas's data: the four reads that never reach the
+ * host. */
 export type BridgeDataCall = Extract<BridgeCall, { method: "list" | "get" | "page" | "count" }>
 
 /** A call the host answers: the canvas's own data, written through the host's one route. */
@@ -206,7 +207,8 @@ export type CanvasWrite =
 /** A call the host answers: the canvas's own data read by the host, or a declared tool. */
 export type BridgeHostCall = Extract<BridgeCall, { method: "read" | "query" | "tool" }>
 
-/** A query of one collection the host answers: the filter, the sort and the page, and no document. */
+/** A query of one collection the host answers: the filter, the sort and the page — the call carries no
+ * document. */
 export type BridgeQueryCall = Extract<BridgeCall, { method: "query" }>
 
 /** A host read's arguments: a named shape and whatever that shape takes. */
@@ -272,7 +274,7 @@ function queryWhere(value: unknown): QueryWhere[] | null {
   return kept
 }
 
-/** A query's sort: a field or the id, and an arrow. Anything else is no call. */
+/** A query's sort: a field or the id, and one of two directions. Anything else is no call. */
 function queryOrder(value: unknown): QueryOrder | null {
   if (value === undefined || value === null) return { dir: "asc" }
   if (typeof value !== "object" || Array.isArray(value)) return null
@@ -435,9 +437,6 @@ function partial(call: BridgeDataCall): Error {
  * number; and a `get` is one document — answering `null` only where a completed sweep says this device
  * has seen the canvas whole, since before one a document the rows don't hold may simply not have been
  * read yet (GLOSSARY "Partial").
- *
- * Each call is answered by the read it is: a `get` reads one row, a `page` one page, so a document of a
- * collection of five thousand costs one row and a page of five costs five.
  */
 export async function answerRead(call: BridgeDataCall, copy: CanvasCopy): Promise<unknown> {
   if (call.method === "count") return copy.count(call.collection)
@@ -748,13 +747,13 @@ function once(
 }
 
 /**
- * The parent's listener: a read of the canvas's data is the reader's, and whatever it answers — a
- * value or an error — is what the page is told; a write is the host's, and a host read or a tool call
- * is the host's too — a tool call held until the reader allows it. A link the page's reader tapped is
- * opened through the app's own way out, once per call. Nothing from another window is answered or
- * posted — a message is the canvas talking only when it comes from this screen's own frame — and a
- * call this rule cannot read is answered with the reason rather than dropped, since the page's
- * promise is waiting on it.
+ * The parent's listener: the four reads of the canvas's data this device answers are the reader's, and
+ * whatever it answers — a value or an error — is what the page is told; a write is the host's, and a
+ * host read, a `query` among them, or a tool call is the host's too — a tool call held until the
+ * reader allows it. A link the page's reader tapped is opened through the app's own way out, once per
+ * call. Nothing from another window is answered or posted — a message is the canvas talking only when
+ * it comes from this screen's own frame — and a call this rule cannot read is answered with the reason
+ * rather than dropped, since the page's promise is waiting on it.
  *
  * A tool refused for consent is asked about once, however many calls are waiting on it: the second
  * call waits on the same answer rather than opening a second dialog. Allow retries the call once and
@@ -823,8 +822,6 @@ export function bridgeHandler(host: BridgeHost): (event: MessageEvent) => void {
       reply(call.call, true, { value: null })
       return
     }
-    // Whatever the call was answered by, the page is told the value or the reason: the reader's
-    // answer, the host's, or a tool's once consent has settled it.
     const settle = (asked: Promise<unknown>) =>
       void asked.then(
         (value) => reply(call.call, true, { value }),

@@ -925,8 +925,8 @@ def _migrate(conn: sqlite3.Connection) -> None:
                )"""
         )
         # v65: whether this canvas's data is copied into the host's OKF vault, the canvas's own
-        # switch and no setting of the app's (canvas_vault.py). Off for every canvas a store written
-        # before it holds, since a backup nobody asked for is not one to start.
+        # switch and no setting of the app's (canvas_vault.py). Off for every canvas an older store
+        # holds, since a backup nobody asked for is not one to start.
         if version < 65:
             canvas_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvases)")}
             if "vault" not in canvas_columns:

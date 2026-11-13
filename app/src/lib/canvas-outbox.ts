@@ -136,10 +136,9 @@ async function send(profile: Profile, canvasId: string): Promise<boolean> {
     try {
       value = await sendWrite(profile, canvasId, call)
     } catch (failure) {
-      // Only a statused refusal is the host's answer about this document: the row goes, the Pending
-      // write it kept goes with it so the copy is the host's own again, and the reader is told which
-      // document and why, in the host's own words. Anything else — a 5xx, a 429, a timeout — is a
-      // bot that isn't answering, and the queue stays where it is for the next time it does.
+      // A statused refusal is the host's answer about this document: the row goes, the Pending write it
+      // kept goes with it so the copy is the host's own again, and the reader is told which document and
+      // why, in the host's own words. Anything else leaves the queue where it is.
       if (!refusedWrite(failure, call.method)) return false
       const sent = await dropRow(row)
       if (sent) await forgetPending(profile, canvasId, row.collection, row.docId)

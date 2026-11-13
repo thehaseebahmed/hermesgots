@@ -739,10 +739,10 @@ export function CanvasView() {
     setRedrawn({ key: frameKey, document })
   }
 
-  // The page's own data and its calls through the app: a data read is the reader's, which answers from
-  // the copy this device holds, and a data write goes to the host's one route (ADR 0113); the host's
-  // four reads are asked freely, and a declared tool's call waits here while the reader is asked
-  // (ADR 0114).
+  // The page's own data and its calls through the app: a data read this device can answer is the
+  // reader's, which answers from the copy it holds — a `query` is the one it hands to the host — and a
+  // data write goes to the host's one route (ADR 0113); the host's four reads are asked freely, and a
+  // declared tool's call waits here while the reader is asked (ADR 0114).
   useEffect(() => {
     const hear = bridgeHandler({
       frame: () => frame.current?.contentWindow ?? null,

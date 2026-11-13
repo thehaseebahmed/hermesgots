@@ -9,8 +9,8 @@ so a collection listed twice reads the same both times however its writes landed
 A walk is one statement a batch, the next starting after the row the last one ended on, so a reader
 holds a batch rather than a collection however many documents the canvas keeps. ``catalogue`` answers
 what a canvas holds by collection rather than any of it, and ``page`` is the collection read a page at
-a time once a sweep has its catalogue: one statement, the next page named by the id this one ended on,
-so a document written or removed between two pages moves neither.
+a time once a sweep has its catalogue, the next page named by the id this one ended on, so a document
+written or removed between two pages moves neither.
 
 ``query`` is the read a page makes of a collection it cannot hold: a filter, a sort and one page of
 the result, answered in one statement with the total beside it, so five thousand documents cost the

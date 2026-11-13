@@ -213,8 +213,8 @@ async function dropCanvas(profile: Profile, id: string) {
 const AWAY_BOT = "This bot didn't answer."
 
 /**
- * What a page's write is told with the host away, and what the reader's toast says: the write is kept
- * on this device as a Pending write and sent when the bot returns, so it is no refusal (ADR 0149).
+ * What the reader's toast says when a page's write waits for a bot that is away: the write is kept on
+ * this device as a Pending write and sent when the bot returns, so it is no refusal (ADR 0149).
  */
 export const CANVAS_AWAY = "Saved on this phone. It will be sent when the bot is back."
 
@@ -321,7 +321,7 @@ function put(profile: Profile, canvas: Canvas) {
  * The reader a canvas's page asks its data of: the one rule for what a read answers (`answerRead`),
  * applied to the rows this device holds for that canvas as the call arrives — read at call time, so a
  * write landing never replaces the reader under a running page. The rule is the bridge's and the rows
- * are this device's, so where a document lives is a change here and nowhere else.
+ * are this device's, so a different place to keep a document changes `canvasCopy` and nothing above it.
  */
 export function canvasReader(id: string): (call: BridgeDataCall) => Promise<unknown> {
   return async (call) => answerRead(call, await canvasCopy(id))

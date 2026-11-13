@@ -73,7 +73,7 @@ export function holdDocBudget(bytes: number) {
 
 /**
  * What a canvas's sweeps left: the generation the last wrote under, and when one last finished — the
- * row `db.ts` defines, without the two parts of its key, which every caller already holds.
+ * row `db.ts` defines, less its key and the two parts of it, which every caller already holds.
  */
 export type CanvasSweep = Omit<CanvasSweepRow, "key" | "connection" | "canvasId">
 
@@ -161,8 +161,6 @@ export async function keepDocs(
         if (kept) stale.push(keys[at])
         return
       }
-      // A row at the page's own clock is the row this page would write: only a document that moved is
-      // written, and one that did not is still one this sweep saw.
       if (!kept || kept.at < one.at) rows.push(rowOf(profile, canvasId, one, under, false))
     })
     if (rows.length) await db.canvasDocs.bulkPut(rows)
@@ -510,10 +508,10 @@ export async function forgetDocs(profile: Profile, canvasId: string) {
 
 /**
  * What one row costs this device, as the row already says: the bytes its collection, its id and its
- * document's JSON take, weighed when the row was written (`weigh`). The measure is read off the row and
- * never off its document, so a pass over a device's rows is a sum rather than every document's JSON
- * encoded a second time — which is what a walk of five thousand rows to weigh them cost, on every
- * completed sweep and every write that added a document.
+ * document's JSON take, weighed when the row was written (`rowOf`, through `canvasDocBytes`). The
+ * measure is read off the row and never off its document, so a pass over a device's rows is a sum
+ * rather than every document's JSON encoded a second time — which is what a walk of five thousand
+ * rows to weigh them cost, on every completed sweep and every write that added a document.
  *
  * A row written before the field existed — one seeded by hand, since v44's upgrade stamps the rows a v42
  * or v43 database moved in — is weighed here, once, and rewritten with its own number the next time that
@@ -522,7 +520,8 @@ export async function forgetDocs(profile: Profile, canvasId: string) {
 const bytesOf = (row: CanvasDocRow) =>
   row.bytes ?? canvasDocBytes(row.collection, row.id, row.doc)
 
-/** One canvas's rows as the budget sees them: what they weigh, and the key both tables file it under. */
+/** One canvas's rows as the budget sees them: what they weigh, and the connection and canvas its rows
+ * and its sweep mark are keyed by. */
 interface Weight {
   connection: string
   canvasId: string
@@ -547,10 +546,10 @@ async function weights(): Promise<Map<string, Weight>> {
 }
 
 /**
- * The canvases an eviction leaves alone: one a reader pinned (they asked for its row in the sidebar),
- * one holding a write its host has not answered (the queue is where that write lives, and the page
- * reads its own write back from these rows), and the one a screen has open — the canvas this device
- * opened last, which is the only open a device can name after the fact.
+ * The canvases an eviction leaves alone that the rows can name: one a reader pinned (they asked for its
+ * row in the sidebar), and one holding a write its host has not answered (the queue is where that write
+ * lives, and the page reads its own write back from these rows). The canvas a screen has open — the one
+ * this device opened last — is the third, and `enforceBudget` adds it from the sweep's mark.
  *
  * A pin is a fact about a record, and a record is kept in its bot's list row, which carries no page. The
  * per-canvas rows beside it hold the page each screen drew — up to 256 KB each, and every canvas this
@@ -573,9 +572,9 @@ async function spared(connections: Iterable<string>): Promise<Set<string>> {
  * where the rows grow — a completed sweep, and a write's answer that added a document — since those
  * are the only two moments the total moves up.
  *
- * A canvas that can be spared goes, until the device is under its budget again. A device still over it
- * with nothing left to take stays over it: the canvas on screen is not the budget's to take, and one
- * canvas of documents is over whatever is evicted for it.
+ * A canvas that can be spared is skipped, until the device is under its budget again. A device still
+ * over it with nothing left to take stays over it: the canvas on screen is not the budget's to take,
+ * and one canvas of documents is over whatever is evicted for it.
  */
 async function enforceBudget() {
   const weighed = await weights()

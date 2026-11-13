@@ -5,7 +5,8 @@
  * it goes with the bot that answered it.
  *
  * A canvas's own documents are not part of this copy: they are rows of their own (`canvas-docs.ts`), a
- * sweep fills them a page at a time, and a page may be 5000 documents — never one row here.
+ * sweep fills them a page at a time, and a collection of five thousand documents is never one row
+ * here.
  *
  * A module of its own for the reason `canvas-css.ts` keeps its own table: this is the device's side
  * of the copy — its keys, its rows and the prune — while `canvases.ts` is the store the screens draw

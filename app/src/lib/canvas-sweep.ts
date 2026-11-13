@@ -39,8 +39,8 @@ export function sweepCanvas(profile: Profile, id: string): Promise<void> {
 
 async function run(profile: Profile, id: string) {
   const generation = await beginSweep(profile, id)
-  // Every key this sweep saw, in the order the host named them: what its completion prunes against, so a
-  // row it read and did not rewrite is still a document the sweep saw.
+  // Every key this sweep saw: what its completion prunes against, so a row it read and did not rewrite
+  // is still a document the sweep saw.
   const swept = new Set<string>()
   // Only the catalogue is asked with the whole read in hand: a host from before the paged route has
   // no `/data` at all, and today's one read of the canvas stands in for a sweep that couldn't begin.

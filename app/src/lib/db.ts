@@ -1136,9 +1136,10 @@ export interface CanvasDocRow {
   at: number
   /**
    * What the document costs this device — its collection, its id and its JSON in bytes — weighed when
-   * the row was written (`canvas-docs.ts`'s `weigh`). The budget sums these instead of encoding every
-   * document again, so the field is the row's own and never a total across rows. Unset on a row a v42
-   * or v43 database moved in, which is weighed once and rewritten the next time that document moves.
+   * the row was written (`canvasDocBytes`). The budget sums these instead of encoding every document
+   * again, so the field is the row's own and never a total across rows. Unset only on a row nothing has
+   * rewritten since v44 stamped the table — a hand-seeded one is the case that lasts — which `bytesOf`
+   * weighs as it reads it.
    */
   bytes?: number
   generation: number
