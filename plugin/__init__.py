@@ -31,6 +31,7 @@ from . import (
     approvals,
     attachments,
     canvases,
+    canvas_vault,
     chats,
     clarify,
     cleanup,
@@ -484,6 +485,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             asyncio.ensure_future(merges.run(home)),
             # Queued messages start their turn once the session's run is over; see outbox.py.
             asyncio.ensure_future(outbox.run(adapter, home)),
+            # A canvas whose backup switch is on is copied into this bot's OKF vault, a tick at a
+            # time; a data write wakes it. See canvas_vault.py.
+            asyncio.ensure_future(canvas_vault.run(home)),
             asyncio.ensure_future(alerts.run(home)),
             # Research missions write up once their researcher stops; see research.py.
             asyncio.ensure_future(research.run(home)),
@@ -711,9 +715,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # advertised only where its tools reach a canvas's session and that session is
                     # told the design guide (openui.py) — a canvas with neither can't be worked.
                     # `canvas_data` rides with it: the paged read of a canvas's own data, which a
-                    # device sweeps a collection at a time rather than in one answer.
+                    # device sweeps a collection at a time rather than in one answer. `canvas_vault`
+                    # is the canvas's own backup switch, drawn on its options sheet where the host
+                    # keeps one (canvas_vault.py): a host from before it offers no row.
                     *(
-                        ["canvas", "canvas_data"]
+                        ["canvas", "canvas_data", "canvas_vault"]
                         if canvases.ready() and openui.canvas_ready()
                         else []
                     ),

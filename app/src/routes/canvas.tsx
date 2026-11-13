@@ -61,7 +61,7 @@ import {
 import { db, getActiveProfile, type Attachment, type Profile } from "@/lib/db"
 import { MAX_ATTACHMENTS } from "@/lib/attachment-caps"
 import { serverConfig } from "@/lib/connection"
-import { usePluginFeature } from "@/lib/features"
+import { usePluginFeature, usePluginFeatureOn } from "@/lib/features"
 import { HEADER_BUTTON } from "@/lib/layout"
 import type { CanvasPoint } from "@/lib/point-marker"
 import { hostAnswered } from "@/lib/hermes"
@@ -514,6 +514,9 @@ export function CanvasView() {
   useEffect(() => setBackGuard(back()), [back])
   const { canvas, profile, missing, loaded, away } = useCanvas(id)
   const { awayNow, words: awayWords } = useAway(away)
+  // Whether this bot's host keeps a vault, which is what its options sheet offers the backup switch
+  // on: a host from before it writes no notes, and a switch that writes nothing is a promise broken.
+  const vaultable = usePluginFeatureOn(profile, "canvas_vault")
   const dark = useDark()
   const mode: CanvasMode = dark ? "dark" : "light"
   const html = canvas?.html
@@ -848,6 +851,7 @@ export function CanvasView() {
         open={optionsOpen}
         onOpenChange={setOptionsOpen}
         canvas={canvas}
+        vaultable={vaultable}
         onGrant={grant}
         onUpdate={update}
         onDelete={remove}
@@ -885,6 +889,8 @@ export function CanvasEdit() {
   // The record alone: this screen draws no page, so what keeps it right is the list's sweep.
   const { canvas, profile, missing, away, loaded } = useCanvasRecord(id)
   const { awayNow, words: awayWords } = useAway(away)
+  // The same read the preview makes: a canvas's options are the same sheet on both screens.
+  const vaultable = usePluginFeatureOn(profile, "canvas_vault")
   const large = useLarge()
   const [optionsOpen, setOptionsOpen] = useState(false)
   const { grant, update, remove } = useCanvasManagement(id)
@@ -982,6 +988,7 @@ export function CanvasEdit() {
         open={optionsOpen}
         onOpenChange={setOptionsOpen}
         canvas={canvas}
+        vaultable={vaultable}
         onGrant={grant}
         onUpdate={update}
         onDelete={remove}

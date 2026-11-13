@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 # version or undo touches it. 62 adds the answers a canvas's page got for the tools its version
 # declared (`canvases.py`'s grants, ADR 0114) — one new table, and a pass over the names an earlier
 # build stored in `canvas_versions.tools` to drop the ones the rule refuses now.
-SCHEMA_VERSION = 64
+SCHEMA_VERSION = 65
 
 
 def data_dir(hermes_home: Path) -> Path:
@@ -924,6 +924,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    created_at INTEGER NOT NULL
                )"""
         )
+        # v65: whether this canvas's data is copied into the host's OKF vault, the canvas's own
+        # switch and no setting of the app's (canvas_vault.py). Off for every canvas a store written
+        # before it holds, since a backup nobody asked for is not one to start.
+        if version < 65:
+            canvas_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvases)")}
+            if "vault" not in canvas_columns:
+                conn.execute("ALTER TABLE canvases ADD COLUMN vault INTEGER NOT NULL DEFAULT 0")
         # v64: the picture a canvas's tile draws (canvases.py, #934). It is the canvas's, not a
         # version's, so a record written before one keeps drawing its mark until a write names one.
         if version < 64:

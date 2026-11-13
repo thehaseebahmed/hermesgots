@@ -2533,14 +2533,17 @@ export async function undoCanvas(config: HermesConfig, id: string) {
 
 /**
  * A canvas's own record changed — its title, whether it is pinned to the sidebar, whether it is
- * hidden from the list — kept on the host, so every device agrees on the shape of the list. A title
- * also renames the chat the canvas is edited in. The host answers the record as it now is: the page
- * is no part of this change, and a screen that made it already holds the version it draws.
+ * hidden from the list, whether its data is backed up — kept on the host, so every device agrees on
+ * the shape of the list. A title also renames the chat the canvas is edited in. The host answers the
+ * record as it now is: the page is no part of this change, and a screen that made it already holds
+ * the version it draws.
  */
 export type CanvasChanges = {
   title?: string
   pinned?: boolean
   archived?: boolean
+  /** Whether this canvas's data is copied into the host's OKF vault (`canvas_vault.py`). */
+  vault?: boolean
   image?: string
 }
 

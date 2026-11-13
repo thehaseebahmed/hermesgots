@@ -523,6 +523,9 @@ _COLUMNS = (
     "version",
     "pinned",
     "archived",
+    # Whether this canvas's data is copied into the host's OKF vault, the canvas's own switch
+    # (canvas_vault.py): off unless the user turned it on for this canvas, in this bot's options.
+    "vault",
     "image",
     "at",
     "created_at",
@@ -543,6 +546,7 @@ def _row(row: Any) -> Dict[str, Any]:
     record = dict(zip(_COLUMNS, row))
     record["pinned"] = bool(record["pinned"])
     record["archived"] = bool(record["archived"])
+    record["vault"] = bool(record["vault"])
     return record
 
 
@@ -619,6 +623,25 @@ def names(path: Path) -> List[Dict[str, Any]]:
     finally:
         conn.close()
     return [_name_row(row) for row in rows]
+
+
+def vaulting(path: Path) -> List[Dict[str, Any]]:
+    """Every canvas whose data is backed up, by its id and its title, in one stable order.
+
+    The vault's own read (``canvas_vault``), and the only one it makes of the record: a canvas holds
+    a folder named by its id and an ``index.md`` named by its title, and nothing else of the record
+    is the vault's to draw. The order is the store's key rather than the clock, so a backup that a
+    tick's budget cut short resumes on the canvases it did not reach instead of following whichever
+    one was written to last.
+    """
+    if not path.exists():
+        return []
+    conn = connect(path)
+    try:
+        rows = conn.execute("SELECT id, title FROM canvases WHERE vault = 1 ORDER BY id").fetchall()
+    finally:
+        conn.close()
+    return [{"id": row[0], "title": row[1]} for row in rows]
 
 
 def _answers_to(named: str, canvas_id: str, title: Optional[str]) -> bool:
@@ -1066,26 +1089,32 @@ def _flag(value: Any, field: str) -> bool:
 def update(path: Path, canvas_id: str, body: Any) -> Dict[str, Any]:
     """Changes a canvas's name and its place in the list, and answers its record as it now is.
 
-    The three are the host's, not the app's: a device that pins a canvas and one that hides it
+    The four are the host's, not the app's: a device that pins a canvas and one that hides it
     write one record, so every device draws the same list. A title renames the chat too — a canvas
     and its thread are one name, as ``_commit`` writes them — and ``chats.set_title`` keeps
     ``titleEdited``, so Hermes's auto-title never takes the canvas's name away.
 
+    ``vault`` is the canvas's own backup switch (``canvas_vault``): a flag of the record like the
+    other two, so the device that turned it on and the host that writes the notes agree about which
+    canvas is copied, and a second device draws the same answer.
+
     The answer is the record alone: a name or a place is not the page, and a screen that changed one
     already holds the version it draws, so it keeps its document rather than reading 256 KB back.
-    A body naming none of the three is nobody's change; a flag that isn't a boolean or a title that
+    A body naming none of them is nobody's change; a flag that isn't a boolean or a title that
     isn't a line of text is refused rather than stored, since a record the app can't draw is worse
     than a refusal it can show. The record's clock moves on the host's, taken under the write lock
     like every other write here, since the list is ordered by it.
     """
-    if not any(field in body for field in ("title", "pinned", "archived", "image")):
-        raise CanvasError("A canvas's update names what changes: a title, pinned, archived, or image.")
+    if not any(field in body for field in ("title", "pinned", "archived", "vault", "image")):
+        raise CanvasError(
+            "A canvas's update names what changes: a title, pinned, archived, vault, or image."
+        )
     changes: Dict[str, Any] = {}
     if "title" in body:
         if not isinstance(body["title"], str) or not body["title"].strip():
             raise CanvasError("A canvas's title is a line of text; this one is blank.")
         changes["title"] = title_of(body["title"])
-    for field in ("pinned", "archived"):
+    for field in ("pinned", "archived", "vault"):
         if field in body:
             changes[field] = _flag(body[field], field)
     if "image" in body:
@@ -1099,12 +1128,14 @@ def update(path: Path, canvas_id: str, body: Any) -> Dict[str, Any]:
         conn.execute(
             """UPDATE canvases
                SET title = COALESCE(?, title), pinned = COALESCE(?, pinned),
-                   archived = COALESCE(?, archived), image = COALESCE(?, image), at = ?
+                   archived = COALESCE(?, archived), vault = COALESCE(?, vault),
+                   image = COALESCE(?, image), at = ?
                WHERE id = ?""",
             (
                 changes.get("title"),
                 changes.get("pinned"),
                 changes.get("archived"),
+                changes.get("vault"),
                 changes.get("image"),
                 now,
                 canvas_id,
@@ -1386,6 +1417,19 @@ def _stored_bytes(
     )
 
 
+def _moved() -> None:
+    """A canvas's data has moved, so the vault's next tick looks again (``canvas_vault``).
+
+    Every write and every remove that took a row comes through here, whichever asked for it — a
+    page's call, the agent's tool, the route a device posts — so one call site is the wake and no
+    path can write a document the backup never hears about. Imported where it is used: the vault
+    reads a canvas's documents and its records through this module.
+    """
+    from . import canvas_vault
+
+    canvas_vault.wake()
+
+
 def put_doc(path: Path, canvas_id: str, collection: Any, doc_id: Any, doc: Any) -> Dict[str, Any]:
     """Stores one document as the canvas's own, and answers it as it now is.
 
@@ -1433,6 +1477,7 @@ def put_doc(path: Path, canvas_id: str, collection: Any, doc_id: Any, doc: Any) 
         )
     # The answer is the stored document read back, not the caller's object: what a page reads next
     # is exactly this, whatever it sent.
+    _moved()
     return canvas_docs.stored(collection, doc_id, value, now)
 
 
@@ -1452,6 +1497,10 @@ def remove_doc(path: Path, canvas_id: str, collection: Any, doc_id: Any) -> Dict
             "DELETE FROM canvas_docs WHERE canvas_id = ? AND collection = ? AND id = ?",
             (canvas_id, collection, doc_id),
         ).rowcount
+    # A remove that found no row moved nothing, so the vault is not woken for it: a page asking
+    # again for a remove whose answer came slowly would otherwise be a write every time it asks.
+    if removed:
+        _moved()
     return {"collection": collection, "id": doc_id, "removed": removed > 0}
 
 

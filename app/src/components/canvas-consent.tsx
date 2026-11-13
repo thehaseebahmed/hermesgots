@@ -215,11 +215,15 @@ function NameSheet({
  * A canvas's options: the record's place and the answers its version carries, changed after the fact.
  *
  * Placement is a name row that opens its own sheet — a text value is edited with Cancel and Save —
- * then Pin and Hide, which write the moment they are flipped. Under them, one row per tool of the
- * union: every tool this version declares, and every tool the host holds an answer for that this
- * version no longer declares, which is still the reader's to revoke. Last is Delete — the app's one
- * destructive shape (`DestructiveButton`), under the last group rather than inside a card of its own,
- * and it asks first, since it takes the page, its data and its chat with it.
+ * then Pin, Archive and, where the host keeps a vault, Back up to a wiki, which write the moment they
+ * are flipped. Under them, one row per tool of the union: every tool this version declares, and every
+ * tool the host holds an answer for that this version no longer declares, which is still the reader's
+ * to revoke. Last is Delete — the app's one destructive shape (`DestructiveButton`), under the last
+ * group rather than inside a card of its own, and it asks first, since it takes the page, its data and
+ * its chat with it.
+ *
+ * The backup row is drawn only where the host advertises `canvas_vault` (`vaultable`): a plugin from
+ * before it has no writer, and a switch that writes nothing is a promise the host can't keep.
  *
  * Every control is disabled while one of the sheet's writes is out, so a second tap can't be lost:
  * two answers for one canvas would land in either order, and a switch that moves under a tap is no
@@ -229,6 +233,7 @@ export function CanvasOptions({
   open,
   onOpenChange,
   canvas,
+  vaultable,
   onGrant,
   onUpdate,
   onDelete,
@@ -236,6 +241,8 @@ export function CanvasOptions({
   open: boolean
   onOpenChange: (open: boolean) => void
   canvas: Canvas | undefined
+  /** Whether this bot's host keeps a vault, which is what offers the backup switch. */
+  vaultable: boolean
   onGrant: (tool: string, allow: boolean) => Promise<boolean>
   /** Writes the canvas's own record; the host's answer is what the screens redraw from. */
   onUpdate: (changes: CanvasChanges) => Promise<void>
@@ -326,6 +333,16 @@ export function CanvasOptions({
                   void change("archived", () => onUpdate({ archived: checked }))
                 }
               />
+              {vaultable && (
+                <SwitchRow
+                  id="canvas-vault"
+                  title="Back up to a wiki"
+                  subtitle="Copy its data into a markdown vault on this bot's host, kept up to date while it's on."
+                  checked={canvas?.vault === true}
+                  disabled={!canvas || busy}
+                  onCheckedChange={(checked) => void change("vault", () => onUpdate({ vault: checked }))}
+                />
+              )}
             </Group>
 
             {/* Nothing where a version declares no tools and holds no grant: an empty card's fill

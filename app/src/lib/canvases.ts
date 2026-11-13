@@ -91,6 +91,12 @@ export interface Canvas {
   pinned: boolean
   archived: boolean
   /**
+   * Whether this canvas's data is copied into its bot's OKF vault — the canvas's own switch, kept on
+   * its record so every device draws the same answer, and off unless the user turned it on
+   * (`canvas_vault.py`).
+   */
+  vault: boolean
+  /**
    * The picture the list's tile draws, as the host keeps it: one inline image the bot wrote with a
    * version, or nothing, which the tile draws as the canvas's own mark.
    */
@@ -253,6 +259,7 @@ function toCanvas(raw: Record<string, unknown>, profileId: string): Canvas {
     version: Number(raw.version) || 0,
     pinned: Boolean(raw.pinned),
     archived: Boolean(raw.archived),
+    vault: Boolean(raw.vault),
     at: Number(raw.at) || 0,
     createdAt: Number(raw.created_at) || 0,
     sessionId: String(raw.session_id ?? ""),

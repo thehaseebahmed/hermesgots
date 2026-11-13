@@ -60,6 +60,14 @@ interface Host {
   removed?: boolean
   /** A grant route that answers no list at all, as a host from before the row carried a clock. */
   silentGrants?: boolean
+  /** Whether this canvas's data is backed up into the host's vault (`canvases.py`'s `vault`). */
+  vault?: boolean
+  /** The record's own clock, which a change to it moves — as the host's does, since a list is ordered by it. */
+  at?: number
+  /** What this host advertises on `/info`; a host from before a feature names none of it. */
+  features?: string[]
+  /** How many times the app asked this host what it advertises. */
+  infos?: number
 }
 
 /** The host's next moment: an answer's `at`, never a list's position. */
@@ -77,7 +85,8 @@ const canvas = (host: Host, id: string) => ({
   version: 3,
   pinned: false,
   archived: false,
-  at: 5,
+  vault: host.vault ?? false,
+  at: host.at ?? 5,
   created_at: 1,
   can_undo: true,
   html: PAGE,
@@ -107,7 +116,10 @@ function serve(host: Host, id: string): { gate: Gate } {
   const gate: Gate = { reads: 0, answered: 0, hold: null }
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input))
-    if (url.pathname.endsWith("/info")) return json({ version: "0.113.0", features: ["canvas"] })
+    if (url.pathname.endsWith("/info")) {
+      host.infos = (host.infos ?? 0) + 1
+      return json({ version: "0.113.0", features: host.features ?? ["canvas"] })
+    }
     const grants = /\/canvases\/([^/]+)\/grants$/.exec(url.pathname)
     if (grants) {
       assert.equal(init?.method, "POST", "a grant is asked for with a POST")
@@ -181,7 +193,11 @@ function serve(host: Host, id: string): { gate: Gate } {
         const body = JSON.parse(String(init?.body)) as Record<string, unknown>
         host.changes?.push({ method: "POST", body })
         if (typeof body.title === "string") host.title = body.title
-        const { id: heldId, title, session_id, chat_id, version, pinned, archived, at, created_at } =
+        if (typeof body.vault === "boolean") host.vault = body.vault
+        // A change moves the record's own clock on the host, which is what makes it the newer of
+        // the two a device holds — a change that kept the clock would never reach the copy.
+        host.at = (host.at ?? 5) + 1
+        const { id: heldId, title, session_id, chat_id, version, pinned, archived, vault, at, created_at } =
           canvas(host, id)
         return json({
           object: "gots.canvas",
@@ -193,6 +209,7 @@ function serve(host: Host, id: string): { gate: Gate } {
             version,
             pinned,
             archived,
+            vault,
             at,
             created_at,
             // The record answer carries whether a version sits under the drawn one, as the host's does.
@@ -224,11 +241,15 @@ function serve(host: Host, id: string): { gate: Gate } {
 /**
  * The bot a case's canvas belongs to, and no copy left over from another case. Each case makes its
  * own canvas, since the screens' store outlives one case in this process.
+ *
+ * `connection` names the bot's server, so a case about a host that answers differently takes one of
+ * its own: what a connection's plugin answered is remembered for the page, and a second case on the
+ * first one's server would read the first one's answer.
  */
-async function seedCanvas() {
+async function seedCanvas(connection = "canvas-consent") {
   await seedSettings()
   await db.profiles.clear()
-  await db.profiles.put(botProfile("canvas-consent"))
+  await db.profiles.put(botProfile(connection))
   await db.messages.clear()
   await db.conversations.clear()
   await db.canvasCache.clear()
@@ -762,6 +783,85 @@ test(
         "the second its place in the sidebar and its archive",
       )
       assert.equal(toolSwitches().length, 0, "and no tool row is drawn at all")
+    })
+  }),
+)
+
+/**
+ * The backup row's switch: the role-carrying control inside the row the canvas's id names, which is
+ * where the app's `SwitchRow` puts the answer a reader sees.
+ */
+const vaultSwitch = () =>
+  find('[data-canvas-options] label[for="canvas-vault"] [role="switch"]')
+
+test(
+  "the options sheet turns a canvas's backup on, and the record carries it",
+  atWidth(390, async () => {
+    // The backup is the canvas's own switch, not a setting of the app's: it is drawn beside Pin and
+    // Archive, and what it writes is the canvas's record, which every device draws.
+    const host: Host = {
+      tools: [],
+      grants: {},
+      clock: 0,
+      calls: [],
+      answers: [],
+      changes: [],
+      features: ["canvas", "canvas_vault"],
+    }
+    serve(host, "c12")
+    await seedCanvas("canvas-vault")
+    await mount(screen("c12"), async () => {
+      await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
+      await click(find("[data-canvas-options-open]"))
+      await until(() => find("[data-canvas-options]") !== null, "the options to open")
+
+      // The host's `/info` is a read of its own: the row appears once the answer that names
+      // `canvas_vault` lands, and no row is drawn before it.
+      await until(async () => host.infos !== undefined, "the host's own answer")
+      await until(async () => vaultSwitch() !== null, "the backup switch")
+      const row = vaultSwitch()!
+      assert.equal(row.getAttribute("aria-checked"), "false", "and it starts off")
+      // It stands with the other switches of the canvas's own record, in the same card.
+      const groups = findAll("[data-canvas-options] [data-settings-group]")
+      assert.equal(groups.length, 2, "the backup is no group of its own")
+      assert.match(
+        wordsOf(groups[1]),
+        /Pin to sidebar[\s\S]*Archive[\s\S]*Back up to a wiki/,
+        "it is drawn beside Pin and Archive",
+      )
+
+      await click(row)
+      await until(async () => host.changes?.length === 1, "the switch to be posted")
+      assert.deepStrictEqual(host.changes?.[0], { method: "POST", body: { vault: true } })
+      await until(
+        () => vaultSwitch()?.getAttribute("aria-checked") === "true",
+        "the row to read the record the host answered with",
+      )
+      // The record this device holds says so too, so the sheet reads it back with the host away.
+      const bot = (await db.profiles.get("bot-1"))!
+      await until(async () => (await cachedCanvas(bot, "c12"))?.vault === true, "the flag to be kept")
+    })
+  }),
+)
+
+test(
+  "the backup row is drawn only where the host advertises the vault",
+  atWidth(390, async () => {
+    const host: Host = { tools: [], grants: {}, clock: 0, calls: [], answers: [], features: ["canvas"] }
+    serve(host, "c13")
+    await seedCanvas("canvas-vault-off")
+    await mount(screen("c13"), async () => {
+      await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
+      await click(find("[data-canvas-options-open]"))
+      await until(() => find("[data-canvas-options]") !== null, "the options to open")
+      // The answer that names no vault has landed, so the absence below is the host's own.
+      await until(async () => host.infos !== undefined, "the host's own answer")
+      await settle()
+      assert.ok(
+        missing('[data-canvas-options] label[for="canvas-vault"]'),
+        "no switch a host can't keep",
+      )
+      assert.doesNotMatch(wordsOf(find("[data-canvas-options]")), /Back up to a wiki/)
     })
   }),
 )
