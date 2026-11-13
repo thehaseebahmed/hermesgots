@@ -132,7 +132,7 @@ import { cn } from "@/lib/utils"
 import { Chip } from "@/components/chip"
 import { BackButton } from "@/components/back-button"
 
-/** Meetings is behind a Developer switch; with it off, its screens send you home. */
+/** Meetings is behind its Lab switch; with it off, its screens send you home. */
 function Gate({ children }: { children: ReactNode }) {
   const enabled = useMeetingsEnabled()
   if (enabled === undefined) return null

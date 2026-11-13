@@ -428,7 +428,7 @@ export const FLOWS = {
   },
   meetings: {
     script: "e2e/meetings.mjs",
-    about: "Meetings behind its Developer switch: a recording, an added file and a timestamp",
+    about: "Meetings behind its Lab switch: a recording, an added file and a timestamp",
   },
   "clarify-polling": {
     script: "regression-clarify-polling.mjs",

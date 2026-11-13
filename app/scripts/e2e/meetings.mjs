@@ -1,4 +1,4 @@
-// Meetings on the mock plugin, behind the Developer switch: a transcript file written up as notes, a
+// Meetings on the mock plugin, behind its Lab switch: a transcript file written up as notes, a
 // recording sent in chunks and followed through its stages to the notes (a bullet with no source
 // marked, an owner the transcript never names said so), a cited time opening the transcript at that
 // line, a recording that fails once and is tried again, an upload nothing finished, search, and

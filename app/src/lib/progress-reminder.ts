@@ -28,14 +28,14 @@ export function isProgressReminder(content: unknown): boolean {
 }
 
 /**
- * Whether this device draws a reminder as a row of its own: *Show progress reminders*, which only
- * exists behind Developer. One spelling of the pair, because the fold, the live stream, both chat
- * screens and the renderer all have to agree on it (ADR 0068).
+ * Whether this device draws a reminder as a row of its own: *Show progress reminders*, the Lab
+ * switch. One spelling of the pair, because the fold, the live stream, both chat screens and the
+ * renderer all have to agree on it (ADR 0068).
  */
 export function progressRemindersShown(
-  settings: { developer?: boolean; showProgressReminders?: boolean } | null | undefined,
+  settings: { showProgressReminders?: boolean } | null | undefined,
 ): boolean {
-  return Boolean(settings?.developer && settings.showProgressReminders)
+  return Boolean(settings?.showProgressReminders)
 }
 
 interface ResultRow {
