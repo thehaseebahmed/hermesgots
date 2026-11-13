@@ -277,8 +277,10 @@ test("a failed refresh keeps the stale set; with no row, the answer is nothing",
 test("fetchModelsDev reads the registry and refuses an error", async () => {
   const real = globalThis.fetch
   try {
-    globalThis.fetch = async (url) => {
+    globalThis.fetch = async (url, init) => {
       assert.equal(url, MODELS_DEV_URL)
+      // A read inside a request has to be able to give up; see CATALOG_TIMEOUT_MS.
+      assert.ok(init?.signal instanceof AbortSignal)
       return Response.json({ anthropic: { models: { m: {} } } })
     }
     assert.deepEqual(await fetchModelsDev(), { anthropic: { models: { m: {} } } })
@@ -287,6 +289,33 @@ test("fetchModelsDev reads the registry and refuses an error", async () => {
   } finally {
     globalThis.fetch = real
   }
+})
+
+test("a catalogue the store can't cache still answers", async () => {
+  const store = memoryStore()
+  store.setJSON = async () => {
+    throw new Error("the blob write was refused")
+  }
+  const load = async () => ({ anthropic: { models: { "claude-opus-5-5": {} } } })
+  assert.deepEqual(await knownModelIds(store, NOW, load), new Set(["claude-opus-5-5"]))
+})
+
+test("a cached board asks the catalogue nothing", async () => {
+  const env = { ...setup(), catalog: async () => LISTED }
+  env.store.data.set("users/octocat", {
+    login: "octocat",
+    days: { "2026-10-15": { "claude-opus-5-5": { chat: counts(1) } } },
+    updatedAt: NOW,
+  })
+  const first = await call(env, null, "GET", "board")
+  assert.equal(first.status, 200)
+  // Within the TTL the board is served as built, so an unreachable catalogue can't fail it.
+  env.catalog = async () => {
+    throw new Error("models.dev is down")
+  }
+  const again = await call(env, null, "GET", "board")
+  assert.equal(again.status, 200)
+  assert.equal(again.body.periods.today.tokens[0].total, 2)
 })
 
 // The catalogue, as the community function hands it to the rules: only these models exist.

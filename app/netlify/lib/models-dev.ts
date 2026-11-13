@@ -51,9 +51,16 @@ export function knownModels(payload: unknown): Known | null {
   return ids.size > 0 ? ids : null
 }
 
+/**
+ * How long models.dev has to answer. The read happens inside a request (a report, or a board being
+ * built), so a reply that never comes would be a request that never ends: give up, and the caller
+ * filters with the stale set or not at all.
+ */
+export const CATALOG_TIMEOUT_MS = 8_000
+
 /** The registry as models.dev serves it. */
 export async function fetchModelsDev(url = MODELS_DEV_URL): Promise<unknown> {
-  const response = await fetch(url)
+  const response = await fetch(url, { signal: AbortSignal.timeout(CATALOG_TIMEOUT_MS) })
   if (!response.ok) throw new Error(`models.dev responded ${response.status}`)
   return response.json()
 }
@@ -83,6 +90,11 @@ export async function knownModelIds(
     .then(knownModels)
     .catch(() => null)
   if (!fresh) return cached
-  await store.setJSON(CATALOG_KEY, { models: [...fresh].sort(), at: now } satisfies CatalogRow)
+  // A cache that can't be written costs the next request a read, not this one an answer.
+  try {
+    await store.setJSON(CATALOG_KEY, { models: [...fresh].sort(), at: now } satisfies CatalogRow)
+  } catch {
+    // The ids are in hand either way.
+  }
   return fresh
 }
