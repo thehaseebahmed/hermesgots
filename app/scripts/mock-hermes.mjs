@@ -4269,7 +4269,10 @@ http
                 "research_verify",
               ]
             : []),
-          ...(CANVAS ? ["canvas"] : []),
+          // The vault's switch rides with canvases: a mock whose record carries `vault` and whose
+          // update takes it answers the row as the plugin does. (The paged data read is not
+          // advertised, since this mock answers a canvas whole and would 404 the pages.)
+          ...(CANVAS ? ["canvas", "canvas_vault"] : []),
           ...(MEETINGS ? ["meetings", "meetings_ask"] : []),
           ...(MCPS
             ? [

@@ -50,7 +50,10 @@ logger = logging.getLogger(__name__)
 # 68 keeps the stance, part and lane of a verification's claim, and how each lane's run ended
 # (`research.py`): four new columns.
 # 69 keeps what each of a verification's lanes searched (`research.py`): one new table.
-SCHEMA_VERSION = 69
+# 70 keeps whether a canvas's data is copied into its host's OKF vault (`canvases.py`'s record,
+# `canvas_vault.py`): one column, off for every canvas an older store holds, since a backup nobody
+# asked for is not one to start.
+SCHEMA_VERSION = 70
 
 
 def data_dir(hermes_home: Path) -> Path:
@@ -971,6 +974,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    created_at INTEGER NOT NULL
                )"""
         )
+        # v70: whether this canvas's data is copied into the host's OKF vault, the canvas's own
+        # switch and no setting of the app's (canvas_vault.py). Off for every canvas an older store
+        # holds, since a backup nobody asked for is not one to start.
+        if version < 70:
+            canvas_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvases)")}
+            if "vault" not in canvas_columns:
+                conn.execute("ALTER TABLE canvases ADD COLUMN vault INTEGER NOT NULL DEFAULT 0")
         # v64: the picture a canvas's tile draws (canvases.py, #934). It is the canvas's, not a
         # version's, so a record written before one keeps drawing its mark until a write names one.
         if version < 64:
