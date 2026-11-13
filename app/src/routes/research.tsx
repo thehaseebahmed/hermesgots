@@ -235,9 +235,9 @@ function ResearchHome({ ask, list }: { ask?: boolean; list?: FeaturePane }) {
           heading
           showBot={false}
           title={
-            <>
+            <span className="flex items-center gap-2">
               Research <LabBadge />
-            </>
+            </span>
           }
         />
       )}

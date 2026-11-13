@@ -181,9 +181,9 @@ export function CanvasPage() {
         heading
         showBot={false}
         title={
-          <>
+          <span className="flex items-center gap-2">
             Canvas <LabBadge />
-          </>
+          </span>
         }
       />
 

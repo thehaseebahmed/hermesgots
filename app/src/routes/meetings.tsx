@@ -330,10 +330,10 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <Header
         title={
-          <>
+          <span className="flex items-center gap-2">
             Meetings
             <LabBadge />
-          </>
+          </span>
         }
       />
 
