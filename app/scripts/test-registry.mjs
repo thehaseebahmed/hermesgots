@@ -158,46 +158,66 @@ test("deleting a host takes its token and its bots, and no other host's", async 
   assert.equal(store.data.has(`users/${USER_ID}/bots/b2`), true)
 })
 
-test("a push inside the second is refused and leaves the gap at its first stamp", async () => {
+test("a push inside the second is refused and leaves the host record as it was", async () => {
   const store = setup()
   register(store, "d1")
   const fcm = sender()
   const body = { kind: "approval", session_id: "s1" }
+  const hostKey = `users/${USER_ID}/hosts/${HOST_ID}`
 
   const first = await call(store, host, "POST", "push", { body, fcm })
   assert.equal(first.status, 200)
   assert.deepEqual(first.body, { sent: 1, failed: 0, skipped: 0, muted: 0 })
-  assert.deepEqual(store.data.get(`users/${USER_ID}/pushed/${HOST_ID}`), { at: NOW })
+  // The gap rides the host's own record, which this route already reads to learn whose push it is.
+  const stamped = structuredClone(store.data.get(hostKey))
+  assert.deepEqual(stamped, { tokenHash: TOKEN_HASH, createdAt: NOW, pushedAt: NOW })
+  assert.equal(store.data.has(`users/${USER_ID}/pushed/${HOST_ID}`), false)
 
   const again = await call(store, host, "POST", "push", { body, fcm, now: NOW + 999 })
   assert.equal(again.status, 429)
   assert.deepEqual(again.body, { error: "Slow down" })
-  // The refused push sent nothing and moved nothing.
+  // The refused push sent nothing and wrote nothing: the record is byte for byte what it was.
   assert.equal(fcm.sent.length, 1)
-  assert.deepEqual(store.data.get(`users/${USER_ID}/pushed/${HOST_ID}`), { at: NOW })
+  assert.equal(JSON.stringify(store.data.get(hostKey)), JSON.stringify(stamped))
 
   const later = await call(store, host, "POST", "push", { body, fcm, now: NOW + 1000 })
   assert.equal(later.status, 200)
-  assert.deepEqual(store.data.get(`users/${USER_ID}/pushed/${HOST_ID}`), { at: NOW + 1000 })
+  assert.equal(store.data.get(hostKey).pushedAt, NOW + 1000)
 })
 
-test("a test push inside its three seconds is refused and leaves the gap at its first stamp", async () => {
+test("two devices' tests do not throttle each other", async () => {
   const store = setup()
   register(store, "d1")
+  register(store, "d2")
   const fcm = sender()
-  const query = { id: "d1" }
+  const device = (deviceId) => store.data.get(`users/${USER_ID}/devices/${deviceId}`)
 
-  const first = await call(store, user, "POST", "push-test", { query, fcm })
+  const first = await call(store, user, "POST", "push-test", { query: { id: "d1" }, fcm })
   assert.equal(first.status, 200)
   assert.deepEqual(first.body, { ok: true })
-  assert.deepEqual(store.data.get(`users/${USER_ID}/tested`), { at: NOW })
+  // The second device's test is no business of the first's: the gap is each device's own record.
+  const other = await call(store, user, "POST", "push-test", { query: { id: "d2" }, fcm })
+  assert.equal(other.status, 200)
+  assert.deepEqual(other.body, { ok: true })
+  assert.equal(device("d1").testedAt, NOW)
+  assert.equal(device("d2").testedAt, NOW)
+  assert.equal(store.data.has(`users/${USER_ID}/tested`), false)
 
-  const again = await call(store, user, "POST", "push-test", { query, fcm, now: NOW + 2999 })
+  // The same device, inside its three seconds, is refused and left as it was.
+  const again = await call(store, user, "POST", "push-test", {
+    query: { id: "d1" },
+    fcm,
+    now: NOW + 2999,
+  })
   assert.equal(again.status, 429)
   assert.deepEqual(again.body, { error: "Slow down" })
-  assert.deepEqual(store.data.get(`users/${USER_ID}/tested`), { at: NOW })
+  assert.equal(device("d1").testedAt, NOW)
 
-  const later = await call(store, user, "POST", "push-test", { query, fcm, now: NOW + 3000 })
+  const later = await call(store, user, "POST", "push-test", {
+    query: { id: "d1" },
+    fcm,
+    now: NOW + 3000,
+  })
   assert.equal(later.status, 200)
-  assert.deepEqual(store.data.get(`users/${USER_ID}/tested`), { at: NOW + 3000 })
+  assert.equal(device("d1").testedAt, NOW + 3000)
 })

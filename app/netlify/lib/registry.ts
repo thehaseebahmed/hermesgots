@@ -47,6 +47,8 @@ interface Code {
 interface Host {
   tokenHash: string
   createdAt: number
+  /** When this host last had a push sent for it, which is the gap a push is throttled by. */
+  pushedAt?: number
 }
 
 interface TokenEntry {
@@ -71,6 +73,8 @@ interface Device {
   /** The categories of push it wants; absent for an app from before there were more than three. */
   categories?: string[]
   updatedAt: number
+  /** When this device last asked for a test push, which is the gap its own tests are throttled by. */
+  testedAt?: number
 }
 
 /** A code works for 30 minutes and up to 20 profiles, so one covers a sitting. */
@@ -173,7 +177,6 @@ async function deleteHost(store: RegistryStore, userId: string, hostId: string) 
     if (bot?.data.hostId !== hostId) continue
     await store.delete(key)
   }
-  await store.delete(`users/${userId}/pushed/${hostId}`)
   await store.delete(`users/${userId}/hosts/${hostId}`)
 }
 
@@ -331,10 +334,18 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
         title: text(input?.title, 120),
         stage: text(input?.stage, 32),
       }
-      const gapKey = `users/${userId}/pushed/${hostId}`
-      const last = await read<{ at: number }>(store, gapKey)
-      if (last && now - last.data.at < PUSH_GAP_MS) return error("Slow down", 429)
-      await store.setJSON(gapKey, { at: now })
+      // The gap rides the host's own record, which this route already reads to learn whose push it
+      // is: one read-modify-write on its etag, instead of a key of its own beside it.
+      let refused = false
+      await update<Host>(store, `users/${userId}/hosts/${hostId}`, (current) => {
+        if (!current) return null
+        if (current.pushedAt !== undefined && now - current.pushedAt < PUSH_GAP_MS) {
+          refused = true
+          return null
+        }
+        return { ...current, pushedAt: now }
+      })
+      if (refused) return error("Slow down", 429)
       let sent = 0
       let failed = 0
       let skipped = 0
@@ -450,12 +461,14 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
     }
     const categories = cleanCategories(input?.categories)
     if (input?.categories !== undefined && !categories) return error("Invalid categories", 400)
-    // A token that rotates keeps what the device asked for.
+    // A token that rotates keeps what the device asked for, and the gap its own tests sit behind.
     const previous = await read<Device>(store, `${prefix}${id}`)
     const keep = categories ?? previous?.data.categories
+    const testedAt = previous?.data.testedAt
     await store.setJSON(`${prefix}${id}`, {
       token,
       ...(keep ? { categories: keep } : {}),
+      ...(testedAt !== undefined ? { testedAt } : {}),
       updatedAt: now,
     } satisfies Device)
     return json({ ok: true })
@@ -476,13 +489,19 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
   if (op === "POST push-test") {
     if (!ID.test(id)) return error("Invalid device id", 400)
     if (!ctx.fcm) return error("Push isn't set up on this site", 503)
-    const device = await read<Device>(store, `users/${userId}/devices/${id}`)
+    // The gap rides this device's own record, so one device's test never throttles another's.
+    let refused = false
+    const device = await update<Device>(store, `users/${userId}/devices/${id}`, (current) => {
+      if (!current) return null
+      if (current.testedAt !== undefined && now - current.testedAt < TEST_GAP_MS) {
+        refused = true
+        return null
+      }
+      return { ...current, testedAt: now }
+    })
+    if (refused) return error("Slow down", 429)
     if (!device) return error("This device isn't registered for push", 404)
-    const gapKey = `users/${userId}/tested`
-    const last = await read<{ at: number }>(store, gapKey)
-    if (last && now - last.data.at < TEST_GAP_MS) return error("Slow down", 429)
-    await store.setJSON(gapKey, { at: now })
-    const reason = await ctx.fcm.test(device.data.token)
+    const reason = await ctx.fcm.test(device.token)
     return reason ? error(reason, 502) : json({ ok: true })
   }
 
