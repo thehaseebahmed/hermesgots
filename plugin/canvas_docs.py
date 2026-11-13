@@ -11,13 +11,19 @@ holds a batch rather than a collection however many documents the canvas keeps. 
 what a canvas holds by collection rather than any of it, and ``page`` is the collection read a page at
 a time once a sweep has its catalogue: one statement, the next page named by the id this one ended on,
 so a document written or removed between two pages moves neither.
+
+``query`` is the read a page makes of a collection it cannot hold: a filter, a sort and one page of
+the result, answered in one statement with the total beside it, so five thousand documents cost the
+host a scan rather than the phone a copy.
 """
 
 from __future__ import annotations
 
 import json
+import math
+import re
 import sqlite3
-from typing import Any, Dict, Iterator, List, Optional
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 # One order for every read, so a page's list of a collection is the same however its writes landed.
 ORDER = "ORDER BY collection, id"
@@ -162,6 +168,163 @@ def page(
         "next": documents[-1]["id"] if len(rows) > limit else None,
         "count": count,
     }
+
+
+# A field a query may read, and the rule a JSON path is safe to carry: letters, digits and
+# underscores, 1 to 64 of them. A name is never pasted into a path unchecked — the path is SQLite's
+# own syntax, and a name that is not one is refused rather than handed to that parser.
+QUERY_FIELD = re.compile(r"[A-Za-z0-9_]{1,64}")
+
+# The five comparisons a query may make, each as the SQL it is. Every value is bound rather than
+# written into the statement, so a page's words are never the statement's. `eq`, `gt` and `lt` compare
+# the field as JSON stores it — a number by its own order, text by its own — while `contains` and
+# `prefix` read the field as text, which is why only text is asked of those two.
+QUERY_OPS = {
+    "eq": "json_extract(value, '$.{field}') = ?",
+    "contains": "instr(CAST(json_extract(value, '$.{field}') AS TEXT), ?) > 0",
+    "prefix": "substr(CAST(json_extract(value, '$.{field}') AS TEXT), 1, length(?)) = ?",
+    "gt": "json_extract(value, '$.{field}') > ?",
+    "lt": "json_extract(value, '$.{field}') < ?",
+}
+
+
+def query(conn: sqlite3.Connection, canvas_id: str, spec: Dict[str, Any]) -> Dict[str, Any]:
+    """One collection filtered, sorted and cut to a page, and the total beside it: one statement.
+
+    The read a page makes of a collection it cannot hold — five thousand bookmarks, a search box — so
+    the filter, the sort and the page are SQLite's rather than a document's worth of Python. ``spec``
+    is ``{collection, where: [{field, op, value}], order: {field|id, dir}, limit, offset}``; a value
+    is bound, never written into the statement, and a field's name is held to ``QUERY_FIELD`` before
+    it becomes a JSON path.
+
+    The total is the whole filter's, not the page's, so a caller can say how far it has to go. It
+    rides the one statement as a count joined to the page rather than a second read, and the join is
+    why a page asked past its own end still answers the total: an aggregate has a row even when the
+    page it is joined to has none.
+    """
+    collection = _held(spec.get("collection"), "collection")
+    filters, values = _where(canvas_id, collection, spec.get("where"))
+    key, direction = _sorted(spec.get("order"))
+    limit, offset = _limit(spec.get("limit")), _offset(spec.get("offset"))
+    rows = conn.execute(
+        f"""SELECT page.collection, page.id, page.value, page.at, kept.total
+            FROM (SELECT COUNT(*) AS total FROM canvas_docs WHERE {filters}) AS kept
+            LEFT JOIN (SELECT collection, id, value, at, {key} AS sort_key
+                       FROM canvas_docs WHERE {filters}
+                       ORDER BY sort_key {direction}, id LIMIT ? OFFSET ?) AS page ON 1
+            ORDER BY page.sort_key {direction}, page.id""",
+        (*values, *values, limit, offset),
+    ).fetchall()
+    return {
+        "documents": [stored(*row[:4]) for row in rows if row[1] is not None],
+        "total": rows[0][4] if rows else 0,
+    }
+
+
+def _where(canvas_id: str, collection: str, where: Any) -> Tuple[str, List[Any]]:
+    """The statement's ``WHERE`` and the values it binds, from the tests a query makes.
+
+    Every name is checked before it reaches a path and every value is bound, so nothing a page sends
+    is the statement's own words.
+    """
+    clause, values = "canvas_id = ? AND collection = ?", [canvas_id, collection]
+    if where is None:
+        return clause, values
+    if not isinstance(where, list):
+        raise ValueError("A query's where is a list of {field, op, value} tests.")
+    for test in where:
+        if not isinstance(test, dict):
+            raise ValueError("A query's where is a list of {field, op, value} tests.")
+        field = test.get("field")
+        if not isinstance(field, str) or not QUERY_FIELD.fullmatch(field):
+            raise ValueError(
+                "A query's field is a name of 1 to 64 letters, digits or underscores: it is one key "
+                "of a document, read as a JSON path, so nothing else is taken."
+            )
+        op = test.get("op")
+        # A name checked by `in` has to be a string first: a list is no op, and asking a dict
+        # whether it holds one raises rather than answers.
+        if not isinstance(op, str) or op not in QUERY_OPS:
+            raise ValueError(f"A query's op is one of {', '.join(QUERY_OPS)}; {op!r} is not one.")
+        if "value" not in test:
+            raise ValueError(f"A query's {op} test needs the value it compares the field to.")
+        value = _value(test["value"], op)
+        clause += " AND " + QUERY_OPS[op].format(field=field)
+        values.extend([value] * QUERY_OPS[op].count("?"))
+    return clause, values
+
+
+def _value(value: Any, op: str) -> Any:
+    """One test's value, as JSON can hold one and as the comparison can read it.
+
+    `contains` and `prefix` compare text, so a number or a flag is refused rather than quietly read as
+    its own spelling. A value is text, a finite number or a boolean: `null` is left out because a
+    document with no such field reads as null too, and a test that can't tell those apart would answer
+    a page rows it did not ask for.
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bool):
+        if op in ("contains", "prefix"):
+            raise ValueError(f"A query's {op} test compares text, so its value is text.")
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        if op in ("contains", "prefix"):
+            raise ValueError(f"A query's {op} test compares text, so its value is text.")
+        if isinstance(value, float) and not math.isfinite(value):
+            raise ValueError("A query's value is a finite number.")
+        return value
+    raise ValueError("A query's value is text, a number or true/false.")
+
+
+def _sorted(order: Any) -> Tuple[str, str]:
+    """The key a page is sorted on and the way it is read: a document's own field, or its id."""
+    if order is None:
+        return "id", "ASC"
+    if not isinstance(order, dict):
+        raise ValueError("A query's order is {field, dir}, or {dir} alone to sort by id.")
+    field = order.get("field")
+    if field is None:
+        key = "id"
+    elif isinstance(field, str) and QUERY_FIELD.fullmatch(field):
+        key = f"json_extract(value, '$.{field}')"
+    else:
+        raise ValueError(
+            "A query's order field is a name of 1 to 64 letters, digits or underscores, or nothing "
+            "for the document's id."
+        )
+    direction = order.get("dir")
+    if direction is None:
+        direction = "asc"
+    if not isinstance(direction, str) or direction.lower() not in ("asc", "desc"):
+        raise ValueError("A query's dir is 'asc' or 'desc'.")
+    return key, direction.upper()
+
+
+def _limit(value: Any) -> int:
+    """How many documents one page of a query answers: ``PAGE_ROWS`` when none is named, and at most
+    ``PAGE_MAX``, clamped rather than refused since the answer's total says what is left."""
+    if value is None:
+        return PAGE_ROWS
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"A query's limit is a whole number of documents, from 1 to {PAGE_MAX}.")
+    return min(value, PAGE_MAX)
+
+
+def _offset(value: Any) -> int:
+    """How many documents a query's page starts past: none at all when it names none."""
+    if value is None:
+        return 0
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError("A query's offset is a whole number of documents, from 0 up.")
+    return value
+
+
+def _held(value: Any, what: str) -> str:
+    """A spec's own name — its collection — as the shape says it: a non-empty string."""
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"A query's {what} is a name.")
+    return value
 
 
 def upto(conn: sqlite3.Connection, canvas_id: str, cap: int) -> List[Dict[str, Any]]:

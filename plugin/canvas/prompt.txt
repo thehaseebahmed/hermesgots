@@ -1,7 +1,6 @@
 # Canvas
 
-A canvas is one HTML page the user keeps and asks you to change. Write it whole with `canvas_write`
-after `canvas_read`.
+A canvas is one HTML page the user keeps. Write it whole with `canvas_write` after `canvas_read`.
 
 ## The user's design
 
@@ -21,25 +20,24 @@ The app draws the page, its theme on `:root` as CSS variables:
 
 They follow the mode; a hardcoded colour breaks in dark, so spend colour on tokens — `--primary`
 for what the page is for. Tailwind v4 compiles classes from the same tokens, so `bg-primary`,
-`text-foreground`, `border-border`, `rounded-lg`, `p-4`, `md:` and `dark:` work, each token also as
+`text-foreground`, `p-4`, `md:` and `dark:` work, each token also as
 `bg-`, `text-` and `border-`. Only markup classes compile; `<style>` is for the rest.
 ## Phone first
 
-Most open on a phone: lay out for 390px first, then breathe from 768px; nothing scrolls sideways.
+Most open on a phone: lay out for 390px, then breathe from 768px; nothing scrolls sideways.
 Tappable is 44px tall, never behind hover; typed-into type is 16px. Keep the foot clear of the
-phone bar: `env(safe-area-inset-bottom)`.
+bar: `env(safe-area-inset-bottom)`.
 
 ## Points
 
-A message may end with `[POINT — Total | selector: #total]`: the reader tapped that element while
-asking; the label names it, the selector finds it.
+A message may end with `[POINT — Total | selector: #total]`: the reader tapped that element; the
+label names it, the selector finds it.
 
 ## Design skills
 
-Three load with `skill_view`: `gots:impeccable` when the page should look like something,
-`gots:web-design-guidelines` when it must pass a review, `gots:transitions-dev` when it moves (CSS
-to paste, not import). `plugin/canvas/DESIGN.md` is the design system; the page gets those tokens
-and no others.
+Load with `skill_view`: `gots:impeccable` when the page should look like something,
+`gots:web-design-guidelines` when it must pass a review, `gots:transitions-dev` when it moves.
+`plugin/canvas/DESIGN.md` is the design system.
 ## The sandbox
 
 - A form's submit is cancelled in place: nothing navigates, so handle the click.
@@ -51,7 +49,7 @@ and no others.
 ## The document
 
 One complete file: `<!doctype html>`, `<html lang="en">`, a `<head>` with `<title>` and viewport
-meta, styles in `<style>`, script in `<script>`. Under 256 KB, no secrets: it is readable by all.
+meta, styles in `<style>`, script in `<script>`. Under 256 KB, no secrets.
 
 ## Libraries
 
@@ -63,12 +61,14 @@ Chart.js, Day.js, lucide, d3, Alpine.js, Three.js and Leaflet are built in, no C
 
 ## Its data
 
-A canvas keeps documents of `{collection, id, doc, at}`. Its page reads with `canvas.data.list`,
-`canvas.data.get`, `canvas.data.page` and `canvas.data.count`, and writes with `canvas.data.put` and
-`canvas.data.remove`; a page is `{after, limit}`. A list stops at 5000 documents and refuses past it,
-so page instead. Until a sweep finishes, a list or page says `partial: true` and a get of a
-document the device lacks throws instead of null — absence follows only a sweep. You have
-`canvas_data_read` and `canvas_data_write`. 64 MB a canvas, 256 KB a document.
+A canvas keeps documents of `{collection, id, doc, at}`. A page reads `canvas.data.list`,
+`canvas.data.get`, `canvas.data.page` and `canvas.data.count`, writes `canvas.data.put` and
+`canvas.data.remove`, and asks the host to filter, sort and page a collection with
+`canvas.data.query({collection, where: [{field, op, value}], order: {field|id, dir}, limit, offset})`
+— `op` is `eq`, `contains`, `prefix`, `gt` or `lt` — answering `{documents, total}`. A query
+needs the bot; with it away ask `page`. A page is `{after, limit}`; a list stops at 5000, refusing
+past it. Until a sweep finishes a list or page says `partial: true`; a get of a missing document
+throws instead of null — absence follows only a sweep. 64 MB a canvas, 256 KB a document.
 ## The host, from the page
 
 It reads four host shapes — `canvas.read("usage", {provider})`, `canvas.read("routines")`,

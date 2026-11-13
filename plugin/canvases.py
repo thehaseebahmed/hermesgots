@@ -1262,6 +1262,31 @@ def data_page(
         conn.close()
 
 
+def data_query(path: Path, canvas_id: str, args: Any) -> Dict[str, Any]:
+    """One ``data.query`` call: a page's collection filtered, sorted and cut to a page by the host.
+
+    The page names the collection and its spec — the tests, the sort and the page — and the store's
+    own rule answers it (`canvas_docs.query`): one statement, so five thousand documents are read by
+    the host rather than carried to the phone. A field's name, an op, a limit and an offset are the
+    spec's to get wrong, and each is refused in words a page can act on.
+
+    Read over a connection of its own, and a canvas this store has never heard of is a 404, as it is
+    for every other read of one.
+    """
+    args = args if isinstance(args, dict) else {}
+    spec = dict(args)
+    spec["collection"] = _name(args.get("collection"), "collection")
+    if not canvas_id or not path.exists():
+        raise CanvasError("There is no such canvas.", 404)
+    conn = connect(path)
+    try:
+        if not _exists(conn, canvas_id):
+            raise CanvasError("There is no such canvas.", 404)
+        return canvas_docs.query(conn, canvas_id, spec)
+    finally:
+        conn.close()
+
+
 def _limit(value: Any) -> int:
     """How many documents one page may answer, from the ``limit`` a caller asked for.
 

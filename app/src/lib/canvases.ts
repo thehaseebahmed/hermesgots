@@ -8,6 +8,7 @@ import {
   mergeGrants,
   type BridgeDataCall,
   type BridgeHostCall,
+  type BridgeQueryCall,
   type BridgeToolCall,
   type BridgeWriteCall,
   type CanvasDoc,
@@ -903,9 +904,43 @@ export async function callCanvasTool(id: string, call: BridgeToolCall) {
   return answer.value
 }
 
-/** Whatever a page asked its host for: a free read, or a tool call it was allowed to make. */
+/**
+ * What a query sends the host: the spec and no document — the page's own ask, which is what makes the
+ * host's one statement the thing that filters, sorts and pages. The number the page's reply names the
+ * call by is the bridge's, and stays here.
+ */
+function queryArgs(call: BridgeQueryCall) {
+  return {
+    collection: call.collection,
+    where: call.where,
+    order: call.order,
+    limit: call.limit,
+    offset: call.offset,
+  }
+}
+
+/**
+ * A page's query of one collection, answered by its host — the one data read that goes there.
+ *
+ * A phone's copy is there to be read offline, not to be filtered: five thousand rows searched by a
+ * page is why the host keeps one statement for it (`canvas_docs.query`). With the bot away there is
+ * nothing to answer it, so the refusal is the one every host read gives (`CANVAS_UNREACHABLE`), and a
+ * page that wants rows without it asks `page` of what the device holds.
+ */
+export async function callCanvasQuery(id: string, call: BridgeQueryCall) {
+  const answer = await withHost(
+    id,
+    (profile) => callCanvas(profile, id, "data.query", queryArgs(call)),
+    CANVAS_UNREACHABLE,
+  )
+  return answer.value
+}
+
+/** Whatever a page asked its host for: a free read, a query of its own data, or a tool it may call. */
 export function callCanvasCall(id: string, call: BridgeHostCall) {
-  return call.method === "read" ? callCanvasRead(id, call.shape, call.args) : callCanvasTool(id, call)
+  if (call.method === "read") return callCanvasRead(id, call.shape, call.args)
+  if (call.method === "query") return callCanvasQuery(id, call)
+  return callCanvasTool(id, call)
 }
 
 /**

@@ -14,12 +14,13 @@ import { MemoryRouter, Route, Routes } from "react-router"
 
 import { BRIDGE_MESSAGE, type CanvasDoc } from "@/lib/canvas-bridge"
 import { canvasCacheKey } from "@/lib/canvas-cache"
+import { cachedDocs, beginSweep, completeSweep, keepDocs } from "@/lib/canvas-docs"
+import { CANVAS_UNREACHABLE } from "@/lib/canvases"
 import { connectionKey } from "@/lib/connection"
-import { beginSweep, completeSweep, keepDocs } from "@/lib/canvas-docs"
 import { db } from "@/lib/db"
 import { CanvasView } from "@/routes/canvas"
 
-import { botProfile, find, mount, seedSettings, until } from "./component-kit.tsx"
+import { botProfile, find, json, mount, seedSettings, until } from "./component-kit.tsx"
 
 const PAGE = `<!doctype html>
 <html lang="en">
@@ -256,6 +257,69 @@ test("a list of 5001 refuses and names page", async () => {
     assert.equal(page.next, "d0499", "the next page starts after this one's last row")
     assert.equal(page.total, cap + 1)
     assert.equal(page.partial, true)
+  })
+})
+
+test("a page asks the host for fifty rows and holds fifty", async () => {
+  // A collection of five thousand is not the page's to filter: it asks the host for one filtered,
+  // sorted page and holds only what came back. With the bot away there is no such answer, so the
+  // refusal is the one every host read gives and `page` still reads this device's own rows.
+  const rows = [doc(0), doc(1)]
+  await open("page-query", rows, async ({ bot, ask }) => {
+    const spec = {
+      collection: "items",
+      where: [{ field: "done", op: "eq", value: false }],
+      order: { field: "at", dir: "desc" },
+      limit: 50,
+      offset: 0,
+    }
+
+    const away = await ask({ type: BRIDGE_MESSAGE, call: 1, method: "query", ...spec })
+    assert.equal(away.ok, false, "a query needs the host, and the host is away")
+    assert.equal(away.error, CANVAS_UNREACHABLE)
+
+    // The call the guide names as the one that works without the host.
+    const paged = await ask({
+      type: BRIDGE_MESSAGE,
+      call: 2,
+      method: "page",
+      collection: "items",
+      limit: 50,
+    })
+    assert.equal(paged.ok, true, "the device's own rows still answer a page")
+    assert.equal((paged.value as { rows: CanvasDoc[] }).rows.length, rows.length)
+
+    // The host answers the query with fifty of its five thousand.
+    const asked: { shape: string; args: Record<string, unknown> }[] = []
+    const fifty = Array.from({ length: 50 }, (_, n) => ({
+      collection: "items",
+      id: `f${String(n).padStart(3, "0")}`,
+      doc: { n },
+      at: 1_000 + n,
+    }))
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input))
+      if (/\/canvases\/[^/]+\/call$/.test(url.pathname)) {
+        asked.push(JSON.parse(String(init?.body)))
+        return json({ object: "gots.canvas.call", result: { documents: fifty, total: 5_000 } })
+      }
+      throw new TypeError("Failed to fetch")
+    }) as unknown as typeof fetch
+
+    const answer = await ask({ type: BRIDGE_MESSAGE, call: 3, method: "query", ...spec })
+    assert.equal(answer.ok, true)
+    const held = answer.value as { documents: CanvasDoc[]; total: number }
+    assert.equal(held.documents.length, 50, "the page holds the page it was given, not the canvas")
+    assert.deepEqual(held.documents, fifty)
+    assert.equal(held.total, 5_000, "and the whole filter's total beside it")
+
+    // One call, carrying the spec and no document: the host is what filters, sorts and pages.
+    assert.deepEqual(asked, [{ shape: "data.query", args: spec }])
+    // The phone's own rows are what the sweep left: a query reads the host, it fills nothing here.
+    assert.deepEqual(
+      (await cachedDocs(bot, CANVAS.id, "items")).map((row) => row.id),
+      rows.map((row) => row.id),
+    )
   })
 })
 

@@ -3395,11 +3395,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         """A call a canvas's page makes: its own data, the four host reads, or a declared tool.
 
         The page owns its data (ADR 0113) and reads the bot's own facts, so those shapes are
-        answered without consent — they write the canvas's own store and read what the app itself
-        renders. A tool named ``<server>.<tool>`` is answered only where the version the page is
-        drawn from declares it and the user allowed it (ADR 0114): ``canvases.may_call`` reads both
-        off the store, and a refusal's verdict rides back as the error's ``code``. The tab is told
-        nothing it could call for any other canvas, since the id is this route's and not the body's.
+        answered without consent — they write, read and query the canvas's own store and read what
+        the app itself renders. A tool named ``<server>.<tool>`` is answered only where the version
+        the page is drawn from declares it and the user allowed it (ADR 0114): ``canvases.may_call``
+        reads both off the store, and a refusal's verdict rides back as the error's ``code``. The tab
+        is told nothing it could call for any other canvas, since the id is this route's and not the
+        body's.
 
         Each read answers the shape the app's own screens draw, and no more. ``sessions`` is this
         bot's chat list — flat, newest first, tombstones dropped — and not the Host's rooms, a
@@ -3443,9 +3444,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         async def read_sessions_shape(args: Dict[str, Any]) -> Dict[str, Any]:
             return {"sessions": await asyncio.to_thread(chats.summaries, path, CANVAS_READS_MAX)}
 
-        writes = {
+        own = {
             "data.put": lambda args: canvases.put_call(path, canvas_id, args),
             "data.remove": lambda args: canvases.remove_call(path, canvas_id, args),
+            "data.query": lambda args: canvases.data_query(path, canvas_id, args),
         }
         # The four names have one home (`page_calls.HOST_SHAPES`): a fifth there with no read here
         # is a KeyError rather than a shape the guide promises and the page can never read.
@@ -3459,7 +3461,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             result = await page_calls.answer(
                 body,
                 reads={shape: readers[shape] for shape in page_calls.HOST_SHAPES},
-                writes=writes,
+                own=own,
                 may_call=partial(canvases.may_call, path, canvas_id),
                 profile=_request_profile(),
                 locks=canvas_locks,

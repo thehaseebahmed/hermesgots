@@ -245,6 +245,182 @@ class PageTest(unittest.TestCase):
         )
 
 
+def bookmark(n: int) -> Tuple[str, str, Any, int]:
+    """One of five thousand bookmarks, one in thirty-seven of them about Rust."""
+    return (
+        "bookmarks",
+        f"b{n:05d}",
+        {"title": f"{'rust' if n % 37 == 0 else 'go'} link {n}", "n": n},
+        1_700_000_000_000 + n,
+    )
+
+
+# The bookmarks a `contains 'rust'` filter matches: one in thirty-seven, so 5000 rows answer 136.
+RUSTY = [n for n in range(5_000) if n % 37 == 0]
+
+
+class QueryTest(unittest.TestCase):
+    """The host filtering, sorting and paging one collection for a page: one statement a query.
+
+    A page over five thousand bookmarks cannot hold them to filter them, so the host answers a
+    filter, a sort and one page of the result in one statement — and holds a field's name to the
+    rule a JSON path can carry before it becomes one.
+    """
+
+    def setUp(self) -> None:
+        self.host = Host(self)
+
+    def ask(self, **spec: Any) -> Dict[str, Any]:
+        """One ``data.query`` call as a page makes it, as the route answers it."""
+        return self.host.call(
+            "/canvases/{canvas_id}/call",
+            method="POST",
+            body={"shape": "data.query", "args": spec},
+            canvas_id=self.host.canvas["id"],
+        )
+
+    def test_a_contains_filter_over_five_thousand_bookmarks_answers_the_right_rows_in_order(self) -> None:
+        plant(self.host.path, self.host.canvas["id"], [bookmark(n) for n in range(5_000)])
+        filter = [{"field": "title", "op": "contains", "value": "rust"}]
+        held: List[int] = []
+        for page, offset in enumerate((0, 50, 100)):
+            answer = self.ask(
+                collection="bookmarks",
+                where=filter,
+                order={"field": "n", "dir": "asc"},
+                limit=50,
+                offset=offset,
+            )
+            self.assertEqual(answer["status"], 200)
+            result = answer["payload"]["result"]
+            # The total is the whole filter's, not the page's, so a caller knows how far it goes.
+            self.assertEqual(result["total"], len(RUSTY))
+            expected = RUSTY[offset : offset + 50]
+            self.assertEqual([document["doc"]["n"] for document in result["documents"]], expected)
+            held.extend(expected)
+        # Fifty at a time, in the order asked for, and the last page is the short one.
+        self.assertEqual(len(held), len(RUSTY))
+        self.assertLess(len(expected), 50)
+        # A document comes back whole, as every read of the store answers one.
+        conn = connect(self.host.path)
+        self.addCleanup(conn.close)
+        first = canvas_docs.query(
+            conn,
+            self.host.canvas["id"],
+            {"collection": "bookmarks", "where": filter, "order": {"field": "n", "dir": "asc"}, "limit": 1},
+        )["documents"][0]
+        self.assertEqual(
+            first,
+            {
+                "collection": "bookmarks",
+                "id": "b00000",
+                "doc": {"title": "rust link 0", "n": 0},
+                "at": 1_700_000_000_000,
+            },
+        )
+        # A page asked past the end is an empty one that still says how many matched: the total rides
+        # the same statement as the page, and an aggregate has a row even where its page has none.
+        past = self.ask(collection="bookmarks", where=filter, limit=50, offset=1_000)
+        self.assertEqual(past["payload"]["result"], {"documents": [], "total": len(RUSTY)})
+        # The arrow is the caller's: the same rows from the other end.
+        backwards = self.ask(
+            collection="bookmarks",
+            where=filter,
+            order={"field": "n", "dir": "desc"},
+            limit=50,
+            offset=0,
+        )["payload"]["result"]["documents"]
+        self.assertEqual([document["doc"]["n"] for document in backwards], RUSTY[::-1][:50])
+
+    def test_a_query_is_one_statement_however_many_documents_it_reads(self) -> None:
+        # Filtering, sorting and cutting the page are SQLite's: one statement, which names the
+        # document's own JSON path and a LIMIT. A loop over rows, or a second statement for the
+        # total, is what this count fails.
+        plant(self.host.path, self.host.canvas["id"], [bookmark(n) for n in range(5_000)])
+        conn = connect(self.host.path)
+        self.addCleanup(conn.close)
+        seen: List[str] = []
+        conn.set_trace_callback(seen.append)
+        try:
+            answer = canvas_docs.query(
+                conn,
+                self.host.canvas["id"],
+                {
+                    "collection": "bookmarks",
+                    "where": [{"field": "n", "op": "gt", "value": 4_950}],
+                    "order": {"field": "n", "dir": "desc"},
+                    "limit": 50,
+                    "offset": 0,
+                },
+            )
+        finally:
+            conn.set_trace_callback(None)
+        self.assertEqual(len(seen), 1, f"one statement, not {len(seen)}: {seen}")
+        self.assertIn("json_extract(value, '$.n')", seen[0])
+        self.assertIn("COUNT(*)", seen[0], "the total rides the same statement as its page")
+        self.assertIn("LIMIT", seen[0])
+        self.assertEqual(answer["total"], 49)
+        self.assertEqual(len(answer["documents"]), 49)
+
+    def test_a_field_name_outside_the_rule_is_refused_not_pasted_into_a_json_path(self) -> None:
+        plant(
+            self.host.path,
+            self.host.canvas["id"],
+            [("bookmarks", "a", {"title": "kept", "n": 1}, 1_000), ("bookmarks", "b", {"title": "also"}, 2_000)],
+        )
+        conn = connect(self.host.path)
+        self.addCleanup(conn.close)
+        seen: List[str] = []
+        conn.set_trace_callback(seen.append)
+        for field in ("n') OR 1=1 --", "n.json", "$.n", "n" * 65, ""):
+            with self.subTest(field=field):
+                with self.assertRaises(ValueError) as refused:
+                    canvas_docs.query(
+                        conn,
+                        self.host.canvas["id"],
+                        {"collection": "bookmarks", "where": [{"field": field, "op": "eq", "value": 1}]},
+                    )
+                self.assertIn("field", str(refused.exception))
+        # Nothing reached SQLite: the name is refused, never pasted into a path a parser reads.
+        self.assertEqual(seen, [])
+        # A value is bound rather than pasted, so the same text as a value is a literal that matches
+        # nothing — and a document with no such field is simply not the answer.
+        answer = canvas_docs.query(
+            conn,
+            self.host.canvas["id"],
+            {"collection": "bookmarks", "where": [{"field": "title", "op": "eq", "value": "n') OR 1=1 --"}]},
+        )
+        self.assertEqual(answer, {"documents": [], "total": 0})
+        self.assertEqual(len(seen), 1)
+
+    def test_a_query_the_shape_cannot_hold_is_refused_in_words_a_page_can_act_on(self) -> None:
+        for spec, words in (
+            ({"where": [{"field": "n", "op": "like", "value": "1%"}]}, "op"),
+            ({"where": [{"field": "n", "op": ["eq"], "value": 1}]}, "op"),
+            ({"where": [{"field": "n", "op": "eq"}]}, "value"),
+            ({"where": [{"field": "n", "op": "eq", "value": None}]}, "value"),
+            ({"where": [{"field": "title", "op": "contains", "value": 5}]}, "text"),
+            ({"where": {"field": "n", "op": "eq", "value": 1}}, "where"),
+            ({"order": {"field": "n", "dir": "up"}}, "dir"),
+            ({"limit": 0}, "limit"),
+            ({"limit": "lots"}, "limit"),
+            ({"offset": -1}, "offset"),
+        ):
+            with self.subTest(spec=spec):
+                answer = self.ask(collection="bookmarks", **spec)
+                self.assertEqual(answer["status"], 400)
+                self.assertIn(words, answer["payload"]["error"]["message"])
+
+    def test_the_query_rides_the_page_s_own_calls_without_asking_consent(self) -> None:
+        # A canvas's own data is the page's: no declared tool, no consent, and no act lock — the
+        # store's own read is what makes it safe, so the call is answered as `data.query` beside
+        # `data.put` and `data.remove`.
+        plant(self.host.path, self.host.canvas["id"], [bookmark(0)])
+        answer = self.ask(collection="bookmarks", limit=1)
+        self.assertEqual(answer["status"], 200)
+        self.assertEqual(answer["payload"]["object"], "gots.canvas.call")
+
+
 class CapsTest(unittest.TestCase):
     """One write, refused whole: a document past its own cap, or a canvas past the whole data's."""
 
