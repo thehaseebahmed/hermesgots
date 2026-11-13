@@ -3,6 +3,7 @@ import { serverConfig } from "@/lib/connection"
 import { db, updateConversation, type Attachment } from "@/lib/db"
 import { retireDraft } from "@/lib/drafts"
 import { addToQueue, hasPluginFeature, queueAction, runRequest } from "@/lib/hermes"
+import { mentionsIn } from "@/lib/mention-marker"
 import { modelOf, wantsPin } from "@/lib/model-pick"
 import { pointsIn } from "@/lib/point-marker"
 import { quietly } from "@/lib/report"
@@ -44,9 +45,10 @@ async function built(chatId: string, text: string, attachments: Attachment[], at
   try {
     const config = serverConfig(bot)
     const words = text.trim()
-    // What the message says in a title or a card: a point's marker line is what the model reads, and
-    // no words a reader is shown.
-    const shown = pointsIn(words).text.trim()
+    // What the message says in a title or a card: a point's or a mention's marker line is what the
+    // model reads, and no words a reader is shown. The blocks go in the reverse of the order the
+    // composer wrote them — the mentions, then the points.
+    const shown = pointsIn(mentionsIn(words).text).text.trim()
     // A project session works in its worktrees; the plugin can't be told about them any other way,
     // and a session whose repo is gone is refused here, before anything is posted.
     const workspace = await ensureSessionWorkspace(chatId, words || attachments[0]?.name || "")

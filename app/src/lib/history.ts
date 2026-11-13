@@ -18,6 +18,7 @@ import { refreshLibrary, refreshPrs, refreshWorkspace } from "@/lib/workspace"
 import { listSessionMessages, type HermesConfig, type SessionMessage } from "@/lib/hermes"
 import { takeHostTitle } from "@/lib/title"
 import { splitAttachments, steerWords } from "@/lib/attachment-text"
+import { mentionsIn } from "@/lib/mention-marker"
 import { appendThinking, carrySpans } from "@/lib/thinking"
 import { readLiveRuns } from "@/lib/waiting"
 import { settleTool } from "@/lib/tools"
@@ -345,7 +346,9 @@ function foldRows(
       // and the reply it closes is what makes the wake turn's answer a message of its own. A retry
       // is the same shape (ADR 0112): the request it re-asks is already drawn above it.
       if (isWakePrompt(row) || isRetryRow(row)) continue
-      const { text, attachments } = splitAttachments(seamDrawnContent(row))
+      // The mention lines a send wrote are the model's, not this screen's: the name is already in
+      // the words. The points are left as they are here.
+      const { text, attachments } = splitAttachments(mentionsIn(seamDrawnContent(row)).text)
       messages.push({
         id,
         conversationId,

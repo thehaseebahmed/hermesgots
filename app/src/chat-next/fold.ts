@@ -6,6 +6,7 @@ import {
   type SummaryRows,
 } from "../lib/compaction-seam.ts"
 import type { Attachment, MessageStats } from "../lib/db.ts"
+import { mentionsIn, type Mention } from "../lib/mention-marker.ts"
 import { progressReminderNotes } from "../lib/progress-reminder.ts"
 import { pointsIn, type CanvasPoint } from "../lib/point-marker.ts"
 import { isRoutineRow } from "../lib/routine-message.ts"
@@ -80,6 +81,8 @@ export interface Turn {
   files?: SentFile[]
   /** The elements of a canvas's page the user pointed at, read off the same marker lines. */
   points?: CanvasPoint[]
+  /** The sessions and bots the request named, read off the same marker lines. */
+  mentions?: Mention[]
   /** The host archived this turn's request when it compacted: what is left is the work, from the seam on. */
   carried?: boolean
   /** The request is in rows not read yet: the reply is drawn alone, and the turn is whole once they are. */
@@ -107,16 +110,23 @@ export interface Turn {
 
 /**
  * A user row's request as the thread keeps it, read once for the fold and for the turn this device
- * streams — so both copies of a turn carry the same words, files, points and retry flag (ADR 0112).
+ * streams — so both copies of a turn carry the same words, files, points, mentions and retry flag
+ * (ADR 0112).
  */
-export function requestOf(content: string): Pick<Turn, "user" | "files" | "retry" | "points"> {
+export function requestOf(
+  content: string,
+): Pick<Turn, "user" | "files" | "retry" | "points" | "mentions"> {
   const request = requestIn(content)
+  // The marker blocks are peeled in the reverse of the order a send writes them — the files, then
+  // the mentions, then the points — since each decode trims only its own trailing block.
   const { text, attachments } = splitAttachments(request)
-  const { text: words, points } = pointsIn(text)
+  const { text: withoutMentions, mentions } = mentionsIn(text)
+  const { text: words, points } = pointsIn(withoutMentions)
   return {
     user: words,
     ...(attachments.length ? { files: attachments.map(sentFileOf) } : {}),
     ...(points.length ? { points } : {}),
+    ...(mentions.length ? { mentions } : {}),
     ...(request === content ? {} : { retry: true as const }),
   }
 }

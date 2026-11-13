@@ -43,6 +43,7 @@ import { attachmentsText } from "@/lib/attachment-text"
 import { chatFlow } from "@/lib/chat-flow"
 import { pointText } from "@/lib/point-marker"
 import { compactionMarks } from "@/lib/compactions"
+import { mentionText } from "@/lib/mention-marker"
 import { clarifyWire, questionAt, questionsIn } from "@/lib/clarify"
 import { db, type ApprovalChoice, type ClarifyQuestion, type Message } from "@/lib/db"
 import type { DelegatedAgent } from "@/lib/hermes"
@@ -135,8 +136,13 @@ export function AppThreadView({
         id: file.path ?? file.name,
       }))
       // The points ride under the words, as the send that carried them wrote them: a retry re-asks
-      // the same request, and the element it named is part of that request.
-      const request = attachmentsText(pointText(failedTurn.user, failedTurn.points ?? []), files)
+      // the same request, and the element it named is part of that request. The mentions ride there
+      // for the same reason: the fold peeled their ids off the words the turn kept, so the session
+      // the request named is only asked again if the retry writes the line back.
+      const request = attachmentsText(
+        mentionText(pointText(failedTurn.user, failedTurn.points ?? []), failedTurn.mentions ?? []),
+        files,
+      )
       await latestSend.current(retryText(request), [], { retry: true })
     } finally {
       setRetrying(false)

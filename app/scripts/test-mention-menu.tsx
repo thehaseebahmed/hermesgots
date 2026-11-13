@@ -2,18 +2,26 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { act } from "react"
 
+import { db } from "@/lib/db"
+import { mentionText } from "@/lib/mention-marker"
+import { RETRY_OPEN } from "@/lib/retry-message"
+
 import { fakeHost } from "./chat-next-host.ts"
 import {
   absent,
   botProfile,
   chatScreen,
+  click,
   composerField,
+  find,
   findAll,
   labelled,
   mount,
   pickPress,
   seedChats,
+  sendPress,
   settle,
+  text,
   type,
   until,
   wordsOf,
@@ -57,7 +65,7 @@ async function seeded() {
     { bots: [MENTIONER, SIBLING, AWAY], active: "bot-1" },
   )
   // chat-next reads the open chat's transcript too; the hosts this menu reads are the device's.
-  fakeHost("gots-c1", { plugin: true })
+  return fakeHost("gots-c1", { plugin: true })
 }
 
 const MENU = '[role="listbox"][aria-label="Sessions and bots"]'
@@ -124,5 +132,65 @@ test("Return takes the row the cursor is on, and Escape shuts the menu till the 
     await type(field(), "/")
     await until(async () => Boolean(slashMenu()), "the / menu")
     absent(MENU, "the @ menu gave way to it")
+  })
+})
+
+/**
+ * A pick's name is the user's sentence and its id is the bot's business: the message the host is
+ * handed still names the session, and no screen — the bubble, the title or Main's card — draws the
+ * line that carries it.
+ */
+test("a pick reaches the host, and no screen draws its marker line", async () => {
+  const host = await seeded()
+  // A chat is titled and its opener made by its first send, which a seeded title pins shut.
+  await db.conversations.update("c1", { titleEdited: false })
+  await mount(chatScreen("c1"), async () => {
+    await until(async () => Boolean(field()), "the composer")
+    await type(field(), "@wee")
+    await until(async () => Boolean(menu()), "the @ menu")
+    await pickPress()
+    await until(async () => field()?.value === "@Weekly review ", "the name in the field")
+
+    // Ctrl+Enter, which sends whichever way the device's Send on Enter switch is set.
+    await sendPress()
+    await until(() => host.asked.runs === 1, "the host was asked to run the message")
+    assert.ok(
+      String(JSON.stringify(host.latest.body)).includes(
+        "[MENTION — Weekly review | session: gots-s2]",
+      ),
+      "the host is told the session the message named",
+    )
+
+    const chat = await db.conversations.get("c1")
+    assert.equal(chat?.title, "@Weekly review", "the title is made of the words")
+    assert.equal(chat?.opener, "@Weekly review", "and so is Main's card opener")
+    await until(
+      () => findAll('[data-chat-next] [data-message-id$="-u"]').length > 0,
+      "the request drawn in the thread",
+    )
+    assert.equal(text().includes("[MENTION"), false, "and no row of the thread draws the line")
+  })
+})
+
+test("a retry re-asks the session the request that failed named", async () => {
+  const host = await seeded()
+  const pick = { name: "Weekly review", kind: "session", id: "gots-s2" }
+  host.seed([
+    {
+      user: mentionText("@Weekly review plan the week", [pick]),
+      reply: "",
+      failed: "Your request was not processed.",
+    },
+  ])
+  await mount(chatScreen("c1"), async () => {
+    await until(async () => Boolean(find("[data-retry]")), "the failed turn offers Retry")
+    await click(find("[data-retry]"))
+    await until(() => host.asked.runs === 1, "the request is asked again")
+    const sent = String(JSON.stringify(host.latest.body))
+    assert.ok(sent.includes(RETRY_OPEN), "the message carries the retry's opening marker")
+    assert.ok(
+      sent.includes("[MENTION — Weekly review | session: gots-s2]"),
+      "and the session the request it asks again named",
+    )
   })
 })
