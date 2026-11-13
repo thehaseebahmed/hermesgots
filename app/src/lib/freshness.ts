@@ -63,6 +63,12 @@ export const ACCOUNT_SYNC_MS = 60_000
  */
 export const CHATS_MERGE_WAIT_MS = 5_000
 
+/**
+ * How often a chat-list pass rewrites when it last heard a bot. Every write repaints the list it just
+ * merged, so a pass a minute after the last one leaves the timestamp where it is.
+ */
+export const HEARD_EVERY_MS = 60_000
+
 /** Which runs are in flight and what waits on the user (`runs/live`), shared by every screen. */
 export const RUNS_MS = 10_000
 /** An open chat looks for turns sent from another device. */

@@ -12,29 +12,10 @@ import {
   modelKey,
   modelKeys,
 } from "../netlify/lib/models-dev.ts"
+import { memoryStore } from "./netlify-store.mjs"
 
 const NOW = Date.UTC(2026, 9, 15, 12)
 const counts = (n) => ({ input: n, output: n, cacheWrite: 0, cacheRead: 0, calls: 1 })
-
-function memoryStore() {
-  const data = new Map()
-  return {
-    data,
-    async getWithMetadata(key) {
-      return data.has(key) ? { data: structuredClone(data.get(key)), etag: "e" } : null
-    },
-    async setJSON(key, value) {
-      data.set(key, structuredClone(value))
-      return { modified: true }
-    },
-    async delete(key) {
-      data.delete(key)
-    },
-    async list({ prefix }) {
-      return { blobs: [...data.keys()].filter((k) => k.startsWith(prefix)).map((key) => ({ key })) }
-    },
-  }
-}
 
 function setup() {
   const store = memoryStore()
@@ -105,6 +86,9 @@ test("join derives the username, report needs a join, leave erases everything", 
   assert.equal(report.status, 200)
   const again = await call(env, host, "POST", "report", { days: {} })
   assert.equal(again.status, 429)
+  // The gap is the report row's own `at`: no separate key writes or reads it.
+  assert.equal(env.registry.data.get("community/reports/u1/h1").at, NOW)
+  assert.equal(env.registry.data.has("community/gap/h1"), false)
 
   const board = await call(env, null, "GET", "board")
   assert.equal(board.status, 200)
@@ -124,6 +108,35 @@ test("join derives the username, report needs a join, leave erases everything", 
   assert.equal(env.store.data.has("users/octocat"), false)
   assert.equal([...env.registry.data.keys()].filter((k) => k.startsWith("community/")).length, 0)
   assert.equal((await call(env, null, "GET", "board")).body.periods.week.tokens.length, 0)
+})
+
+test("a stored report row inside the half minute is the whole gap", async () => {
+  const env = setup()
+  const host = await hostToken(env)
+  await call(env, user, "POST", "join")
+  // A host that reported ten seconds ago, and no key of its own to agree with it.
+  env.registry.data.set("community/reports/u1/h1", { days: {}, at: NOW - 10_000 })
+
+  const tooSoon = await call(env, host, "POST", "report", {
+    days: { "2026-10-15": { "claude-x": { auto: counts(10) } } },
+  })
+
+  assert.equal(tooSoon.status, 429)
+  assert.deepEqual(tooSoon.body, { error: "Slow down" })
+  assert.equal(env.registry.data.get("community/reports/u1/h1").at, NOW - 10_000)
+})
+
+test("a report the rules refuse costs no gap", async () => {
+  const env = setup()
+  const host = await hostToken(env)
+  await call(env, user, "POST", "join")
+
+  const bad = await call(env, host, "POST", "report", { days: "nope" })
+  assert.equal(bad.status, 400)
+  const good = await call(env, host, "POST", "report", {
+    days: { "2026-10-15": { "claude-x": { auto: counts(10) } } },
+  })
+  assert.equal(good.status, 200)
 })
 
 test("a GitHub account can't be claimed by a second sign-in; failures are reported", async () => {

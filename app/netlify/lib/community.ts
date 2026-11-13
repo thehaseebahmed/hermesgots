@@ -607,13 +607,13 @@ export async function handleCommunity(req: Request, ctx: CommunityContext) {
       // a fetched resource, and this is a public endpoint.
       const input = await body(req)
       if (!input) return error("Invalid report", 400)
-      const gapKey = `community/gap/${hostId}`
-      const last = await read<{ at: number }>(ctx.registry, gapKey)
+      // The gap is the report row's own `at`, read where the throttle key used to be: a public
+      // endpoint gains no write and no shared record beyond the report it is already given.
+      const last = await read<Report>(ctx.registry, reportKey(userId, hostId))
       if (last && now - last.at < REPORT_GAP_MS) return error("Slow down", 429)
       const catalog = await catalogOf(ctx)
       const cleaned = cleanDays(input.days, now, catalog)
       if (!cleaned) return error("Invalid report", 400)
-      await ctx.registry.setJSON(gapKey, { at: now })
       await ctx.registry.setJSON(reportKey(userId, hostId), {
         days: cleaned.days,
         providers: cleanProviders(input.providers, now, catalog),
@@ -667,7 +667,6 @@ export async function handleCommunity(req: Request, ctx: CommunityContext) {
       await ctx.store.delete("board")
       const prefix = `community/reports/${userId}/`
       for (const { key } of (await ctx.registry.list({ prefix })).blobs) {
-        await ctx.registry.delete(`community/gap/${key.slice(prefix.length)}`)
         await ctx.registry.delete(key)
       }
       await ctx.registry.delete(ownerKey(account.login))

@@ -29,7 +29,6 @@ interface RegistryBot {
   sealed: SealedToInbox
   enabled: boolean
   adopts?: string
-  seen?: { at: number; pluginVersion?: string }
 }
 
 /** What a plugin seals for the app (`record` in `plugin/link.py`). */
@@ -42,24 +41,8 @@ interface BotRecord {
   pluginVersion?: string
 }
 
-/** The plugin checks in every 10 minutes, so two missed check-ins and a margin mean it's gone. */
-const ONLINE_MS = 25 * 60_000
 /** How soon an unreachable bot is checked again while a screen watches it. */
 const RETRY_MS = 5000
-
-export function isOnline(profile: Profile, now = Date.now()) {
-  return Boolean(profile.seenAt && now - profile.seenAt < ONLINE_MS)
-}
-
-/**
- * Whether this device can say the bot's host is checking in: `undefined` while the bot is off, has no
- * host, or has never checked in. A device that has heard from no host cannot call it offline, and
- * settings says nothing about the same bot — one bot must not read two ways across two screens.
- */
-export function presence(profile: Profile, now = Date.now()): boolean | undefined {
-  if (!profile.hostId || profile.disabled || !profile.seenAt) return undefined
-  return isOnline(profile, now)
-}
 
 /** Where the plugin reaches the registry: this site, or the one the Android app was built for. */
 export function siteUrl() {

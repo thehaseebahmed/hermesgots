@@ -32,7 +32,7 @@ import { previewLine } from "@/lib/bot-chrome"
 import { useCanvasEnabled, usePinnedCanvases } from "@/lib/canvases"
 import { chatOwner } from "@/lib/chat-owner"
 import { compareChatOrder, waitsOnUser } from "@/lib/chat-list"
-import { presence } from "@/lib/registry"
+import { presence } from "@/lib/presence"
 import type { Conversation, Message, Profile } from "@/lib/db"
 import { db, isReply, newestMessage } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
@@ -354,6 +354,8 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
     return found ? chatOwner(found).answerer : undefined
   }, [chat])
   const now = useNow()
+  // What this device's last chat-list pass answered for each bot: the dot's whole evidence.
+  const { chatStores } = useSyncState()
 
   return (
     <nav
@@ -421,7 +423,7 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
                         {previewLine({
                           line: preview,
                           title: latest?.title,
-                          online: presence(bot, now),
+                          online: presence(bot, now, chatStores[bot.id]),
                         })}
                       </span>
                       {waiting > 0 && (
