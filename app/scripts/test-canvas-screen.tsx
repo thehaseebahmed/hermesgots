@@ -9,6 +9,7 @@ import test from "node:test"
 import { StrictMode, act } from "react"
 import { Link, MemoryRouter, Route, Routes } from "react-router"
 
+import { awayLine } from "@/lib/away"
 import { BRIDGE_MESSAGE, POINT_MESSAGE, type CanvasDoc } from "@/lib/canvas-bridge"
 import { SCROLL_MESSAGE } from "@/lib/canvas-document"
 import { takePoint, keepPoint } from "@/lib/canvas-point-pick"
@@ -36,6 +37,7 @@ import {
   nav,
   seedSettings,
   settle,
+  shutSheet,
   text,
   until,
   withToasts,
@@ -125,6 +127,8 @@ interface Host {
   page?: string
   /** What a refused undo says, in the host's own words. */
   failUndo?: string
+  /** Answers nothing at all, the way a host this device can't reach does: no features, no list. */
+  failAll?: boolean
 }
 
 /**
@@ -137,6 +141,7 @@ function serveCanvases(host: Host) {
   host.calls ??= []
   host.reads ??= []
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (host.failAll) throw new TypeError("Failed to fetch")
     const url = new URL(String(input))
     if (url.pathname.endsWith("/info")) return json({ version: "0.113.0", features: ["canvas"] })
     const call = /\/canvases\/([^/]+)\/call$/.exec(url.pathname)
@@ -422,14 +427,25 @@ test(
   }),
 )
 
+/**
+ * What a screen reader calls a control: the words it draws, when it carries no label of its own and
+ * points at no other words — which the canvas's control is asserted to do at every press.
+ */
+const spoken = (control: Element | null) => wordsOf(control)
+
 test(
   "a tap on the canvas's header opens its options, and no header offers an ellipsis",
   atWidth(390, async () => {
     serveCanvases({ version: 3, undos: 0 })
     await seedCanvasChat(CANVAS.id)
-    const press = async (where: string) => {
+    /**
+     * The header's one control, pressed where `part` names: the title, the line under it, or the
+     * block both are drawn in. Its shape and its name are checked at every press, because the block
+     * it sits in is what a press lands on.
+     */
+    const press = async (where: string, part: "the title" | "the subtitle" | "the block") => {
       await until(
-        () => find('[data-slot="header-title"]')?.textContent === CANVAS.title,
+        () => Boolean(find('[data-canvas-options-open]')),
         "the canvas's title in the shared header",
       )
       const heading = find('[data-slot="header-title"]')
@@ -446,25 +462,86 @@ test(
       )
       assert.ok(
         control!.classList.contains("w-full"),
-        "and as wide as the middle slot gives it, so no press on the title line is dead (w-full)",
+        "and as wide as the block gives it, so no press on the title line is dead (w-full)",
       )
       assert.ok(missing('button[aria-label="Canvas options"]'), "the header offers no ellipsis")
-      await click(control)
+
+      // The block holds the heading and the line under it, and the press answers anywhere on it: the
+      // line — the away sentence with it — is outside the control, so it is no part of its name.
+      const line = find('[data-slot="header-line"]')
+      const block = heading!.parentElement
+      assert.ok(block && block.contains(line), "the line is drawn in the block the press answers on")
+      assert.ok(
+        block!.className.includes("cursor-pointer") &&
+          block!.className.includes("hover:bg-muted/60"),
+        "and that block draws the surface a thumb, a hover and a focus ring answer on",
+      )
+      assert.equal(control!.contains(line), false, "the line is no part of the control")
+      assert.equal(control!.getAttribute("aria-label"), null, "the control has no label of its own")
+      assert.equal(control!.getAttribute("aria-labelledby"), null, "and points at no other words")
+      assert.equal(
+        control!.querySelector('[role="status"]'),
+        null,
+        "no live region is drawn inside the control",
+      )
+      assert.equal(spoken(control), CANVAS.title, "so what a reader hears is the title alone")
+      const lineWords = wordsOf(line)
+      assert.ok(lineWords.length > 0, "the line beside it draws words of its own")
+      assert.equal(
+        spoken(control).includes(lineWords),
+        false,
+        "which the control is not called",
+      )
+
+      await click(part === "the title" ? control : part === "the subtitle" ? line : block)
       await until(() => Boolean(find("[data-canvas-options]")), `${where} options to open`)
       assert.equal(
         find("[data-canvas-options-open]")?.getAttribute("aria-expanded"),
         "true",
         "and it says they are open",
       )
+      await shutSheet(() => find("[data-canvas-options]"))
     }
+    const parts = ["the title", "the subtitle", "the block"] as const
     await drawCanvas([`/canvas/${CANVAS.id}`], async () => {
       await until(() => Boolean(find("iframe[data-canvas-frame]")), "the page to draw")
-      await press("the page screen's")
+      for (const part of parts) await press("the page screen's", part)
     })
     await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
       await until(() => Boolean(composerField()), "the edit screen to draw")
-      await press("the edit screen's")
+      for (const part of parts) await press("the edit screen's", part)
     })
+    // A host this device can't reach says so in the same line, and the sentence is still no part of
+    // what the control is called: the block draws it beside the control, where a live region stays a
+    // live region and a name stays the title's. The record is read first, so the header has a title.
+    serveCanvases({ version: 3, undos: 0 })
+    await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
+      await until(() => Boolean(find("[data-canvas-options-open]")), "the record to land")
+    })
+    serveCanvases({ version: 3, undos: 0, failAll: true })
+    await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
+      await until(
+        () => Boolean(find("[data-canvas-offline]")),
+        "the header to say its bot isn't answering",
+      )
+      const away = wordsOf(find("[data-canvas-offline]"))
+      const control = find("[data-canvas-options-open]")
+      assert.equal(away, awayLine(true, true), "the line says the host isn't answering")
+      assert.equal(spoken(control), CANVAS.title, "the control is still called the title alone")
+      assert.equal(
+        spoken(control).includes(away),
+        false,
+        `and its name never carries the away sentence (${away})`,
+      )
+      assert.equal(
+        control!.querySelector('[role="status"]'),
+        null,
+        "no live region is drawn inside the control",
+      )
+    })
+    // Leave the host answering for the rest of the file.
+    serveCanvases({ version: 3, undos: 0 })
+    await refreshCanvas(CANVAS.id)
   }),
 )
 
