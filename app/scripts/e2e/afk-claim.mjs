@@ -2,12 +2,13 @@
 // account and marked — so the pop-up says what it is working and the frontier no longer offers it.
 // A project that may hold several tasks holds one per place: raising its pick count fills them, the
 // Working block names every task it holds over a count of them against the pick count, and a reload
-// reads every count back. A GitHub refusal leaves the switch on and shows its
-// reason in the same pop-up. The bot's pick budget and its usage threshold are written on the wire
-// and drawn by its own Coding page, which this flow reads back — the threshold as seven segments, Off
-// and the six tens, which is the one thing a DOM without layout cannot say fits a phone. The read is
-// the plugin's own route, so the whole thing is covered against the mock. Phone, tablet and laptop,
-// light and dark, with no console error.
+// reads every count back — with the frontier offering only what the sweep hasn't taken, and no group
+// of somebody else's claims on it. A GitHub refusal leaves the switch on and shows its reason there.
+// The bot's pick budget and its usage threshold are written on the wire and drawn by its own Coding
+// page, which this flow reads back — the threshold as seven segments, Off and the six tens, which is
+// the one thing a DOM without layout cannot say fits a phone. The read is the plugin's own route, so
+// the whole thing is covered against the mock. Phone, tablet and laptop, light and dark, with no
+// console error.
 import { afkOn, afkRead, app, assert, flow, makeProject, mock, openAfk, pass, say } from "./lib.mjs"
 
 const HELD = 265
@@ -155,17 +156,17 @@ const run = async ({ page, profileId, shot, until }) => {
       .isVisible(),
     "the pop-up names the task AFK is holding",
   )
-  // One place, one task: the count row says how many of them are held, against the count of one a
+  // One place, one task: the heading says how many of them are held, against the count of one a
   // project starts with.
   const count = working.locator("[data-holds]")
   await count.waitFor({ timeout: 15_000 })
-  assert.equal(await count.getAttribute("data-holds"), "1", "the count row counts the one hold")
+  assert.equal(await count.getAttribute("data-holds"), "1", "the heading counts the one hold")
   assert.equal(
     await count.getAttribute("data-pick-count"),
     "1",
     "against the count of one it holds by",
   )
-  assert.equal((await count.innerText()).trim(), "1 of 1 held", "and reads them as words")
+  assert.equal((await count.innerText()).trim(), "Working (1 of 1)", "and reads them as words")
   await shot("working")
 
   // The pick count sits under the switch as one pill per count, the count it holds already on.
@@ -209,7 +210,7 @@ const run = async ({ page, profileId, shot, until }) => {
   }
   assert.equal(
     (await count.innerText()).trim(),
-    "3 of 3 held",
+    "Working (3 of 3)",
     "three holds against a count of three",
   )
   await shot("three-holds")
@@ -224,12 +225,13 @@ const run = async ({ page, profileId, shot, until }) => {
   )
   assert.equal(held.task.number, HELD, "the oldest hold is still the one a shipped app draws")
 
-  // A claimed task leaves the frontier — every one of them — and is listed as claimed. The tasks the
-  // sweep hasn't reached are still offered: a project holding three of five leaves two ready.
+  // A task AFK holds leaves the frontier, and the tasks the sweep hasn't reached are still offered: a
+  // project holding three of five leaves two ready. The sheet has no claimed group at all — the tasks
+  // it holds are Working, and what another hand took is not this sheet's to list.
   await until(
-    async () => (await page.locator('[data-group="claimed"] [data-task="269"]').count()) === 1,
+    async () => (await page.locator('[data-group="ready"] [data-task="271"]').count()) === 1,
     15_000,
-    "the frontier to list the third task as claimed",
+    "the frontier to offer what AFK doesn't hold",
   )
   assert.deepEqual(
     await page
@@ -238,13 +240,11 @@ const run = async ({ page, profileId, shot, until }) => {
     [270, 271],
     "nothing AFK holds is offered as ready, and what it doesn't hold still is",
   )
-  for (const number of [HELD, SECOND, THIRD]) {
-    assert.equal(
-      await page.locator(`[data-group="claimed"] [data-task="${number}"]`).count(),
-      1,
-      `#${number} is listed as claimed`,
-    )
-  }
+  assert.equal(
+    await page.locator('[data-group="claimed"]').count(),
+    0,
+    "and no task is drawn as somebody else's claim",
+  )
   await shot("frontier")
 
   // The claim is the host's, so a reload reads every task and the count back rather than an empty
@@ -313,5 +313,5 @@ for (const width of [390, 768, 1024]) {
   }
 }
 pass(
-  "AFK claims the oldest ready task when a project is turned on — and filling its pick count to three makes the pop-up name every task it holds, oldest first, over a count row — with the frontier dropping every task it took and still offering the rest, and a reload reading them back, and a GitHub refusal leaving the switch on with its reason shown, at 390, 768 and 1024px, light and dark",
+  "AFK claims the oldest ready task when a project is turned on — and filling its pick count to three makes the pop-up name every task it holds, oldest first, over a count row, with no claimed group of somebody else's tasks — with the frontier dropping every task it took and still offering the rest, and a reload reading them back, and a GitHub refusal leaving the switch on with its reason shown, at 390, 768 and 1024px, light and dark",
 )

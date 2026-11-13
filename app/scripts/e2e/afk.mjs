@@ -1,6 +1,6 @@
 // AFK: a project's options menu carries an AFK row, and the pop-up it opens lists that project's
-// tasks as AFK reads them from GitHub — the ready ones oldest first, the claimed ones marked with
-// who has them, and the blocked ones naming the open task they wait on. The read is the plugin's
+// tasks as AFK reads them from GitHub — the ready ones oldest first, and the blocked ones naming the
+// open task they wait on, with no group of somebody else's claims on it. The read is the plugin's
 // own route, so the whole pop-up is covered against the mock. A plugin that doesn't advertise `afk`
 // offers no row, and a Host whose GitHub refuses shows its reason instead of a list. Phone and
 // tablet, light and dark, with no console error.
@@ -53,11 +53,11 @@ const run = async ({ page, profileId, shot, until }) => {
     .evaluateAll((nodes) => nodes.map((node) => Number(node.dataset.task)))
   assert.deepEqual(order, [265, 266, 269, 270, 271], `ready tasks are listed oldest first (${order})`)
 
-  // Claimed: marked, with the account that has it.
-  const claimed = page.locator('[data-group="claimed"]')
-  assert.ok(
-    await claimed.locator('[data-task="267"]').getByText("mock-user", { exact: true }).isVisible(),
-    "a claimed task is marked with who has it",
+  // No claimed group: a task somebody has taken is not one this sheet lists.
+  assert.equal(
+    await page.locator('[data-group="claimed"]').count(),
+    0,
+    "a taken task is in no group of its own",
   )
 
   // Blocked: the task it waits on is named, not just counted.
@@ -130,5 +130,5 @@ for (const width of [390, 1024]) {
   }
 }
 pass(
-  "a project's options menu opens AFK's frontier — ready oldest first, claimed marked, blocked naming its open blocker — with no row for a plugin that can't read it and a refusal shown as it is, at 390 and 1024px, light and dark",
+  "a project's options menu opens AFK's frontier — ready oldest first, blocked naming its open blocker, and no group of somebody else's claims — with no row for a plugin that can't read it and a refusal shown as it is, at 390 and 1024px, light and dark",
 )
