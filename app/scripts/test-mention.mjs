@@ -6,7 +6,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { mentionName, mentionToken, pickMention } from "../src/lib/mention.ts"
+import { mentionName, mentionToken, pickMention, rankMentions } from "../src/lib/mention.ts"
 
 const tokenAt = (text, caret = text.length) => mentionToken(text, caret)
 
@@ -88,4 +88,27 @@ test("the letters typed after the caret inside the token stay", () => {
     text: "fix @Weekly review k please",
     caret: 19,
   })
+})
+
+test("a query keeps the rows whose name holds it, in the list's own order", () => {
+  const rows = [{ name: "Weekly review" }, { name: "Q3 Planning" }, { name: "Weekly retro" }]
+  // Nothing typed is every row, in the order the menu offers them.
+  assert.deepEqual(
+    rankMentions(rows, "").map((row) => row.name),
+    ["Weekly review", "Q3 Planning", "Weekly retro"],
+  )
+  // A substring anywhere in the name, not a prefix, and case is no part of it.
+  assert.deepEqual(
+    rankMentions(rows, "week").map((row) => row.name),
+    ["Weekly review", "Weekly retro"],
+  )
+  assert.deepEqual(
+    rankMentions(rows, "WEEKLY").map((row) => row.name),
+    ["Weekly review", "Weekly retro"],
+  )
+  assert.deepEqual(
+    rankMentions(rows, "plan").map((row) => row.name),
+    ["Q3 Planning"],
+  )
+  assert.deepEqual(rankMentions(rows, "zzz"), [])
 })

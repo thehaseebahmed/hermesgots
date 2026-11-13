@@ -1259,6 +1259,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
             }}
             connection={serverConfig(profile)}
             botName={profile?.name}
+            mentions={profile ? { bot: profile, here: id } : undefined}
             dictationWords={profile?.vocabulary}
             dictationHint={dictationHint({
               title: conversation?.title,

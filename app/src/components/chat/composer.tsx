@@ -17,6 +17,7 @@ import { AttachMenu } from "@/components/chat/attach-menu"
 import { PointChip, useCanvasPoints } from "@/components/chat/canvas-points"
 import { useCodeFace } from "@/components/chat/code-face"
 import { AttachmentTile } from "@/components/chat/attachments"
+import { MentionMenu } from "@/components/chat/mention-menu"
 import type { ModeSettings } from "@/components/chat/mode-menu"
 import { usePreviewer, type PreviewItem } from "@/components/chat/previewer"
 import { SlashMenu } from "@/components/chat/slash-menu"
@@ -35,7 +36,8 @@ import { openAttachment, prepareIntake } from "@/lib/attachments"
 import { attachmentUrl, drawable } from "@/lib/attachment-url"
 import { drawnCell, mediaKind } from "@/lib/media-kind"
 import { previewItem } from "@/lib/media-items"
-import type { Attachment } from "@/lib/db"
+import type { Attachment, Profile } from "@/lib/db"
+import { mentionText, type Mention } from "@/lib/mention-marker"
 import { pointText, type CanvasPoint } from "@/lib/point-marker"
 import type { PluginFeatureAnswer } from "@/lib/features"
 
@@ -70,6 +72,8 @@ import {
   type SlashItem,
 } from "@/lib/slash"
 import { enterSends, isDoubleEscape, isInterrupt, isSendChord } from "@/lib/keys"
+import { mentionToken, pickMention, rankMentions } from "@/lib/mention"
+import { useMentionRows, type MentionRow } from "@/lib/mentions"
 import { useSkills } from "@/lib/skills"
 import { midReply, steerAsked } from "@/lib/steer"
 import { runnableSkills } from "@/lib/skills-cache"
@@ -110,6 +114,7 @@ export function Composer({
   onCommand,
   connection,
   botName = "Hermes",
+  mentions,
   dictationHint,
   dictationWords,
   model,
@@ -149,6 +154,11 @@ export function Composer({
   /** The chat's Hermes profile, for the skills in the `/` menu. */
   connection: HermesConfig
   botName?: string
+  /**
+   * What this composer may tag under an `@`: the bot it speaks to, and the chat it is, so that
+   * neither the bot's own chats nor this chat is offered. Absent on a surface that tags nothing.
+   */
+  mentions?: { bot: Profile; here?: string }
   /** Names the chat may mention (its title, a project's repos), to help the host hear them. */
   dictationHint?: string
   /** The bot's vocabulary: the names and words its dictation is written with. */
@@ -225,6 +235,12 @@ export function Composer({
   })
   const [pointing, setPointing] = useState(false)
   /**
+   * The sessions and bots this message names, as they were picked: the name rides in the sentence
+   * and the id rides in a marker line at the send, and a message the host never took hands the picks
+   * back with the text, as a point is handed back.
+   */
+  const [mentionsHeld, setMentionsHeld] = useState<Mention[]>([])
+  /**
    * The staged files the Host refused, each with its own sentence: a tile the user can take off,
    * rather than a message the whole of which was refused with no word about which file it was. A
    * send that keeps a refused file says it again, because the Host is asked again.
@@ -251,6 +267,8 @@ export function Composer({
     // A point is the canvas's page, not this chat's: another chat is another place to point at.
     setPoints([])
     setPointing(false)
+    // A pick names something in this chat's sentence, and another chat's sentence is another's.
+    setMentionsHeld([])
   }
   // A draft that lands after mount fills the field only while it is still empty and untouched.
   const syncedDraft = useDraftText(draftKey)
@@ -300,6 +318,7 @@ export function Composer({
   // When the last Escape that had nothing else to close was pressed, for the double that clears.
   const lastEscape = useRef<number | null>(null)
   const listId = useId()
+  const atListId = useId()
   const dictationInfo = useDictationInfo(connection)
   const placeLanded = useRef<(landed: string, takeId: TakeId) => void>(() => {})
   const dictation = useChunkedDictation(
@@ -379,25 +398,34 @@ export function Composer({
     return () => window.clearTimeout(timer)
   }, [stopAsked, runId, working])
 
-  // The menu follows the caret: a `/` that begins a word opens it, wherever in the message it is.
+  // The menu follows the caret: a `/` or an `@` that begins a word opens one, wherever in the message
+  // it is. A caret sits in one token or none, so exactly one list can stand at a time.
   const token = slashToken(value, caret)
+  const at = plain || !mentions ? null : mentionToken(value, caret)
   const skills = useSkills(connection, !plain && Boolean(token) && !disabled)
+  const offered = useMentionRows(mentions?.bot, mentions?.here, !plain && Boolean(at) && !disabled)
+  const atRows = at ? rankMentions(offered.rows, at.query) : []
   const skillItems: SlashItem[] =
     skills.status === "ok"
       ? runnableSkills(skills.skills).map((skill) => ({ kind: "skill", ...skill }))
       : []
-  const items =
+  const slashItems =
     plain || !token
       ? []
       : rankSlashItems([...localCommands(), ...(busy ? SEND_COMMANDS : []), ...skillItems], token)
-  // Escape closes the menu until the text changes: any edit opens it again, and so does a new `/`.
-  const menuOpen =
+  // Escape closes a menu until the text changes: any edit opens it again, and so does a new `/`.
+  const slashOpen =
     !plain &&
     token !== null &&
     !dismissed &&
     !disabled &&
-    (items.length > 0 || skills.status !== "ok")
-  const activeIndex = Math.min(active, Math.max(items.length - 1, 0))
+    (slashItems.length > 0 || skills.status !== "ok")
+  // The `@` menu stands only over a row, so a query nothing matches leaves the field as it was.
+  const mentionOpen = !plain && Boolean(at) && !dismissed && !disabled && atRows.length > 0
+  const menu: "slash" | "mention" | null = slashOpen ? "slash" : mentionOpen ? "mention" : null
+  const shown = menu === "mention" ? atRows : slashItems
+  const openId = menu === "mention" ? atListId : listId
+  const activeIndex = Math.min(active, Math.max(shown.length - 1, 0))
   // The caret follows the field. A pick places it (`caretWanted`); anything else that writes the
   // value — a restored draft, dictation, a message handed back after a failed send — leaves it
   // where the field put it, so the menu tracks the text the user is in and not where the mirror
@@ -437,18 +465,37 @@ export function Composer({
     setValue(next.text)
   }
 
+  const pickAt = (row: MentionRow) => {
+    if (!at) return
+    const next = pickMention(value, at, row.name)
+    caretWanted.current = next.caret
+    setDismissed(false)
+    setValue(next.text)
+    // One entry per thing picked, whatever else the sentence goes on to say: a name picked twice is
+    // one mention, and its id is the newest row it was picked from.
+    setMentionsHeld((held) => [
+      ...held.filter((one) => !(one.kind === row.kind && one.id === row.id)),
+      { name: row.name, kind: row.kind, id: row.id },
+    ])
+  }
+
   const submitText = (raw: string) => {
     const text = plain ? raw : (sendMode(raw)?.text ?? raw)
     if (!text.trim() && !attachments.length && !points.length) return
     const sent = attachments
     const steer = !plain && steersNow(raw, sent)
-    // A point rides the message it was taken for: the model reads its label and its selector. A steer
-    // is a nudge at the reply already running, so the chip waits for the message after it.
-    const marked = steer ? text : pointText(text, points)
+    // A pick rides the message it was made for only while its name still stands in the words:
+    // deleting the name is the reader taking it back. A point rides the same message, so the two go
+    // on in the order every reader peels them — the words, the point lines, then the mentions. A
+    // steer is a nudge at the reply already running, so it carries neither.
+    const live = mentionsHeld.filter((mention) => text.includes(`@${mention.name}`))
+    const marked = steer ? text : mentionText(pointText(text, points), live)
     const carried = steer ? [] : points
+    const carriedPicks = steer ? [] : live
     setValue("")
     setAttachments([])
     if (carried.length) setPoints([])
+    setMentionsHeld([])
     setPointing(false)
     const go = () => (steer ? onSteer!(text, sent) : (busy ? onQueue : onSend)(marked, sent))
     // Hand the message back if it never made it into the chat, unless something new was added.
@@ -458,6 +505,7 @@ export function Composer({
         setValue((current) => current || raw)
         setAttachments((current) => (current.length ? current : sent))
         setPoints((current) => (current.length ? current : carried))
+        setMentionsHeld((current) => (current.length ? current : carriedPicks))
         // A file the Host refused is the one thing here worth interrupting for: the tile that
         // carries it turns red, and the Host's own sentence — the limit it names — is a toast on
         // the phone and the page's own toaster on the web. A send refused for another reason keeps
@@ -708,8 +756,8 @@ export function Composer({
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing) return
-    if (menuOpen && items.length > 0) {
-      const count = items.length
+    if (menu && shown.length > 0) {
+      const count = shown.length
       if (event.key === "ArrowDown" || event.key === "ArrowUp") {
         event.preventDefault()
         setActive((activeIndex + (event.key === "ArrowDown" ? 1 : count - 1)) % count)
@@ -720,11 +768,12 @@ export function Composer({
         event.key === "Tab"
       ) {
         event.preventDefault()
-        pick(items[activeIndex])
+        if (menu === "mention") pickAt(atRows[activeIndex])
+        else pick(slashItems[activeIndex])
         return
       }
     }
-    if (menuOpen && event.key === "Escape") {
+    if (menu && event.key === "Escape") {
       event.preventDefault()
       setDismissed(true)
       lastEscape.current = null
@@ -819,13 +868,23 @@ export function Composer({
       onDrop={dropped}
       className={`${COLUMN_BOX} relative`}
     >
-      {menuOpen && (
+      {menu === "slash" && (
         <SlashMenu
           id={listId}
-          items={items}
+          items={slashItems}
           active={activeIndex}
           status={skills.status}
           onPick={pick}
+          onActive={setActive}
+        />
+      )}
+      {menu === "mention" && (
+        <MentionMenu
+          id={atListId}
+          rows={atRows}
+          active={activeIndex}
+          status={offered.status}
+          onPick={pickAt}
           onActive={setActive}
         />
       )}
@@ -879,13 +938,11 @@ export function Composer({
           onPaste={pasted}
           onKeyDown={onKeyDown}
           enterKeyHint={sendOnEnter ? "send" : "enter"}
-          role={menuOpen ? "combobox" : undefined}
-          aria-expanded={menuOpen ? true : undefined}
-          aria-controls={menuOpen ? listId : undefined}
-          aria-autocomplete={menuOpen ? "list" : undefined}
-          aria-activedescendant={
-            menuOpen && items.length ? optionId(listId, activeIndex) : undefined
-          }
+          role={menu ? "combobox" : undefined}
+          aria-expanded={menu ? true : undefined}
+          aria-controls={menu ? openId : undefined}
+          aria-autocomplete={menu ? "list" : undefined}
+          aria-activedescendant={menu && shown.length ? optionId(openId, activeIndex) : undefined}
           placeholder={
             placeholder ??
             (disabled

@@ -61,3 +61,13 @@ export function mentionName(title: string): string {
 export function pickMention(text: string, token: MentionToken, name: string) {
   return pickWord(text, token, "@", name)
 }
+
+/**
+ * The rows a typed query keeps: a name holding it, case aside, in the list's own order — sessions
+ * before bots, as the list offers them. Nothing typed is every row.
+ */
+export function rankMentions<T extends { name: string }>(rows: T[], query: string): T[] {
+  const wanted = query.toLowerCase()
+  if (!wanted) return rows
+  return rows.filter((row) => row.name.toLowerCase().includes(wanted))
+}

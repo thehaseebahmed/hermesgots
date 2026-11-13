@@ -76,6 +76,7 @@ export function ChatNextBlank({ botId, slot }: { botId: string; slot: HoldSlot }
         )}
         <ChatComposer
           bot={bot}
+          mentions={{ bot }}
           draftKey={draftKey(undefined, bot.id)}
           modelChoice={modelPick}
           onChooseModel={(choice) => setModelPick(storedPick(choice))}
