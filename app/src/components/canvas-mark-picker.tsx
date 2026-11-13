@@ -1,25 +1,23 @@
 /**
- * The picker a canvas's mark is chosen from (issue #1065): lucide's icons and the phone's emojis,
- * one search over both. It is the centred dialog a tablet or a laptop opens and the bottom sheet a
- * phone does (`useWide`), with the tabs the Outputs sheet draws and no more box than the model
- * selector's.
+ * The picker a canvas's icon is chosen from (issue #1065): lucide's icons and the phone's emojis, one
+ * search over both. It opens the way the model selector does — a menu anchored to the button it came
+ * from on a laptop and up, a bottom sheet below that — with the tabs the Outputs sheet draws, and it
+ * says what it is for in the same words everywhere: Canvas Icon.
  *
  * A pick is the record's, not this device's: it posts the mark to the host, the host's answer folds
  * into the store, and the row it was opened from redraws from it.
  */
-import { useMemo, useState, type ReactNode } from "react"
+import { useMemo, useState, type ReactNode, type RefObject } from "react"
 
-import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { Popup, PopupContent, PopupHeader } from "@/components/popup"
 import { SearchField } from "@/components/search-field"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { Canvas, CanvasChanges } from "@/lib/canvases"
 import { MARK_EMOJIS } from "@/lib/canvas-emojis"
 import { useMarkIcons } from "@/lib/canvas-mark-icons"
 import { markMatches, readMark } from "@/lib/canvas-marks"
-import { useWide } from "@/lib/media"
 import { cn } from "@/lib/utils"
 
 /**
@@ -29,8 +27,8 @@ import { cn } from "@/lib/utils"
  */
 const LISTED = 160
 
-/** The picker's own box: the model selector's height, and no taller than the screen allows. */
-const PICKER = "h-[min(30rem,85dvh)]"
+/** The picker's own box: the model selector's, so the two read as one kind of card. */
+const PICKER = "h-[min(36rem,85dvh)]"
 
 /** One mark in the grid: the icon or the glyph, and the pale disc that says it is the one chosen. */
 function Cell({
@@ -201,51 +199,41 @@ function MarkPicker({
           disabled={saving || !canvas || !chosen}
           onClick={() => void pick("")}
         >
-          Use the app's own mark
+          Remove Icon
         </Button>
       </div>
     </Tabs>
   )
 }
 
-/** The picker as a wide screen opens it: a dialog, no wider than the model selector. */
+/**
+ * The picker, opened by the button it belongs to: the model selector's own rule (`ModelMenu`), so a
+ * laptop draws the card beside that button and a phone draws the sheet under its thumb. The heading
+ * is centred in both, since it names the card rather than the list under it.
+ */
 export function CanvasMarkPicker({
   open,
   onOpenChange,
+  anchor,
   canvas,
   onUpdate,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
+  /** The mark's box in the options: a menu beside it from 1024px, a sheet under it below that. */
+  anchor: RefObject<HTMLElement | null>
   canvas: Canvas | undefined
   onUpdate: (changes: CanvasChanges) => Promise<void>
 }) {
-  const wide = useWide()
-  const body = (
-    <MarkPicker canvas={canvas} onUpdate={onUpdate} onDone={() => onOpenChange(false)} />
-  )
-  if (wide)
-    return (
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent
-          size="sm"
-          data-canvas-mark-picker=""
-          className={cn("grid-rows-[auto_minmax(0,1fr)] gap-0 p-0", PICKER)}
-        >
-          <DialogHeader className="px-4 pt-4">
-            <DialogTitle>Mark</DialogTitle>
-          </DialogHeader>
-          {body}
-        </DialogContent>
-      </Dialog>
-    )
   return (
-    <Popup open={open} onOpenChange={onOpenChange}>
-      <PopupContent dataSlot="canvas-mark-picker" className={PICKER}>
+    <Popup open={open} onOpenChange={onOpenChange} anchor={anchor}>
+      <PopupContent dataSlot="canvas-mark-picker" fixedHeight={PICKER}>
         <PopupHeader className="pb-0">
-          <PopupTitle>Mark</PopupTitle>
+          <h2 className="cn-font-heading w-full truncate text-center text-base font-medium text-foreground">
+            Canvas Icon
+          </h2>
         </PopupHeader>
-        {body}
+        <MarkPicker canvas={canvas} onUpdate={onUpdate} onDone={() => onOpenChange(false)} />
       </PopupContent>
     </Popup>
   )

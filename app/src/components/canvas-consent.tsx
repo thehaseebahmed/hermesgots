@@ -258,7 +258,8 @@ export function CanvasOptions({
   const [asking, setAsking] = useState(false)
   const [naming, setNaming] = useState(false)
   const [marking, setMarking] = useState(false)
-  // The mark's own box in the name block, which the picker opens from.
+  // The mark's own box in the name block: the picker opens anchored to it, so a laptop draws the
+  // card beside it (the model selector's rule) and a phone draws a sheet.
   const markButton = useRef<HTMLButtonElement>(null)
   const busy = saving !== null
   const deleting = saving === "delete"
@@ -321,6 +322,7 @@ export function CanvasOptions({
                 </button>
                 <button
                   type="button"
+                  data-canvas-name-open
                   disabled={!canvas || busy}
                   onClick={() => setNaming(true)}
                   className="h-11 min-w-0 flex-1 truncate pr-3 text-left text-base outline-none disabled:opacity-60"
@@ -418,6 +420,7 @@ export function CanvasOptions({
           key={canvas.id}
           open={marking}
           onOpenChange={setMarking}
+          anchor={markButton}
           canvas={canvas}
           onUpdate={onUpdate}
         />

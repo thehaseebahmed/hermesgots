@@ -3,9 +3,10 @@
  * canvas's own record so every device's sidebar shows the same one — and the app's frame mark where
  * nobody has chosen one, which is the row every canvas drew before a mark could be picked.
  *
- * The picker is the centred dialog a tablet and a laptop open and the sheet a phone does, with the
- * tabs the Outputs sheet draws; its card is the name block's own mark, and the way back to the frame
- * is the one button under the grid.
+ * The picker opens the way the model selector does — a menu anchored to the mark's own box on a
+ * laptop and up, a sheet below that — with the tabs the Outputs sheet draws, "Canvas Icon" over
+ * both, and one button under the grid to remove what is there.
+ *
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -191,9 +192,14 @@ test("the options pick a mark, an emoji, and the app's own mark", async () => {
         await until(async () => changes.length === 2, "the emoji to be posted")
         assert.deepEqual(changes[1], { mark: "🎉" })
 
-        // And the one button under the grid is the way back to the app's own frame mark.
+        // And the one button under the grid removes the icon, back to the app's own frame mark.
         await click(find("[data-canvas-mark-open]"))
-        await until(async () => find("[data-canvas-mark-unset]") !== null, "the unset button")
+        await until(async () => find("[data-canvas-mark-unset]") !== null, "the remove button")
+        assert.equal(
+          find("[data-canvas-mark-unset]")?.textContent?.trim(),
+          "Remove Icon",
+          "the way back says what it does",
+        )
         await click(find("[data-canvas-mark-unset]"))
         await until(async () => changes.length === 3, "the clear to be posted")
         assert.deepEqual(changes[2], { mark: "" })
@@ -202,13 +208,14 @@ test("the options pick a mark, an emoji, and the app's own mark", async () => {
   })
 })
 
-test("the picker is a dialog from a tablet and a sheet on a phone", async () => {
-  // The dialog's card and the sheet's card are one body: the width decides which frame it is drawn in.
-  const dialog = () => find("[data-slot=\"dialog-content\"][data-canvas-mark-picker]")
-  const sheet = () => find('[data-slot="canvas-mark-picker"]')
+test("the picker is a menu beside its box on a laptop, and a sheet below it", async () => {
+  // The model selector's own rule: an anchored menu from 1024px, a sheet under the thumb below it.
+  const menu = () => find('[data-popup-form="menu"] [data-slot="canvas-mark-picker"]')
+  const sheet = () => find('[data-popup-form="sheet"] [data-slot="canvas-mark-picker"]')
   for (const [width, drawn] of [
-    [1280, "dialog"],
-    [768, "dialog"],
+    [1280, "menu"],
+    [1024, "menu"],
+    [768, "sheet"],
     [390, "sheet"],
   ] as const) {
     await atWidth(width, async () => {
@@ -217,9 +224,15 @@ test("the picker is a dialog from a tablet and a sheet on a phone", async () => 
         async () => {
           await openPicker()
           assert.equal(
-            drawn === "dialog" ? Boolean(dialog()) : Boolean(sheet()),
+            Boolean(drawn === "menu" ? menu() : sheet()),
             true,
             `${width}px draws the picker as a ${drawn}`,
+          )
+          // One name for the card, centred, at every width.
+          assert.equal(
+            find("[data-canvas-mark-picker] h2")?.textContent?.trim(),
+            "Canvas Icon",
+            "the card is named Canvas Icon",
           )
         },
       )
@@ -237,7 +250,7 @@ test("the mark's own box opens the picker, and is inert where the host has no ma
       assert.equal(
         find("[data-canvas-mark-unset]")?.hasAttribute("disabled"),
         true,
-        "no mark to unset on a canvas drawn with the app's own",
+        "no icon to remove on a canvas drawn with the app's own",
       )
     })
   })

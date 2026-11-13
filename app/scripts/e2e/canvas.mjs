@@ -8,10 +8,10 @@
 // they tap back as the field's chip — and a visit costs only what its page asked: a page that asks
 // for no library fetches none of one, and one that asks for three fetches each of those chunks once.
 // The mark's own box at the head of the options' Name block opens the mark picker (issue #1065) as
-// a sheet on the phone and a dialog on a wide screen, lucide's icons listed eight to a row and
-// narrowed by the field, an icon then an emoji picked as the mark its row draws, and the one button
-// under the grid clearing it back to the app's frame — and a pinned canvas's row in the docked
-// sidebar wearing the mark it chose.
+// a sheet on the phone and a menu anchored to it on a wide screen, lucide's icons listed eight to a
+// row and narrowed by the field, an icon then an emoji picked as the mark its row draws, and the one
+// Remove Icon button under the grid clearing it back to the app's frame — and a pinned canvas's row
+// in the docked sidebar wearing the mark it chose.
 // A wide screen is the same canvas in two panes, and only boxes say where they are: no DOM without
 // layout can measure which pane a header spans.
 
@@ -275,7 +275,7 @@ await flow(
     // picker stands on the tab the mark lives in — the emojis — and its clear row is under either.
     await page.locator("[data-canvas-mark-open]").click()
     await page.locator('[data-slot="canvas-mark-picker"]').waitFor({ timeout: 20_000 })
-    await page.getByRole("button", { name: "Use the app's own mark" }).click()
+    await page.getByRole("button", { name: "Remove Icon" }).click()
     await page.locator("[data-canvas-mark-open] svg.lucide-frame").waitFor({ timeout: 20_000 })
     await page
       .locator('[data-slot="canvas-mark-picker"]')
@@ -517,12 +517,12 @@ await flow(
     const options = page.locator("[data-canvas-options]")
     await options.waitFor({ timeout: 10_000 })
     await page.locator("[data-canvas-mark-open]").click()
-    const dialog = page.locator('[data-slot="dialog-content"][data-canvas-mark-picker]')
-    await dialog.waitFor({ timeout: 40_000 })
+    const menu = page.locator('[data-popup-form="menu"] [data-slot="canvas-mark-picker"]')
+    await menu.waitFor({ timeout: 40_000 })
     assert.equal(
-      await page.locator('[data-slot="dialog"][data-slot="canvas-mark-picker"]').count(),
+      await page.locator('[data-popup-form="sheet"] [data-slot="canvas-mark-picker"]').count(),
       0,
-      "a wide screen draws the picker as a dialog, not a sheet",
+      "a wide screen draws the picker as a menu beside its box, not a sheet",
     )
     await page.getByRole("searchbox", { name: "Search icons" }).fill("star")
     await page.getByRole("button", { name: "Star", exact: true }).click()
@@ -532,7 +532,7 @@ await flow(
     await page.keyboard.press("Escape")
     await page.locator("a[data-canvas-pinned] svg.lucide-star").waitFor({ timeout: 20_000 })
     await shot("pinned-mark")
-    pass("a wide screen: the picker is a dialog, and the pinned row draws the mark it chose")
+    pass("a wide screen: the picker is a menu beside the mark's box, and the pinned row draws its mark")
 
     // The scrollbar is the platform's own, and it is pinned here rather than styled: the page's
     // document is grown past its own viewport, and what is read is what the app does NOT force —
