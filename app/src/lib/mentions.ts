@@ -30,23 +30,23 @@ export interface MentionRow extends Mention {
 }
 
 /**
- * The rows an `@` menu offers, and whether the read behind them has answered yet. Nothing is read
- * while no token stands, and a bot that isn't there offers nothing at all.
+ * The rows an `@` menu offers. Nothing is read while no token stands, and a bot that isn't there
+ * offers nothing at all — there is no state in between to draw, since these rows are this device's
+ * own and an open menu is only ever drawn over one of them.
  */
 export function useMentionRows(
   bot: Profile | undefined,
   here: string | undefined,
   open: boolean,
-): { rows: MentionRow[]; status: "ok" | "loading" } {
+): MentionRow[] {
   const id = bot?.id
   const host = bot?.hostId
   const read = useLiveQuery(async () => {
-    if (!open || !id) return { rows: [] as MentionRow[] }
+    if (!open || !id) return []
     const [sessions, bots] = await Promise.all([sessionsOf(id, here), botsOf(id, host)])
-    return { rows: [...sessions, ...bots] }
+    return [...sessions, ...bots]
   }, [id, host, here, open])
-  if (!open || !bot) return { rows: [], status: "ok" }
-  return read ? { rows: read.rows, status: "ok" } : { rows: [], status: "loading" }
+  return open && bot ? (read ?? []) : []
 }
 
 /**
@@ -54,41 +54,42 @@ export function useMentionRows(
  * answered standing rather than taking the whole menu down with it.
  */
 async function sessionsOf(profileId: string, here: string | undefined): Promise<MentionRow[]> {
+  // The walk stops once eight have been found, so a bot with a long history pays for eight rows and
+  // not for the partition: the predicate runs per row the index hands over, as it is read.
   const chats = await conversationsOf(profileId)
     .reverse()
-    .toArray()
-    .catch(quietly("Reading the sessions that may be mentioned"))
-  return (chats ?? [])
     .filter(
       (chat) =>
-        chat.title.trim() &&
+        Boolean(chat.title.trim()) &&
         // A chat nobody has said anything in wears the default title, so there is nothing in it to
         // name; one the reader renamed to those same words is theirs and stays.
-        (chat.title !== NEW_CHAT_TITLE || chat.titleEdited) &&
+        (chat.title !== NEW_CHAT_TITLE || Boolean(chat.titleEdited)) &&
         !chat.canvasId &&
         chat.id !== here,
     )
-    .slice(0, OFFERED_SESSIONS)
-    .map((chat) => ({
-      name: mentionName(chat.title),
-      kind: "session" as const,
-      id: chat.hermesSessionId,
-      line: "Session",
-    }))
+    .limit(OFFERED_SESSIONS)
+    .toArray()
+    .catch(quietly("Reading the sessions that may be mentioned"))
+  return (chats ?? []).map((chat) => ({
+    name: mentionName(chat.title),
+    kind: "session" as const,
+    id: chat.hermesSessionId,
+    line: "Session",
+  }))
 }
 
 /** The other bots on this bot's host, less the ones turned off. A bot added by hand has no host. */
 async function botsOf(profileId: string, hostId: string | undefined): Promise<MentionRow[]> {
   if (!hostId) return []
+  // Only a bot its host can name is offered: the line written for it carries the profile its host
+  // knows, and a bot added by hand has only the name this device shows it by.
   const bots = await db.profiles
     .filter((one) => one.hostId === hostId && one.id !== profileId && !one.disabled)
     .toArray()
     .catch(quietly("Reading the bots that may be mentioned"))
-  return (bots ?? []).map((one) => ({
-    name: one.name,
-    kind: "bot" as const,
-    // The name its host knows it by; a bot added by hand is only known by the name it shows.
-    id: one.hermesProfile ?? one.name,
-    line: "Bot",
-  }))
+  return (bots ?? []).flatMap((one) =>
+    one.hermesProfile
+      ? [{ name: one.name, kind: "bot" as const, id: one.hermesProfile, line: "Bot" }]
+      : [],
+  )
 }

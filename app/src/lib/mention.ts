@@ -6,8 +6,9 @@
  * opens nothing, since the `@` there sits inside a word, and neither does `@a@b`, since no name
  * holds a second `@`. The span is computed the way `slashToken` computes its own — `end` is the
  * whitespace after the caret's word, or the text's end — so the composer reads whichever token
- * stands with one piece of code. A picked name may hold spaces while a typed query never does: a
- * space ends the word, and so ends the query.
+ * stands with one piece of code. It answers no `alone`: that flag exists to keep a `/` command from
+ * being offered inside a sentence, and a name a reader tags may stand anywhere in one. A picked
+ * name may hold spaces while a typed query never does: a space ends the word, and so ends the query.
  *
  * A name reaches the sentence as the words the user sees, and nothing else is done to it: no slug,
  * no case change, no truncation. The id that names it to a host rides in a marker line instead
@@ -30,8 +31,6 @@ export interface MentionToken {
   end: number
   /** What has been typed after the `@`, up to the caret. */
   query: string
-  /** Whether the token is the whole message: nothing but whitespace around it. */
-  alone: boolean
 }
 
 /**
@@ -48,8 +47,7 @@ export function mentionToken(text: string, caret: number): MentionToken | null {
   const query = text.slice(start + 1, caret)
   // A second `@` makes this an address or a handle the user is writing, not a tag: no name has one.
   if (query.includes("@")) return null
-  const alone = `${text.slice(0, start)}${text.slice(end)}`.trim() === ""
-  return { start, end, query, alone }
+  return { start, end, query }
 }
 
 /** A session's title as it lands in a sentence: trimmed, its runs of whitespace made one space. */

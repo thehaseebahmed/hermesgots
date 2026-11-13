@@ -341,7 +341,7 @@ function NextComposerBody({
         notice={notice}
         connection={serverConfig(bot)}
         botName={bot.name}
-        mentions={{ bot, here: chatId }}
+        mentionable={{ bot, here: chatId }}
         dictationWords={bot.vocabulary}
         dictationHint={dictationHint({ title: chat.title, project: project?.name, repos })}
         draftKey={draftKey(chatId)}

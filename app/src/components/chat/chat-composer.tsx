@@ -24,7 +24,7 @@ import { chosenOf } from "@/lib/model-pick"
  */
 export function ChatComposer({
   bot,
-  mentions,
+  mentionable,
   draftKey,
   modelChoice,
   onChooseModel,
@@ -41,8 +41,8 @@ export function ChatComposer({
   onStop,
 }: {
   bot: Profile
-  /** What this composer may tag under an `@`, where the surface that mounts it knows: `{ bot }`. */
-  mentions?: { bot: Profile; here?: string }
+  /** What may be tagged under an `@`: the bot, and the chat it is where the surface has one. */
+  mentionable?: { bot: Profile; here?: string }
   /** Where the unsent text is kept (`draftKey` in `lib/drafts.ts`), so it's there on return. */
   draftKey?: string
   /** The model the chat runs on: what its pill names, and what a send runs with. */
@@ -80,7 +80,7 @@ export function ChatComposer({
         notice={notice}
         connection={serverConfig(bot)}
         botName={bot.name}
-        mentions={mentions}
+        mentionable={mentionable}
         dictationWords={bot.vocabulary}
         dictationHint={dictationHint}
         draftKey={draftKey}

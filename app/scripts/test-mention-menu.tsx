@@ -45,6 +45,12 @@ const SIBLING = botProfile("bot-sibling", {
   hostId: "host-1",
   hermesProfile: "sibling",
 })
+/** The same host, but no profile its host knows: there is no id to write in a line for it. */
+const UNNAMED = botProfile("bot-unnamed", {
+  id: "bot-4",
+  name: "Unnamed",
+  hostId: "host-1",
+})
 /** Another host, so nothing of it can be resolved by the host this message goes to. */
 const AWAY = botProfile("bot-away", {
   id: "bot-3",
@@ -64,7 +70,7 @@ async function seeded() {
       // A chat nobody has said anything in: it wears the title a new one is made with.
       { id: "s4", profileId: "bot-1", title: "New chat", at: 50 },
     ],
-    { bots: [MENTIONER, SIBLING, AWAY], active: "bot-1" },
+    { bots: [MENTIONER, SIBLING, AWAY, UNNAMED], active: "bot-1" },
   )
   // Seeded chats are titled for good; this one is left as the app makes it, so it reads as unsaid.
   await db.conversations.update("s4", { titleEdited: false })
@@ -73,7 +79,7 @@ async function seeded() {
 }
 
 const MENU = '[role="listbox"][aria-label="Sessions and bots"]'
-const menu = () => labelled('[role="listbox"]', "Sessions and bots")
+const menu = () => find(MENU)
 const slashMenu = () => labelled('[role="listbox"]', "Commands and skills")
 /** A row's words are its title and its line, and `PickRow` puts nothing between them. */
 const options = () => findAll('[role="option"]').map((row) => wordsOf(row))
@@ -102,6 +108,7 @@ test("typing @ offers this bot's sessions and its host's other bots, and nothing
     assert.ok(offers("Sibling", "Bot"), "the host's other bot is offered")
     assert.equal(offers("Away bot", "Bot"), false, "a bot of another host is not")
     assert.equal(offers("Mentioner", "Bot"), false, "and this bot never offers itself")
+    assert.equal(offers("Unnamed", "Bot"), false, "nor a bot its host never named as a profile")
     assert.equal(
       offers("New chat", "Session"),
       false,
@@ -141,6 +148,32 @@ test("Return takes the row the cursor is on, and Escape shuts the menu till the 
     await type(field(), "/")
     await until(async () => Boolean(slashMenu()), "the / menu")
     absent(MENU, "the @ menu gave way to it")
+  })
+})
+
+test("the menu offers the newest eight sessions, and no more", async () => {
+  const chats = Array.from({ length: 10 }, (_, place) => ({
+    id: `c${place}`,
+    profileId: "bot-1",
+    title: `Session ${place + 1}`,
+    at: 100 + place,
+  }))
+  await seedChats(
+    [...chats, { id: "here", profileId: "bot-1", title: "The chat we are in", at: 500 }],
+    {
+      bots: [MENTIONER, SIBLING, AWAY, UNNAMED],
+      active: "bot-1",
+    },
+  )
+  fakeHost("gots-here", { plugin: true })
+  await mount(chatScreen("here"), async () => {
+    await until(async () => Boolean(field()), "the composer")
+    await type(field(), "@")
+    await until(async () => Boolean(menu()), "the @ menu")
+    const sessions = options().filter((row) => row.endsWith("Session"))
+    assert.equal(sessions.length, 8, "eight rows: the room above a phone's keyboard")
+    assert.ok(offers("Session 10", "Session"), "the newest is one of them")
+    assert.equal(offers("Session 1", "Session"), false, "the oldest of ten is not")
   })
 })
 

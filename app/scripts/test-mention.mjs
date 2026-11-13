@@ -11,28 +11,28 @@ import { mentionName, mentionToken, pickMention, rankMentions } from "../src/lib
 const tokenAt = (text, caret = text.length) => mentionToken(text, caret)
 
 test("an @ at the front of the message is a token, with the query typed after it or none", () => {
-  assert.deepEqual(tokenAt("@week"), { start: 0, end: 5, query: "week", alone: true })
-  assert.deepEqual(tokenAt("@"), { start: 0, end: 1, query: "", alone: true })
+  assert.deepEqual(tokenAt("@week"), { start: 0, end: 5, query: "week" })
+  assert.deepEqual(tokenAt("@"), { start: 0, end: 1, query: "" })
 })
 
-test("an @ that begins a word mid-message is a token, and knows it isn't alone", () => {
-  assert.deepEqual(tokenAt("ping @week"), { start: 5, end: 10, query: "week", alone: false })
+test("an @ that begins a word mid-message is a token too", () => {
+  assert.deepEqual(tokenAt("ping @week"), { start: 5, end: 10, query: "week" })
 })
 
 test("a new line starts a token just as a space does", () => {
   assert.equal(tokenAt("fix the tests\n@week")?.start, 14)
-  assert.equal(tokenAt("fix the tests\n@week")?.alone, false)
-  assert.equal(tokenAt("\n@week")?.alone, true)
+  assert.equal(tokenAt("fix the tests\n@week")?.start, 14)
+  assert.equal(tokenAt("\n@week")?.start, 1)
 })
 
 test("a caret between two words reads the word under it, and the span ends at the space", () => {
   const text = "fix @we the tests"
-  assert.deepEqual(mentionToken(text, 7), { start: 4, end: 7, query: "we", alone: false })
+  assert.deepEqual(mentionToken(text, 7), { start: 4, end: 7, query: "we" })
 })
 
 test("the token spans the word it sits in, while the query is only what is before the caret", () => {
   const text = "fix @week please"
-  assert.deepEqual(mentionToken(text, 6), { start: 4, end: 9, query: "w", alone: false })
+  assert.deepEqual(mentionToken(text, 6), { start: 4, end: 9, query: "w" })
 })
 
 test("an @ inside a word opens nothing: an address is not a tag", () => {
