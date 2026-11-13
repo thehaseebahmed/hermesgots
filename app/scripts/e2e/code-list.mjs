@@ -166,7 +166,6 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   await shot("sorted-desc")
   pass("picking the chosen sort again flips its arrow instead of choosing it twice")
 
-  // A filter reads as words, so a project's chip is its name and nothing else drawn before it.
   const chips = page.locator("[aria-label=Projects] button")
   const faces = await chips.evaluateAll((ones) =>
     ones.map((one) => ({
