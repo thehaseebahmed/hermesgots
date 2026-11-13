@@ -117,6 +117,7 @@ await flow("one-pick", async ({ page, profileId, held, seed, shot, until, watchP
           `the pill reads the model it applied at ${look}`,
         )
         pass(`at ${look} a one-model host applied it from the composer's pill, with no sheet and no read`)
+        await shot(`${look}-applied`)
 
         // (b) quiet: a bot already running that one model writes nothing when its row is tapped.
         await forgetHost()
@@ -137,6 +138,7 @@ await flow("one-pick", async ({ page, profileId, held, seed, shot, until, watchP
         )
         assert.deepEqual(modelTraffic(quietFrom), [], `nor asks the host for a model at ${look}`)
         pass(`at ${look} the Models row of a bot already on that model was quiet: no sheet, no write`)
+        await shot(`${look}-quiet`)
 
         // (c) the negative control: a host of two models draws the sheet, and nothing is written.
         await offer(twoModels)
@@ -163,6 +165,7 @@ await flow("one-pick", async ({ page, profileId, held, seed, shot, until, watchP
         assert.deepEqual((await chat(chatId)).modelChoice, controlBefore.modelChoice)
         assert.deepEqual(modelTraffic(controlFrom), [], `and the negative control writes nothing at ${look}`)
         pass(`at ${look} a list of two drew its ${drawn[0].form} and wrote nothing: the control holds`)
+        await shot(`${look}-control`)
 
         // (d) still reading: the tap opens the sheet saying so, and the list that lands applies nothing.
         await offer(oneModel)
@@ -198,7 +201,7 @@ await flow("one-pick", async ({ page, profileId, held, seed, shot, until, watchP
         assert.equal((await bot()).modelChoice, readingBefore.modelChoice)
         assert.deepEqual(modelTraffic(readingFrom), [], `and the landing wrote nothing to the host at ${look}`)
         pass(`at ${look} a held read opened the sheet reading, and landing applied nothing`)
-        await shot(look)
+        await shot(`${look}-landed`)
       }
     }
   } finally {
