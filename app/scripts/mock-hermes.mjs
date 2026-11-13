@@ -107,7 +107,12 @@
 // 202 at once, GET …/closes reads the report, and GET /api/plugins/gots/closes lists the recent
 // ones — MOCK_CLOSE_MS holds one open that long. MOCK_PRS_FAIL=1 (or
 // POST /__mock/prs { fail }) is a host that can't reach GitHub: …/prs answers an error rather than
-// a list, so the app keeps the pull requests it already knows. GET /api/plugins/gots/runs/live lists the sessions with
+// a list, so the app keeps the pull requests it already knows. POST /__mock/models { providers }
+// is a host with the models it names and no others — `[{ slug, name, models }]`, the shape
+// /api/model/options answers with, and its first model of the first provider read as the host's
+// own — so a flow can make a bot whose host offers exactly one model; seed a provider that
+// `PICKER_PROVIDERS` names, so a pick from that list is one this mock still accepts.
+// `{ reset: true }` puts the fixed inventory back. GET /api/plugins/gots/runs/live lists the sessions with
 // a run in flight, why each one waiting on the user waits, and which are still owed the wake turn of
 // a finished subagent (`waking`, keyed like the runs — the window between the turn ending and the
 // wake starting that the app must never read as the session at rest); POST /__mock/wake { delay }
@@ -3651,6 +3656,10 @@ let usagePercent = null
 // The providers the picker lists (see /api/model/options below): a model from one of these can
 // become the host's model or one of its fallbacks.
 const PICKER_PROVIDERS = ["openrouter", "anthropic", "ollama-cloud"]
+// What POST /__mock/models narrowed the inventory to, or null for the fixed one below: a flow's
+// one-model host is this, with `/api/model/options` answering it and naming its first model as the
+// host's own.
+let modelInventory = null
 
 function checkedPick(entry, label) {
   const provider = entry?.provider?.trim?.() ?? ""
@@ -4129,9 +4138,12 @@ http
     if (url.pathname === "/api/model/options") {
       // Named profiles report a model models.dev doesn't know, so no window is found for it.
       const configured = configuredModel(profile)
-      const model = hostModel(profile)
+      // A narrowed inventory (POST /__mock/models) answers as the whole host's: its own providers,
+      // and the first model of the first of them as the model the host runs.
+      const seeded = modelInventory
+      const model = seeded ? seeded[0]?.models[0] : hostModel(profile)
       // Hermes's picker inventory: a skeleton row without credentials is left out of the picker.
-      const providers = [
+      const providers = seeded ?? [
         {
           slug: "openrouter",
           name: "OpenRouter",
@@ -4177,7 +4189,11 @@ http
         },
       ]
       if (url.searchParams.get("refresh") === "true") customProbed = true
-      return json(res, 200, { model, provider: hostProvider(profile) ?? "openrouter", providers })
+      return json(res, 200, {
+        model,
+        provider: seeded ? seeded[0]?.slug : (hostProvider(profile) ?? "openrouter"),
+        providers,
+      })
     }
     if (url.pathname === "/api/jobs") {
       const all = url.searchParams.get("include_disabled") === "true"
@@ -6254,6 +6270,15 @@ http
       const { fail } = await readBody(req)
       PRS_FAIL = !!fail
       return json(res, 200, { ok: true })
+    }
+    // Dev only: POST { providers } is what /api/model/options answers from then on — that exact
+    // list, with the first model of the first provider as the host's own — so a flow's one-model
+    // host is a host, not a stand-in. `{ reset: true }`, or no providers, puts the fixed inventory
+    // back; a flow resets in a `finally` so a run that dies leaves nothing narrowed behind.
+    if (url.pathname === "/__mock/models" && req.method === "POST") {
+      const { providers } = await readBody(req)
+      modelInventory = Array.isArray(providers) && providers.length ? providers : null
+      return json(res, 200, { ok: true, providers: modelInventory?.length ?? 0 })
     }
     // Dev only: POST { ms } sets how long after a chat's opener Hermes's background title lands
     // (2000 by default), for a flow whose chat must meet a title that lands late.

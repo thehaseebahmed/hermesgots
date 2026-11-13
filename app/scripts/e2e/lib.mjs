@@ -782,6 +782,11 @@ function helpers(page) {
      * are still coming: `hold()` holds what arrives from then on, `release()` lets it all through. A
      * hold lasts 10s at most, so a flow that throws can't hang. With `fail`, a url ending in it is
      * answered as a file the host can't serve (which reads as "Couldn't load").
+     *
+     * The released request falls back rather than continuing: this route is registered after
+     * `flow`'s, so it runs first, and `continue()` would send the request to the bot's `.test`
+     * address with nothing left to answer it — the flow's own rewrite to the mock is the next
+     * handler, and `fallback()` is what reaches it.
      */
     async held(pattern, fail) {
       const waiting = []
@@ -794,7 +799,7 @@ function helpers(page) {
             waiting.push(done)
             setTimeout(done, 10_000)
           })
-        await route.continue().catch(() => {})
+        await route.fallback().catch(() => {})
       })
       return {
         hold: () => {
@@ -834,6 +839,45 @@ function helpers(page) {
     },
     stopSkeletons() {
       return page.evaluate(() => window.__skeletonObserver?.disconnect())
+    },
+    /**
+     * Records every pop-up the page adds from then on — each `[data-popup-form]` element, as the
+     * form it is (`sheet`, `drawer` or `menu`) — so a sheet that lives for a single commit is still
+     * caught, which a poll of the document misses. `popups()` reads them and `stopPopups()` ends the
+     * recording.
+     *
+     * The nodes come off the mutations rather than out of the document: one added and taken away
+     * inside the same task is already detached by the time the observer runs, and reading the
+     * records is what still sees it.
+     */
+    async watchPopups() {
+      await page.evaluate(() => {
+        window.__popups = []
+        // One entry per element: Base UI moves a pop-up's node as it settles, and a move is not a
+        // second sheet. A remount is a new element and one of its own.
+        const seen = new WeakSet()
+        const note = (node) => {
+          const popups = node.matches?.("[data-popup-form]")
+            ? [node]
+            : [...(node.querySelectorAll?.("[data-popup-form]") ?? [])]
+          for (const popup of popups) {
+            if (seen.has(popup)) continue
+            seen.add(popup)
+            window.__popups.push({ form: popup.getAttribute("data-popup-form") })
+          }
+        }
+        window.__popupObserver = new MutationObserver((records) => {
+          for (const record of records)
+            for (const node of record.addedNodes) if (node.nodeType === 1) note(node)
+        })
+        window.__popupObserver.observe(document.body, { childList: true, subtree: true })
+      })
+    },
+    popups() {
+      return page.evaluate(() => window.__popups ?? [])
+    },
+    stopPopups() {
+      return page.evaluate(() => window.__popupObserver?.disconnect())
     },
     /**
      * Records whether the page ever shows `text`, from its next navigation on: it watches each change

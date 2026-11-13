@@ -268,6 +268,11 @@ export const FLOWS = {
     about:
       "A bot's subagent model, on its Delegation page, is recorded as its host's delegation model, cleared back to the bot's own",
   },
+  "one-pick": {
+    script: "e2e/one-pick.mjs",
+    about:
+      "A pick whose list holds one option applies it and draws no sheet — at 390 and 1024px, light and dark",
+  },
   "question-during-delegation": {
     script: "e2e/question-during-delegation.mjs",
     about:

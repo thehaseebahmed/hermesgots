@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **94 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 94 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **95 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 95 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --------- | ------ |
-| stay | 39 |
+| stay | 40 |
 | component | 51 |
 | plugin | 2 |
 | delete | 2 |
-| **total** | **94** |
+| **total** | **95** |
 
-Of those 94, 88 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 87 distinct files) and 6 point at the older
+Of those 95, 89 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 88 distinct files) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -201,18 +201,18 @@ component tier's. So the registry holds 93 + 1 = **94** keys, the component verd
 
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above
-that its rows don't add up to, or a stay beyond the thirty-nine fails the app's gates. A new flow is
+that its rows don't add up to, or a stay beyond the forty fails the app's gates. A new flow is
 then an argument this page has to carry, never a default (ADR 0019).
 
 Check any of it in one line:
 
 ```bash
-grep -c '^| `' docs/e2e-flow-audit.md                           # 94 rows, one per registry key
-grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 39
+grep -c '^| `' docs/e2e-flow-audit.md                           # 95 rows, one per registry key
+grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 40
 grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 51
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 2
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm -s e2e list | wc -l                             # 94 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 95 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
@@ -502,6 +502,17 @@ pieces land, so its body and its closer are two states of one page.
 | Key | Verdict | What it asserts today | Why it moves | What replaces it |
 | ----------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `mermaid` | stay | A reply carrying a closed `mermaid` fence draws a `[data-slot=diagram]` frame where the fence stood — between the reply's paragraph above it and the one below — with no `[data-md-code]` left for that fence, the frame labelled `mermaid` and carrying the copy control a code block does; the reply then being held by the mock with that fence still open, so the held screen is read rather than raced: the fence stands as a code block, no frame is drawn, and not one of mermaid's chunks has been asked for; released to its closer the frame draws where the fence stood while the mock holds the words after it, and only then does the reply end, with every state recorded from the send on showing the fence as a code block first, the frame from the closing fence on, and no code block drawn again after it. | Both halves are the page's own writing and the app's own batching. A fence's body and its closer reach the device as separate writes, so the code-before-frame arrangement exists only while a reply is really arriving: a component test handed the finished string has one state, and it would pass whether or not the streaming path draws the fence as the code it is first. The mock's own gate (`POST /__mock/diagram`) is what makes the held state a state the flow can read rather than a window it has to be quick enough to see. The frame's place between the reply's own words is layout, which a DOM without a layout engine cannot put. What the same flow grows into — mermaid's own `getBBox` measurement of a drawing, and the sheet a tap opens — is a browser's as well. | Nothing yet: `scripts/test-mermaid.tsx` holds the frame, the tone a bubble's frame takes, the copy control's source, and the fences that stay code (`mermaid extra`, an indented one, a list's, an unterminated one). The streaming window and the frame's place in the reply are only here. |
+
+### A pick whose list holds one option — this branch
+
+One key, a stay. A tap on a picker whose list is settled and holds exactly one entry applies it
+through the handler a row's tap calls, and no sheet is drawn — not even for a frame. What no lower
+tier reaches is a sheet's absence: the component tier proves the handler ran, and only the page's
+own mutation clock and request log say nothing painted and nothing was fetched.
+
+| Key | Verdict | What it asserts today | Why it moves | What replaces it |
+| ----------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `one-pick` | stay | A pick whose list holds one option applies it, at 390 and 1024px in light and dark, in four legs each: **(a)** a host offering one model, whose composer pill's tap writes that model into the chat's own row and into the bot's recent picks, reads no `/api/model/options` again because the pill already held the list, and draws no `[data-popup-form]` even for a frame; **(b)** a bot already running that model on its Models page, whose row's tap draws no popup and writes nothing to the bot or the host; **(c)** the negative control, a host of two models, where the sheet is drawn, lists both, and writes nothing; **(d)** a read held back, where the sheet opens saying *Reading this bot's models…*, and the list that lands draws its rows and applies nothing. | A frame watch and a request count over a real browser: `watchPopups` records every `[data-popup-form]` ever added to the document, off the mutations, because a sheet that lives one commit is already gone by the time a poll looks; and "the tap fetched nothing" is the page's own request log. The component tier holds the trigger's one write, the double tap and the held read (`test-one-pick.tsx`, `test-pick-one.mjs`), but it has no network stack and no commits to watch between. | Nothing: a stay is replaced by itself. `test-one-pick.tsx` holds the rule's three answers and the sites that apply them; only the absence of a paint and of a fetch is here. |
 
 ## The coverage a demotion leaves with no home
 
