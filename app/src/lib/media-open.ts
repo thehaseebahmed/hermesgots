@@ -13,11 +13,11 @@ export interface HostFile {
   path: string
 }
 
-/** What a screen's tap on one of its files asks for: open it, and whether it is still being asked for. */
+/** What a screen's tap on one of its files asks for: open it, and which one is still being asked for. */
 export interface HostFileOpen {
   open: (file: HostFile) => void
-  /** Whether this file is being opened right now, so its row can say it is working. */
-  busy: boolean
+  /** The path being opened right now, so its row alone can say it is working. */
+  busy: string | null
 }
 
 /**
@@ -33,13 +33,13 @@ export interface HostFileOpen {
  */
 export function useOpenHostFile(config: HermesConfig): HostFileOpen {
   const { open: preview } = usePreviewer()
-  const [busy, setBusy] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
   const open = useCallback(
     (file: HostFile) => {
       // A URL this page already holds opens at once, so the row isn't dimmed for a round trip it
       // never makes.
       const held = heldMediaUrl(config, file.path)
-      if (!held) setBusy(true)
+      if (!held) setBusy(file.path)
       void (async () => {
         try {
           const answer = await askMediaUrl(config, file.path, { again: !held })
@@ -72,7 +72,7 @@ export function useOpenHostFile(config: HermesConfig): HostFileOpen {
         } catch (error) {
           openFailed(file.name, error)
         } finally {
-          setBusy(false)
+          setBusy(null)
         }
       })()
     },

@@ -62,15 +62,24 @@ const NEWEST_FIRST: Sort<LibrarySort> = defaultSort(LIBRARY_SORTS)
 /**
  * One file under a folder: its kind's icon and its name, and a tap that opens it the way the app
  * opens any file the host holds — the Previewer for a photo, a clip or a recording, and the
- * platform for what the Previewer can't draw.
+ * platform for what the Previewer can't draw. The tap is the folder's to answer, so a row knows
+ * nothing about hosts, signing or the Previewer.
  */
-function FileRow({ config, file }: { config: HermesConfig; file: LibraryFile }) {
-  const { open, busy } = useOpenHostFile(config)
+function FileRow({
+  file,
+  busy,
+  onOpen,
+}: {
+  file: LibraryFile
+  /** Whether this is the file being opened right now, so its row says it is working. */
+  busy: boolean
+  onOpen: (file: LibraryFile) => void
+}) {
   const Icon = ICONS[iconOf(file.name)]
   return (
     <button
       type="button"
-      onClick={() => open(file)}
+      onClick={() => onOpen(file)}
       aria-busy={busy || undefined}
       className={cn(
         "-mx-2 flex min-h-11 w-[calc(100%+1rem)] items-center gap-3 rounded-xl px-2 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring",
@@ -125,6 +134,10 @@ function FolderSection({
   own?: boolean
 }) {
   const sessions = titles ? sessionsOf(folder, titles) : ""
+  // The folder's own opener: one for the list its rows are drawn from, so a tap can be answered
+  // with the files it was tapped among. It sits above the panel, whose contents unmount when the
+  // folder closes, so a folder folded away while the Previewer is open still signs a step.
+  const { open, busy } = useOpenHostFile(config)
   return (
     <Collapsible defaultOpen={false} render={<section />}>
       <CollapsibleTrigger className="group flex min-h-11 w-full items-center gap-3 rounded-xl px-2 py-2 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring">
@@ -142,7 +155,12 @@ function FolderSection({
       <CollapsibleContent>
         <div className={cn("space-y-0.5 pl-[3.25rem]", own && "pb-3")}>
           {folder.files.map((file) => (
-            <FileRow key={file.path} config={config} file={file} />
+            <FileRow
+              key={file.path}
+              file={file}
+              busy={busy === file.path}
+              onOpen={(one) => open(one)}
+            />
           ))}
         </div>
       </CollapsibleContent>
