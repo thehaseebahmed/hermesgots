@@ -33,15 +33,13 @@ KINDS = ("input", "output", "cache_write", "cache_read")
 WIRE = {"input": "input", "output": "output", "cache_write": "cacheWrite", "cache_read": "cacheRead"}
 
 
-def _provider(value: Any) -> Optional[str]:
-    """The provider as the board names it: Hermes's slug, ``unknown`` for a value that names none,
-    and ``None`` for a custom endpoint, which counts to no provider at all."""
+def _provider(value: Any) -> str:
+    """The provider as the board names it: Hermes's slug, without a custom endpoint's own name
+    (``custom:acme`` is ``custom``), so nothing a person named reaches the board."""
     if not isinstance(value, str):
         return "unknown"
     name = value.strip().lower().split(":", 1)[0]
-    if not name:
-        return "unknown"
-    return None if name == CUSTOM_ENDPOINT else name[:48]
+    return name[:48] or "unknown"
 
 
 def _count(value: Any) -> int:
@@ -105,7 +103,7 @@ def _record(kwargs: Dict[str, Any]) -> None:
                    calls = calls + 1""",
             (_day(), model.strip().lower()[:96], mode, *counts),
         )
-        if provider is not None:
+        if provider != CUSTOM_ENDPOINT:
             conn.execute(
                 """INSERT INTO community_providers (day, provider, model, tokens) VALUES (?, ?, ?, ?)
                    ON CONFLICT(day, provider, model) DO UPDATE SET tokens = tokens + excluded.tokens""",

@@ -12,7 +12,7 @@
  * person, and leaving deletes the lot.
  */
 
-import { modelKey } from "./models-dev.ts"
+import { modelKey, type Known } from "./models-dev.ts"
 import { sha256, type RegistryStore } from "./registry.ts"
 
 export const MODES = ["plan", "auto", "accept_edits", "chat"] as const
@@ -177,15 +177,16 @@ export function modelName(raw: unknown): string | null {
   return MODEL.test(name) ? name : null
 }
 
-/** The model ids models.dev lists (`models-dev.ts`), or null when the catalogue couldn't be read. */
-export type Known = ReadonlySet<string>
-
 /**
  * Whether the board may count this model. A report carries whatever the host's endpoint called the
  * model it ran, and a host's own word is all it is: a name the catalogue doesn't list is a model
  * nobody can look up, so it stays off the board. Nothing is filtered without a catalogue.
  */
 const listed = (model: string, known?: Known | null) => !known || known.has(modelKey(model))
+
+/** The catalogue a caller has, or null when it has none or it couldn't be read: nothing is filtered. */
+const catalogOf = async (ctx: CommunityContext): Promise<Known | null> =>
+  (await ctx.catalog?.()) ?? null
 
 /**
  * A provider as the board names it: lower case, without a custom endpoint's own name
@@ -503,11 +504,13 @@ async function recompute(
   await ctx.store.setJSON(memberKey(login), member)
 }
 
-async function board(ctx: CommunityContext, now: number, known?: Known | null): Promise<Board> {
+async function board(ctx: CommunityContext, now: number): Promise<Board> {
   const cached = await read<Board>(ctx.store, "board")
   if (cached && cached.version === BOARD_VERSION && now - cached.updatedAt < BOARD_TTL_MS) {
     return cached
   }
+  // Read here, not by the caller: a board answered from its cache asks the catalogue for nothing.
+  const known = await catalogOf(ctx)
   const oldest = dateOf(now, KEEP_DAYS - 1)
   const members: Member[] = []
   for (const { key } of (await ctx.store.list({ prefix: "users/" })).blobs) {
@@ -546,8 +549,7 @@ export async function handleCommunity(req: Request, ctx: CommunityContext) {
   const op = `${req.method} ${route}`
 
   if (op === "GET board") {
-    const known = ctx.catalog ? await ctx.catalog() : null
-    return json(await board(ctx, now, known), 200, {
+    return json(await board(ctx, now), 200, {
       "Cache-Control": "public, max-age=60",
       "Access-Control-Allow-Origin": "*",
     })
@@ -566,7 +568,7 @@ export async function handleCommunity(req: Request, ctx: CommunityContext) {
     if (op === "POST report") {
       // Counts are only taken from accounts that joined; anything else is asked not to send them.
       if (!account) return error("This account hasn't joined the leaderboard", 403)
-      const known = ctx.catalog ? await ctx.catalog() : null
+      const known = await catalogOf(ctx)
       const input = await body(req)
       const cleaned = cleanDays(input?.days, now, known)
       if (!cleaned) return error("Invalid report", 400)

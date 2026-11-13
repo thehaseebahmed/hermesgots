@@ -12,11 +12,14 @@ import type { RegistryStore } from "./registry.ts"
 export const MODELS_DEV_URL = "https://models.dev/api.json"
 export const CATALOG_TTL_MS = 24 * 60 * 60 * 1000
 
+/** The model ids models.dev lists: the set the board filters by (`community.ts`). */
+export type Known = ReadonlySet<string>
+
 /** The row the ids are cached in, in the community store. */
 const CATALOG_KEY = "models-dev"
 
 interface CatalogRow {
-  /** Sorted, so the blob only changes when the catalogue does. */
+  /** Sorted, so the same catalogue is always stored as the same bytes. */
   models: string[]
   at: number
 }
@@ -37,7 +40,7 @@ export function modelKey(raw: string): string {
  * `src/lib/models.ts` reads, or holds no id at all: a caller can then tell "nothing is real" from
  * "nothing could be read", and only the second fails open.
  */
-export function knownModels(payload: unknown): Set<string> | null {
+export function knownModels(payload: unknown): Known | null {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null
   const ids = new Set<string>()
   for (const provider of Object.values(payload as Record<string, unknown>)) {
@@ -73,13 +76,14 @@ export async function knownModelIds(
   store: RegistryStore,
   now: number,
   load: () => Promise<unknown> = fetchModelsDev,
-): Promise<Set<string> | null> {
+): Promise<Known | null> {
   const row = await cachedRow(store)
-  if (row && now - row.at < CATALOG_TTL_MS) return new Set(row.models)
+  const cached = row ? new Set(row.models) : null
+  if (row && cached && now - row.at < CATALOG_TTL_MS) return cached
   const fresh = await load()
     .then(knownModels)
     .catch(() => null)
-  if (!fresh) return row ? new Set(row.models) : null
+  if (!fresh) return cached
   await store.setJSON(CATALOG_KEY, { models: [...fresh].sort(), at: now } satisfies CatalogRow)
   return fresh
 }
