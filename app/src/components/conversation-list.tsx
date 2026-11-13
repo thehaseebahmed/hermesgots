@@ -1,6 +1,6 @@
 import { useLiveQuery } from "dexie-react-hooks"
 import type { ReactNode } from "react"
-import { matchPath, NavLink, useLocation, type NavLinkProps } from "react-router"
+import { Link, matchPath, NavLink, useLocation, type NavLinkProps } from "react-router"
 import {
   AudioLinesIcon,
   BellOffIcon,
@@ -29,7 +29,8 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { botChatsPath } from "@/lib/bot-tabs"
 import { previewLine } from "@/lib/bot-chrome"
-import { useCanvasEnabled, usePinnedCanvases } from "@/lib/canvases"
+import { useCanvasOpened } from "@/lib/canvas-open"
+import { useCanvasEnabled, usePinnedCanvases, type Canvas } from "@/lib/canvases"
 import { chatOwner } from "@/lib/chat-owner"
 import { compareChatOrder, waitsOnUser } from "@/lib/chat-list"
 import { presence } from "@/lib/registry"
@@ -218,19 +219,50 @@ function PinnedCanvases({
   return (
     <>
       {pinned.map((canvas) => (
-        <RootLink
+        <CanvasRow
           key={canvas.id}
-          to={`/canvas/${canvas.id}`}
-          onClick={onNavigate}
-          aria-label={collapsed ? canvas.title : undefined}
-          data-canvas-pinned=""
-          className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
-        >
-          <FrameIcon className="size-5 text-muted-foreground" />
-          {!collapsed && <span className="min-w-0 truncate">{canvas.title}</span>}
-        </RootLink>
+          canvas={canvas}
+          collapsed={collapsed}
+          onNavigate={onNavigate}
+        />
       ))}
     </>
+  )
+}
+
+/**
+ * A pinned canvas's row. It is no `NavLink`: what marks it is the canvas this tab opened
+ * (`lib/canvas-open.ts`, ADR 0151), not the address, so a reader who merely arrives is given a row at
+ * rest and a screen reader is told nothing is the page. Its press still opens as the app's one entry.
+ */
+function CanvasRow({
+  canvas,
+  collapsed,
+  onNavigate,
+}: {
+  canvas: Canvas
+  collapsed: boolean
+  onNavigate?: () => void
+}) {
+  const { root } = useNav()
+  const to = `/canvas/${canvas.id}`
+  const opened = useCanvasOpened(canvas.id)
+  return (
+    <Link
+      to={to}
+      replace
+      onClick={(event) => {
+        onNavigate?.()
+        opensAsRoot(() => root(to))(event)
+      }}
+      aria-label={collapsed ? canvas.title : undefined}
+      aria-current={opened ? "page" : undefined}
+      data-canvas-pinned=""
+      className={(collapsed ? railClass : rowClass)({ isActive: opened })}
+    >
+      <FrameIcon className="size-5 text-muted-foreground" />
+      {!collapsed && <span className="min-w-0 truncate">{canvas.title}</span>}
+    </Link>
   )
 }
 
@@ -693,6 +725,7 @@ export function ConversationList({
           {canvas && (
             <RootLink
               to="/canvas"
+              end
               onClick={onNavigate}
               aria-label={collapsed ? "Canvas" : undefined}
               className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
