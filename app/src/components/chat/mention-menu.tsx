@@ -7,7 +7,7 @@
  * group and one `optionId` run, so a row's id means the same thing whichever kind it holds.
  */
 import { useEffect } from "react"
-import { BotIcon, MessageSquareIcon, type LucideIcon } from "lucide-react"
+import { BotIcon, MessageCircleIcon, type LucideIcon } from "lucide-react"
 
 import { MenuBox } from "@/components/chat/menu-box"
 import { PickGroup, PickRow } from "@/components/pick-row"
@@ -17,7 +17,8 @@ import type { MentionKind } from "@/lib/mention-marker"
 import { optionId } from "@/lib/slash"
 
 const KIND_ICONS: Record<MentionKind, LucideIcon> = {
-  session: MessageSquareIcon,
+  // A circle, not a rounded square: at 16px the square reads as a checkbox the row isn't.
+  session: MessageCircleIcon,
   bot: BotIcon,
 }
 
