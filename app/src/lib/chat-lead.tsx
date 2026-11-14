@@ -23,8 +23,9 @@ import { useBotLabels } from "@/lib/use-bot-labels"
 
 /**
  * What a press does where nothing stands behind the screen: `back` steps to whatever opened it and
- * leaves the app at its entry, and `list` always steps onto the list, which is a room's and a run's
- * answer — the screen they were opened from is that list.
+ * leaves the app at its entry, and `list` always steps onto the list — a bot's conversation, a room
+ * and a routine's run are all one rung off that list, so the press's move is the corner control's
+ * wherever the screen was opened from.
  */
 type Press = "back" | "list"
 

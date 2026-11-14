@@ -17,6 +17,8 @@ import {
   laptop,
   missing,
   mount,
+  Nav,
+  nav,
   Path,
   path,
   seedSettings,
@@ -96,6 +98,7 @@ async function seed({ collapsed = false } = {}) {
 const screen = (entry: string | { pathname: string; state?: unknown }) => (
   <MemoryRouter initialEntries={[entry]}>
     <Path />
+    <Nav />
     <Routes>
       <Route element={<AppShell />}>
         <Route path="b/:profileId" element={<BotChatsPage />} />
@@ -282,6 +285,30 @@ test(
       )
       assert.equal(missing(CHAT_BESIDE), false, "the chat still stands beside the list")
       assert.match(laneClass(), /\bw-103\b/, "and the list keeps its lane through the switch")
+    })
+  }),
+)
+
+/**
+ * Two rows of one list are siblings, not steps: a second conversation picked while one already stands
+ * beside the list takes its place, so a step back from it is still the list rather than the chat
+ * before it.
+ */
+test(
+  "a row pressed beside an open conversation replaces it, so back is still one rung",
+  laptop(async () => {
+    localStorage.clear()
+    await seed()
+    await mount(screen("/c/c-a"), async () => {
+      await until(
+        async () => openRow()?.getAttribute("href") === "/c/c-a",
+        "the chat the list opened",
+      )
+      await click(find('[data-slot="list-lane"] ul a[href="/c/c-b"]'))
+      await until(async () => path() === "/c/c-b", "the row's own chat")
+      assert.equal(nav(), "REPLACE:/c/c-b", "the row takes the item's place rather than stacking a second")
+      assert.equal(missing(CHAT_BESIDE), false, "the new conversation stands beside the same list")
+      assert.equal(openRow()?.getAttribute("href"), "/c/c-b", "with its row the one marked open")
     })
   }),
 )

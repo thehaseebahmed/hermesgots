@@ -703,10 +703,10 @@ test("the picks' New chat makes a chat of this bot's, and their New room opens t
   })
 })
 
-test("a pick in a bot's list opens the chat as the app's only entry", async () => {
+test("a pick in a bot's list opens its chat above the list", async () => {
   // The list the pick leaves behind is the session history's, which a screen drawn without one cannot
-  // walk: `scripts/e2e/bot-chats` holds the step back through the list and the chat under it, and this
-  // holds the move the row makes at the app's entry — the list's own entry, replaced by the chat's.
+  // walk: `scripts/test-bot-open` walks the step back onto that list, and this holds the move the row
+  // makes — the chat pushed over the list, so that history has the list to return to.
   await seed([
     { id: "a", title: "A chat", at: 100, said: "Hello" },
     { id: "b", title: "Another", at: 200, said: "Hi" },
@@ -715,7 +715,7 @@ test("a pick in a bot's list opens the chat as the app's only entry", async () =
     await until(async () => rowIds().length === 2, "the bot's chats")
     await click(rowOf("b"))
     await until(async () => path() === "/c/b", "the chat it picked")
-    assert.equal(nav(), "REPLACE:/c/b", "the chat takes the list's entry, nothing of it left behind")
+    assert.equal(nav(), "PUSH:/c/b", "the chat stands above the list rather than in its place")
   })
   await mount(screen(), async () => {
     await until(async () => rowIds().length === 2, "the bot's chats")
@@ -723,7 +723,7 @@ test("a pick in a bot's list opens the chat as the app's only entry", async () =
     await until(async () => picksOpen(), "the picks")
     await click(newRow("New chat"))
     await until(async () => path() !== `/b/${bot.id}`, "the chat it made")
-    assert.ok(nav().startsWith("REPLACE:/c/"), "and the foot's New chat takes it too")
+    assert.ok(nav().startsWith("PUSH:/c/"), "and the foot's New chat takes the same move")
   })
 })
 

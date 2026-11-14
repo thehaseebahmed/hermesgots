@@ -16,9 +16,10 @@ export const plainPress = (event: MouseEvent<HTMLAnchorElement>) =>
 /**
  * The `onClick` for a link that opens a top-level screen: the plain press opens it as the app's only
  * entry, and a press meant for a new tab or window — a modifier held, or a button other than the
- * left — is left to the link the browser already has.
+ * left — is left to the link the browser already has. Private, since a top-level screen is a place:
+ * a conversation is pushed over its list and never rooted in the list's place.
  */
-export const opensAsRoot = (open: () => void) => (event: MouseEvent<HTMLAnchorElement>) => {
+const opensAsRoot = (open: () => void) => (event: MouseEvent<HTMLAnchorElement>) => {
   if (!plainPress(event)) return
   event.preventDefault()
   open()
