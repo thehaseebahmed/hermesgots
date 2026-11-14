@@ -4,6 +4,10 @@
 [ADR 0153](0153-a-bot-s-list-is-the-way-into-every-conversation.md) and
 [ADR 0144](0144-a-chat-is-the-root.md).**
 
+**Amended 2026-11-14**: the way back stands in the bar's **leading** slot, not in the corner this
+record first named, and a bot's list is the only screen that keeps the drawer there. The rejection of
+two back controls stands.
+
 [ADR 0144](0144-a-chat-is-the-root.md) made a chat the app's root: `/b/<bot>` opened the chat this
 device was last in there, and a chat's address was where the app stood.
 [ADR 0153](0153-a-bot-s-list-is-the-way-into-every-conversation.md) took the memory and the landing

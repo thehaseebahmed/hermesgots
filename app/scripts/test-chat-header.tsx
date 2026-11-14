@@ -171,7 +171,8 @@ test("a caller's way back leads the bar in the drawer's place, in either form", 
   await mount(
     <ChatHeader title="A chat" subtitle="Working" actions={options} leading={wayBack} />,
     async () => {
-      const [leading, , , actions] = rowParts()
+      const row = rowParts()
+      const leading = row[0]
       assert.equal(
         leading.getAttribute("data-slot"),
         "header-leading",
@@ -187,7 +188,7 @@ test("a caller's way back leads the bar in the drawer's place, in either form", 
         "and no drawer beside it: a bar that leads back has nowhere for the app's menu",
       )
       assert.ok(
-        actions.contains(find('[aria-label="Chat options"]')),
+        row.at(-1)!.contains(find('[aria-label="Chat options"]')),
         "the actions are the row's last part",
       )
       assert.equal(

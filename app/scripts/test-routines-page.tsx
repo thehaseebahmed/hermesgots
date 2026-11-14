@@ -312,7 +312,7 @@ test("the page leads with the bot's way back, as a conversation does", async () 
     await until(async () => Boolean(find('[aria-label="Back to Mainly"]')), "the page's way back")
     const back = find('[aria-label="Back to Mainly"]')
     // The app's bar, not a second header invented here (ADR 0140): the same row and slots the chat's
-    // header draws, and the place a phone's back stands in (G1).
+    // header draws, and the place a phone's back stands in (ADR 0154).
     assert.ok(find('header [data-slot="header-row"]'), "the bar's own row")
     assert.equal(
       findAll('[data-slot="header-leading"] [aria-label="Back to Mainly"]').length,
@@ -427,7 +427,7 @@ test(
           find('[data-slot="item-lane"]')?.textContent?.includes("Morning watch"),
           "and the routines stand beside it, in the item lane",
         )
-        // The same control at the two-pane width (G1): beside its list a bot's screen is still the
+        // The same control at the two-pane width (ADR 0154): beside its list a bot's screen is still
         // bot's, and the left of its bar is where its way back stands there too.
         assert.equal(
           findAll('[data-slot="header-leading"] [aria-label="Back to Mainly"]').length,

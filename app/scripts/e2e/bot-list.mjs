@@ -236,7 +236,18 @@ await flow(
     await shot("phone-chat")
     pass("a row picked on a phone opens its chat one step above the list")
 
-    // The control leading the bar is the way back, and it lands the list in the entry the chat stood in.
+    // The control leading the bar is the way back — the leading slot, with no drawer beside it, which
+    // is the place the change moved it to — and it lands the list in the entry the chat stood in.
+    assert.equal(
+      await page.locator('[data-slot="header-leading"] button[aria-label="Back to Test bot"]').count(),
+      1,
+      "a phone's conversation leads with its way back",
+    )
+    assert.equal(
+      await page.locator('header button[aria-label="Open conversations"]').count(),
+      0,
+      "and draws no drawer beside a bar that leads back",
+    )
     await page.getByRole("button", { name: "Back to Test bot" }).click()
     await page.waitForURL(`**/b/${profileId}`, { timeout: 20_000 })
     await until(async () => (await mine("main")).length === 4, 20_000, "the list again")
