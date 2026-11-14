@@ -675,10 +675,9 @@ test(
       await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
 
       await click(find("[data-canvas-options-open]"))
-      await click(find("[data-canvas-name-open]"))
       await until(async () => find("#canvas-name") !== null, "the name field")
       await type(find("#canvas-name"), "Split the bill")
-      await click(findText("button", "Save"))
+      await click(find("[data-canvas-name-save]"))
       await until(
         async () => wordsOf(find('[data-slot="header-title"]')).includes("Split the bill"),
         "the header to wear the new name",
@@ -705,6 +704,71 @@ test(
       await click(findText('[role="alertdialog"] button', "Delete"))
       await until(async () => host.changes?.[2]?.method === "DELETE", "the delete to be posted")
       assert.strictEqual(host.removed, true, "the canvas is gone from its host")
+    })
+  }),
+)
+
+test(
+  "the canvas's name is typed in its options sheet, and only its Save writes it",
+  atWidth(390, async () => {
+    const host: Host = { tools: [], grants: {}, clock: 0, calls: [], answers: [], changes: [] }
+    serve(host, "c12")
+    await seedCanvas()
+    await mount(screen("c12"), async () => {
+      await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
+      await click(find("[data-canvas-options-open]"))
+      await until(() => find("[data-canvas-options]") !== null, "the options to open")
+      await settle()
+
+      // One surface: the sheet holds the field itself, and no row opens a second popup over it.
+      const field = () => find("[data-canvas-options] #canvas-name") as HTMLInputElement | null
+      assert.ok(field(), "the sheet holds the canvas's name in a field of its own")
+      assert.equal(field()!.value, TITLE, "holding the record's own name")
+      assert.equal(
+        wordsOf(find("[data-canvas-options] label[for='canvas-name']")),
+        "Name",
+        "under the row's own label, the way a project's Edit screen draws its name",
+      )
+      assert.equal(missing("[data-canvas-name-open]"), true, "and no row opens a surface of its own")
+      assert.equal(findAll("[data-popup-form]").length, 1, "one popup is on screen, never two")
+      assert.equal(
+        document.activeElement === field(),
+        true,
+        "the field takes the sheet's focus, so the name is a tap away",
+      )
+      assert.equal(field()!.maxLength, 60, "with the host's cap on what can be typed")
+      assert.equal(missing("[data-canvas-name-save]"), true, "a name as it was has nothing to save")
+
+      // Nothing goes out while it is typed: the write is the Save's, and the Save writes one line.
+      await type(field(), "  Split   the  bill ")
+      assert.equal(host.changes?.length ?? 0, 0, "no change is posted while the name is typed")
+      assert.ok(find("[data-canvas-name-save]"), "and the sheet offers the Save that would")
+
+      await click(find("[data-canvas-name-save]"))
+      await until(async () => host.changes?.[0] !== undefined, "the name to be posted")
+      assert.deepStrictEqual(
+        host.changes?.[0],
+        { method: "POST", body: { title: "Split the bill" } },
+        "whitespace folded, as the host writes it",
+      )
+      await until(
+        async () => field()?.value === "Split the bill",
+        "the field to wear the record the host answered",
+      )
+      assert.equal(missing("[data-canvas-name-save]"), true, "and the Save to stand down")
+
+      // A name of nothing is no name at all, so there is nothing for a Save to send.
+      await type(field(), "   ")
+      assert.equal(missing("[data-canvas-name-save]"), true, "spaces alone are nothing to save")
+      assert.equal(host.changes?.length, 1, "and nothing is posted")
+
+      // Enter is that same Save, from the field itself.
+      await type(field(), "Bill split")
+      await act(async () => {
+        field()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
+      })
+      await until(async () => host.changes?.[1] !== undefined, "the Enter to save")
+      assert.deepStrictEqual(host.changes?.[1], { method: "POST", body: { title: "Bill split" } })
     })
   }),
 )

@@ -5,8 +5,7 @@
  * declared. Every change but a tool's is the canvas's record on the host, so the same page is named,
  * pinned and archived the same way on every device; nothing here is kept on this one alone.
  */
-import { useCallback, useRef, useState } from "react"
-import { ChevronRightIcon } from "lucide-react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import { CanvasMark } from "@/components/canvas-mark"
@@ -14,13 +13,10 @@ import { CanvasMarkPicker } from "@/components/canvas-mark-picker"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import {
   DestructiveButton,
-  FormActions,
   Group,
   SwitchRow,
-  fieldInputClass,
-  fieldLabelClass,
 } from "@/components/settings-chrome"
-import { Input } from "@/components/ui/input"
+import { Button } from "@/components/ui/button"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -144,83 +140,16 @@ export function CanvasConsentDialog({
 }
 
 /**
- * A canvas's name, edited on its own surface: a field and the app's Cancel/Save bar. A text value is
- * never edited beside instant switches, and nothing is written until Save (settings-ux).
- */
-function NameSheet({
-  open,
-  onOpenChange,
-  title,
-  onSave,
-}: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  title: string
-  onSave: (title: string) => Promise<void>
-}) {
-  const [name, setName] = useState(title)
-  const [saving, setSaving] = useState(false)
-  // The host writes one line: whitespace folded, then its cap. The field holds what a Save would
-  // write, so what is typed and what lands agree.
-  const trimmed = name.trim().replace(/\s+/g, " ")
-  const canSave = trimmed.length > 0 && trimmed !== title
-
-  const save = async () => {
-    if (!canSave || saving) return
-    setSaving(true)
-    try {
-      await onSave(trimmed)
-      onOpenChange(false)
-    } catch {
-      // Said where it was read; the field keeps the words so the next Save is a retry.
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <Popup open={open} onOpenChange={onOpenChange}>
-      <PopupContent>
-        <PopupHeader>
-          <PopupTitle>Name</PopupTitle>
-        </PopupHeader>
-        <form
-          className="flex flex-col gap-4 px-4 pb-4"
-          onSubmit={(event) => {
-            event.preventDefault()
-            void save()
-          }}
-        >
-          <div className="flex flex-col gap-2">
-            <label htmlFor="canvas-name" className={fieldLabelClass}>
-              Name
-            </label>
-            <Input
-              id="canvas-name"
-              value={name}
-              autoComplete="off"
-              maxLength={TITLE_CHARS}
-              onChange={(event) => setName(event.target.value)}
-              className={fieldInputClass}
-            />
-          </div>
-          <FormActions onCancel={() => onOpenChange(false)} disabled={!canSave} busy={saving} />
-        </form>
-      </PopupContent>
-    </Popup>
-  )
-}
-
-/**
  * A canvas's options: the record's place and the answers its version carries, changed after the fact.
  *
- * Placement is a name row that opens its own sheet — a text value is edited with Cancel and Save —
- * then Pin, Archive and, where the host keeps a vault, Back up to a wiki, which write the moment they
- * are flipped. Under them, one row per tool of the union: every tool this version declares, and every
- * tool the host holds an answer for that this version no longer declares, which is still the reader's
- * to revoke. Last is Delete — the app's one destructive shape (`DestructiveButton`), under the last
- * group rather than inside a card of its own, and it asks first, since it takes the page, its data and
- * its chat with it.
+ * The name is the sheet's own first row — a field and a Save, the way a project's Edit screen draws
+ * its name — since a text value is never written as it is typed, and nothing is sent until the Save
+ * beside it. Under it, Pin, Archive and, where the host keeps a vault, Back up to a wiki, which write
+ * the moment they are flipped. Under them, one row per tool of the union: every tool this version
+ * declares, and every tool the host holds an answer for that this version no longer declares, which
+ * is still the reader's to revoke. Last is Delete — the app's one destructive shape
+ * (`DestructiveButton`), under the last group rather than inside a card of its own, and it asks
+ * first, since it takes the page, its data and its chat with it.
  *
  * The backup row is drawn only where the host advertises `canvas_vault` (`vaultable`): a plugin from
  * before it has no writer, and a switch that writes nothing is a promise the host can't keep. The
@@ -256,13 +185,32 @@ export function CanvasOptions({
 }) {
   const [saving, setSaving] = useState<string | null>(null)
   const [asking, setAsking] = useState(false)
-  const [naming, setNaming] = useState(false)
   const [marking, setMarking] = useState(false)
   // The mark's own box in the name block: the picker opens anchored to it, so a laptop draws the
   // card beside it (the model selector's rule) and a phone draws a sheet.
   const markButton = useRef<HTMLButtonElement>(null)
+  // The name's field, focused when the sheet opens: the sheet is the screen the reader came to for
+  // the name, and its first row is the field.
+  const nameField = useRef<HTMLInputElement>(null)
   const busy = saving !== null
   const deleting = saving === "delete"
+  // The name as the field holds it, and the record's title it was typed against: while they agree the
+  // field shows the words, and a record the host answers moves the title past them, so the field
+  // draws the record again — what is typed and what lands are the same one line.
+  const title = canvas?.title ?? ""
+  const [draft, setDraft] = useState<{ against: string; name: string } | null>(null)
+  const name = draft?.against === title ? draft.name : title
+  // The host writes one line: whitespace folded, then its cap. The field's ink is what a Save would
+  // send, so a name left as it was — or one of nothing but spaces — is no write at all.
+  const trimmed = name.trim().replace(/\s+/g, " ")
+  const renaming = trimmed.length > 0 && trimmed !== title
+
+  useEffect(() => {
+    if (!open) return
+    // After the pop-up's own commit: its content mounts on open, so the field is here a frame later.
+    const frame = requestAnimationFrame(() => nameField.current?.focus())
+    return () => cancelAnimationFrame(frame)
+  }, [open])
 
   const declared = canvas?.tools ?? []
   const held = canvas?.grants ?? []
@@ -296,6 +244,12 @@ export function CanvasOptions({
     setAsking(false)
   }
 
+  /** The name's own write: the one control here that waits for a press rather than a flip. */
+  const saveName = () => {
+    if (!renaming || busy) return
+    void change("name", () => onUpdate({ title: trimmed }))
+  }
+
   return (
     <>
       <Popup open={open} onOpenChange={onOpenChange}>
@@ -304,10 +258,13 @@ export function CanvasOptions({
             <PopupTitle>Options</PopupTitle>
           </PopupHeader>
           <div data-canvas-options className="flex flex-col gap-4 px-4 pb-4">
-            {/* The name and the mark beside it, as a project's Edit screen draws its own: the box at
-                the head is the mark, and a tap on it picks another (issue #1065). */}
-            <div data-canvas-name-block className="flex flex-col gap-2">
-              <span className="px-1 text-sm font-medium">Name</span>
+            {/* The mark and the name in one row, the way a project's Edit screen draws its own: the
+                box at the head is the mark, and a tap on it picks another (issue #1065); the name is
+                typed here and written by the Save that appears once it differs from the record. */}
+            <section data-canvas-name-block className="flex flex-col gap-2">
+              <label htmlFor="canvas-name" className="px-1 text-sm font-medium">
+                Name
+              </label>
               <div className="flex items-center gap-3 rounded-3xl bg-muted p-2">
                 <button
                   ref={markButton}
@@ -320,18 +277,38 @@ export function CanvasOptions({
                 >
                   <CanvasMark mark={canvas?.mark} />
                 </button>
-                <button
-                  type="button"
-                  data-canvas-name-open
+                <input
+                  ref={nameField}
+                  id="canvas-name"
+                  data-canvas-name
+                  autoComplete="off"
+                  maxLength={TITLE_CHARS}
+                  value={name}
                   disabled={!canvas || busy}
-                  onClick={() => setNaming(true)}
-                  className="h-11 min-w-0 flex-1 truncate pr-3 text-left text-base outline-none disabled:opacity-60"
-                >
-                  {canvas?.title}
-                </button>
-                <ChevronRightIcon className="mr-2 size-4 shrink-0 text-muted-foreground" />
+                  onChange={(event) => setDraft({ against: title, name: event.target.value })}
+                  onKeyDown={(event) => {
+                    // Enter is the Save, from the field itself: a phone's keyboard has no room for a
+                    // second press, and the write is the same one.
+                    if (event.key !== "Enter") return
+                    event.preventDefault()
+                    saveName()
+                  }}
+                  className="h-11 min-w-0 flex-1 bg-transparent pr-3 text-base outline-none disabled:opacity-60"
+                />
+                {renaming && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    data-canvas-name-save
+                    className="mr-1 shrink-0 rounded-full"
+                    disabled={busy}
+                    onClick={saveName}
+                  >
+                    Save
+                  </Button>
+                )}
               </div>
-            </div>
+            </section>
 
             <Group>
               <SwitchRow
@@ -404,16 +381,6 @@ export function CanvasOptions({
           </div>
         </PopupContent>
       </Popup>
-
-      {canvas && (
-        <NameSheet
-          key={canvas.title}
-          open={naming}
-          onOpenChange={setNaming}
-          title={canvas.title}
-          onSave={(title) => onUpdate({ title })}
-        />
-      )}
 
       {canvas && (
         <CanvasMarkPicker
