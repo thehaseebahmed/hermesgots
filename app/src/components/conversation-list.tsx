@@ -415,6 +415,9 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
           const age = latest?.updatedAt
           return (
             <li key={bot.id}>
+              {/* A bot's row is the design's row for a title with a line under it, not the menu's
+                  44px one: a 36px picture and two lines leave a 44px row no air, and draw the
+                  picture against its top edge (ADR 0153, amended 2026-11-14). */}
               <RootLink
                 to={botChatsPath(bot.id)}
                 onClick={onNavigate}
@@ -422,10 +425,10 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
                 className={({ isActive }) =>
                   collapsed
                     ? railClass({ isActive: isActive || owner === bot.id })
-                    : rowClass({ isActive: isActive || owner === bot.id })
+                    : cn(rowClass({ isActive: isActive || owner === bot.id }), "min-h-14 py-2")
                 }
               >
-                <span className="relative shrink-0">
+                <span className="relative flex shrink-0">
                   <Bot id={bot.botId} className="size-9" />
                   {/* The rail draws no line under the name, so its mark is the only one a row has
                       there: news since this device last looked at one of the bot's conversations
@@ -609,7 +612,7 @@ function Waiting({
                   onClick={onNavigate}
                   aria-label={collapsed ? title : undefined}
                   className={(state) =>
-                    collapsed ? railClass(state) : cn(rowClass(state), "py-2")
+                    collapsed ? railClass(state) : cn(rowClass(state), "min-h-14 py-2")
                   }
                 >
                   <Icon

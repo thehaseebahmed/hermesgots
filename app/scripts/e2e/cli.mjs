@@ -506,7 +506,7 @@ export const FLOWS = {
   "bot-list": {
     script: "e2e/bot-list.mjs",
     about:
-      "A bot's list as the way into every conversation: ordered by the last message received, a chat, a room and a routine's run each opening in the pane beside it at 1280px with the bot's face drawn once, a bot's sidebar row at the app's 44px height, and on a phone a row opening its chat as the app's only entry with the sidebar the way back to the list",
+      "A bot's list as the way into every conversation: ordered by the last message received, a chat, a room and a routine's run each opening in the pane beside it at 1280px with the bot's face drawn once, a bot's sidebar row at the app's 56px row for a title with a line under it, its picture on the row's own centre line, and on a phone a row opening its chat as the app's only entry with the sidebar the way back to the list",
   },
   "card-widths": {
     script: "e2e/card-widths.mjs",

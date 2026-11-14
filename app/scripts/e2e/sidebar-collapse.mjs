@@ -27,12 +27,18 @@ const railRows = (page) =>
     const rail = document.querySelector("aside").getBoundingClientRect()
     return rows.map((row) => {
       const box = row.getBoundingClientRect()
+      // Where the row's picture stands against the row's own centre line, for the rows that draw one:
+      // a rail draws its bot as the picture alone, so the picture is the whole row.
+      const face = row.querySelector('[role="img"]')?.getBoundingClientRect()
       return {
         name: row.getAttribute("aria-label") ?? row.textContent.trim(),
         connected: row.isConnected,
         width: Math.round(box.width),
         height: Math.round(box.height),
         offCentre: Math.round(box.left + box.width / 2 - (rail.left + rail.width / 2)),
+        faceOffset: face
+          ? Math.round((face.top + face.height / 2 - (box.top + box.height / 2)) * 100) / 100
+          : null,
       }
     })
   })
@@ -173,6 +179,25 @@ for (const dark of [false, true]) {
         await aside.getByRole("link", { name: "New room" }).count(),
         0,
         "and the sidebar offers no New room in the bot layout",
+      )
+      // The rail draws a picture and no line under it, so it keeps its 44px square — and the picture
+      // hangs on the row's centre line, not on the top of the line box it was drawn in.
+      const rail = shownRows(await railRows(page))
+      const railBot = rail.find((row) => row.name === "Test bot")
+      assert.ok(
+        railBot,
+        `the rail draws the bot's row: ${JSON.stringify(rail.map((row) => row.name))}`,
+      )
+      assert.equal(railBot.height, 44, `the rail's bot row keeps its 44px square (${railBot.height})`)
+      // Strict, like `markOffsetIn`: a row that draws no picture has no offset to compare.
+      assert.notEqual(
+        railBot.faceOffset,
+        null,
+        `the rail's bot row draws its picture (${JSON.stringify(railBot)})`,
+      )
+      assert.ok(
+        Math.abs(railBot.faceOffset) <= 0.5,
+        `the rail's bot picture sits on the row's centre line (${railBot.faceOffset}px off)`,
       )
       await shot("bots-collapsed")
 
