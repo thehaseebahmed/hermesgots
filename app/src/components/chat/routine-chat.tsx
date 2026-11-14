@@ -114,6 +114,8 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
             subtitle={`Ran ${ranOn(chat.updatedAt)}`}
             botId={bot.botId}
             muted={Boolean(chat.muted || bot.muted)}
+            // The bot's list beside this run already names the bot with its face.
+            showBot={!lead.besideList}
             actions={actions}
             leading={lead.leading}
           />

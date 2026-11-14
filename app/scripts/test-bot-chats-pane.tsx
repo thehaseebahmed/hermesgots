@@ -325,6 +325,11 @@ test(
       assert.equal(openRow()?.getAttribute("href"), "/c/room-1", "the row the pane holds")
       assert.equal(missing(CHAT_BESIDE), false, "and the room drawn in the pane beside it")
       assert.equal(missing(LIST_CONTROL), true, "no bar control repeats the list beside it")
+      assert.equal(
+        findAll('[data-slot="item-lane"] [data-slot="header-row"] [role="img"]').length,
+        0,
+        "and the room's bar repeats no face the list's bar already draws",
+      )
     })
   }),
 )

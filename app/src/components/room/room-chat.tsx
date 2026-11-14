@@ -157,6 +157,8 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
         title={name}
         subtitle={chat?.room ? roomMembersLine({ ...chat.room, members: live.members }) : undefined}
         botId={answerer?.botId}
+        // The bot's list beside this room already names the bot with its face.
+        showBot={!lead.besideList}
         actions={<RoomActions roomId={id} name={name} answerer={answerer} />}
         // The list its row stands in, where that list is not on screen beside this one: a room is
         // opened from a bot's list like any row of it, so it carries the same way back a chat does.
