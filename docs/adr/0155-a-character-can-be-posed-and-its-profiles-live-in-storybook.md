@@ -20,10 +20,14 @@ header is sleepy while its host is away. The mood is never stored or synced. Wai
 (curious) and a finished task (excited) are the next two and want a signal the screens do not hold
 in one place yet.
 
-**A change of mood is a poof.** The old pose swells and goes out in smoke, the new one pops in. A
-mood asked for while one is changing waits, and only the newest is shown. With reduced motion the
-pose is swapped and nothing moves. Six other transitions were tried (squish, sparkle, flip, drop, flash, fade);
-the poof was chosen.
+**A change of mood is a poof, built from transitions.dev.** Both poses sit in one cell (its icon
+swap, already the list foot's), so the old pose shrinks and blurs out while the new one grows in over
+it, each keeping its own idle motion, and the body squashes and throws a puff of smoke (its like
+button's pop and particle burst). The first version hand-wrote the motion as three sequential
+animations with an empty beat between them; the snippets overlap the two poses instead, so nothing
+blinks, and their tuning lives in the stylesheet's variables. A mood asked for while one is changing
+waits, and only the newest is shown. With reduced motion the pose is swapped and nothing moves. Six
+other transitions were tried (squish, sparkle, flip, drop, flash, fade); the poof was chosen.
 
 **No colour per mood.** A tint and a glow per mood were tried and left out: the characters' colours
 are their identity.

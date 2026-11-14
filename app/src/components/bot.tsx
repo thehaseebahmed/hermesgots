@@ -49,55 +49,57 @@ export function Bot({
   )
 }
 
-const OUT_MS = 240
-const HIDDEN_MS = 120
-const IN_MS = 380
-const PUFFS = 9
+/** The smoke's puffs: the like button's burst throws eight. */
+const PUFFS = 8
 
 const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms))
 
-/** One animation's end; a cancelled one resolves rather than rejects, so a flight never throws. */
-const done = (animation: Animation) =>
-  animation.finished.then(
-    () => {},
-    () => {},
-  )
-
-/** Smoke thrown out from the middle of the box, sized and thrown by the box's own width. */
-function puff(into: HTMLElement, width: number) {
-  for (let i = 0; i < PUFFS; i++) {
-    const angle = (i / PUFFS) * Math.PI * 2 + Math.random() * 0.5
-    const far = width * (0.45 + Math.random() * 0.4)
-    const size = width * (0.28 + Math.random() * 0.22)
-    const x = Math.cos(angle) * far
-    const y = Math.sin(angle) * far * 0.8
-    const smoke = document.createElement("span")
-    smoke.style.cssText = `position:absolute;left:50%;top:55%;width:${size}px;height:${size}px;border-radius:50%;background:var(--muted-foreground)`
-    into.append(smoke)
-    smoke
-      .animate(
-        [
-          { transform: "translate(-50%,-50%) scale(.3)", opacity: 0.5 },
-          {
-            transform: `translate(calc(-50% + ${x * 0.6}px),calc(-50% + ${y * 0.6}px)) scale(1.1)`,
-            opacity: 0.4,
-            offset: 0.4,
-          },
-          {
-            transform: `translate(calc(-50% + ${x}px),calc(-50% + ${y - width * 0.2}px)) scale(.6)`,
-            opacity: 0,
-          },
-        ],
-        { duration: 650, easing: "cubic-bezier(.2,.7,.3,1)" },
-      )
-      .finished.then(
-        () => smoke.remove(),
-        () => smoke.remove(),
-      )
-  }
+/** A duration the stylesheet holds, read where it is set so the two never drift (`250ms` → 250). */
+function cssMs(el: Element, name: string, fallback: number) {
+  const value = getComputedStyle(el).getPropertyValue(name).trim()
+  const ms = value.endsWith("ms")
+    ? parseFloat(value)
+    : value.endsWith("s")
+      ? parseFloat(value) * 1000
+      : NaN
+  return Number.isFinite(ms) ? ms : fallback
 }
 
+/** Replays a CSS animation keyed to a class or an attribute: off, a reflow, on. */
+function replay(el: HTMLElement, set: (on: boolean) => void) {
+  set(false)
+  void el.offsetWidth
+  set(true)
+}
+
+/**
+ * The poof (transitions.dev's like-button burst): each puff is sent on its own vector, sized and thrown
+ * by the box's own width so a small bot throws a small puff, and they rise as smoke does.
+ */
+function aim(puffs: HTMLElement, width: number) {
+  const dots = [...puffs.children] as HTMLElement[]
+  dots.forEach((dot, i) => {
+    const angle = (i / dots.length) * Math.PI * 2 + Math.random() * 0.6
+    const far = width * (0.42 + Math.random() * 0.3)
+    dot.style.setProperty("--px", `${Math.cos(angle) * far}px`)
+    dot.style.setProperty("--py", `${Math.sin(angle) * far * 0.8 - width * 0.12}px`)
+    dot.style.setProperty("--psize", `${(0.85 + Math.random() * 0.6).toFixed(2)}`)
+    dot.style.setProperty("--pdur", `${Math.round(520 + Math.random() * 180)}ms`)
+    dot.style.setProperty("--pdelay", `${Math.round(Math.random() * 60)}ms`)
+    dot.style.setProperty("--p-end-scale", `${(1.2 + Math.random() * 0.5).toFixed(2)}`)
+  })
+}
+
+type Slot = "a" | "b"
+const other = (slot: Slot): Slot => (slot === "a" ? "b" : "a")
+
+/**
+ * A posed bot's two poses sit in one cell (transitions.dev's icon swap), so a change of mood is the old
+ * pose shrinking and blurring out while the new one grows in over it, the body giving a jelly squash
+ * (the like button's pop) and throwing a puff of smoke (its burst). Each pose keeps its own mood's idle
+ * motion, so the one leaving goes on moving as it fades rather than snapping still.
+ */
 function PosedBot({
   bot,
   mood,
@@ -107,19 +109,16 @@ function PosedBot({
   mood: BotMood
   className?: string
 }) {
-  const [shown, setShown] = useState(mood)
+  const [poses, setPoses] = useState<Record<Slot, BotMood>>({ a: mood, b: mood })
+  const [front, setFront] = useState<Slot>("a")
+  const frontNow = useRef<Slot>("a")
   const shownNow = useRef(mood)
   const wanted = useRef(mood)
   const flying = useRef(false)
   const alive = useRef(true)
   const box = useRef<HTMLSpanElement>(null)
-  const smoke = useRef<HTMLSpanElement>(null)
-  const pose = useRef<HTMLSpanElement>(null)
-
-  const show = (next: BotMood) => {
-    shownNow.current = next
-    setShown(next)
-  }
+  const puffs = useRef<HTMLSpanElement>(null)
+  const images = { a: useRef<HTMLImageElement>(null), b: useRef<HTMLImageElement>(null) }
 
   // Every pose is in the cache before the first change, so a swap never waits on the network.
   useEffect(() => {
@@ -139,47 +138,34 @@ function PosedBot({
     flying.current = true
     void (async () => {
       try {
-        // A mood asked for while one is changing waits for it, and only the newest is shown.
+        // A mood asked for while one is changing waits for that swap, and only the newest is shown.
         while (alive.current && shownNow.current !== wanted.current) {
           const next = wanted.current
-          const el = pose.current
-          const into = smoke.current
-          if (!el || !into || !box.current || prefersReducedMotion() || !el.animate) {
-            show(next)
-            continue
-          }
-          puff(into, box.current.offsetWidth)
-          await done(
-            el.animate(
-              [
-                { transform: "scale(1)", opacity: 1 },
-                { transform: "scale(1.12)", offset: 0.4 },
-                { transform: "scale(0)", opacity: 0 },
-              ],
-              { duration: OUT_MS, easing: "ease-in", fill: "forwards" },
-            ),
-          )
-          await wait(HIDDEN_MS)
+          const back = other(frontNow.current)
+          setPoses((held) => ({ ...held, [back]: next }))
+          await frame()
+          // The pose coming in is decoded before it is shown, so it never paints half-loaded.
+          await images[back].current?.decode?.().catch(() => {})
           if (!alive.current) return
-          show(next)
-          await frame()
-          await frame()
-          await done(
-            el.animate(
-              [
-                { transform: "scale(.2)", opacity: 0 },
-                { transform: "scale(1.1)", opacity: 1, offset: 0.6 },
-                { transform: "scale(1)", opacity: 1 },
-              ],
-              { duration: IN_MS, easing: "cubic-bezier(.3,1.4,.5,1)", fill: "forwards" },
-            ),
-          )
-          el.getAnimations?.().forEach((animation) => animation.cancel())
+          frontNow.current = back
+          shownNow.current = next
+          setFront(back)
+          const el = box.current
+          if (!el || prefersReducedMotion()) continue
+          if (puffs.current) aim(puffs.current, el.offsetWidth)
+          el.style.setProperty("--like-particle-size", `${Math.max(3, el.offsetWidth * 0.14)}px`)
+          replay(el, (on) => (el.dataset.liked = String(on)))
+          replay(el, (on) => el.classList.toggle("is-bursting", on))
+          const smokeMs = cssMs(el, "--like-particle-dur", 600) + 300
+          window.setTimeout(() => el.classList.remove("is-bursting"), smokeMs)
+          await wait(cssMs(el, "--icon-swap-dur", 250))
         }
       } finally {
         flying.current = false
       }
     })()
+    // `images` is two refs made on every render; the effect reads them through `.current` only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mood])
 
   return (
@@ -187,17 +173,34 @@ function PosedBot({
       ref={box}
       role="img"
       aria-label={bot.name}
-      className={cn("bot-animate relative inline-block size-8 shrink-0", className)}
+      data-liked="false"
+      className={cn("t-like bot-animate relative inline-block size-8 shrink-0", className)}
     >
-      <span ref={smoke} aria-hidden className="pointer-events-none absolute inset-0" />
-      <span ref={pose} className="block size-full">
-        <img
-          src={botImage(bot, shown)}
-          alt=""
-          draggable={false}
-          data-mood={shown}
-          className="bot-posed size-full object-contain select-none"
-        />
+      <span ref={puffs} aria-hidden className="t-like-particles">
+        {Array.from({ length: PUFFS }, (_, i) => (
+          <i key={i} />
+        ))}
+      </span>
+      <span className="t-like-icon block size-full">
+        <span className="t-icon-swap size-full" data-state={front}>
+          {(["a", "b"] as const).map((slot) => (
+            <span
+              key={slot}
+              className="t-icon size-full"
+              data-icon={slot}
+              aria-hidden={slot !== front}
+            >
+              <img
+                ref={images[slot]}
+                src={botImage(bot, poses[slot])}
+                alt=""
+                draggable={false}
+                data-mood={poses[slot]}
+                className="bot-posed size-full object-contain select-none"
+              />
+            </span>
+          ))}
+        </span>
       </span>
     </span>
   )

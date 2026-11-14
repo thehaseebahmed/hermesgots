@@ -74,9 +74,10 @@
 }
 
 /*
-  The motion scale the foot's two transitions read, copied from transitions-dev (icon swap, texts
-  reveal). Durations and easings are its shared tokens; a snippet names the ones it wants and nothing
-  else, so half a scale never sits unused.
+  The motion scale the transitions copied from transitions-dev read: the foot's (icon swap, texts
+  reveal) and a posed bot's poof (icon swap again, and the like button's pop and burst). Durations and
+  easings are its shared tokens; a snippet names the ones it wants and nothing else, so half a scale
+  never sits unused.
 */
 :root {
   /* Durations */
@@ -104,6 +105,16 @@
   --stagger-stagger: var(--duration-stagger);
   --stagger-blur: var(--blur-medium);
   --stagger-ease: var(--ease-smooth-out);
+
+  /* Like button — a posed bot's poof: the squash its body gives as the pose swaps, and the puff of
+     smoke thrown out around it. The pop and the particle duration have no token whose usage matches,
+     so they keep the snippet's own values; the smoke's colour, size and reach are ours. */
+  --like-color: color-mix(in oklab, var(--muted-foreground) 55%, transparent);
+  --like-pop: 350ms;
+  --like-pop-ease: cubic-bezier(0.34, 1.96, 0.64, 1);
+  --like-particle-dur: 600ms;
+  --like-particle-size: 2.5px; /* bot.tsx sizes it to the box it draws */
+  --like-ease: var(--ease-smooth-out);
 }
 
 .dark {
@@ -256,6 +267,70 @@
   .t-icon-swap .t-icon,
   .t-stagger-line {
     transition: none !important;
+  }
+}
+
+/*
+  Like button: a posed bot's poof (bot.tsx). Only the pop and the particle burst are taken — there is no
+  heart to fill. The body gives a jelly squash as the pose swaps (`data-liked` flipping to true replays
+  it), and `.is-bursting` throws the particles, each sent on its own vector by bot.tsx. Our one change:
+  the pop and the burst are keyed to the bot's box, which carries `t-like`.
+*/
+.t-like[data-liked="true"] .t-like-icon {
+  animation: t-like-pop var(--like-pop) var(--like-pop-ease);
+}
+@keyframes t-like-pop {
+  0% {
+    transform: scale(1);
+  }
+  30% {
+    transform: scale(0.82);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+.t-like-particles {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  color: var(--like-color);
+}
+.t-like-particles i {
+  position: absolute;
+  left: calc(var(--like-particle-size) * var(--psize, 1) / -2);
+  top: calc(var(--like-particle-size) * var(--psize, 1) / -2);
+  width: calc(var(--like-particle-size) * var(--psize, 1));
+  height: calc(var(--like-particle-size) * var(--psize, 1));
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0;
+}
+@keyframes t-like-burst {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.4);
+  }
+  20% {
+    opacity: 1;
+    transform: translate(calc(var(--px) * 0.25), calc(var(--py) * 0.25)) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--px), var(--py)) scale(var(--p-end-scale, 0.6));
+  }
+}
+.t-like.is-bursting .t-like-particles i {
+  animation: t-like-burst var(--pdur, var(--like-particle-dur)) ease-out var(--pdelay, 0ms) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-like-icon,
+  .t-like-particles i {
+    animation: none !important;
   }
 }
 

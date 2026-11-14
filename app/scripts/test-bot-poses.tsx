@@ -1,7 +1,9 @@
 /**
  * A posed bot (Crumb): drawn still it is its happy pose, drawn with `animate` it shows the pose its
- * mood names and changes between moods in a poof — and with no motion asked for, or while moods
- * arrive faster than a poof, it still ends on the newest one. A bot with one picture ignores mood.
+ * mood names and changes between moods in a poof — the new pose swapped in over the old one
+ * (transitions.dev's icon swap), the body's squash and a puff of smoke (its like button's pop and
+ * burst) — and with no motion asked for, or while moods arrive faster than a poof, it still ends on
+ * the newest one. A bot with one picture ignores mood.
  */
 import assert from "node:assert/strict"
 import { existsSync } from "node:fs"
@@ -11,7 +13,7 @@ import { act } from "react"
 const { Bot } = await import("@/components/bot")
 const { BOTS, BOT_MOODS, botImage } = await import("@/components/bots")
 import type { BotMood } from "@/components/bots"
-const { mount, spyAnimate, until, withReducedMotion } = await import("./component-kit.tsx")
+const { mount, until, withReducedMotion } = await import("./component-kit.tsx")
 
 const crumb = BOTS.find((bot) => bot.id === "crumb")!
 const src = () => document.querySelector("img")?.getAttribute("src")
@@ -68,32 +70,34 @@ async function withCrumb(
   }
 }
 
-const poseOf = (root: HTMLElement) => root.querySelector("img")?.getAttribute("src")
+/** The pose on show: the image in the slot the swap's state names. */
+const poseOf = (root: HTMLElement) => {
+  const front = root.querySelector(".t-icon-swap")?.getAttribute("data-state")
+  return root.querySelector(`.t-icon[data-icon="${front}"] img`)?.getAttribute("src")
+}
+const box = (root: HTMLElement) => root.querySelector<HTMLElement>(".t-like")!
 
 test("an animated posed bot draws the pose its mood names, and poofs to the next", async () => {
   await withCrumb(async (draw, root) => {
     await draw("wave")
     assert.equal(poseOf(root), "/bots/crumb/wave.png")
-    assert.equal(root.querySelector("img")?.getAttribute("data-mood"), "wave")
-    const spy = spyAnimate()
-    try {
-      await draw("love")
-      await until(async () => poseOf(root) === "/bots/crumb/love.png", "the pose to change")
-      const frames = spy.asked.flatMap((one) =>
-        one.keyframes.map((frame) => String(frame.transform)),
-      )
-      assert.ok(
-        frames.some((t) => t.includes("scale(0)")),
-        "it shrinks away",
-      )
-      assert.ok(
-        frames.some((t) => t.includes("scale(1.1)")),
-        "it pops back in",
-      )
-      assert.equal(root.querySelectorAll("[aria-hidden] span").length, 0, "the smoke is gone")
-    } finally {
-      spy.restore()
-    }
+    assert.equal(box(root).dataset.liked, "false", "nothing has popped yet")
+    await draw("love")
+    await until(async () => poseOf(root) === "/bots/crumb/love.png", "the pose to change")
+    const slots = [...root.querySelectorAll(".t-icon img")].map((img) => img.getAttribute("src"))
+    assert.deepEqual(
+      slots.sort(),
+      ["/bots/crumb/love.png", "/bots/crumb/wave.png"],
+      "the old pose fades out under the new one",
+    )
+    assert.equal(box(root).dataset.liked, "true", "the body pops")
+    assert.ok(box(root).classList.contains("is-bursting"), "a puff of smoke is thrown")
+    const puffs = [...root.querySelectorAll<HTMLElement>(".t-like-particles i")]
+    assert.equal(puffs.length, 8)
+    assert.ok(
+      puffs.every((puff) => puff.style.getPropertyValue("--px") !== ""),
+      "each puff has its own vector",
+    )
   })
 })
 
@@ -108,14 +112,10 @@ test("with no motion asked for the pose changes at once, with no smoke", async (
   await withReducedMotion(async () => {
     await withCrumb(async (draw, root) => {
       await draw("happy")
-      const spy = spyAnimate()
-      try {
-        await draw("curious")
-        await until(async () => poseOf(root) === "/bots/crumb/curious.png", "the pose to change")
-        assert.equal(spy.asked.length, 0)
-      } finally {
-        spy.restore()
-      }
+      await draw("curious")
+      await until(async () => poseOf(root) === "/bots/crumb/curious.png", "the pose to change")
+      assert.equal(box(root).dataset.liked, "false", "no pop")
+      assert.ok(!box(root).classList.contains("is-bursting"), "no smoke")
     })
   })
 })
