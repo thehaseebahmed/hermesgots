@@ -38,3 +38,5 @@ __pycache__
 # pairing token beside it. Both are local, both change on every run.
 .reticle
 reticle.local.js
+
+storybook-static
