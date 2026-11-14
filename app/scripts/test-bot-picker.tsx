@@ -136,7 +136,12 @@ test("the picker scores a model from the shipped payload", async () => {
     data: {
       anthropic: {
         models: {
-          "claude-sonnet-4-6": { limit: { context: 200_000 }, cost: { input: 3, output: 15 } },
+          "claude-sonnet-4-6": {
+            limit: { context: 200_000 },
+            cost: { input: 3, output: 15 },
+            modalities: { input: ["text", "image"] },
+            reasoning: true,
+          },
           "deepseek-v4-flash": { limit: { context: 128_000 }, cost: { input: 0.2, output: 0.8 } },
         },
       },
@@ -174,6 +179,21 @@ test("the picker scores a model from the shipped payload", async () => {
         line("deepseek-v4-flash"),
         /BenchLM \?/,
         "a model it has no row for says so",
+      )
+      assert.ok(
+        findAll("section").some((group) => wordsOf(group).startsWith("BenchLM")),
+        "the score column is named once, over the rows, not on each of them",
+      )
+      assert.match(
+        line("claude-sonnet-4-6"),
+        /\$+ · 200k · VisionReasoning/,
+        "the second line is the cost's dollar signs, the bare window and a mark per capability",
+      )
+      assert.doesNotMatch(line("claude-sonnet-4-6"), /context/, "the window carries no word")
+      assert.doesNotMatch(
+        line("deepseek-v4-flash"),
+        /Vision|Reasoning/,
+        "a capability models.dev doesn't name draws nothing",
       )
       await settle()
     },

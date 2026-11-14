@@ -31,6 +31,7 @@ export function PickGroup({
   mode,
   surface = "bare",
   heading,
+  aside,
   label,
   id,
   className,
@@ -40,6 +41,8 @@ export function PickGroup({
   mode: PickMode
   surface?: "plate" | "bare"
   heading?: string
+  /** A column's name at the heading's right end, over the values its rows draw in `trailing`. */
+  aside?: ReactNode
   /** What the list is called where the heading would name the wrong thing. */
   label?: string
   /** The list's own id, for the field that points at its options. */
@@ -66,10 +69,19 @@ export function PickGroup({
       <Surface.Provider value={{ mode, plate }}>{children}</Surface.Provider>
     </ul>
   )
-  if (!heading) return list
+  if (!heading && !aside) return list
   return (
     <section className="flex flex-col gap-2">
-      <h3 className="px-1 text-sm text-muted-foreground">{heading}</h3>
+      <div className="flex items-baseline justify-between gap-3 px-1 text-sm text-muted-foreground">
+        {heading ? <h3 className="min-w-0 truncate">{heading}</h3> : <span />}
+        {aside && (
+          // Its right edge is the trailing column's: the plate's 4px inset, the row's 12px padding
+          // and the tick's 16px slot with its 12px gap, less the heading's own 4px.
+          <span aria-hidden className={cn("shrink-0", plate ? "pr-10" : "pr-9")}>
+            {aside}
+          </span>
+        )}
+      </div>
       {list}
     </section>
   )
@@ -83,6 +95,7 @@ export function PickRow({
   leading,
   title,
   line,
+  trailing,
   selected = false,
   active = false,
   disabled,
@@ -98,6 +111,11 @@ export function PickRow({
   title: ReactNode
   /** One muted line under the name. Its presence is what makes a row taller than 44px. */
   line?: ReactNode
+  /**
+   * A value in a column at the row's right end, before the tick. A row that carries one keeps the
+   * tick's slot even unchosen, so the column lines up down the list.
+   */
+  trailing?: ReactNode
   selected?: boolean
   /** The keyboard cursor, which is not the same fact as `selected`. */
   active?: boolean
@@ -155,8 +173,14 @@ export function PickRow({
             </span>
           )}
         </span>
-        {stateful && selected && (
-          <CheckIcon className="size-4 shrink-0 text-primary" aria-hidden />
+        {trailing !== undefined && (
+          <span className="shrink-0 text-right text-sm tabular-nums">{trailing}</span>
+        )}
+        {stateful && (selected || trailing !== undefined) && (
+          <CheckIcon
+            className={cn("size-4 shrink-0 text-primary", !selected && "invisible")}
+            aria-hidden
+          />
         )}
         {mode === "open" && (
           <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" aria-hidden />

@@ -1,8 +1,9 @@
-import { useMemo, useRef, useState } from "react"
-import { BrainIcon, EyeIcon, type LucideIcon } from "lucide-react"
+import { Fragment, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   ArrowLeftIcon,
+  BrainIcon,
   ChevronDownIcon,
+  EyeIcon,
   PlusIcon,
   XIcon,
 } from "lucide-react"
@@ -17,14 +18,13 @@ import { usePopupForm } from "@/lib/popup-form"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { rememberModel, type ModelChoice, type Profile } from "@/lib/db"
 import { MAX_FALLBACKS, withFallback } from "@/lib/fallback-list"
 import { useFallbackModels } from "@/lib/fallbacks"
 import { formatTokens } from "@/lib/format"
 import type { ModelProvider } from "@/lib/hermes"
 import { botModel, fullModel, hostChoice, shortModel, useModelInfo } from "@/lib/model-info"
-import { MAX_COST_TIER, modelFacts, useModelCatalog, type Catalog } from "@/lib/models"
+import { modelFacts, useModelCatalog, type Catalog } from "@/lib/models"
 import { overallScoreOf, useOverallRankings, type RankingsData } from "@/lib/rankings"
 import { tell } from "@/lib/tell"
 import { cn } from "@/lib/utils"
@@ -144,12 +144,18 @@ export function ModelPicker({
           </PickGroup>
         )}
         {top && recentOffered.length > 0 && (
-          <PickGroup mode="choose" surface="plate" heading="Recent">
+          <PickGroup
+            mode="choose"
+            surface="plate"
+            heading="Recent"
+            aside={scoreHeading(rankings)}
+          >
             {recentOffered.map((m) => (
               <PickRow
                 key={fullModel(m)}
-                title={fullModel(m)}
-                line={modelDetail(catalog, rankings, m)}
+                title={m.model}
+                line={modelDetail(catalog, m, providerName(providers, m.provider))}
+                trailing={scoreCell(m, rankings)}
                 selected={isChosen(m)}
                 onPick={() => onChoose(m)}
               />
@@ -174,13 +180,15 @@ export function ModelPicker({
               mode="choose"
               surface="plate"
               heading={drilled ? undefined : p.name}
+              aside={scoreHeading(rankings)}
               label={p.name}
             >
               {p.models.map((m) => (
                 <PickRow
                   key={m}
                   title={m}
-                  line={modelDetail(catalog, rankings, { provider: p.slug, model: m })}
+                  line={modelDetail(catalog, { provider: p.slug, model: m })}
+                  trailing={scoreCell({ provider: p.slug, model: m }, rankings)}
                   selected={isChosen({ provider: p.slug, model: m })}
                   onPick={() => onChoose({ provider: p.slug, model: m })}
                 />
@@ -270,12 +278,18 @@ function ProviderModels({
           <ModelSortMenu sort={sort} onSort={setSort} />
         </div>
         {models.length ? (
-          <PickGroup mode="choose" surface="plate" label={provider.name}>
+          <PickGroup
+            mode="choose"
+            surface="plate"
+            aside={scoreHeading(rankings)}
+            label={provider.name}
+          >
             {models.map((m) => (
               <PickRow
                 key={m}
                 title={m}
-                line={modelDetail(catalog, rankings, { provider: provider.slug, model: m })}
+                line={modelDetail(catalog, { provider: provider.slug, model: m })}
+                trailing={scoreCell({ provider: provider.slug, model: m }, rankings)}
                 selected={isChosen({ provider: provider.slug, model: m })}
                 onPick={() => onChoose({ provider: provider.slug, model: m })}
               />
@@ -304,104 +318,80 @@ function sortProviders(providers: ModelProvider[]) {
     .sort((a, b) => byName.compare(a.name, b.name))
 }
 
-/** The dim a fixed slot gets when the model isn't known to have it. */
-const DIM = "opacity-40"
-
-interface Capability {
-  key: "vision" | "reasoning"
-  label: string
-  /** What the mark reads as when the catalog says the model lacks it. */
-  off: string
-  Icon: LucideIcon
-}
-
-/** The capability marks every row draws, in order. */
-const CAPABILITIES: Capability[] = [
-  { key: "vision", label: "Vision", off: "No vision", Icon: EyeIcon },
-  { key: "reasoning", label: "Reasoning", off: "No reasoning", Icon: BrainIcon },
-]
-
 /**
- * A capability mark: a lucide icon with a tooltip naming the capability, dimmed when the model
- * isn't known to have it.
+ * The capabilities a row marks, in order: an icon each, drawn only where models.dev says the model
+ * has it, so nothing is dimmed and nothing waits on a tooltip a phone never opens. The name rides
+ * beside the icon for a screen reader.
  */
-function CapabilityMark({
-  capability,
-  supported,
-}: {
-  capability: Capability
-  supported?: boolean
-}) {
-  const { Icon } = capability
-  const label = supported === false ? capability.off : capability.label
-  return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <span
-            aria-label={label}
-            className={cn("inline-flex align-[-2px]", supported !== true && DIM)}
-          />
-        }
-      >
-        <Icon className="size-3.5" aria-hidden="true" />
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
-  )
-}
+const CAPABILITIES = [
+  { key: "vision", label: "Vision", Icon: EyeIcon },
+  { key: "reasoning", label: "Reasoning", Icon: BrainIcon },
+] as const
 
-/** The cost as fixed dollar slots: the band's signs lit, the rest dimmed, so every row lines up. */
-function CostSigns({ tier }: { tier: number | undefined }) {
-  const lit = tier ?? 0
-  return (
-    <span className="inline-flex">
-      {"$".repeat(lit)}
-      {MAX_COST_TIER > lit && <span className={DIM}>{"$".repeat(MAX_COST_TIER - lit)}</span>}
-    </span>
-  )
-}
-
-/** `BenchLM 87`, or `BenchLM ?` where the shipped payload has no row for the model. */
-function benchlmLabel(score: number | undefined, rankings: RankingsData) {
-  if (score !== undefined) return `BenchLM ${Math.round(score)}`
-  return rankings ? "BenchLM ?" : null
+/** A provider's own name for a slug, for a row whose group doesn't already say it. */
+function providerName(providers: ModelProvider[], slug: string | undefined) {
+  return providers.find((p) => p.slug === slug)?.name ?? slug
 }
 
 /**
- * A model row's muted second line, one shape in a fixed order: the BenchLM score, the cost, the
- * model's capabilities, then the context window. The score and the context drop out when unknown;
- * the cost and both capability marks always show, dimmed when the model isn't known to have them.
- * A model models.dev doesn't list shows its score and a dash where the rest would be, or `—` when
- * BenchLM doesn't rank it either, and no line at all while the catalog is still loading.
+ * The score column's name, drawn once at the right of each group's heading over the numbers its
+ * rows carry, so a row says `65` rather than `BenchLM 65`. Nothing until the rankings load.
  */
-function modelDetail(
-  catalog: Catalog | undefined,
-  rankings: RankingsData,
-  choice: ModelChoice,
-) {
-  if (!catalog) return undefined
-  const facts = modelFacts(catalog, choice)
-  const benchlm = benchlmLabel(overallScoreOf(choice), rankings)
-  // The score stands on its own: models.dev knows nothing else about an unlisted model.
-  if (!facts.listed) return benchlm ? `${benchlm} · —` : "—"
+function scoreHeading(rankings: RankingsData) {
+  return rankings ? "BenchLM" : undefined
+}
+
+/**
+ * A row's BenchLM score, right-aligned in the column the heading names: `?` where the shipped
+ * payload has no row for the model. The column's name rides on the cell for a screen reader,
+ * since the heading over it is drawn for the eye alone.
+ */
+function scoreCell(choice: ModelChoice, rankings: RankingsData) {
+  if (!rankings) return undefined
+  const score = overallScoreOf(choice)
   return (
     <>
-      {benchlm && `${benchlm} · `}
-      <CostSigns tier={facts.tier} />
-      {" · "}
-      <span className="inline-flex items-center gap-1">
-        {CAPABILITIES.map((capability) => (
-          <CapabilityMark
-            key={capability.key}
-            capability={capability}
-            supported={facts[capability.key]}
-          />
-        ))}
+      <span className="sr-only">BenchLM </span>
+      <span className={cn(score === undefined && "text-muted-foreground")}>
+        {score === undefined ? "?" : Math.round(score)}
       </span>
-      {facts.context ? ` · ${formatTokens(facts.context)}` : null}
     </>
   )
+}
+
+/**
+ * A model row's muted second line: the provider where the group doesn't name it, the cost as the
+ * band's dollar signs, the context window, then a mark for each capability the model has — each
+ * part left out where it isn't known, and nothing drawn for a capability it lacks. A model
+ * models.dev doesn't list shows a dash where its facts would be, and no line while the catalog loads.
+ */
+function modelDetail(catalog: Catalog | undefined, choice: ModelChoice, provider?: string) {
+  if (!catalog) return provider
+  const facts = modelFacts(catalog, choice)
+  const parts: ReactNode[] = provider ? [provider] : []
+  if (!facts.listed) parts.push("—")
+  else {
+    if (facts.tier) parts.push("$".repeat(facts.tier))
+    if (facts.context) parts.push(formatTokens(facts.context))
+    const marks = CAPABILITIES.filter((capability) => facts[capability.key])
+    if (marks.length)
+      parts.push(
+        <span className="inline-flex items-center gap-1.5 align-[-2px]">
+          {marks.map(({ key, label, Icon }) => (
+            <Fragment key={key}>
+              <Icon className="size-3.5" aria-hidden="true" />
+              <span className="sr-only">{label}</span>
+            </Fragment>
+          ))}
+        </span>,
+      )
+  }
+  return parts.map((part, i) => (
+    <Fragment key={i}>
+      {i > 0 && " · "}
+      {part}
+    </Fragment>
+  ))
 }
 
 // A fixed height, so the sheet doesn't grow and shrink between the lists.
