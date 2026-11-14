@@ -205,6 +205,13 @@ _Avoid_: alert, limit banner, usage warning
 One Hermes profile the user has linked to Gots: its own agent, skills and settings, reached at the host it runs on.
 _Avoid_: profile, agent, assistant
 
+**Character**:
+The face and voice a bot wears: its picture, how it moves, who it is and the five lines it says on an empty chat. One of nine, chosen in the bot's settings under Image. A **posed** character has a picture per **mood** and changes between them in a poof; a still one has a single picture (ADR 0155). Its full profile is in Storybook's Characters, not in the app.
+_Avoid_: avatar, skin, bot (which is the Hermes profile)
+
+**Mood**:
+What a posed character feels, shown by its pose and its idle motion: happy, waving, excited, loved, curious or sleepy. The screen that draws the character chooses it; it is never stored and carries no colour.
+
 **Bot's label**:
 What a list calls a bot: the name its host gave it, and the host it answers at only where another bot of that
 name answers somewhere else — `Hermes (domain)` and `Hermes (example)` for two hosts' sealed defaults, `Studio`

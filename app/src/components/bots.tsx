@@ -1,13 +1,36 @@
 /**
- * Gots's bot characters. The artwork lives in public/bots/<id>.png and <Bot> (bot.tsx) renders
- * it; each one's motion is `.bot-anim-<id>` in index.css, which only runs under `.bot-animate`.
+ * Gots's bot characters. A still character's artwork is public/bots/<id>.png and its motion is
+ * `.bot-anim-<id>` in index.css, which only runs under `.bot-animate`. A **posed** character
+ * (`posed: true`) ships one pose per mood in public/bots/<id>/<mood>.png instead — its still is the
+ * happy pose — and <Bot> (bot.tsx) draws the pose its mood names, changing between them in a poof.
  */
+
+/** What a posed character can feel; each has its own pose and its own idle motion. */
+export const BOT_MOODS = [
+  { id: "happy", name: "Happy", when: "Idle, listening" },
+  { id: "wave", name: "Waving", when: "Greeting, a new chat" },
+  { id: "excited", name: "Excited", when: "Poked, good news" },
+  { id: "love", name: "Loved", when: "Thanked" },
+  { id: "curious", name: "Curious", when: "Waiting on you" },
+  { id: "sleepy", name: "Sleepy", when: "Away, offline" },
+] as const
+
+export type BotMood = (typeof BOT_MOODS)[number]["id"]
+
+export const DEFAULT_MOOD: BotMood = "happy"
+
+/** The image a bot is drawn with: its mood's pose where it has poses, else its one picture. */
+export function botImage(bot: Pick<BotDefinition, "id" | "posed">, mood: BotMood = DEFAULT_MOOD) {
+  return bot.posed ? `/bots/${bot.id}/${mood}.png` : `/bots/${bot.id}.png`
+}
 
 type Lines = [string, string, string, string, string]
 
-interface BotDefinition {
+export interface BotDefinition {
   id: string
   name: string
+  /** Ships a pose per mood (see the top of this file) rather than one picture. */
+  posed?: boolean
   /** How it looks and moves. */
   description: string
   /** Who it is, written from how it looks; its lines are said in this voice. */
@@ -134,9 +157,29 @@ export const BOTS: BotDefinition[] = [
       "Glad you're here. Let's make something good.",
     ],
   },
+  {
+    id: "ember",
+    name: "Ember",
+    posed: true,
+    description:
+      "A glowing amber jelly with a visor face who bobs when it's content and pops into a new mood in a puff of smoke.",
+    character:
+      "Warm and a little sleepy-eyed, like something fresh from the oven. Wears every feeling on its face and says so with a puff.",
+    lines: [
+      "Glowing steady. Ready when you are.",
+      "Fresh out of the oven and fully warmed up. What's first?",
+      "Smiling with my whole visor. Let's get into it.",
+      "I'm at a gentle simmer. Give me something to heat up.",
+      "Warm, wobbly and ready. Where to?",
+    ],
+  },
 ]
 
-/** Older builds stored these ids; v3 of the database maps them onto the current bots. */
+/**
+ * Older builds stored these ids; v3 of the database maps them onto the current bots. The map runs
+ * once, on a database older than v3, so "ember" here is the old character of that name and not the
+ * posed one in BOTS, which a v3 database has never held.
+ */
 export const LEGACY_BOT_IDS: Record<string, string> = {
   bolt: "cubby",
   ember: "tri",

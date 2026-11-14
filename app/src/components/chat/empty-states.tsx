@@ -53,7 +53,7 @@ export function EmptyChatState({
 }) {
   return (
     <div className={`${PANE} gap-6`}>
-      <Bot id={botId} animate className="size-24" />
+      <Bot id={botId} animate mood="wave" className="size-24" />
       {configured ? (
         <div className="flex max-w-md flex-col items-center gap-3">
           {line && <ReadyLine botId={botId} id={id} />}
