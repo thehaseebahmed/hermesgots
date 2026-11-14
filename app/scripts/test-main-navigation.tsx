@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter, Route, Routes, useLocation } from "react-router"
 
-import { Home } from "@/App"
+import { AppRoutes, Home } from "@/App"
 import { ConversationList } from "@/components/conversation-list"
 import { BotChatsPage } from "@/routes/bot-chats"
 import { ChatPage } from "@/routes/chat"
@@ -10,6 +10,7 @@ import { db } from "@/lib/db"
 
 import {
   botProfile,
+  composerField,
   find,
   findAll,
   findText,
@@ -158,6 +159,26 @@ test("a link to a bot's screen draws the bot's list, and makes no Main", async (
       "the list reads the chats it has rather than making one",
     )
   })
+})
+
+test("a chat open writes no memory", async () => {
+  await seed()
+  await db.conversations.put(mainRow())
+  localStorage.removeItem("gots:last-chat")
+  globalThis.fetch = async () => json({})
+  await mount(
+    <MemoryRouter initialEntries={[`/c/${MAIN}`]}>
+      <AppRoutes />
+    </MemoryRouter>,
+    async () => {
+      await until(async () => Boolean(composerField()), "the chat's composer")
+      assert.equal(
+        localStorage.getItem("gots:last-chat"),
+        null,
+        "a chat open remembers nothing as the conversation the app was last left in",
+      )
+    },
+  )
 })
 
 test("the Chats list's bot row opens the bot's screen", async () => {
