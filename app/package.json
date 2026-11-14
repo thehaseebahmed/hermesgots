@@ -21,7 +21,9 @@
     "test:unit": "node --experimental-strip-types --test --test-concurrency=3 \"scripts/test-*.mjs\"",
     "test:component": "node --max-old-space-size=1536 --test --test-concurrency=2 --test-force-exit --import ./scripts/component-hooks.mjs \"scripts/test-*.tsx\"",
     "mock": "node scripts/mock-hermes.mjs",
-    "e2e": "node scripts/e2e/cli.mjs"
+    "e2e": "node scripts/e2e/cli.mjs",
+    "storybook": "pnpm build:canvas-libraries && storybook dev -p 6006",
+    "build-storybook": "pnpm build:canvas-libraries && storybook build"
   },
   "dependencies": {
     "@alpinejs/csp": "^3.17.5",
@@ -73,6 +75,7 @@
     "@reticlehq/react": "3.9.0",
     "@reticlehq/vite-plugin": "3.9.0",
     "@sentry/vite-plugin": "^11.10.0",
+    "@storybook/react-vite": "^10.6.7",
     "@types/leaflet": "^1.9.22",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
@@ -85,6 +88,7 @@
     "prettier": "^3.9.9",
     "prettier-plugin-tailwindcss": "^0.8.1",
     "shadcn": "^4.21.1",
+    "storybook": "^10.6.7",
     "typescript": "~6.0.2",
     "typescript-7": "npm:typescript@7.0.2",
     "vite": "^8.3.0",

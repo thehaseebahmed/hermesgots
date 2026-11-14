@@ -1,0 +1,92 @@
+name: Storybook
+
+# Storybook is a slot of the app's own Netlify site, not a site of its own (docs/adr/0154-storybook-is-a-slot-of-the-app-site.md): a branch
+# deploy aliased `storybook`, served at storybook--<site>.netlify.app beside `candidate`. A pull
+# request builds it, so a story that stops compiling fails the PR; a merge to main deploys it. It is
+# always an alias deploy: `--prod` is deliberately never passed, because on this site that would
+# publish Storybook over the app. Branch deploys cost no credits (ADR 0003).
+on:
+  pull_request:
+    paths:
+      - "app/src/**"
+      - "app/.storybook/**"
+      - "app/package.json"
+      - "app/pnpm-lock.yaml"
+      - "DESIGN.md"
+      - ".github/workflows/storybook.yml"
+  push:
+    branches: [main]
+    paths:
+      - "app/src/**"
+      - "app/.storybook/**"
+      - "app/package.json"
+      - "app/pnpm-lock.yaml"
+      - "DESIGN.md"
+      - ".github/workflows/storybook.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: storybook-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  storybook:
+    name: Build and deploy Storybook
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Install
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        working-directory: app
+        run: pnpm build-storybook
+
+      - name: Deploy to the storybook alias
+        # The root netlify.toml still applies to a deploy, and its catch-all redirect to /index.html
+        # is harmless here: Storybook has an index.html of its own and every file it serves is real.
+        if: github.event_name != 'pull_request'
+        run: |
+          npx --yes netlify-cli@27.12.0 deploy \
+            --dir=app/storybook-static \
+            --alias storybook \
+            --message "storybook ${{ github.sha }} $(git log -1 --format='%s')"
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+
+      - name: Where it is
+        if: github.event_name != 'pull_request'
+        run: |
+          site=$(npx --yes netlify-cli@27.12.0 api getSite --data "{\"site_id\":\"$NETLIFY_SITE_ID\"}" 2>/dev/null || true)
+          name=$(printf '%s' "$site" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("name",""))' 2>/dev/null || true)
+          {
+            echo "### Storybook deployed"
+            echo
+            if [ -n "$name" ]; then
+              echo "https://storybook--${name}.netlify.app"
+            else
+              echo "The site name could not be read from the Netlify API; the URL is storybook--SITE.netlify.app."
+            fi
+            echo
+            echo "An unpublished branch deploy aliased storybook; the app's own deploys are untouched."
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}

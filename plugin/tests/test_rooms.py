@@ -1138,7 +1138,14 @@ class RoomInTheChatList(unittest.TestCase):
         host = Host(listed=[ROOM])
         answers = []
         with dispatcher(host), no_loopback():
-            readers = [threading.Thread(target=lambda: answers.append(self.chats(host=host))) for _ in range(2)]
+            # The patches above are this test's, entered once: a reader that entered its own
+            # (`self.chats`) would, on leaving, restore a `sys.modules` older than its sibling's wiring.
+            readers = [
+                threading.Thread(
+                    target=lambda: answers.append(self.asked(plugin.PREFIX + "/chats")["payload"]["chats"])
+                )
+                for _ in range(2)
+            ]
             for reader in readers:
                 reader.start()
             for reader in readers:
