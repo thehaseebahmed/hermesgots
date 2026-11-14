@@ -1,0 +1,92 @@
+name: Storybook
+
+# Storybook is its own Netlify site, built here and never by Netlify's Git builds (docs/adr/0153-...).
+# A pull request builds it, so a story that stops compiling fails the PR. A merge to main deploys an
+# unpublished branch deploy aliased `latest` (free: a production deploy costs 15 credits, ADR 0003).
+# Running this by hand on main with `promote` on publishes the same build to the site's production URL.
+# Both deploys need the NETLIFY_STORYBOOK_SITE_ID secret; without it the deploy steps are skipped
+# rather than failed, so the workflow is safe to merge before the site exists.
+on:
+  pull_request:
+    paths:
+      - "app/src/**"
+      - "app/.storybook/**"
+      - "app/package.json"
+      - "app/pnpm-lock.yaml"
+      - "DESIGN.md"
+      - ".github/workflows/storybook.yml"
+  push:
+    branches: [main]
+    paths:
+      - "app/src/**"
+      - "app/.storybook/**"
+      - "app/package.json"
+      - "app/pnpm-lock.yaml"
+      - "DESIGN.md"
+      - ".github/workflows/storybook.yml"
+  workflow_dispatch:
+    inputs:
+      promote:
+        description: Publish this build to the Storybook site's production URL (15 credits)
+        type: boolean
+        default: false
+
+concurrency:
+  group: storybook-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  storybook:
+    name: Build and deploy Storybook
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+
+      - name: Install
+        working-directory: app
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        working-directory: app
+        run: pnpm build-storybook
+
+      - name: Is there a site to deploy to
+        id: site
+        if: github.event_name != 'pull_request'
+        run: echo "present=${{ secrets.NETLIFY_STORYBOOK_SITE_ID != '' && secrets.NETLIFY_AUTH_TOKEN != '' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy the latest build
+        if: steps.site.outputs.present == 'true' && github.event_name == 'push'
+        run: |
+          npx --yes netlify-cli@27.12.0 deploy \
+            --dir=app/storybook-static \
+            --alias latest \
+            --message "${{ github.sha }} $(git log -1 --format='%s')"
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_STORYBOOK_SITE_ID }}
+
+      - name: Publish to production
+        if: steps.site.outputs.present == 'true' && github.event_name == 'workflow_dispatch' && github.event.inputs.promote == 'true'
+        run: |
+          npx --yes netlify-cli@27.12.0 deploy \
+            --dir=app/storybook-static \
+            --prod \
+            --message "${{ github.sha }} $(git log -1 --format='%s')"
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_STORYBOOK_SITE_ID }}
