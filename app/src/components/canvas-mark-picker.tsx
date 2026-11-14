@@ -282,7 +282,13 @@ function MarkPicker({
             type="file"
             accept="image/*"
             className="hidden"
-            onChange={(event) => void choose(event.target.files?.[0])}
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              // The field forgets what it was handed, so choosing that same file again is a choice
+              // again rather than a change no one hears about.
+              event.target.value = ""
+              void choose(file)
+            }}
           />
         </div>
       </TabsContent>
