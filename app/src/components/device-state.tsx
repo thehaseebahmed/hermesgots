@@ -20,44 +20,35 @@ import { getPluginInfo, type PluginInfo } from "@/lib/hermes"
 import { isNative } from "@/lib/platform"
 import { resumeTrace } from "@/lib/resume-trace"
 import { legacyChatOn } from "@/lib/legacy-chat"
-import { landingChat, lastChatOf } from "@/lib/last-chat"
 import { MIN_PLUGIN_VERSION } from "@/lib/version"
 
 /** The newest chats each bot's state names, so a busy bot can't make the dump unbounded. */
 const CHATS = 100
 
-/** The host-and-pane answers one bot's state carries, with nulls where nothing was answered. */
-const hostOf = (
-  profile: Profile,
-  info: PluginInfo | null,
-  pane: { last: string | null; stored: string | null },
-): DiagHost => ({
+/** The host-and-features answers one bot's state carries, with nulls where nothing was answered. */
+const hostOf = (profile: Profile, info: PluginInfo | null): DiagHost => ({
   configured: hasServer(profile),
   pluginVersion: profile.pluginVersion ?? null,
   plugin: info?.version ?? null,
   features: info?.features ?? null,
-  lastThread: pane.last,
-  lastStored: pane.stored,
 })
 
 async function botState(profile: Profile): Promise<DiagBot> {
   const configured = hasServer(profile)
   const chats = conversationsOf(profile.id).reverse().filter(listsAsChat)
-  const [rows, last, info] = await Promise.all([
+  const [rows, info] = await Promise.all([
     chats.clone().limit(CHATS).toArray(),
-    landingChat(profile.id),
     configured ? getPluginInfo(serverConfig(profile)).catch(() => null) : null,
   ])
   const drawn: DiagChat[] = rows.map((chat) => diagChat(chat))
-  const pane = { last: last ?? null, stored: lastChatOf(profile.id) }
-  return diagBot({ profile, host: hostOf(profile, info, pane), chats: drawn })
+  return diagBot({ profile, host: hostOf(profile, info), chats: drawn })
 }
 
 /** A bot whose own reads failed: named and configured, and marked unread rather than empty. */
 const unreadBot = (profile: Profile): DiagBot =>
   diagBot({
     profile,
-    host: hostOf(profile, null, { last: null, stored: null }),
+    host: hostOf(profile, null),
     chats: [],
     unread: true,
   })

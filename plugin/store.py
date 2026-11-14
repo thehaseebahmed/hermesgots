@@ -53,7 +53,13 @@ logger = logging.getLogger(__name__)
 # 70 keeps whether a canvas's data is copied into its host's OKF vault (`canvases.py`'s record,
 # `canvas_vault.py`): one column, off for every canvas an older store holds, since a backup nobody
 # asked for is not one to start.
-SCHEMA_VERSION = 70
+# 71 keeps a literature review's papers (`research.py`): the review's own brief and funnel on its
+# mission, a paper's metadata, screening and evidence level on its source, and the field and theme
+# of a claim. New columns only, so every other mission reads as it did.
+# 72 keeps the mark a pinned canvas's row draws (`canvases.py`'s record, #1065): one column — the
+# icon's name or the emoji — empty for every canvas an older store holds, since a canvas nobody has
+# marked draws the app's own frame.
+SCHEMA_VERSION = 72
 
 
 def data_dir(hermes_home: Path) -> Path:
@@ -577,6 +583,31 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    PRIMARY KEY (mission_id, lane, query)
                )"""
         )
+        # v71: a literature review (research.py). `review` is what the user confirmed (the field, the
+        # years, the criteria, the queries, the cap, preprints) and `funnel` what the search and the
+        # screening counted. A paper is a source: its metadata is the index's, `screening` is where
+        # it stands (found, include, unsure, exclude, unscreened) with the reason and what it failed,
+        # `dropped` the fields its quote check threw out, and
+        # `evidence_level` how much of it was read (full, abstract, metadata). `abstract` and
+        # `text_urls` are working data the reading needs across a restart, cleared when it ends.
+        mission_columns = {row[1] for row in conn.execute("PRAGMA table_info(research_missions)")}
+        for column in ("review", "funnel"):
+            if column not in mission_columns:
+                conn.execute(f"ALTER TABLE research_missions ADD COLUMN {column} TEXT")
+        source_columns = {row[1] for row in conn.execute("PRAGMA table_info(research_sources)")}
+        for column in (
+            "doi", "venue", "authors", "screening", "screen_reason", "screen_fails", "evidence_level",
+            "abstract", "text_urls",
+        ):
+            if column not in source_columns:
+                conn.execute(f"ALTER TABLE research_sources ADD COLUMN {column} TEXT")
+        for column in ("year", "preprint", "dropped"):
+            if column not in source_columns:
+                conn.execute(f"ALTER TABLE research_sources ADD COLUMN {column} INTEGER")
+        claim_columns = {row[1] for row in conn.execute("PRAGMA table_info(research_claims)")}
+        for column in ("field", "theme"):
+            if column not in claim_columns:
+                conn.execute(f"ALTER TABLE research_claims ADD COLUMN {column} TEXT")
         # v32: the messages triage sent out of a Main thread, for its Moved markers (moves.py).
         # v33: a v32 store also had a thread_session column nothing read; it is rebuilt without it.
         move_columns = {row[1] for row in conn.execute("PRAGMA table_info(main_moves)")}
@@ -987,6 +1018,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
             canvas_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvases)")}
             if "image" not in canvas_columns:
                 conn.execute("ALTER TABLE canvases ADD COLUMN image TEXT")
+        # v72: the mark a canvas's pinned row draws (canvases.py, #1065). `mark` is one lucide icon's
+        # name or one emoji; it is the record's rather than the pin's, so every device draws the same
+        # row, and it is absent until a user chooses one — a canvas nobody marked draws the app's own
+        # frame.
+        if version < 72:
+            canvas_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvases)")}
+            if "mark" not in canvas_columns:
+                conn.execute("ALTER TABLE canvases ADD COLUMN mark TEXT")
         # v63: the record's folded-away flag is the reader's "Archived" (canvases.py, #933). A store
         # written before the name carries the first one, and the state is the same state under it.
         if version < 63:

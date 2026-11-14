@@ -217,6 +217,9 @@ components:
   merged-dot:
     backgroundColor: "{colors.merged}"
     rounded: "{rounded.full}"
+  warning-dot:
+    backgroundColor: "{colors.warning}"
+    rounded: "{rounded.full}"
   usage-input-dot:
     backgroundColor: "{colors.usage-input}"
     rounded: "{rounded.full}"
@@ -354,7 +357,9 @@ drawer.
 - **A reply is one column.** Its text, the interface a block draws and the rows that account for its
   work all stand on the same inset, so a block starting to draw moves nothing.
 - **Gutters are 16px**, and 12px at the foot of a composer. Nothing scrolls sideways.
-- **Anything tappable is 44px tall**, never smaller and never behind hover, and a row is 56px.
+- **Anything tappable is 44px tall**, never smaller and never behind hover, and a row is 56px. The
+  box a thumb gets is the block a press answers on, so a title and its line are 44px together even
+  where the words inside them stand one line tall.
 - **The foot of the screen belongs to the phone.** A composer, a sheet's last row and a toast stand
   at `max(0.75rem, env(safe-area-inset-bottom))`, and the app reads `env(safe-area-inset-*)` rather
   than guessing at a bar's height.
@@ -374,7 +379,8 @@ hairline.
 A pop-up is the one thing that carries a shadow: a soft one under a sheet or a drawer, and a
 two-line one under a menu, because it sits over a page that keeps working beneath it. A sheet that
 is drag-snapped over a canvas takes no scrim: the page stays readable and the sheet's stops say
-where it is.
+where it is. The unread dot's halo is the one glow outside a pop-up, and it is named with the dots
+above rather than here: it marks a state, it does not lift a surface.
 
 A card never floats. Where a row needs to lift, it takes `{colors.muted}` or `{colors.accent}`
 instead.
@@ -425,7 +431,11 @@ that speaks on that surface. A tone is never used as its own line of text: the t
 at 2.55:1.
 
 **Dots, code and charts.** A state is an 8px dot in `{colors.success}`, `{colors.info}` or
-`{colors.merged}`. A project's token use is four dots, `{colors.usage-input}` through
+`{colors.merged}`. The one exception names its meaning: a bot row's `{colors.warning}` dot at the end
+of its line says the bot holds something this device hasn't read, it always stands beside the words
+that count it, and it carries a faint halo of its own tone — 6px at 45% — so a fill that small reads on
+a row that tints under the pointer; a mark on an avatar, where no words stand, stays `{colors.info}` and
+glows nothing. A project's token use is four dots, `{colors.usage-input}` through
 `{colors.usage-cache-read}`. Code is `{typography.code}` on the muted block a tool card draws, in
 the six syntax colours. A chart draws its series from `chart-series-1` upward, never reordering
 them, and an interface's tables and lists reuse the row and card above rather than inventing a
@@ -452,6 +462,6 @@ words, once.
 - Don't put a plate and its ink in one pair. The tone and its ink score 2.06:1 read together; the
   plate is one entry and the line is another.
 - Don't mix a shadow into a card. Shadows are for what floats over the page: a sheet, a drawer, a
-  menu.
+  menu, and the unread dot's own halo.
 - Don't let a pill and a card argue: pills are `{rounded.full}`, cards are `{rounded.3xl}`, and a
   row inside a group takes no radius at all.

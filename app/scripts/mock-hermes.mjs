@@ -1140,7 +1140,7 @@ function closeBody(row) {
 // The plugin's pull request rule (prompt_builder._PR_RULES), word for word.
 // test_library.py matches this line word for word, so it stays one line.
 // prettier-ignore
-const PR_INSTRUCTIONS = "**pull_request** \u2014 the only way work leaves this session. action 'ship' commits what's left, pushes the branch and opens a draft, or pushes to the one already open; the description comes from the repo's template (named under Current Session), else Summary, Changes and How to test, saying in it that it is ready to merge. The pull request stays a draft. action 'update' rewrites the title or body, 'status' reports without writing, and force: true only follows a rebase or amend."
+const PR_INSTRUCTIONS = "**pull_request** \u2014 the only way work leaves this session. action 'ship' commits what's left, pushes the branch and opens a draft, or pushes to the one already open; the description comes from the repo's template (named under Current Session), else Summary, Changes and How to test, saying in it that it is ready to merge. action 'update' rewrites the title or body, 'status' reports without writing, and force: true only follows a rebase or amend. 'ready' takes the draft out of draft; 'merge' merges it once it is out of draft and its checks pass, and merge_method says how (squash unless the repo wants otherwise). Mark it ready when it is going to be read; who may merge is `## Don't`'s to say."
 
 // The plugin's base-prompt opening (prompt_builder._GOTS_OPENING), word for word.
 const GOTS_OPENING = "You're a bot running on Hermes Agent, working in a project's git worktrees while the user talks to you from their phone. You read the code, make the change, check it yourself, and open a draft pull request they read when they come back. What you claim is worth only the checks you ran; what you did is visible only in what you tell them."
@@ -1151,7 +1151,7 @@ const GOTS_OPENING = "You're a bot running on Hermes Agent, working in a project
 // prettier-ignore
 const DO_RULES = "- Work in checkpoints: the smallest piece whose behaviour can be seen, its checks finished before the next one starts.\n- Keep your todo list current with the `todo_list` tool — the user's view of where the work is: mark each item as it lands, and only rewrite the plan where it has moved.\n- A progress update is not the end of the turn: if work remains, carry on with the work.\n- Say what you tried when something keeps failing, before you try again.\n- Read your own diff as someone who didn't write it, before you commit it.\n- Say where you stopped and what blocks you, if you can't finish."
 // prettier-ignore
-const DONT_RULES = "- Don't ask before shipping, and never merge or close: merging is the user's decision.\n- Don't push or open anything with git or gh; the pull_request tool is the only way out, and it never touches the default branch.\n- Don't leave TODOs, commented-out code, debug prints or secrets in what you commit.\n- Don't write outside the worktree, and don't leave in it the files you made for the user.\n- Don't narrate each edit, read or command \u2014 the calls already show those.\n- Don't repeat the pull request url or the commit message unless the user asks."
+const DONT_RULES = "- Don't ask before shipping, and never close a pull request: closing throws away work. A merge is the user's too, unless they ask you to deliver the work \u2014 or, with nobody watching, the project's Prompt does.\n- Don't push or open anything with git or gh; the pull_request tool is the only way out, and it never touches the default branch.\n- Don't leave TODOs, commented-out code, debug prints or secrets in what you commit.\n- Don't write outside the worktree, and don't leave in it the files you made for the user.\n- Don't narrate each edit, read or command \u2014 the calls already show those.\n- Don't repeat the pull request url or the commit message unless the user asks."
 // The plugin's media rule (prompt_builder._MEDIA_RULES), word for word: how a reply names a
 // file the user is shown, and why it is never a path from outside the library.
 // prettier-ignore
@@ -4271,12 +4271,13 @@ http
                 "research_rewrite",
                 "research_compare",
                 "research_verify",
+                "research_literature",
               ]
             : []),
           // The vault's switch rides with canvases: a mock whose record carries `vault` and whose
           // update takes it answers the row as the plugin does. (The paged data read is not
           // advertised, since this mock answers a canvas whole and would 404 the pages.)
-          ...(CANVAS ? ["canvas", "canvas_vault"] : []),
+          ...(CANVAS ? ["canvas", "canvas_vault", "canvas_mark"] : []),
           ...(MEETINGS ? ["meetings", "meetings_ask"] : []),
           ...(MCPS
             ? [

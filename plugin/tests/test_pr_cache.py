@@ -179,6 +179,10 @@ class PrCacheTests(unittest.TestCase):
         self._read("success")
         self.assertGreater(self.reads, reads)
 
+    def test_a_pull_request_carries_the_head_its_checks_were_read_on(self):
+        """The gate reads checks on one commit; the merge has to name that same commit."""
+        self.assertEqual(self._read("success")["sha"], "sha27")
+
     def test_failing_checks_keep_the_long_window(self):
         self.assertEqual(self._read("failure")["checks"], "failure")
         reads = self.reads

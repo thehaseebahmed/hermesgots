@@ -106,6 +106,11 @@ export interface Canvas {
    * version, or nothing, which the tile draws as the canvas's own mark.
    */
   image?: string
+  /**
+   * The mark this canvas's pinned row draws (#1065): one lucide icon's name, or one emoji, as its
+   * user chose it in the canvas's options. Empty or absent is the app's own frame mark.
+   */
+  mark?: string
   /** The record's change clock. */
   at: number
   createdAt: number
@@ -271,6 +276,7 @@ function toCanvas(raw: Record<string, unknown>, profileId: string): Canvas {
     chatId: String(raw.chat_id ?? ""),
     canUndo: Boolean(raw.can_undo),
     ...(typeof raw.image === "string" && raw.image ? { image: raw.image } : {}),
+    ...(typeof raw.mark === "string" && raw.mark ? { mark: raw.mark } : {}),
     ...(typeof raw.docs_at === "number" ? { docsAt: raw.docs_at } : {}),
     ...(grants ? { grants } : {}),
     ...(typeof raw.html === "string" ? { html: raw.html } : {}),
@@ -593,7 +599,13 @@ export async function updateCanvas(id: string, changes: CanvasChanges) {
   if (!value) throw new Error("The host answered a change the app couldn't read.")
   const held = store.get().details[id]
   const record = toCanvas(value, profile.id)
-  put(profile, held ? { ...held, ...record } : record)
+  // A field the host holds nothing in — a picture or a mark its reader cleared — is no field on the
+  // record it answers, and the copy this device draws still carries the old one. Folding alone would
+  // leave it there until the next read, so a change that named the field empty takes it off.
+  const folded = held ? { ...held, ...record } : record
+  for (const cleared of ["image", "mark"] as const)
+    if (changes[cleared] === "") delete folded[cleared]
+  put(profile, folded)
 }
 
 /**

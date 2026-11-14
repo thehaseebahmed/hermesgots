@@ -2,10 +2,16 @@ import { useCallback, type MouseEvent } from "react"
 import { useNavigate } from "react-router"
 
 /**
- * The state a room's screen and a routine's run give the entry they leave a bot's list in: the reader
- * stepped back onto the list, so it draws itself rather than landing in the chat behind it.
+ * Whether a press is the reader's own: the left button, with nothing held. A press meant for a new
+ * tab or window belongs to the browser, so the app leaves it alone.
  */
-export const BACK_ON_LIST = { listed: true }
+export const plainPress = (event: MouseEvent<HTMLAnchorElement>) =>
+  !event.defaultPrevented &&
+  event.button === 0 &&
+  !event.metaKey &&
+  !event.ctrlKey &&
+  !event.shiftKey &&
+  !event.altKey
 
 /**
  * The `onClick` for a link that opens a top-level screen: the plain press opens it as the app's only
@@ -13,11 +19,25 @@ export const BACK_ON_LIST = { listed: true }
  * left — is left to the link the browser already has.
  */
 export const opensAsRoot = (open: () => void) => (event: MouseEvent<HTMLAnchorElement>) => {
-  if (event.defaultPrevented || event.button !== 0) return
-  if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+  if (!plainPress(event)) return
   event.preventDefault()
   open()
 }
+
+/**
+ * A row's own press where it also opens as the app's one entry: what the row does first, then
+ * `opensAsRoot`. The sidebar's rows all do both, so the order lives here rather than in each of them.
+ */
+export const pressOpeningRoot =
+  (
+    root: (to: string) => void,
+    to: string,
+    first?: (event: MouseEvent<HTMLAnchorElement>) => void,
+  ) =>
+  (event: MouseEvent<HTMLAnchorElement>) => {
+    first?.(event)
+    opensAsRoot(() => root(to))(event)
+  }
 
 /**
  * History mirrors the screen hierarchy: a top-level screen (a chat, Code, Settings) is the first
@@ -59,16 +79,6 @@ export function useNav() {
   )
 
   /**
-   * Steps back onto a list this screen's row stands in: `up`'s move with the marker a list reads as
-   * "the reader stepped back here". A list left without it reads the entry as a fresh arrival and
-   * lands the reader in the chat behind it, so the move carries the marker rather than each caller.
-   */
-  const backToList = useCallback(
-    (to: string) => up(to, BACK_ON_LIST),
-    [up],
-  )
-
-  /**
    * The guard a screen gives the back button where the menu and a list both open it: whatever
    * opened it stands behind it, so the press steps back to that; the menu opens it as the first
    * entry, where nothing is behind it, so the press is left to the app — which leaves, as back does
@@ -83,5 +93,5 @@ export function useNav() {
     [],
   )
 
-  return { root, up, backToList, back }
+  return { root, up, back }
 }

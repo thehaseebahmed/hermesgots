@@ -217,7 +217,11 @@ _Avoid_: display name, nickname, handle
 Whether a bot's host answered this device's last chat-list pass, and when this device last heard it: the
 pass's own answer decides online or away, and until a pass lands the time this device kept stands in for it.
 It is not a stored heartbeat — nothing on the server records a check-in — and the screens draw two words
-from it, `Online` or `Last seen 2 hr. ago`, or nothing at all about a bot this device cannot answer for.
+from it, `Online` or `Last seen 2 hr. ago`, and the sidebar's bot row the third, `Offline`, since a row
+one line tall has no room for when it was heard. Where it cannot answer for a bot the row says what is
+missing rather than falling silent — `Not seen yet` for a host nothing has answered from, `Not linked`
+for a bot no host registered — while Settings keeps its own silence about the same bot, since its rows
+have room to say what the bot is instead (ADR 0151).
 _Avoid_: heartbeat, online status, availability
 
 **Chat**:
@@ -831,6 +835,14 @@ _Avoid_: thumbnail, preview, cover
 A canvas that has its own row in the sidebar, on every device.
 _Avoid_: favourite, starred, shortcut
 
+**Mark**:
+The icon or emoji a pinned canvas's row draws in the sidebar, chosen by the reader in the canvas's options and kept on the canvas's own record rather than on this device, so every device draws the same one. An icon takes one of the palette's colour names; an emoji carries its own colour; a canvas with no mark draws the app's frame mark.
+_Avoid_: icon, avatar, badge, glyph, sticker
+
+**Open canvas**:
+The canvas this tab opened from Canvas's own screens — the list's tile, or a start — and the one thing a canvas's row is marked by (ADR 0151). A canvas reached by its address, a reload, back or forward, or another tab's opening is no open canvas.
+_Avoid_: current canvas, active canvas, selected canvas
+
 **Declared tools**:
 The tools a version of a canvas says it may call, named by its bot when it writes that version and enforced where the canvas calls the host. A declared tool is asked about the first time the canvas calls it, and only an allowed one is called. Unrelated to an **Approval**, which a bot asks for mid-run.
 _Avoid_: permissions, agreed tools, scopes
@@ -909,6 +921,26 @@ _Avoid_: track, branch, side, researcher
 **Stance**:
 Which way a piece of evidence bears on a part: it supports it, refutes it, or is only context. The researcher records one and the judge gives one independently, and the evidence counts only where they agree.
 _Avoid_: position, polarity, sentiment, side
+
+**Literature review**:
+A research mission that answers what the research says about a question: the host searches a scholarly index, screens the papers against the user's criteria, reads what is open and extracts the same fields from each. It delivers a narrative review, and is never called systematic.
+_Avoid_: systematic review, lit search, paper summary
+
+**Inclusion criteria**:
+The short lines a paper must meet to be part of a literature review, each checkable from a title and an abstract; the user confirms them before anything is searched.
+_Avoid_: filters, rules, requirements
+
+**Funnel**:
+A literature review's counts, worked out by code: the papers found, screened, included, and excluded with the reason for each, plus the ones the cap left unreached. Found is always screened plus unreached, and screened is always included plus excluded.
+_Avoid_: stats, pipeline counts, PRISMA diagram
+
+**Evidence level**:
+How much of a paper the host read for a literature review: its full text, its abstract only, or its metadata only.
+_Avoid_: quality, rigour, confidence, depth
+
+**Quote check**:
+The code that keeps an extracted field of a paper only when the passage given for it is found in the text the host fetched; a field that fails it is dropped and counted.
+_Avoid_: cross-check, verification, fact check
 
 **Search trail**:
 The web searches each lane of a verify mission made, in the order it made them, kept so a reader can see where the evidence was looked for, and where it wasn't.

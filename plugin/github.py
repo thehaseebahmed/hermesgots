@@ -60,9 +60,18 @@ def git_auth_args(auth: Optional[str]) -> list[str]:
 
 
 class GitHubError(Exception):
-    def __init__(self, message: str, status: int = 502):
+    """GitHub refused a call, or couldn't be reached.
+
+    ``status`` is the answer this plugin gives for that failure, which is why every HTTP failure but
+    a 401 is a 502: the app reads a 404 as a plugin that isn't there. ``code`` keeps the status
+    GitHub itself answered where there was one, so a caller whose next step depends on *which*
+    refusal it was — the merge's 405, 409 and 422 — can act on it instead of reading prose.
+    """
+
+    def __init__(self, message: str, status: int = 502, code: Optional[int] = None):
         super().__init__(message)
         self.status = status
+        self.code = code
 
 
 class GitHubBusy(GitHubError):
@@ -186,7 +195,9 @@ def _fetch(
     except urllib.error.HTTPError as error:
         if error.code == 401:
             raise GitHubError("GitHub rejected the server's token.", 401) from None
-        raise GitHubError(_error_message(error) or f"GitHub answered {error.code}.") from None
+        raise GitHubError(
+            _error_message(error) or f"GitHub answered {error.code}.", 502, error.code
+        ) from None
     except (urllib.error.URLError, TimeoutError, ValueError):
         raise GitHubError("Couldn't reach GitHub from the server.") from None
     finally:
@@ -216,9 +227,10 @@ def is_missing(error: "GitHubError") -> bool:
     """Whether GitHub said the thing isn't there.
 
     Every HTTP failure but a 401 arrives as GitHub's own wording rather than its status, so this is
-    the one place that reads a 404 out of it.
+    the one place that reads a 404 out of it — the code the failure kept where it had one, else
+    GitHub's own words.
     """
-    return "Not Found" in str(error)
+    return error.code == 404 or "Not Found" in str(error)
 
 
 def _user(auth: Optional[str]) -> Dict[str, Any]:
@@ -498,6 +510,8 @@ def _pr(repo: str, row: Any, auth: Optional[str], checks: bool = True) -> Option
         "title": row.get("title") if isinstance(row.get("title"), str) else "",
         "url": row.get("html_url") if isinstance(row.get("html_url"), str) else None,
         "state": _state(row),
+        # The commit the checks above were read on, so the merge can guard the one the gate judged.
+        "sha": sha if isinstance(sha, str) else None,
         "checks": _checks(repo, sha, auth) if checks and isinstance(sha, str) and sha else None,
     }
 
@@ -643,6 +657,125 @@ def forget_pull_request(repo_root: str, branch: str) -> None:
         del _pr_cache[key]
     for key in [key for key in _pr_failed if key[:2] == (repo_root, branch)]:
         del _pr_failed[key]
+
+
+# GitHub's only supported way to take a draft out of draft: the REST update endpoint documents no
+# `draft` field, so this mutation is the call.
+READY_MUTATION = (
+    "mutation($id: ID!) { markPullRequestReadyForReview(input: {pullRequestId: $id}) "
+    "{ pullRequest { id isDraft } } }"
+)
+
+
+def _pull(repo: str, number: int, auth: str) -> Dict[str, Any]:
+    """One pull request's own row: what a write is checked against before GitHub is asked."""
+    row = _request(f"/repos/{repo}/pulls/{number}", auth)
+    if not isinstance(row, dict):
+        raise GitHubError(f"GitHub didn't return {repo}#{number}.")
+    return row
+
+
+def mark_ready(repo: str, number: int, auth: str) -> Dict[str, Any]:
+    """Takes a draft pull request out of draft, so it can be reviewed (and then merged).
+
+    Read first for the pull request's node id, which is what the mutation names it by. One already
+    out of draft is answered as it is, so a retry after a dropped answer costs no call.
+    """
+    row = _pull(repo, number, auth)
+    if not row.get("draft"):
+        return _pr_or_error(repo, row, None)
+    node = row.get("node_id")
+    if not isinstance(node, str) or not node:
+        raise GitHubError(f"GitHub didn't name {repo}#{number} in a way it can be marked ready by.")
+    answer = _request("/graphql", auth, "POST", {"query": READY_MUTATION, "variables": {"id": node}})
+    errors = answer.get("errors") if isinstance(answer, dict) else None
+    if isinstance(errors, list) and errors:
+        first = errors[0] if isinstance(errors[0], dict) else {}
+        said = first.get("message")
+        raise GitHubError(said if isinstance(said, str) and said else f"GitHub didn't mark {repo}#{number} ready.")
+    made = answer.get("data") if isinstance(answer, dict) else None
+    made = made.get("markPullRequestReadyForReview") if isinstance(made, dict) else None
+    made = made.get("pullRequest") if isinstance(made, dict) else None
+    if not isinstance(made, dict) or made.get("isDraft") is not False:
+        # A 200 that never says the draft is gone is no evidence it is: the app would list a pull
+        # request as ready while GitHub still held a draft, and the next merge would eat GitHub's 405.
+        raise GitHubError(
+            f"GitHub answered without saying {repo}#{number} is out of draft. Call pull_request with "
+            "action 'ready' again."
+        )
+    # The mutation answers a node, not a row, so the row this function read is returned with the
+    # draft state it has just been told is cleared.
+    return _pr_or_error(repo, {**row, "draft": False}, None)
+
+
+MERGE_METHODS = ("merge", "squash", "rebase")
+
+
+def merge_pull_request(
+    repo: str, number: int, method: str, auth: str, sha: Optional[str] = None
+) -> Dict[str, Any]:
+    """Merges a pull request, on the head the caller judged, and says whether GitHub merged it.
+
+    ``sha`` is the commit the caller read the checks and the draft state on: GitHub refuses the
+    merge if the branch has moved since, rather than merging a commit nobody looked at. Left out, the
+    head this call reads is the guard.
+    """
+    row = _pull(repo, number, auth)
+    if row.get("draft"):
+        raise GitHubError(
+            f"{repo}#{number} is still a draft, and GitHub won't merge one. Call pull_request with "
+            "action 'ready' first, then 'merge'.",
+            409,
+        )
+    head = row.get("head")
+    head_sha = head.get("sha") if isinstance(head, dict) else None
+    sha = sha if isinstance(sha, str) and sha else head_sha if isinstance(head_sha, str) else None
+    fields: Dict[str, Any] = {"merge_method": method}
+    if sha:
+        fields["sha"] = sha
+    try:
+        answer = _request(f"/repos/{repo}/pulls/{number}/merge", auth, "PUT", fields)
+    except GitHubError as error:
+        raise _merge_refused(repo, number, error) from None
+    answer = answer if isinstance(answer, dict) else {}
+    said = answer.get("message")
+    return {
+        "repo": repo,
+        "number": number,
+        "sha": sha,
+        "merged": bool(answer.get("merged")),
+        "message": said if isinstance(said, str) else None,
+    }
+
+
+def _merge_refused(repo: str, number: int, error: "GitHubError") -> "GitHubError":
+    """A merge GitHub wouldn't make, said as the call the agent makes next."""
+    said = str(error)
+    if error.code == 405:
+        return GitHubError(
+            f"GitHub won't merge {repo}#{number}: {said}. A conflict, a required review or a check "
+            "it says failed is in the way — open its Checks tab, fix what GitHub names, call 'ship' "
+            "again, then 'merge'. Leave a rule the user set on the branch alone, and say what it "
+            "asks for.",
+            409,
+            error.code,
+        )
+    if error.code == 409:
+        return GitHubError(
+            f"{repo}#{number}'s branch moved since this session last read it, so GitHub refused the "
+            "merge rather than merge a commit nobody reviewed. Call pull_request with action 'ship' "
+            "to push this session's commits, then 'merge' again.",
+            409,
+            error.code,
+        )
+    if error.code == 422:
+        return GitHubError(
+            f"GitHub refused the merge of {repo}#{number}: {said}. The repository may not allow this "
+            "merge_method — try 'merge' or 'rebase', else ask the user with clarify.",
+            409,
+            error.code,
+        )
+    return error
 
 
 def create_pull_request(

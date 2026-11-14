@@ -5,14 +5,12 @@ import {
   BellOffIcon,
   CheckIcon,
   EllipsisIcon,
-  ListChecksIcon,
   PencilIcon,
   PinIcon,
   RotateCcwIcon,
   Trash2Icon,
   XIcon,
 } from "lucide-react"
-import { Link } from "react-router"
 import { Banner } from "@/components/banner"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { RenameDialog } from "@/components/chat/rename-dialog"
@@ -20,10 +18,9 @@ import {
   ContextIcon,
   ContextPercent,
   ContextRing,
-  UsageSheet,
   type ContextUsage,
 } from "@/components/chat/usage-sheet"
-import { Button, buttonVariants } from "@/components/ui/button"
+import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -56,10 +53,7 @@ import {
   resetsInText,
 } from "@/lib/provider-usage"
 import { setThreadMuted } from "@/lib/push"
-import { labelOf } from "@/lib/bot-name"
 import { quietly } from "@/lib/report"
-import { cn } from "@/lib/utils"
-import { useBotLabels } from "@/lib/use-bot-labels"
 import { closeSessionWork } from "@/lib/workspace"
 
 /**
@@ -231,11 +225,7 @@ export function ChatActions({
   profile,
   session,
   wide,
-  listPath,
-  unread,
   usage,
-  providerUsage,
-  usageOpen,
   onUsageOpenChange,
   onDeleted,
 }: {
@@ -244,19 +234,12 @@ export function ChatActions({
   /** The chat as a project session, where it is one. */
   session?: Conversation
   wide: boolean
-  /** The bot's chats, where this chat has a list of its own that isn't already on screen beside it. */
-  listPath?: string
-  /** Whether anything else in that list waits unread on this device. */
-  unread?: boolean
   usage: ContextUsage
-  providerUsage?: Profile["providerUsage"]
-  /** The usage sheet, which the limit banner above the composer opens too. */
-  usageOpen: boolean
+  /** Opens the usage sheet, which the limit banner above the composer opens too. */
   onUsageOpenChange: (open: boolean) => void
   /** Where to go once the chat is gone. */
   onDeleted: () => void
 }) {
-  const labels = useBotLabels()
   const configured = Boolean(profile?.baseUrl.trim())
   const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -274,24 +257,6 @@ export function ChatActions({
       <div className="flex items-center gap-2">
         {wide && configured && (
           <ContextRing usage={usage} onClick={() => onUsageOpenChange(true)} />
-        )}
-        {listPath && (
-          <Link
-            to={listPath}
-            aria-label={`Chats with ${profile ? labelOf(labels, profile) : "the bot"}${unread ? ", unread chats" : ""}`}
-            className={cn(buttonVariants({ variant: "outline", size: "icon-lg" }), HEADER_BUTTON)}
-          >
-            <span className="relative flex items-center justify-center">
-              <ListChecksIcon />
-              {unread && (
-                <span
-                  data-unread
-                  aria-hidden
-                  className="absolute -top-1.5 -right-1.5 size-2.5 rounded-full bg-info ring-2 ring-background"
-                />
-              )}
-            </span>
-          </Link>
         )}
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -372,13 +337,6 @@ export function ChatActions({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-
-      <UsageSheet
-        open={usageOpen}
-        onOpenChange={onUsageOpenChange}
-        usage={usage}
-        providerUsage={providerUsage}
-      />
 
       <RenameDialog
         open={renaming}

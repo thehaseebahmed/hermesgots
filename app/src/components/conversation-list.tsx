@@ -1,6 +1,6 @@
 import { useLiveQuery } from "dexie-react-hooks"
 import type { ReactNode } from "react"
-import { matchPath, NavLink, useLocation, type NavLinkProps } from "react-router"
+import { Link, matchPath, NavLink, useLocation, type NavLinkProps } from "react-router"
 import {
   AudioLinesIcon,
   BellOffIcon,
@@ -22,17 +22,18 @@ import {
 } from "lucide-react"
 
 import { Bot } from "@/components/bot"
+import { CanvasMark } from "@/components/canvas-mark"
 import { LabLabel } from "@/components/lab-badge"
 import { RoomFaces } from "@/components/room/room-faces"
 import { SortMenu } from "@/components/sort-menu"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { botChatsPath } from "@/lib/bot-tabs"
-import { previewLine } from "@/lib/bot-chrome"
-import { useCanvasEnabled, usePinnedCanvases } from "@/lib/canvases"
+import { stateLine } from "@/lib/bot-chrome"
+import { closeCanvas, useCanvasOpened } from "@/lib/canvas-open"
+import { useCanvasEnabled, usePinnedCanvases, type Canvas } from "@/lib/canvases"
 import { chatOwner } from "@/lib/chat-owner"
 import { compareChatOrder, waitsOnUser } from "@/lib/chat-list"
-import { presence } from "@/lib/presence"
 import type { Conversation, Message, Profile } from "@/lib/db"
 import { db, isReply, newestMessage } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
@@ -40,7 +41,7 @@ import { useCanMakeRoom, useRoomNeeds, type RoomNeedsRow } from "@/lib/room"
 import { roomMembersLine, roomNeedsOf } from "@/lib/rooms"
 import { useLegacyChat } from "@/lib/legacy-chat"
 import { useMeetingsEnabled } from "@/lib/meetings"
-import { opensAsRoot, useNav } from "@/lib/nav"
+import { pressOpeningRoot, plainPress, useNav } from "@/lib/nav"
 import { useSyncState } from "@/lib/sync"
 import { BOT_SORTS, sortBots, useBotSort, useBotSummaries, useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
@@ -73,10 +74,7 @@ function RootLink({
     <NavLink
       to={to}
       replace
-      onClick={(event) => {
-        onClick?.(event)
-        opensAsRoot(() => root(to))(event)
-      }}
+      onClick={pressOpeningRoot(root, to, onClick)}
       {...props}
     />
   )
@@ -218,19 +216,51 @@ function PinnedCanvases({
   return (
     <>
       {pinned.map((canvas) => (
-        <RootLink
+        <CanvasRow
           key={canvas.id}
-          to={`/canvas/${canvas.id}`}
-          onClick={onNavigate}
-          aria-label={collapsed ? canvas.title : undefined}
-          data-canvas-pinned=""
-          className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
-        >
-          <FrameIcon className="size-5 text-muted-foreground" />
-          {!collapsed && <span className="min-w-0 truncate">{canvas.title}</span>}
-        </RootLink>
+          canvas={canvas}
+          collapsed={collapsed}
+          onNavigate={onNavigate}
+        />
       ))}
     </>
+  )
+}
+
+/**
+ * A pinned canvas's row. No `NavLink`: the canvas this tab opened marks it, not the address
+ * (`lib/canvas-open.ts`, ADR 0151).
+ */
+function CanvasRow({
+  canvas,
+  collapsed,
+  onNavigate,
+}: {
+  canvas: Canvas
+  collapsed: boolean
+  onNavigate?: () => void
+}) {
+  const { root } = useNav()
+  const to = `/canvas/${canvas.id}`
+  const opened = useCanvasOpened(canvas.id)
+  return (
+    <Link
+      to={to}
+      replace
+      onClick={pressOpeningRoot(root, to, (event) => {
+        onNavigate?.()
+        // A row's press is a way onto the canvas like any other and no open, so the mark the flow
+        // wrote goes with it (ADR 0151) — a press meant for a new tab leaves this tab as it was.
+        if (plainPress(event)) closeCanvas()
+      })}
+      aria-label={collapsed ? canvas.title : undefined}
+      aria-current={opened ? "page" : undefined}
+      data-canvas-pinned=""
+      className={(collapsed ? railClass : rowClass)({ isActive: opened })}
+    >
+      <CanvasMark mark={canvas.mark} />
+      {!collapsed && <span className="min-w-0 truncate">{canvas.title}</span>}
+    </Link>
   )
 }
 
@@ -333,11 +363,13 @@ function Recents({
 
 /**
  * With bot threads on, in place of Recents: every bot that's turned on, each with its newest thread
- * and a count of the threads waiting on the user. A bot opens as one chat holding its threads.
+ * and its state — something unread, or whether its host is checking in (ADR 0151). A bot opens as one
+ * chat holding its threads.
  *
- * The Host's rooms are rows of the same list, after the bots: a room is nobody's thread, so it
- * belongs to no bot's row, and it is not a section of its own either — it is drawn by the chat
- * list's own row, with its members, its last activity and the mark its log reads (ADR 0115).
+ * The Host's rooms are rows of the same list, after the bots: a room is nobody's thread, so it is never
+ * a row of a bot's own — though a room its roster seats counts toward that bot's unread (ADR 0151). It
+ * is not a section of its own either — it is drawn by the chat list's own row, with its members, its
+ * last activity and the mark its log reads (ADR 0115).
  */
 function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; collapsed?: boolean }) {
   const summaries = useBotSummaries()
@@ -354,7 +386,8 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
     return found ? chatOwner(found).answerer : undefined
   }, [chat])
   const now = useNow()
-  // What this device's last chat-list pass answered for each bot: the dot's whole evidence.
+  // What this device's last chat-list pass answered for each bot: the whole evidence behind the
+  // line's Online or Offline.
   const { chatStores } = useSyncState()
 
   return (
@@ -378,7 +411,7 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
         </div>
       )}
       <ul className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>
-        {bots?.map(({ bot, label, latest, preview, waiting, unread }) => {
+        {bots?.map(({ bot, label, latest, unread }) => {
           const age = latest?.updatedAt
           return (
             <li key={bot.id}>
@@ -389,13 +422,15 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
                 className={({ isActive }) =>
                   collapsed
                     ? railClass({ isActive: isActive || owner === bot.id })
-                    : cn(rowClass({ isActive: isActive || owner === bot.id }), "min-h-14 py-2")
+                    : rowClass({ isActive: isActive || owner === bot.id })
                 }
               >
                 <span className="relative shrink-0">
                   <Bot id={bot.botId} className="size-9" />
-                  {/* New since this device last looked at one of the bot's threads (ADR 0110). */}
-                  {unread && (
+                  {/* The rail draws no line under the name, so its mark is the only one a row has
+                      there: news since this device last looked at one of the bot's conversations
+                      (ADR 0110, ADR 0151). */}
+                  {collapsed && unread > 0 && (
                     <>
                       <span className="sr-only">New activity</span>
                       <span
@@ -418,19 +453,26 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
                       )}
                       {age && <RowAge at={age} now={now} />}
                     </span>
+                    {/* Drawn, never read out: the line beside it already counts what it marks
+                        (ADR 0151). */}
                     <span className="flex items-center gap-2">
-                      <span className="min-w-0 flex-1 truncate text-xs font-normal text-muted-foreground">
-                        {previewLine({
-                          line: preview,
-                          title: latest?.title,
-                          online: presence(bot, now, chatStores[bot.id]),
+                      <span
+                        data-slot="bot-state"
+                        className="min-w-0 flex-1 truncate text-xs font-normal text-muted-foreground"
+                      >
+                        {stateLine({
+                          unread,
+                          bot,
+                          now,
+                          answer: chatStores[bot.id],
                         })}
                       </span>
-                      {waiting > 0 && (
-                        <span className="shrink-0 rounded-full bg-warning/15 px-1.5 text-xs leading-5 font-semibold text-warning tabular-nums">
-                          {waiting}
-                          <span className="sr-only"> waiting for you</span>
-                        </span>
+                      {unread > 0 && (
+                        <span
+                          data-unread
+                          aria-hidden
+                          className="dot-glow size-2.5 shrink-0 rounded-full bg-warning"
+                        />
                       )}
                     </span>
                   </span>
@@ -695,6 +737,7 @@ export function ConversationList({
           {canvas && (
             <RootLink
               to="/canvas"
+              end
               onClick={onNavigate}
               aria-label={collapsed ? "Canvas" : undefined}
               className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}

@@ -395,7 +395,7 @@ export const FLOWS = {
   "code-requests": {
     script: "e2e/code-requests.mjs",
     about:
-      "What Code asks its server, counted against a budget: the list opening, left alone, put away and brought back, and the same for a session opened from it",
+      "What Code asks its server, counted against a budget: the list opening, left alone, put away and brought back, and the same for a session opened from it; and how stale the list is when the host changes under it",
     alsoPolling: true,
   },
   openui: {
@@ -426,6 +426,11 @@ export const FLOWS = {
   research: {
     script: "e2e/research.mjs",
     about: "A research mission from question to guide, another format, and a citation's source",
+  },
+  "research-literature": {
+    script: "e2e/research-literature.mjs",
+    about:
+      "A literature review from question to narrative review, its papers table scrolling inside its card at a phone's width",
   },
   panes: {
     script: "e2e/panes.mjs",
@@ -496,7 +501,12 @@ export const FLOWS = {
   "bot-chats": {
     script: "e2e/bot-chats.mjs",
     about:
-      "A bot opens the chat this device left it in — from the sidebar, and after a reload — with its list behind that chat, whose own press back leaves the app; a bot never opened draws its list, with nothing made for it",
+      "A bot pressed from the sidebar or Home always draws its list, at the app's only entry, with nothing made for it and no chat resumed; a chat picked from it takes the app's only entry, a room keeps the list as its way back, and a reload keeps the reader where they were",
+  },
+  "bot-list": {
+    script: "e2e/bot-list.mjs",
+    about:
+      "A bot's list as the way into every conversation: ordered by the last message received, a chat, a room and a routine's run each opening in the pane beside it at 1280px with the bot's face drawn once, a bot's sidebar row at the app's 44px height, and on a phone a row opening its chat as the app's only entry with the sidebar the way back to the list",
   },
   "card-widths": {
     script: "e2e/card-widths.mjs",
@@ -506,7 +516,7 @@ export const FLOWS = {
   canvas: {
     script: "e2e/canvas.mjs",
     about:
-      "A canvas on a phone: made from a prompt, its page building under a non-modal half sheet, a box ticked above that sheet and kept through an edit sent from it and through Undo, a point tagged on the page while the sheet is up, a page that sets location to an outside URL staying put, and the sheet swiped down to leave the page whole",
+      "A canvas on a phone: made from a prompt, its page building under a non-modal half sheet, a box ticked above that sheet and kept through an edit sent from it and through Undo, a point tagged on the page while the sheet is up, a page that sets location to an outside URL staying put, the face picker opened from the box in the options' Name block as a sheet, lucide's icons eight to a row with an icon and the clear button picked from it, and its two ways measured as just an icon and a thumbnail, and the sheet swiped down to leave the page whole",
   },
   submission: {
     script: "regression-submission.mjs",

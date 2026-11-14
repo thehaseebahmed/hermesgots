@@ -7,15 +7,27 @@
 // and drawn again, and the chat's Point row sends the reader to the page and takes the element
 // they tap back as the field's chip — and a visit costs only what its page asked: a page that asks
 // for no library fetches none of one, and one that asks for three fetches each of those chunks once.
+// The mark's own box at the head of the options' Name block opens the mark picker (issue #1065) as
+// a sheet on the phone and a menu anchored to it on a wide screen, lucide's icons listed eight to a
+// row and narrowed by the field, an icon then an emoji picked as the mark its row draws, and the one
+// Remove Icon button under the grid clearing it back to the app's frame — and a pinned canvas's row
+// in the docked sidebar wearing the mark it chose.
 // A wide screen is the same canvas in two panes, and only boxes say where they are: no DOM without
 // layout can measure which pane a header spans.
+// The head is the last thing it reads, and only a browser can: how tight its line sits under its
+// title's words, against a code session's head drawn in the same browser; whether the drawer or the
+// way back to the list leads it, for a canvas the browser opened as the app's own entry and one the
+// list opened; and the app's back press arming its exit at that entry, with the press after it
+// leaving.
 
 // A browser is the tier that holds it: the page is a sandboxed `srcdoc` document with an opaque
 // origin of its own, the refusal of an outside navigation is the browser's own policy, the outline
 // and the tap that answer a point are that document's own script, a library's source is a chunk
 // only the browser runs (the component tier loads the sources, but no page makes a request), what a visit
 // fetches is the browser's own request log rather than anything the build's output says, and the
-// versions land from the mock's clock rather than a component test's single step.
+// versions land from the mock's clock rather than a component test's single step. The mark's grid is
+// boxes — eight to a row is a fact about layout — and which form the picker takes is the window's
+// width, which a component test stands in for with a matchMedia stub and a browser answers itself.
 import { app, assert, flow, mockJson, pass, SEND_CHORD, settled } from "./lib.mjs"
 
 const PROMPT = "A checklist for the deck"
@@ -25,7 +37,7 @@ const FRAME = "iframe[data-canvas-frame]"
 
 await flow(
   "canvas",
-  async ({ page, until, shot }) => {
+  async ({ page, seed, until, shot }) => {
     const frame = () => page.frameLocator(FRAME)
     /** The header's one flip, by the screen it goes to: `edit` from the page, `preview` from the chat. */
     const flip = (to) => page.locator(`[data-canvas-flip="${to}"]`)
@@ -146,6 +158,14 @@ await flow(
     // is not drawn there at all.
     await flip("edit").click()
     await page.waitForURL(new RegExp(`/canvas/${id}/edit$`), { timeout: 20_000 })
+    // The flip stands on the page's own entry rather than pushing a second one: the chat's back
+    // draws the page where it already is, so the one canvas keeps one entry and its head's way back
+    // lands on the list instead of on the screen it is already showing (ADR 0130).
+    assert.equal(
+      await page.evaluate(() => window.history.state?.idx ?? 0),
+      1,
+      "the flip to the chat stands on the page's own entry",
+    )
     const field = page.getByLabel("Message", { exact: true })
     await field.waitFor({ timeout: 20_000 })
     assert.equal(await page.locator(FRAME).count(), 0, "the edit screen draws no page")
@@ -182,7 +202,9 @@ await flow(
 
     // A gap only a browser can measure: the sheet's heading starts 16px below its drag handle.
     await page.locator("[data-canvas-options-open]").click()
-    const optionsTitle = page.locator('[data-slot="sheet-title"]')
+    // Named, not any sheet's title: the options open the mark picker as a sheet of its own, and a
+    // screen with two sheets has two titles.
+    const optionsTitle = page.getByRole("heading", { name: "Options", exact: true })
     await optionsTitle.waitFor({ timeout: 10_000 })
     await settled(page)
     const gap = await page.evaluate(() => {
@@ -208,6 +230,70 @@ await flow(
         `(handle bottom ${gap.handle}, heading top ${gap.heading})`,
     )
     await shot("options-sheet")
+    // The face a pinned canvas's row draws (#1065, #1074): the box at the head of the options' Name
+    // block opens the picker as a sheet on this phone, its search narrows lucide's own set, and what
+    // is picked is the record's — an icon, then the app's own frame mark again. The other tab is the
+    // thumbnail, which is one inline image on the same record.
+    const grid = () => page.locator('[data-slot="canvas-mark-picker"] [data-canvas-mark-grid="icons"]')
+    await page.locator("[data-canvas-mark-open]").click()
+    // The icons are one chunk fetched the first time something draws one, so the grid is waited for
+    // rather than asserted at once.
+    await grid().waitFor({ timeout: 40_000 })
+    await page.getByRole("searchbox", { name: "Search icons" }).fill("heart")
+    await page.getByRole("button", { name: "Heart", exact: true }).waitFor({ timeout: 10_000 })
+    // Eight to a row, measured rather than read off a class: a wrapped cell is still a cell, and only
+    // a box says which row it landed in.
+    const gridBoxes = await page.evaluate(() => {
+      const ys = [...document.querySelectorAll('[data-canvas-mark-grid="icons"] button')].map((cell) =>
+        Math.round(cell.getBoundingClientRect().y),
+      )
+      return { inRow: ys.filter((y) => y === ys[0]).length, total: ys.length }
+    })
+    console.log(`mark picker 390 — ${gridBoxes.inRow} to the row of ${gridBoxes.total}`)
+    assert.equal(gridBoxes.inRow, 8, `the picker draws eight icons to a row (${gridBoxes.inRow})`)
+    assert.equal(
+      await page.locator('[data-popup-form="sheet"] [data-slot="canvas-mark-picker"]').count(),
+      1,
+      "a phone draws the picker as a sheet",
+    )
+    // The grid is the thing that scrolls: the way back to the app's own mark is pinned under it, so
+    // clearing a mark is never a scroll past every icon to find.
+    const pinnedClear = await page.evaluate(() => {
+      const picker = document.querySelector('[data-slot="canvas-mark-picker"]')?.closest("[data-popup-form]")
+      const clear = document.querySelector("[data-canvas-mark-unset]")
+      if (!picker || !clear) return null
+      const box = picker.getBoundingClientRect()
+      const row = clear.getBoundingClientRect()
+      return { popup: Math.round(box.bottom), row: Math.round(row.bottom), top: Math.round(row.top), popupTop: Math.round(box.top) }
+    })
+    assert.ok(
+      pinnedClear && pinnedClear.row <= pinnedClear.popup && pinnedClear.top >= pinnedClear.popupTop,
+      `the clear row is inside the picker without scrolling (row ${JSON.stringify(pinnedClear)})`,
+    )
+    await shot("mark-picker")
+    await page.getByRole("button", { name: "Heart", exact: true }).click()
+    await page.locator("[data-canvas-mark-open] svg.lucide-heart").waitFor({ timeout: 20_000 })
+    await shot("mark-icon")
+    pass("the options: the picker searches lucide's icons eight to a row, and the icon picked is the mark")
+
+    // Two ways and no third: the icon just picked, and the thumbnail beside it.
+    await page.locator("[data-canvas-mark-open]").click()
+    await grid().waitFor({ timeout: 20_000 })
+    assert.deepEqual(
+      await page.getByRole("tab").allTextContents(),
+      ["Icon", "Thumbnail"],
+      "the card offers an icon and a thumbnail, and nothing else",
+    )
+    pass("the options: the picker offers an icon and a thumbnail, and no third way")
+
+    // And the way back to the app's own frame mark, which is what clears the record's — the picker
+    // just opened stands on the icons, so its clear row is under them already.
+    await page.getByRole("button", { name: "Remove Icon" }).click()
+    await page.locator("[data-canvas-mark-open] svg.lucide-frame").waitFor({ timeout: 20_000 })
+    await page
+      .locator('[data-slot="canvas-mark-picker"]')
+      .waitFor({ state: "detached", timeout: 10_000 })
+    pass("the options: the one button under the grid clears the mark back to the app's frame")
     // Shut again, so the legs after this one read the page and not a sheet laid over it.
     await page.keyboard.press("Escape")
     await optionsTitle.waitFor({ state: "detached", timeout: 10_000 })
@@ -278,7 +364,7 @@ await flow(
       // The frame is drawn only once the sources its page asked for are in hand, so a frame that
       // is up is a fetch that is over: nothing arrives after this to be counted.
       await drawn.waitFor({ timeout: 20_000 })
-      return { fetched: chunks.slice(from), drew: await drawn.innerText() }
+      return { id: seeded, fetched: chunks.slice(from), drew: await drawn.innerText() }
     }
 
     const quiet = await visit("plain")
@@ -301,6 +387,117 @@ await flow(
     assert.equal(many.drew, "chart d3 date", "and the page drew with all three inside the frame")
     await shot("three-libraries")
     pass("the preview screen: a canvas that asks for three libraries fetches each chunk once")
+
+    // How tight the head is under its title, which only a browser can measure: the line's own top
+    // against the words' bottom, in this head and in the code session's — the same row, drawn
+    // centered for a session, with no control around its title.
+    const headGap = () =>
+      page.evaluate(() => {
+        const title = document.querySelector('[data-slot="header-title"]')
+        const line = document.querySelector('[data-slot="header-line"]')
+        if (!title || !line) return null
+        // The words' own box, which is the deepest box the title draws: a title that is a control
+        // wraps them in one, and it is that box — not the title's — that ends where they end.
+        let words = title
+        while (words.firstElementChild) words = words.firstElementChild
+        const round = (size) => Math.round(size * 10) / 10
+        return {
+          under: round(line.getBoundingClientRect().top - words.getBoundingClientRect().bottom),
+          words: round(words.getBoundingClientRect().height),
+          box: round(title.getBoundingClientRect().height),
+        }
+      })
+    await settled(page)
+    const canvasHead = await headGap()
+    // A chat in a project draws the code session's head: a seeded one is read as unread rather than
+    // unstarted, so its title and its line are drawn with no turn behind them.
+    await seed([{ id: "gap-session", title: "A session in a project", projectId: "p_1a2b3c4d" }])
+    await page.goto(`${app}/c/gap-session`)
+    await until(
+      async () =>
+        Boolean(
+          (await page.locator('[data-slot="header-title"]').innerText().catch(() => "")).trim(),
+        ) && Boolean(await page.locator('[data-slot="header-line"]').count()),
+      20_000,
+      "the session's head to draw its title and line",
+    )
+    const sessionHead = await headGap()
+    console.log(
+      `head 390 — canvas: title box ${canvasHead.box}px over words ${canvasHead.words}px, ` +
+        `line ${canvasHead.under}px under them; code session: title box ${sessionHead.box}px ` +
+        `over words ${sessionHead.words}px, line ${sessionHead.under}px under them`,
+    )
+    assert.ok(
+      await page.locator("[data-code-session]").count(),
+      "the head compared against is a code session's",
+    )
+    assert.ok(
+      canvasHead.under <= 0.5,
+      `the canvas's line begins under its title's words (${canvasHead.under}px of air)`,
+    )
+    assert.ok(
+      Math.abs(canvasHead.under - sessionHead.under) <= 0.5,
+      `and sits as tight as the code session's does (${sessionHead.under}px of air)`,
+    )
+    assert.ok(
+      Math.abs(canvasHead.words - sessionHead.words) <= 0.5,
+      "the title's box is its words' height in both heads",
+    )
+    await shot("head-gap")
+    pass("the preview screen: the title and its line sit as tight as a code session's head")
+
+    // The address a reader came from decides the head's first control, and no DOM without layout can
+    // say which one a screen drew. An address the browser opened is the app's own entry, so nothing
+    // stands behind it: the head leads with the drawer, and the app's back press arms its exit — the
+    // press after it leaves rather than stepping onto a screen that isn't there.
+    await page.goto(`${app}/canvas/${many.id}`)
+    await page.locator(FRAME).waitFor({ timeout: 20_000 })
+    await settled(page)
+    const entryHead = await page.evaluate(() => ({
+      drawer: Boolean(document.querySelector('header [aria-label="Open conversations"]')),
+      back: Boolean(document.querySelector('header [aria-label="All canvases"]')),
+      idx: window.history.state?.idx ?? 0,
+    }))
+    assert.deepEqual(
+      entryHead,
+      { drawer: true, back: false, idx: 0 },
+      "a canvas the app opened leads with the drawer, with nothing behind it",
+    )
+    const presses = await page.evaluate(async () => {
+      const { answerBackPress } = await import("/src/lib/native.ts")
+      return [answerBackPress(), answerBackPress()]
+    })
+    assert.deepEqual(
+      presses,
+      ["armed", "leave"],
+      "a back press at the entry arms the app's exit, and the one after it leaves",
+    )
+    await shot("head-entry")
+    pass("the preview screen: a canvas the app opened leads with the drawer, and back arms the exit")
+
+    // The list opens a canvas as its child, so the head leads back to it, named for the screen it
+    // goes to, with no drawer drawn beside it — and the press steps there.
+    await page.goto(`${app}/canvas`)
+    await page.locator("[data-canvas-tile]").first().click()
+    await page.waitForURL(new RegExp(`/canvas/c_[^/]+$`), { timeout: 20_000 })
+    await page.locator(FRAME).waitFor({ timeout: 20_000 })
+    await settled(page)
+    const pushedHead = await page.evaluate(() => ({
+      back:
+        document
+          .querySelector('header [aria-label="All canvases"]')
+          ?.getAttribute("aria-label") ?? null,
+      drawer: Boolean(document.querySelector('header [aria-label="Open conversations"]')),
+    }))
+    assert.deepEqual(
+      pushedHead,
+      { back: "All canvases", drawer: false },
+      "a canvas the list opened leads back to the list, and draws no drawer beside it",
+    )
+    await shot("head-pushed")
+    await page.getByRole("button", { name: "All canvases" }).click()
+    await page.waitForURL(`${app}/canvas`, { timeout: 20_000 })
+    pass("the preview screen: a canvas the list opened is led back to the list, and steps there")
   },
   { viewport: { width: 390, height: 844 }, touch: true },
 )
@@ -437,6 +634,29 @@ await flow(
     )
     await shot("wide-two-panes")
     pass("a wide screen: the chat's lane is the left pane, and the page fills the right with no header")
+
+    // The mark the sidebar's row draws (#1065), where a wide screen keeps that row docked: the picker
+    // is a floating menu beside the Mark row, and the pin is what puts the marked row in the band.
+    await page.locator("[data-canvas-options-open]").click()
+    const options = page.locator("[data-canvas-options]")
+    await options.waitFor({ timeout: 10_000 })
+    await page.locator("[data-canvas-mark-open]").click()
+    const menu = page.locator('[data-popup-form="menu"] [data-slot="canvas-mark-picker"]')
+    await menu.waitFor({ timeout: 40_000 })
+    assert.equal(
+      await page.locator('[data-popup-form="sheet"] [data-slot="canvas-mark-picker"]').count(),
+      0,
+      "a wide screen draws the picker as a menu beside its box, not a sheet",
+    )
+    await page.getByRole("searchbox", { name: "Search icons" }).fill("star")
+    await page.getByRole("button", { name: "Star", exact: true }).click()
+    await options.waitFor({ state: "visible", timeout: 10_000 })
+    // The row's own words are what a thumb presses: the switch's input is the label's, hidden.
+    await options.getByText("Pin to sidebar", { exact: true }).click()
+    await page.keyboard.press("Escape")
+    await page.locator("a[data-canvas-pinned] svg.lucide-star").waitFor({ timeout: 20_000 })
+    await shot("pinned-mark")
+    pass("a wide screen: the picker is a menu beside the mark's box, and the pinned row draws its mark")
 
     // The scrollbar is the platform's own, and it is pinned here rather than styled: the page's
     // document is grown past its own viewport, and what is read is what the app does NOT force —

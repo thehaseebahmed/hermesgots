@@ -4,16 +4,18 @@ import {
   useMemo,
   useRef,
   useState,
+  type MouseEvent,
   type ReactNode,
   type RefObject,
 } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CrosshairIcon, FrameIcon, PencilIcon, Undo2Icon } from "lucide-react"
-import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router"
+import { Link, Navigate, useMatch, useNavigate, useParams, useSearchParams } from "react-router"
 
 import { ChatBody } from "@/chat-next/chat-body"
 import { BackButton } from "@/components/back-button"
 import { CanvasConsentDialog, CanvasOptions, useCanvasConsent } from "@/components/canvas-consent"
+import { CanvasMark } from "@/components/canvas-mark"
 import { Refusal } from "@/components/banner"
 import { CanvasPointsProvider, type CanvasPoints } from "@/components/chat/canvas-points"
 import { ChatHeader } from "@/components/chat/chat-header"
@@ -25,13 +27,14 @@ import { UsageSheet } from "@/components/chat/usage-sheet"
 import { LabLabel } from "@/components/lab-badge"
 import { ItemGroup } from "@/components/item-list"
 import { setBackGuard } from "@/lib/native"
-import { useNav } from "@/lib/nav"
+import { plainPress, depth, useNav } from "@/lib/nav"
 import { Button } from "@/components/ui/button"
 import { failed, type RefusalHold } from "@/lib/refusal"
 import { useRefusal, useSaidRefusal } from "@/lib/use-refusal"
 import { awayLine } from "@/lib/away"
 import { hostAnswered } from "@/lib/hermes"
 import { bridgeHandler, pointWatch } from "@/lib/canvas-bridge"
+import { openCanvas } from "@/lib/canvas-open"
 import { canvasCss, canvasCssKey } from "@/lib/canvas-css"
 import {
   canvasDocument,
@@ -98,15 +101,25 @@ const CHAT_LANE = "flex min-h-0 flex-1 flex-col"
 const NO_LIBRARIES: Record<string, CanvasLibrarySource> = {}
 
 /**
+ * The flow's own open: the reader picked this canvas on Canvas's own screens. A press meant for a new
+ * tab opens nothing here, since this tab stays where it is.
+ */
+const openedBy = (id: string) => (event: MouseEvent<HTMLAnchorElement>) => {
+  if (plainPress(event)) openCanvas(id)
+}
+
+/**
  * A canvas in the list: the picture its bot put on it, or its own mark, over the name and where it
  * stands. A tile rather than a row, since what a reader picks from is a page — the picture is the
- * whole of what tells two canvases apart at a glance.
+ * whole of what tells two canvases apart at a glance, and where a record holds none the mark its
+ * reader chose stands in, which is the same slot the sidebar's row draws it in.
  */
 function CanvasTile({ canvas, now }: { canvas: Canvas; now: number }) {
   const line = canvas.version > 0 ? `Version ${canvas.version}` : "Building it…"
   return (
     <Link
       to={`/canvas/${canvas.id}`}
+      onClick={openedBy(canvas.id)}
       data-canvas-tile
       className="group flex min-w-0 flex-col gap-2 rounded-2xl outline-none focus-visible:ring-2 focus-visible:ring-ring/40"
     >
@@ -117,8 +130,11 @@ function CanvasTile({ canvas, now }: { canvas: Canvas; now: number }) {
         {canvas.image ? (
           <img src={canvas.image} alt="" className="size-full object-cover" loading="lazy" />
         ) : (
-          <span className="flex size-full items-center justify-center text-muted-foreground">
-            <FrameIcon className="size-7" aria-hidden />
+          <span
+            aria-hidden
+            className="flex size-full items-center justify-center text-muted-foreground"
+          >
+            <CanvasMark mark={canvas.mark} large />
           </span>
         )}
       </div>
@@ -178,6 +194,8 @@ export function CanvasPage() {
       // The canvas's own address, not its chat's: the preview decides which screen a canvas opens on
       // (a phone sends a canvas with no version to its chat from there), so only one screen owns that
       // rule, and the desktop no longer mounts the chat it will not draw beside the page (ADR 0130).
+      // A start is the flow's open too (ADR 0151).
+      openCanvas(started.id)
       navigate(`/canvas/${started.id}`)
     } finally {
       setStarting(false)
@@ -342,6 +360,15 @@ function useCanvasManagement(id: string, hold: RefusalHold) {
 /**
  * The head both canvas screens wear (ADR 0130). A title the record hasn't answered for yet is still
  * "Canvas", since the address may name one this device hasn't read.
+ *
+ * What leads the row is how the reader arrived, decided here rather than by either screen. At the
+ * app's own entry nothing stands behind the screen — an address a browser opened, a sidebar row, a
+ * pinned canvas — so the head leads with the drawer the sidebar is collapsed into (the header draws
+ * it itself, and a wide screen, where the sidebar stands, leads with nothing), and a device's back
+ * press is the app's, which arms its exit. A screen the list opened leads back to it, and that press
+ * steps there too. The chat is the one exception, and only once the canvas has a page: its own way
+ * back is the Preview corner, which replaces this entry, so an arrow beside it would be a second
+ * control for one move (ADR 0130).
  */
 function CanvasHead({
   canvas,
@@ -349,7 +376,6 @@ function CanvasHead({
   awayWords,
   optionsOpen,
   onOpenOptions,
-  leading,
   actions,
 }: {
   canvas: Canvas | undefined
@@ -360,12 +386,18 @@ function CanvasHead({
   optionsOpen: boolean
   /** The title's press: the options' only door, on either screen (ADR 0130). */
   onOpenOptions: () => void
-  leading: ReactNode
   actions: ReactNode
 }) {
+  const { up } = useNav()
+  // The chat is the address whose own way back is drawn as its Preview corner (ADR 0130): no arrow
+  // once the canvas has a page, and none while the record is still being read — a canvas that turns
+  // out to have a page must not have been offered an arrow in the frames before it landed.
+  const cornerLeads = Boolean(useMatch("canvas/:id/edit")) && (!canvas || hasVersion(canvas))
+  const leadsBack = depth() > 0 && !cornerLeads
   return (
     <ChatHeader
       className="relative pb-2"
+      leading={leadsBack ? <BackButton label="All canvases" onClick={() => up("/canvas")} /> : undefined}
       // The subtitle's away sentence stays outside the control: a live region inside a button
       // becomes part of its name.
       onTitlePress={canvas ? onOpenOptions : undefined}
@@ -376,9 +408,10 @@ function CanvasHead({
             aria-haspopup="dialog"
             aria-expanded={optionsOpen}
             data-canvas-options-open
-            // The press is the block's (`onTitlePress`); this button is what a reader, a tab stop and
-            // a keyboard activate, and its own presses bubble to the block.
-            className="flex min-h-11 w-full min-w-0 items-center text-left outline-none"
+            // The press is the block's (`onTitlePress`), and the block is what a thumb is given; this
+            // button is what a reader, a tab stop and a keyboard activate, and its own presses bubble.
+            // It hugs its words, so the line under it begins where they end.
+            className="flex w-full min-w-0 items-center text-left outline-none"
           >
             <span className="min-w-0 truncate">{canvas.title}</span>
           </button>
@@ -408,7 +441,6 @@ function CanvasHead({
       }
       showBot={false}
       heading
-      leading={leading}
       actions={actions}
     />
   )
@@ -499,7 +531,7 @@ function CanvasPagePane({
  */
 export function CanvasView() {
   const { id = "" } = useParams()
-  const { up, back } = useNav()
+  const { back } = useNav()
   const navigate = useNavigate()
   useEffect(() => setBackGuard(back()), [back])
   const { canvas, profile, missing, loaded, away } = useCanvas(id)
@@ -507,6 +539,9 @@ export function CanvasView() {
   // Whether this bot's host keeps a vault, which is what its options sheet offers the backup switch
   // on: a host from before it writes no notes, and a switch that writes nothing is a promise broken.
   const vaultable = usePluginFeatureOn(profile, "canvas_vault")
+  // The same for the mark a pinned row draws (#1065): a host whose record has no field for one
+  // offers no picker, rather than one whose every pick it would refuse.
+  const markable = usePluginFeatureOn(profile, "canvas_mark")
   const dark = useDark()
   const mode: CanvasMode = dark ? "dark" : "light"
   const html = canvas?.html
@@ -780,7 +815,6 @@ export function CanvasView() {
           awayWords={awayWords}
           optionsOpen={optionsOpen}
           onOpenOptions={() => setOptionsOpen(true)}
-          leading={<BackButton label="All canvases" onClick={() => up("/canvas")} />}
           actions={
             <>
               {canvas && !missing && !large ? (
@@ -790,7 +824,10 @@ export function CanvasView() {
                   className={HEADER_BUTTON}
                   data-canvas-flip="edit"
                   aria-label={FLIP.edit}
-                  onClick={() => navigate(`/canvas/${id}/edit`)}
+                  // A replace, as the flip back to the page is: the two are one canvas's other half,
+                  // so a push would leave the page behind for the next back press to land on — the
+                  // same screen, drawn twice, and a head whose way back moves nothing (ADR 0130).
+                  onClick={() => navigate(`/canvas/${id}/edit`, { replace: true })}
                 >
                   <PencilIcon />
                 </Button>
@@ -844,6 +881,7 @@ export function CanvasView() {
         onOpenChange={setOptionsOpen}
         canvas={canvas}
         vaultable={vaultable}
+        markable={markable}
         onGrant={grant}
         onUpdate={update}
         onDelete={remove}
@@ -883,6 +921,7 @@ export function CanvasEdit() {
   const { awayNow, words: awayWords } = useAway(away)
   // The same read the preview makes: a canvas's options are the same sheet on both screens.
   const vaultable = usePluginFeatureOn(profile, "canvas_vault")
+  const markable = usePluginFeatureOn(profile, "canvas_mark")
   const large = useLarge()
   const [optionsOpen, setOptionsOpen] = useState(false)
   // This screen draws no notice of its own, so the answers its options give are said in passing: the
@@ -931,16 +970,6 @@ export function CanvasEdit() {
         awayWords={awayWords}
         optionsOpen={optionsOpen}
         onOpenOptions={() => setOptionsOpen(true)}
-        leading={
-          // The list is where this screen's way back goes whether the record has landed or not:
-          // while it is reading, that is the only screen there is to go to.
-          reading || (loaded && !versioned) ? (
-            <BackButton
-              label="All canvases"
-              onClick={() => navigate("/canvas", { replace: true })}
-            />
-          ) : undefined
-        }
         actions={
           <>
             {loaded && versioned ? (
@@ -984,6 +1013,7 @@ export function CanvasEdit() {
         onOpenChange={setOptionsOpen}
         canvas={canvas}
         vaultable={vaultable}
+        markable={markable}
         onGrant={grant}
         onUpdate={update}
         onDelete={remove}

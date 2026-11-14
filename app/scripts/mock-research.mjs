@@ -430,6 +430,65 @@ const VERIFY_CHANGE = para(
   { text: " So would cohort studies that separate filtered from unfiltered coffee.", cites: ["c5"] },
 )
 
+/** A literature review's fixed papers, as the index would name them and as the plugin screens them. */
+const paperSource = (id, title, year, venue, authors, doi, more = {}) => ({
+  id, title, url: `https://doi.org/${doi}`, kind: "papers", doi, year, venue, authors, preprint: false,
+  screening: "found", screen_reason: "", screen_fails: "", evidence_level: null, dropped: 0, ...more,
+})
+const REVIEW_PAPERS = [
+  paperSource("s1", "Sleep loss and working memory: a randomised trial", 2021, "Sleep", ["Ada Okafor", "Lin Wei", "Marta Ruiz"], "10.1000/sleep.2021.014"),
+  paperSource("s2", "A short nap restores recall after a night awake", 2023, "PsyArXiv", ["Jonas Berg", "Priya Nair"], "10.1000/psyarxiv.nap23", { preprint: true }),
+  paperSource("s3", "Sleep deprivation and spatial memory in mice", 2020, "Neuroscience Letters", ["Ken Ito"], "10.1000/nl.2020.77"),
+  paperSource("s4", "Chronic sleep restriction and working memory in shift workers", 2019, "Occupational Medicine", ["Sofia Lindqvist", "Omar Haddad"], "10.1000/om.2019.203"),
+  paperSource("s5", "The coffee market after 2020", 2022, "Journal of Commodity Markets", ["Rui Costa"], "10.1000/jcm.2022.9"),
+  paperSource("s6", "Total sleep deprivation and executive function: a review of 31 studies", 2022, "Sleep Medicine Reviews", ["Hannah Weiss", "Tomás Vega", "Ife Adeyemi", "Carl Brandt", "Mei Tanaka", "Lucas Moreau", "Anika Shah"], "10.1000/smr.2022.101"),
+  paperSource("s7", "Sleep and cognition across adolescence", 2024, "Developmental Science", ["Noor Rahman"], "10.1000/ds.2024.55"),
+]
+/** How each paper is screened, in the index's order, and what is read of the included ones. */
+const REVIEW_SCREENING = [
+  { screening: "include", screen_reason: "A trial of sleep loss and working memory in adults.", evidence_level: "full", dropped: 1 },
+  { screening: "include", screen_reason: "Measures recall after sleep loss in adults.", evidence_level: "abstract" },
+  { screening: "exclude", screen_fails: "Human participants", screen_reason: "An animal study." },
+  { screening: "unsure", screen_reason: "The abstract doesn't say how memory was measured.", evidence_level: "abstract", dropped: 1 },
+  { screening: "exclude", screen_fails: "Off topic", screen_reason: "About commodity prices." },
+  { screening: "include", screen_reason: "Reviews studies of sleep deprivation and executive function.", evidence_level: "full" },
+  { screening: "unscreened" },
+]
+const REVIEW_CLAIMS = [
+  { id: "c1", source: "s1", field: "question", text: "Does one night without sleep impair working memory in healthy adults?", snippet: "We tested whether one night of total sleep deprivation impairs working memory in healthy adults." },
+  { id: "c2", source: "s1", field: "design", text: "trial", snippet: "Participants were randomly assigned to a night of sleep or a night of wakefulness." },
+  { id: "c3", source: "s1", field: "sample", text: "Sixty healthy adults aged 18 to 35.", snippet: "Sixty healthy adults (aged 18 to 35) completed the protocol." },
+  { id: "c4", source: "s1", field: "finding", text: "Accuracy on a working memory task fell by 12% after a night awake.", snippet: "Accuracy on the n-back task fell by 12% after sleep deprivation relative to rested controls." },
+  { id: "c5", source: "s1", field: "limitation", text: "A small sample drawn from one university.", snippet: "The sample was small and drawn from a single university." },
+  { id: "c6", source: "s2", field: "design", text: "trial", snippet: "In a randomised crossover design, participants either napped for 30 minutes or stayed awake." },
+  { id: "c7", source: "s2", field: "finding", text: "A 30-minute nap restored recall to its rested level.", snippet: "A 30-minute nap restored recall to baseline in 40 students." },
+  { id: "c8", source: "s4", field: "sample", text: "A cohort of 212 night-shift nurses.", snippet: "We followed a cohort of 212 night-shift nurses for twelve months." },
+  { id: "c9", source: "s4", field: "finding", text: "Chronic short sleep did not change working memory accuracy.", snippet: "Working memory accuracy did not differ between nurses sleeping under five hours and those sleeping longer." },
+  { id: "c10", source: "s6", field: "design", text: "review", snippet: "We reviewed 31 studies of total sleep deprivation and executive function." },
+  { id: "c11", source: "s6", field: "finding", text: "Across studies, attention suffered more than working memory.", snippet: "Deficits were largest for sustained attention and smaller and less consistent for working memory." },
+  { id: "c12", source: "s6", field: "limitation", text: "Most of the studies were small and short.", snippet: "Most included studies had fewer than 40 participants and a single night of deprivation." },
+].map((claim) => ({ confidence: "supported", ...claim }))
+const REVIEW_THEMES = [
+  {
+    id: "t1", title: "What a night without sleep does to working memory", claims: ["c4", "c9", "c11"], papers: 3, full: 2,
+    paragraphs: [[
+      { text: "One night awake lowered accuracy on a working memory task.", cites: ["c4"] },
+      { text: " Chronic short sleep, in a cohort of nurses, did not.", cites: ["c9"] },
+      { text: " Across many studies the effect on working memory was smaller and less consistent than on attention.", cites: ["c11"] },
+    ]],
+  },
+  {
+    id: "t2", title: "Recovery", claims: ["c7"], papers: 1, full: 0,
+    paragraphs: [[
+      { text: "A short nap brought recall back to its rested level in one preprint.", cites: ["c7"] },
+      { text: " How long that lasts is not known.", flagged: true },
+    ]],
+  },
+]
+const REVIEW_FUNNEL = { index: "OpenAlex", keyed: false, found: 7, duplicates: 2, screened: 6, included: 4, unsure: 1, excluded: { "Human participants": 1, "Off topic": 1 }, unscreened: 1 }
+const reference = (s) =>
+  `${s.authors.length > 6 ? s.authors.slice(0, 6).join(", ") + ", et al." : s.authors.join(", ")} (${s.year}). ${s.title}. ${s.venue}.${s.preprint ? " Preprint." : ""} ${s.url}`
+
 /** The ranking as research.py's `decide` works it out: weighted scores out of 100. */
 function decide(m) {
   const memo = m.outputs.memo
@@ -591,7 +650,9 @@ missions.set(
 
 function summary(m) {
   const { ledger, outputs: _outputs, revisions: _revisions, ...rest } = m
-  return { ...rest, found: ledger.sources.length, claims: ledger.claims.length }
+  // A paper a review screened out, or never reached, is not one of its sources.
+  const found = ledger.sources.filter((s) => !s.screening || ["include", "unsure"].includes(s.screening)).length
+  return { ...rest, found, claims: ledger.claims.length }
 }
 
 function full(m) {
@@ -675,6 +736,88 @@ function readClaim(m, note) {
           },
       note,
     )
+  })
+}
+
+/** A review's question read back with its field, years, criteria and the queries it would run. */
+function readReview(m, note) {
+  later(1500, () => {
+    if (!missions.has(m.id)) return
+    change(
+      m,
+      {
+        busy: null,
+        title: "Sleep loss and working memory",
+        goal: "What does research say about sleep deprivation and working memory?",
+        review: {
+          field: "Cognitive psychology",
+          from_year: 2018,
+          to_year: null,
+          criteria: ["Human participants", "Measures working memory or recall", "Reports original data or reviews studies that do"],
+          queries: ["sleep deprivation working memory", "sleep restriction cognitive performance", "nap recovery memory"],
+          cap: 25,
+          preprints: true,
+        },
+      },
+      note,
+    )
+  })
+}
+
+const reviewFunnel = (m) => {
+  const papers = m.ledger.sources
+  const included = papers.filter((s) => ["include", "unsure"].includes(s.screening)).length
+  const excluded = {}
+  for (const s of papers) if (s.screening === "exclude") excluded[s.screen_fails] = (excluded[s.screen_fails] ?? 0) + 1
+  const screened = included + Object.values(excluded).reduce((a, b) => a + b, 0)
+  return { ...REVIEW_FUNNEL, searched_at: m.funnel?.searched_at ?? Date.now(), screened, included, unsure: papers.filter((s) => s.screening === "unsure").length, excluded, unscreened: papers.length - screened }
+}
+
+/** A review's reading: the search's candidates at once, each screened, then each included one read. */
+function reviewRead(m, note) {
+  const steps = [() => (m.ledger.sources = REVIEW_PAPERS.map((s) => ({ ...s })))]
+  REVIEW_SCREENING.forEach(({ evidence_level: _level, dropped: _dropped, ...screened }, index) =>
+    steps.push(() => Object.assign(m.ledger.sources[index], screened)),
+  )
+  REVIEW_SCREENING.forEach(({ evidence_level, dropped = 0 }, index) => {
+    if (!evidence_level) return
+    steps.push(() => {
+      Object.assign(m.ledger.sources[index], { evidence_level, dropped })
+      m.ledger.claims.push(...REVIEW_CLAIMS.filter((c) => c.source === REVIEW_PAPERS[index].id).map((c) => ({ ...c })))
+    })
+  })
+  const step = () => {
+    if (!missions.has(m.id) || m.stage !== "reading") return
+    const run = steps.shift()
+    if (run) return run(), change(m, { funnel: reviewFunnel(m) }, note), later(350, step)
+    change(m, { stage: "drafting", written: 0 }, note)
+    later(1200, () => synthesise(m, note))
+  }
+  later(400, step)
+}
+
+/** The fixed synthesis, with the counts and the reference list the plugin's code would write. */
+function synthesise(m, note) {
+  if (!missions.has(m.id) || m.stage !== "drafting") return
+  const included = m.ledger.sources.filter((s) => ["include", "unsure"].includes(s.screening))
+  for (const theme of REVIEW_THEMES)
+    for (const claim of m.ledger.claims) if (theme.claims.includes(claim.id)) claim.theme ??= theme.id
+  m.outputs.review = {
+    themes: REVIEW_THEMES,
+    disagreements: [{ a: "c4", b: "c9", theme: "t1", about: "Whether losing sleep lowers working memory accuracy." }],
+    gaps: [[{ text: "The studies were small and mostly looked at a single night.", cites: ["c5", "c12"] }]],
+    method: { ...m.review, index: "OpenAlex" },
+    funnel: m.funnel,
+    read: Object.fromEntries(["full", "abstract", "metadata"].map((level) => [level, included.filter((s) => s.evidence_level === level).length])),
+    dropped: included.reduce((sum, s) => sum + s.dropped, 0),
+    references: included.map((s) => ({ source: s.id, text: reference(s) })),
+  }
+  change(m, { written: 1, stage: "reviewing" }, note)
+  later(600, () => {
+    if (!missions.has(m.id)) return
+    m.formats = ["review"]
+    revise(m, "first")
+    change(m, { stage: "delivered", formats: ["review"], pending: null }, note)
   })
 }
 
@@ -877,8 +1020,8 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
     }
     const { input, type } = await readBody(req)
     if (typeof input !== "string" || !input.trim()) return fail(400, "The question is required."), true
-    if (type && !["learn", "compare", "verify"].includes(type))
-      return fail(400, "Only Learn & understand, Compare & decide and Verify a claim missions can be started so far."), true
+    if (type && !["learn", "compare", "verify", "literature"].includes(type))
+      return fail(400, "Only Learn & understand, Compare & decide, Verify a claim and Literature review missions can be started so far."), true
     const m = mission({
       id: `r_${Math.random().toString(16).slice(2, 18)}`,
       input,
@@ -886,10 +1029,12 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
       busy: "brief",
       ...(type === "compare" ? { type, format: "memo" } : {}),
       ...(type === "verify" ? { type, format: "verdict", restatement: null, parts: [], terms: [], uncheckable: null, strictness: null } : {}),
+      ...(type === "literature" ? { type, format: "review", source_kinds: ["papers"], review: null, funnel: null } : {}),
     })
     missions.set(m.id, m)
     note(m.id)
-    if (type === "compare") readComparison(m, note)
+    if (type === "literature") readReview(m, note)
+    else if (type === "compare") readComparison(m, note)
     else if (type === "verify") readClaim(m, note)
     else readBrief(m, note)
     json(res, 202, { object: "gots.research.mission", mission: full(m) })
@@ -905,6 +1050,17 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
   switch (action) {
     case "brief":
       if (moved(["brief"])) return fail(409, "The mission has moved on; reload it."), true
+      if (m.type === "literature") {
+        if (typeof body.goal !== "string" || !body.goal.trim()) return fail(400, "The question is required."), true
+        const criteria = [...new Set((body.criteria ?? []).filter((c) => typeof c === "string" && c.trim()).map((c) => c.trim()))]
+        if (criteria.length < 1 || criteria.length > 6) return fail(400, "Give 1 to 6 inclusion criteria."), true
+        const year = (value) => (Number.isInteger(value) && value > 0 ? value : null)
+        if (year(body.from_year) && year(body.to_year) && body.from_year > body.to_year)
+          return fail(400, "The first year is after the last."), true
+        const review = { ...m.review, field: (body.field ?? "").trim(), from_year: year(body.from_year), to_year: year(body.to_year), criteria }
+        change(m, { goal: body.goal.trim(), review, stage: "scope", outline: review.queries, error: null }, note)
+        break
+      }
       if (m.type === "verify") {
         if (m.uncheckable) return fail(409, "This claim can't be checked; start another."), true
         if (typeof body.restatement !== "string" || !body.restatement.trim()) return fail(400, "The restatement is required."), true
@@ -960,6 +1116,18 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
       break
     case "start": {
       if (moved(["scope"])) return fail(409, "The mission has moved on; reload it."), true
+      if (m.type === "literature") {
+        const queries = [...new Set((body.queries ?? []).filter((q) => typeof q === "string" && q.trim()).map((q) => q.trim()))]
+        if (queries.length < 1 || queries.length > 6) return fail(400, "Give 1 to 6 search queries."), true
+        if (!Number.isInteger(body.cap) || body.cap < 5 || body.cap > 40) return fail(400, "Review 5 to 40 papers."), true
+        if (typeof body.preprints !== "boolean") return fail(400, "preprints is true or false."), true
+        m.ledger = { sources: [], claims: [] }
+        m.outputs = {}
+        const review = { ...m.review, queries, cap: body.cap, preprints: body.preprints }
+        change(m, { review, outline: queries, funnel: null, stage: "reading", written: 0, formats: [], error: null }, note)
+        reviewRead(m, note)
+        break
+      }
       if (m.type === "compare") {
         const kinds = body.source_kinds ?? []
         if (!kinds.length || kinds.some((k) => !SOURCE_KINDS.includes(k))) return fail(400, "Pick the kinds of source."), true
@@ -997,6 +1165,7 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
     case "formats":
       if (m.type === "compare") return fail(400, "A comparison has one format, the memo."), true
       if (m.type === "verify") return fail(400, "A verification has one format, the verdict."), true
+      if (m.type === "literature") return fail(400, "A literature review has one format, the review."), true
       if (moved(["delivered"]) || m.making || m.formats.includes(body.format))
         return fail(409, "That format is already made or on its way."), true
       change(m, { making: body.format, error: null }, note)
@@ -1033,8 +1202,9 @@ export async function handleResearch(req, res, path, { json, readBody, noteEvent
       if (!m.error) return fail(409, "Nothing failed."), true
       change(m, { error: null }, note)
       if (m.stage === "reading")
-        (m.type === "compare" ? compare : m.type === "verify" ? verifyRead : research)(m, note)
-      else if (m.stage === "drafting") (m.type === "verify" ? judgeClaim : write)(m, note)
+        (m.type === "literature" ? reviewRead : m.type === "compare" ? compare : m.type === "verify" ? verifyRead : research)(m, note)
+      else if (m.stage === "drafting")
+        (m.type === "literature" ? synthesise : m.type === "verify" ? judgeClaim : write)(m, note)
       break
     case "remove":
       missions.delete(m.id)

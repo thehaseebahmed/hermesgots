@@ -43,7 +43,7 @@ import {
 } from "@/lib/research"
 import { cn } from "@/lib/utils"
 
-function Section({ label, children }: { label: string; children: React.ReactNode }) {
+export function Section({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-2">
       <span className="text-sm font-medium">{label}</span>
@@ -53,7 +53,7 @@ function Section({ label, children }: { label: string; children: React.ReactNode
 }
 
 /** A list of short lines, each edited, removed or added, between `least` and `most` of them. */
-function ListEditor({
+export function ListEditor({
   noun,
   items,
   least,

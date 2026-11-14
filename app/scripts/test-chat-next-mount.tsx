@@ -25,6 +25,7 @@ import {
   composerField,
   find,
   findAll,
+  leave,
   missing,
   mount,
   sendPress,
@@ -840,29 +841,24 @@ test("the composer carries the chat's model pill, which names the model the chat
   })
 })
 
-test("the header's options rename a chat and delete it, as the current screen's do", async () => {
+test("the header press renames a chat and deletes it, from the chat's own settings", async () => {
   await onChatNext("c-options")
   await db.sentFiles.put({ session: "gots-c-options", path: "/h/a.png", blob: new Blob(["x"]) })
   await mount(chatScreen("c-options"), async () => {
-    await until(() => Boolean(find('button[aria-label="Chat options"]')), "the options button")
-    await click(find('button[aria-label="Chat options"]'))
-    await click(
-      findAll('[role="menuitem"]').find((one) => one.textContent?.includes("Rename")) ?? null,
-    )
-    const field = find('input[aria-label="Chat title"]') as HTMLInputElement | null
-    assert.ok(field, "the rename dialog")
+    await until(() => Boolean(find("[data-chat-settings-open]")), "the bar's title, as one press")
+    await click(find("[data-chat-settings-open]"))
+    const field = find("[data-chat-name]") as HTMLInputElement | null
+    assert.ok(field, "the name, as the field it is typed in")
     await type(field, "Renamed chat")
-    await click(button("Save"))
+    // Leaving the field is the write: the sheet stays where it is.
+    await leave(field)
     await until(
       () => find('[data-slot="header-title"]')?.textContent?.trim() === "Renamed chat",
       "the header carries the new title",
     )
     assert.equal((await db.conversations.get("c-options"))?.titleEdited, true)
 
-    await click(find('button[aria-label="Chat options"]'))
-    await click(
-      findAll('[role="menuitem"]').find((one) => one.textContent?.includes("Delete")) ?? null,
-    )
+    await click(button("Delete chat"))
     await click(button("Delete"))
     await settle()
     assert.equal(await db.conversations.get("c-options"), undefined, "the chat is deleted")

@@ -37,6 +37,9 @@ title and its age off the record, which costs nothing to hold. A bound on the *r
 cheaper still and could not be honest: it would put a pinned chat, or a chat of an older bot, out of
 reach of the only screen that reaches chats.
 
+> **Superseded in part by ADR 0153.** A bot opens on its list, always: the memory below is gone with
+> `lib/last-chat.ts`, and with it `BACK_ON_LIST`. Read the paragraphs under this note as history.
+
 **A bot opens where the reader left it.** Opening the bot opens the chat whose address was last on
 screen for it — kept per bot in this device's storage, never synced, since it is where a reader was
 sitting rather than a fact about the chat (`lib/last-chat.ts`). A memory that no longer holds — the
