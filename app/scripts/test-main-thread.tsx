@@ -14,11 +14,12 @@ import {
   botProfile,
   click,
   find,
-  findAll,
+  findText,
   json,
   mount,
   seedSettings,
   settle,
+  until,
 } from "./component-kit.tsx"
 
 const bot = botProfile("main-thread", { id: "bot-1", name: "Mainly" })
@@ -64,7 +65,7 @@ test("a Main is titled with its own name, not its bot's", async () => {
   )
 })
 
-test("Main has no Delete, in its menu or in the data layer", async () => {
+test("Main has no Delete, in its settings or in the data layer", async () => {
   await seed()
   globalThis.fetch = async () => json({})
   await mount(
@@ -74,12 +75,11 @@ test("Main has no Delete, in its menu or in the data layer", async () => {
       </Routes>
     </MemoryRouter>,
     async () => {
-      await click(find('[aria-label="Chat options"]'))
+      await until(async () => Boolean(find("[data-chat-settings-open]")), "the bar's title")
+      await click(find("[data-chat-settings-open]"))
       await settle()
-      const items = findAll('[role="menuitem"]').map((item) => item.textContent)
-      assert.ok(items.length > 0, "the chat's own menu opened")
-      assert.ok(items.some((label) => label?.includes("Rename")), "a chat's menu, not a bot's")
-      assert.ok(!items.some((label) => /Delete|Discard/.test(label ?? "")))
+      assert.ok(find("[data-chat-name]"), "the chat's own settings opened")
+      assert.ok(!findText("button", "Delete chat"), "with no way to delete a Main among them")
     },
   )
   await deleteConversation(MAIN.id)

@@ -495,7 +495,12 @@ export const FLOWS = {
   "bot-chats": {
     script: "e2e/bot-chats.mjs",
     about:
-      "A bot opens the chat this device left it in — from the sidebar, and after a reload — with its list behind that chat, whose own press back leaves the app; a bot never opened draws its list, with nothing made for it",
+      "A bot pressed from the sidebar or Home always draws its list, at the app's only entry, with nothing made for it and no chat resumed; a chat picked from it takes the app's only entry, a room keeps the list as its way back, and a reload keeps the reader where they were",
+  },
+  "bot-list": {
+    script: "e2e/bot-list.mjs",
+    about:
+      "A bot's list as the way into every conversation: ordered by the last message received, a chat, a room and a routine's run each opening in the pane beside it at 1280px with the bot's face drawn once, a bot's sidebar row at the app's 44px height, and on a phone a row opening its chat as the app's only entry with the sidebar the way back to the list",
   },
   "card-widths": {
     script: "e2e/card-widths.mjs",

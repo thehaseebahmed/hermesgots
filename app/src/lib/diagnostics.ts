@@ -37,10 +37,6 @@ export interface DiagBot {
   plugin: string | null
   /** The features the plugin advertises; null where the host couldn't be asked. */
   features: string[] | null
-  /** The chat this device's bot screen opens, as the bot's own address reads it. */
-  lastThread: string | null
-  /** The chat storage holds for that screen, even where it no longer names one of the bot's. */
-  lastStored: string | null
   /** The newest chats, most recently touched first, as far back as the window reached. */
   chats: DiagChat[]
   /** Its own reads failed, so what sits above is what could be read around them. */
@@ -107,10 +103,6 @@ export interface DiagHost {
   plugin: string | null
   /** The features the plugin advertises. */
   features: string[] | null
-  /** The chat this device's bot screen opens, as the bot's own address reads it. */
-  lastThread: string | null
-  /** The chat storage holds for that screen, even where it no longer names one of the bot's. */
-  lastStored: string | null
 }
 
 export function diagBot(input: {
@@ -129,8 +121,6 @@ export function diagBot(input: {
     pluginVersion: host.pluginVersion,
     plugin: host.plugin,
     features: host.features,
-    lastThread: host.lastThread,
-    lastStored: host.lastStored,
     chats,
   }
   if (unread) built.unread = true

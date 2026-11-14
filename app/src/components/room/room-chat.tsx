@@ -81,8 +81,8 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
   const labels = useBotLabels()
   // The bot's list this room is a row of: the one the row was opened from, as its link says in the
   // address's state, else the bot that carries the room onto this device. A room is no bot's chat
-  // (`listsAsChat`), so `useBotChatsPane` answers nothing for it at any width — the list is never
-  // beside it, and this screen is always one the list pushed.
+  // (`listsAsChat`), so the shell seats its pane from that state alone — and the legacy layout, where
+  // no bot has a list, is asked too, so a room is never drawn beside a list that isn't there.
   const carrier = (location.state as { bot?: string } | null)?.bot ?? chat?.profileId
   const listBot = carrier ? seated.get(carrier) : undefined
   const lead = useChatLead({
@@ -157,6 +157,8 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
         title={name}
         subtitle={chat?.room ? roomMembersLine({ ...chat.room, members: live.members }) : undefined}
         botId={answerer?.botId}
+        // The bot's list beside this room already names the bot with its face.
+        showBot={!lead.besideList}
         actions={<RoomActions roomId={id} name={name} answerer={answerer} />}
         // The list its row stands in, where that list is not on screen beside this one: a room is
         // opened from a bot's list like any row of it, so it carries the same way back a chat does.

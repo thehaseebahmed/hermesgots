@@ -1,5 +1,12 @@
 # A chat is the root, and a bot's list is a screen it opens
 
+**Superseded in part by [ADR 0153](0153-a-bot-s-list-is-the-way-into-every-conversation.md)**
+(2026-11-13): a bot's address is its list rather than the chat this device was last in — so the
+landing, the memory behind it and the list control this record put in a chat's bar are gone, and a
+bot's row in the sidebar always draws the list. What this record says about a chat being the root
+stands, and a picked chat is still the app's only entry
+([ADR 0145](0145-a-picked-chat-opens-as-the-apps-only-entry.md)).
+
 **Superseded in part by [ADR 0145](0145-a-picked-chat-opens-as-the-apps-only-entry.md)** (2026-11-11): a row picked from a bot's list opens that chat as the app's only entry, rather than taking the list's own entry and leaving the chat it covered behind — so a picked chat stands at rung 0, and its press is the app's. The rest of what this record says about a picked row stands: the pick is still what makes the chat the bot's chat on screen.
 
 [ADR 0136](0136-a-bots-screen-is-the-list-of-its-chats.md) made a bot's screen the list of its chats
@@ -75,6 +82,8 @@ the bar both screens draw is still one component
 
 ## Consequences
 
+- **Superseded in part by ADR 0153**: a bot's presses now land on its list at the app's first entry,
+  and the marker that said the list stood over a chat (`BACK_ON_LIST` in `lib/nav.ts`) is gone.
 - The list's own back at the root, and the app's exit press, are all the app's: `BACK_ON_LIST` in
   `lib/nav.ts` stays, because a room and a routine's run still leave a list their leading steps back
   to, but a bot's chat no longer steps back onto its list.

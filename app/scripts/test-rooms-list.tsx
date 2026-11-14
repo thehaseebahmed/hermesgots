@@ -16,7 +16,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { act } from "react"
-import { MemoryRouter, Route, Routes, useLocation } from "react-router"
+import { MemoryRouter, Route, Routes } from "react-router"
 
 import { ConversationList } from "@/components/conversation-list"
 import { RoomChat } from "@/components/room/room-chat"
@@ -653,12 +653,6 @@ test("the room's needs-you mark stands on its row, and clears when the room is o
   })
 })
 
-/** Whether the entry on screen is one a screen marked as a step back onto a list. */
-const Listed = () => {
-  const state = useLocation().state as { listed?: boolean } | null
-  return <p data-listed>{String(Boolean(state?.listed))}</p>
-}
-
 test("a room opened from a bot's list leads back to that list, by its control and by back", async () => {
   // A room is a row of every bot's list it seats, and the shell lays no bot list beside a room — it
   // is no bot's chat (`listsAsChat`), so `useBotChatsPane` answers nothing for it at any width. The
@@ -669,7 +663,6 @@ test("a room opened from a bot's list leads back to that list, by its control an
   const roomFromList = () => (
     <MemoryRouter initialEntries={[{ pathname: `/c/${ROOM}`, state: { bot: CODER } }]}>
       <Path />
-      <Listed />
       <Routes>
         <Route path="/c/:id" element={<RoomChat id={ROOM} slot="route" />} />
         <Route path="/b/:profileId" element={<p data-list />} />
@@ -681,11 +674,6 @@ test("a room opened from a bot's list leads back to that list, by its control an
     await click(find(`[aria-label="Back to Coder"]`))
     await until(async () => path() === `/b/${CODER}`, "the list the row stands in")
     assert.ok(find("[data-list]"), "and the room's screen is what was left")
-    assert.equal(
-      find("[data-listed]")?.textContent,
-      "true",
-      "so the entry says the reader stepped back onto the list rather than arriving afresh",
-    )
   })
   await mount(roomFromList(), async () => {
     await until(
@@ -694,11 +682,6 @@ test("a room opened from a bot's list leads back to that list, by its control an
     )
     assert.equal(pressBack(), "screen", "Android's back is the same answer")
     await until(async () => path() === `/b/${CODER}`, "the list behind it")
-    assert.equal(
-      find("[data-listed]")?.textContent,
-      "true",
-      "with the marker its control leaves: one move, so the press cannot forget it",
-    )
   })
 })
 

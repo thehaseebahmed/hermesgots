@@ -5,8 +5,8 @@
  * A bot's chat, a room and a routine's run are all rows of a bot's list, so all three ask the same
  * three questions — is my list a real screen here, is it already on screen beside me, and where does
  * the press go — and answered them separately until this module. What a screen still decides for
- * itself is which bot carries it (a chat's own, a room's `state.bot`), whether a list can stand
- * beside it at all (a room's cannot), and the words its control wears.
+ * itself is which bot carries it (a chat's own, a room's `state.bot`) and the words its control
+ * wears.
  */
 import { useCallback, useEffect, useRef } from "react"
 
@@ -46,13 +46,13 @@ export function useChatLead({
 }) {
   const legacy = useLegacyChat()
   const split = useSplit()
-  const { back, backToList } = useNav()
+  const { back, up } = useNav()
   // The legacy layout has no bot's screen at all, so nothing of the list is drawn there.
   const list = legacy === false && bot ? botChatsPath(bot) : undefined
   const besideList = (beside ?? split) && Boolean(list)
   const ontoList = useCallback(() => {
-    if (list) backToList(list)
-  }, [list, backToList])
+    if (list) up(list)
+  }, [list, up])
   // `useNav` hands back a fresh move whenever the address does, while the guard must not re-register
   // with it: the guard reads the move it was made with.
   const step = useRef(ontoList)
@@ -74,11 +74,11 @@ export function useChatLead({
     <BackButton label={label} onClick={() => ontoList()} floating />
   )
   return {
-    /** The bot's list, where it does not already stand beside this screen: what the bar opens. */
-    listPath: besideList ? undefined : list,
-    /** The same address whether or not the list is beside: where a screen that deletes itself goes. */
+    /** Whether the list stands beside this screen, so its bar drops the bot's face. */
+    besideList,
+    /** The list's address, where one holds this screen: what a screen that deletes itself steps onto. */
     list,
-    /** Steps back onto that list, carrying the marker a list reads as the reader's own step. */
+    /** Steps back onto that list, which is what a room's and a run's control answers with. */
     ontoList,
     leading,
   }

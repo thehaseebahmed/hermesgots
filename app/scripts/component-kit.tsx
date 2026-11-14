@@ -559,6 +559,15 @@ export async function type(element: Element | null, value: string) {
   await settle()
 }
 
+/** Leaves a field the way a thumb does: a focusout, which is the event React's `onBlur` answers. */
+export async function leave(element: Element | null) {
+  assert.ok(element, "the field is on screen")
+  await act(async () => {
+    element.dispatchEvent(new Event("focusout", { bubbles: true }))
+  })
+  await settle()
+}
+
 export const text = () => document.body.textContent ?? ""
 /** An element's words as a row reads them: its text, whitespace collapsed to single spaces. */
 export const wordsOf = (element: Element | null) =>

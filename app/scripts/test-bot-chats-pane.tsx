@@ -93,7 +93,7 @@ async function seed({ collapsed = false } = {}) {
  * address for every screen — a bot's chat, a project session, a canvas — so which pane it opens is
  * the shell's to decide and this test's to read.
  */
-const screen = (entry: string) => (
+const screen = (entry: string | { pathname: string; state?: unknown }) => (
   <MemoryRouter initialEntries={[entry]}>
     <Path />
     <Routes>
@@ -210,66 +210,24 @@ test(
 )
 
 test(
-  "a phone's chat carries the way to its bot's chats, beside the options menu",
+  "a phone's chat carries no way to its bot's chats and no menu: the title is its settings",
   atWidth(390, async () => {
     localStorage.clear()
     await seed()
     await mount(screen("/c/c-a"), async () => {
       await until(async () => titles().includes("Alpha"), "the chat's own header")
-      const control = find(LIST_CONTROL)
-      assert.equal(control?.getAttribute("href"), `/b/${bot.id}`, "the bar carries the way to the bot's chats")
+      assert.equal(missing(LIST_CONTROL), true, "no control opens the bot's chats from the bar")
       assert.deepEqual(
-        findAll('[data-slot="header-actions"] a, [data-slot="header-actions"] button').map((one) =>
-          one.getAttribute("aria-label"),
+        findAll('[data-slot="header-actions"] a, [data-slot="header-actions"] button').map(
+          (node) => node.getAttribute("aria-label")?.split(",")[0],
         ),
-        ["Chats with Mainly", "Chat options"],
-        "and it stands immediately beside the options menu",
-      )
-      assert.match(
-        control?.getAttribute("class") ?? "",
-        /\bsize-11\b.*\bbackdrop-blur\b/,
-        "wearing the frosted circle the bar's other controls wear",
-      )
-    })
-  }),
-)
-
-test(
-  "the list control says when another of the bot's chats waits unread",
-  atWidth(390, async () => {
-    localStorage.clear()
-    await seed()
-    // Beta has moved since this device last read it. The marks outlive a case in this process, so the
-    // one an earlier case wrote for this chat is dropped first, and the mark put back behind its record.
-    forgetRead("c-b")
-    markRead("c-b", 11)
-    await mount(screen("/c/c-a"), async () => {
-      await until(async () => titles().includes("Alpha"), "the chat's own header")
-      const control = () => find('[data-slot="header-actions"] a[href^="/b/"]')
-      assert.equal(
-        control()?.getAttribute("aria-label"),
-        "Chats with Mainly, unread chats",
-        "the control names the row of the list that waits",
+        ["Context"],
+        "and the corner holds the chat's context alone",
       )
       assert.equal(
-        missing('[data-slot="header-actions"] a[href^="/b/"] [data-unread]'),
-        false,
-        "and wears the dot the app's rows wear",
-      )
-      markRead("c-b", 13)
-      await until(
-        async () =>
-          control()?.getAttribute("aria-label") === "Chats with Mainly",
-        "the dot to go once that chat has been read",
-      )
-      // The chat on screen moving is not news to the reader sitting in it, so it never dots the
-      // control that opens the rest of the list.
-      await db.conversations.update("c-a", { updatedAt: Date.now() })
-      await settle()
-      assert.equal(
-        missing('[data-slot="header-actions"] a[href^="/b/"] [data-unread]'),
-        true,
-        "with nothing of the bot's left waiting, and the chat on screen not counted",
+        find("[data-chat-settings-open]")?.getAttribute("aria-haspopup"),
+        "dialog",
+        "the title is the press that opens the chat's settings",
       )
     })
   }),
@@ -332,6 +290,121 @@ test(
         missing('[data-slot="bot-chats-empty"]'),
         true,
         "and the bot's screen is not the pane a session opens",
+      )
+    })
+  }),
+)
+
+/**
+ * A room is a row of every bot's list its roster seats, so the list it was picked from is the lane it
+ * opens beside — the shell asks the record which bot it answers, and a room answers for its Host, so
+ * the row's own state is what names the list (ADR 0153).
+ */
+test(
+  "a room's row opens beside the list it was picked from, at 1280px",
+  atWidth(1280, async () => {
+    localStorage.clear()
+    await seed()
+    await db.profiles.update(bot.id, { hermesProfile: "default" })
+    await db.conversations.put({
+      id: "room-1",
+      profileId: bot.id,
+      title: "Standup",
+      hermesSessionId: "gots-room-1",
+      createdAt: 2,
+      updatedAt: 14,
+      changedAt: 14,
+      room: { id: "room-1", members: [{ profile: "default" }] },
+    })
+    await mount(screen({ pathname: "/c/room-1", state: { bot: bot.id } }), async () => {
+      await until(async () => titles().includes("Standup"), "the room's own screen")
+      assert.equal(missing(LANE), false, "the bot's list keeps its lane beside the room")
+      assert.deepEqual(
+        listRows().sort(),
+        [`/c/${MAIN}`, ...CHATS.map((chat) => `/c/${chat.id}`), "/c/room-1"].sort(),
+        "with the room a row of it, marked as the one open",
+      )
+      assert.equal(openRow()?.getAttribute("href"), "/c/room-1", "the row the pane holds")
+      assert.equal(missing(CHAT_BESIDE), false, "and the room drawn in the pane beside it")
+      assert.equal(missing(LIST_CONTROL), true, "no bar control repeats the list beside it")
+      assert.equal(
+        findAll('[data-slot="item-lane"] [data-slot="header-row"] [role="img"]').length,
+        0,
+        "and the room's bar repeats no face the list's bar already draws",
+      )
+    })
+  }),
+)
+
+/**
+ * The record a row opens is the authority on which list stands beside it: a link that names another
+ * bot, or a link that names one at all on a session, cannot seat a list the record does not belong to.
+ */
+test(
+  "a chat's link naming another bot opens the list of the bot that owns it",
+  atWidth(1280, async () => {
+    localStorage.clear()
+    await seed()
+    const other = botProfile("bot-chats-pane-other", { id: "bot-2", name: "Elsewhere" })
+    await db.profiles.put(other)
+    await mount(screen({ pathname: `/c/${CHATS[0].id}`, state: { bot: other.id } }), async () => {
+      await until(() => listRows().length > 0, "the list beside the chat")
+      assert.equal(missing(`[data-slot="list-lane"] a[href="/c/${CHATS[1].id}"]`), false,
+        "the owning bot's list, not the one the link named")
+      assert.equal(
+        findAll("p").some((node) => node.textContent === "No chats yet."),
+        false,
+        "which is not the other bot's empty list",
+      )
+    })
+  }),
+)
+
+test(
+  "a session's link naming a bot seats no bot's list beside it",
+  atWidth(1280, async () => {
+    localStorage.clear()
+    await seed()
+    await db.conversations.put({
+      id: "c-project",
+      profileId: bot.id,
+      title: "A session",
+      projectId: "p-1",
+      hermesSessionId: "gots-c-project",
+      createdAt: 3,
+      updatedAt: 15,
+      changedAt: 15,
+    })
+    await mount(screen({ pathname: "/c/c-project", state: { bot: bot.id } }), async () => {
+      await until(() => titles().includes("A session"), "the session's own screen")
+      assert.equal(
+        missing(`[data-slot="list-lane"] a[href="/c/${CHATS[1].id}"]`),
+        true,
+        "the bot's list is not seated beside a project's session, whatever its link says",
+      )
+    })
+  }),
+)
+
+/**
+ * The bot is named once on a screen: its list's bar carries its face, and the chat beside that list
+ * does not repeat it (ADR 0153).
+ */
+test(
+  "the bot's face is drawn once, in the list's bar, not again in the chat's",
+  laptop(async () => {
+    localStorage.clear()
+    await seed()
+    await mount(screen("/c/c-a"), async () => {
+      await until(async () => titles().includes("Alpha"), "the chat's own header")
+      assert.ok(
+        find('[data-slot="list-lane"] [data-slot="header-row"] [role="img"]'),
+        "the list's bar carries the bot's face",
+      )
+      assert.equal(
+        findAll('[data-slot="item-lane"] [data-slot="header-row"] [role="img"]').length,
+        0,
+        "and the chat beside it repeats no face",
       )
     })
   }),
