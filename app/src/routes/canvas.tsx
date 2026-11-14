@@ -15,6 +15,7 @@ import { Link, Navigate, useMatch, useNavigate, useParams, useSearchParams } fro
 import { ChatBody } from "@/chat-next/chat-body"
 import { BackButton } from "@/components/back-button"
 import { CanvasConsentDialog, CanvasOptions, useCanvasConsent } from "@/components/canvas-consent"
+import { CanvasMark } from "@/components/canvas-mark"
 import { Refusal } from "@/components/banner"
 import { CanvasPointsProvider, type CanvasPoints } from "@/components/chat/canvas-points"
 import { ChatHeader } from "@/components/chat/chat-header"
@@ -110,7 +111,8 @@ const openedBy = (id: string) => (event: MouseEvent<HTMLAnchorElement>) => {
 /**
  * A canvas in the list: the picture its bot put on it, or its own mark, over the name and where it
  * stands. A tile rather than a row, since what a reader picks from is a page — the picture is the
- * whole of what tells two canvases apart at a glance.
+ * whole of what tells two canvases apart at a glance, and where a record holds none the mark its
+ * reader chose stands in, which is the same slot the sidebar's row draws it in.
  */
 function CanvasTile({ canvas, now }: { canvas: Canvas; now: number }) {
   const line = canvas.version > 0 ? `Version ${canvas.version}` : "Building it…"
@@ -129,7 +131,7 @@ function CanvasTile({ canvas, now }: { canvas: Canvas; now: number }) {
           <img src={canvas.image} alt="" className="size-full object-cover" loading="lazy" />
         ) : (
           <span className="flex size-full items-center justify-center text-muted-foreground">
-            <FrameIcon className="size-7" aria-hidden />
+            <CanvasMark mark={canvas.mark} large />
           </span>
         )}
       </div>

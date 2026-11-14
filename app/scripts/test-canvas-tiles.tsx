@@ -40,12 +40,26 @@ const PLAIN = {
   created_at: 2,
 }
 
+/** A canvas whose reader chose an icon for it and never gave it a picture. */
+const MARKED = {
+  id: "x3",
+  title: "A marked checklist",
+  session_id: "gots-chat-x3",
+  chat_id: "chat-x3",
+  version: 2,
+  pinned: true,
+  archived: false,
+  mark: "heart",
+  at: 30,
+  created_at: 3,
+}
+
 function serveCanvases() {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
     if (url.pathname.endsWith("/info")) return json({ version: "0.114.0", features: ["canvas"] })
     if (url.pathname.endsWith("/canvases"))
-      return json({ object: "gots.canvases", canvases: [PICTURED, PLAIN] })
+      return json({ object: "gots.canvases", canvases: [PICTURED, PLAIN, MARKED] })
     return json({ error: { message: "no route" } }, 404)
   }) as unknown as typeof fetch
 }
@@ -69,13 +83,16 @@ test("a canvas is a tile, with its picture or its own mark", async () => {
       <CanvasPage />
     </MemoryRouter>,
     async () => {
-      await until(async () => Boolean(tile("x1") && tile("x2")), "both canvases as tiles")
+      await until(
+        async () => Boolean(tile("x1") && tile("x2") && tile("x3")),
+        "every canvas as a tile",
+      )
 
       const grid = find('ul[aria-label="Canvases"]')!
       assert.match(grid.className, /grid-cols-2\b/, "a phone holds two columns")
       assert.equal(
         grid.querySelectorAll(":scope > li a[data-canvas-tile]").length,
-        2,
+        3,
         "each canvas is a tile of the grid",
       )
 
@@ -90,6 +107,16 @@ test("a canvas is a tile, with its picture or its own mark", async () => {
       assert.equal(plain.dataset.canvasTileImage, "mark")
       assert.equal(plain.querySelector("img"), null)
       assert.ok(plain.querySelector("svg"), "the mark is drawn")
+
+      // A mark the reader chose is what the tile draws where the record holds no picture (#1074):
+      // the icon's own name, in the tile's size, rather than the app's frame.
+      const marked = picture("x3")!
+      assert.equal(marked.dataset.canvasTileImage, "mark", "a mark, since there is no picture")
+      assert.equal(marked.querySelector("img"), null, "and nothing is drawn as an image")
+      const icon = marked.querySelector("svg")
+      assert.ok(icon, "the mark takes the picture's place")
+      assert.match(icon!.getAttribute("class") ?? "", /\blucide-heart\b/, "the heart it was given")
+      assert.match(icon!.getAttribute("class") ?? "", /\bsize-7\b/, "in the tile's own size")
 
       // The line under the name says where the canvas stands.
       assert.match(tile("x1")!.textContent ?? "", /Version 3/)
