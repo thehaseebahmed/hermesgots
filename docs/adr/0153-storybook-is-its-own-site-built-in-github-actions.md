@@ -9,6 +9,8 @@ Storybook (`app/.storybook`, stories beside the component they show as `*.storie
 the shared components in light and dark, and a Foundations section that draws `DESIGN.md`'s colours,
 type, radii and measures, read through `src/lib/design-spec.ts` so the file stays the one source.
 
+**It covers three layers**: every standard component in `components/ui/` with the states it takes (open, disabled, invalid), the app's own components in their states (an approval waiting and answered, a question paged, a pull request by state and checks, the cards that stand where the composer would), and the app's screens, which are the real route table over a seeded device rather than copies of them (`src/stories/device.ts`). A screen's states are the device's — empty, filled, the host away — and its width is the Viewport toolbar's.
+
 **It builds with its own Vite config** (`.storybook/vite.config.ts`: React, Tailwind and the app's
 alias). The app's `vite.config.ts` carries the service worker, Sentry's source map upload and the dev
 verification SDK, none of which belong in a component workshop, and Storybook would load all of them

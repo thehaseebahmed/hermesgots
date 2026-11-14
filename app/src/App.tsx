@@ -99,7 +99,7 @@ function MovedProject() {
   return <Navigate to={`/projects/${profileId}/${projectId}`} replace />
 }
 
-function AppRoutes() {
+export function AppRoutes() {
   useRecordLastChat()
   useShareReceiver()
   // The model sheet reads the models.dev catalog on every open, so warm it here: a returning
