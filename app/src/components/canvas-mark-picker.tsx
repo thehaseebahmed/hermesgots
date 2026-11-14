@@ -1,13 +1,15 @@
 /**
- * The picker a canvas's icon is chosen from (issue #1065): lucide's icons and the phone's emojis, one
- * search over both. It opens the way the model selector does — a menu anchored to the button it came
- * from on a laptop and up, a bottom sheet below that — with the tabs the Outputs sheet draws, and it
- * says what it is for in the same words everywhere: Canvas Icon.
+ * The picker a canvas's face is chosen from (issues #1065, #1074): lucide's icons and the phone's
+ * emojis, one search over both, and — on a tab of its own — the picture the Canvas list draws.
+ * It opens the way the model selector does — a menu anchored to the button it came from on a laptop
+ * and up, a bottom sheet below that — with the tabs the Outputs sheet draws, and it says what it is
+ * for in the same words everywhere: Canvas Icon.
  *
- * A pick is the record's, not this device's: it posts the mark to the host, the host's answer folds
- * into the store, and the row it was opened from redraws from it.
+ * A pick is the record's, not this device's: it posts the mark — or the picture, which is one inline
+ * image the host keeps on the same record — to the host, the host's answer folds into the store, and
+ * the row and the tile it was opened for redraw from it.
  */
-import { useMemo, useState, type ReactNode, type RefObject } from "react"
+import { useMemo, useRef, useState, type ReactNode, type RefObject } from "react"
 
 import { Popup, PopupContent, PopupHeader } from "@/components/popup"
 import { SearchField } from "@/components/search-field"
@@ -16,6 +18,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { Canvas, CanvasChanges } from "@/lib/canvases"
 import { MARK_EMOJIS } from "@/lib/canvas-emojis"
+import { UNREADABLE_PICTURE, inlinePicture } from "@/lib/canvas-image"
 import { useMarkIcons } from "@/lib/canvas-mark-icons"
 import { markMatches, readMark } from "@/lib/canvas-marks"
 import { cn } from "@/lib/utils"
@@ -82,6 +85,12 @@ function MarkPicker({
   )
   const [query, setQuery] = useState("")
   const [saving, setSaving] = useState(false)
+  // A picture is read here, not by the host, so what the device's own decoder says about one is said
+  // on the tab that asked rather than where the host's refusals are said.
+  const [said, setSaid] = useState<string | null>(null)
+  const [reading, setReading] = useState(false)
+  const pictureField = useRef<HTMLInputElement>(null)
+  const busy = saving || reading
 
   /** Writes the mark the picker means, and answers whether the host took it. */
   const write = async (changes: CanvasChanges) => {
@@ -101,6 +110,32 @@ function MarkPicker({
   /** A pick is the answer to what the picker was opened for, so the picker closes on it. */
   const pick = async (mark: string) => {
     if (await write({ mark })) onDone()
+  }
+
+  /**
+   * A picture the reader chose, read here and posted as the record's `image`. What the file can't be
+   * — too big for the host to keep, or no picture at all — is said on the tab that asked for it, and
+   * the record the grid draws stays as it was.
+   */
+  const choose = async (file: File | undefined) => {
+    if (!file || busy) return
+    setSaid(null)
+    setReading(true)
+    try {
+      const image = await inlinePicture(file)
+      if (await write({ image })) onDone()
+    } catch (failure) {
+      setSaid(failure instanceof Error ? failure.message : UNREADABLE_PICTURE)
+    } finally {
+      setReading(false)
+    }
+  }
+
+  /** The picture taken off the record, which is a canvas that goes back to its mark. */
+  const clearPicture = async () => {
+    if (busy) return
+    setSaid(null)
+    if (await write({ image: "" })) onDone()
   }
 
   const grid = useMemo(() => {
@@ -127,15 +162,19 @@ function MarkPicker({
         <TabsList>
           <TabsTrigger value="icons">Icons</TabsTrigger>
           <TabsTrigger value="emojis">Emojis</TabsTrigger>
+          <TabsTrigger value="picture">Picture</TabsTrigger>
         </TabsList>
       </div>
-      <div className="px-4 pt-3">
-        <SearchField
-          value={query}
-          onChange={setQuery}
-          label={tab === "icons" ? "Search icons" : "Search emojis"}
-        />
-      </div>
+      {/* The search narrows a set of marks; a picture is one place of its own, so it has none. */}
+      {tab !== "picture" && (
+        <div className="px-4 pt-3">
+          <SearchField
+            value={query}
+            onChange={setQuery}
+            label={tab === "icons" ? "Search icons" : "Search emojis"}
+          />
+        </div>
+      )}
 
       <TabsContent value="icons" className="min-h-0 overflow-y-auto px-4 pt-3">
         {!icons ? (
@@ -150,7 +189,7 @@ function MarkPicker({
                   key={name}
                   label={icon.words}
                   selected={chosen === name}
-                  disabled={saving || !canvas}
+                  disabled={busy || !canvas}
                   onPick={() => void pick(name)}
                 >
                   <icon.Icon className="size-5 text-muted-foreground" />
@@ -176,7 +215,7 @@ function MarkPicker({
               key={emoji.glyph}
               label={emoji.words}
               selected={chosen === emoji.glyph}
-              disabled={saving || !canvas}
+              disabled={busy || !canvas}
               onPick={() => void pick(emoji.glyph)}
             >
               <span className="text-xl leading-none">{emoji.glyph}</span>
@@ -188,20 +227,82 @@ function MarkPicker({
         )}
       </TabsContent>
 
+      {/*
+        The picture is the canvas's face in the list, and it wins over the mark wherever both exist:
+        it sits on the record as one inline image, so a canvas draws the same one on every device.
+      */}
+      <TabsContent value="picture" className="min-h-0 overflow-y-auto px-4 pt-3">
+        <div className="flex flex-col gap-3">
+          <div
+            data-canvas-picture={canvas?.image ? "picture" : "none"}
+            className="relative aspect-[4/3] overflow-hidden rounded-2xl border bg-muted/40"
+          >
+            {canvas?.image ? (
+              <img src={canvas.image} alt="" className="size-full object-cover" />
+            ) : (
+              <span className="flex size-full items-center justify-center px-4 text-center text-sm text-muted-foreground">
+                No picture yet.
+              </span>
+            )}
+          </div>
+          <p className="text-sm text-muted-foreground">
+            The Canvas list draws this for the canvas, over any icon. It's kept on the canvas itself,
+            so every device draws the same one.
+          </p>
+          {said && (
+            <p data-canvas-picture-said className="text-sm text-destructive-ink">
+              {said}
+            </p>
+          )}
+          <Button
+            type="button"
+            variant="outline"
+            data-canvas-picture-choose
+            className="w-full"
+            disabled={busy || !canvas}
+            onClick={() => pictureField.current?.click()}
+          >
+            {reading ? "Reading it…" : canvas?.image ? "Choose another picture" : "Choose a picture"}
+          </Button>
+          {canvas?.image && (
+            <Button
+              type="button"
+              variant="ghost"
+              data-canvas-picture-unset
+              className="w-full"
+              disabled={busy || !canvas}
+              onClick={() => void clearPicture()}
+            >
+              Remove picture
+            </Button>
+          )}
+          <input
+            ref={pictureField}
+            id="canvas-picture"
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(event) => void choose(event.target.files?.[0])}
+          />
+        </div>
+      </TabsContent>
+
       {/* The way back: a canvas nobody has marked draws the app's own frame, as every canvas did
           before a mark could be chosen. Under the grid's own scroll rather than inside it. */}
-      <div className="border-t px-4 py-3">
-        <Button
-          type="button"
-          variant="outline"
-          data-canvas-mark-unset
-          className="w-full"
-          disabled={saving || !canvas || !chosen}
-          onClick={() => void pick("")}
-        >
-          Remove Icon
-        </Button>
-      </div>
+      {tab !== "picture" && (
+        <div className="border-t px-4 py-3">
+          <Button
+            type="button"
+            variant="outline"
+            data-canvas-mark-unset
+            className="w-full"
+            disabled={busy || !canvas || !chosen}
+            onClick={() => void pick("")}
+          >
+            Remove Icon
+          </Button>
+        </div>
+      )}
     </Tabs>
   )
 }
