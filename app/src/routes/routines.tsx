@@ -62,12 +62,11 @@ export function RoutinesPage() {
   }, [profileId])
   const bot = answered && answered.profileId === profileId ? answered.bot : undefined
   // The bot's list stands beside its routines where there is room (`useBotChatsPane`), so the page
-  // has nothing to lead back to; below that width the list pushed it and is what back returns to.
+  // has nothing to lead back to; below that width the list is the screen this page was opened from,
+  // and is what back returns to.
   const beside = Boolean(useBotChatsPane(useLegacyChat() === false))
-  const { backToList, back } = useNav()
-  // The list a routine's page steps back onto draws itself: without the marker the replacement this
-  // makes at the app's entry would read as a fresh arrival, and land the reader in a chat.
-  const leave = useCallback(() => backToList(botChatsPath(profileId)), [backToList, profileId])
+  const { up, back } = useNav()
+  const leave = useCallback(() => up(botChatsPath(profileId)), [up, profileId])
   // Beside the list the page is the top-level screen, so the press is the app's where nothing stands
   // behind it. The control above still steps to the list, wherever this page was opened.
   useEffect(() => (beside ? undefined : setBackGuard(back())), [back, beside])

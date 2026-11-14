@@ -37,13 +37,33 @@ test("a row's line is the bot's last word, and its time the chat's newest messag
   assert.equal(row.id, "a")
 })
 
-test("a row says what the reader was told, not what they typed under it", () => {
-  // The reader spoke last: the row's place is when the chat moved, its words are the bot's.
+test("a row says what the reader was told, and is placed by when it was told", () => {
+  // The reader spoke last: the row's line is the bot's, and so is its clock — what the reader typed
+  // is not news to them, and a chat is as new as the last thing received in it.
   const mine = said("now do the next thing please", 300, { role: "user" })
   const told = said("The build is green.", 240)
   const row = chatRowOf(chat("a", 100), mine, told)
   assert.equal(row.line, "The build is green.", "the line is the last thing received")
-  assert.equal(row.at, 300, "and the row is ordered by the newest message of any role")
+  assert.equal(row.at, 240, "and the row is ordered by when that arrived, not by the reply to it")
+  // Two chats whose newest messages are both the reader's own, in the opposite order to the bot's:
+  // the one the reader wrote in last is not the one above, since nothing has arrived in it since.
+  const rows = [
+    chatRowOf(
+      chat("spoken-in-last", 100),
+      said("a note", 500, { role: "user" }),
+      said("said first", 200),
+    ),
+    chatRowOf(
+      chat("answered-last", 100),
+      said("a note", 250, { role: "user" }),
+      said("said last", 400),
+    ),
+  ]
+  assert.deepEqual(
+    orderChatRows(rows).map((row) => row.id),
+    ["answered-last", "spoken-in-last"],
+    "the chat the bot answered most recently stands first",
+  )
 })
 
 test("a chat the bot has not answered yet says the reader's own words", () => {

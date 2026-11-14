@@ -1,5 +1,10 @@
 # A chat picked from a bot's list opens as the app's only entry
 
+**Kept whole by [ADR 0153](0153-a-bot-s-list-is-the-way-into-every-conversation.md)** (2026-11-13):
+a picked chat is still the app's only entry, and a room and a run still stand above the list. What
+that record takes away is the list control in a chat's bar, which this one leaned on as the way back
+to the list — a bot's address and the sidebar are that way now.
+
 [ADR 0144](0144-a-chat-is-the-root.md) made a chat the root: `/b/<bot>` opens the chat this device
 last had open there by replacing its own entry, so back from a chat is the app's. It left one hole in
 that model where the list is a screen. The list stands above the chat it covers, and a row picked in

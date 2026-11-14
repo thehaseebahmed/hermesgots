@@ -12,6 +12,7 @@ import { useEffect, useLayoutEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { ChatActions, useChatSurface } from "@/components/chat/chat-actions"
+import { UsageSheet } from "@/components/chat/usage-sheet"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { MessageItem } from "@/components/chat/message-item"
 import {
@@ -92,8 +93,6 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
       profile={bot}
       wide={wide}
       usage={usage}
-      providerUsage={providerUsage}
-      usageOpen={usageOpen}
       onUsageOpenChange={setUsageOpen}
       onDeleted={() => (lead.list ? lead.ontoList() : root("/"))}
     />
@@ -114,6 +113,8 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
             subtitle={`Ran ${ranOn(chat.updatedAt)}`}
             botId={bot.botId}
             muted={Boolean(chat.muted || bot.muted)}
+            // The bot's list beside this run already names the bot with its face.
+            showBot={!lead.besideList}
             actions={actions}
             leading={lead.leading}
           />
@@ -154,6 +155,12 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
       ) : (
         <PendingRoutine />
       )}
+      <UsageSheet
+        open={usageOpen}
+        onOpenChange={setUsageOpen}
+        usage={usage}
+        providerUsage={providerUsage}
+      />
     </div>
   )
 }
