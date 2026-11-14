@@ -226,8 +226,8 @@ test("the picker is a menu beside its box on a laptop, and a sheet below it", as
           // One name for the card, centred, at every width.
           assert.equal(
             find("[data-canvas-mark-picker] h2")?.textContent?.trim(),
-            "Canvas Appearance",
-            "the card is named Canvas Appearance",
+            "Edit Appearance",
+            "the card is named Edit Appearance",
           )
         },
       )

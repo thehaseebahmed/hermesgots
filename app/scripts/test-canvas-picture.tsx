@@ -163,6 +163,14 @@ test("the tab draws the picture the record holds, and its Remove clears the fiel
       assert.ok(remove, "a picture already there has a way off")
       assert.equal(remove?.textContent?.trim(), "Remove picture", "and says what it does")
 
+      // The pair is one column of the app's actions: the same width, and the same thumb's height.
+      // A DOM without layout can't measure the boxes, so it holds the classes a browser reads them by.
+      const choose = find("[data-canvas-thumbnail-choose]")
+      assert.equal(choose?.classList.contains("w-full"), true, "the way on spans the card")
+      assert.equal(remove?.classList.contains("w-full"), true, "and so does the way off")
+      assert.match(choose?.className ?? "", /\bh-11\b/, "both at the app's action height")
+      assert.match(remove?.className ?? "", /\bh-11\b/, "the one the other wears")
+
       await click(remove)
       await until(async () => changes.length === 1, "the clear to be posted")
       assert.deepEqual(changes[0], { image: "" }, "an empty string, which is the host's own clear")

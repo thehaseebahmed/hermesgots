@@ -2,7 +2,7 @@
  * The picker a canvas's face is chosen from (issues #1065, #1074): lucide's icons, one search over
  * them, and — on a tab of its own — the thumbnail the Canvas list draws. It opens the way the model
  * selector does — a menu anchored to the button it came from on a laptop and up, a bottom sheet below
- * that — and it names itself in the same words everywhere: Canvas Appearance.
+ * that — and it names itself in the same words everywhere: Edit Appearance.
  *
  * A pick is the record's, not this device's: it posts the mark — or the thumbnail, which is one
  * inline image the host keeps on the same record — to the host, the host's answer folds into the
@@ -32,7 +32,10 @@ const LISTED = 160
 /** The picker's own box: the model selector's, so the two read as one kind of card. */
 const PICKER = "h-[min(36rem,85dvh)]"
 
-/** The app's action size, which is a thumb's: a thumbnail is chosen and taken off in the same one. */
+/**
+ * The app's action size, which is a thumb's: a thumbnail is chosen and taken off by the same one,
+ * and both span the card, so the two ways to it read as one column of actions.
+ */
 const ACTION = "h-11 w-full"
 
 /** One icon in the grid, and the pale disc that says it is the one chosen. */
@@ -238,7 +241,7 @@ function MarkPicker({
           {canvas?.image && (
             <DestructiveButton
               data-canvas-thumbnail-unset
-              className="self-center"
+              className="w-full"
               disabled={busy || !canvas}
               onClick={() => void clearThumbnail()}
             >
@@ -309,7 +312,7 @@ export function CanvasMarkPicker({
       <PopupContent dataSlot="canvas-mark-picker" fixedHeight={PICKER}>
         <PopupHeader className="pb-0">
           <h2 className="cn-font-heading w-full truncate text-center text-base font-medium text-foreground">
-            Canvas Appearance
+            Edit Appearance
           </h2>
         </PopupHeader>
         <MarkPicker
