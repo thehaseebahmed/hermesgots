@@ -46,8 +46,6 @@ import { seatedLine } from "@/lib/room-seats"
 import { useRoom } from "@/lib/room"
 import { memberLabel, type RoomRow } from "@/lib/room-log"
 import { botsByProfile, roomMembersLine } from "@/lib/rooms"
-import { labelOf } from "@/lib/bot-name"
-import { useBotLabels } from "@/lib/use-bot-labels"
 import { cn } from "@/lib/utils"
 
 /**
@@ -78,18 +76,15 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
   const location = useLocation()
   const navigate = useNavigate()
   const legacy = useLegacyChat()
-  const labels = useBotLabels()
   // The bot's list this room is a row of: the one the row was opened from, as its link says in the
   // address's state, else the bot that carries the room onto this device. A room is no bot's chat
   // (`listsAsChat`), so the shell seats its pane from that state alone — and the legacy layout, where
   // no bot has a list, is asked too, so a room is never drawn beside a list that isn't there.
   const carrier = (location.state as { bot?: string } | null)?.bot ?? chat?.profileId
-  const listBot = carrier ? seated.get(carrier) : undefined
   const lead = useChatLead({
     bot: carrier,
     beside: Boolean(useBotChatsPane(legacy === false)),
     press: "list",
-    label: `Back to ${listBot ? labelOf(labels, listBot) : "the chats"}`,
   })
   // A room's row going while the room is open — a disband on another device, or a merge landing
   // first — leaves to the list: the chat screen's own "gone" state would draw an empty chat for a
@@ -160,9 +155,9 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
         // The bot's list beside this room already names the bot with its face.
         showBot={!lead.besideList}
         actions={<RoomActions roomId={id} name={name} answerer={answerer} />}
-        // The list its row stands in, where that list is not on screen beside this one: a room is
-        // opened from a bot's list like any row of it, so it carries the same way back a chat does.
-        leading={lead.leading}
+        // A room is opened from a bot's list like any row of it, so its bar's corner carries the
+        // same way back a chat's does — the list beside it or not.
+        back={lead.back}
       />
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">
         <MessageScroller className="flex-1">

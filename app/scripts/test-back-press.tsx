@@ -280,7 +280,7 @@ async function seedChatOfBot() {
 }
 
 test(
-  "a chat's bar leads with the app's menu, not its bot's list",
+  "a phone's chat carries its way back in the bar's corner, the drawer still at its left",
   atWidth(390, async () => {
     await seedChatOfBot()
     const history = atDepth(0)
@@ -296,9 +296,14 @@ test(
           "the bar leads with the drawer's own control",
         )
         assert.equal(
-          findAll('[aria-label="Back to Mainly"]').length,
+          findAll('[data-slot="header-actions"] button[aria-label="Back to Mainly"]').length,
+          1,
+          "and its corner carries the way back to the bot's list",
+        )
+        assert.equal(
+          findAll('[data-slot="header-leading"] [aria-label="Back to Mainly"]').length,
           0,
-          "and nothing anywhere leads back to the bot's list",
+          "which stands nowhere at the bar's left",
         )
       })
     } finally {

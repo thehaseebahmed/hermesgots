@@ -483,6 +483,9 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
             centered={Boolean(session)}
             showBot={!session && !lead.besideList}
             actions={actions}
+            back={lead.back}
+            // Only a project session under Code leads with a control here: a conversation's way back
+            // stands in its bar's corner, and its left keeps the app's drawer (D3).
             leading={lead.leading}
           />
           <ChatBody
@@ -1095,6 +1098,9 @@ function CurrentChatPage({ slot }: ChatPageProps) {
         centered={centered}
         showBot={!session && !lead.besideList}
         actions={actions}
+        back={lead.back}
+        // Only a project session under Code leads with a control here: a conversation's way back
+        // stands in its bar's corner, and its left keeps the app's drawer (D3).
         leading={lead.leading}
       />
 

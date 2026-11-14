@@ -153,10 +153,14 @@ test(
         "/c/c-a",
         "the row of the chat on screen is the one the list marks open",
       )
+      assert.ok(
+        find(`[data-slot="header-actions"] ${BACK_TO_BOT}`),
+        "and the chat's bar carries its way back to the bot's list in its corner",
+      )
       assert.equal(
-        missing(BACK_TO_BOT),
+        missing(`[data-slot="header-leading"] ${BACK_TO_BOT}`),
         true,
-        "and the chat carries no way back to its bot's list: the bar leads with the app's menu",
+        "in the corner alone: the left of the bar still leads with the app's menu",
       )
     })
   }),
@@ -171,7 +175,10 @@ test(
       await until(async () => titles().includes("Beta"), "the chat's own header")
       assert.match(laneClass(), /\bw-103\b/, "the list keeps the 412px lane a rail leaves room for")
       assert.equal(openRow()?.getAttribute("href"), "/c/c-b", "and marks the chat the address names")
-      assert.equal(missing(BACK_TO_BOT), true, "the chat carries no way back to the list either")
+      assert.ok(
+        find(`[data-slot="header-actions"] ${BACK_TO_BOT}`),
+        "the chat's corner carries its way back, the list beside it or not",
+      )
       assert.equal(missing(LIST_CONTROL), true, "and no way to it in the bar: it stands on screen beside")
     })
   }),
@@ -185,7 +192,10 @@ test(
     await mount(screen("/c/c-a"), async () => {
       await until(async () => titles().includes("Alpha"), "the chat's own header")
       assert.equal(missing(LANE), true, "no list stands beside it")
-      assert.equal(missing(BACK_TO_BOT), true, "and the chat leads with no way back to it")
+      assert.ok(
+        find(`[data-slot="header-actions"] ${BACK_TO_BOT}`),
+        "and the chat leads with a control, its way back standing in the corner",
+      )
       assert.match(
         find(DRAWER)?.getAttribute("class") ?? "",
         /\bmd:hidden\b/,
@@ -204,25 +214,28 @@ test(
       await until(async () => titles().includes("Alpha"), "the chat's own header")
       assert.equal(missing(LANE), true, "no list stands beside it")
       assert.equal(missing(DRAWER), false, "and the bar leads with the drawer's own control")
-      assert.equal(missing(BACK_TO_BOT), true, "with no way back to the list")
+      assert.ok(
+        find(`[data-slot="header-actions"] ${BACK_TO_BOT}`),
+        "with its way back to the list in the corner",
+      )
     })
   }),
 )
 
 test(
-  "a phone's chat carries no way to its bot's chats and no menu: the title is its settings",
+  "a phone's chat's corner carries its way back and its context, no menu: the title is its settings",
   atWidth(390, async () => {
     localStorage.clear()
     await seed()
     await mount(screen("/c/c-a"), async () => {
       await until(async () => titles().includes("Alpha"), "the chat's own header")
-      assert.equal(missing(LIST_CONTROL), true, "no control opens the bot's chats from the bar")
+      assert.equal(missing(LIST_CONTROL), true, "no separate control opens the bot's chats from the bar")
       assert.deepEqual(
         findAll('[data-slot="header-actions"] a, [data-slot="header-actions"] button').map(
           (node) => node.getAttribute("aria-label")?.split(",")[0],
         ),
-        ["Context"],
-        "and the corner holds the chat's context alone",
+        ["Context", "Back to Mainly"],
+        "and the corner holds the chat's context, with the way back drawn last",
       )
       assert.equal(
         find("[data-chat-settings-open]")?.getAttribute("aria-haspopup"),
