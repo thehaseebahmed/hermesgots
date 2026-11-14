@@ -37,7 +37,8 @@ entry — so no bar draws both, and the corner stays the actions' alone. Routine
 because it is a screen of the bot: a bot's screens do not have two conventions for one press. The
 control and the platform's guard are one move (`up(list)`), so a control that says "Back to <bot>"
 cannot answer a press by leaving the app. It is drawn at the two-pane width too: a reader who wants
-the list with nothing beside it asks for it the same way at every width.
+the list with nothing beside it asks for it the same way at every width. A new room's picker wears it
+as well, on the bot the list's New room press named.
 
 **Nothing open beside the list says so.** `/b/<bot>` at the two-pane width draws the list in its lane
 and, beside it, a large chat mark over the words *No chat selected* — one state for "the list is the
