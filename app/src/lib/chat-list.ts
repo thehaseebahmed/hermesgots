@@ -8,7 +8,7 @@
  * same arrival — the newest message the bot sent — because the list is ordered by what came *in*, and a
  * chat the reader has just spoken in is not one that has said anything since: it keeps the bot's last
  * word as its line and sits where that word put it. A bot that has said nothing in a chat yet keeps the
- * record's own clock and draws no line.
+ * record's own clock and draws no line, and so does a row past `BOT_CHATS`, whose tail no screen reads.
  */
 import { filterByFuzzy } from "./fuzzy.ts"
 import { isUnread } from "./session-work.ts"

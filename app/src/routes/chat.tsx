@@ -39,6 +39,7 @@ import { ApprovalCard } from "@/components/chat/approval-card"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { ChatSettings, ChatTitlePress } from "@/components/chat/chat-settings"
+import { UsageSheet } from "@/components/chat/usage-sheet"
 import { CODE_FACE, CodeFaceProvider } from "@/components/chat/code-face"
 import {
   ChatActions,
@@ -424,6 +425,8 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
   )
   const [away, setAway] = useState(false)
   const online = useOnline()
+  // A bot's own chat is edited from its bar; a session and a chat not yet started are not.
+  const editable = Boolean(chat) && !session
   // A session keeps the bar's menu: resolve, discard and its delete are not a chat's settings. A bot's
   // own chat has none — its header opens the sheet (ADR 0153).
   const actions = chat && bot && session && (
@@ -433,8 +436,6 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
       session={session}
       wide={wide}
       usage={usage}
-      providerUsage={providerUsage}
-      usageOpen={usageOpen}
       onUsageOpenChange={setUsageOpen}
       onDeleted={() => up("/code")}
     />
@@ -458,14 +459,10 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
               ) : session ? (
                 chat.title
               ) : (
-                <ChatTitlePress
-                  title={chat.title}
-                  open={settingsOpen}
-                  onOpen={() => setSettingsOpen(true)}
-                />
+                <ChatTitlePress title={chat.title} open={settingsOpen} />
               )
             }
-            onTitlePress={session || unstarted ? undefined : () => setSettingsOpen(true)}
+            onTitlePress={editable ? () => setSettingsOpen(true) : undefined}
             // The header never follows the reply: what the thread is doing is drawn in the thread.
             subtitle={
               awayLine(away, online) ??
@@ -480,7 +477,6 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
             botId={bot.botId}
             muted={Boolean(chat.muted || bot.muted)}
             centered={Boolean(session)}
-            // The list's own bar names the bot with its face where the two stand side by side.
             showBot={!session && !lead.besideList}
             actions={actions}
             leading={lead.leading}
@@ -493,19 +489,23 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
             onAway={setAway}
             limit={limit}
           />
-          {!session && (
+          {editable && (
             <ChatSettings
               chat={chat}
               open={settingsOpen}
               onOpenChange={setSettingsOpen}
               usage={usage}
-              providerUsage={providerUsage}
-              context={!wide && Boolean(bot.baseUrl.trim())}
-              usageOpen={usageOpen}
-              onUsageOpenChange={setUsageOpen}
+              context={Boolean(bot.baseUrl.trim())}
+              onOpenUsage={() => setUsageOpen(true)}
               onDeleted={() => root("/")}
             />
           )}
+          <UsageSheet
+            open={usageOpen}
+            onOpenChange={setUsageOpen}
+            usage={usage}
+            providerUsage={providerUsage}
+          />
           {leaveDialog}
         </>
       ) : (
@@ -1050,8 +1050,6 @@ function CurrentChatPage({ slot }: ChatPageProps) {
       session={session}
       wide={wide}
       usage={usage}
-      providerUsage={providerUsage}
-      usageOpen={usageOpen}
       onUsageOpenChange={setUsageOpen}
       onDeleted={() => up("/code")}
     />
@@ -1081,11 +1079,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
       <ChatHeader
         title={
           editable && conversation ? (
-            <ChatTitlePress
-              title={headerTitle}
-              open={settingsOpen}
-              onOpen={() => setSettingsOpen(true)}
-            />
+            <ChatTitlePress title={headerTitle} open={settingsOpen} />
           ) : (
             headerTitle
           )
@@ -1095,9 +1089,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
         botId={profile?.botId}
         muted={Boolean(conversation?.muted || profile?.muted)}
         centered={centered}
-        // A chat is with its bot, so its picture stays — unless the bot's list stands beside it, whose
-        // own bar already carries that face.
-        showBot={!session && !unstarted && !lead.besideList}
+        showBot={!session && !lead.besideList}
         actions={actions}
         leading={lead.leading}
       />
@@ -1349,16 +1341,20 @@ function CurrentChatPage({ slot }: ChatPageProps) {
         onOpenChange={(next) => !next && setAgentView(undefined)}
       />
       <Cheatsheet open={sheet.open} onOpenChange={sheet.setOpen} switches={sheet.switches} />
+      <UsageSheet
+        open={usageOpen}
+        onOpenChange={setUsageOpen}
+        usage={usage}
+        providerUsage={providerUsage}
+      />
       {editable && conversation && (
         <ChatSettings
           chat={conversation}
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
           usage={usage}
-          providerUsage={providerUsage}
-          context={!wide && configured}
-          usageOpen={usageOpen}
-          onUsageOpenChange={setUsageOpen}
+          context={configured}
+          onOpenUsage={() => setUsageOpen(true)}
           onDeleted={() => root("/")}
         />
       )}

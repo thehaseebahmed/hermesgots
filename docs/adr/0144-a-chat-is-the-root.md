@@ -82,6 +82,8 @@ the bar both screens draw is still one component
 
 ## Consequences
 
+- **Superseded in part by ADR 0153**: a bot's presses now land on its list at the app's first entry,
+  and the marker that said the list stood over a chat (`BACK_ON_LIST` in `lib/nav.ts`) is gone.
 - The list's own back at the root, and the app's exit press, are all the app's: `BACK_ON_LIST` in
   `lib/nav.ts` stays, because a room and a routine's run still leave a list their leading steps back
   to, but a bot's chat no longer steps back onto its list.

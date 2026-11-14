@@ -18,7 +18,7 @@ ticket that lands a family edits its own rows.
 ## The arithmetic, and how to check it
 
 The registry in `app/scripts/e2e/cli.mjs` holds **96 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 95 keys, and the rows here are grouped by the ticket that
+below. `pnpm e2e list` prints the same 96 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
@@ -29,8 +29,8 @@ takes them rather than by the registry's order, so the count is the thing to che
 | delete | 2 |
 | **total** | **96** |
 
-Of those 94, 88 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 87 distinct files) and 6 point at the older
+Of those 96, 90 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 89 distinct files) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.

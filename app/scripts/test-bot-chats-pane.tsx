@@ -335,6 +335,56 @@ test(
 )
 
 /**
+ * The record a row opens is the authority on which list stands beside it: a link that names another
+ * bot, or a link that names one at all on a session, cannot seat a list the record does not belong to.
+ */
+test(
+  "a chat's link naming another bot opens the list of the bot that owns it",
+  atWidth(1280, async () => {
+    localStorage.clear()
+    await seed()
+    const other = botProfile("bot-chats-pane-other", { id: "bot-2", name: "Elsewhere" })
+    await db.profiles.put(other)
+    await mount(screen({ pathname: `/c/${CHATS[0].id}`, state: { bot: other.id } }), async () => {
+      await until(() => listRows().length > 0, "the list beside the chat")
+      assert.equal(missing(`[data-slot="list-lane"] a[href="/c/${CHATS[1].id}"]`), false,
+        "the owning bot's list, not the one the link named")
+      assert.equal(
+        findAll("p").some((node) => node.textContent === "No chats yet."),
+        false,
+        "which is not the other bot's empty list",
+      )
+    })
+  }),
+)
+
+test(
+  "a session's link naming a bot seats no bot's list beside it",
+  atWidth(1280, async () => {
+    localStorage.clear()
+    await seed()
+    await db.conversations.put({
+      id: "c-project",
+      profileId: bot.id,
+      title: "A session",
+      projectId: "p-1",
+      hermesSessionId: "gots-c-project",
+      createdAt: 3,
+      updatedAt: 15,
+      changedAt: 15,
+    })
+    await mount(screen({ pathname: "/c/c-project", state: { bot: bot.id } }), async () => {
+      await until(() => titles().includes("A session"), "the session's own screen")
+      assert.equal(
+        missing(`[data-slot="list-lane"] a[href="/c/${CHATS[1].id}"]`),
+        true,
+        "the bot's list is not seated beside a project's session, whatever its link says",
+      )
+    })
+  }),
+)
+
+/**
  * The bot is named once on a screen: its list's bar carries its face, and the chat beside that list
  * does not repeat it (ADR 0153).
  */

@@ -5,8 +5,8 @@
  * A bot's chat, a room and a routine's run are all rows of a bot's list, so all three ask the same
  * three questions — is my list a real screen here, is it already on screen beside me, and where does
  * the press go — and answered them separately until this module. What a screen still decides for
- * itself is which bot carries it (a chat's own, a room's `state.bot`), whether a list can stand
- * beside it at all (a room's cannot), and the words its control wears.
+ * itself is which bot carries it (a chat's own, a room's `state.bot`) and the words its control
+ * wears.
  */
 import { useCallback, useEffect, useRef } from "react"
 
@@ -74,7 +74,7 @@ export function useChatLead({
     <BackButton label={label} onClick={() => ontoList()} floating />
   )
   return {
-    /** Whether that list is on screen beside this one, which is what its bar has already said. */
+    /** Whether the list stands beside this screen, so its bar drops the bot's face. */
     besideList,
     /** The list's address, where one holds this screen: what a screen that deletes itself steps onto. */
     list,

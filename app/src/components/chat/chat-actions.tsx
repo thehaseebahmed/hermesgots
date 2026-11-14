@@ -18,7 +18,6 @@ import {
   ContextIcon,
   ContextPercent,
   ContextRing,
-  UsageSheet,
   type ContextUsage,
 } from "@/components/chat/usage-sheet"
 import { Button } from "@/components/ui/button"
@@ -227,8 +226,6 @@ export function ChatActions({
   session,
   wide,
   usage,
-  providerUsage,
-  usageOpen,
   onUsageOpenChange,
   onDeleted,
 }: {
@@ -238,9 +235,7 @@ export function ChatActions({
   session?: Conversation
   wide: boolean
   usage: ContextUsage
-  providerUsage?: Profile["providerUsage"]
-  /** The usage sheet, which the limit banner above the composer opens too. */
-  usageOpen: boolean
+  /** Opens the usage sheet, which the limit banner above the composer opens too. */
   onUsageOpenChange: (open: boolean) => void
   /** Where to go once the chat is gone. */
   onDeleted: () => void
@@ -342,13 +337,6 @@ export function ChatActions({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-
-      <UsageSheet
-        open={usageOpen}
-        onOpenChange={onUsageOpenChange}
-        usage={usage}
-        providerUsage={providerUsage}
-      />
 
       <RenameDialog
         open={renaming}

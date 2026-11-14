@@ -3,6 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { matchPath, useLocation } from "react-router"
 
 import { db } from "@/lib/db"
+import { listsAsChat } from "@/lib/lists-as-chat"
 import { useLarge, useXLarge } from "@/lib/media"
 import { useSidebarCollapsed } from "@/lib/sidebar"
 
@@ -92,8 +93,8 @@ export interface BotPane extends FeaturePane {
  * Everything the list draws is a row of it — the bot's chats, the rooms its roster seats and its
  * routines' runs — so each opens beside it; a project session is Code's and a canvas is its own
  * screen's, which is why neither answers here (ADR 0115). A room's record names its Host and not the
- * bot whose list it was picked from, so the state a row carries is read before the record's own
- * owner: the list the reader was looking at is the one that stays.
+ * bot whose list it was picked from, so a room reads the state its row carries instead of its
+ * record's owner: the list the reader was looking at is the one that stays.
  */
 export function useBotChatsPane(enabled: boolean | undefined): BotPane | undefined {
   const split = useSplit()
@@ -102,8 +103,12 @@ export function useBotChatsPane(enabled: boolean | undefined): BotPane | undefin
   // Tagged with the id it ran for, since a new id still sees the last answer for a moment.
   const read = useLiveQuery(async () => {
     const found = id ? await db.conversations.get(id) : undefined
-    const listed = Boolean(found && !found.projectId && !found.canvasId)
-    return { id, profileId: listed ? found!.profileId : undefined }
+    return {
+      id,
+      listed: Boolean(found && listsAsChat(found)),
+      room: Boolean(found?.room),
+      profileId: found?.profileId,
+    }
   }, [id])
   if (!split || !enabled) return undefined
   // A bot's own screen, and everything the list opens over it: the splat matches the bare address
@@ -113,7 +118,15 @@ export function useBotChatsPane(enabled: boolean | undefined): BotPane | undefin
   if (!id) return undefined
   const from = (state as { bot?: string } | null)?.bot
   const answered = read?.id === id ? read : undefined
-  const profileId = from ?? answered?.profileId
+  // The record is the authority for a chat; a room's record names its Host, so only a room takes
+  // the bot it was picked from. A session or a canvas answers nothing, whatever the link claims.
+  const profileId = answered
+    ? answered.listed
+      ? answered.profileId
+      : answered.room
+        ? (from ?? answered.profileId)
+        : undefined
+    : from
   return profileId ? { open: true, selected: id, profileId } : undefined
 }
 

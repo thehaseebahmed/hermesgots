@@ -63,11 +63,11 @@ export function BotChatsPage() {
   if (legacy === undefined) return null
   if (!enabled || !profileId) return <Navigate to="/" replace />
   if (pane) return <NoChatOpen />
-  return <BotChatsList profileId={profileId} place="root" />
+  return <BotChatsList profileId={profileId} />
 }
 
 export function BotChatsPane({ pane }: { pane: BotPane }) {
-  return <BotChatsList profileId={pane.profileId} selected={pane.selected} place="pane" />
+  return <BotChatsList profileId={pane.profileId} selected={pane.selected} beside />
 }
 
 function NoChatOpen() {
@@ -82,18 +82,18 @@ function NoChatOpen() {
 }
 
 /**
- * A bot's chats, each with the one read of its newest message that a row's line and time come from,
- * and the rooms it is a participant of: one list, one order.
+ * A bot's chats, each row dated by the newest reply the bot sent, and the rooms it is a participant
+ * of: one list, one order.
  */
 function BotChatsList({
   profileId,
   selected,
-  place,
+  beside,
 }: {
   profileId: string
   /** The chat drawn open beside this list, which is the pane's to name and no screen's. */
   selected?: string
-  place: ListPlace
+  beside?: boolean
 }) {
   // The rooms this device lists, read by their membership: a room belongs to its Host and lists in
   // every bot its roster seats, whatever bot carried the record here (ADR 0115).
@@ -135,33 +135,32 @@ function BotChatsList({
     .filter((room) => room.seated.includes(profileId))
     .map((room) => roomRowOf(room.chat, room.faces, room.said))
   return (
-    <ChatList bot={fresh.bot} rows={[...fresh.rows, ...seated]} selected={selected} place={place} />
+    <ChatList
+      bot={fresh.bot}
+      rows={[...fresh.rows, ...seated]}
+      selected={selected}
+      beside={beside}
+    />
   )
 }
-
-/**
- * Where a bot's list stands: beside a chat in the shell's first pane (`pane`), or as the screen the
- * bot's own address names (`root`). Which one it is settles one thing and nothing else: whether its
- * rows open beside it or as the app's own entry.
- */
-type ListPlace = "pane" | "root"
 
 function ChatList({
   bot,
   rows,
   selected,
-  place,
+  beside,
 }: {
   bot: Profile
   rows: ChatListRow[]
   selected?: string
-  place: ListPlace
+  /** Whether the list stands beside a chat, which is what its rows' presses turn on. */
+  beside?: boolean
 }) {
   const navigate = useNavigate()
   const { root, back } = useNav()
   // The bar names the bot as the sidebar's row does (ADR 0149).
   const label = labelOf(useBotLabels(), bot)
-  const pane = place === "pane"
+  const pane = Boolean(beside)
   const marks = useReadMarks()
   // The press is the app's at its first entry — where this list stands when nothing opened it — and a
   // step back wherever something did, which `back()` answers itself.
@@ -267,9 +266,8 @@ function ChatList({
                 selected={row.id === selected}
                 profileId={bot.id}
                 // A chat of the bot's opens as the app's root, taking this list's place along with
-                // whatever stood behind it: the chat picked is the chat its bot opens from then on. A
-                // room and a routine's run are screens of their own whose way back is this list, so
-                // they stay above it, and a pane's rows open beside the list rather than over it.
+                // whatever stood behind it; a room and a routine's run are screens of their own whose
+                // way back is this list, so they stay above it, and a pane's rows open beside it.
                 pick={pane || row.room || row.routine ? undefined : () => openChat(`/c/${row.id}`)}
                 live={row.session ? runs[row.session] : undefined}
               />

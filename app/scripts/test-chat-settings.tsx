@@ -13,6 +13,7 @@ import { MemoryRouter, Route, Routes } from "react-router"
 import { ChatPage } from "@/routes/chat"
 import { db, type Conversation } from "@/lib/db"
 import {
+  atWidth,
   botProfile,
   click,
   find,
@@ -102,6 +103,28 @@ test("the bar's title opens the chat's settings, holding its name, its mute and 
       "its notifications, as a switch rather than a menu item",
     )
     assert.ok(findText("button", "Delete chat"), "and the one control that ends it")
+  })
+})
+
+/**
+ * The bar's ring is gone for a bot's chat, so the sheet's Context row is where its use lives — at every
+ * width, not only the ones the menu used to hold it for.
+ */
+test("a wide screen's sheet still offers the chat's context", async () => {
+  await seed()
+  globalThis.fetch = async () => json({})
+  await atWidth(1280, async () => {
+    await mount(screen(), async () => {
+      await until(async () => Boolean(titlePress()), "the chat's bar")
+      await click(titlePress())
+      await until(async () => Boolean(sheet()), "the chat's settings")
+      assert.ok(find("[data-chat-context]"), "the context row, where the ring would have been")
+      await click(find("[data-chat-context]"))
+      await until(
+        async () => Boolean(findText("[role=dialog]", "Usage")),
+        "the usage sheet the row opens",
+      )
+    })
   })
 })
 
