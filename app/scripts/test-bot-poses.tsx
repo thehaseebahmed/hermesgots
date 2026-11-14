@@ -4,6 +4,7 @@
  * arrive faster than a poof, it still ends on the newest one. A bot with one picture ignores mood.
  */
 import assert from "node:assert/strict"
+import { existsSync } from "node:fs"
 import test from "node:test"
 import { act } from "react"
 
@@ -23,6 +24,17 @@ test("every mood has a pose and the still is the happy one", () => {
     BOT_MOODS.map((one) => `/bots/ember/${one.id}.png`),
   )
   assert.equal(botImage({ id: "tri" }, "sleepy"), "/bots/tri.png", "a one-picture bot has no poses")
+})
+
+test("every posed bot has a pose file for every mood", () => {
+  const posed = BOTS.filter((bot) => bot.posed)
+  assert.ok(posed.length > 0)
+  for (const bot of posed)
+    for (const { id } of BOT_MOODS)
+      assert.ok(
+        existsSync(new URL(`../public${botImage(bot, id)}`, import.meta.url)),
+        `${bot.id} has no ${id} pose`,
+      )
 })
 
 test("a still posed bot is its happy pose whatever mood it is given", async () => {

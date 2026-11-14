@@ -173,12 +173,28 @@ export const BOTS: BotDefinition[] = [
       "Warm, wobbly and ready. Where to?",
     ],
   },
+  {
+    id: "bubbles",
+    name: "Bubbles",
+    posed: true,
+    description:
+      "A glossy blue-and-pink jelly with a visor face who drifts when it's content and pops into a new mood in a puff of smoke.",
+    character:
+      "Bright and a little dreamy, with a shimmer that shifts as it moves. Easily delighted, says so out loud and floats back down to the task.",
+    lines: [
+      "Shimmering gently. Ready when you are.",
+      "Bobbing along and fully charged. What's first?",
+      "All my colours are on. Let's get into it.",
+      "Floating a little. Give me something to hold onto.",
+      "Glossy, giddy and ready. Where to?",
+    ],
+  },
 ]
 
 /**
  * Older builds stored these ids; v3 of the database maps them onto the current bots. The map runs
- * once, on a database older than v3, so "ember" here is the old character of that name and not the
- * posed one in BOTS, which a v3 database has never held.
+ * once, on a database older than v3, so "ember" and "bubbles" here are the old characters of those
+ * names and not the posed ones in BOTS, which a v3 database has never held.
  */
 export const LEGACY_BOT_IDS: Record<string, string> = {
   bolt: "cubby",
