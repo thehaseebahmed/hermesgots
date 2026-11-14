@@ -383,10 +383,8 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
   })
   const lead = useChatLead({
     bot: chat && listsAsChat(chat) ? chat.profileId : undefined,
-    // A bot's conversation is one rung off its list: the platform's back makes the corner control's
-    // move, so Android's back and the browser's step onto the list rather than out of the app. A
-    // session holds no list, so nothing is registered for it.
-    press: "list",
+    // A bot's conversation is one rung off its list, so the hook registers the corner control's move
+    // as the platform's back; a session holds no list, so nothing is registered for it.
     underCode,
     leave,
   })
@@ -1016,7 +1014,6 @@ function CurrentChatPage({ slot }: ChatPageProps) {
     bot: conversation && listsAsChat(conversation) ? conversation.profileId : undefined,
     // The same guard as the corner control's: a bot's conversation is answered by its list. A session
     // holds no list, so nothing is registered for it.
-    press: "list",
     underCode,
     leave,
   })

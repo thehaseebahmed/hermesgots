@@ -167,6 +167,12 @@ for (const [width, collapsed, panes] of CASES) {
       await page.locator(`main ul a[href="${botChat}"]`).click()
       await page.waitForURL(`**${botChat}`, { timeout: 15_000 })
       await until(async () => (await chatTitle()) === "Garden plan", 15_000, "the chat's own title")
+      // A conversation carries its way back in the bar's corner at every width, the list beside it or not.
+      assert.equal(
+        await page.getByRole("button", { name: "Back to Test bot" }).count(),
+        1,
+        "the conversation's bar carries its way back in the corner",
+      )
       if (panes === 2) {
         const lane = await page.evaluate(() => {
           const list = document.querySelector('[data-slot="list-lane"]')
@@ -181,19 +187,9 @@ for (const [width, collapsed, panes] of CASES) {
           `the bot's list keeps its 412px lane beside the chat (${lane.width})`,
         )
         assert.equal(lane.open, botChat, "and marks the chat on screen as the open one")
-        assert.equal(
-          await page.getByRole("button", { name: "Back to Test bot" }).count(),
-          1,
-          "the chat beside the list carries its way back in the corner too",
-        )
         await shot("bot-chats")
         pass(`${look}: a bot's list beside its chat, the list's row marked open`)
       } else {
-        assert.equal(
-          await page.getByRole("button", { name: "Back to Test bot" }).count(),
-          1,
-          "a conversation opened from the list carries its way back in the corner",
-        )
         const chatRung = await rung(page)
         assert.equal(chatRung, 1, "standing one rung above the list it was picked from")
         await page.getByRole("button", { name: "Back to Test bot" }).click()

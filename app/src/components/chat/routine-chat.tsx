@@ -60,7 +60,7 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
   const { root } = useNav()
   // The list this run was opened from is the bot's, never the chat a delivery arrived in: a routine's
   // row is the bot's own, so its bar's corner steps back to where its row stands.
-  const lead = useChatLead({ bot: chat?.profileId, press: "list" })
+  const lead = useChatLead({ bot: chat?.profileId })
   const wide = useWide()
   useLayoutEffect(() => {
     if (ready) hold(slot, id)

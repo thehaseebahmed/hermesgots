@@ -66,7 +66,7 @@ export function RoutinesPage() {
   // no bot's list for it to step onto, so there the page keeps the leading button it has always drawn,
   // since a page with no way back is worse than one with the older control.
   const legacy = useLegacyChat()
-  const lead = useChatLead({ bot: profileId, press: "list" })
+  const lead = useChatLead({ bot: profileId })
   const { up } = useNav()
   const [tick, setTick] = useState(0)
   const [pollTick, setPollTick] = useState(0)

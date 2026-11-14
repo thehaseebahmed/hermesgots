@@ -86,8 +86,10 @@ meets, and the request this record answers gives it up.
   phone; the list is what they get.
 - Every device keeps the `gots:last-chat` keys it wrote. Nothing reads them and nothing migrates them,
   the same call ADR 0153 made about `gots:last-chat:<bot>`.
-- `lib/nav.ts`'s `root()` is for places — Home, Code, Settings, a canvas — and no conversation. The
-  sidebar's bot row still roots, because a bot's row is a place; a row inside a list never does.
+- **A row inside a bot's list never roots its conversation.** `root()` still serves the presses that
+  open a place — the sidebar's bot row, Home, Code, Settings, a canvas — and the two ways a
+  conversation can open as the only entry without being picked from its list: a share that lands on
+  one, and the legacy layout's Recents row.
 - `scripts/e2e/bot-chats.mjs` walks the new rungs, `bot-list.mjs` measures the empty pane beside the
   list, and `panes.mjs`'s bot section is repaired where it has looked for a "Chats with <bot>" control
   since ADR 0153 removed it.

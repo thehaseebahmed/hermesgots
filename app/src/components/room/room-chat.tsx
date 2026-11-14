@@ -84,7 +84,6 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
   const lead = useChatLead({
     bot: carrier,
     beside: Boolean(useBotChatsPane(legacy === false)),
-    press: "list",
   })
   // A room's row going while the room is open — a disband on another device, or a merge landing
   // first — leaves to the list: the chat screen's own "gone" state would draw an empty chat for a
