@@ -417,7 +417,7 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
             <li key={bot.id}>
               {/* A bot's row is the design's row for a title with a line under it, not the menu's
                   44px one: a 36px picture and two lines leave a 44px row no air, and draw the
-                  picture against its top edge. */}
+                  picture against its top edge (ADR 0153, amended 2026-11-14). */}
               <RootLink
                 to={botChatsPath(bot.id)}
                 onClick={onNavigate}

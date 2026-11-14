@@ -57,6 +57,15 @@ bar has room now that the menu is gone.
 two lines of text; the two lines fit the 44px row the rest of the app uses, so the band reads as one
 list rather than as one with a gap between bots.
 
+**Amended 2026-11-14.** The 44px row holds the two lines but not the 36px picture beside them: the
+picture sat 1px from the row's top edge and 7px from its bottom, and — its wrapper being a bare inline
+span — it was drawn 3px above the row's own centre, because a row centres the wrapper's line box, and
+that box carries the font's leading under an inline-block. The row is 56px again, the design's row for a
+title with a muted line under it (`DESIGN.md`'s `row`), and the picture hangs in a box of its own so it
+sits on the row's centre. The band still reads as one list: the 2px gap between rows and the 12px at
+each side are unchanged, and the sidebar's other two-line row, `Waiting for input`, takes the same 56px,
+so the rows that carry two lines agree with each other. Menu rows stay 44px.
+
 ## Considered options
 
 - **The landing kept, and the sidebar's row meaning "resume".** It is what ADR 0144 argued for, and it
