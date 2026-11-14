@@ -289,7 +289,7 @@ function ChatList({
         query={query}
         onQueryChange={setQuery}
         onNewChat={() => void start()}
-        onNewRoom={() => navigate("/new-room")}
+        onNewRoom={() => navigate("/new-room", { state: { bot: bot.id } })}
       />
     </div>
   )

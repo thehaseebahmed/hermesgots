@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { useNavigate } from "react-router"
+import { useLocation, useNavigate } from "react-router"
 import { CheckIcon, UsersIcon } from "lucide-react"
 
 import { Banner } from "@/components/banner"
@@ -12,6 +12,7 @@ import { RoomFaces } from "@/components/room/room-faces"
 import { Group, linkRowClass, RowText } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
 import { botsByLabel, labelOf } from "@/lib/bot-name"
+import { useChatLead } from "@/lib/chat-lead"
 import { connectionKey, hostKey, serverConfig } from "@/lib/connection"
 import {
   DEFAULT_SETTINGS,
@@ -62,6 +63,11 @@ const OTHER_HOST = "A room holds one Host's bots. Unpick every bot to change Hos
  */
 export function NewRoomScreen({ slot }: { slot?: string }) {
   const navigate = useNavigate()
+  // The bot's list this picker was opened from, where the press that opened it named one: the way back
+  // is that list, and the platform's back makes the same move. A picker opened from the sidebar's own
+  // row, or reloaded at its address, names none — the drawer keeps the bar's left there.
+  const startedFrom = (useLocation().state as { bot?: string } | null)?.bot
+  const lead = useChatLead({ bot: startedFrom })
   const bots = useLiveQuery(() => db.profiles.toArray(), []) ?? []
   const labels = useBotLabels()
   const sendOnEnter = useLiveQuery(
@@ -190,6 +196,7 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
         }
         showBot={false}
         centered
+        leading={lead.leading}
       />
       <div className="flex min-h-0 flex-1 items-center justify-center px-6">
         <p className={cn(COLUMN_BOX, "max-w-sm text-center text-sm text-muted-foreground")}>

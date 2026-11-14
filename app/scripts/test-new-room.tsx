@@ -243,6 +243,16 @@ const screen = () => (
   </MemoryRouter>
 )
 const where = () => find("[data-path]")?.textContent
+/** The blank room as a bot's list opens it: the press that got here names the list behind it. */
+const openedFrom = (bot: Profile) => (
+  <MemoryRouter initialEntries={[{ pathname: "/new-room", state: { bot: bot.id } }]}>
+    <Path />
+    <Routes>
+      <Route path="/new-room" element={<NewRoomScreen slot="route" />} />
+      <Route path="/b/:profileId" element={<p data-list />} />
+    </Routes>
+  </MemoryRouter>
+)
 /** The room the address names, read from the address itself, as the app's own route does. */
 function RoomAt() {
   const { id } = useParams()
@@ -309,6 +319,29 @@ test("a room whose create seated a profile says so once, above its first message
       "The Host was configured to seat coder.",
       "one line, naming the bots the Host now seats",
     )
+  })
+})
+
+test("a blank room opened from a bot's list leads back to it", async () => {
+  const bots = await freshSeats()
+  // A bot's list exists in the bot layout alone, and this is the picker its foot opens.
+  await seedSettings({ onboarded: true, legacyChat: false })
+  await mount(openedFrom(bots[0]), async () => {
+    await until(async () => Boolean(find('[data-slot="seats-pill"]')), "the blank room")
+    await until(
+      async () => Boolean(find('[data-slot="header-leading"] button[aria-label="Back to Ada"]')),
+      "the bar's way back",
+    )
+    const back = find('[data-slot="header-leading"] button[aria-label="Back to Ada"]')
+    assert.ok(back, "the bar leads with the list the picker was opened from")
+    assert.equal(
+      missing('[aria-label="Open conversations"]'),
+      true,
+      "and draws no drawer beside a bar that leads back",
+    )
+    await click(back)
+    await until(async () => where() === `/b/${bots[0].id}`, "the bot's list")
+    assert.ok(find("[data-list]"), "and the picker is what was left")
   })
 })
 
