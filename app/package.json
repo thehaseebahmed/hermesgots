@@ -22,8 +22,8 @@
     "test:component": "node --max-old-space-size=1536 --test --test-concurrency=2 --test-force-exit --import ./scripts/component-hooks.mjs \"scripts/test-*.tsx\"",
     "mock": "node scripts/mock-hermes.mjs",
     "e2e": "node scripts/e2e/cli.mjs",
-    "storybook": "storybook dev -p 6006",
-    "build-storybook": "storybook build"
+    "storybook": "pnpm build:canvas-libraries && storybook dev -p 6006",
+    "build-storybook": "pnpm build:canvas-libraries && storybook build"
   },
   "dependencies": {
     "@alpinejs/csp": "^3.17.5",
