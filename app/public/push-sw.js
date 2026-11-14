@@ -25,6 +25,14 @@ const WORDS = {
 }
 
 // When the plugin is older or couldn't find a name.
+// Ids a host may still hold for the characters the posed ones replaced (`LEGACY_BOT_IDS` in
+// src/components/bots.tsx, which this repeats: a worker can't import the app's modules).
+const LEGACY_BOTS = {
+  bolt: "bubble", ember: "pixel", custard: "wink", nimbus: "pip", sprout: "nova", twinkle: "sunny",
+  bubbles: "byte", mochi: "lovey", cubby: "bubble", tri: "pixel", penny: "wink", hex: "byte",
+  stella: "sunny", orbi: "pip", gem: "nova", bloom: "lovey",
+}
+
 const UNTITLED = {
   routine_failed: "A routine",
   routine_message: "A bot",
@@ -78,12 +86,13 @@ async function show(data) {
     (typeof data.title === "string" && data.title.trim()) || UNTITLED[data.kind] || "Gots"
   const body =
     WORDS[data.kind] || "Waiting for you"
-  // The bot's own picture, so it's plain which bot it is.
+  // The bot's own picture, so it's plain which bot it is. A host that still holds a retired id
+  // draws the character that replaced it.
   const bot = typeof data.bot === "string" && /^[a-z0-9-]{1,32}$/.test(data.bot) ? data.bot : ""
   await self.registration.showNotification(title, {
     body,
     tag,
-    icon: bot ? `/bots/${bot}.png` : "/pwa-192x192.png",
+    icon: bot ? `/bots/${LEGACY_BOTS[bot] || bot}/happy.png` : "/pwa-192x192.png",
     // Safari revokes a subscription that gets pushes without notifications, so a visible app still
     // shows one, silently. It is closed as soon as it is shown: Chrome counts it as delivered, and
     // nothing is left in the tray.

@@ -18,7 +18,7 @@ import { Link, useNavigate } from "react-router"
 
 import { Banner, Retry } from "@/components/banner"
 import { Bot } from "@/components/bot"
-import { BOTS } from "@/components/bots"
+import { BOTS, botIdOf } from "@/components/bots"
 import { botsByLabel, labelOf } from "@/lib/bot-name"
 import { useBotLabels } from "@/lib/use-bot-labels"
 import { CodingTab } from "@/components/bot-coding-tab"
@@ -996,7 +996,9 @@ function FieldForm({
       onSave={async (text) => {
         const parsed = draftValue(field, text)
         if (!parsed.ok) {
-          throw new AppWords(field.kind === "number" ? "That isn't a number." : "Couldn't save that.")
+          throw new AppWords(
+            field.kind === "number" ? "That isn't a number." : "Couldn't save that.",
+          )
         }
         await commit(field.key, parsed.value)
         onClose()
@@ -1018,7 +1020,7 @@ function FieldForm({
 function BotCard({ profile, onOpen }: { profile: Profile; onOpen: (id: string) => void }) {
   const linked = Boolean(profile.hostId)
   const [pick, setPick] = useState<string>()
-  const character = BOTS.find((bot) => bot.id === profile.botId)
+  const character = BOTS.find((bot) => bot.id === botIdOf(profile.botId))
   // The version the bot's host runs, off the `info` read the page already makes for its gates.
   const plugin = usePluginVersion(profile)
   const reported = plugin && (plugin.version ?? "No plugin")
@@ -1088,7 +1090,7 @@ function BotCard({ profile, onOpen }: { profile: Profile; onOpen: (id: string) =
         <PickList
           label="Image"
           searchable={false}
-          selected={profile.botId}
+          selected={botIdOf(profile.botId)}
           options={BOTS.map((bot) => ({
             id: bot.id,
             label: bot.name,

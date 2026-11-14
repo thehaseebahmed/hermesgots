@@ -3,7 +3,7 @@ import Dexie, { type EntityTable, type Table, type Transaction } from "dexie"
 import type { Agent } from "@/chat-next/agents"
 import type { Queued } from "@/chat-next/api"
 import type { Row, Turn } from "@/chat-next/fold"
-import { BOTS, LEGACY_BOT_IDS } from "@/components/bots"
+import { BOTS, LEGACY_BOT_IDS, botIdOf } from "@/components/bots"
 import { carriesPart } from "@/lib/attachment-caps"
 import type { Canvas, CanvasRecord } from "@/lib/canvases"
 import type { CanvasDoc } from "@/lib/canvas-bridge"
@@ -1818,6 +1818,21 @@ db.version(47).upgrade(async (tx) => {
  * holds with it.
  */
 db.version(48).stores({ overallRankings: null })
+
+/**
+ * v49: the eight one-picture characters were replaced by posed ones, so a bot that wore one now
+ * wears the character that took its shape (`LEGACY_BOT_IDS`). A device that syncs later, or a bot
+ * record another device wrote before it updated, is mapped the same way where it lands (`botIdOf`),
+ * so no path leaves a bot with a picture that is gone.
+ */
+db.version(49).upgrade((tx) =>
+  tx
+    .table("profiles")
+    .toCollection()
+    .modify((profile: Profile) => {
+      profile.botId = botIdOf(profile.botId)
+    }),
+)
 
 /**
  * How many rows of one room's log this device keeps: the page a reader can scroll back through.

@@ -88,7 +88,7 @@ const bots: Profile[] = [
     baseUrl: HOST,
     apiKey: "rooms-key",
     hermesProfile: "writer",
-    botId: "hex",
+    botId: "byte",
   }),
 ]
 
@@ -753,7 +753,7 @@ test("a room's row draws its members' pictures, four at most, and counts the res
         name: profile,
         baseUrl: HOST,
         hermesProfile: profile,
-        botId: ["gem", "hex", "orbi", "penny", "stella"][at],
+        botId: ["nova", "byte", "pip", "wink", "sunny"][at],
       }),
     ),
   )

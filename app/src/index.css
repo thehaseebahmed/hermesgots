@@ -405,38 +405,11 @@
 }
 
 /* Bot characters (src/components/bot.tsx): still unless the wrapper carries .bot-animate, which
-   gives each artwork its own motion. */
+   moves each pose in its mood's own way. */
 .bot-animate {
   * {
     transform-box: fill-box;
     transform-origin: center;
-  }
-  .bot-anim-cubby {
-    transform-origin: 50% 100%;
-    animation: bot-jiggle 2.2s ease-in-out infinite;
-  }
-  .bot-anim-tri {
-    transform-origin: 50% 100%;
-    animation: bot-nod 3.6s ease-in-out infinite;
-  }
-  .bot-anim-orbi {
-    animation: bot-drift 3.2s ease-in-out infinite;
-  }
-  .bot-anim-stella {
-    animation: bot-twinkle 2.8s ease-in-out infinite;
-  }
-  .bot-anim-bloom {
-    animation: bot-heartbeat 1.8s ease-in-out infinite;
-  }
-  .bot-anim-penny {
-    transform-origin: 50% 100%;
-    animation: bot-groove 0.9s ease-in-out infinite;
-  }
-  .bot-anim-hex {
-    animation: bot-hover 2.6s ease-in-out infinite;
-  }
-  .bot-anim-gem {
-    animation: bot-flip 4.2s ease-in-out infinite;
   }
   /* A posed bot's idle motion is its mood's, set by the img's data-mood. */
   .bot-posed {
@@ -529,119 +502,7 @@
   }
 }
 
-@keyframes bot-jiggle {
-  0%,
-  60%,
-  100% {
-    transform: scale(1, 1);
-  }
-  10% {
-    transform: scale(1.08, 0.92);
-  }
-  20% {
-    transform: scale(0.95, 1.06);
-  }
-  30% {
-    transform: scale(1.03, 0.97);
-  }
-  40% {
-    transform: scale(0.99, 1.01);
-  }
-}
 
-@keyframes bot-nod {
-  0%,
-  100% {
-    transform: rotate(0);
-  }
-  15%,
-  30% {
-    transform: rotate(-7deg);
-  }
-  45%,
-  60% {
-    transform: rotate(7deg) translateY(-2%);
-  }
-  75% {
-    transform: rotate(0);
-  }
-}
-@keyframes bot-drift {
-  0%,
-  100% {
-    transform: translate(0, 3%) scale(1.04, 0.96);
-  }
-  50% {
-    transform: translate(2%, -6%) scale(0.97, 1.04);
-  }
-}
-@keyframes bot-twinkle {
-  0%,
-  100% {
-    transform: rotate(0) scale(1);
-    filter: brightness(1) drop-shadow(0 0 0 transparent);
-  }
-  20% {
-    transform: rotate(-10deg) scale(1.04);
-    filter: brightness(1.15) drop-shadow(0 0 8px #ffd54a);
-  }
-  40% {
-    transform: rotate(8deg) scale(1.02);
-  }
-  55% {
-    transform: rotate(0) scale(1);
-    filter: brightness(1) drop-shadow(0 0 0 transparent);
-  }
-}
-@keyframes bot-heartbeat {
-  0%,
-  40%,
-  100% {
-    transform: scale(1);
-  }
-  10% {
-    transform: scale(1.12);
-  }
-  20% {
-    transform: scale(1);
-  }
-  30% {
-    transform: scale(1.08);
-  }
-}
-@keyframes bot-groove {
-  0%,
-  100% {
-    transform: translateY(0) rotate(-4deg) scale(1.03, 0.96);
-  }
-  50% {
-    transform: translateY(-7%) rotate(4deg) scale(0.98, 1.03);
-  }
-}
-@keyframes bot-hover {
-  0%,
-  100% {
-    transform: translateY(3%);
-    filter: drop-shadow(0 0 0 transparent);
-  }
-  50% {
-    transform: translateY(-5%);
-    filter: drop-shadow(0 0 10px #4fc3ff);
-  }
-}
-@keyframes bot-flip {
-  0%,
-  55%,
-  100% {
-    transform: perspective(300px) translateY(2%) rotateY(0);
-  }
-  25% {
-    transform: perspective(300px) translateY(-5%) rotateY(0);
-  }
-  80% {
-    transform: perspective(300px) translateY(-5%) rotateY(360deg);
-  }
-}
 
 @media (prefers-reduced-motion: reduce) {
   .bot-animate * {

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 
-import { BOTS, DEFAULT_BOT_ID } from "@/components/bots"
+import { BOTS, DEFAULT_BOT_ID, botIdOf } from "@/components/bots"
 
 const SEEN = "gots:last-greeted"
 const TURN = "gots:line-turn:"
@@ -46,8 +46,9 @@ interface Told {
 const told = new Map<string, Told>()
 
 function choose(botId: string): Told {
-  const lines = (BOTS.find((b) => b.id === botId) ?? BOTS.find((b) => b.id === DEFAULT_BOT_ID)!)
-    .lines
+  const lines = (
+    BOTS.find((b) => b.id === botIdOf(botId)) ?? BOTS.find((b) => b.id === DEFAULT_BOT_ID)!
+  ).lines
   const now = Date.now()
   const turn = read(TURN + botId) % lines.length
   const greet = now - read(SEEN) >= ABSENCE_MS

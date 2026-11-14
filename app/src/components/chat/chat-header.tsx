@@ -76,7 +76,7 @@ export function ChatHeader({
 }: {
   title: ReactNode
   botId?: string
-  /** How the bot feels, for a posed one: sleepy where the host is away. */
+  /** How the bot feels: sleepy where the host is away. */
   botMood?: BotMood
   muted?: boolean
   showBot?: boolean

@@ -44,3 +44,15 @@ are not the app's.
   fetched together when a posed bot first animates.
 - **Keep the Bots screen.** Rejected: nothing in the app opened it, and a gallery with moods and
   profiles is a developer's page.
+
+## Amendment: the one-picture characters are retired
+
+The other characters were redrawn all at once rather than one by one, so the app has nine, every one
+posed, and `posed` and the one-picture path are gone. Each retired character maps onto the new one with
+its shape (`LEGACY_BOT_IDS`): Cubby to Bubble, Tri to Pixel, Penny to Wink, Hex to Byte, Stella to
+Sunny, Orbi to Pip, Gem to Nova, Bloom to Lovey, and the ids from before them the same way. The eight
+map to eight different characters, so two bots a user kept apart stay apart. Dexie v49 rewrites the
+stored ids and `botIdOf` reads the map wherever an id may still arrive — a bot record another device
+wrote before it updated, a host's push icon — so nothing draws a picture that is gone. A device on an
+older build that reads a new id falls back to its first character, which is the cost of not versioning
+the synced record.

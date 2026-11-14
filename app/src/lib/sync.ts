@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react"
 import { liveQuery } from "dexie"
 
+import { botIdOf } from "@/components/bots"
 import {
   ACCOUNT_SYNC_MS,
   CHATS_MERGE_WAIT_MS,
@@ -463,7 +464,13 @@ async function syncBots(key: CryptoKey) {
           await db.transaction("rw", db.profiles, db.tombstones, async () => {
             const current = await db.profiles.get(id)
             const local = Object.fromEntries(LOCAL_BOT_FIELDS.map((f) => [f, current?.[f]]))
-            await db.profiles.put({ ...entry.value!, ...local, id, updatedAt: entry.at } as Profile)
+            await db.profiles.put({
+              ...entry.value!,
+              ...local,
+              botId: botIdOf(entry.value!.botId),
+              id,
+              updatedAt: entry.at,
+            } as Profile)
             await db.tombstones.delete(`bot:${id}`)
           })
         }

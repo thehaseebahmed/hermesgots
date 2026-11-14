@@ -11,7 +11,7 @@ import test from "node:test"
 import { act } from "react"
 
 const { Bot } = await import("@/components/bot")
-const { BOTS, BOT_MOODS, botImage } = await import("@/components/bots")
+const { BOTS, BOT_MOODS, LEGACY_BOT_IDS, botIdOf, botImage } = await import("@/components/bots")
 import type { BotMood } from "@/components/bots"
 const { mount, until, withReducedMotion } = await import("./component-kit.tsx")
 
@@ -19,19 +19,16 @@ const crumb = BOTS.find((bot) => bot.id === "crumb")!
 const src = () => document.querySelector("img")?.getAttribute("src")
 
 test("every mood has a pose and the still is the happy one", () => {
-  assert.ok(crumb.posed)
   assert.equal(botImage(crumb), "/bots/crumb/happy.png")
   assert.deepEqual(
     BOT_MOODS.map((one) => botImage(crumb, one.id)),
     BOT_MOODS.map((one) => `/bots/crumb/${one.id}.png`),
   )
-  assert.equal(botImage({ id: "tri" }, "sleepy"), "/bots/tri.png", "a one-picture bot has no poses")
 })
 
-test("every posed bot has a pose file for every mood", () => {
-  const posed = BOTS.filter((bot) => bot.posed)
-  assert.ok(posed.length > 0)
-  for (const bot of posed)
+test("every bot has a pose file for every mood", () => {
+  assert.ok(BOTS.length > 0)
+  for (const bot of BOTS)
     for (const { id } of BOT_MOODS)
       assert.ok(
         existsSync(new URL(`../public${botImage(bot, id)}`, import.meta.url)),
@@ -39,15 +36,33 @@ test("every posed bot has a pose file for every mood", () => {
       )
 })
 
-test("a still posed bot is its happy pose whatever mood it is given", async () => {
+test("a still bot is its happy pose whatever mood it is given", async () => {
   await mount(<Bot id="crumb" mood="sleepy" />, async () => {
     assert.equal(src(), "/bots/crumb/happy.png")
   })
 })
 
-test("a bot with one picture ignores mood", async () => {
-  await mount(<Bot id="tri" animate mood="sleepy" />, async () => {
-    assert.equal(src(), "/bots/tri.png")
+test("every retired id maps onto a bot that exists, in one step", () => {
+  const ids = new Set(BOTS.map((bot) => bot.id))
+  for (const [old, now] of Object.entries(LEGACY_BOT_IDS)) {
+    assert.ok(ids.has(now), `${old} maps to ${now}, which is no bot`)
+    assert.ok(!ids.has(old), `${old} is retired but still a bot`)
+    assert.equal(botIdOf(old), now)
+  }
+  assert.equal(botIdOf("crumb"), "crumb", "a current id is itself")
+})
+
+test("the retired characters map onto distinct new ones, so a device's bots stay apart", () => {
+  const shapes = ["cubby", "tri", "penny", "hex", "stella", "orbi", "gem", "bloom"]
+  assert.equal(new Set(shapes.map(botIdOf)).size, shapes.length)
+})
+
+test("a retired id draws the character that replaced it", async () => {
+  await mount(<Bot id="hex" />, async () => {
+    assert.equal(src(), "/bots/byte/happy.png")
+  })
+  await mount(<Bot id="nonsense" />, async () => {
+    assert.ok(src()?.endsWith("/happy.png"), "an unknown id draws the first character")
   })
 })
 

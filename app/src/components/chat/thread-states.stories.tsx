@@ -183,14 +183,14 @@ export const ComposerReplacements: Story = {
 export const EmptyConfigured: Story = {
   render: () => (
     <div className="h-[420px]">
-      <EmptyChatState botId="cubby" configured onSend={noop} />
+      <EmptyChatState botId="bubble" configured onSend={noop} />
     </div>
   ),
 }
 export const EmptyNotConfigured: Story = {
   render: () => (
     <div className="h-[420px]">
-      <EmptyChatState botId="cubby" configured={false} />
+      <EmptyChatState botId="bubble" configured={false} />
     </div>
   ),
 }
@@ -198,7 +198,7 @@ export const EmptyProjectSession: Story = {
   render: () => (
     <div className="h-[420px]">
       <EmptyChatState
-        botId="cubby"
+        botId="bubble"
         configured
         session={{
           repos: [

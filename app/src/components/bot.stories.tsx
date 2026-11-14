@@ -1,6 +1,6 @@
 /**
  * The characters: every bot's profile drawn whole — its picture still and moving, who it is, what it
- * says — and, for a posed one, every mood it can feel with the poof between them. This is where the
+ * says — and every mood it can feel, with the poof between them. This is where the
  * gallery lives now that the app has no Bots screen; a character's longer profile is kept in the
  * gots-universe repository.
  */
@@ -9,7 +9,6 @@ import { useState } from "react"
 
 import { Bot } from "@/components/bot"
 import { BOT_MOODS, BOTS, botImage, type BotDefinition, type BotMood } from "@/components/bots"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 
@@ -37,7 +36,6 @@ function CharacterProfile({ bot }: { bot: BotDefinition }) {
           <div className="flex min-w-0 flex-col gap-2">
             <div className="flex items-center gap-2">
               <h2 className="text-xl font-semibold tracking-tight">{bot.name}</h2>
-              <Badge variant="secondary">{bot.posed ? "Posed" : "Still"}</Badge>
             </div>
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <Bot id={bot.id} className="size-5" />
@@ -62,7 +60,7 @@ function CharacterProfile({ bot }: { bot: BotDefinition }) {
           </ol>
         </Section>
 
-        {bot.posed && (
+        {
           <Section title="Moods">
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {BOT_MOODS.map((one) => (
@@ -84,7 +82,7 @@ function CharacterProfile({ bot }: { bot: BotDefinition }) {
               ))}
             </div>
           </Section>
-        )}
+        }
       </CardContent>
     </Card>
   )
