@@ -217,10 +217,12 @@ test(
     await mount(screen("/c/c-a"), async () => {
       await until(async () => titles().includes("Alpha"), "the chat's own header")
       assert.equal(missing(LIST_CONTROL), true, "no control opens the bot's chats from the bar")
-      assert.equal(
-        findAll('[data-slot="header-actions"] a, [data-slot="header-actions"] button').length,
-        0,
-        "and the corner holds nothing at all",
+      assert.deepEqual(
+        findAll('[data-slot="header-actions"] a, [data-slot="header-actions"] button').map(
+          (node) => node.getAttribute("aria-label")?.split(",")[0],
+        ),
+        ["Context"],
+        "and the corner holds the chat's context alone",
       )
       assert.equal(
         find("[data-chat-settings-open]")?.getAttribute("aria-haspopup"),

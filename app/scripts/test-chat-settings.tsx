@@ -85,6 +85,33 @@ test("a bot's chat draws no way to its list and no menu in its bar", async () =>
     await until(async () => Boolean(titlePress()), "the chat's bar")
     assert.equal(findAll('[aria-label^="Chats with"]').length, 0, "no list control")
     assert.equal(findAll('[aria-label="Chat options"]').length, 0, "and no menu beside it")
+    assert.equal(
+      findAll('[data-slot="header-actions"] button[aria-label^="Context"]').length,
+      1,
+      "its context, as the ring the bar keeps at every width",
+    )
+  })
+})
+
+/**
+ * The ring is the bar's one control, and it opens the same use the sheet used to hold a row for: the
+ * sheet would rather the reader saw it while reading, not after a press.
+ */
+test("the bar's ring opens the chat's usage at 1280 as it does on a phone", async () => {
+  await seed()
+  globalThis.fetch = async () => json({})
+  await atWidth(1280, async () => {
+    await mount(screen(), async () => {
+      await until(
+        () => Boolean(find('[data-slot="header-actions"] button[aria-label^="Context"]')),
+        "the ring in the bar",
+      )
+      await click(find('[data-slot="header-actions"] button[aria-label^="Context"]'))
+      await until(
+        async () => Boolean(findText("[role=dialog]", "Usage")),
+        "the usage sheet the ring opens",
+      )
+    })
   })
 })
 
@@ -96,35 +123,22 @@ test("the bar's title opens the chat's settings, holding its name, its mute and 
     assert.equal(findAll("[role=dialog]").length, 0, "nothing is open until the title is pressed")
     await click(titlePress())
     await until(async () => Boolean(sheet()), "the chat's settings")
-    assert.ok(find("[data-chat-name]"), "its name, to edit")
+    const name = find("[data-chat-name]")
+    assert.equal(name?.tagName, "INPUT", "its name, as the field it is typed in")
     assert.equal(
-      findAll('[role="switch"]').length,
-      1,
-      "its notifications, as a switch rather than a menu item",
+      name?.closest("[data-settings-group]"),
+      null,
+      "and not in a card, which a field is not",
     )
+    const mute = find('[role="switch"]')?.closest("[data-settings-group]")
+    assert.ok(mute, "its notifications, as a switch in a card of its own")
+    assert.equal(
+      findAll("[data-settings-group]").length,
+      1,
+      "one card in the sheet, holding the mute alone",
+    )
+    assert.equal(missing("[data-chat-context]"), true, "no context row: the bar draws the ring")
     assert.ok(findText("button", "Delete chat"), "and the one control that ends it")
-  })
-})
-
-/**
- * The bar's ring is gone for a bot's chat, so the sheet's Context row is where its use lives — at every
- * width, not only the ones the menu used to hold it for.
- */
-test("a wide screen's sheet still offers the chat's context", async () => {
-  await seed()
-  globalThis.fetch = async () => json({})
-  await atWidth(1280, async () => {
-    await mount(screen(), async () => {
-      await until(async () => Boolean(titlePress()), "the chat's bar")
-      await click(titlePress())
-      await until(async () => Boolean(sheet()), "the chat's settings")
-      assert.ok(find("[data-chat-context]"), "the context row, where the ring would have been")
-      await click(find("[data-chat-context]"))
-      await until(
-        async () => Boolean(findText("[role=dialog]", "Usage")),
-        "the usage sheet the row opens",
-      )
-    })
   })
 })
 

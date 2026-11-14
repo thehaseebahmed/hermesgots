@@ -39,7 +39,7 @@ import { ApprovalCard } from "@/components/chat/approval-card"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { ChatSettings, ChatTitlePress } from "@/components/chat/chat-settings"
-import { UsageSheet } from "@/components/chat/usage-sheet"
+import { ContextRing, UsageSheet } from "@/components/chat/usage-sheet"
 import { CODE_FACE, CodeFaceProvider } from "@/components/chat/code-face"
 import {
   ChatActions,
@@ -428,18 +428,22 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
   // A bot's own chat is edited from its bar; a session and a chat not yet started are not.
   const editable = Boolean(chat) && !session
   // A session keeps the bar's menu: resolve, discard and its delete are not a chat's settings. A bot's
-  // own chat has none — its header opens the sheet (ADR 0153).
-  const actions = chat && bot && session && (
-    <ChatActions
-      chat={chat}
-      profile={bot}
-      session={session}
-      wide={wide}
-      usage={usage}
-      onUsageOpenChange={setUsageOpen}
-      onDeleted={() => up("/code")}
-    />
-  )
+  // own chat has no menu — its title opens the sheet, and its context stands in the bar as the ring,
+  // at every width, because the sheet no longer carries it (ADR 0153).
+  const actions =
+    chat && bot && session ? (
+      <ChatActions
+        chat={chat}
+        profile={bot}
+        session={session}
+        wide={wide}
+        usage={usage}
+        onUsageOpenChange={setUsageOpen}
+        onDeleted={() => up("/code")}
+      />
+    ) : chat && bot && bot.baseUrl.trim() ? (
+      <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
+    ) : undefined
   return (
     <div
       data-slot="chat-pane"
@@ -494,9 +498,6 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
               chat={chat}
               open={settingsOpen}
               onOpenChange={setSettingsOpen}
-              usage={usage}
-              context={Boolean(bot.baseUrl.trim())}
-              onOpenUsage={() => setUsageOpen(true)}
               onDeleted={() => root("/")}
             />
           )}
@@ -1041,19 +1042,22 @@ function CurrentChatPage({ slot }: ChatPageProps) {
       refusal.refuse(failed(error, "Couldn't send your message.")),
     )
 
-  // A session keeps the bar's menu; a bot's own chat has none, and its header opens the sheet (ADR
-  // 0153).
-  const actions = conversation && session && (
-    <ChatActions
-      chat={conversation}
-      profile={profile}
-      session={session}
-      wide={wide}
-      usage={usage}
-      onUsageOpenChange={setUsageOpen}
-      onDeleted={() => up("/code")}
-    />
-  )
+  // A session keeps the bar's menu; a bot's own chat opens its sheet from the title and keeps its
+  // context in the bar as the ring, at every width (ADR 0153).
+  const actions =
+    conversation && session ? (
+      <ChatActions
+        chat={conversation}
+        profile={profile}
+        session={session}
+        wide={wide}
+        usage={usage}
+        onUsageOpenChange={setUsageOpen}
+        onDeleted={() => up("/code")}
+      />
+    ) : conversation && configured ? (
+      <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
+    ) : undefined
 
   // A session is a place in a project, so it is centred; a chat's own face reads from the left.
   const centered = Boolean(session)
@@ -1352,9 +1356,6 @@ function CurrentChatPage({ slot }: ChatPageProps) {
           chat={conversation}
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
-          usage={usage}
-          context={configured}
-          onOpenUsage={() => setUsageOpen(true)}
           onDeleted={() => root("/")}
         />
       )}

@@ -1,17 +1,16 @@
 import { useState } from "react"
-import { BellOffIcon, MessageCircleIcon } from "lucide-react"
+import { BellOffIcon } from "lucide-react"
 
 import { ConfirmDestructive } from "@/components/confirm-destructive"
-import { RenameDialog } from "@/components/chat/rename-dialog"
-import { ContextPercent, type ContextUsage } from "@/components/chat/usage-sheet"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import {
   DestructiveButton,
   Group,
-  RowText,
   SwitchRow,
-  linkRowClass,
+  fieldInnerClass,
+  fieldLabelClass,
 } from "@/components/settings-chrome"
+import { InputGroup, InputGroupInput } from "@/components/ui/input-group"
 import { deleteConversation, updateConversation, type Conversation } from "@/lib/db"
 import { setThreadMuted } from "@/lib/push"
 import { stopMessage } from "@/lib/chat"
@@ -40,9 +39,9 @@ export function ChatTitlePress({ title, open }: { title: string; open: boolean }
  *
  * A chat's bar carries no `…` and no way to its bot's list — the list is where a conversation is
  * reached from, and back is how it is left (ADR 0153). What the menu that stood there held is this
- * sheet, as the rows the app's settings screens are drawn with. The mute is a switch rather than a
- * menu item because it is a setting a reader comes to change, and the delete is the same confirmation
- * the menu opened, asked in the same words.
+ * sheet, as the rows the app's settings screens are drawn with: the name is typed where it is shown,
+ * the mute is a switch in a card of its own, and the delete is the same confirmation the menu opened,
+ * asked in the same words.
  *
  * Everything here is the conversation's: a project session keeps its `…`, whose resolve, discard and
  * delete are not a chat's settings, and the bot's own mute and delete stay on its settings page.
@@ -51,43 +50,60 @@ export function ChatSettings({
   chat,
   open,
   onOpenChange,
-  usage,
-  context,
-  onOpenUsage,
   onDeleted,
 }: {
   chat: Conversation
   open: boolean
   onOpenChange: (open: boolean) => void
-  usage: ContextUsage
-  /** Whether the context row is offered: a bot the app can call, which has a use to show. */
-  context?: boolean
-  /** Opens the usage sheet, which the composer's limit notice opens too. */
-  onOpenUsage: () => void
   /** Where to go once the chat is gone. */
   onDeleted: () => void
 }) {
-  const [renaming, setRenaming] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  // The field holds what is being typed, and the record what was last written: an edit abandoned or
+  // refused leaves the name as it was.
+  const [name, setName] = useState(chat.title)
+  const saveName = () => {
+    const next = name.trim()
+    if (!next || next === chat.title) {
+      setName(chat.title)
+      return
+    }
+    void updateConversation(chat.id, { title: next, titleEdited: true })
+  }
 
   return (
     <>
       <Popup open={open} onOpenChange={onOpenChange}>
-        <PopupContent>
+        {/* The field is the sheet's first control, and a phone opens its keyboard for whichever
+            control takes the focus — over a sheet the reader only just opened. */}
+        <PopupContent initialFocus={false}>
           <PopupHeader className="pb-2">
             <PopupTitle>Edit chat</PopupTitle>
           </PopupHeader>
           <div className="flex flex-col gap-6 px-4 pb-4 sm:px-6">
+            <div className="flex flex-col gap-2">
+              <label htmlFor="chat-name" className={fieldLabelClass}>
+                Name
+              </label>
+              <InputGroup className="h-12 rounded-full bg-muted">
+                <InputGroupInput
+                  id="chat-name"
+                  data-chat-name
+                  className={fieldInnerClass}
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                  onBlur={saveName}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") event.currentTarget.blur()
+                  }}
+                />
+              </InputGroup>
+            </div>
             <Group>
-              <button
-                type="button"
-                className={linkRowClass}
-                data-chat-name
-                onClick={() => setRenaming(true)}
-              >
-                <MessageCircleIcon className="size-5 shrink-0 text-muted-foreground" />
-                <RowText title="Name" subtitle={chat.title} />
-              </button>
               <SwitchRow
                 id="chat-muted"
                 icon={BellOffIcon}
@@ -96,20 +112,6 @@ export function ChatSettings({
                 checked={Boolean(chat.muted)}
                 onCheckedChange={(checked) => void setThreadMuted(chat.id, checked)}
               />
-              {context && (
-                <button
-                  type="button"
-                  className={linkRowClass}
-                  data-chat-context
-                  onClick={() => {
-                    onOpenChange(false)
-                    onOpenUsage()
-                  }}
-                >
-                  <RowText title="Context" subtitle="This chat's context use" />
-                  <ContextPercent usage={usage} />
-                </button>
-              )}
             </Group>
             {!chat.main && (
               <DestructiveButton onClick={() => setDeleting(true)}>Delete chat</DestructiveButton>
@@ -117,15 +119,6 @@ export function ChatSettings({
           </div>
         </PopupContent>
       </Popup>
-
-      <RenameDialog
-        open={renaming}
-        onOpenChange={setRenaming}
-        title="Rename chat"
-        fieldLabel="Chat title"
-        value={chat.title}
-        onSave={(name) => updateConversation(chat.id, { title: name, titleEdited: true })}
-      />
 
       <ConfirmDestructive
         open={deleting}

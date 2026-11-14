@@ -38,15 +38,20 @@ project session and a canvas still answer to Code's and their own panes.
 **The bot is named once.** Where the list stands beside a chat at 1024px or 1280px, its own bar
 already carries the bot's face; the chat beside it drops its copy. One screen, one bot's face.
 
-**A chat's bar holds no controls, and its title is its settings.** The list control ADR 0144 put in a
-chat's bar is gone: the list is where a conversation is reached from, and back — or the sidebar —
-leaves it. The `…` a chat kept (ADR 0136 said "a chat keeps its `…`") is gone too: the press the
-header's title answers opens an **Edit chat** sheet, a `Popup` holding the chat's name, its
-notifications as a switch rather than a menu item, its context where the bar has no room for the
-ring, and its delete. A project session keeps its `…`: resolve, discard and a session's delete are not
-a chat's settings, and a bot's own mute and delete stay on the bot's settings page, where a bot is
-what is being changed. The routines control stays in the list's bar: it is a screen a bot's list
-opens, not a conversation's control.
+**A chat's bar holds its context and one press, and that press is its settings.** The list control ADR
+0144 put in a chat's bar is gone: the list is where a conversation is reached from, and back — or the
+sidebar — leaves it. The `…` a chat kept (ADR 0136 said "a chat keeps its `…`") is gone too: the press
+the header's title answers opens an **Edit chat** sheet, a `Popup` holding the chat's name, typed in
+the field it is shown in, its notifications as a switch in a card of their own, and its delete. A
+project session keeps its `…`: resolve, discard and a session's delete are not a chat's settings, and
+a bot's own mute and delete stay on the bot's settings page, where a bot is what is being changed.
+The routines control stays in the list's bar: it is a screen a bot's list opens, not a conversation's
+control.
+
+The chat's context is the exception to a bar with no controls: the ring stands in a bot's chat at
+every width, because the sheet is where a reader goes to change something and the use is what they
+read while they write. The menu held it only below 768px, where the bar had no room for the ring; the
+bar has room now that the menu is gone.
 
 **A bot's row in the sidebar is the app's own row height.** It carried 56px and its own padding for
 two lines of text; the two lines fit the 44px row the rest of the app uses, so the band reads as one
