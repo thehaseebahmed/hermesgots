@@ -130,6 +130,9 @@ export function ChatBody({
           // session's workspace, pull requests and library — read as every chat reads it, and then
           // whatever the container reads of its own: a canvas re-reads the page its session edited.
           onSettled={(reason, thread) => {
+            // A return to the app reads them only where they have gone stale (`FOLLOW_UP_MS`): the
+            // transcript's own catch-up has already said whether anything moved.
+            if (reason === "returned") return refreshChatDetails(id, false)
             const read =
               reason === "turn" ? readAfterTurn(id, { turn: thread.turns }) : refreshChatDetails(id)
             void Promise.resolve(read)

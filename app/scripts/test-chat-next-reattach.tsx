@@ -211,3 +211,25 @@ test("a run the host has dropped is not drawn as a failure over the thread", asy
     )
   })
 })
+
+test("a stream that died while the device slept is let go of as it wakes, and the turn is read", async () => {
+  const host = fakeHost("gots-reattach-slept", { plugin: true })
+  host.seed([{ user: "earlier", reply: "Earlier.", tools: 0 }])
+  await withDevice(openDevice(host), async (phone) => {
+    await showsEverything(phone, host, "the finished chat first")
+    const run = host.startElsewhere("while it sleeps")
+    run.say("\n\nBefore the sleep.")
+    await eventually(
+      () => assert.deepEqual(lastTurn(phone)?.texts, ["Before the sleep."]),
+      "the words streamed while the device was awake",
+    )
+    // The connection dies with nothing closing it, and the run ends where the device cannot hear.
+    host.silenceConnections()
+    run.finish("Before the sleep. After it.")
+    await wait(200)
+    assert.deepEqual(lastTurn(phone)?.texts, ["Before the sleep."], "a dead stream says nothing")
+    // The network coming back is one of the ways the app wakes (`wake.ts`).
+    window.dispatchEvent(new Event("online"))
+    await showsEverything(phone, host, "the whole turn, read once the stream was let go of")
+  })
+})

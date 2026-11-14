@@ -4,7 +4,7 @@ import { heardOf } from "@/lib/dictation-log"
 import { namedLevel, type CleanupLevel } from "@/lib/speech"
 import { readHeardBy, type HeardBy, type SpeechPatch } from "@/lib/speech"
 import { pluginRoot, serverRoot } from "@/lib/host-url"
-import { READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
+import { READ_TIMEOUT_MS, RUN_STREAM_IDLE_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import type {
   ApprovalChoice,
   Attachment,
@@ -4738,13 +4738,6 @@ export async function startRun(
  * Follows a run's events from after `lastSeq` (Hermes replays what it buffered). Resolves with the
  * outcome, or null when Hermes closes the stream before the run ends (a subscriber that fell behind).
  */
-/**
- * Hermes writes a keepalive comment every 10s while a run is quiet, so a stream silent for longer
- * than this is dead: a phone that slept, or a proxy or tunnel that dropped the connection without
- * closing it. Nothing else ends such a read.
- */
-const RUN_STREAM_IDLE_MS = 30_000
-
 export async function followRun(
   config: HermesConfig,
   runId: string,

@@ -7,7 +7,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { followRun } from "../src/chat-next/api.ts"
+import { followRun, RunStalled } from "../src/chat-next/api.ts"
 import { fixture as recorded } from "./chat-next-fixtures.ts"
 
 /** Serves `text` as an event stream, `size` bytes at a time. */
@@ -74,3 +74,48 @@ for (const size of [1, 7, 64]) {
       assert.deepEqual(await read(name, size), await read(name), name)
   })
 }
+
+/** A stream that sends `frames`, each after `gapMs`, and then says nothing and never closes. */
+function stall(frames, gapMs = 0) {
+  let cancelled = false
+  globalThis.fetch = async () =>
+    new Response(
+      new ReadableStream({
+        async start(controller) {
+          for (const frame of frames) {
+            await new Promise((done) => setTimeout(done, gapMs))
+            controller.enqueue(new TextEncoder().encode(frame))
+          }
+        },
+        cancel() {
+          cancelled = true
+        },
+      }),
+      { headers: { "content-type": "text/event-stream" } },
+    )
+  return () => cancelled
+}
+
+const delta = `data: ${JSON.stringify({ event: "message.delta", delta: "hi" })}\n\n`
+
+test("a stream that goes silent is let go of, so the page reads the transcript instead of waiting", async () => {
+  const cancelled = stall([delta])
+  const events = []
+  await assert.rejects(
+    followRun({ server: "http://hermes.test", key: "k" }, "run", (e) => events.push(e), undefined, 60),
+    RunStalled,
+  )
+  assert.equal(events.length, 1, "what it said before going silent was heard")
+  assert.ok(cancelled(), "the dead connection is released")
+})
+
+test("a quiet run's keepalive comments keep its stream", async () => {
+  // Four comments 30ms apart outlast a 60ms idle rule only if each one counts as the host speaking.
+  stall([": keepalive\n\n", ": keepalive\n\n", ": keepalive\n\n", delta], 30)
+  const events = []
+  await assert.rejects(
+    followRun({ server: "http://hermes.test", key: "k" }, "run", (e) => events.push(e), undefined, 60),
+    RunStalled,
+  )
+  assert.equal(events.length, 1, "the event after the keepalives arrived")
+})

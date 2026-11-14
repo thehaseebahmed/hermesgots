@@ -24,6 +24,12 @@ export const ROOM_NEEDS_MS = 1_000
  * nothing. A tool call, an approval, a question or a status change is written at once.
  */
 export const FLUSH_INTERVAL_MS = 150
+/**
+ * Hermes writes a keepalive comment every 10s while a run is quiet, so a run's event stream silent
+ * for longer than this is dead: a phone that slept, or a proxy or tunnel that dropped the connection
+ * without closing it. Nothing else ends such a read, on either chat screen.
+ */
+export const RUN_STREAM_IDLE_MS = 30_000
 /** A read that hasn't answered by now is treated as lost, since a dead connection can hang. */
 export const READ_TIMEOUT_MS = 15_000
 /**
