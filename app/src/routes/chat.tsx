@@ -481,6 +481,7 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
                 : undefined)
             }
             botId={bot.botId}
+            botMood={away ? "sleepy" : undefined}
             muted={Boolean(chat.muted || bot.muted)}
             centered={Boolean(session)}
             showBot={!session && !lead.besideList}

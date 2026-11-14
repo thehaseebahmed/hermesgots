@@ -1,13 +1,36 @@
 /**
- * Gots's bot characters. The artwork lives in public/bots/<id>.png and <Bot> (bot.tsx) renders
- * it; each one's motion is `.bot-anim-<id>` in index.css, which only runs under `.bot-animate`.
+ * Gots's bot characters. A still character's artwork is public/bots/<id>.png and its motion is
+ * `.bot-anim-<id>` in index.css, which only runs under `.bot-animate`. A **posed** character
+ * (`posed: true`) ships one pose per mood in public/bots/<id>/<mood>.png instead — its still is the
+ * happy pose — and <Bot> (bot.tsx) draws the pose its mood names, changing between them in a poof.
  */
+
+/** What a posed character can feel; each has its own pose and its own idle motion. */
+export const BOT_MOODS = [
+  { id: "happy", name: "Happy", when: "Idle, listening" },
+  { id: "wave", name: "Waving", when: "Greeting, a new chat" },
+  { id: "excited", name: "Excited", when: "Poked, good news" },
+  { id: "love", name: "Loved", when: "Thanked" },
+  { id: "curious", name: "Curious", when: "Waiting on you" },
+  { id: "sleepy", name: "Sleepy", when: "Away, offline" },
+] as const
+
+export type BotMood = (typeof BOT_MOODS)[number]["id"]
+
+export const DEFAULT_MOOD: BotMood = "happy"
+
+/** The image a bot is drawn with: its mood's pose where it has poses, else its one picture. */
+export function botImage(bot: Pick<BotDefinition, "id" | "posed">, mood: BotMood = DEFAULT_MOOD) {
+  return bot.posed ? `/bots/${bot.id}/${mood}.png` : `/bots/${bot.id}.png`
+}
 
 type Lines = [string, string, string, string, string]
 
-interface BotDefinition {
+export interface BotDefinition {
   id: string
   name: string
+  /** Ships a pose per mood (see the top of this file) rather than one picture. */
+  posed?: boolean
   /** How it looks and moves. */
   description: string
   /** Who it is, written from how it looks; its lines are said in this voice. */
@@ -132,6 +155,54 @@ export const BOTS: BotDefinition[] = [
       "Beating a little faster. The good way.",
       "Here for it, whatever it is.",
       "Glad you're here. Let's make something good.",
+    ],
+  },
+  {
+    id: "crumb",
+    name: "Crumb",
+    posed: true,
+    description:
+      "A plump scored loaf of honey-gold jelly with a visor face who bobs when it's content and pops into a new mood in a puff of smoke.",
+    character:
+      "The Baker: a dough-loving perfectionist who cares about recipes, bread and technique. Warm from the oven, exacting about the details, and says so with a puff.",
+    lines: [
+      "Proofed, scored and ready. What's first?",
+      "Fresh out of the oven and fully warmed up.",
+      "I've checked the temperature twice. Ready when you are.",
+      "Hand me the recipe and I'll mind the technique.",
+      "Warm, golden and ready. Where to?",
+    ],
+  },
+  {
+    id: "bubble",
+    name: "Bubble",
+    posed: true,
+    description:
+      "An inflated rounded-square jelly that shifts from cyan to pink, with a visor face, who bobs along and pops into a new mood in a puff of smoke.",
+    character:
+      "The Optimist: a friendly, uplifting presence that brings encouragement. Sees the bright side first, says so out loud and gets on with it.",
+    lines: [
+      "Good things ahead. Ready when you are.",
+      "Bright side up and fully charged. What's first?",
+      "I have a good feeling about this one. Let's go.",
+      "Whatever it is, we've got this. Where to?",
+      "Shimmering and certain. Give me something.",
+    ],
+  },
+  {
+    id: "pixel",
+    name: "Pixel",
+    posed: true,
+    description:
+      "An inflated rounded triangle of violet jelly, blue on one side and magenta on the other, with a tilted visor face, who bobs along and pops into a new mood in a puff of smoke.",
+    character:
+      "The Thinker: a clever problem solver who untangles complexity, spots patterns and finds the elegant answer. Composed, curious, and quietly pleased when the pieces fit.",
+    lines: [
+      "Thinking cap on. What are we untangling?",
+      "I've already spotted a pattern. Show me the rest.",
+      "Give me the knot. I'll find the loose end.",
+      "Composed, curious and ready. Where do we start?",
+      "There's an elegant answer in here somewhere. Let's find it.",
     ],
   },
 ]

@@ -116,7 +116,7 @@ export default defineConfig(({ mode }) => {
         // The Android app ships its assets in the APK; a service worker would only serve stale ones.
         disable: mode === "native",
         registerType: "autoUpdate",
-        includeAssets: ["favicon.png", "apple-touch-icon.png", "bots/*.png"],
+        includeAssets: ["favicon.png", "apple-touch-icon.png", "bots/**/*.png"],
         manifest: {
           name: "Gots",
           short_name: "Gots",

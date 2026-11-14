@@ -18,7 +18,6 @@ import { SetupGate } from "@/routes/setup"
 const BotChatsPage = lazy(() =>
   import("@/routes/bot-chats").then((m) => ({ default: m.BotChatsPage })),
 )
-const BotsPage = lazy(() => import("@/routes/bots").then((m) => ({ default: m.BotsPage })))
 const OpenSessionPage = lazy(() =>
   import("@/routes/open-session").then((m) => ({ default: m.OpenSessionPage })),
 )
@@ -152,7 +151,6 @@ export function AppRoutes() {
         <Route path="research" element={<ResearchPage />} />
         <Route path="research/:id" element={<MissionPage />} />
         <Route path="settings/:section?/:botId?/:tab?/:sub?/:leaf?" element={<SettingsPage />} />
-        <Route path="bots" element={<BotsPage />} />
         <Route path="share" element={<SharePage />} />
         <Route path="demos/markdown" element={<MarkdownDemoPage />} />
         <Route path="docs/open-ui" element={<OpenUIReferencePage />} />

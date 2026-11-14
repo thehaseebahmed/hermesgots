@@ -3,6 +3,7 @@ import { BellOffIcon, MenuIcon } from "lucide-react"
 
 import { useOpenDrawer } from "@/components/drawer-context"
 import { Bot } from "@/components/bot"
+import type { BotMood } from "@/components/bots"
 import { Button } from "@/components/ui/button"
 import { COLUMN_BOX, HEADER_BUTTON } from "@/lib/layout"
 import { cn } from "@/lib/utils"
@@ -60,6 +61,7 @@ export function ChatHeader({
   title,
   subtitle,
   botId,
+  botMood,
   muted,
   showBot = true,
   centered = false,
@@ -74,6 +76,8 @@ export function ChatHeader({
 }: {
   title: ReactNode
   botId?: string
+  /** How the bot feels, for a posed one: sleepy where the host is away. */
+  botMood?: BotMood
   muted?: boolean
   showBot?: boolean
   centered?: boolean
@@ -134,7 +138,7 @@ export function ChatHeader({
             {centered && <div aria-hidden className="hidden size-11 md:block" />}
           </>
         )}
-        {showBot && <Bot id={botId} animate className="pointer-events-auto size-11" />}
+        {showBot && <Bot id={botId} animate mood={botMood} className="pointer-events-auto size-11" />}
         <div
           data-slot="header-middle"
           className={cn(
