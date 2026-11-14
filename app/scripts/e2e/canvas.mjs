@@ -14,6 +14,11 @@
 // in the docked sidebar wearing the mark it chose.
 // A wide screen is the same canvas in two panes, and only boxes say where they are: no DOM without
 // layout can measure which pane a header spans.
+// The head is the last thing it reads, and only a browser can: how tight its line sits under its
+// title's words, against a code session's head drawn in the same browser; whether the drawer or the
+// way back to the list leads it, for a canvas the browser opened as the app's own entry and one the
+// list opened; and the app's back press arming its exit at that entry, with the press after it
+// leaving.
 
 // A browser is the tier that holds it: the page is a sandboxed `srcdoc` document with an opaque
 // origin of its own, the refusal of an outside navigation is the browser's own policy, the outline
@@ -32,7 +37,7 @@ const FRAME = "iframe[data-canvas-frame]"
 
 await flow(
   "canvas",
-  async ({ page, until, shot }) => {
+  async ({ page, seed, until, shot }) => {
     const frame = () => page.frameLocator(FRAME)
     /** The header's one flip, by the screen it goes to: `edit` from the page, `preview` from the chat. */
     const flip = (to) => page.locator(`[data-canvas-flip="${to}"]`)
@@ -351,7 +356,7 @@ await flow(
       // The frame is drawn only once the sources its page asked for are in hand, so a frame that
       // is up is a fetch that is over: nothing arrives after this to be counted.
       await drawn.waitFor({ timeout: 20_000 })
-      return { fetched: chunks.slice(from), drew: await drawn.innerText() }
+      return { id: seeded, fetched: chunks.slice(from), drew: await drawn.innerText() }
     }
 
     const quiet = await visit("plain")
@@ -374,6 +379,117 @@ await flow(
     assert.equal(many.drew, "chart d3 date", "and the page drew with all three inside the frame")
     await shot("three-libraries")
     pass("the preview screen: a canvas that asks for three libraries fetches each chunk once")
+
+    // How tight the head is under its title, which only a browser can measure: the line's own top
+    // against the words' bottom, in this head and in the code session's — the same row, drawn
+    // centered for a session, with no control around its title.
+    const headGap = () =>
+      page.evaluate(() => {
+        const title = document.querySelector('[data-slot="header-title"]')
+        const line = document.querySelector('[data-slot="header-line"]')
+        if (!title || !line) return null
+        // The words' own box, which is the deepest box the title draws: a title that is a control
+        // wraps them in one, and it is that box — not the title's — that ends where they end.
+        let words = title
+        while (words.firstElementChild) words = words.firstElementChild
+        const round = (size) => Math.round(size * 10) / 10
+        return {
+          under: round(line.getBoundingClientRect().top - words.getBoundingClientRect().bottom),
+          words: round(words.getBoundingClientRect().height),
+          box: round(title.getBoundingClientRect().height),
+        }
+      })
+    await settled(page)
+    const canvasHead = await headGap()
+    // A chat in a project draws the code session's head: a seeded one is read as unread rather than
+    // unstarted, so its title and its line are drawn with no turn behind them.
+    await seed([{ id: "gap-session", title: "A session in a project", projectId: "p_1a2b3c4d" }])
+    await page.goto(`${app}/c/gap-session`)
+    await until(
+      async () =>
+        Boolean(
+          (await page.locator('[data-slot="header-title"]').innerText().catch(() => "")).trim(),
+        ) && Boolean(await page.locator('[data-slot="header-line"]').count()),
+      20_000,
+      "the session's head to draw its title and line",
+    )
+    const sessionHead = await headGap()
+    console.log(
+      `head 390 — canvas: title box ${canvasHead.box}px over words ${canvasHead.words}px, ` +
+        `line ${canvasHead.under}px under them; code session: title box ${sessionHead.box}px ` +
+        `over words ${sessionHead.words}px, line ${sessionHead.under}px under them`,
+    )
+    assert.ok(
+      await page.locator("[data-code-session]").count(),
+      "the head compared against is a code session's",
+    )
+    assert.ok(
+      canvasHead.under <= 0.5,
+      `the canvas's line begins under its title's words (${canvasHead.under}px of air)`,
+    )
+    assert.ok(
+      Math.abs(canvasHead.under - sessionHead.under) <= 0.5,
+      `and sits as tight as the code session's does (${sessionHead.under}px of air)`,
+    )
+    assert.ok(
+      Math.abs(canvasHead.words - sessionHead.words) <= 0.5,
+      "the title's box is its words' height in both heads",
+    )
+    await shot("head-gap")
+    pass("the preview screen: the title and its line sit as tight as a code session's head")
+
+    // The address a reader came from decides the head's first control, and no DOM without layout can
+    // say which one a screen drew. An address the browser opened is the app's own entry, so nothing
+    // stands behind it: the head leads with the drawer, and the app's back press arms its exit — the
+    // press after it leaves rather than stepping onto a screen that isn't there.
+    await page.goto(`${app}/canvas/${many.id}`)
+    await page.locator(FRAME).waitFor({ timeout: 20_000 })
+    await settled(page)
+    const entryHead = await page.evaluate(() => ({
+      drawer: Boolean(document.querySelector('header [aria-label="Open conversations"]')),
+      back: Boolean(document.querySelector('header [aria-label="All canvases"]')),
+      idx: window.history.state?.idx ?? 0,
+    }))
+    assert.deepEqual(
+      entryHead,
+      { drawer: true, back: false, idx: 0 },
+      "a canvas the app opened leads with the drawer, with nothing behind it",
+    )
+    const presses = await page.evaluate(async () => {
+      const { answerBackPress } = await import("/src/lib/native.ts")
+      return [answerBackPress(), answerBackPress()]
+    })
+    assert.deepEqual(
+      presses,
+      ["armed", "leave"],
+      "a back press at the entry arms the app's exit, and the one after it leaves",
+    )
+    await shot("head-entry")
+    pass("the preview screen: a canvas the app opened leads with the drawer, and back arms the exit")
+
+    // The list opens a canvas as its child, so the head leads back to it, named for the screen it
+    // goes to, with no drawer drawn beside it — and the press steps there.
+    await page.goto(`${app}/canvas`)
+    await page.locator("[data-canvas-tile]").first().click()
+    await page.waitForURL(new RegExp(`/canvas/c_[^/]+$`), { timeout: 20_000 })
+    await page.locator(FRAME).waitFor({ timeout: 20_000 })
+    await settled(page)
+    const pushedHead = await page.evaluate(() => ({
+      back:
+        document
+          .querySelector('header [aria-label="All canvases"]')
+          ?.getAttribute("aria-label") ?? null,
+      drawer: Boolean(document.querySelector('header [aria-label="Open conversations"]')),
+    }))
+    assert.deepEqual(
+      pushedHead,
+      { back: "All canvases", drawer: false },
+      "a canvas the list opened leads back to the list, and draws no drawer beside it",
+    )
+    await shot("head-pushed")
+    await page.getByRole("button", { name: "All canvases" }).click()
+    await page.waitForURL(`${app}/canvas`, { timeout: 20_000 })
+    pass("the preview screen: a canvas the list opened is led back to the list, and steps there")
   },
   { viewport: { width: 390, height: 844 }, touch: true },
 )

@@ -357,7 +357,9 @@ drawer.
 - **A reply is one column.** Its text, the interface a block draws and the rows that account for its
   work all stand on the same inset, so a block starting to draw moves nothing.
 - **Gutters are 16px**, and 12px at the foot of a composer. Nothing scrolls sideways.
-- **Anything tappable is 44px tall**, never smaller and never behind hover, and a row is 56px.
+- **Anything tappable is 44px tall**, never smaller and never behind hover, and a row is 56px. The
+  box a thumb gets is the block a press answers on, so a title and its line are 44px together even
+  where the words inside them stand one line tall.
 - **The foot of the screen belongs to the phone.** A composer, a sheet's last row and a toast stand
   at `max(0.75rem, env(safe-area-inset-bottom))`, and the app reads `env(safe-area-inset-*)` rather
   than guessing at a bar's height.

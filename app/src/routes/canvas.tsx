@@ -10,14 +10,14 @@ import {
 } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CrosshairIcon, FrameIcon, PencilIcon, Undo2Icon } from "lucide-react"
-import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router"
+import { Link, Navigate, useMatch, useNavigate, useParams, useSearchParams } from "react-router"
 
 import { ChatBody } from "@/chat-next/chat-body"
 import { BackButton } from "@/components/back-button"
 import { CanvasConsentDialog, CanvasOptions, useCanvasConsent } from "@/components/canvas-consent"
 import { Refusal } from "@/components/banner"
 import { CanvasPointsProvider, type CanvasPoints } from "@/components/chat/canvas-points"
-import { ChatHeader, SidebarButton } from "@/components/chat/chat-header"
+import { ChatHeader } from "@/components/chat/chat-header"
 import { useChatSurface } from "@/components/chat/chat-actions"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { Composer } from "@/components/chat/composer"
@@ -26,7 +26,7 @@ import { UsageSheet } from "@/components/chat/usage-sheet"
 import { LabLabel } from "@/components/lab-badge"
 import { ItemGroup } from "@/components/item-list"
 import { setBackGuard } from "@/lib/native"
-import { plainPress, useNav } from "@/lib/nav"
+import { plainPress, depth, useNav } from "@/lib/nav"
 import { Button } from "@/components/ui/button"
 import { failed, type RefusalHold } from "@/lib/refusal"
 import { useRefusal, useSaidRefusal } from "@/lib/use-refusal"
@@ -70,7 +70,7 @@ import { serverConfig } from "@/lib/connection"
 import { usePluginFeature, usePluginFeatureOn } from "@/lib/features"
 import { HEADER_BUTTON } from "@/lib/layout"
 import type { CanvasPoint } from "@/lib/point-marker"
-import { useLarge, useWide } from "@/lib/media"
+import { useLarge } from "@/lib/media"
 import { openExternal } from "@/lib/native"
 import { useOnline } from "@/lib/online"
 import { useDark } from "@/lib/theme"
@@ -355,6 +355,15 @@ function useCanvasManagement(id: string, hold: RefusalHold) {
 /**
  * The head both canvas screens wear (ADR 0130). A title the record hasn't answered for yet is still
  * "Canvas", since the address may name one this device hasn't read.
+ *
+ * What leads the row is how the reader arrived, decided here rather than by either screen. At the
+ * app's own entry nothing stands behind the screen — an address a browser opened, a sidebar row, a
+ * pinned canvas — so the head leads with the drawer the sidebar is collapsed into (the header draws
+ * it itself, and a wide screen, where the sidebar stands, leads with nothing), and a device's back
+ * press is the app's, which arms its exit. A screen the list opened leads back to it, and that press
+ * steps there too. The chat is the one exception, and only once the canvas has a page: its own way
+ * back is the Preview corner, which replaces this entry, so an arrow beside it would be a second
+ * control for one move (ADR 0130).
  */
 function CanvasHead({
   canvas,
@@ -362,7 +371,6 @@ function CanvasHead({
   awayWords,
   optionsOpen,
   onOpenOptions,
-  leading,
   actions,
 }: {
   canvas: Canvas | undefined
@@ -373,18 +381,17 @@ function CanvasHead({
   optionsOpen: boolean
   /** The title's press: the options' only door, on either screen (ADR 0130). */
   onOpenOptions: () => void
-  /** What leads the row where the sidebar stands: the canvas list's own way back, or nothing. */
-  leading: ReactNode
   actions: ReactNode
 }) {
-  // A phone's sidebar is behind the drawer, so the head leads with the drawer's button there and the
-  // way back to the list leads it only where the sidebar stands on screen and cannot be opened. The
-  // two are one control in one slot either way, and the row is read from the left the same.
-  const wide = useWide()
+  const { up } = useNav()
+  // The chat is the address whose own way back is drawn as its Preview corner, so it draws no arrow
+  // once the canvas has a page (ADR 0130); every other screen the list opened leads back to it.
+  const chatWithPage = Boolean(useMatch("canvas/:id/edit")) && hasVersion(canvas)
+  const leadsBack = depth() > 0 && !chatWithPage
   return (
     <ChatHeader
       className="relative pb-2"
-      leading={wide ? leading : <SidebarButton />}
+      leading={leadsBack ? <BackButton label="All canvases" onClick={() => up("/canvas")} /> : undefined}
       // The subtitle's away sentence stays outside the control: a live region inside a button
       // becomes part of its name.
       onTitlePress={canvas ? onOpenOptions : undefined}
@@ -395,9 +402,10 @@ function CanvasHead({
             aria-haspopup="dialog"
             aria-expanded={optionsOpen}
             data-canvas-options-open
-            // The press is the block's (`onTitlePress`); this button is what a reader, a tab stop and
-            // a keyboard activate, and its own presses bubble to the block.
-            className="flex min-h-11 w-full min-w-0 items-center text-left outline-none"
+            // The press is the block's (`onTitlePress`), and the block is what a thumb is given; this
+            // button is what a reader, a tab stop and a keyboard activate, and its own presses bubble.
+            // It hugs its words, so the line under it begins where they end.
+            className="flex w-full min-w-0 items-center text-left outline-none"
           >
             <span className="min-w-0 truncate">{canvas.title}</span>
           </button>
@@ -517,7 +525,7 @@ function CanvasPagePane({
  */
 export function CanvasView() {
   const { id = "" } = useParams()
-  const { up, back } = useNav()
+  const { back } = useNav()
   const navigate = useNavigate()
   useEffect(() => setBackGuard(back()), [back])
   const { canvas, profile, missing, loaded, away } = useCanvas(id)
@@ -801,7 +809,6 @@ export function CanvasView() {
           awayWords={awayWords}
           optionsOpen={optionsOpen}
           onOpenOptions={() => setOptionsOpen(true)}
-          leading={<BackButton label="All canvases" onClick={() => up("/canvas")} />}
           actions={
             <>
               {canvas && !missing && !large ? (
@@ -954,16 +961,6 @@ export function CanvasEdit() {
         awayWords={awayWords}
         optionsOpen={optionsOpen}
         onOpenOptions={() => setOptionsOpen(true)}
-        leading={
-          // The list is where this screen's way back goes whether the record has landed or not:
-          // while it is reading, that is the only screen there is to go to.
-          reading || (loaded && !versioned) ? (
-            <BackButton
-              label="All canvases"
-              onClick={() => navigate("/canvas", { replace: true })}
-            />
-          ) : undefined
-        }
         actions={
           <>
             {loaded && versioned ? (
