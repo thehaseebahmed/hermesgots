@@ -292,7 +292,7 @@ async function seedChatOfBot() {
 }
 
 test(
-  "a phone's chat carries its way back in the bar's corner, the drawer still at its left",
+  "a phone's chat leads with its way back, and no drawer stands beside it",
   atWidth(390, async () => {
     await seedChatOfBot()
     const history = atDepth(0)
@@ -303,19 +303,19 @@ test(
           "the chat",
         )
         assert.equal(
-          find('[data-slot="header-row"] button')?.getAttribute("aria-label"),
-          "Open conversations",
-          "the bar leads with the drawer's own control",
+          findAll('[data-slot="header-leading"] button[aria-label="Back to Mainly"]').length,
+          1,
+          "the bar leads with the way back to the bot's list",
+        )
+        assert.equal(
+          findAll('[data-slot="header-leading"] button[aria-label="Open conversations"]').length,
+          0,
+          "and the drawer stands nowhere on a bar that leads back",
         )
         assert.equal(
           findAll('[data-slot="header-actions"] button[aria-label="Back to Mainly"]').length,
-          1,
-          "and its corner carries the way back to the bot's list",
-        )
-        assert.equal(
-          findAll('[data-slot="header-leading"] [aria-label="Back to Mainly"]').length,
           0,
-          "which stands nowhere at the bar's left",
+          "the corner is the actions' alone",
         )
       })
     } finally {

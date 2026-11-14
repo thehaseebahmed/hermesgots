@@ -1,6 +1,6 @@
 /**
  * The lead a chat-shaped screen draws and the press it answers (ADR 0144, ADR 0154): which bot's list
- * its row stands in, what its bar's corner carries, and what the platform's back does there.
+ * its row stands in, what its bar leads with, and what the platform's back does there.
  *
  * A bot's chat, a room, a routine's run and the routines screen are all screens of one bot, so all
  * four ask the same three questions — is my list a real screen here, is it already on screen beside
@@ -69,15 +69,16 @@ export function useChatLead({
     if (!list) return
     return setBackGuard(listed)
   }, [list, listed])
-  // A Code session's way out is the one leading control: it leads back to Code, which is a place a
-  // screen opened, not a list its row stands in.
+  // A Code session's way out leads to Code, which is a place a screen opened, not a list its row
+  // stands in. Every other screen of a bot leads back to the list its row stands in, in the same slot
+  // — where a phone's back stands — and a bar that leads back draws no drawer, so the app's menu is
+  // left to the screens nothing leads back from.
+  const words = named ? `Back to ${named}` : UNNAMED
   const leading = underCode ? (
     <BackButton label="Back to Code" onClick={() => void leave?.()} floating />
+  ) : list ? (
+    <BackButton label={words} onClick={() => ontoList()} floating />
   ) : undefined
-  // The bar's corner, at every width: the list beside a conversation is a lane of the same screen, so
-  // the control stands there too rather than letting each width guess where its way back is.
-  const words = named ? `Back to ${named}` : UNNAMED
-  const wayBack = list ? <BackButton label={words} onClick={() => ontoList()} floating /> : undefined
   return {
     /** Whether the list stands beside this screen, so its bar drops the bot's face. */
     besideList,
@@ -85,9 +86,7 @@ export function useChatLead({
     list,
     /** Steps back onto that list, which is what a room's and a run's control answers with. */
     ontoList,
-    /** The bar's corner: the control that steps onto that list, named for where it lands. */
-    back: wayBack,
-    /** A Code session's leading control, where this screen is one: nothing leads a bot's conversation. */
+    /** The bar's leading control: the one that steps onto that list, named for where it lands. */
     leading,
   }
 }

@@ -109,7 +109,7 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
             // The bot's list beside this run already names the bot with its face.
             showBot={!lead.besideList}
             actions={actions}
-            back={lead.back}
+            leading={lead.leading}
           />
           <MessageScrollerProvider key={id} autoScroll defaultScrollPosition="end">
             <MessageScroller className="flex-1">

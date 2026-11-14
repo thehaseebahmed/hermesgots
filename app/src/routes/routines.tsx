@@ -87,22 +87,24 @@ export function RoutinesPage() {
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       {/*
         The app's bar in its pinned form (ADR 0140) — the same row, slots and frosted circles the chat
-        and the bot's list draw. Its leading control is the legacy layout's only: everywhere a bot has a
-        list, that list is this page's way back and stands in the corner, as a conversation's does. Its
-        title is the screen's own, its action is Refresh, and the four states it filters by are pinned
-        under the row inside the same sticky box, so a long list is filtered without scrolling back up
-        to reach them.
+        and the bot's list draw. Its leading control is the way back at every width: a bot's list
+        everywhere it has one, and the legacy layout's chats where it has none, so the bar that leads
+        back draws no drawer at all. Its title is the screen's own, its action is Refresh, and the four
+        states it filters by are pinned under the row inside the same sticky box, so a long list is
+        filtered without scrolling back up to reach them.
       */}
       <ChatHeader
         pinned
         showBot={false}
         leading={
-          legacy === true && (
+          legacy === true ? (
             <BackButton
               label="Back to chats"
               onClick={() => up(botChatsPath(profileId))}
               floating
             />
+          ) : (
+            lead.leading
           )
         }
         title="Routines"
@@ -117,7 +119,6 @@ export function RoutinesPage() {
             <RefreshCwIcon />
           </Button>
         }
-        back={lead.back}
         below={
           <ChipRow label="Routine states">
             {FILTERS.map(({ key, label }) => (
