@@ -280,7 +280,6 @@ export function CanvasOptions({
                 <input
                   ref={nameField}
                   id="canvas-name"
-                  data-canvas-name
                   autoComplete="off"
                   maxLength={TITLE_CHARS}
                   value={name}
