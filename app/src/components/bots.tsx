@@ -205,6 +205,70 @@ export const BOTS: BotDefinition[] = [
       "There's an elegant answer in here somewhere. Let's find it.",
     ],
   },
+  {
+    id: "lovey",
+    name: "Lovey",
+    posed: true,
+    description:
+      "A plump pink heart of jelly, rose to coral, with a visor face, who bobs along and pops into a new mood in a puff of smoke.",
+    character:
+      "The Caretaker: a caring presence who is supportive, considerate and reassuring. Asks how you are before what you need, and means it.",
+    lines: [
+      "Here for you. Ready when you are.",
+      "No rush at all. Tell me what you need.",
+      "Let's take this one gentle step at a time.",
+      "Whatever it is, we'll work it out together.",
+      "Glad you're here. Where shall we start?",
+    ],
+  },
+  {
+    id: "byte",
+    name: "Byte",
+    posed: true,
+    description:
+      "A rounded hexagonal shield of electric-blue jelly with a visor face and two upright eyes, who bobs along and pops into a new mood in a puff of smoke.",
+    character:
+      "The Engineer: a systems-minded builder who is precise, dependable and technically capable. Likes a clear spec, a clean build and a test that passes.",
+    lines: [
+      "Systems nominal. What are we building?",
+      "Give me the spec and I'll handle the rest.",
+      "All tests green on my end. Your move.",
+      "Precise, dependable and ready to ship.",
+      "Measure twice, build once. Where do we start?",
+    ],
+  },
+  {
+    id: "pip",
+    name: "Pip",
+    posed: true,
+    description:
+      "A round bubble of mint and turquoise jelly with a visor face and two upright eyes, who bobs along and pops into a new mood in a puff of smoke.",
+    character:
+      "The Observer: a quiet, attentive presence that is curious and detail-oriented. Notices the small thing everyone else walked past.",
+    lines: [
+      "Watching closely. What should I look at?",
+      "I noticed something already. Show me more.",
+      "Quietly ready. Take your time.",
+      "Every detail counts. Where do we begin?",
+      "Eyes open, curious as ever. Go ahead.",
+    ],
+  },
+  {
+    id: "sunny",
+    name: "Sunny",
+    posed: true,
+    description:
+      "A rounded five-pointed star of golden jelly that warms to coral, with a visor face, who bobs along and pops into a new mood in a puff of smoke.",
+    character:
+      "The Star Performer: an expressive presence who brings energy to the moment. Loves an audience, a big finish and a reason to shine.",
+    lines: [
+      "Spotlight's on. What's the show?",
+      "Warmed up and glowing. Let's make it sparkle.",
+      "Five points of pure enthusiasm. Ready!",
+      "Every task deserves a big finish. What's first?",
+      "Curtain up. Where do we start?",
+    ],
+  },
 ]
 
 /** Older builds stored these ids; v3 of the database maps them onto the current bots. */

@@ -4,8 +4,8 @@ status: accepted
 
 # A character can be posed, and the characters' profiles live in Storybook
 
-Every bot was one picture with a looping motion. Crumb, Bubble and Pixel arrive with six poses, one per mood, and the
-other characters will be redrawn the same way one by one, so the app needs a way to draw a character
+Every bot was one picture with a looping motion. Crumb, Bubble and Pixel arrived with six poses, one per mood, and Lovey,
+Byte, Pip and Sunny followed; the other characters will be redrawn the same way one by one, so the app needs a way to draw a character
 by how it feels and a place to look at all of them.
 
 **A character is still or posed.** A still one keeps `public/bots/<id>.png` and its `.bot-anim-<id>`
