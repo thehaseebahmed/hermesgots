@@ -392,6 +392,12 @@ export const FLOWS = {
     mock: "polling",
     about: "An idle open chat makes at most 12 requests in 65s",
   },
+  "code-requests": {
+    script: "e2e/code-requests.mjs",
+    about:
+      "What Code asks its server, counted against a budget: the list opening, left alone, put away and brought back, and the same for a session opened from it",
+    alsoPolling: true,
+  },
   openui: {
     script: "e2e/openui.mjs",
     about:
