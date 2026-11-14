@@ -15,7 +15,6 @@ import {
 import { deleteConversation, updateConversation, type Conversation, type Profile } from "@/lib/db"
 import { setThreadMuted } from "@/lib/push"
 import { stopMessage } from "@/lib/chat"
-import { cn } from "@/lib/utils"
 
 /**
  * A chat's bar's title as the press that opens its settings (ADR 0153): the whole block answers a
@@ -114,11 +113,11 @@ export function ChatSettings({
               {context && (
                 <button
                   type="button"
-                  className={cn(linkRowClass, "items-center")}
+                  className={linkRowClass}
                   data-chat-context
                   onClick={() => onUsageOpenChange(true)}
                 >
-                  <RowText title="Context" subtitle={usage.model ?? "This chat's context use"} />
+                  <RowText title="Context" subtitle="This chat's context use" />
                   <ContextPercent usage={usage} />
                 </button>
               )}

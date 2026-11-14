@@ -436,7 +436,7 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
       providerUsage={providerUsage}
       usageOpen={usageOpen}
       onUsageOpenChange={setUsageOpen}
-      onDeleted={() => (session ? up("/code") : root("/"))}
+      onDeleted={() => up("/code")}
     />
   )
   return (
@@ -994,7 +994,6 @@ function CurrentChatPage({ slot }: ChatPageProps) {
   const wide = useWide()
   const beside = Boolean(useCodePane()) && Boolean(session)
   useRememberOpened("code", session?.id)
-  const codePath = session && "/code"
   const {
     leave,
     underCode,
@@ -1054,7 +1053,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
       providerUsage={providerUsage}
       usageOpen={usageOpen}
       onUsageOpenChange={setUsageOpen}
-      onDeleted={() => (codePath ? up(codePath) : root("/"))}
+      onDeleted={() => up("/code")}
     />
   )
 
@@ -1360,7 +1359,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
           context={!wide && configured}
           usageOpen={usageOpen}
           onUsageOpenChange={setUsageOpen}
-          onDeleted={() => (codePath ? up(codePath) : root("/"))}
+          onDeleted={() => root("/")}
         />
       )}
       {session && (
