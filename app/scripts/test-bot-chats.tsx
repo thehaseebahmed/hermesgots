@@ -189,8 +189,8 @@ const screen = (entry: InitialEntry = `/b/${bot.id}`) => (
 )
 
 test("Home is the active bot's screen: `/` sends the reader to its list", async () => {
-  // A bot with nothing to open, so the address `/` lands on is the list itself rather than the chat
-  // the landing would send the reader on to: the door, seen without another screen answering for it.
+  // A bot with nothing to open, so the address `/` lands on is the list itself: the door, seen without
+  // another screen answering for it.
   await seed([])
   await mount(
     <MemoryRouter initialEntries={["/"]}>
@@ -732,8 +732,8 @@ test("a list a chat opens marks no row, where a list beside a chat marks the one
     { id: "a", title: "A chat", at: 100, said: "Hello" },
     { id: "b", title: "Another", at: 200, said: "Hi" },
   ])
-  // The list a chat's own control opens names the chat it covers, and that chat is not open beside it:
-  // the mark a row carries for "this is the one drawn here" would say something untrue.
+  // A list drawn with nothing beside it marks no row: the mark says "this is the one drawn here", and
+  // none is.
   await mount(screen({ pathname: `/b/${bot.id}`, state: { open: "a" } }), async () => {
     await until(async () => rowIds().length === 2, "the bot's chats")
     assert.equal(

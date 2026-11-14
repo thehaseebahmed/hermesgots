@@ -81,7 +81,7 @@ function ThemeColor() {
   return null
 }
 
-/** Home is the selected bot's screen: the list of its chats, which opens where the reader left it. */
+/** Home is the selected bot's screen: the list of its chats, at the bot's own address. */
 export function Home() {
   const legacy = useLegacyChat()
   const active = useLiveQuery(

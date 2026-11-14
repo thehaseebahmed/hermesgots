@@ -211,7 +211,7 @@ await flow(
     assert.equal(botRow, 44, `a bot's row is the app's 44px target, not a taller one (${botRow})`)
     pass("a bot's row in the sidebar is the app's row height")
 
-    // A phone: the same bot draws the same list, and a row opens its chat as the app's only entry.
+    // A phone: the same bot draws the same list, and a row opens its chat one step above it.
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto(`${app}/b/${profileId}`)
     // Below the split width the list is the screen, so its rows are read in the main pane.

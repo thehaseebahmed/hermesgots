@@ -61,10 +61,9 @@ export function RoutinesPage() {
     return { profileId, bot: bot ?? null }
   }, [profileId])
   const bot = answered && answered.profileId === profileId ? answered.bot : undefined
-  // A bot's screens all wear one way back — the bar's corner control, named for the list it lands on,
-  // with the platform's press registered to make the same move (ADR 0144, G8). The legacy layout has
-  // no bot's list for it to step onto, so there the page keeps the leading button it has always drawn,
-  // since a page with no way back is worse than one with the older control.
+  // A bot's screens all wear one way back — the bar's corner control, named for the list it lands on —
+  // with the platform's press registered beside it (ADR 0144, G8). The legacy layout has no bot's list
+  // for the lead to step onto, so there this page registers the press itself.
   const legacy = useLegacyChat()
   const lead = useChatLead({ bot: profileId })
   const { up } = useNav()

@@ -69,8 +69,8 @@ export function useChatLead({
     if (!list) return
     return setBackGuard(listed)
   }, [list, listed])
-  // A Code session's way out stays the leading control it has always been: it leads back to Code,
-  // which is a place a screen opened, not a list its row stands in.
+  // A Code session's way out is the one leading control: it leads back to Code, which is a place a
+  // screen opened, not a list its row stands in.
   const leading = underCode ? (
     <BackButton label="Back to Code" onClick={() => void leave?.()} floating />
   ) : undefined
