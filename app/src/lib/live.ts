@@ -114,6 +114,16 @@ export function isLive(profile?: Connection | null) {
   return Boolean(profile && live.has(connectionKey(profile)))
 }
 
+/**
+ * Whether the bot's server is expected to say when things change: its stream is open, or is being
+ * opened — as it is for a moment each time the page comes back to the foreground. A read that is
+ * only a net under the stream waits for the stream's answer rather than running in that moment.
+ */
+export function awaitsStream(profile?: Connection | null) {
+  const status = statusOf(profile)
+  return status === "push" || status === "connecting"
+}
+
 export function useLive(profile?: Connection | null) {
   return useSyncExternalStore(subscribe, () => isLive(profile))
 }

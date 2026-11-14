@@ -42,6 +42,7 @@ import { codeGroupOf, codeGroups, codeOrder } from "@/lib/item-groups"
 import { useAnyChange } from "@/lib/live"
 import { useNav } from "@/lib/nav"
 import { itemToOpen, useCodePane, type FeaturePane } from "@/lib/pane"
+import { usePoll } from "@/lib/poll"
 import { readProjects, useAllProjects } from "@/lib/projects"
 import { quietly } from "@/lib/report"
 import { createSignal } from "@/lib/store"
@@ -177,10 +178,16 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const toRead = JSON.stringify(
     [...servers.values()].map(({ baseUrl, apiKey }) => ({ baseUrl, apiKey })),
   )
-  useEffect(() => {
-    for (const server of JSON.parse(toRead) as { baseUrl: string; apiKey: string }[])
-      readProjects(server).catch(quietly("Reading projects"))
-  }, [toRead, changes])
+  // Read as the screen opens, when a server says its projects changed, and as the page comes back to
+  // the foreground: a server that isn't streaming has no other way to say a project moved.
+  usePoll(
+    () => {
+      for (const server of JSON.parse(toRead) as { baseUrl: string; apiKey: string }[])
+        readProjects(server).catch(quietly("Reading projects"))
+    },
+    false,
+    [toRead, changes],
+  )
 
   const projects = useMemo(() => {
     const byKey = new Map<string, { profile: Profile; project: HermesProject }>()

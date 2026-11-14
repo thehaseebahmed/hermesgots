@@ -9,11 +9,14 @@ import type { HermesProject } from "@/lib/hermes"
 import {
   CLOSE_REPORT_GAP_MS,
   CLOSE_REPORT_MS,
+  LIST_MS,
   PR_PENDING_MS,
+  SAFETY_MS,
   SESSION_REREAD_MS,
   TAIL_MS,
 } from "@/lib/freshness"
-import { useAnyChange } from "@/lib/live"
+import { awaitsStream, useAllLive, useAnyChange } from "@/lib/live"
+import { useAllLiveRuns, useWaiting } from "@/lib/waiting"
 import { usePoll } from "@/lib/poll"
 import { closedSession } from "@/lib/session-work"
 import { quietly } from "@/lib/report"
@@ -113,45 +116,110 @@ export function useProjectSessions(only?: string, { tails: readTails = true } = 
 /**
  * A session's PRs are read when it's open; this reads them for every listed session as the screen
  * opens, its worktree first when this device hasn't seen it (a session started elsewhere). While the
- * screen stays open it reads both again, at most every minute, as the sessions change, so a plan
- * approved or a pull request opened on another device shows here too. While any has checks running
- * it reads its pull requests every few seconds, so the rows keep up with the pill; the open
- * session's own chat does that for itself.
+ * screen stays open it reads them again on its own timer and as the page comes back to the
+ * foreground, so a pull request opened or merged elsewhere shows here too.
+ *
+ * A session's workspace — its mode, and whether a plan waits — is read again when the host's own
+ * account of its run moves (`runs/live`, which every screen already shares): a run that ended or a
+ * wait that came or went is when a plan appears or is settled, and when a pull request is most
+ * likely to have been opened, so that row is read at once rather than at the next tick. Where a
+ * bot's server streams its changes that is the whole of it; a bot that is only polled has its rows'
+ * workspaces read on the timer as well, as a net.
+ *
+ * While any session has checks running it reads its pull requests every few seconds, so the rows
+ * keep up with the pill; the open session's own chat does that, and its turn's own reads, for itself.
  */
 export function useSessionFollowUps(sessions: Conversation[] | undefined, open?: string) {
-  const read = useRef(new Map<string, number>())
+  const live = useAllLiveRuns()
+  const waits = useWaiting()
+  const rows = (sessions ?? []).filter((c) => !closedSession(c))
+  const latest = useRef(rows)
   useEffect(() => {
-    const now = Date.now()
+    latest.current = rows
+  })
+  /** When each row's workspace was last asked for here. */
+  const read = useRef(new Map<string, number>())
+
+  // The rows as the reads see them: which sessions are listed, and which have a worktree to read a
+  // branch from. A live query hands back new rows on every write, so the effect keys on this.
+  const listed = rows.map((c) => `${c.id}:${c.worktree ? 1 : 0}`).join()
+  const started = useRef(new Set<string>())
+  useEffect(() => {
     const ready: string[] = []
-    const reread: string[] = []
     const late: string[] = []
-    for (const c of sessions ?? []) {
-      if (closedSession(c)) continue
-      const last = read.current.get(c.id)
-      if (last !== undefined && now - last < SESSION_REREAD_MS) continue
-      read.current.set(c.id, now)
-      if (!c.worktree) {
-        late.push(c.id)
-        continue
-      }
-      ready.push(c.id)
-      // A row this device has seen is re-read alongside rather than in front of the rest.
-      if (last !== undefined) reread.push(c.id)
+    for (const c of latest.current) {
+      const key = `${c.id}:${c.worktree ? 1 : 0}`
+      if (started.current.has(key)) continue
+      started.current.add(key)
+      if (c.worktree) ready.push(c.id)
+      // A worktree that has just arrived came from the read below, which reads its pull requests.
+      else if (!started.current.has(`${c.id}:1`)) late.push(c.id)
     }
-    if (reread.length) void refreshWorkspaces(reread).catch(quietly("Reading a workspace"))
     // One read for every row this device can read now; a bot whose plugin predates the batch
     // answers them one at a time from inside `refreshPrsOf`.
     if (ready.length) void refreshPrsOf(ready).catch(quietly("Reading sessions' pull requests"))
     if (late.length) {
+      const now = Date.now()
+      for (const id of late) read.current.set(id, now)
       // Their worktrees aren't here yet, so there is no branch to read until the host names one.
       void refreshWorkspaces(late)
         .then(() => refreshPrsOf(late))
         .catch(quietly("Reading sessions' pull requests"))
     }
-  }, [sessions])
-  const runningChecks = (sessions ?? []).filter(
-    (c) => c.id !== open && !closedSession(c) && prChecksPending(c.prs),
+  }, [listed])
+
+  // What the host says of each row's run, as last seen: a row is read again when it changes.
+  const seen = useRef(new Map<string, string>())
+  useEffect(() => {
+    const moved: string[] = []
+    const ended: string[] = []
+    for (const c of latest.current) {
+      const run = live[c.hermesSessionId] ?? ""
+      const now = `${run}|${waits[c.hermesSessionId]?.kind ?? ""}`
+      const before = seen.current.get(c.id)
+      seen.current.set(c.id, now)
+      // The first sight of a row is the screen opening, which the reads above cover; the open
+      // session's own chat reads its workspace and pull requests as its turn ends.
+      if (before === undefined || before === now || c.id === open || !c.worktree) continue
+      moved.push(c.id)
+      if (!run && !before.startsWith("|")) ended.push(c.id)
+    }
+    if (moved.length) {
+      const at = Date.now()
+      for (const id of moved) read.current.set(id, at)
+      void refreshWorkspaces(moved).catch(quietly("Reading a workspace"))
+    }
+    if (ended.length)
+      void refreshPrsOf(ended, { force: true }).catch(quietly("Reading sessions' pull requests"))
+  }, [live, waits, listed, open])
+
+  usePoll(
+    async () => {
+      const held = latest.current.filter((c) => c.worktree)
+      if (!held.length) return
+      // Gated inside by how old each row's copy is, so a quick return to the page asks for nothing.
+      void refreshPrsOf(held.map((c) => c.id)).catch(quietly("Reading sessions' pull requests"))
+      const bots = new Map(
+        (await db.profiles.bulkGet([...new Set(held.map((c) => c.profileId))])).flatMap((bot) =>
+          bot ? [[bot.id, bot] as const] : [],
+        ),
+      )
+      const now = Date.now()
+      const polled = held.filter(
+        (c) =>
+          !awaitsStream(bots.get(c.profileId)) &&
+          now - (read.current.get(c.id) ?? 0) >= SESSION_REREAD_MS,
+      )
+      for (const c of polled) read.current.set(c.id, now)
+      if (polled.length)
+        void refreshWorkspaces(polled.map((c) => c.id)).catch(quietly("Reading a workspace"))
+    },
+    LIST_MS,
+    [],
+    { immediate: false },
   )
+
+  const runningChecks = rows.filter((c) => c.id !== open && prChecksPending(c.prs))
   // Forced, so the freshness gate doesn't skip a tick that lands just inside its window.
   usePoll(
     () => {
@@ -189,14 +257,27 @@ export function startBlocked(project: HermesProject) {
 export function useCloseReports() {
   const changed = useAnyChange("closes")
   const last = useRef(0)
+  // One ask per server: bots that share one share its closes, and a close is told once.
+  const servers = useLiveQuery(async () => {
+    const unique = new Map<string, Profile>()
+    for (const bot of await listReachableProfiles())
+      if (!unique.has(connectionKey(bot))) unique.set(connectionKey(bot), bot)
+    return [...unique.values()]
+  }, [])
+  const asked = useRef(servers)
+  useEffect(() => {
+    asked.current = servers
+  })
   const read = useCallback(async () => {
     const now = Date.now()
     if (now - last.current < CLOSE_REPORT_GAP_MS) return
     last.current = now
-    const bots = await listReachableProfiles()
+    const bots = asked.current ?? (await listReachableProfiles())
     await Promise.all(bots.map((bot) => tellCloseReports(bot)))
   }, [])
-  usePoll(read, CLOSE_REPORT_MS)
+  // A server that streams its changes says when a close ended, so the timer is only the net.
+  const streamed = useAllLive(servers)
+  usePoll(read, streamed ? SAFETY_MS : CLOSE_REPORT_MS)
   useEffect(() => {
     // The poll above ran once on mount; this is the stream's own word, not a second read of it.
     if (changed) void read()
