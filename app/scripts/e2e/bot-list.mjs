@@ -1,4 +1,4 @@
-import { app, assert, flow, pass, rung, settled } from "./lib.mjs"
+import { app, assert, flow, markOffsetIn, pass, rung, settled } from "./lib.mjs"
 
 /**
  * A bot's list is the way into every conversation (ADR 0153, ADR 0154): a bot pressed from the sidebar
@@ -49,6 +49,14 @@ await flow(
         const row = document.querySelector(selector)
         return row ? Math.round(row.getBoundingClientRect().height) : null
       }, selector)
+    // The docked sidebar and the drawer draw this one row, so this one rule asks both.
+    const assertPictureCentred = async (selector, where) => {
+      const offset = await markOffsetIn(page, selector)
+      assert.ok(
+        Math.abs(offset) <= 0.5,
+        `the bot's picture sits on the row's centre line, ${where} (${offset}px off)`,
+      )
+    }
     const press = async (selector) => {
       await page.locator(selector).first().click()
       await settled(page)
@@ -206,10 +214,13 @@ await flow(
     await shot("empty-pane")
     pass("returning to the list beside nothing shows the mark and no chat selected")
 
-    // The bots band's rows sit at the app's own row height: no extra room between one bot and the next.
+    // A bot's row is the row the design gives a title with a line under it — 56px, taller than the
+    // 44px menu above it because it carries a picture and two lines — and the picture hangs on the
+    // row's own centre line rather than on the top of the line box it was drawn in.
     const botRow = await heightOf(`aside a[href="/b/${profileId}"]`)
-    assert.equal(botRow, 44, `a bot's row is the app's 44px target, not a taller one (${botRow})`)
-    pass("a bot's row in the sidebar is the app's row height")
+    assert.equal(botRow, 56, `a bot's row is the app's 56px row for a title and a line (${botRow})`)
+    await assertPictureCentred(`aside a[href="/b/${profileId}"]`, "in the sidebar")
+    pass("a bot's row in the sidebar is the app's row, with its picture centred in it")
 
     // A phone: the same bot draws the same list, and a row opens its chat one step above it.
     await page.setViewportSize({ width: 390, height: 844 })
@@ -235,6 +246,11 @@ await flow(
     // The sidebar is the way to the list as well, and it lands there rather than in another chat.
     await page.getByRole("button", { name: "Open conversations" }).click()
     await page.locator(`aside, [role="dialog"]`).first().waitFor({ timeout: 10_000 })
+    await page.locator(DRAWER_BOT_ROW(profileId)).first().waitFor({ timeout: 10_000 })
+    await settled(page)
+    const drawerRow = await heightOf(DRAWER_BOT_ROW(profileId))
+    assert.equal(drawerRow, 56, `the drawer's bot row is the same 56px row (${drawerRow})`)
+    await assertPictureCentred(DRAWER_BOT_ROW(profileId), "in the drawer")
     await press(DRAWER_BOT_ROW(profileId))
     await page.waitForURL(`**/b/${profileId}`, { timeout: 20_000 })
     await until(async () => (await mine("main")).length === 4, 20_000, "the list again")
