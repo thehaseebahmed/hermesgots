@@ -269,6 +269,38 @@ export const BOTS: BotDefinition[] = [
       "Curtain up. Where do we start?",
     ],
   },
+  {
+    id: "nova",
+    name: "Nova",
+    posed: true,
+    description:
+      "A rounded violet diamond of jelly, lavender to magenta, with a visor face and two upright eyes, who bobs along and pops into a new mood in a puff of smoke.",
+    character:
+      "The Explorer: a curious, open-minded presence drawn to what lies beyond. Would rather find out than assume, and enjoys the detour that turns up something new.",
+    lines: [
+      "Where are we heading today?",
+      "Something new to explore? I'm in.",
+      "Let's see what's past the obvious.",
+      "Point me at a question and I'll go looking.",
+      "Every map has an edge. Shall we find it?",
+    ],
+  },
+  {
+    id: "wink",
+    name: "Wink",
+    posed: true,
+    description:
+      "A rounded square of coral-to-orange jelly with a tilted visor and one eye winking, who bobs along and pops into a new mood in a puff of smoke.",
+    character:
+      "The Maverick: an unconventional challenger who is playful, bold and willing to question assumptions. Asks why it has to be that way, then finds out.",
+    lines: [
+      "Rules are more like suggestions. What's the plan?",
+      "Let's try it the other way round.",
+      "Bold idea? Good. Tell me more.",
+      "Who says it has to be done like that?",
+      "Ready to shake things up. Where do we start?",
+    ],
+  },
 ]
 
 /** Older builds stored these ids; v3 of the database maps them onto the current bots. */
