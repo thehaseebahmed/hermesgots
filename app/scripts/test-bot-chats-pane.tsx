@@ -267,6 +267,43 @@ test(
   }),
 )
 
+/**
+ * The lane beside the list, with nothing open in it, says so properly: a chat's mark on one line and
+ * the words under it on the next, both standing centred in the lane the state fills (F5).
+ */
+test(
+  "the item pane says what is not there",
+  laptop(async () => {
+    localStorage.clear()
+    await seed()
+    await mount(screen(`/b/${bot.id}`), async () => {
+      await until(async () => listRows().length === CHATS.length + 1, "the bot's chats in its list")
+      const empty = find('[data-slot="bot-chats-empty"]')
+      assert.ok(empty, "the lane beside the list says there is nothing open in it")
+      const mark = empty?.querySelector("svg")
+      assert.ok(mark, "and draws a chat's mark")
+      assert.equal(
+        mark?.parentElement,
+        empty,
+        "with the mark a line of the lane's own, not wrapped in the words' paragraph",
+      )
+      const words = [...(empty?.children ?? [])].find((child) => child.tagName === "P")
+      assert.equal(words?.textContent?.trim(), "No chat selected", "the words on the line under it")
+      assert.equal(empty?.textContent?.trim(), "No chat selected", "and no other words in the lane")
+      assert.match(
+        empty?.getAttribute("class") ?? "",
+        /\bflex-col\b/,
+        "the two stand as separate lines, one above the other",
+      )
+      assert.match(
+        empty?.getAttribute("class") ?? "",
+        /\bitems-center\b.*\bjustify-center\b/,
+        "and centred on both axes of the lane",
+      )
+    })
+  }),
+)
+
 test(
   "the list marks the chat its address names, and keeps its lane across the switch",
   laptop(async () => {

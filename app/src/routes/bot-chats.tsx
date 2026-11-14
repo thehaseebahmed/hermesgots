@@ -70,13 +70,19 @@ export function BotChatsPane({ pane }: { pane: BotPane }) {
   return <BotChatsList profileId={pane.profileId} selected={pane.selected} beside />
 }
 
+/**
+ * The item lane with nothing open in it, at the two-pane width: a chat's mark over the words saying
+ * so, the two centred on both axes of the lane this fills. The single-pane width has no lane to fill
+ * — the list is the screen there — so nothing of this is drawn.
+ */
 function NoChatOpen() {
   return (
     <div
       data-slot="bot-chats-empty"
-      className="flex min-h-0 flex-1 items-center justify-center px-6 text-center"
+      className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center"
     >
-      <p className="text-sm text-muted-foreground">No chat open</p>
+      <MessageCircleIcon aria-hidden className="size-16 text-muted-foreground" />
+      <p className="text-sm text-muted-foreground">No chat selected</p>
     </div>
   )
 }
