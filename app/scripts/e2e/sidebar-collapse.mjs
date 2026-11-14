@@ -174,6 +174,21 @@ for (const dark of [false, true]) {
         0,
         "and the sidebar offers no New room in the bot layout",
       )
+      // The rail draws a picture and no line under it, so it keeps its 44px square — and the picture
+      // hangs on the row's centre line, not on the top of the line box it was drawn in.
+      const railBot = await page.locator('aside a[href^="/b/"]').first().evaluate((row) => {
+        const box = row.getBoundingClientRect()
+        const face = row.querySelector('[role="img"]').getBoundingClientRect()
+        return {
+          height: Math.round(box.height),
+          offset: Math.round((face.top + face.height / 2 - (box.top + box.height / 2)) * 100) / 100,
+        }
+      })
+      assert.equal(railBot.height, 44, `the rail's bot row keeps its 44px square (${railBot.height})`)
+      assert.ok(
+        Math.abs(railBot.offset) <= 0.5,
+        `the rail's bot picture sits on the row's centre line (${railBot.offset}px off)`,
+      )
       await shot("bots-collapsed")
 
       pass(`The sidebar collapses to an icon rail and back at 1024px, ${look}`)
