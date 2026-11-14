@@ -175,6 +175,15 @@ test("the picker scores a model from the shipped payload", async () => {
         /BenchLM \?/,
         "a model it has no row for says so",
       )
+      assert.ok(
+        findAll("section").some((group) => wordsOf(group).startsWith("BenchLM")),
+        "the score column is named once, over the rows, not on each of them",
+      )
+      assert.match(
+        line("claude-sonnet-4-6"),
+        /\$+ · 200k context/,
+        "the second line is the cost's dollar signs and the context window",
+      )
       await settle()
     },
   )
