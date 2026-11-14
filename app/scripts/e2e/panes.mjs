@@ -167,11 +167,11 @@ for (const [width, collapsed, panes] of CASES) {
       await page.locator(`main ul a[href="${botChat}"]`).click()
       await page.waitForURL(`**${botChat}`, { timeout: 15_000 })
       await until(async () => (await chatTitle()) === "Garden plan", 15_000, "the chat's own title")
-      // A conversation carries its way back in the bar's corner at every width, the list beside it or not.
+      // A conversation leads with its way back at every width, the list beside it or not.
       assert.equal(
         await page.getByRole("button", { name: "Back to Test bot" }).count(),
         1,
-        "the conversation's bar carries its way back in the corner",
+        "the conversation's bar leads with its way back",
       )
       if (panes === 2) {
         const lane = await page.evaluate(() => {
@@ -214,7 +214,7 @@ for (const [width, collapsed, panes] of CASES) {
           "the chat the list led back to",
         )
         await shot("bot-chats")
-        pass(`${look}: a conversation's corner control lands its bot's list, and a row returns to it`)
+        pass(`${look}: the control leading a conversation lands its bot's list, and a row returns to it`)
       }
 
       // Research.
