@@ -101,22 +101,22 @@ export const Gallery: Story = {
   ),
 }
 
-/** Ember's profile alone. */
-export const Ember: Story = {
+/** Crumb's profile alone. */
+export const Crumb: Story = {
   render: () => (
     <div className="mx-auto w-full max-w-xl p-4">
-      <CharacterProfile bot={BOTS.find((bot) => bot.id === "ember")!} />
+      <CharacterProfile bot={BOTS.find((bot) => bot.id === "crumb")!} />
     </div>
   ),
 }
 
-/** Ember as the app draws it: change the mood in the controls to watch the poof. */
-export const EmberMood: StoryObj<{ mood: BotMood }> = {
+/** Crumb as the app draws it: change the mood in the controls to watch the poof. */
+export const CrumbMood: StoryObj<{ mood: BotMood }> = {
   args: { mood: "happy" },
   argTypes: { mood: { control: "select", options: BOT_MOODS.map((one) => one.id) } },
   render: ({ mood }) => (
     <div className="flex justify-center p-10">
-      <Bot id="ember" animate mood={mood} className="size-64" />
+      <Bot id="crumb" animate mood={mood} className="size-64" />
     </div>
   ),
 }

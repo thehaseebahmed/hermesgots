@@ -158,44 +158,56 @@ export const BOTS: BotDefinition[] = [
     ],
   },
   {
-    id: "ember",
-    name: "Ember",
+    id: "crumb",
+    name: "Crumb",
     posed: true,
     description:
-      "A glowing amber jelly with a visor face who bobs when it's content and pops into a new mood in a puff of smoke.",
+      "A plump scored loaf of honey-gold jelly with a visor face who bobs when it's content and pops into a new mood in a puff of smoke.",
     character:
-      "Warm and a little sleepy-eyed, like something fresh from the oven. Wears every feeling on its face and says so with a puff.",
+      "The Baker: a dough-loving perfectionist who cares about recipes, bread and technique. Warm from the oven, exacting about the details, and says so with a puff.",
     lines: [
-      "Glowing steady. Ready when you are.",
-      "Fresh out of the oven and fully warmed up. What's first?",
-      "Smiling with my whole visor. Let's get into it.",
-      "I'm at a gentle simmer. Give me something to heat up.",
-      "Warm, wobbly and ready. Where to?",
+      "Proofed, scored and ready. What's first?",
+      "Fresh out of the oven and fully warmed up.",
+      "I've checked the temperature twice. Ready when you are.",
+      "Hand me the recipe and I'll mind the technique.",
+      "Warm, golden and ready. Where to?",
     ],
   },
   {
-    id: "bubbles",
-    name: "Bubbles",
+    id: "bubble",
+    name: "Bubble",
     posed: true,
     description:
-      "A glossy blue-and-pink jelly with a visor face who drifts when it's content and pops into a new mood in a puff of smoke.",
+      "An inflated rounded-square jelly that shifts from cyan to pink, with a visor face, who bobs along and pops into a new mood in a puff of smoke.",
     character:
-      "Bright and a little dreamy, with a shimmer that shifts as it moves. Easily delighted, says so out loud and floats back down to the task.",
+      "The Optimist: a friendly, uplifting presence that brings encouragement. Sees the bright side first, says so out loud and gets on with it.",
     lines: [
-      "Shimmering gently. Ready when you are.",
-      "Bobbing along and fully charged. What's first?",
-      "All my colours are on. Let's get into it.",
-      "Floating a little. Give me something to hold onto.",
-      "Glossy, giddy and ready. Where to?",
+      "Good things ahead. Ready when you are.",
+      "Bright side up and fully charged. What's first?",
+      "I have a good feeling about this one. Let's go.",
+      "Whatever it is, we've got this. Where to?",
+      "Shimmering and certain. Give me something.",
+    ],
+  },
+  {
+    id: "pixel",
+    name: "Pixel",
+    posed: true,
+    description:
+      "An inflated rounded triangle of violet jelly, blue on one side and magenta on the other, with a tilted visor face, who bobs along and pops into a new mood in a puff of smoke.",
+    character:
+      "The Thinker: a clever problem solver who untangles complexity, spots patterns and finds the elegant answer. Composed, curious, and quietly pleased when the pieces fit.",
+    lines: [
+      "Thinking cap on. What are we untangling?",
+      "I've already spotted a pattern. Show me the rest.",
+      "Give me the knot. I'll find the loose end.",
+      "Composed, curious and ready. Where do we start?",
+      "There's an elegant answer in here somewhere. Let's find it.",
     ],
   },
 ]
 
-/**
- * Older builds stored these ids; v3 of the database maps them onto the current bots. The map runs
- * once, on a database older than v3, so "ember" and "bubbles" here are the old characters of those
- * names and not the posed ones in BOTS, which a v3 database has never held.
- */
+/** Older builds stored these ids; v3 of the database maps them onto the current bots. */
 export const LEGACY_BOT_IDS: Record<string, string> = {
   bolt: "cubby",
   ember: "tri",

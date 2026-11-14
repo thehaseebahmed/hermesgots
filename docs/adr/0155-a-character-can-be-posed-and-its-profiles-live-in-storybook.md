@@ -4,7 +4,7 @@ status: accepted
 
 # A character can be posed, and the characters' profiles live in Storybook
 
-Every bot was one picture with a looping motion. Ember arrives with six poses, one per mood, and the
+Every bot was one picture with a looping motion. Crumb, Bubble and Pixel arrive with six poses, one per mood, and the
 other characters will be redrawn the same way one by one, so the app needs a way to draw a character
 by how it feels and a place to look at all of them.
 
