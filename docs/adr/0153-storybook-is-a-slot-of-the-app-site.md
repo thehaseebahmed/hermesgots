@@ -2,7 +2,7 @@
 status: accepted
 ---
 
-# Storybook is its own Netlify site, built in GitHub Actions
+# Storybook is a slot of the app's Netlify site, built in GitHub Actions
 
 The app's components had no place to be looked at apart from a screen that happens to draw them.
 Storybook (`app/.storybook`, stories beside the component they show as `*.stories.tsx`) is that place:
@@ -16,17 +16,18 @@ alias). The app's `vite.config.ts` carries the service worker, Sentry's source m
 verification SDK, none of which belong in a component workshop, and Storybook would load all of them
 if it were allowed to find that file.
 
-**It deploys the way the app does** (ADR 0003): a separate Netlify site, built by
-`.github/workflows/storybook.yml` and never by Netlify's Git builds, because the repository's root
-`netlify.toml` belongs to the app's site and a second site reading it would build the app. A merge
-deploys an unpublished branch deploy aliased `latest`, which costs nothing; running the workflow by
-hand with `promote` on publishes to the site's production URL at 15 credits. A pull request builds
-Storybook without deploying, so a story that stops compiling fails the PR. The deploy steps need the
-`NETLIFY_STORYBOOK_SITE_ID` secret (and the existing `NETLIFY_AUTH_TOKEN`) and are skipped, not
-failed, while it is missing.
+**It is a slot of the app's own Netlify site**, not a site of its own: `.github/workflows/storybook.yml`
+builds it in GitHub Actions and deploys it as a branch deploy aliased `storybook`, at
+`storybook--<site name>.netlify.app` beside the app's `candidate` (ADR 0003). It reuses the app's
+`NETLIFY_AUTH_TOKEN` and `NETLIFY_SITE_ID`, so there is no second site and no new secret. A branch deploy
+costs no credits, and the workflow never passes `--prod`, because on this site that would publish
+Storybook over the app: the alias is the only place Storybook goes. A pull request builds Storybook
+without deploying, so a story that stops compiling fails the PR.
 
 ## Considered options
 
+- **A second Netlify site.** Tried first. Rejected: another site to create, another secret to keep, and
+  nothing a branch alias doesn't already give.
 - **Let Netlify build it from Git.** Rejected: the site would read the root `netlify.toml`, whose
   `[build]` is the app's, and a Netlify Git build of a merge is a metered production deploy.
 - **A page inside the app.** Tried first, as `/docs/style-guide` behind Developer's switch. Rejected:
