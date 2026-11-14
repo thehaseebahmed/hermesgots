@@ -1,4 +1,4 @@
-import { app, assert, flow, pass, rung, settled } from "./lib.mjs"
+import { app, assert, flow, markOffsetIn, pass, rung, settled } from "./lib.mjs"
 
 /**
  * A bot's list is the way into every conversation (ADR 0153): a bot pressed from the sidebar always
@@ -47,16 +47,14 @@ await flow(
         const row = document.querySelector(selector)
         return row ? Math.round(row.getBoundingClientRect().height) : null
       }, selector)
-    // How far a row's picture sits from the row's own centre line: 0 when it hangs on the line.
-    const pictureOffsetOf = (selector) =>
-      page.evaluate((selector) => {
-        const row = document.querySelector(selector)
-        const picture = row?.querySelector('[role="img"]')
-        if (!row || !picture) return null
-        const box = row.getBoundingClientRect()
-        const face = picture.getBoundingClientRect()
-        return Math.round((face.top + face.height / 2 - (box.top + box.height / 2)) * 100) / 100
-      }, selector)
+    // The docked sidebar and the drawer draw this one row, so this one rule asks both.
+    const assertPictureCentred = async (selector, where) => {
+      const offset = await markOffsetIn(page, selector)
+      assert.ok(
+        Math.abs(offset) <= 0.5,
+        `the bot's picture sits on the row's centre line, ${where} (${offset}px off)`,
+      )
+    }
     const press = async (selector) => {
       await page.locator(selector).first().click()
       await settled(page)
@@ -178,11 +176,7 @@ await flow(
     // row's own centre line rather than on the top of the line box it was drawn in.
     const botRow = await heightOf(`aside a[href="/b/${profileId}"]`)
     assert.equal(botRow, 56, `a bot's row is the app's 56px row for a title and a line (${botRow})`)
-    const pictureOffset = await pictureOffsetOf(`aside a[href="/b/${profileId}"]`)
-    assert.ok(
-      Math.abs(pictureOffset) <= 0.5,
-      `the bot's picture sits on the row's centre line (${pictureOffset}px off)`,
-    )
+    await assertPictureCentred(`aside a[href="/b/${profileId}"]`, "in the sidebar")
     pass("a bot's row in the sidebar is the app's row, with its picture centred in it")
 
     // A phone: the same bot draws the same list, and a row opens its chat as the app's only entry.
@@ -201,16 +195,11 @@ await flow(
     // The sidebar is the way back to the list, and it lands there rather than in another chat.
     await page.getByRole("button", { name: "Open conversations" }).click()
     await page.locator(`aside, [role="dialog"]`).first().waitFor({ timeout: 10_000 })
-    // The drawer draws the same row: the same 56px, the same picture on its centre line.
     await page.locator(DRAWER_BOT_ROW(profileId)).first().waitFor({ timeout: 10_000 })
     await settled(page)
     const drawerRow = await heightOf(DRAWER_BOT_ROW(profileId))
     assert.equal(drawerRow, 56, `the drawer's bot row is the same 56px row (${drawerRow})`)
-    const drawerOffset = await pictureOffsetOf(DRAWER_BOT_ROW(profileId))
-    assert.ok(
-      Math.abs(drawerOffset) <= 0.5,
-      `the drawer's bot picture sits on the row's centre line (${drawerOffset}px off)`,
-    )
+    await assertPictureCentred(DRAWER_BOT_ROW(profileId), "in the drawer")
     await press(DRAWER_BOT_ROW(profileId))
     await page.waitForURL(`**/b/${profileId}`, { timeout: 20_000 })
     await until(async () => (await mine("main")).length === 4, 20_000, "the list again")

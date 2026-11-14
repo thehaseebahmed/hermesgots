@@ -604,6 +604,24 @@ export const centreOf = (page, selector) =>
   }, selector)
 
 /**
+ * How far a row's mark — the picture a row draws for its bot — sits from the row's own centre line,
+ * in the page's px: 0 when it hangs on the line. Strict, so a row or a mark the selectors cannot
+ * reach fails here rather than measuring nothing and reading as centred.
+ */
+export const markOffsetIn = (page, rowSelector, markSelector = '[role="img"]') =>
+  page.evaluate(
+    ([rowSelector, markSelector]) => {
+      const row = document.querySelector(rowSelector)
+      const mark = row?.querySelector(markSelector)
+      if (!row || !mark) throw new Error(`no row or mark for ${rowSelector} → ${markSelector}`)
+      const outer = row.getBoundingClientRect()
+      const inner = mark.getBoundingClientRect()
+      return Math.round((inner.top + inner.height / 2 - (outer.top + outer.height / 2)) * 100) / 100
+    },
+    [rowSelector, markSelector],
+  )
+
+/**
  * One finger from `at`, moving `dy` px down the screen: a thumb's swipe, sent through the browser's
  * own input pipeline so `touch-action` and the handler decide what it does. Ten moves, a frame apart,
  * as a hand makes them, and settled afterwards.
