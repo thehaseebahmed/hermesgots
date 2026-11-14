@@ -2,12 +2,6 @@ import { useCallback, type MouseEvent } from "react"
 import { useNavigate } from "react-router"
 
 /**
- * The state a room's screen and a routine's run give the entry they leave a bot's list in: the reader
- * stepped back onto the list, so it draws itself rather than landing in the chat behind it.
- */
-export const BACK_ON_LIST = { listed: true }
-
-/**
  * Whether a press is the reader's own: the left button, with nothing held. A press meant for a new
  * tab or window belongs to the browser, so the app leaves it alone.
  */
@@ -85,16 +79,6 @@ export function useNav() {
   )
 
   /**
-   * Steps back onto a list this screen's row stands in: `up`'s move with the marker a list reads as
-   * "the reader stepped back here". A list left without it reads the entry as a fresh arrival and
-   * lands the reader in the chat behind it, so the move carries the marker rather than each caller.
-   */
-  const backToList = useCallback(
-    (to: string) => up(to, BACK_ON_LIST),
-    [up],
-  )
-
-  /**
    * The guard a screen gives the back button where the menu and a list both open it: whatever
    * opened it stands behind it, so the press steps back to that; the menu opens it as the first
    * entry, where nothing is behind it, so the press is left to the app — which leaves, as back does
@@ -109,5 +93,5 @@ export function useNav() {
     [],
   )
 
-  return { root, up, backToList, back }
+  return { root, up, back }
 }

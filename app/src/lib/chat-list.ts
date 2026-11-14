@@ -4,10 +4,11 @@
  * list read one bot's chats, so the row's shape lives here rather than in either of them.
  *
  * A row's line is the last thing the reader was told: the bot's newest words, and the reader's own only
- * while the bot has not answered them yet, because what they typed is not news to them. Its time is the
- * chat's newest message of any role, which is when the chat last moved — a chat the reader has just
- * spoken in is at the top of the list, saying what the bot said last. A bot that has said nothing in a
- * chat yet keeps the record's own clock and draws no line.
+ * while the bot has not answered them yet, because what they typed is not news to them. Its time is that
+ * same arrival — the newest message the bot sent — because the list is ordered by what came *in*, and a
+ * chat the reader has just spoken in is not one that has said anything since: it keeps the bot's last
+ * word as its line and sits where that word put it. A bot that has said nothing in a chat yet keeps the
+ * record's own clock and draws no line, and so does a row past `BOT_CHATS`, whose tail no screen reads.
  */
 import { filterByFuzzy } from "./fuzzy.ts"
 import { isUnread } from "./session-work.ts"
@@ -93,8 +94,9 @@ export function waitsOnUser(newest: ChatTail | undefined): boolean {
 /**
  * One chat's row, from its record, the newest message this device holds for it and the newest *reply*
  * it holds. The line is the reply's words — the last thing the reader was told — and the reader's own
- * message stands in for it only while the bot has not answered them; `at` stays the newest message's,
- * so a chat the reader has just spoken in is ordered by that and still says what the bot last said.
+ * message stands in for it only while the bot has not answered them; `at` is that reply's, so the list
+ * is ordered by what was received in it. A chat with no reply yet falls to its record's clock, since
+ * nothing has arrived in it to date it by.
  *
  * `reply` is also the row a question or an approval can sit on, and it defaults to the newest message
  * for a caller that has only the one read: a list that reads the tail of any role still asks this of
@@ -120,7 +122,7 @@ export function chatRowOf(
     id: chat.id,
     title: chat.title,
     line: plainLine((reply ?? newest)?.content ?? "") ?? NO_MESSAGES,
-    at: newest?.createdAt ?? chat.updatedAt,
+    at: reply?.createdAt ?? chat.updatedAt,
     pinned: Boolean(chat.pinned),
     ...(chat.hermesSessionId ? { session: chat.hermesSessionId } : {}),
     // Nothing settled in a chat whose newest reply is still being written.

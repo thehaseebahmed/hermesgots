@@ -7,7 +7,6 @@ import { ConversationList } from "@/components/conversation-list"
 import { BotChatsPage } from "@/routes/bot-chats"
 import { ChatPage } from "@/routes/chat"
 import { db } from "@/lib/db"
-import { rememberLastChat } from "@/lib/last-chat"
 
 import {
   botProfile,
@@ -137,13 +136,14 @@ test("with nothing stored the app is the bot-first layout", async () => {
   )
 })
 
-test("home opens the chat this device last had open in the bot", async () => {
+test("home opens the bot's list, whatever this device last had open in it", async () => {
   await seed()
   await db.conversations.put(mainRow())
-  rememberLastChat(bot.id, MAIN)
+  localStorage.setItem(`gots:last-chat:${bot.id}`, MAIN)
   globalThis.fetch = async () => json({})
   await mount(homeScreen, async () => {
-    await until(async () => where() === `/c/${MAIN}`, "the chat the bot was left in")
+    await until(async () => where() === `/b/${bot.id}`, "the bot's list")
+    assert.equal(where(), `/b/${bot.id}`, "and no chat opens in its place")
   })
 })
 

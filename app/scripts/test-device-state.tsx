@@ -4,7 +4,6 @@ import test from "node:test"
 import { DeviceStateSheet, readDeviceDiagnostics } from "@/components/device-state"
 import { db } from "@/lib/db"
 import { markResume, startResumeTrace } from "@/lib/resume-trace"
-import { lastChatKey } from "@/lib/last-chat"
 import { botProfile, json, mount, seedSettings, until } from "./component-kit.tsx"
 
 const bot = botProfile("device-state", { id: "bot-1", name: "Mainly" })
@@ -65,7 +64,6 @@ async function seed(patch: { legacyChat?: boolean } = {}) {
       createdAt: 1_001,
     },
   ])
-  localStorage.setItem(lastChatKey(bot.id), "t1")
 }
 
 test("the device state names a bot's chats and its host's answers, with no secrets", async () => {
@@ -82,8 +80,6 @@ test("the device state names a bot's chats and its host's answers, with no secre
     "the window holds every chat of the bot's, a Main among them, and no project session",
   )
   assert.equal(found.chats.find((one) => one.id === "main-bot-1")?.main, true, "Main rides as a flag")
-  assert.equal(found.lastThread, "t1", "the chat its own screen opens rides along")
-  assert.equal(found.lastStored, "t1", "and so does what storage holds")
   assert.equal(found.plugin, "0.99.0", "the host's plugin version was read")
   assert.deepEqual(found.features, ["queue", "pending"], "the host's features were read")
 })

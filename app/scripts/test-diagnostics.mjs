@@ -47,13 +47,9 @@ test("a bot's state names its chats and never carries its key or host", () => {
       pluginVersion: null,
       plugin: "0.99.0",
       features: ["pending", "queue"],
-      lastThread: "t1",
-      lastStored: "t1",
     },
     chats,
   })
-  assert.equal(built.lastThread, "t1", "the pane's answer rides")
-  assert.equal(built.lastStored, "t1", "and so does what storage holds")
   assert.deepEqual(
     built.chats.map((one) => one.id),
     ["main-bot-1", "t1"],
@@ -80,14 +76,11 @@ test("a bot without an answer still reads", () => {
       pluginVersion: null,
       plugin: null,
       features: null,
-      lastThread: null,
-      lastStored: null,
     },
     chats: [diagChat(chat("t1", 2_000))],
   })
   assert.equal(built.configured, false, "nothing was asked of a bot with no server and key")
   assert.equal(built.plugin, null, "an absent answer reads as null, not as a missing field")
-  assert.equal(built.lastThread, null)
   assert.equal(built.disabled, undefined, "a switch that is off rides as no field")
 })
 
@@ -99,8 +92,6 @@ test("a bot whose own reads failed says so rather than claiming emptiness", () =
       pluginVersion: null,
       plugin: null,
       features: null,
-      lastThread: null,
-      lastStored: null,
     },
     chats: [],
     unread: true,
