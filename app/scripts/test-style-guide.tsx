@@ -60,6 +60,15 @@ test("the live components are mounted", async () => {
   })
 })
 
+test("screens are composed from the guide's own components", async () => {
+  await seedSettings({ developer: true })
+  await mountMarkdown(screen(), async () => {
+    for (const name of ["Settings", "List", "Chat"])
+      assert.ok(find(`[data-screen="${name}"]`), name)
+    assert.ok(missing("iframe"), "no screen is a frame of the running app")
+  })
+})
+
 test("with the Developer switch off the address falls back to Settings", async () => {
   await seedSettings({ developer: false })
   await mountMarkdown(screen(), async () => {

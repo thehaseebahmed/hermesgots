@@ -15,6 +15,7 @@ import {
 
 import { Banner } from "@/components/banner"
 import { Markdown } from "@/components/chat/markdown"
+import { UserBubble } from "@/components/chat/user-bubble"
 import { Chip } from "@/components/chip"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { DeveloperOnly } from "@/components/developer-only"
@@ -32,6 +33,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Message, MessageContent } from "@/components/ui/message"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { parseDesign, sectionOf, type TokenMap } from "@/lib/design-spec"
@@ -405,6 +407,120 @@ function Components() {
   )
 }
 
+/** A phone's width, drawn in the guide: what a screen is built from, not a second copy of one. */
+function Phone({ name, children }: { name: string; children: ReactNode }) {
+  return (
+    <div data-screen={name} className="flex w-[390px] shrink-0 flex-col gap-2">
+      <h3 className="text-base font-medium">{name}</h3>
+      <div className="flex h-[640px] flex-col overflow-hidden rounded-3xl border border-border bg-background">
+        {children}
+      </div>
+    </div>
+  )
+}
+
+function ScreenBar({ title }: { title: string }) {
+  return (
+    <header className="flex min-h-11 items-center px-4 pt-3 pb-2">
+      <h1 className="text-xl font-semibold tracking-tight">{title}</h1>
+    </header>
+  )
+}
+
+function Screens() {
+  const [query, setQuery] = useState("")
+  const [filter, setFilter] = useState("all")
+  const [on, setOn] = useState(true)
+  return (
+    <div className="-mx-4 flex gap-4 overflow-x-auto px-4 pb-2">
+      <Phone name="Settings">
+        <ScreenBar title="Settings" />
+        <div className="flex flex-col gap-4 overflow-y-auto px-4 pb-6">
+          <Group>
+            <LinkRow
+              to="/docs/style-guide"
+              leading={<BellIcon className="size-5 shrink-0 text-muted-foreground" />}
+              title="Notifications"
+              subtitle="Choose what a push says"
+            />
+            <SwitchRow
+              id="screen-switch"
+              icon={SparklesIcon}
+              title="Steer by default"
+              subtitle="A message sent mid-reply steers it"
+              checked={on}
+              onCheckedChange={setOn}
+            />
+          </Group>
+          <Group>
+            <LinkRow to="/docs/style-guide" title="Developer" subtitle="Switches for this device" />
+          </Group>
+          <Button variant="ghost" className="h-11 rounded-full">
+            Hide developer settings
+          </Button>
+        </div>
+      </Phone>
+
+      <Phone name="List">
+        <ScreenBar title="Hermes" />
+        <div className="flex flex-col gap-3 overflow-y-auto px-4 pb-6">
+          <div className="flex gap-2 overflow-x-auto">
+            {["all", "unread", "chats"].map((id) => (
+              <Chip key={id} active={filter === id} onClick={() => setFilter(id)}>
+                {id[0].toUpperCase() + id.slice(1)}
+              </Chip>
+            ))}
+          </div>
+          <SearchField value={query} onChange={setQuery} label="Search" />
+          <ItemRow
+            icon={<MessageSquareIcon />}
+            tone="warning"
+            unread
+            warn
+            title="Deploy the candidate"
+            when="1h"
+            line="A question needs an answer"
+          />
+          <ItemRow
+            icon={<MessageSquareIcon />}
+            tone="success"
+            title="Plan the migration"
+            when="2m"
+            line="Three checkpoints, each committed"
+            selected
+          />
+          <ItemRow
+            icon={<CircleCheckIcon />}
+            tone="muted"
+            title="Tidy the changelog"
+            when="Mon"
+            line="Done"
+          />
+        </div>
+      </Phone>
+
+      <Phone name="Chat">
+        <ScreenBar title="Plan the migration" />
+        <div className="flex flex-1 flex-col gap-4 overflow-y-auto px-4 pb-4">
+          <Message align="end">
+            <MessageContent className="items-end gap-1">
+              <UserBubble>Plan the migration in three checkpoints.</UserBubble>
+            </MessageContent>
+          </Message>
+          <Markdown className={cn(REPLY_TEXT)}>
+            {
+              "Here is the plan.\n\n1. Add the table\n2. Backfill it\n3. Switch reads over\n\nRun `pnpm test` after each."
+            }
+          </Markdown>
+        </div>
+        <div className="p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <Input placeholder="Message" className="h-12 rounded-full bg-muted px-4" />
+        </div>
+      </Phone>
+    </div>
+  )
+}
+
 export function StyleGuidePage() {
   const spec = useMemo(() => parseDesign(designSource), [])
   const rules = (title: string) => <Rules body={sectionOf(spec, title)} />
@@ -437,6 +553,9 @@ export function StyleGuidePage() {
           <Section id="components" title="Components">
             <Components />
             {rules("Components")}
+          </Section>
+          <Section id="screens" title="Screens">
+            <Screens />
           </Section>
           <Section id="rules" title="Do's and Don'ts">
             {rules("Do's and Don'ts")}
