@@ -210,66 +210,22 @@ test(
 )
 
 test(
-  "a phone's chat carries the way to its bot's chats, beside the options menu",
+  "a phone's chat carries no way to its bot's chats and no menu: the title is its settings",
   atWidth(390, async () => {
     localStorage.clear()
     await seed()
     await mount(screen("/c/c-a"), async () => {
       await until(async () => titles().includes("Alpha"), "the chat's own header")
-      const control = find(LIST_CONTROL)
-      assert.equal(control?.getAttribute("href"), `/b/${bot.id}`, "the bar carries the way to the bot's chats")
-      assert.deepEqual(
-        findAll('[data-slot="header-actions"] a, [data-slot="header-actions"] button').map((one) =>
-          one.getAttribute("aria-label"),
-        ),
-        ["Chats with Mainly", "Chat options"],
-        "and it stands immediately beside the options menu",
-      )
-      assert.match(
-        control?.getAttribute("class") ?? "",
-        /\bsize-11\b.*\bbackdrop-blur\b/,
-        "wearing the frosted circle the bar's other controls wear",
-      )
-    })
-  }),
-)
-
-test(
-  "the list control says when another of the bot's chats waits unread",
-  atWidth(390, async () => {
-    localStorage.clear()
-    await seed()
-    // Beta has moved since this device last read it. The marks outlive a case in this process, so the
-    // one an earlier case wrote for this chat is dropped first, and the mark put back behind its record.
-    forgetRead("c-b")
-    markRead("c-b", 11)
-    await mount(screen("/c/c-a"), async () => {
-      await until(async () => titles().includes("Alpha"), "the chat's own header")
-      const control = () => find('[data-slot="header-actions"] a[href^="/b/"]')
+      assert.equal(missing(LIST_CONTROL), true, "no control opens the bot's chats from the bar")
       assert.equal(
-        control()?.getAttribute("aria-label"),
-        "Chats with Mainly, unread chats",
-        "the control names the row of the list that waits",
+        findAll('[data-slot="header-actions"] a, [data-slot="header-actions"] button').length,
+        0,
+        "and the corner holds nothing at all",
       )
       assert.equal(
-        missing('[data-slot="header-actions"] a[href^="/b/"] [data-unread]'),
-        false,
-        "and wears the dot the app's rows wear",
-      )
-      markRead("c-b", 13)
-      await until(
-        async () =>
-          control()?.getAttribute("aria-label") === "Chats with Mainly",
-        "the dot to go once that chat has been read",
-      )
-      // The chat on screen moving is not news to the reader sitting in it, so it never dots the
-      // control that opens the rest of the list.
-      await db.conversations.update("c-a", { updatedAt: Date.now() })
-      await settle()
-      assert.equal(
-        missing('[data-slot="header-actions"] a[href^="/b/"] [data-unread]'),
-        true,
-        "with nothing of the bot's left waiting, and the chat on screen not counted",
+        find("[data-chat-settings-open]")?.getAttribute("aria-haspopup"),
+        "dialog",
+        "the title is the press that opens the chat's settings",
       )
     })
   }),

@@ -74,11 +74,9 @@ export function useChatLead({
     <BackButton label={label} onClick={() => ontoList()} floating />
   )
   return {
-    /** The bot's list, where it does not already stand beside this screen: what the bar opens. */
-    listPath: besideList ? undefined : list,
-    /** The same address whether or not the list is beside: where a screen that deletes itself goes. */
+    /** The list's address, where one holds this screen: what a screen that deletes itself steps onto. */
     list,
-    /** Steps back onto that list, carrying the marker a list reads as the reader's own step. */
+    /** Steps back onto that list, which is what a room's and a run's control answers with. */
     ontoList,
     leading,
   }

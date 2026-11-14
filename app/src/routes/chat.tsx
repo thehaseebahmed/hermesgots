@@ -38,6 +38,7 @@ import { useBreakReminderEligibility } from "@/components/break-reminder-context
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatHeader } from "@/components/chat/chat-header"
+import { ChatSettings, ChatTitlePress } from "@/components/chat/chat-settings"
 import { CODE_FACE, CodeFaceProvider } from "@/components/chat/code-face"
 import {
   ChatActions,
@@ -121,7 +122,6 @@ import { useDismissChatPushes } from "@/lib/push"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { cn } from "@/lib/utils"
 import { useNav } from "@/lib/nav"
-import { useUnreadElsewhere } from "@/lib/unread-chats"
 import { modelChanges } from "@/lib/model-changes"
 import { chosenOf, samePick, storedPick } from "@/lib/model-pick"
 import { useDraws } from "@/lib/openui-draws"
@@ -418,20 +418,20 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
     if (ready) hold(slot, id)
   }, [ready, slot, id])
   const [usageOpen, setUsageOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const { summaries, usage, providerUsage, limit } = useChatSurface(chat, bot, () =>
     setUsageOpen(true),
   )
   const [away, setAway] = useState(false)
   const online = useOnline()
-  const unread = useUnreadElsewhere(chat?.profileId, chat?.id)
-  const actions = chat && bot && (
+  // A session keeps the bar's menu: resolve, discard and its delete are not a chat's settings. A bot's
+  // own chat has none — its header opens the sheet (ADR 0153).
+  const actions = chat && bot && session && (
     <ChatActions
       chat={chat}
       profile={bot}
       session={session}
       wide={wide}
-      listPath={lead.listPath}
-      unread={unread}
       usage={usage}
       providerUsage={providerUsage}
       usageOpen={usageOpen}
@@ -452,7 +452,20 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
         <>
           <ChatHeader
             // A session not started has no title yet, and its bot is the big one in the middle.
-            title={unstarted ? "" : chat.title}
+            title={
+              unstarted ? (
+                ""
+              ) : session ? (
+                chat.title
+              ) : (
+                <ChatTitlePress
+                  title={chat.title}
+                  open={settingsOpen}
+                  onOpen={() => setSettingsOpen(true)}
+                />
+              )
+            }
+            onTitlePress={session || unstarted ? undefined : () => setSettingsOpen(true)}
             // The header never follows the reply: what the thread is doing is drawn in the thread.
             subtitle={
               awayLine(away, online) ??
@@ -479,6 +492,19 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
             onAway={setAway}
             limit={limit}
           />
+          {!session && (
+            <ChatSettings
+              chat={chat}
+              open={settingsOpen}
+              onOpenChange={setSettingsOpen}
+              usage={usage}
+              providerUsage={providerUsage}
+              context={!wide && Boolean(bot.baseUrl.trim())}
+              usageOpen={usageOpen}
+              onUsageOpenChange={setUsageOpen}
+              onDeleted={() => root("/")}
+            />
+          )}
           {leaveDialog}
         </>
       ) : (
@@ -530,6 +556,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
   const threads = useLiveQuery(async () => ({ id, rows: id ? await getMessages(id) : [] }), [id])
   const messages = threads && threads.id === id ? threads.rows : undefined
   const [usageOpen, setUsageOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [todosOpen, setTodosOpen] = useState(false)
   const sheet = useCheatsheet()
   const [outputsOpen, setOutputsOpen] = useState(false)
@@ -1014,15 +1041,14 @@ function CurrentChatPage({ slot }: ChatPageProps) {
       refusal.refuse(failed(error, "Couldn't send your message.")),
     )
 
-  const unread = useUnreadElsewhere(conversation?.profileId, conversation?.id)
-  const actions = conversation && (
+  // A session keeps the bar's menu; a bot's own chat has none, and its header opens the sheet (ADR
+  // 0153).
+  const actions = conversation && session && (
     <ChatActions
       chat={conversation}
       profile={profile}
       session={session}
       wide={wide}
-      listPath={lead.listPath}
-      unread={unread}
       usage={usage}
       providerUsage={providerUsage}
       usageOpen={usageOpen}
@@ -1037,6 +1063,8 @@ function CurrentChatPage({ slot }: ChatPageProps) {
   // device draws no title: it is never drawn as a new one, and a header standing empty is the honest
   // answer. A bot's Main is titled with its own name, like any other chat.
   const headerTitle = gone ? "" : unstarted ? "" : (conversation?.title ?? NEW_CHAT_TITLE)
+  // A bot's own chat is edited from its bar; a session and a chat this device cannot draw are not.
+  const editable = Boolean(conversation) && !session && !unstarted && !gone
   let subtitle: string | undefined
   if (!unstarted)
     subtitle = session
@@ -1051,7 +1079,18 @@ function CurrentChatPage({ slot }: ChatPageProps) {
   const frame = ready ? (
     <>
       <ChatHeader
-        title={headerTitle}
+        title={
+          editable && conversation ? (
+            <ChatTitlePress
+              title={headerTitle}
+              open={settingsOpen}
+              onOpen={() => setSettingsOpen(true)}
+            />
+          ) : (
+            headerTitle
+          )
+        }
+        onTitlePress={editable ? () => setSettingsOpen(true) : undefined}
         subtitle={subtitle}
         botId={profile?.botId}
         muted={Boolean(conversation?.muted || profile?.muted)}
@@ -1309,6 +1348,19 @@ function CurrentChatPage({ slot }: ChatPageProps) {
         onOpenChange={(next) => !next && setAgentView(undefined)}
       />
       <Cheatsheet open={sheet.open} onOpenChange={sheet.setOpen} switches={sheet.switches} />
+      {editable && conversation && (
+        <ChatSettings
+          chat={conversation}
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+          usage={usage}
+          providerUsage={providerUsage}
+          context={!wide && configured}
+          usageOpen={usageOpen}
+          onUsageOpenChange={setUsageOpen}
+          onDeleted={() => (codePath ? up(codePath) : root("/"))}
+        />
+      )}
       {session && (
         <OutputsDrawer
           open={outputsOpen}
