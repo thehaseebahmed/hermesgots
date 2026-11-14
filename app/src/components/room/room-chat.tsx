@@ -154,8 +154,6 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
         // The bot's list beside this room already names the bot with its face.
         showBot={!lead.besideList}
         actions={<RoomActions roomId={id} name={name} answerer={answerer} />}
-        // A room is opened from a bot's list like any row of it, so its bar leads back the same way a
-        // chat's does — onto that list, the list beside it or not.
         leading={lead.leading}
       />
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">

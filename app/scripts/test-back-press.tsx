@@ -33,7 +33,7 @@ import {
   until,
 } from "./component-kit.tsx"
 
-/** The state the address on screen carries, as a chat's corner control and the guard both read it. */
+/** The state the address on screen carries, as the chat's way back and the guard both read it. */
 const State = () => <p data-state>{JSON.stringify(useLocation().state ?? null)}</p>
 
 function Stepping() {

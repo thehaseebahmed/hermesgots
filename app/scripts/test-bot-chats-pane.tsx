@@ -163,7 +163,7 @@ test(
       assert.equal(
         missing(`[data-slot="header-actions"] ${BACK_TO_BOT}`),
         true,
-        "which the corner does not carry, the actions' place being the actions'",
+        "which the corner does not carry",
       )
     })
   }),
