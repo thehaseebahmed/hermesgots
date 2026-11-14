@@ -1,17 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CircleAlertIcon, MessageCircleIcon, RotateCcwClockIcon } from "lucide-react"
-import {
-  Link,
-  Navigate,
-  useLocation,
-  useNavigate,
-  useNavigationType,
-  useParams,
-} from "react-router"
+import { Link, Navigate, useNavigate, useParams } from "react-router"
 
 import { Bot } from "@/components/bot"
-import { BackButton } from "@/components/back-button"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { Chip, ChipRow } from "@/components/chip"
 import { ItemRow, pinnedLine } from "@/components/item-list"
@@ -46,11 +38,10 @@ import {
 import type { LiveRunStatus } from "@/lib/hermes"
 import { HEADER_BUTTON } from "@/lib/layout"
 import { useBotLabels } from "@/lib/use-bot-labels"
-import { landingChat } from "@/lib/last-chat"
 import { useXLarge } from "@/lib/media"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { setBackGuard } from "@/lib/native"
-import { BACK_ON_LIST, depth, opensAsRoot, useNav } from "@/lib/nav"
+import { opensAsRoot, useNav } from "@/lib/nav"
 import { useBotChatsPane, type BotPane } from "@/lib/pane"
 import { useReadMarks } from "@/lib/read-marks"
 import { quietly } from "@/lib/report"
@@ -67,49 +58,12 @@ export function BotChatsPage() {
   const legacy = useLegacyChat()
   const enabled = legacy === false
   const pane = useBotChatsPane(enabled)
-  const place = useListPlace()
-  const landing = useLanding(profileId, enabled, place.landed)
   // Nothing is drawn before the layout answers, and a device on the legacy layout — where a bot has
   // no screen — lands home rather than on a list it cannot fill.
   if (legacy === undefined) return null
   if (!enabled || !profileId) return <Navigate to="/" replace />
-  // The chat the address opens is on its way, so neither the list it is leaving nor an empty pane is
-  // drawn for a frame.
-  if (landing) return null
   if (pane) return <NoChatOpen />
-  return <BotChatsList profileId={profileId} place={place.root ? "root" : "pushed"} />
-}
-
-function useListPlace() {
-  const type = useNavigationType()
-  const state = useLocation().state
-  const listed = Boolean((state as typeof BACK_ON_LIST | null)?.listed)
-  const root = depth() === 0
-  // The landing fires at the app's entry, arrived at forwards, with nobody having asked for the
-  // list: a step back onto it arrives as a `POP`, and a list a chat pushed or a screen stepped back
-  // onto is either not the entry or carries the marker. Each draws the list rather than a chat.
-  return { root, landed: root && type !== "POP" && !listed }
-}
-
-function useLanding(profileId: string | undefined, enabled: boolean | undefined, landed: boolean) {
-  const navigate = useNavigate()
-  const answer = useLiveQuery(
-    async () =>
-      profileId && enabled && landed
-        ? { profileId, chat: (await landingChat(profileId)) ?? null }
-        : undefined,
-    [profileId, enabled, landed],
-  )
-  const chat = answer && answer.profileId === profileId ? answer.chat : undefined
-  const opens = landed && Boolean(chat)
-  // One landing per visit: a second effect (a strict-mode double run) opens nothing again.
-  const opened = useRef(false)
-  useEffect(() => {
-    if (!opens || opened.current) return
-    opened.current = true
-    navigate(`/c/${chat}`, { replace: true, state: { bot: profileId } })
-  }, [opens, chat, profileId, navigate])
-  return landed && (chat === undefined || opens)
+  return <BotChatsList profileId={profileId} place="root" />
 }
 
 export function BotChatsPane({ pane }: { pane: BotPane }) {
@@ -186,11 +140,11 @@ function BotChatsList({
 }
 
 /**
- * Where a bot's list stands: the pane beside a chat (`pane`), the app's own entry (`root`), or the
- * screen a chat's own control pushed over it (`pushed`). Which one it is settles two things and
- * nothing else: whether its rows open beside it or as the app's root, and what its back leads to.
+ * Where a bot's list stands: beside a chat in the shell's first pane (`pane`), or as the screen the
+ * bot's own address names (`root`). Which one it is settles one thing and nothing else: whether its
+ * rows open beside it or as the app's own entry.
  */
-type ListPlace = "pane" | "root" | "pushed"
+type ListPlace = "pane" | "root"
 
 function ChatList({
   bot,
@@ -208,10 +162,6 @@ function ChatList({
   // The bar names the bot as the sidebar's row does (ADR 0149).
   const label = labelOf(useBotLabels(), bot)
   const pane = place === "pane"
-  // What stands behind this screen, as far as the entry that opened it says: a chat's own control is
-  // the only thing that pushes a list, so a list pushed over one leads back to a chat; a typed or
-  // restored address can land this list on any entry, and then nothing of this screen says which.
-  const backToChat = place === "pushed"
   const marks = useReadMarks()
   // The press is the app's at its first entry — where this list stands when nothing opened it — and a
   // step back wherever something did, which `back()` answers itself.
@@ -257,11 +207,6 @@ function ChatList({
       <ChatHeader
         pinned
         showBot={false}
-        leading={
-          place === "pushed" ? (
-            <BackButton label={backToChat ? "Back to chat" : "Back"} onClick={back()} floating />
-          ) : undefined
-        }
         title={
           <Link
             to={botPath(bot.id)}

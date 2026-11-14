@@ -46,13 +46,13 @@ export function useChatLead({
 }) {
   const legacy = useLegacyChat()
   const split = useSplit()
-  const { back, backToList } = useNav()
+  const { back, up } = useNav()
   // The legacy layout has no bot's screen at all, so nothing of the list is drawn there.
   const list = legacy === false && bot ? botChatsPath(bot) : undefined
   const besideList = (beside ?? split) && Boolean(list)
   const ontoList = useCallback(() => {
-    if (list) backToList(list)
-  }, [list, backToList])
+    if (list) up(list)
+  }, [list, up])
   // `useNav` hands back a fresh move whenever the address does, while the guard must not re-register
   // with it: the guard reads the move it was made with.
   const step = useRef(ontoList)

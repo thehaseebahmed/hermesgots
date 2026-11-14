@@ -121,7 +121,6 @@ import { useDismissChatPushes } from "@/lib/push"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { cn } from "@/lib/utils"
 import { useNav } from "@/lib/nav"
-import { rememberLastChat } from "@/lib/last-chat"
 import { useUnreadElsewhere } from "@/lib/unread-chats"
 import { modelChanges } from "@/lib/model-changes"
 import { chosenOf, samePick, storedPick } from "@/lib/model-pick"
@@ -262,25 +261,9 @@ interface ChatPageProps {
  */
 const roomsDrawn = new Set<string>()
 
-/**
- * The chat the address names is the one this device will open its bot on next time, so it is written
- * here — where every screen that draws a chat passes — and only for one of a bot's chats: a project
- * session, a room and a canvas are none of a bot's list.
- */
-function useRememberedChat(id: string | undefined) {
-  const chat = useLiveQuery(async () => (id ? await db.conversations.get(id) : undefined), [id])
-  useEffect(() => {
-    // A routine's run is read-only, so it is never the chat its bot opens on.
-    if (!chat || chat.id !== id || !listsAsChat(chat) || chat.routine) return
-    rememberLastChat(chat.profileId, chat.id)
-  }, [chat, id])
-}
-
 export function ChatPage(props: ChatPageProps) {
   const params = useParams()
   const id = params.id
-  // The chat the address names is remembered as the one its bot opens next.
-  useRememberedChat(id)
   // The push that named this chat leaves the tray now that its screen is open (ADR 0132).
   useDismissChatPushes(id)
   const verdict = useLiveQuery(async () => {

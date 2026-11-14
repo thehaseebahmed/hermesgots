@@ -8,7 +8,7 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
-import { MemoryRouter, Route, Routes, useLocation } from "react-router"
+import { MemoryRouter, Route, Routes } from "react-router"
 
 import { ChatPage } from "@/routes/chat"
 import { db, type Conversation, type Message, type Profile } from "@/lib/db"
@@ -110,16 +110,9 @@ async function seed({
   await db.messages.bulkPut(messages.map((message) => ({ ...message, conversationId: rowOf() })))
 }
 
-/** Whether the entry on screen is one a screen marked as a step back onto a list. */
-const Listed = () => {
-  const state = useLocation().state as { listed?: boolean } | null
-  return <p data-listed>{String(Boolean(state?.listed))}</p>
-}
-
 const screen = (entry = `/c/${rowOf()}`) => (
   <MemoryRouter initialEntries={[entry]}>
     <Path />
-    <Listed />
     <Routes>
       <Route path="c/:id" element={<ChatPage slot="route" />} />
       <Route path="b/:profileId" element={<p data-list />} />
@@ -186,11 +179,6 @@ test("the way back is the bot's list, not the chat the run was opened from", asy
     await click(back)
     await until(async () => path() === `/b/${bot.id}`, "the bot's list")
     absent("[data-slot=routine-note]", "and the run's screen is what was left")
-    assert.equal(
-      find("[data-listed]")?.textContent,
-      "true",
-      "and the entry it leaves says the reader stepped back onto the list",
-    )
   })
 })
 
