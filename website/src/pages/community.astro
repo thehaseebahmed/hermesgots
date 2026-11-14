@@ -1,4 +1,5 @@
 ---
+import "../styles/board.css"
 import Board from "../components/Board.astro"
 import Base from "../layouts/Base.astro"
 ---
@@ -7,11 +8,13 @@ import Base from "../layouts/Base.astro"
   title="Gots Community"
   description="Who spends the most tokens and which models carry them, from people running Gots."
 >
+  <div class="sky sky-page" aria-hidden="true"></div>
   <div class="shell board-page">
     <main>
       <span class="badge" id="sample-badge" hidden>Sample data</span>
       <div class="hero">
         <div>
+          <p class="eyebrow">Leaderboard</p>
           <h1>Community</h1>
           <p class="lede">What people running Gots used this week. Join in Settings &gt; Community to add yours.</p>
         </div>

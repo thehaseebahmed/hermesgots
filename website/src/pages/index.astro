@@ -1,49 +1,26 @@
 ---
-import "../styles/home.css"
-import Chat from "../components/Chat.astro"
-import Dictation from "../components/Dictation.astro"
-import Phone from "../components/Phone.astro"
 import Base from "../layouts/Base.astro"
+import Bot from "../components/Bot.astro"
+import GitHub from "../components/GitHub.astro"
 
-const stages = [
-  {
-    id: "code",
-    tag: "Code",
-    title: "Sessions that end in a pull request.",
-    body: "Every session gets a worktree of its own and opens a draft pull request. Use plan mode to read the plan before anything is written. Leave AFK on and your host works through the issues you've labelled, runs your tests itself and never merges.",
-    chips: ["Plan mode", "Worktrees", "AFK", "Skills"],
-    shot: "code",
-  },
-  {
-    id: "research",
-    tag: "Research missions",
-    title: "Answers with receipts.",
-    body: "A mission reads the web, then writes a guide where every sentence points at its source. The host re-checks each quote and flags anything unsourced. Compare and decide scores your options against the criteria you set.",
-    chips: ["Learn & understand", "Compare & decide", "Cited"],
-    shot: "research",
-  },
-  {
-    id: "dictate",
-    tag: "Dictation",
-    title: "Dictation that runs on your own bot.",
-    body: "Talk into any chat. Your Hermes host transcribes it with the speech model you pick, tidies it to the level you want and drops the words where your cursor was. Teach it your names and jargon once.",
-    chips: ["Your vocabulary", "Cleanup levels", "Your host"],
-    dictate: true,
-  },
-  {
-    id: "generate",
-    tag: "Generative UI",
-    title: "Replies that are interfaces.",
-    body: "Built on OpenUI. An answer can come back as a table, a chart, a form or buttons you use in place, so a decision is a tap instead of a paragraph.",
-    chips: ["OpenUI", "Approvals in place", "Tables & charts"],
-    shot: "approve",
-  },
+const INSTALL = "hermes plugins install thehaseebahmed/hermesgots/plugin --enable"
+
+const steps = [
+  { key: "1", title: "Ask", body: "Type it or say it. Attach a repo, a file or a photo." },
+  { key: "2", title: "Close the app", body: "The work runs on your Hermes host, so it keeps going while your phone sleeps." },
+  { key: "3", title: "Come back", body: "A draft pull request, a cited guide or one question waits on whichever screen is nearest." },
 ]
 
-const journey = [
-  { n: "01", title: "Ask", body: "Say what you want done, by typing or by talking. Attach a repo, a file or a photo." },
-  { n: "02", title: "Step away", body: "Close the app. The work runs on your Hermes host, not on your phone, so it carries on." },
-  { n: "03", title: "Come back", body: "Open it on whichever screen is nearest. A draft pull request, a cited guide or a question waits for you." },
+const bots = [
+  { id: "byte", name: "Byte", role: "The Engineer" },
+  { id: "pixel", name: "Pixel", role: "The Thinker" },
+  { id: "nova", name: "Nova", role: "The Explorer" },
+  { id: "pip", name: "Pip", role: "The Observer" },
+  { id: "bubble", name: "Bubble", role: "The Optimist" },
+  { id: "lovey", name: "Lovey", role: "The Caretaker" },
+  { id: "sunny", name: "Sunny", role: "The Star Performer" },
+  { id: "wink", name: "Wink", role: "The Maverick" },
+  { id: "crumb", name: "Crumb", role: "The Baker" },
 ]
 
 const yours = [
@@ -53,26 +30,8 @@ const yours = [
 ]
 
 const coming = [
-  {
-    bot: "orbi",
-    title: "Bot chatrooms",
-    body: "Put several bots in one room and let them work a problem together.",
-  },
-  {
-    bot: "penny",
-    title: "Meeting transcription",
-    body: "Hand over a recording. Get back what was decided, what's yours to do and a timeline to check it against.",
-  },
-  {
-    bot: "bloom",
-    title: "Apps from replies",
-    body: "Ask for a small app. It lives beside your chats, drawn from the same OpenUI parts.",
-  },
-  {
-    bot: "gem",
-    title: "Calling",
-    body: "Ring a bot and talk it through, or let it ring you when something is waiting on you.",
-  },
+  { bot: "lovey", title: "Meetings", body: "Hand over a recording. Get back what was decided, what's yours to do and a timeline to check it against." },
+  { bot: "sunny", title: "Calling", body: "Ring a bot and talk it through, or let it ring you when something is waiting on you." },
 ]
 
 const faq = [
@@ -89,120 +48,247 @@ const faq = [
     a: "Nothing stops. Work that has to keep going lives on your host, so you can ask for something, close the app and find it done later.",
   },
   {
+    q: "What's a bot?",
+    a: "Each Hermes profile you link becomes a bot, with its own model, skills and character. Link as many as you run.",
+  },
+  {
     q: "Which features are ready?",
-    a: "Coding sessions, research missions, dictation and generative UI work today. Bot chatrooms, meeting transcription, apps from replies and calling are marked Coming soon.",
+    a: "Chats, coding sessions, research missions, canvases, rooms, dictation and routines work today. Meetings and calling are coming soon.",
   },
 ]
 ---
 
 <Base
   title="Gots: Hermes Bots that got your back"
-  description="Gots is the app for your Hermes Agent, on your phone and your laptop. Code, research, dictation and generative UI, running on your own host."
+  description="Gots is the app for your Hermes Agent, on your phone and your laptop. Code, research, canvases, rooms and dictation, running on your own host."
 >
   <main>
+    <!-- Hero: a centred stack over a soft sky, the product drawn underneath it. -->
     <section class="home-hero">
-      <div class="glow" aria-hidden="true"></div>
+      <div class="sky" aria-hidden="true"></div>
       <div class="wrap hero-copy">
-        <p class="tag" data-reveal>Hermes Bots that got your back</p>
-        <h1 data-reveal style="--d:60ms">Ask. Close the app. Come back to it <em>done.</em></h1>
+        <a class="pill-link" href="#features" data-reveal>
+          <span class="pill-dot"></span>Hermes Bots that got your back
+        </a>
+        <h1 data-reveal style="--d:60ms">Ask. Close the app.<br />Come back to it done.</h1>
         <p class="lede" data-reveal style="--d:120ms">
-          Gots is the app for your Hermes agent. It works on your own host, so the job keeps going when your phone sleeps, and you pick it up on whichever screen is closer.
+          Gots is the app for your Hermes agent. The work runs on your own host, so it keeps going when your phone sleeps.
         </p>
         <div class="cta" data-reveal style="--d:180ms">
-          <a class="btn" href="#waitlist">Join the waiting list</a>
-          <a class="btn btn-ghost" href="#features">See what it does</a>
+          <a class="btn btn-ink" href="#waitlist">Join the waiting list</a>
+          <a class="btn btn-glass" href="https://github.com/thehaseebahmed/hermesgots" rel="noreferrer"><GitHub /> Self-host for free</a>
         </div>
-        <p class="where" data-reveal style="--d:240ms">Phone · Tablet · Laptop</p>
+        <div class="install" data-reveal style="--d:240ms">
+          <code>{INSTALL}</code>
+          <button type="button" class="copy" data-copy={INSTALL} aria-label="Copy the install command">
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <p class="meta" data-reveal style="--d:280ms">Web app · Android · Hermes 0.22.5+</p>
       </div>
 
-      <figure class="hero-art" aria-label="The same coding session open on a laptop and on a phone">
-        <div class="laptop">
-          <div class="laptop-lid"><div class="laptop-screen"><Chat variant="laptop" /></div></div>
-          <div class="laptop-base"></div>
+      <figure class="stage" aria-label="A coding session in Gots on a laptop, with its notification on a phone">
+        <div class="aurora" aria-hidden="true"></div>
+
+        <div class="window" data-reveal style="--d:200ms">
+          <div class="window-bar">
+            <span class="lights"><i></i><i></i><i></i></span>
+            <span class="window-title">Fix the flaky retry test</span>
+            <span class="kbd-row"><kbd>⌥</kbd><kbd>1</kbd></span>
+          </div>
+          <div class="window-body">
+            <aside class="rail">
+              <p class="rail-head">Bots</p>
+              <ul>
+                <li class="on"><Bot id="byte" size={28} eager /><span>Byte<small>Draft PR ready</small></span></li>
+                <li><Bot id="nova" size={28} eager /><span>Nova<small>Reading 14 sources</small></span><b class="dot-warn"></b></li>
+                <li><Bot id="pip" size={28} eager /><span>Pip<small>Morning digest</small></span></li>
+                <li><Bot id="crumb" size={28} eager /><span>Crumb<small>Sourdough schedule</small></span></li>
+              </ul>
+            </aside>
+            <div class="thread">
+              <p class="bubble-user">Fix the flaky retry test and open a PR.</p>
+              <p class="work"><span class="spark"></span>Thought for 6s</p>
+              <p class="work"><span class="tick"></span>Ran 3 commands, edited <code>retry.test.ts</code> <span class="diff"><b>+12</b> <s>−4</s></span></p>
+              <p class="reply">The test waited on a real timer. It now uses fake timers and passes 50 runs in a row.</p>
+              <div class="pr-row">
+                <span class="pr-pill"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><circle cx="6" cy="6" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="6" cy="18" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="18" cy="18" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 8.5v7M18 15.5V9a3 3 0 0 0-3-3h-4" fill="none" stroke="currentColor" stroke-width="2"/></svg>Draft #214</span>
+                <span class="checks">Checks passing</span>
+              </div>
+              <div class="composer"><span>Reply to Byte…</span><kbd>↵</kbd></div>
+            </div>
+          </div>
         </div>
-        <div class="hero-phone">
-          <div class="phone"><div class="phone-screen"><Chat variant="phone" /></div></div>
+
+        <div class="phone" data-reveal style="--d:320ms">
+          <div class="phone-screen">
+            <p class="phone-time">9:41</p>
+            <div class="notice">
+              <Bot id="byte" size={34} eager />
+              <span><b>Fix the flaky retry test</b><small>Your draft pull request is ready.</small></span>
+            </div>
+            <div class="notice notice-dim">
+              <Bot id="nova" size={34} eager />
+              <span><b>Which database?</b><small>Nova has a question for you.</small></span>
+            </div>
+          </div>
         </div>
-        <p class="hero-bubble"><img src="/bots/hex.png" alt="" width="48" height="48" />On it.</p>
-        <img class="float float-a" src="/bots/stella.png" alt="" width="72" height="72" />
-        <img class="float float-b" src="/bots/gem.png" alt="" width="72" height="72" />
+
+        <div class="float-card fc-host" data-reveal style="--d:420ms"><i class="pulse"></i>Running on your host</div>
+        <div class="float-card fc-steps" data-reveal style="--d:480ms">
+          <b>3 of 4 done</b>
+          <span class="bar"><span></span></span>
+        </div>
+        <Bot id="sunny" mood="wave" size={92} class="fb fb-a" eager />
+        <Bot id="pixel" mood="curious" size={76} class="fb fb-b" eager />
       </figure>
     </section>
 
-    <section class="journey" aria-labelledby="journey-title">
+    <!-- How it works -->
+    <section class="steps" aria-labelledby="steps-title">
       <div class="wrap">
-        <span class="tag" data-reveal>How it works</span>
-        <h2 id="journey-title" class="section-title" data-reveal>Works while you're there, and while you're not.</h2>
-
-        <ol class="journey-grid">
-          <li class="jcard" data-reveal>
-            <div class="jart" aria-hidden="true">
-              <p class="bubble-user">Fix the flaky retry test and open a PR.</p>
-              <p class="bubble-bot"><img src="/bots/hex.png" alt="" width="40" height="40" />On it.</p>
-            </div>
-            <span class="jn">{journey[0].n}</span>
-            <h3>{journey[0].title}</h3>
-            <p>{journey[0].body}</p>
-          </li>
-          <li class="jcard" data-reveal style="--d:90ms">
-            <div class="jart jart-away" aria-hidden="true">
-              <p class="away-state"><i></i>Running on your host</p>
-              <ul class="away-lines">
-                <li>Ran 3 commands</li>
-                <li>Edited <code>retry.test.ts</code></li>
-                <li>Tests passing</li>
-              </ul>
-              <div class="bar"><span></span></div>
-            </div>
-            <span class="jn">{journey[1].n}</span>
-            <h3>{journey[1].title}</h3>
-            <p>{journey[1].body}</p>
-          </li>
-          <li class="jcard" data-reveal style="--d:180ms">
-            <div class="jart" aria-hidden="true">
-              <p class="push"><img src="/bots/hex.png" alt="" width="36" height="36" /><span><b>Draft PR ready</b><small>Checks passing · 2m 14s</small></span></p>
-            </div>
-            <span class="jn">{journey[2].n}</span>
-            <h3>{journey[2].title}</h3>
-            <p>{journey[2].body}</p>
-          </li>
+        <p class="eyebrow" data-reveal>How it works</p>
+        <h2 id="steps-title" class="title" data-reveal>Works while you're there.<br /><span class="soft">And while you're not.</span></h2>
+        <ol class="step-grid">
+          {
+            steps.map((s, i) => (
+              <li data-reveal style={`--d:${i * 90}ms`}>
+                <kbd class="key">{s.key}</kbd>
+                <h3>{s.title}</h3>
+                <p>{s.body}</p>
+              </li>
+            ))
+          }
         </ol>
       </div>
     </section>
 
-    <div id="features">
-      {
-        stages.map((s, i) => (
-          <section class:list={["stage", { flip: i % 2 === 1 }]} aria-labelledby={`${s.id}-title`}>
-            <div class="wrap stage-grid">
-              <div class="stage-copy" data-reveal>
-                <span class="tag">{s.tag}</span>
-                <h2 id={`${s.id}-title`}>{s.title}</h2>
-                <p>{s.body}</p>
-                <ul class="chips">
-                  {s.chips.map((chip) => <li>{chip}</li>)}
-                </ul>
-              </div>
-              <div class="stage-art" data-reveal style="--d:100ms">
-                {s.dictate ? (
-                  <Dictation />
-                ) : (
-                  <div class="phone art-phone">
-                    <Phone shot={s.shot!} alt={s.title} dark />
-                  </div>
-                )}
+    <!-- Features as a bento -->
+    <section id="features" class="features" aria-labelledby="features-title">
+      <div class="wrap">
+        <p class="eyebrow" data-reveal>What it does</p>
+        <h2 id="features-title" class="title" data-reveal>One app for everything<br /><span class="soft">your agent can do.</span></h2>
+
+        <div class="bento">
+          <article class="tile t-code" data-reveal>
+            <div class="tile-copy">
+              <h3>Sessions that end in a pull request.</h3>
+              <p>Each session works in its own worktree and ships a draft PR. Read the plan first in plan mode, or leave AFK on and let it work through the issues you've labelled.</p>
+            </div>
+            <div class="art art-sessions" aria-hidden="true">
+              <p class="group">Waiting for you <b>1</b></p>
+              <div class="srow"><span class="ic ic-warn"></span><span>Migrate the lights to the new hub<small>Plan ready for review</small></span><em>2m</em></div>
+              <p class="group">Working <b>2</b></p>
+              <div class="srow"><span class="ic ic-spin"></span><span>Add retries to the uploader <i class="chip">AFK</i><small>#88 · hermesgots</small></span><em>now</em></div>
+              <div class="srow"><span class="ic ic-spin"></span><span>Fix the flaky retry test<small>Running tests</small></span><em>now</em></div>
+              <p class="group">Idle <b>1</b></p>
+              <div class="srow"><span class="ic ic-ok"></span><span>Dark mode for settings<small>Draft #209 · checks passing</small></span><em>1h</em></div>
+            </div>
+          </article>
+
+          <article class="tile t-research" data-reveal style="--d:80ms">
+            <div class="tile-copy">
+              <h3>Answers with receipts.</h3>
+              <p>Research missions read the web and cite every sentence. The host checks each quote and flags anything unsourced.</p>
+            </div>
+            <div class="art art-cite" aria-hidden="true">
+              <p>Attention lets every word look at every other word at once <sup>1</sup>, which is why it replaced recurrence <sup>2</sup>. <mark>It also halves training cost.</mark></p>
+              <span class="flag">No source</span>
+              <ul class="types"><li>Learn</li><li>Compare</li><li>Verify a claim</li><li>Literature review</li></ul>
+            </div>
+          </article>
+
+          <article class="tile t-approve" data-reveal>
+            <div class="tile-copy">
+              <h3>Asks before anything risky.</h3>
+              <p>Approvals and questions land where you'd type, and a push tells you when one is waiting.</p>
+            </div>
+            <div class="art art-approve" aria-hidden="true">
+              <p class="a-head"><span class="ic ic-warn"></span>Approval needed</p>
+              <code>rm -rf /var/log/app/*.log</code>
+              <div class="a-btns"><span class="b-ok">Allow once</span><span>Deny</span></div>
+            </div>
+          </article>
+
+          <article class="tile t-dictate" data-reveal style="--d:80ms">
+            <div class="tile-copy">
+              <h3>Talk. Your host types.</h3>
+              <p>Dictation runs on your own bot, tidied to the level you pick, with your names and jargon taught once.</p>
+            </div>
+            <div class="art art-wave" aria-hidden="true">
+              <span class="rec"></span>
+              <span class="bars">{Array.from({ length: 28 }, (_, i) => <i style={`--h:${20 + ((i * 37) % 70)}%;--i:${i}`}></i>)}</span>
+              <span class="time">0:07</span>
+            </div>
+          </article>
+
+          <article class="tile t-rooms" data-reveal style="--d:160ms">
+            <div class="tile-copy">
+              <h3>Put bots in a room.</h3>
+              <p>Several bots, one conversation. Each answers in its own voice.</p>
+            </div>
+            <div class="art art-room" aria-hidden="true">
+              <div class="msg"><Bot id="pixel" size={30} /><span><b>Pixel</b>Three options. The second is cheapest.</span></div>
+              <div class="msg"><Bot id="wink" size={30} /><span><b>Wink</b>Why not skip the migration?</span></div>
+              <div class="msg"><Bot id="byte" size={30} /><span><b>Byte</b>I can test both tonight.</span></div>
+            </div>
+          </article>
+
+          <article class="tile t-canvas" data-reveal>
+            <div class="tile-copy">
+              <h3>Ask for an app. Keep it.</h3>
+              <p>A canvas is a small page your bot builds and keeps updating: a tracker, a dashboard, a checklist. It lives beside your chats.</p>
+            </div>
+            <div class="art art-canvas" aria-hidden="true">
+              <div class="cv-head"><b>Reading list</b><span>12 books</span></div>
+              <div class="cv-grid">
+                <span class="cv-card c1"><b>Dune</b><i style="--p:100%"></i></span>
+                <span class="cv-card c2"><b>Piranesi</b><i style="--p:64%"></i></span>
+                <span class="cv-card c3"><b>Klara</b><i style="--p:22%"></i></span>
               </div>
             </div>
-          </section>
-        ))
-      }
-    </div>
+          </article>
 
-    <section class="yours" aria-labelledby="yours-title">
+          <article class="tile t-routines" data-reveal style="--d:80ms">
+            <div class="tile-copy">
+              <h3>Routines that report back.</h3>
+              <p>Jobs on a schedule, run by your host. Results arrive as a row in your bot's chats.</p>
+            </div>
+            <div class="art art-routines" aria-hidden="true">
+              <div class="rt"><span>Inbox triage<small>Every hour</small></span><span class="hb">{Array.from({ length: 18 }, (_, i) => <i class={i === 11 ? "bad" : ""}></i>)}</span></div>
+              <div class="rt"><span>Morning digest<small>Daily at 8:00</small></span><span class="hb">{Array.from({ length: 18 }, (_, i) => <i class={i < 9 ? "off" : ""}></i>)}</span></div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Bots -->
+    <section id="bots" class="bots" aria-labelledby="bots-title">
       <div class="wrap">
-        <span class="tag" data-reveal>Yours</span>
-        <h2 id="yours-title" class="section-title" data-reveal>Your agent, your host, your say.</h2>
-        <ul class="yours-grid">
+        <p class="eyebrow" data-reveal>Bots</p>
+        <h2 id="bots-title" class="title" data-reveal>Every profile is a bot.<br /><span class="soft">Every bot has a character.</span></h2>
+        <p class="sub" data-reveal>Link each Hermes profile you run. Give it a face, a model and a voice.</p>
+      </div>
+      <ul class="bot-row" data-reveal>
+        {
+          bots.map((b) => (
+            <li>
+              <Bot id={b.id} hover="excited" size={120} />
+              <b>{b.name}</b>
+              <small>{b.role}</small>
+            </li>
+          ))
+        }
+      </ul>
+    </section>
+
+    <!-- Dark band -->
+    <section class="band" aria-labelledby="band-title">
+      <div class="streaks" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+      <div class="wrap band-inner">
+        <h2 id="band-title" data-reveal>Your phone sleeps.<br />Your bot doesn't.</h2>
+        <ul class="yours">
           {
             yours.map((y, i) => (
               <li data-reveal style={`--d:${i * 80}ms`}>
@@ -215,18 +301,21 @@ const faq = [
       </div>
     </section>
 
-    <section id="coming" class="coming">
+    <!-- Coming soon -->
+    <section class="coming" aria-labelledby="coming-title">
       <div class="wrap">
-        <span class="tag" data-reveal>Coming soon</span>
-        <h2 class="section-title" data-reveal>Next in the room.</h2>
+        <p class="eyebrow" data-reveal>Coming soon</p>
+        <h2 id="coming-title" class="title" data-reveal>Next in the room.</h2>
         <ul class="coming-grid">
           {
             coming.map((c, i) => (
-              <li data-reveal style={`--d:${i * 70}ms`}>
-                <img src={`/bots/${c.bot}.png`} alt="" width="96" height="96" loading="lazy" />
-                <span class="soon">Coming soon</span>
-                <h3>{c.title}</h3>
-                <p>{c.body}</p>
+              <li data-reveal style={`--d:${i * 80}ms`}>
+                <Bot id={c.bot} mood="curious" size={88} />
+                <div>
+                  <span class="soon">Coming soon</span>
+                  <h3>{c.title}</h3>
+                  <p>{c.body}</p>
+                </div>
               </li>
             ))
           }
@@ -234,50 +323,54 @@ const faq = [
       </div>
     </section>
 
-    <section id="pricing" class="pricing">
+    <!-- Pricing -->
+    <section id="pricing" class="pricing" aria-labelledby="pricing-title">
       <div class="wrap">
-        <span class="tag" data-reveal>Pricing</span>
-        <h2 class="section-title" data-reveal>Two ways in. Both simple.</h2>
+        <p class="eyebrow" data-reveal>Pricing</p>
+        <h2 id="pricing-title" class="title" data-reveal>Two ways in.<br /><span class="soft">Both simple.</span></h2>
 
         <div class="plans">
-          <article id="waitlist" class="plan plan-featured" data-reveal>
-            <span class="tag">Hosted</span>
-            <p class="price">Waiting list</p>
-            <p class="plan-lede">
-              Gots, run for you. Leave your email and you're first in when the doors open.
-            </p>
+          <article class="plan" data-reveal>
+            <h3>Self-host</h3>
+            <p class="plan-sub">Free, forever.</p>
+            <p class="price">$0</p>
+            <ul class="ticks">
+              <li>Every feature in the app</li>
+              <li>Your chats, runs and keys stay on your host</li>
+              <li>End-to-end encrypted sync</li>
+              <li>Open source, MIT licensed</li>
+            </ul>
+            <a class="btn btn-glass btn-block" href="https://github.com/thehaseebahmed/hermesgots" rel="noreferrer"><GitHub /> Get it on GitHub</a>
+          </article>
+
+          <article id="waitlist" class="plan plan-featured" data-reveal style="--d:100ms">
+            <Bot id="bubble" mood="wave" size={72} class="plan-bot" />
+            <h3>Hosted</h3>
+            <p class="plan-sub">Gots, run for you.</p>
+            <p class="price price-word">Waiting list</p>
+            <ul class="ticks">
+              <li>No host to run</li>
+              <li>One email when your spot opens</li>
+              <li>First look at new features</li>
+            </ul>
             <form class="waitlist" name="waitlist" method="POST" action="/" data-netlify="true" netlify-honeypot="bot-field" data-waitlist>
               <input type="hidden" name="form-name" value="waitlist" />
               <p class="sr-only"><label>Leave this empty <input name="bot-field" tabindex="-1" autocomplete="off" /></label></p>
               <label class="sr-only" for="email">Email</label>
               <input id="email" type="email" name="email" placeholder="you@example.com" required autocomplete="email" />
-              <button class="btn" type="submit">Count me in</button>
+              <button class="btn btn-ink" type="submit">Count me in</button>
               <p class="thanks" role="status">You're on the list. We'll be in touch.</p>
               <p class="form-error" role="alert">That didn't go through. Try again in a moment.</p>
             </form>
-            <ul class="ticks">
-              <li>One email when your spot opens</li>
-              <li>First look at new features</li>
-            </ul>
-          </article>
-
-          <article class="plan" data-reveal style="--d:100ms">
-            <span class="tag">Self-host</span>
-            <p class="price">Free</p>
-            <p class="plan-lede">Run it on your own Hermes host. Your chats, runs and keys stay with you.</p>
-            <ul class="ticks">
-              <li>Every feature in the app</li>
-              <li>Open source, MIT licensed</li>
-              <li>End-to-end encrypted sync</li>
-            </ul>
           </article>
         </div>
       </div>
     </section>
 
+    <!-- FAQ -->
     <section class="faq" aria-labelledby="faq-title">
       <div class="wrap faq-wrap">
-        <h2 id="faq-title" class="section-title" data-reveal>Questions</h2>
+        <h2 id="faq-title" class="title" data-reveal>Questions</h2>
         <div class="faq-list" data-reveal style="--d:80ms">
           {
             faq.map((f) => (
@@ -291,11 +384,19 @@ const faq = [
       </div>
     </section>
 
-    <p class="bigword" aria-hidden="true">Gots</p>
+    <!-- Closing -->
+    <section class="closing" aria-labelledby="closing-title">
+      <div class="sky sky-low" aria-hidden="true"></div>
+      <div class="wrap">
+        <div class="crew" aria-hidden="true" data-reveal>
+          {bots.slice(0, 7).map((b, i) => <Bot id={b.id} mood={i === 3 ? "wave" : "happy"} size={i === 3 ? 112 : 72} />)}
+        </div>
+        <h2 id="closing-title" class="title" data-reveal>Your bots are waiting.</h2>
+        <div class="cta" data-reveal style="--d:80ms">
+          <a class="btn btn-ink" href="#waitlist">Join the waiting list</a>
+          <a class="btn btn-glass" href="https://github.com/thehaseebahmed/hermesgots" rel="noreferrer"><GitHub /> Self-host for free</a>
+        </div>
+      </div>
+    </section>
   </main>
-
-  <div class="dock" data-dock>
-    <span class="wordmark">Gots</span>
-    <a class="btn btn-sm" href="#waitlist">Join the waiting list</a>
-  </div>
 </Base>

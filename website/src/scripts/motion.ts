@@ -1,6 +1,6 @@
 /**
- * Scroll motion for the landing page: one-shot reveals, and the bottom dock that steps aside while
- * the hero buttons, the waiting list or the footer are on screen. Everything is progressive: without the script (or
+ * The site's script: one-shot reveals, the nav's glass once the page scrolls, the install command's
+ * copy button and the waiting list's form. Everything is progressive: without the script (or
  * with reduced motion) the page is a plain stack, so nothing is hidden until this says it can animate.
  */
 
@@ -24,18 +24,25 @@ if (!reduced && "IntersectionObserver" in window) {
   document.querySelectorAll("[data-reveal]").forEach((element) => seen.observe(element))
 }
 
-const dock = document.querySelector<HTMLElement>("[data-dock]")
-if (dock && "IntersectionObserver" in window) {
-  const covering = new Set<Element>()
-  const watch = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      if (entry.isIntersecting) covering.add(entry.target)
-      else covering.delete(entry.target)
-    }
-    dock.classList.toggle("is-away", covering.size > 0)
-  })
-  document.querySelectorAll("#pricing, .footer, .home-hero .cta").forEach((element) => watch.observe(element))
+// The nav takes its glass once the page has moved under it.
+const nav = document.querySelector<HTMLElement>("[data-nav]")
+if (nav) {
+  const update = () => nav.classList.toggle("is-scrolled", window.scrollY > 8)
+  update()
+  window.addEventListener("scroll", update, { passive: true })
 }
+
+document.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((button) => {
+  button.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(button.dataset.copy ?? "")
+      button.classList.add("is-done")
+      setTimeout(() => button.classList.remove("is-done"), 1600)
+    } catch {
+      // Clipboard blocked: the command is still on screen to select.
+    }
+  })
+})
 
 document.querySelectorAll<HTMLFormElement>("[data-waitlist]").forEach((form) => {
   form.addEventListener("submit", async (event) => {
