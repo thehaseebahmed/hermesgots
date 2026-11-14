@@ -1,26 +1,25 @@
 /**
- * The picker a canvas's face is chosen from (issues #1065, #1074): lucide's icons and the phone's
- * emojis, one search over both, and — on a tab of its own — the picture the Canvas list draws.
- * It opens the way the model selector does — a menu anchored to the button it came from on a laptop
- * and up, a bottom sheet below that — with the tabs the Outputs sheet draws, and it says what it is
- * for in the same words everywhere: Canvas Icon.
+ * The picker a canvas's face is chosen from (issues #1065, #1074): lucide's icons, one search over
+ * them, and — on a tab of its own — the thumbnail the Canvas list draws. It opens the way the model
+ * selector does — a menu anchored to the button it came from on a laptop and up, a bottom sheet below
+ * that — and it names itself in the same words everywhere: Canvas Appearance.
  *
- * A pick is the record's, not this device's: it posts the mark — or the picture, which is one inline
- * image the host keeps on the same record — to the host, the host's answer folds into the store, and
- * the row and the tile it was opened for redraw from it.
+ * A pick is the record's, not this device's: it posts the mark — or the thumbnail, which is one
+ * inline image the host keeps on the same record — to the host, the host's answer folds into the
+ * store, and the row and the tile it was opened for redraw from it.
  */
 import { useMemo, useRef, useState, type ReactNode, type RefObject } from "react"
 
 import { Popup, PopupContent, PopupHeader } from "@/components/popup"
 import { SearchField } from "@/components/search-field"
+import { DestructiveButton } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import type { Canvas, CanvasChanges } from "@/lib/canvases"
-import { MARK_EMOJIS } from "@/lib/canvas-emojis"
 import { UNREADABLE_PICTURE, inlinePicture } from "@/lib/canvas-image"
 import { useMarkIcons } from "@/lib/canvas-mark-icons"
-import { markMatches, readMark } from "@/lib/canvas-marks"
+import { markMatches } from "@/lib/canvas-marks"
 import { cn } from "@/lib/utils"
 
 /**
@@ -33,7 +32,10 @@ const LISTED = 160
 /** The picker's own box: the model selector's, so the two read as one kind of card. */
 const PICKER = "h-[min(36rem,85dvh)]"
 
-/** One mark in the grid: the icon or the glyph, and the pale disc that says it is the one chosen. */
+/** The app's action size, which is a thumb's: a thumbnail is chosen and taken off in the same one. */
+const ACTION = "h-11 w-full"
+
+/** One icon in the grid, and the pale disc that says it is the one chosen. */
 function Cell({
   selected,
   label,
@@ -83,16 +85,14 @@ function MarkPicker({
 }) {
   const icons = useMarkIcons()
   const chosen = canvas?.mark ?? ""
-  const [tab, setTab] = useState(() =>
-    !markable ? "picture" : readMark(canvas?.mark)?.kind === "emoji" ? "emojis" : "icons",
-  )
+  const [tab, setTab] = useState(markable ? "icons" : "thumbnail")
   const [query, setQuery] = useState("")
   const [saving, setSaving] = useState(false)
-  // A picture is read here, not by the host, so what the device's own decoder says about one is said
-  // on the tab that asked rather than where the host's refusals are said.
+  // A thumbnail is read here, not by the host, so what the device's own decoder says about one is
+  // said on the tab that asked rather than where the host's refusals are said.
   const [said, setSaid] = useState<string | null>(null)
   const [reading, setReading] = useState(false)
-  const pictureField = useRef<HTMLInputElement>(null)
+  const thumbnailField = useRef<HTMLInputElement>(null)
   const busy = saving || reading
 
   /** Posts a change to the record, and answers whether the host took it. */
@@ -119,9 +119,9 @@ function MarkPicker({
   }
 
   /**
-   * A picture the reader chose, read here and posted as the record's `image`. What the file can't be
-   * — too big for the host to keep, or no picture at all — is said on the tab that asked for it, and
-   * the record the grid draws stays as it was.
+   * A thumbnail the reader chose, read here and posted as the record's `image`. What the file can't
+   * be — too big for the host to keep, or no picture at all — is said on the tab that asked for it,
+   * and the record the grid draws stays as it was.
    */
   const choose = async (file: File | undefined) => {
     if (!file || busy) return
@@ -137,8 +137,8 @@ function MarkPicker({
     }
   }
 
-  /** The picture taken off the record, which is a canvas that goes back to its mark. */
-  const clearPicture = async () => {
+  /** The thumbnail taken off the record, which is a canvas that goes back to its own mark. */
+  const clearThumbnail = async () => {
     if (busy) return
     setSaid(null)
     await commit({ image: "" })
@@ -149,11 +149,6 @@ function MarkPicker({
     const matched = [...icons.entries()].filter(([, icon]) => markMatches(icon.words, query))
     return { listed: matched.slice(0, LISTED), more: Math.max(0, matched.length - LISTED) }
   }, [icons, query])
-
-  const emojis = useMemo(
-    () => MARK_EMOJIS.filter((emoji) => markMatches(emoji.words, query)),
-    [query],
-  )
 
   return (
     <Tabs
@@ -166,125 +161,93 @@ function MarkPicker({
     >
       <div className="px-3 sm:px-4">
         <TabsList>
-          {markable && <TabsTrigger value="icons">Icons</TabsTrigger>}
-          {markable && <TabsTrigger value="emojis">Emojis</TabsTrigger>}
-          <TabsTrigger value="picture">Picture</TabsTrigger>
+          {markable && <TabsTrigger value="icons">Icon</TabsTrigger>}
+          <TabsTrigger value="thumbnail">Thumbnail</TabsTrigger>
         </TabsList>
       </div>
-      {/* The search narrows a set of marks; a picture is one place of its own, so it has none. */}
-      {tab !== "picture" && (
+      {/* The search narrows a set of icons; a thumbnail is one place of its own, so it has none. */}
+      {tab === "icons" && (
         <div className="px-4 pt-3">
-          <SearchField
-            value={query}
-            onChange={setQuery}
-            label={tab === "icons" ? "Search icons" : "Search emojis"}
-          />
+          <SearchField value={query} onChange={setQuery} label="Search icons" />
         </div>
       )}
 
-      <TabsContent value="icons" className="min-h-0 overflow-y-auto px-4 pt-3">
-        {!icons ? (
-          <div className="flex justify-center py-8">
-            <Spinner />
-          </div>
-        ) : (
-          <>
-            <div data-canvas-mark-grid="icons" className="grid grid-cols-8 gap-1">
-              {grid.listed.map(([name, icon]) => (
-                <Cell
-                  key={name}
-                  label={icon.words}
-                  selected={chosen === name}
-                  disabled={busy || !canvas}
-                  onPick={() => void commit({ mark: name })}
-                >
-                  <icon.Icon className="size-5 text-muted-foreground" />
-                </Cell>
-              ))}
+      {markable && (
+        <TabsContent value="icons" className="min-h-0 overflow-y-auto px-4 pt-3">
+          {!icons ? (
+            <div className="flex justify-center py-8">
+              <Spinner />
             </div>
-            {grid.listed.length === 0 && (
-              <p className="py-8 text-center text-sm text-muted-foreground">No icon matches.</p>
-            )}
-            {grid.more > 0 && (
-              <p className="py-3 text-center text-xs text-muted-foreground">
-                {grid.more} more — search to narrow them.
-              </p>
-            )}
-          </>
-        )}
-      </TabsContent>
+          ) : (
+            <>
+              <div data-canvas-mark-grid="icons" className="grid grid-cols-8 gap-1">
+                {grid.listed.map(([name, icon]) => (
+                  <Cell
+                    key={name}
+                    label={icon.words}
+                    selected={chosen === name}
+                    disabled={busy || !canvas}
+                    onPick={() => void commit({ mark: name })}
+                  >
+                    <icon.Icon className="size-5 text-muted-foreground" />
+                  </Cell>
+                ))}
+              </div>
+              {grid.listed.length === 0 && (
+                <p className="py-8 text-center text-sm text-muted-foreground">No icon matches.</p>
+              )}
+              {grid.more > 0 && (
+                <p className="py-3 text-center text-xs text-muted-foreground">
+                  {grid.more} more — search to narrow them.
+                </p>
+              )}
+            </>
+          )}
+        </TabsContent>
+      )}
 
-      <TabsContent value="emojis" className="min-h-0 overflow-y-auto px-4 pt-3">
-        <div data-canvas-mark-grid="emojis" className="grid grid-cols-8 gap-1">
-          {emojis.map((emoji) => (
-            <Cell
-              key={emoji.glyph}
-              label={emoji.words}
-              selected={chosen === emoji.glyph}
-              disabled={busy || !canvas}
-              onPick={() => void commit({ mark: emoji.glyph })}
-            >
-              <span className="text-xl leading-none">{emoji.glyph}</span>
-            </Cell>
-          ))}
-        </div>
-        {emojis.length === 0 && (
-          <p className="py-8 text-center text-sm text-muted-foreground">No emoji matches.</p>
-        )}
-      </TabsContent>
-
-      <TabsContent value="picture" className="min-h-0 overflow-y-auto px-4 pt-3">
+      <TabsContent value="thumbnail" className="min-h-0 overflow-y-auto px-4 pt-3">
         <div className="flex flex-col gap-3">
           <div
-            data-canvas-picture={canvas?.image ? "picture" : "none"}
+            data-canvas-thumbnail={canvas?.image ? "thumbnail" : "none"}
             className="relative mx-auto aspect-[4/3] w-56 overflow-hidden rounded-2xl border bg-muted/40"
           >
             {canvas?.image ? (
               <img src={canvas.image} alt="" className="size-full object-cover" />
             ) : (
               <span className="flex size-full items-center justify-center px-4 text-center text-sm text-muted-foreground">
-                No picture yet.
+                No thumbnail yet.
               </span>
             )}
           </div>
-          <p className="text-sm text-muted-foreground">
-            The Canvas list draws this for the canvas, over any icon. It's kept on the canvas
-            itself, so every device draws the same one.
-          </p>
           {said && (
-            <p data-canvas-picture-said className="text-sm text-destructive-ink">
+            <p data-canvas-thumbnail-said className="text-sm text-destructive-ink">
               {said}
             </p>
           )}
           <Button
             type="button"
             variant="outline"
-            data-canvas-picture-choose
-            className="w-full"
+            data-canvas-thumbnail-choose
+            className={cn(ACTION, "font-normal")}
             disabled={busy || !canvas}
-            onClick={() => pictureField.current?.click()}
+            onClick={() => thumbnailField.current?.click()}
           >
-            {reading
-              ? "Reading it…"
-              : canvas?.image
-                ? "Choose another picture"
-                : "Choose a picture"}
+            {reading ? "Reading it…" : "Choose picture"}
           </Button>
           {canvas?.image && (
-            <Button
-              type="button"
-              variant="ghost"
-              data-canvas-picture-unset
-              className="w-full"
+            <DestructiveButton
+              data-canvas-thumbnail-unset
+              className="self-center"
               disabled={busy || !canvas}
-              onClick={() => void clearPicture()}
+              onClick={() => void clearThumbnail()}
             >
               Remove picture
-            </Button>
+            </DestructiveButton>
           )}
           <input
-            ref={pictureField}
-            id="canvas-picture"
+            ref={thumbnailField}
+            id="canvas-thumbnail"
             type="file"
             accept="image/*"
             className="hidden"
@@ -301,13 +264,13 @@ function MarkPicker({
 
       {/* The way back: a canvas nobody has marked draws the app's own frame, as every canvas did
           before a mark could be chosen. Under the grid's own scroll rather than inside it. */}
-      {markable && tab !== "picture" && (
+      {markable && tab === "icons" && (
         <div className="border-t px-4 py-3">
           <Button
             type="button"
             variant="outline"
             data-canvas-mark-unset
-            className="w-full"
+            className={ACTION}
             disabled={busy || !canvas || !chosen}
             onClick={() => void commit({ mark: "" })}
           >
@@ -337,7 +300,7 @@ export function CanvasMarkPicker({
   /** The mark's box in the options: a menu beside it from 1024px, a sheet under it below that. */
   anchor: RefObject<HTMLElement | null>
   canvas: Canvas | undefined
-  /** Whether this host's record keeps a mark, which is what offers the two tabs of them. */
+  /** Whether this host's record keeps a mark, which is what offers the tab of icons. */
   markable: boolean
   onUpdate: (changes: CanvasChanges) => Promise<void>
 }) {
@@ -346,7 +309,7 @@ export function CanvasMarkPicker({
       <PopupContent dataSlot="canvas-mark-picker" fixedHeight={PICKER}>
         <PopupHeader className="pb-0">
           <h2 className="cn-font-heading w-full truncate text-center text-base font-medium text-foreground">
-            Canvas Icon
+            Canvas Appearance
           </h2>
         </PopupHeader>
         <MarkPicker

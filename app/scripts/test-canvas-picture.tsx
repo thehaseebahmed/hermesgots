@@ -82,8 +82,8 @@ const openPictureTab = async () => {
   await until(async () => find("[data-canvas-options]") !== null, "the options")
   await click(find("[data-canvas-mark-open]"))
   await until(async () => find("[data-slot='tabs-trigger']") !== null, "the picker")
-  await click(findText("[data-slot='tabs-trigger']", "Picture"))
-  await until(async () => find("[data-canvas-picture]") !== null, "the picture tab")
+  await click(findText("[data-slot='tabs-trigger']", "Thumbnail"))
+  await until(async () => find("[data-canvas-thumbnail]") !== null, "the thumbnail tab")
 }
 
 /** A width, drawn: `atWidth` hands back the test a width's own body, which a case inside a case runs. */
@@ -92,7 +92,7 @@ const at = (width: number, body: () => Promise<void>) => atWidth(width, body)()
 /** A file chosen in the tab's own field, the way the browser hands one over. */
 async function pick(file: File) {
   const field = find('input[type="file"]') as HTMLInputElement | null
-  assert.ok(field, "the picture tab offers a file to choose")
+  assert.ok(field, "the thumbnail tab offers a file to choose")
   Object.defineProperty(field, "files", { configurable: true, value: [file] })
   await act(async () => {
     field.dispatchEvent(new Event("change", { bubbles: true }))
@@ -100,7 +100,7 @@ async function pick(file: File) {
   await settle()
 }
 
-test("the picker's Picture tab posts the chosen picture as the record's image", async () => {
+test("the picker's Thumbnail tab posts the chosen picture as the record's image", async () => {
   const changes: Record<string, unknown>[] = []
   await at(390, async () => {
     await mount(
@@ -111,12 +111,12 @@ test("the picker's Picture tab posts the chosen picture as the record's image", 
         // A canvas with no picture says so, offers the one control that gives it one, and has
         // nothing to remove; the mark search stands down, since a picture is no set to narrow.
         assert.equal(
-          find("[data-canvas-picture]")?.getAttribute("data-canvas-picture"),
+          find("[data-canvas-thumbnail]")?.getAttribute("data-canvas-thumbnail"),
           "none",
           "the tab draws the record's picture, and there is none",
         )
-        assert.match(wordsOf(find("[data-canvas-picture]")), /No picture yet/)
-        assert.equal(missing("[data-canvas-picture-unset]"), true, "nothing to remove yet")
+        assert.match(wordsOf(find("[data-canvas-thumbnail]")), /No thumbnail yet/)
+        assert.equal(missing("[data-canvas-thumbnail-unset]"), true, "nothing to remove yet")
         assert.equal(
           missing('input[aria-label="Search icons"]'),
           true,
@@ -127,7 +127,7 @@ test("the picker's Picture tab posts the chosen picture as the record's image", 
           true,
           "and so does the emoji one",
         )
-        assert.ok(find("[data-canvas-picture-choose]"), "the way to give it one")
+        assert.ok(find("[data-canvas-thumbnail-choose]"), "the way to give it one")
 
         await pick(new File([PNG], "tile.png", { type: "image/png" }))
         await until(async () => changes.length === 1, "the picture to be posted")
@@ -148,18 +148,18 @@ test("the tab draws the picture the record holds, and its Remove clears the fiel
     async () => {
       await openPictureTab()
 
-      const preview = find("[data-canvas-picture]")
+      const preview = find("[data-canvas-thumbnail]")
       assert.equal(
-        preview?.getAttribute("data-canvas-picture"),
-        "picture",
-        "the record's own picture",
+        preview?.getAttribute("data-canvas-thumbnail"),
+        "thumbnail",
+        "the record's own thumbnail",
       )
       assert.equal(
         preview?.querySelector("img")?.getAttribute("src"),
         PICTURE,
         "drawn as the image itself, which is what the tile draws",
       )
-      const remove = find("[data-canvas-picture-unset]")
+      const remove = find("[data-canvas-thumbnail-unset]")
       assert.ok(remove, "a picture already there has a way off")
       assert.equal(remove?.textContent?.trim(), "Remove picture", "and says what it does")
 
@@ -178,7 +178,7 @@ test("a file that isn't a picture is refused on its own tab, and nothing is post
       await openPictureTab()
       await pick(new File(["not a picture"], "notes.txt", { type: "text/plain" }))
 
-      const said = find("[data-canvas-picture-said]")
+      const said = find("[data-canvas-thumbnail-said]")
       assert.ok(said, "the tab says what the file can't be")
       assert.match(wordsOf(said), /image file/, "in the words the encoder refused it with")
       assert.equal(changes.length, 0, "and the record is never posted a file it can't keep")
@@ -186,7 +186,7 @@ test("a file that isn't a picture is refused on its own tab, and nothing is post
   )
 })
 
-test("a phone and a desktop draw the same three tabs and the same picture tab", async () => {
+test("a phone and a desktop draw the same two tabs and the same thumbnail tab", async () => {
   const changes: Record<string, unknown>[] = []
   const draw = async (width: number) =>
     at(width, async () => {
@@ -197,15 +197,15 @@ test("a phone and a desktop draw the same three tabs and the same picture tab", 
           const tabs = [...document.querySelectorAll("[data-slot='tabs-trigger']")].map((one) =>
             one.textContent?.trim(),
           )
-          assert.deepEqual(tabs, ["Icons", "Emojis", "Picture"], `${width}px draws the three ways`)
+          assert.deepEqual(tabs, ["Icon", "Thumbnail"], `${width}px draws the two ways`)
           assert.equal(
-            find("[data-canvas-picture] img")?.getAttribute("src"),
+            find("[data-canvas-thumbnail] img")?.getAttribute("src"),
             PICTURE,
             `${width}px draws the record's picture`,
           )
           assert.equal(
-            find("[data-canvas-picture-choose]")?.textContent?.trim(),
-            "Choose another picture",
+            find("[data-canvas-thumbnail-choose]")?.textContent?.trim(),
+            "Choose picture",
             `${width}px offers the same control in the same words`,
           )
         },
@@ -278,12 +278,12 @@ test("a host that keeps no mark still offers the canvas a picture", async () => 
       const box = find("[data-canvas-mark-open]")
       assert.equal(box?.hasAttribute("disabled"), false, "the box opens for the picture")
       await click(box)
-      await until(async () => find("[data-canvas-picture]") !== null, "the picture tab")
+      await until(async () => find("[data-canvas-thumbnail]") !== null, "the thumbnail tab")
       assert.deepEqual(
         [...document.querySelectorAll("[data-slot='tabs-trigger']")].map((one) =>
           one.textContent?.trim(),
         ),
-        ["Picture"],
+        ["Thumbnail"],
         "one tab: the marks are the field this host has none for",
       )
 

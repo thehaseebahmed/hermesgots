@@ -11,8 +11,7 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { CanvasMark } from "@/components/canvas-mark"
 import { CanvasMarkPicker } from "@/components/canvas-mark-picker"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
-import { DestructiveButton, Group, SwitchRow } from "@/components/settings-chrome"
-import { Button } from "@/components/ui/button"
+import { Caption, DestructiveButton, Group, SwitchRow } from "@/components/settings-chrome"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,6 +26,12 @@ import type { Canvas, CanvasChanges } from "@/lib/canvases"
 
 /** The plugin's own cap on a canvas's title (`canvases.py`'s `TITLE_CHARS`), mirrored by the field. */
 const TITLE_CHARS = 60
+
+/**
+ * How long a name waits for the typing to stop before it writes itself. Short enough to read as
+ * autosave, long enough that a name typed at speed is one write rather than one a letter.
+ */
+const NAME_WRITE_MS = 700
 
 /** One tool waiting for an answer, and the two ways the call held on it can settle. */
 export interface ConsentAsk {
@@ -188,24 +193,17 @@ export function CanvasOptions({
   const nameField = useRef<HTMLInputElement>(null)
   const busy = saving !== null
   const deleting = saving === "delete"
-  // The name as the field holds it, and the canvas and title it was typed against: while they agree
-  // the field shows the words, and a record the host answers — or another canvas in the same sheet —
-  // moves past them, so the field draws that record again. What is typed and what lands are the same
-  // one line, and a name abandoned by closing the sheet is no draft at all.
+  // The name as the field holds it, and the canvas it was typed for: a sheet opened on another
+  // canvas, or a name dropped by closing this one, draws the record's own words again. The record's
+  // title moving under a draft — the write that draft made landing — leaves it where it is.
   const title = canvas?.title ?? ""
-  const here = `${canvas?.id ?? ""}\n${title}`
+  const here = canvas?.id ?? ""
   const [draft, setDraft] = useState<{ against: string; name: string } | null>(null)
   const name = draft?.against === here ? draft.name : title
   // The host writes one line: whitespace folded, then its cap. The field's ink is what a Save would
   // send, so a name left as it was — or one of nothing but spaces — is no write at all.
   const trimmed = name.trim().replace(/\s+/g, " ")
   const renaming = trimmed.length > 0 && trimmed !== title
-
-  /** Closing the sheet drops what was typed and not saved: the record's own words are what stand. */
-  const setOpen = (next: boolean) => {
-    if (!next) setDraft(null)
-    onOpenChange(next)
-  }
 
   useEffect(() => {
     if (!open) return
@@ -246,10 +244,32 @@ export function CanvasOptions({
     setAsking(false)
   }
 
-  /** The name's own write: the one control here that waits for a press rather than a flip. */
-  const saveName = () => {
+  /**
+   * The name's own write, which the field makes for itself: a moment after the typing stops, at once
+   * when it is left or Enter is pressed, and once more as the sheet closes on words not yet sent.
+   * Nothing is written for a name the record already holds, or for one of nothing.
+   */
+  const writeName = () => {
     if (!renaming || busy) return
     void change("name", () => onUpdate({ title: trimmed }))
+  }
+
+  // Every render re-arms this: a keystroke is a render, so the timer that fires is the one the last
+  // keystroke armed. A write that is out takes the guard, and the render its answer causes arms the
+  // timer again for whatever was typed while it was away.
+  useEffect(() => {
+    if (!open || !renaming || busy) return
+    const timer = setTimeout(writeName, NAME_WRITE_MS)
+    return () => clearTimeout(timer)
+  })
+
+  /** Closing the sheet sends what is waiting and drops the draft: the record's words are what stand. */
+  const setOpen = (next: boolean) => {
+    if (!next) {
+      writeName()
+      setDraft(null)
+    }
+    onOpenChange(next)
   }
 
   return (
@@ -262,8 +282,8 @@ export function CanvasOptions({
           <div data-canvas-options className="flex flex-col gap-4 px-4 pb-4">
             {/* The mark and the name in one row, the way a project's Edit screen draws its own: the
                 box at the head is the canvas's face, and a tap on it picks another (issues #1065,
-                #1074); the name is typed here and written by the Save beside it, which waits until
-                the words are a change the host can keep. */}
+                #1074); the name writes itself a moment after the typing stops, so this row is the
+                whole of what the record's name is. */}
             <section data-canvas-name-block className="flex flex-col gap-2">
               <label htmlFor="canvas-name" className="px-1 text-sm font-medium">
                 Name
@@ -273,7 +293,7 @@ export function CanvasOptions({
                   ref={markButton}
                   type="button"
                   data-canvas-mark-open
-                  aria-label={markable ? "Change mark" : "Change icon"}
+                  aria-label="Change icon"
                   disabled={!canvas || busy}
                   onClick={() => setMarking(true)}
                   className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-background/60 outline-none transition-colors hover:bg-background focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-60"
@@ -289,27 +309,16 @@ export function CanvasOptions({
                   disabled={!canvas || busy}
                   onChange={(event) => setDraft({ against: here, name: event.target.value })}
                   onKeyDown={(event) => {
-                    // Enter is the Save, from the field itself: a phone's keyboard has no room for a
-                    // second press, and the write is the same one.
+                    // Enter is the write, at once: a phone's keyboard has no room for a second press,
+                    // and nothing on this row asks for one.
                     if (event.key !== "Enter") return
                     event.preventDefault()
-                    saveName()
+                    writeName()
                   }}
+                  // Leaving the field writes what it holds rather than waiting the rest of the pause.
+                  onBlur={writeName}
                   className="h-11 min-w-0 flex-1 bg-transparent pr-3 text-base outline-none disabled:opacity-60"
                 />
-                {/* Drawn whether or not it can be pressed: a control that comes and goes under the
-                    words being typed is a row that moves, and an empty name's Save waiting here is
-                    what says the name is what is missing. */}
-                <Button
-                  type="button"
-                  size="sm"
-                  data-canvas-name-save
-                  className="mr-1 shrink-0 rounded-full"
-                  disabled={busy || !renaming}
-                  onClick={saveName}
-                >
-                  Save
-                </Button>
               </div>
             </section>
 
@@ -349,33 +358,36 @@ export function CanvasOptions({
             {/* Nothing where a version declares no tools and holds no grant: an empty card's fill
                 reads as a gap, which is the same noise as a sentence apologising for it. */}
             {rows.length > 0 && (
-              <Group>
-                {rows.map(({ tool, declared: current }) => {
-                  const answer = held.find((row) => row.tool === tool)?.allowed
-                  return (
-                    <SwitchRow
-                      key={tool}
-                      id={`canvas-tool-${tool}`}
-                      title={tool}
-                      data-canvas-tool={tool}
-                      subtitle={
-                        !current
-                          ? "Not declared by this version"
-                          : answer === true
-                            ? "Allowed"
-                            : answer === false
-                              ? "Not allowed"
-                              : "Not asked yet"
-                      }
-                      checked={answer === true}
-                      disabled={busy}
-                      onCheckedChange={(checked) =>
-                        void change(tool, () => onGrant(tool, checked).then(() => undefined))
-                      }
-                    />
-                  )
-                })}
-              </Group>
+              <div className="flex flex-col gap-2">
+                <Caption>Tools</Caption>
+                <Group>
+                  {rows.map(({ tool, declared: current }) => {
+                    const answer = held.find((row) => row.tool === tool)?.allowed
+                    return (
+                      <SwitchRow
+                        key={tool}
+                        id={`canvas-tool-${tool}`}
+                        title={tool}
+                        data-canvas-tool={tool}
+                        subtitle={
+                          !current
+                            ? "Not declared by this version"
+                            : answer === true
+                              ? "Allowed"
+                              : answer === false
+                                ? "Not allowed"
+                                : "Not asked yet"
+                        }
+                        checked={answer === true}
+                        disabled={busy}
+                        onCheckedChange={(checked) =>
+                          void change(tool, () => onGrant(tool, checked).then(() => undefined))
+                        }
+                      />
+                    )
+                  })}
+                </Group>
+              </div>
             )}
 
             <DestructiveButton disabled={!canvas || busy} onClick={() => setAsking(true)}>

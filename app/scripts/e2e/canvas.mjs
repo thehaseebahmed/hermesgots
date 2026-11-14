@@ -230,9 +230,10 @@ await flow(
         `(handle bottom ${gap.handle}, heading top ${gap.heading})`,
     )
     await shot("options-sheet")
-    // The mark a pinned canvas's row draws (#1065): the box at the head of the options' Name block
-    // opens the picker as a sheet on this phone, its search narrows lucide's own set, and what is
-    // picked is the record's — an icon, then an emoji, then the app's own frame mark again.
+    // The face a pinned canvas's row draws (#1065, #1074): the box at the head of the options' Name
+    // block opens the picker as a sheet on this phone, its search narrows lucide's own set, and what
+    // is picked is the record's — an icon, then the app's own frame mark again. The other tab is the
+    // thumbnail, which is one inline image on the same record.
     const grid = () => page.locator('[data-slot="canvas-mark-picker"] [data-canvas-mark-grid="icons"]')
     await page.locator("[data-canvas-mark-open]").click()
     // The icons are one chunk fetched the first time something draws one, so the grid is waited for
@@ -275,19 +276,18 @@ await flow(
     await shot("mark-icon")
     pass("the options: the picker searches lucide's icons eight to a row, and the icon picked is the mark")
 
-    // An emoji is the picker's other tab, and the mark is the character itself.
+    // Two ways and no third: the icon just picked, and the thumbnail beside it.
     await page.locator("[data-canvas-mark-open]").click()
     await grid().waitFor({ timeout: 20_000 })
-    await page.getByRole("tab", { name: "Emojis" }).click()
-    await page.getByRole("searchbox", { name: "Search emojis" }).fill("party")
-    await page.getByRole("button", { name: /^Party popper/ }).click()
-    await page.locator("[data-canvas-mark-open]").getByText("🎉").waitFor({ timeout: 20_000 })
-    pass("the options: the emoji tab's pick is the mark, drawn as the character itself")
+    assert.deepEqual(
+      await page.getByRole("tab").allTextContents(),
+      ["Icon", "Thumbnail"],
+      "the card offers an icon and a thumbnail, and nothing else",
+    )
+    pass("the options: the picker offers an icon and a thumbnail, and no third way")
 
-    // And the way back to the app's own frame mark, which is what clears the record's. Reopened, the
-    // picker stands on the tab the mark lives in — the emojis — and its clear row is under either.
-    await page.locator("[data-canvas-mark-open]").click()
-    await page.locator('[data-slot="canvas-mark-picker"]').waitFor({ timeout: 20_000 })
+    // And the way back to the app's own frame mark, which is what clears the record's — the picker
+    // just opened stands on the icons, so its clear row is under them already.
     await page.getByRole("button", { name: "Remove Icon" }).click()
     await page.locator("[data-canvas-mark-open] svg.lucide-frame").waitFor({ timeout: 20_000 })
     await page

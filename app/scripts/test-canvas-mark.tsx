@@ -21,7 +21,6 @@ import {
   botProfile,
   click,
   find,
-  findText,
   json,
   missing,
   mount,
@@ -158,13 +157,10 @@ const options = (onUpdate: (changes: Record<string, unknown>) => Promise<void>, 
 const openPicker = async () => {
   await until(async () => find("[data-canvas-options]") !== null, "the options")
   await click(find("[data-canvas-mark-open]"))
-  await until(
-    async () => find('[data-canvas-mark-grid="icons"], [data-canvas-mark-grid="emojis"]') !== null,
-    "the picker",
-  )
+  await until(async () => find('[data-canvas-mark-grid="icons"]') !== null, "the picker")
 }
 
-test("the options pick a mark, an emoji, and the app's own mark", async () => {
+test("the options pick an icon, and the app's own mark", async () => {
   const changes: Record<string, unknown>[] = []
 
   await atWidth(390, async () => {
@@ -181,19 +177,18 @@ test("the options pick a mark, an emoji, and the app's own mark", async () => {
         await until(async () => changes.length === 1, "the mark to be posted")
         assert.deepEqual(changes[0], { mark: "heart" })
 
-        // The emojis are the other tab of the same picker, and an emoji is the character itself.
+        // The two ways the card offers: the icon just picked, and the thumbnail beside it.
         await click(find("[data-canvas-mark-open]"))
         await until(async () => find('[data-slot="tabs-trigger"]') !== null, "the picker again")
-        await click(findText('[data-slot="tabs-trigger"]', "Emojis"))
-        await type(find('input[aria-label="Search emojis"]'), "party")
-        const popper = find('[data-canvas-mark-grid="emojis"] button[aria-label^="Party popper"]')
-        await until(async () => popper !== null, "the party popper")
-        await click(popper)
-        await until(async () => changes.length === 2, "the emoji to be posted")
-        assert.deepEqual(changes[1], { mark: "🎉" })
+        assert.deepEqual(
+          [...document.querySelectorAll('[data-slot="tabs-trigger"]')].map((one) =>
+            one.textContent?.trim(),
+          ),
+          ["Icon", "Thumbnail"],
+          "an icon and a thumbnail, and no third way",
+        )
 
         // And the one button under the grid removes the icon, back to the app's own frame mark.
-        await click(find("[data-canvas-mark-open]"))
         await until(async () => find("[data-canvas-mark-unset]") !== null, "the remove button")
         assert.equal(
           find("[data-canvas-mark-unset]")?.textContent?.trim(),
@@ -201,8 +196,8 @@ test("the options pick a mark, an emoji, and the app's own mark", async () => {
           "the way back says what it does",
         )
         await click(find("[data-canvas-mark-unset]"))
-        await until(async () => changes.length === 3, "the clear to be posted")
-        assert.deepEqual(changes[2], { mark: "" })
+        await until(async () => changes.length === 2, "the clear to be posted")
+        assert.deepEqual(changes[1], { mark: "" })
       },
     )
   })
@@ -231,8 +226,8 @@ test("the picker is a menu beside its box on a laptop, and a sheet below it", as
           // One name for the card, centred, at every width.
           assert.equal(
             find("[data-canvas-mark-picker] h2")?.textContent?.trim(),
-            "Canvas Icon",
-            "the card is named Canvas Icon",
+            "Canvas Appearance",
+            "the card is named Canvas Appearance",
           )
         },
       )
@@ -269,7 +264,7 @@ test("the mark's own box opens the picker, with only what the host can keep", as
         [...document.querySelectorAll("[data-slot='tabs-trigger']")].map((one) =>
           one.textContent?.trim(),
         ),
-        ["Picture"],
+        ["Thumbnail"],
         "one tab, since a mark is the field it has none for",
       )
       assert.equal(missing("[data-canvas-mark-grid='icons']"), true, "and no grid of icons")
