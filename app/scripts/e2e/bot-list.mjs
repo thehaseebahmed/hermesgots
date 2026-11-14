@@ -202,6 +202,8 @@ await flow(
     await page.getByRole("button", { name: "Open conversations" }).click()
     await page.locator(`aside, [role="dialog"]`).first().waitFor({ timeout: 10_000 })
     // The drawer draws the same row: the same 56px, the same picture on its centre line.
+    await page.locator(DRAWER_BOT_ROW(profileId)).first().waitFor({ timeout: 10_000 })
+    await settled(page)
     const drawerRow = await heightOf(DRAWER_BOT_ROW(profileId))
     assert.equal(drawerRow, 56, `the drawer's bot row is the same 56px row (${drawerRow})`)
     const drawerOffset = await pictureOffsetOf(DRAWER_BOT_ROW(profileId))
