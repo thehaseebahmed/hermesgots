@@ -599,7 +599,13 @@ export async function updateCanvas(id: string, changes: CanvasChanges) {
   if (!value) throw new Error("The host answered a change the app couldn't read.")
   const held = store.get().details[id]
   const record = toCanvas(value, profile.id)
-  put(profile, held ? { ...held, ...record } : record)
+  // A field the host holds nothing in — a picture or a mark its reader cleared — is no field on the
+  // record it answers, and the copy this device draws still carries the old one. Folding alone would
+  // leave it there until the next read, so a change that named the field empty takes it off.
+  const folded = held ? { ...held, ...record } : record
+  for (const cleared of ["image", "mark"] as const)
+    if (changes[cleared] === "") delete folded[cleared]
+  put(profile, folded)
 }
 
 /**

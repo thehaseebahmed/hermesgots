@@ -618,6 +618,14 @@ test(
       assert.match(words, /notes\.list/, "the tool the host holds an answer for is listed")
       assert.match(words, /Not declared by this version/, "and said to be undeclared now")
 
+      // The card the rows sit in is named, so the switches under it are the canvas's tools and not
+      // another set of the canvas's own settings.
+      const caption = [...document.querySelectorAll("[data-canvas-options] p")].find(
+        (one) => one.textContent?.trim() === "Tools",
+      )
+      assert.ok(caption, "the tools' card is titled")
+      assert.equal(caption!.nextElementSibling?.hasAttribute("data-settings-group"), true, "over it")
+
       const switches = toolSwitches()
       assert.equal(switches.length, 2, "one row per tool of the union")
       await click(switches[1])
@@ -675,10 +683,8 @@ test(
       await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
 
       await click(find("[data-canvas-options-open]"))
-      await click(find("[data-canvas-name-open]"))
       await until(async () => find("#canvas-name") !== null, "the name field")
       await type(find("#canvas-name"), "Split the bill")
-      await click(findText("button", "Save"))
       await until(
         async () => wordsOf(find('[data-slot="header-title"]')).includes("Split the bill"),
         "the header to wear the new name",
@@ -692,6 +698,9 @@ test(
       assert.deepStrictEqual(host.changes, [
         { method: "POST", body: { title: "Split the bill" } },
       ])
+      // The sheet disables every control while a write is out; the name's own write has to land
+      // before the next one is taken.
+      await settle()
 
       await click(find('[data-canvas-options] [id="canvas-pinned"]'))
       await until(async () => host.changes?.length === 2, "the pin to be posted")
@@ -705,6 +714,98 @@ test(
       await click(findText('[role="alertdialog"] button', "Delete"))
       await until(async () => host.changes?.[2]?.method === "DELETE", "the delete to be posted")
       assert.strictEqual(host.removed, true, "the canvas is gone from its host")
+    })
+  }),
+)
+
+test(
+  "the canvas's name writes itself once the typing stops",
+  atWidth(390, async () => {
+    const host: Host = { tools: [], grants: {}, clock: 0, calls: [], answers: [], changes: [] }
+    serve(host, "c12")
+    await seedCanvas()
+    await mount(screen("c12"), async () => {
+      await until(async () => find("iframe[data-canvas-frame]") !== null, "the canvas's frame")
+      await click(find("[data-canvas-options-open]"))
+      await until(() => find("[data-canvas-options]") !== null, "the options to open")
+      await settle()
+
+      // One surface: the sheet holds the field itself, and no row opens a second popup over it.
+      const field = () => find("[data-canvas-options] #canvas-name") as HTMLInputElement | null
+      assert.ok(field(), "the sheet holds the canvas's name in a field of its own")
+      assert.equal(field()!.value, TITLE, "holding the record's own name")
+      assert.equal(
+        wordsOf(find("[data-canvas-options] label[for='canvas-name']")),
+        "Name",
+        "under the row's own label, the way a project's Edit screen draws its name",
+      )
+      assert.equal(missing("[data-canvas-name-open]"), true, "and no row opens a surface of its own")
+      assert.equal(findAll("[data-popup-form]").length, 1, "one popup is on screen, never two")
+      assert.equal(
+        document.activeElement === field(),
+        true,
+        "the field takes the sheet's focus, so the name is a tap away",
+      )
+      assert.equal(field()!.maxLength, 60, "with the host's cap on what can be typed")
+      assert.equal(
+        missing("[data-canvas-name-save]"),
+        true,
+        "and nothing to press: the name writes itself",
+      )
+
+      // Typed, it goes a pause later, as one line: the fold is the host's own, applied before it goes.
+      await type(field(), "  Split   the  bill ")
+      assert.equal(host.changes?.length ?? 0, 0, "nothing is written in the same breath as the typing")
+      await until(async () => host.changes?.[0] !== undefined, "the name to write itself")
+      assert.deepStrictEqual(
+        host.changes?.[0],
+        { method: "POST", body: { title: "Split the bill" } },
+        "whitespace folded, as the host writes it",
+      )
+      assert.equal(
+        field()?.value,
+        "  Split   the  bill ",
+        "and the field keeps the words it was left holding, never snapping mid-edit",
+      )
+
+      // A name of nothing is no name at all: the pause passes and nothing goes out.
+      await type(field(), "   ")
+      await settle()
+      assert.equal(host.changes?.length, 1, "spaces alone are no write")
+
+      // Enter writes at once, without waiting the pause out.
+      await type(field(), "Bill split")
+      await act(async () => {
+        field()!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }))
+      })
+      await until(async () => host.changes?.[1] !== undefined, "the Enter to write")
+      assert.deepStrictEqual(host.changes?.[1], { method: "POST", body: { title: "Bill split" } })
+
+      // Leaving the field does the same, so a tap on another row is no lost name.
+      await type(field(), "Deck checklist")
+      await act(async () => {
+        field()!.blur()
+      })
+      await until(async () => host.changes?.[2] !== undefined, "the blur to write")
+      assert.deepStrictEqual(host.changes?.[2], {
+        method: "POST",
+        body: { title: "Deck checklist" },
+      })
+
+      // And closing the sheet sends what is still waiting: a name typed and swiped away is kept.
+      await type(field(), "Deck list")
+      await act(async () => {
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
+      })
+      await until(async () => find("#canvas-name") === null, "the sheet to close")
+      await until(async () => host.changes?.[3] !== undefined, "the close to write")
+      assert.deepStrictEqual(host.changes?.[3], { method: "POST", body: { title: "Deck list" } })
+
+      // Opened again, the field draws the record the host holds — no draft outlives the sheet.
+      await click(find("[data-canvas-options-open]"))
+      await until(() => find("[data-canvas-options]") !== null, "the options to open again")
+      await settle()
+      assert.equal(field()?.value, "Deck list", "the record's own words, and not a draft")
     })
   }),
 )
@@ -779,6 +880,11 @@ test(
       const block = find("[data-canvas-name-block]")
       assert.ok(block, "the name's own block")
       assert.match(wordsOf(block), /Name/, "the block holds the canvas's name")
+      assert.doesNotMatch(
+        wordsOf(find("[data-canvas-options]")),
+        /Tools/,
+        "and no card is titled for tools a version never declared",
+      )
       const groups = findAll("[data-canvas-options] [data-settings-group]")
       assert.equal(groups.length, 1, "one group: the switches, and no card for the name")
       assert.match(

@@ -392,6 +392,12 @@ export const FLOWS = {
     mock: "polling",
     about: "An idle open chat makes at most 12 requests in 65s",
   },
+  "code-requests": {
+    script: "e2e/code-requests.mjs",
+    about:
+      "What Code asks its server, counted against a budget: the list opening, left alone, put away and brought back, and the same for a session opened from it; and how stale the list is when the host changes under it",
+    alsoPolling: true,
+  },
   openui: {
     script: "e2e/openui.mjs",
     about:
@@ -510,7 +516,7 @@ export const FLOWS = {
   canvas: {
     script: "e2e/canvas.mjs",
     about:
-      "A canvas on a phone: made from a prompt, its page building under a non-modal half sheet, a box ticked above that sheet and kept through an edit sent from it and through Undo, a point tagged on the page while the sheet is up, a page that sets location to an outside URL staying put, the mark picker opened from the mark's box in the options' Name block as a sheet, lucide's icons eight to a row with an icon, an emoji and the clear button picked from it, and the sheet swiped down to leave the page whole",
+      "A canvas on a phone: made from a prompt, its page building under a non-modal half sheet, a box ticked above that sheet and kept through an edit sent from it and through Undo, a point tagged on the page while the sheet is up, a page that sets location to an outside URL staying put, the face picker opened from the box in the options' Name block as a sheet, lucide's icons eight to a row with an icon and the clear button picked from it, and its two ways measured as just an icon and a thumbnail, and the sheet swiped down to leave the page whole",
   },
   submission: {
     script: "regression-submission.mjs",

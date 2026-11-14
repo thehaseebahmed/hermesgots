@@ -1,5 +1,5 @@
 import { pluginRoot, serverRoot } from "../lib/host-url.ts"
-import { READ_TIMEOUT_MS } from "../lib/freshness.ts"
+import { READ_TIMEOUT_MS, RUN_STREAM_IDLE_MS } from "../lib/freshness.ts"
 import { ask, sawFrame, sawWords, sent, sentFrom } from "../lib/net-watch.ts"
 import { SKIPPED } from "../lib/clarify.ts"
 import { promptOf } from "../lib/run-prompt.ts"
@@ -61,6 +61,12 @@ export class HostRefused extends Error {}
  * The current chat screen answers the same 404 by polling instead (`chat.ts`).
  */
 export class RunGone extends Error {}
+/**
+ * A run's stream that said nothing for longer than the host's keepalive allows: the connection is
+ * dead without anything having closed it. Not a failed page — the run may be fine — so the follower
+ * lets go and the transcript and the host's run list say where the turn stands.
+ */
+export class RunStalled extends Error {}
 /**
  * A transcript walk the host would not move on: it answered a page with the rows it had just
  * answered. The walk stops there rather than asking for the same page for ever, which a host that
@@ -417,12 +423,16 @@ export async function respond(connection: Connection, waiting: Waiting, value: s
   ensure(response)
 }
 
-/** Follows a run's events until the host closes the stream. */
+/**
+ * Follows a run's events until the host closes the stream, or until it has said nothing — not an
+ * event, not a keepalive — for `idleMs`, which is a connection that died unnoticed (`RunStalled`).
+ */
 export async function followRun(
   connection: Connection,
   runId: string,
   onEvent: (event: RunEvent) => void,
   signal?: AbortSignal,
+  idleMs = RUN_STREAM_IDLE_MS,
 ) {
   const response = await ask(`${root(connection)}/v1/runs/${encodeURIComponent(runId)}/events`, {
     headers: headers(connection),
@@ -436,7 +446,28 @@ export async function followRun(
   let pending = ""
   let first = true
   for (;;) {
-    const { value, done } = await reader.read()
+    let quiet: ReturnType<typeof setTimeout> | undefined
+    let stop = () => {}
+    // The read is raced rather than trusted to end: a dead connection never rejects it, and neither
+    // does an abort on a body whose connection is no longer listening.
+    const ended = new Promise<never>((_, reject) => {
+      quiet = setTimeout(() => reject(new RunStalled(`Run ${runId}'s stream went silent.`)), idleMs)
+      stop = () => reject(signal?.reason ?? new DOMException("Aborted", "AbortError"))
+      if (signal?.aborted) stop()
+      else signal?.addEventListener("abort", stop, { once: true })
+    })
+    let chunk: ReadableStreamReadResult<string>
+    try {
+      chunk = await Promise.race([reader.read(), ended])
+    } catch (error) {
+      // Lets go of the connection, which may be dead without anything having noticed.
+      void reader.cancel().catch(() => undefined)
+      throw error
+    } finally {
+      clearTimeout(quiet)
+      signal?.removeEventListener("abort", stop)
+    }
+    const { value, done } = chunk
     if (done) return
     pending += value
     const blocks = pending.split("\n\n")

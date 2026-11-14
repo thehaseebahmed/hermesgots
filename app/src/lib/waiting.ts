@@ -60,20 +60,52 @@ function notify() {
  * busy host starting another bot's run or a dropped connection says nothing about what runs, so the
  * last answer stands instead of clearing every mark of that server.
  */
-export async function readLiveRuns(server: Server): Promise<LiveRuns | undefined> {
-  const next = await getLiveRuns(server, AbortSignal.timeout(READ_TIMEOUT_MS)).catch(
-    quietly("Reading runs/live"),
-  )
-  if (next) {
-    answers.set(connectionKey(server), next)
-    notify()
-  }
-  return next
+export function readLiveRuns(
+  server: Server,
+  { join = true }: { join?: boolean } = {},
+): Promise<LiveRuns | undefined> {
+  const key = connectionKey(server)
+  // One read per server at a time for everything that asks in the same breath: the shared poll, a
+  // chat opening and a stream's event land together far more often than apart. A caller about to
+  // act on "the host lists no run" asks afresh (`join: false`): a read that left before the run
+  // began would answer for a moment that has passed.
+  const out = join ? asking.get(key) : undefined
+  if (out) return out
+  const read = getLiveRuns(server, AbortSignal.timeout(READ_TIMEOUT_MS))
+    .catch(quietly("Reading runs/live"))
+    .then((next) => {
+      if (next) {
+        answers.set(key, next)
+        notify()
+      }
+      return next ?? undefined
+    })
+    .finally(() => {
+      if (asking.get(key) === read) asking.delete(key)
+    })
+  asking.set(key, read)
+  return read
+}
+
+/** The reads still out, by server, so a second ask joins the first. */
+const asking = new Map<string, Promise<LiveRuns | undefined>>()
+
+/**
+ * The run the host has in flight for a session, asked through the shared read so every screen gets
+ * the answer: its id, null when the host says there is none, and undefined when it couldn't say.
+ */
+export async function readLiveRunOf(
+  server: Server,
+  sessionId: string,
+  options?: { join?: boolean },
+): Promise<string | null | undefined> {
+  const answer = await readLiveRuns(server, options)
+  return answer ? (answer.runIds[sessionId] ?? null) : undefined
 }
 
 async function poll(only: Server[] = servers) {
   if (document.visibilityState !== "visible") return
-  await Promise.all(only.map(readLiveRuns))
+  await Promise.all(only.map((server) => readLiveRuns(server)))
   if (only.length) markResume("runs-live-end", { requests: only.length })
   notify()
 }

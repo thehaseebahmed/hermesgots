@@ -989,6 +989,19 @@ export function fakeHost(
     if (!broke) throw new Error("No open stream to break.")
   }
 
+  /**
+   * Every open event stream goes dead without closing or failing, as a connection does behind a
+   * phone that slept: the reader waits on, and nothing the run does afterwards reaches it.
+   */
+  function silenceConnections() {
+    let silenced = 0
+    for (const state of runs.values()) {
+      silenced += state.streams.size
+      state.streams.clear()
+    }
+    if (!silenced) throw new Error("No open stream to silence.")
+  }
+
   /** A turn another device sent: the host runs it with no screen of ours watching. */
   const startElsewhere = (input: string) => {
     const { id, run } = start(input)
@@ -1090,6 +1103,7 @@ export function fakeHost(
     session,
     dropConnections,
     breakConnections,
+    silenceConnections,
     startElsewhere,
     retireLatest,
   }

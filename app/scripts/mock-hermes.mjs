@@ -106,7 +106,8 @@
 // closes them and removes the trees like …/workspace/remove. POST …/closes records one and answers
 // 202 at once, GET …/closes reads the report, and GET /api/plugins/gots/closes lists the recent
 // ones — MOCK_CLOSE_MS holds one open that long. MOCK_PRS_FAIL=1 (or
-// POST /__mock/prs { fail }) is a host that can't reach GitHub: …/prs answers an error rather than
+// POST /__mock/prs { fail }; or { session, checks } to move a session's live PR's checks with no
+// turn and no event, as GitHub does) is a host that can't reach GitHub: …/prs answers an error rather than
 // a list, so the app keeps the pull requests it already knows. GET /api/plugins/gots/runs/live lists the sessions with
 // a run in flight, why each one waiting on the user waits, and which are still owed the wake turn of
 // a finished subagent (`waking`, keyed like the runs — the window between the turn ending and the
@@ -3936,6 +3937,8 @@ function startRun(req, body, options = {}) {
     async ask(questions) {
       const clarify_id = randomUUID().replace(/-/g, "").slice(0, 12)
       run.status = "waiting_for_approval"
+      // The plugin notes a `runs` change for a question as it does for an approval (`clarify.py`).
+      noteEvent("runs", run.sessionId)
       // Hermes 0.22.5 asks one prompt per question on its own route (`POST /v1/runs/{id}/clarify`
       // with `{ request_id, execution_generation, answer }`); the plugin's older flow asks the call
       // as a whole (`POST /api/plugins/gots/runs/{id}/clarify` with `{ clarify_id, answers }`).
@@ -3992,6 +3995,7 @@ function startRun(req, body, options = {}) {
       pendingClarifies.delete(id)
       run.status = "running"
       run.clarify = undefined
+      noteEvent("runs", run.sessionId)
       push("clarify.responded", { clarify_id, outcome, answers })
       return { answers, outcome }
     },
@@ -6252,7 +6256,15 @@ http
     // Dev only: POST { fail } makes the plugin's read of a session's pull requests fail, like a
     // host that can't reach GitHub (also from the start, with MOCK_PRS_FAIL=1).
     if (url.pathname === "/__mock/prs" && req.method === "POST") {
-      const { fail } = await readBody(req)
+      const { fail, session, checks } = await readBody(req)
+      // `{ session, checks }` moves a session's live pull request's checks with no turn and no
+      // event, as GitHub does when a check finishes: nothing on the host says it happened.
+      if (session !== undefined) {
+        const workspace = projectSessions.get(String(session))
+        if (!workspace) return json(res, 404, { error: { message: "No such session." } })
+        workspace.checksOverride = checks ?? undefined
+        return json(res, 200, { ok: true })
+      }
       PRS_FAIL = !!fail
       return json(res, 200, { ok: true })
     }
@@ -6435,11 +6447,8 @@ http
         // A finished pull request's checks don't matter any more, so only the live one has them.
         checks: pr.state
           ? null
-          : said("break")
-            ? "failure"
-            : checksRunning
-              ? "pending"
-              : "success",
+          : (workspace.checksOverride ??
+            (said("break") ? "failure" : checksRunning ? "pending" : "success")),
       }))
       // Like the plugin: a merge of the live one resolves the session in the chat list, once.
       if (state === "merged" && !workspace.mergeResolved) {
@@ -6561,6 +6570,8 @@ http
           return json(res, 404, { error: { message: "This session has no workspace yet" } })
         workspace.mode = mode
         workspace.plan_pending = 0
+        // The plugin notes a `runs` change for a mode, as it does for a plan left pending.
+        noteEvent("runs", id)
         // Switching to Auto answers what a run of the session already waits on, like the plugin.
         if (mode === "auto")
           for (const run of runs.values())
