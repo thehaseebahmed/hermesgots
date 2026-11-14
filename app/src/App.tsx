@@ -35,12 +35,8 @@ const MeetingPage = lazy(() =>
   import("@/routes/meetings").then((m) => ({ default: m.MeetingPage })),
 )
 const TopicPage = lazy(() => import("@/routes/meetings").then((m) => ({ default: m.TopicPage })))
-const CanvasGate = lazy(() =>
-  import("@/routes/canvas").then((m) => ({ default: m.CanvasGate })),
-)
-const CanvasPage = lazy(() =>
-  import("@/routes/canvas").then((m) => ({ default: m.CanvasPage })),
-)
+const CanvasGate = lazy(() => import("@/routes/canvas").then((m) => ({ default: m.CanvasGate })))
+const CanvasPage = lazy(() => import("@/routes/canvas").then((m) => ({ default: m.CanvasPage })))
 const CanvasView = lazy(() => import("@/routes/canvas").then((m) => ({ default: m.CanvasView })))
 const CanvasEdit = lazy(() => import("@/routes/canvas").then((m) => ({ default: m.CanvasEdit })))
 const ResearchPage = lazy(() =>
@@ -65,6 +61,9 @@ const ChatNextPage = lazy(() =>
 )
 const MarkdownDemoPage = lazy(() =>
   import("@/routes/demos/markdown").then((m) => ({ default: m.MarkdownDemoPage })),
+)
+const StyleGuidePage = lazy(() =>
+  import("@/routes/docs/style-guide").then((m) => ({ default: m.StyleGuidePage })),
 )
 const OpenUIReferencePage = lazy(() =>
   import("@/routes/docs/open-ui").then((m) => ({ default: m.OpenUIReferencePage })),
@@ -158,6 +157,7 @@ function AppRoutes() {
         <Route path="share" element={<SharePage />} />
         <Route path="demos/markdown" element={<MarkdownDemoPage />} />
         <Route path="docs/open-ui" element={<OpenUIReferencePage />} />
+        <Route path="docs/style-guide" element={<StyleGuidePage />} />
         {import.meta.env.DEV ? <Route path="next" element={<ChatNextPage />} /> : null}
         <Route path="*" element={<ChatPage slot="route" />} />
       </Route>

@@ -699,6 +699,12 @@ export function DeveloperSettings() {
           title="Component reference"
           subtitle="The blocks a bot can draw"
         />
+        <LinkRow
+          to="/docs/style-guide"
+          leading={<PaletteIcon className="size-5 shrink-0 text-muted-foreground" />}
+          title="Style guide"
+          subtitle="Tokens from DESIGN.md and the app's components"
+        />
       </Group>
       <Button
         variant="ghost"

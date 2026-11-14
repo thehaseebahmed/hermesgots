@@ -184,5 +184,7 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: { "@": path.resolve(import.meta.dirname, "./src") },
     },
+    // The style guide reads the repository's DESIGN.md, one level above the app.
+    server: { fs: { allow: [".."] } },
   }
 })
