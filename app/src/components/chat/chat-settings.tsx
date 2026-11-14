@@ -123,7 +123,9 @@ export function ChatSettings({
                 </button>
               )}
             </Group>
-            {!chat.main && <DestructiveButton onClick={() => setDeleting(true)}>Delete chat</DestructiveButton>}
+            {!chat.main && (
+              <DestructiveButton onClick={() => setDeleting(true)}>Delete chat</DestructiveButton>
+            )}
           </div>
         </PopupContent>
       </Popup>

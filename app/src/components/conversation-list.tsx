@@ -422,7 +422,7 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
                 className={({ isActive }) =>
                   collapsed
                     ? railClass({ isActive: isActive || owner === bot.id })
-                    : cn(rowClass({ isActive: isActive || owner === bot.id }), "min-h-14 py-2")
+                    : rowClass({ isActive: isActive || owner === bot.id })
                 }
               >
                 <span className="relative shrink-0">
