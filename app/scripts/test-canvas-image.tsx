@@ -72,7 +72,7 @@ function standInFor(weigh: (edge: number) => number | null) {
       drawn += 1
     },
   })) as unknown as typeof prototype.getContext
-  prototype.toBlob = (function (this: HTMLCanvasElement, callback: BlobCallback) {
+  prototype.toBlob = function (this: HTMLCanvasElement, callback: BlobCallback) {
     const edge = Math.max(this.width, this.height)
     edges.push(edge)
     const bytes = weigh(edge)
@@ -80,7 +80,7 @@ function standInFor(weigh: (edge: number) => number | null) {
     // The bytes are the weight the case chose, at the long edge it was asked for: a JPEG of a
     // photograph, in the shape the reader's own browser would hand one back.
     callback(new File([new Uint8Array(bytes).fill(7)], "picture.jpg", { type: "image/jpeg" }))
-  }) as unknown as typeof prototype.toBlob
+  } as unknown as typeof prototype.toBlob
 
   return {
     edges,

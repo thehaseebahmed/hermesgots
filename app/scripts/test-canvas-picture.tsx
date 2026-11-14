@@ -14,14 +14,20 @@ import { act } from "react"
 import { MemoryRouter } from "react-router"
 
 import { CanvasOptions } from "@/components/canvas-consent"
+import { cachedCanvas } from "@/lib/canvas-cache"
+import { refreshCanvas, updateCanvas } from "@/lib/canvases"
+import { db } from "@/lib/db"
 
 import {
   atWidth,
+  botProfile,
   click,
   find,
   findText,
+  json,
   missing,
   mount,
+  seedSettings,
   settle,
   until,
   wordsOf,
@@ -110,8 +116,16 @@ test("the picker's Picture tab posts the chosen picture as the record's image", 
         )
         assert.match(wordsOf(find("[data-canvas-picture]")), /No picture yet/)
         assert.equal(missing("[data-canvas-picture-unset]"), true, "nothing to remove yet")
-        assert.equal(missing('input[aria-label="Search icons"]'), true, "the icon search stands down")
-        assert.equal(missing('input[aria-label="Search emojis"]'), true, "and so does the emoji one")
+        assert.equal(
+          missing('input[aria-label="Search icons"]'),
+          true,
+          "the icon search stands down",
+        )
+        assert.equal(
+          missing('input[aria-label="Search emojis"]'),
+          true,
+          "and so does the emoji one",
+        )
         assert.ok(find("[data-canvas-picture-choose]"), "the way to give it one")
 
         await pick(new File([PNG], "tile.png", { type: "image/png" }))
@@ -134,7 +148,11 @@ test("the tab draws the picture the record holds, and its Remove clears the fiel
       await openPictureTab()
 
       const preview = find("[data-canvas-picture]")
-      assert.equal(preview?.getAttribute("data-canvas-picture"), "picture", "the record's own picture")
+      assert.equal(
+        preview?.getAttribute("data-canvas-picture"),
+        "picture",
+        "the record's own picture",
+      )
       assert.equal(
         preview?.querySelector("img")?.getAttribute("src"),
         PICTURE,
@@ -194,4 +212,53 @@ test("a phone and a desktop draw the same three tabs and the same picture tab", 
     })
   await draw(390)
   await draw(1440)
+})
+
+/**
+ * The clear is a write whose answer carries no `image` at all — the host's record has no field for a
+ * picture it no longer holds — so the copy this device keeps is what the clear has to reach: folded
+ * over the old copy, a record that says nothing about the picture would leave it there, and a canvas
+ * opened with the host away would draw a picture its reader removed.
+ */
+test("clearing the picture takes it off the copy this device keeps", async () => {
+  let image: string | undefined = PICTURE
+  const record = () => ({
+    ...PLAIN,
+    id: "p9",
+    at: image ? 20 : 21,
+    ...(image ? { image } : {}),
+  })
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input))
+    if (url.pathname.endsWith("/info")) return json({ version: "0.114.0", features: ["canvas"] })
+    if (/\/canvases\/[^/]+$/.test(url.pathname)) {
+      if (init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { image?: string }
+        if (body.image === "") image = undefined
+        return json({ object: "gots.canvas", canvas: record() })
+      }
+      return json({ object: "gots.canvas", canvas: { ...record(), html: "<h1>Deck</h1>" } })
+    }
+    if (url.pathname.endsWith("/canvases"))
+      return json({ object: "gots.canvases", canvases: [record()] })
+    return json({ error: { message: "no route" } }, 404)
+  }) as unknown as typeof fetch
+
+  await seedSettings({ activeProfileId: "bot-1" })
+  await db.profiles.clear()
+  await db.profiles.put(botProfile("canvas-picture"))
+  await refreshCanvas("p9")
+  const bot = (await db.profiles.get("bot-1"))!
+  assert.equal(
+    (await cachedCanvas(bot, "p9"))?.image,
+    PICTURE,
+    "the copy this device keeps holds the picture",
+  )
+
+  await updateCanvas("p9", { image: "" })
+  assert.equal(
+    (await cachedCanvas(bot, "p9"))?.image,
+    undefined,
+    "and the clear takes it off that copy, not only off the host",
+  )
 })

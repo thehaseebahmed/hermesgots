@@ -11,11 +11,7 @@ import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup
 import { CanvasMark } from "@/components/canvas-mark"
 import { CanvasMarkPicker } from "@/components/canvas-mark-picker"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
-import {
-  DestructiveButton,
-  Group,
-  SwitchRow,
-} from "@/components/settings-chrome"
+import { DestructiveButton, Group, SwitchRow } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
 import {
   AlertDialog,
@@ -189,8 +185,6 @@ export function CanvasOptions({
   // The mark's own box in the name block: the picker opens anchored to it, so a laptop draws the
   // card beside it (the model selector's rule) and a phone draws a sheet.
   const markButton = useRef<HTMLButtonElement>(null)
-  // The name's field, focused when the sheet opens: the sheet is the screen the reader came to for
-  // the name, and its first row is the field.
   const nameField = useRef<HTMLInputElement>(null)
   const busy = saving !== null
   const deleting = saving === "delete"

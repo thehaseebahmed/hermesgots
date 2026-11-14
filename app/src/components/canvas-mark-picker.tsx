@@ -92,7 +92,7 @@ function MarkPicker({
   const pictureField = useRef<HTMLInputElement>(null)
   const busy = saving || reading
 
-  /** Writes the mark the picker means, and answers whether the host took it. */
+  /** Posts a change to the record, and answers whether the host took it. */
   const write = async (changes: CanvasChanges) => {
     if (saving || !canvas) return false
     setSaving(true)
@@ -107,9 +107,12 @@ function MarkPicker({
     }
   }
 
-  /** A pick is the answer to what the picker was opened for, so the picker closes on it. */
-  const pick = async (mark: string) => {
-    if (await write({ mark })) onDone()
+  /**
+   * Writes what the reader chose, and closes on it: the choice is the answer to what the picker was
+   * opened for, and the host's answer is what the grid and the tile redraw from.
+   */
+  const commit = async (changes: CanvasChanges) => {
+    if (await write(changes)) onDone()
   }
 
   /**
@@ -123,7 +126,7 @@ function MarkPicker({
     setReading(true)
     try {
       const image = await inlinePicture(file)
-      if (await write({ image })) onDone()
+      await commit({ image })
     } catch (failure) {
       setSaid(failure instanceof Error ? failure.message : UNREADABLE_PICTURE)
     } finally {
@@ -135,7 +138,7 @@ function MarkPicker({
   const clearPicture = async () => {
     if (busy) return
     setSaid(null)
-    if (await write({ image: "" })) onDone()
+    await commit({ image: "" })
   }
 
   const grid = useMemo(() => {
@@ -190,7 +193,7 @@ function MarkPicker({
                   label={icon.words}
                   selected={chosen === name}
                   disabled={busy || !canvas}
-                  onPick={() => void pick(name)}
+                  onPick={() => void commit({ mark: name })}
                 >
                   <icon.Icon className="size-5 text-muted-foreground" />
                 </Cell>
@@ -216,7 +219,7 @@ function MarkPicker({
               label={emoji.words}
               selected={chosen === emoji.glyph}
               disabled={busy || !canvas}
-              onPick={() => void pick(emoji.glyph)}
+              onPick={() => void commit({ mark: emoji.glyph })}
             >
               <span className="text-xl leading-none">{emoji.glyph}</span>
             </Cell>
@@ -227,10 +230,6 @@ function MarkPicker({
         )}
       </TabsContent>
 
-      {/*
-        The picture is the canvas's face in the list, and it wins over the mark wherever both exist:
-        it sits on the record as one inline image, so a canvas draws the same one on every device.
-      */}
       <TabsContent value="picture" className="min-h-0 overflow-y-auto px-4 pt-3">
         <div className="flex flex-col gap-3">
           <div
@@ -246,8 +245,8 @@ function MarkPicker({
             )}
           </div>
           <p className="text-sm text-muted-foreground">
-            The Canvas list draws this for the canvas, over any icon. It's kept on the canvas itself,
-            so every device draws the same one.
+            The Canvas list draws this for the canvas, over any icon. It's kept on the canvas
+            itself, so every device draws the same one.
           </p>
           {said && (
             <p data-canvas-picture-said className="text-sm text-destructive-ink">
@@ -262,7 +261,11 @@ function MarkPicker({
             disabled={busy || !canvas}
             onClick={() => pictureField.current?.click()}
           >
-            {reading ? "Reading it…" : canvas?.image ? "Choose another picture" : "Choose a picture"}
+            {reading
+              ? "Reading it…"
+              : canvas?.image
+                ? "Choose another picture"
+                : "Choose a picture"}
           </Button>
           {canvas?.image && (
             <Button
@@ -303,7 +306,7 @@ function MarkPicker({
             data-canvas-mark-unset
             className="w-full"
             disabled={busy || !canvas || !chosen}
-            onClick={() => void pick("")}
+            onClick={() => void commit({ mark: "" })}
           >
             Remove Icon
           </Button>

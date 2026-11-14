@@ -40,31 +40,20 @@ function dataUrlOf(blob: Blob): Promise<string> {
   })
 }
 
-/** The picture as a JPEG no longer than `edge` on its long side. */
-async function shrunk(file: File, edge: number): Promise<string> {
-  let bitmap: ImageBitmap
-  try {
-    bitmap = await createImageBitmap(file)
-  } catch {
-    throw new Error(UNREADABLE_PICTURE)
-  }
-  try {
-    const scale = Math.min(1, edge / Math.max(bitmap.width, bitmap.height))
-    const canvas = document.createElement("canvas")
-    canvas.width = Math.max(1, Math.round(bitmap.width * scale))
-    canvas.height = Math.max(1, Math.round(bitmap.height * scale))
-    const context = canvas.getContext("2d")
-    if (!context) throw new Error(UNREADABLE_PICTURE)
-    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, "image/jpeg", QUALITY),
-    )
-    if (!blob) throw new Error(UNREADABLE_PICTURE)
-    return await dataUrlOf(blob)
-  } finally {
-    // A decoded picture holds its memory until it is let go, and a list of them would hold a lot.
-    bitmap.close()
-  }
+/** One bitmap as a JPEG no longer than `edge` on its long side. */
+async function jpegOf(bitmap: ImageBitmap, edge: number): Promise<string> {
+  const scale = Math.min(1, edge / Math.max(bitmap.width, bitmap.height))
+  const canvas = document.createElement("canvas")
+  canvas.width = Math.max(1, Math.round(bitmap.width * scale))
+  canvas.height = Math.max(1, Math.round(bitmap.height * scale))
+  const context = canvas.getContext("2d")
+  if (!context) throw new Error(UNREADABLE_PICTURE)
+  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height)
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, "image/jpeg", QUALITY),
+  )
+  if (!blob) throw new Error(UNREADABLE_PICTURE)
+  return await dataUrlOf(blob)
 }
 
 /**
@@ -75,9 +64,22 @@ export async function inlinePicture(file: File): Promise<string> {
   if (!file.type.startsWith("image/")) throw new Error(NOT_A_PICTURE)
   const whole = await dataUrlOf(file)
   if (whole.length <= IMAGE_CHARS) return whole
-  for (const edge of EDGES) {
-    const smaller = await shrunk(file, edge)
-    if (smaller.length <= IMAGE_CHARS) return smaller
+  // Decoded once and cut at each edge, rather than decoded again for the second: a photograph is
+  // tens of megabytes of pixels, and both edges are the same picture.
+  let bitmap: ImageBitmap
+  try {
+    bitmap = await createImageBitmap(file)
+  } catch {
+    throw new Error(UNREADABLE_PICTURE)
+  }
+  try {
+    for (const edge of EDGES) {
+      const smaller = await jpegOf(bitmap, edge)
+      if (smaller.length <= IMAGE_CHARS) return smaller
+    }
+  } finally {
+    // A decoded picture holds its memory until it is let go, and a list of them would hold a lot.
+    bitmap.close()
   }
   throw new Error(PICTURE_TOO_BIG)
 }
