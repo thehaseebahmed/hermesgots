@@ -8,11 +8,13 @@
 /** How well a query matched: 2 for the words run together somewhere, 1 for letters in order, 0 none. */
 export type MatchRank = 2 | 1 | 0
 
-/** A haystack with the noise taken out: lower case, and punctuation read as a space. */
+/** A haystack with the noise taken out: accents folded, lower case, and anything that isn't a letter or a number read as a space. */
 function plain(text: string) {
   return text
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim()
 }
 
