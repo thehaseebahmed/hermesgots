@@ -3,7 +3,6 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { matchPath, useLocation } from "react-router"
 
 import { db } from "@/lib/db"
-import { listsAsChat } from "@/lib/lists-as-chat"
 import { useLarge, useXLarge } from "@/lib/media"
 import { useSidebarCollapsed } from "@/lib/sidebar"
 
@@ -90,9 +89,11 @@ export interface BotPane extends FeaturePane {
  * its address's row, and the list's own links say which bot they are for in `state.bot`, so the
  * lane holds while the row loads.
  *
- * A project session, a room and a canvas are none of a bot's list — each belongs to its own
- * screen's pane — which is why this asks `listsAsChat`, and why the shell asks Code first (ADR
- * 0115).
+ * Everything the list draws is a row of it — the bot's chats, the rooms its roster seats and its
+ * routines' runs — so each opens beside it; a project session is Code's and a canvas is its own
+ * screen's, which is why neither answers here (ADR 0115). A room's record names its Host and not the
+ * bot whose list it was picked from, so the state a row carries is read before the record's own
+ * owner: the list the reader was looking at is the one that stays.
  */
 export function useBotChatsPane(enabled: boolean | undefined): BotPane | undefined {
   const split = useSplit()
@@ -101,7 +102,8 @@ export function useBotChatsPane(enabled: boolean | undefined): BotPane | undefin
   // Tagged with the id it ran for, since a new id still sees the last answer for a moment.
   const read = useLiveQuery(async () => {
     const found = id ? await db.conversations.get(id) : undefined
-    return { id, profileId: found && listsAsChat(found) ? found.profileId : undefined }
+    const listed = Boolean(found && !found.projectId && !found.canvasId)
+    return { id, profileId: listed ? found!.profileId : undefined }
   }, [id])
   if (!split || !enabled) return undefined
   // A bot's own screen, and everything the list opens over it: the splat matches the bare address
@@ -109,8 +111,9 @@ export function useBotChatsPane(enabled: boolean | undefined): BotPane | undefin
   const own = matchPath("/b/:profileId/*", pathname)
   if (own) return { open: true, profileId: own.params.profileId ?? "" }
   if (!id) return undefined
+  const from = (state as { bot?: string } | null)?.bot
   const answered = read?.id === id ? read : undefined
-  const profileId = answered ? answered.profileId : (state as { bot?: string } | null)?.bot
+  const profileId = from ?? answered?.profileId
   return profileId ? { open: true, selected: id, profileId } : undefined
 }
 

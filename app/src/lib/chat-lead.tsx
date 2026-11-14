@@ -74,6 +74,8 @@ export function useChatLead({
     <BackButton label={label} onClick={() => ontoList()} floating />
   )
   return {
+    /** Whether that list is on screen beside this one, which is what its bar has already said. */
+    besideList,
     /** The list's address, where one holds this screen: what a screen that deletes itself steps onto. */
     list,
     /** Steps back onto that list, which is what a room's and a run's control answers with. */

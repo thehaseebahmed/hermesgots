@@ -93,7 +93,7 @@ async function seed({ collapsed = false } = {}) {
  * address for every screen — a bot's chat, a project session, a canvas — so which pane it opens is
  * the shell's to decide and this test's to read.
  */
-const screen = (entry: string) => (
+const screen = (entry: string | { pathname: string; state?: unknown }) => (
   <MemoryRouter initialEntries={[entry]}>
     <Path />
     <Routes>
@@ -288,6 +288,66 @@ test(
         missing('[data-slot="bot-chats-empty"]'),
         true,
         "and the bot's screen is not the pane a session opens",
+      )
+    })
+  }),
+)
+
+/**
+ * A room is a row of every bot's list its roster seats, so the list it was picked from is the lane it
+ * opens beside — the shell asks the record which bot it answers, and a room answers for its Host, so
+ * the row's own state is what names the list (ADR 0153).
+ */
+test(
+  "a room's row opens beside the list it was picked from, at 1280px",
+  atWidth(1280, async () => {
+    localStorage.clear()
+    await seed()
+    await db.profiles.update(bot.id, { hermesProfile: "default" })
+    await db.conversations.put({
+      id: "room-1",
+      profileId: bot.id,
+      title: "Standup",
+      hermesSessionId: "gots-room-1",
+      createdAt: 2,
+      updatedAt: 14,
+      changedAt: 14,
+      room: { id: "room-1", members: [{ profile: "default" }] },
+    })
+    await mount(screen({ pathname: "/c/room-1", state: { bot: bot.id } }), async () => {
+      await until(async () => titles().includes("Standup"), "the room's own screen")
+      assert.equal(missing(LANE), false, "the bot's list keeps its lane beside the room")
+      assert.deepEqual(
+        listRows().sort(),
+        [`/c/${MAIN}`, ...CHATS.map((chat) => `/c/${chat.id}`), "/c/room-1"].sort(),
+        "with the room a row of it, marked as the one open",
+      )
+      assert.equal(openRow()?.getAttribute("href"), "/c/room-1", "the row the pane holds")
+      assert.equal(missing(CHAT_BESIDE), false, "and the room drawn in the pane beside it")
+      assert.equal(missing(LIST_CONTROL), true, "no bar control repeats the list beside it")
+    })
+  }),
+)
+
+/**
+ * The bot is named once on a screen: its list's bar carries its face, and the chat beside that list
+ * does not repeat it (ADR 0153).
+ */
+test(
+  "the bot's face is drawn once, in the list's bar, not again in the chat's",
+  laptop(async () => {
+    localStorage.clear()
+    await seed()
+    await mount(screen("/c/c-a"), async () => {
+      await until(async () => titles().includes("Alpha"), "the chat's own header")
+      assert.ok(
+        find('[data-slot="list-lane"] [data-slot="header-row"] [role="img"]'),
+        "the list's bar carries the bot's face",
+      )
+      assert.equal(
+        findAll('[data-slot="item-lane"] [data-slot="header-row"] [role="img"]').length,
+        0,
+        "and the chat beside it repeats no face",
       )
     })
   }),

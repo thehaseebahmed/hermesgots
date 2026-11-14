@@ -480,7 +480,8 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
             botId={bot.botId}
             muted={Boolean(chat.muted || bot.muted)}
             centered={Boolean(session)}
-            showBot={!session}
+            // The list's own bar names the bot with its face where the two stand side by side.
+            showBot={!session && !lead.besideList}
             actions={actions}
             leading={lead.leading}
           />
@@ -1095,8 +1096,9 @@ function CurrentChatPage({ slot }: ChatPageProps) {
         botId={profile?.botId}
         muted={Boolean(conversation?.muted || profile?.muted)}
         centered={centered}
-        // A chat is with its bot, so its picture stays.
-        showBot={!session && !unstarted}
+        // A chat is with its bot, so its picture stays — unless the bot's list stands beside it, whose
+        // own bar already carries that face.
+        showBot={!session && !unstarted && !lead.besideList}
         actions={actions}
         leading={lead.leading}
       />
