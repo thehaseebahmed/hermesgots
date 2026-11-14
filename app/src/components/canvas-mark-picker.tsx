@@ -235,7 +235,7 @@ function MarkPicker({
         <div className="flex flex-col gap-3">
           <div
             data-canvas-picture={canvas?.image ? "picture" : "none"}
-            className="relative aspect-[4/3] overflow-hidden rounded-2xl border bg-muted/40"
+            className="relative mx-auto aspect-[4/3] w-56 overflow-hidden rounded-2xl border bg-muted/40"
           >
             {canvas?.image ? (
               <img src={canvas.image} alt="" className="size-full object-cover" />
