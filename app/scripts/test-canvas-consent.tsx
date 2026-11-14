@@ -737,7 +737,12 @@ test(
         "the field takes the sheet's focus, so the name is a tap away",
       )
       assert.equal(field()!.maxLength, 60, "with the host's cap on what can be typed")
-      assert.equal(missing("[data-canvas-name-save]"), true, "a name as it was has nothing to save")
+      assert.ok(find("[data-canvas-name-save]"), "the Save is drawn from the first frame")
+      assert.equal(
+        find("[data-canvas-name-save]")?.hasAttribute("disabled"),
+        true,
+        "and waits while the name is the record's own",
+      )
 
       // Nothing goes out while it is typed: the write is the Save's, and the Save writes one line.
       await type(field(), "  Split   the  bill ")
@@ -755,12 +760,43 @@ test(
         async () => field()?.value === "Split the bill",
         "the field to wear the record the host answered",
       )
-      assert.equal(missing("[data-canvas-name-save]"), true, "and the Save to stand down")
+      assert.equal(
+        find("[data-canvas-name-save]")?.hasAttribute("disabled"),
+        true,
+        "and the Save to stand down onto the record it now holds",
+      )
 
-      // A name of nothing is no name at all, so there is nothing for a Save to send.
+      // A name of nothing is no name at all: the Save is there, waiting, and nothing goes out.
       await type(field(), "   ")
-      assert.equal(missing("[data-canvas-name-save]"), true, "spaces alone are nothing to save")
+      assert.equal(
+        find("[data-canvas-name-save]")?.hasAttribute("disabled"),
+        true,
+        "spaces alone are nothing for a Save to send",
+      )
       assert.equal(host.changes?.length, 1, "and nothing is posted")
+
+      // Closing the sheet is the Cancel it has: what was typed and not saved is no draft, and the
+      // sheet opened again holds the record's own words.
+      await type(field(), "A name nobody saved")
+      await act(async () => {
+        find("[data-canvas-options]")?.closest("[data-popup-form]")
+        document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))
+      })
+      await settle()
+      assert.equal(
+        (find("#canvas-name") as HTMLInputElement | null)?.value ?? null,
+        null,
+        "the sheet closed on Escape",
+      )
+      await click(find("[data-canvas-options-open]"))
+      await until(() => find("[data-canvas-options]") !== null, "the options to open again")
+      await settle()
+      assert.equal(
+        field()?.value,
+        "Split the bill",
+        "and the name it opens on is the record's, not the one that was abandoned",
+      )
+      assert.equal(host.changes?.length, 1, "with nothing written for it")
 
       // Enter is that same Save, from the field itself.
       await type(field(), "Bill split")

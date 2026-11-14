@@ -188,16 +188,24 @@ export function CanvasOptions({
   const nameField = useRef<HTMLInputElement>(null)
   const busy = saving !== null
   const deleting = saving === "delete"
-  // The name as the field holds it, and the record's title it was typed against: while they agree the
-  // field shows the words, and a record the host answers moves the title past them, so the field
-  // draws the record again — what is typed and what lands are the same one line.
+  // The name as the field holds it, and the canvas and title it was typed against: while they agree
+  // the field shows the words, and a record the host answers — or another canvas in the same sheet —
+  // moves past them, so the field draws that record again. What is typed and what lands are the same
+  // one line, and a name abandoned by closing the sheet is no draft at all.
   const title = canvas?.title ?? ""
+  const here = `${canvas?.id ?? ""}\n${title}`
   const [draft, setDraft] = useState<{ against: string; name: string } | null>(null)
-  const name = draft?.against === title ? draft.name : title
+  const name = draft?.against === here ? draft.name : title
   // The host writes one line: whitespace folded, then its cap. The field's ink is what a Save would
   // send, so a name left as it was — or one of nothing but spaces — is no write at all.
   const trimmed = name.trim().replace(/\s+/g, " ")
   const renaming = trimmed.length > 0 && trimmed !== title
+
+  /** Closing the sheet drops what was typed and not saved: the record's own words are what stand. */
+  const setOpen = (next: boolean) => {
+    if (!next) setDraft(null)
+    onOpenChange(next)
+  }
 
   useEffect(() => {
     if (!open) return
@@ -246,15 +254,16 @@ export function CanvasOptions({
 
   return (
     <>
-      <Popup open={open} onOpenChange={onOpenChange}>
+      <Popup open={open} onOpenChange={setOpen}>
         <PopupContent>
           <PopupHeader>
             <PopupTitle>Options</PopupTitle>
           </PopupHeader>
           <div data-canvas-options className="flex flex-col gap-4 px-4 pb-4">
             {/* The mark and the name in one row, the way a project's Edit screen draws its own: the
-                box at the head is the mark, and a tap on it picks another (issue #1065); the name is
-                typed here and written by the Save that appears once it differs from the record. */}
+                box at the head is the canvas's face, and a tap on it picks another (issues #1065,
+                #1074); the name is typed here and written by the Save beside it, which waits until
+                the words are a change the host can keep. */}
             <section data-canvas-name-block className="flex flex-col gap-2">
               <label htmlFor="canvas-name" className="px-1 text-sm font-medium">
                 Name
@@ -264,8 +273,8 @@ export function CanvasOptions({
                   ref={markButton}
                   type="button"
                   data-canvas-mark-open
-                  aria-label={markable ? "Change mark" : "Mark"}
-                  disabled={!canvas || busy || !markable}
+                  aria-label={markable ? "Change mark" : "Change icon"}
+                  disabled={!canvas || busy}
                   onClick={() => setMarking(true)}
                   className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-background/60 outline-none transition-colors hover:bg-background focus-visible:ring-2 focus-visible:ring-ring/50 disabled:opacity-60"
                 >
@@ -278,7 +287,7 @@ export function CanvasOptions({
                   maxLength={TITLE_CHARS}
                   value={name}
                   disabled={!canvas || busy}
-                  onChange={(event) => setDraft({ against: title, name: event.target.value })}
+                  onChange={(event) => setDraft({ against: here, name: event.target.value })}
                   onKeyDown={(event) => {
                     // Enter is the Save, from the field itself: a phone's keyboard has no room for a
                     // second press, and the write is the same one.
@@ -288,18 +297,19 @@ export function CanvasOptions({
                   }}
                   className="h-11 min-w-0 flex-1 bg-transparent pr-3 text-base outline-none disabled:opacity-60"
                 />
-                {renaming && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    data-canvas-name-save
-                    className="mr-1 shrink-0 rounded-full"
-                    disabled={busy}
-                    onClick={saveName}
-                  >
-                    Save
-                  </Button>
-                )}
+                {/* Drawn whether or not it can be pressed: a control that comes and goes under the
+                    words being typed is a row that moves, and an empty name's Save waiting here is
+                    what says the name is what is missing. */}
+                <Button
+                  type="button"
+                  size="sm"
+                  data-canvas-name-save
+                  className="mr-1 shrink-0 rounded-full"
+                  disabled={busy || !renaming}
+                  onClick={saveName}
+                >
+                  Save
+                </Button>
               </div>
             </section>
 
@@ -382,6 +392,7 @@ export function CanvasOptions({
           onOpenChange={setMarking}
           anchor={markButton}
           canvas={canvas}
+          markable={markable}
           onUpdate={onUpdate}
         />
       )}

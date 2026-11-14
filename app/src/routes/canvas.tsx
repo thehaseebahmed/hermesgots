@@ -130,7 +130,10 @@ function CanvasTile({ canvas, now }: { canvas: Canvas; now: number }) {
         {canvas.image ? (
           <img src={canvas.image} alt="" className="size-full object-cover" loading="lazy" />
         ) : (
-          <span className="flex size-full items-center justify-center text-muted-foreground">
+          <span
+            aria-hidden
+            className="flex size-full items-center justify-center text-muted-foreground"
+          >
             <CanvasMark mark={canvas.mark} large />
           </span>
         )}

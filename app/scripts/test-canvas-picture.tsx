@@ -61,6 +61,7 @@ const PICTURED = { ...PLAIN, id: "p2", image: PICTURE }
 const options = (
   onUpdate: (changes: Record<string, unknown>) => Promise<void>,
   canvas: typeof PLAIN & { image?: string; mark?: string } = PLAIN,
+  markable = true,
 ) => (
   <MemoryRouter initialEntries={["/canvas"]}>
     <CanvasOptions
@@ -68,7 +69,7 @@ const options = (
       onOpenChange={() => {}}
       canvas={canvas}
       vaultable={false}
-      markable
+      markable={markable}
       onGrant={async () => true}
       onUpdate={onUpdate}
       onDelete={async () => {}}
@@ -260,5 +261,35 @@ test("clearing the picture takes it off the copy this device keeps", async () =>
     (await cachedCanvas(bot, "p9"))?.image,
     undefined,
     "and the clear takes it off that copy, not only off the host",
+  )
+})
+
+/**
+ * A host from before the mark (`canvas_mark` landed in #1067, above `MIN_PLUGIN_VERSION`) still
+ * keeps the record's picture: the door opens on the one tab that host can honour, so a reader there
+ * can give a canvas its face rather than being offered nothing at all.
+ */
+test("a host that keeps no mark still offers the canvas a picture", async () => {
+  const changes: Record<string, unknown>[] = []
+  await mount(
+    options(async (next) => void changes.push(next), PLAIN, false),
+    async () => {
+      await until(async () => find("[data-canvas-options]") !== null, "the options")
+      const box = find("[data-canvas-mark-open]")
+      assert.equal(box?.hasAttribute("disabled"), false, "the box opens for the picture")
+      await click(box)
+      await until(async () => find("[data-canvas-picture]") !== null, "the picture tab")
+      assert.deepEqual(
+        [...document.querySelectorAll("[data-slot='tabs-trigger']")].map((one) =>
+          one.textContent?.trim(),
+        ),
+        ["Picture"],
+        "one tab: the marks are the field this host has none for",
+      )
+
+      await pick(new File([PNG], "tile.png", { type: "image/png" }))
+      await until(async () => changes.length === 1, "the picture to be posted")
+      assert.deepEqual(changes[0], { image: PICTURE }, "posted as the record's own picture")
+    },
   )
 })

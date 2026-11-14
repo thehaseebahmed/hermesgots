@@ -71,17 +71,20 @@ function Cell({
  */
 function MarkPicker({
   canvas,
+  markable,
   onUpdate,
   onDone,
 }: {
   canvas: Canvas | undefined
+  /** Whether this host's record keeps a mark; a host from before it keeps only the picture. */
+  markable: boolean
   onUpdate: (changes: CanvasChanges) => Promise<void>
   onDone: () => void
 }) {
   const icons = useMarkIcons()
   const chosen = canvas?.mark ?? ""
   const [tab, setTab] = useState(() =>
-    readMark(canvas?.mark)?.kind === "emoji" ? "emojis" : "icons",
+    !markable ? "picture" : readMark(canvas?.mark)?.kind === "emoji" ? "emojis" : "icons",
   )
   const [query, setQuery] = useState("")
   const [saving, setSaving] = useState(false)
@@ -163,8 +166,8 @@ function MarkPicker({
     >
       <div className="px-3 sm:px-4">
         <TabsList>
-          <TabsTrigger value="icons">Icons</TabsTrigger>
-          <TabsTrigger value="emojis">Emojis</TabsTrigger>
+          {markable && <TabsTrigger value="icons">Icons</TabsTrigger>}
+          {markable && <TabsTrigger value="emojis">Emojis</TabsTrigger>}
           <TabsTrigger value="picture">Picture</TabsTrigger>
         </TabsList>
       </div>
@@ -298,7 +301,7 @@ function MarkPicker({
 
       {/* The way back: a canvas nobody has marked draws the app's own frame, as every canvas did
           before a mark could be chosen. Under the grid's own scroll rather than inside it. */}
-      {tab !== "picture" && (
+      {markable && tab !== "picture" && (
         <div className="border-t px-4 py-3">
           <Button
             type="button"
@@ -326,6 +329,7 @@ export function CanvasMarkPicker({
   onOpenChange,
   anchor,
   canvas,
+  markable,
   onUpdate,
 }: {
   open: boolean
@@ -333,6 +337,8 @@ export function CanvasMarkPicker({
   /** The mark's box in the options: a menu beside it from 1024px, a sheet under it below that. */
   anchor: RefObject<HTMLElement | null>
   canvas: Canvas | undefined
+  /** Whether this host's record keeps a mark, which is what offers the two tabs of them. */
+  markable: boolean
   onUpdate: (changes: CanvasChanges) => Promise<void>
 }) {
   return (
@@ -343,7 +349,12 @@ export function CanvasMarkPicker({
             Canvas Icon
           </h2>
         </PopupHeader>
-        <MarkPicker canvas={canvas} onUpdate={onUpdate} onDone={() => onOpenChange(false)} />
+        <MarkPicker
+          canvas={canvas}
+          markable={markable}
+          onUpdate={onUpdate}
+          onDone={() => onOpenChange(false)}
+        />
       </PopupContent>
     </Popup>
   )

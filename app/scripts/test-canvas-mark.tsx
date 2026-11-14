@@ -240,7 +240,7 @@ test("the picker is a menu beside its box on a laptop, and a sheet below it", as
   }
 })
 
-test("the mark's own box opens the picker, and is inert where the host has no mark", async () => {
+test("the mark's own box opens the picker, with only what the host can keep", async () => {
   const changes: Record<string, unknown>[] = []
   await atWidth(390, async () => {
     // The card at the head of the name block is the mark: with nothing chosen the unset button is
@@ -255,12 +255,25 @@ test("the mark's own box opens the picker, and is inert where the host has no ma
     })
   })
 
+  // A host whose record keeps no mark still keeps a picture, so the box opens the picker with the
+  // one tab it can honour: the marks are what that host has no field for (issue #1074).
   await atWidth(390, async () => {
     await mount(options(async () => {}, false), async () => {
       await until(async () => find("[data-canvas-options]") !== null, "the options")
       const box = find("[data-canvas-mark-open]")
-      assert.ok(box, "the mark's box is still drawn")
-      assert.equal(box.hasAttribute("disabled"), true, "and it picks nothing a host can't keep")
+      assert.ok(box, "the canvas's own box is still drawn")
+      assert.equal(box.hasAttribute("disabled"), false, "and opens what the host can still keep")
+      await click(box)
+      await until(async () => find("[data-canvas-picture]") !== null, "the picture tab")
+      assert.deepEqual(
+        [...document.querySelectorAll("[data-slot='tabs-trigger']")].map((one) =>
+          one.textContent?.trim(),
+        ),
+        ["Picture"],
+        "one tab, since a mark is the field it has none for",
+      )
+      assert.equal(missing("[data-canvas-mark-grid='icons']"), true, "and no grid of icons")
+      assert.equal(missing("[data-canvas-mark-unset]"), true, "nor a mark to remove")
     })
   })
 })
