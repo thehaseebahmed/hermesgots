@@ -1,5 +1,10 @@
 # A chat picked from a bot's list opens as the app's only entry
 
+**Superseded by [ADR 0154](0154-a-conversation-sits-one-step-off-its-bot-s-list.md)** (2026-11-14): a
+conversation picked from a bot's list opens one step above it, so back — the bar's corner control, a
+gesture, Android's button, the browser's — lands the list instead of the app's edge. The record below
+is kept as the reasoning that was given for the move it made.
+
 **Kept whole by [ADR 0153](0153-a-bot-s-list-is-the-way-into-every-conversation.md)** (2026-11-13):
 a picked chat is still the app's only entry, and a room and a run still stand above the list. What
 that record takes away is the list control in a chat's bar, which this one leaned on as the way back

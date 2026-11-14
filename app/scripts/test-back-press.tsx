@@ -11,6 +11,7 @@ import { AppShell } from "@/components/app-shell"
 import { db } from "@/lib/db"
 import { useNav } from "@/lib/nav"
 import { answerBackPress, pressBack, setBackGuard, setMenuOpener } from "@/lib/native"
+import { BotChatsPage } from "@/routes/bot-chats"
 import { ChatPage } from "@/routes/chat"
 import { SettingsPage } from "@/routes/settings"
 
@@ -32,9 +33,8 @@ import {
   until,
 } from "./component-kit.tsx"
 
-/** The state the address on screen carries, as a screen a chat's way out leaves behind reads it. */
+/** The state the address on screen carries, as a chat's corner control and the guard both read it. */
 const State = () => <p data-state>{JSON.stringify(useLocation().state ?? null)}</p>
-const state = () => find("[data-state]")?.textContent ?? ""
 
 function Stepping() {
   const { back } = useNav()
@@ -212,12 +212,23 @@ test("a press at another entry of the same address is not the armed press", asyn
   }
 })
 
-const shellAt = (id: string) => (
-  <MemoryRouter initialEntries={[`/c/${id}`]}>
+/**
+ * The bot every list case seeds: its chats are what a conversation is opened above, so its address is
+ * the entry the guard steps onto and the one the app's press is answered on.
+ */
+const BOT = "bot-1"
+
+/**
+ * A bot's list at the app's first entry, which is where a launch and the app's own exit meet: a
+ * conversation is no longer the app's entry, so the screen the press at the root is answered on is
+ * the list — its guard steps back wherever something opened it and leaves the press to the app here.
+ */
+const listAt = () => (
+  <MemoryRouter initialEntries={[`/b/${BOT}`]}>
     <Path />
     <Routes>
       <Route element={<AppShell />}>
-        <Route path="c/:id" element={<ChatPage slot="route" />} />
+        <Route path="b/:profileId" element={<BotChatsPage />} />
       </Route>
     </Routes>
   </MemoryRouter>
@@ -231,10 +242,10 @@ test(
     await seedChatOfBot()
     const history = atDepth(0)
     try {
-      await mount(shellAt("back-chat"), async () => {
+      await mount(listAt(), async () => {
         await until(
           async () => Boolean(document.querySelector('[data-slot="header-title"]')),
-          "the chat",
+          "the bot's list",
         )
         await act(async () => {
           assert.equal(answerBackPress(), "armed", "the press still arms the exit")
@@ -254,13 +265,14 @@ const chatAt = (id: string) => (
     <State />
     <Routes>
       <Route path="c/:id" element={<ChatPage slot="route" />} />
+      <Route path="b/:profileId" element={<p data-bot-list />} />
     </Routes>
   </MemoryRouter>
 )
 
 /** One chat of a bot this device holds, drawn by the screen every bot's chat opens on. */
 async function seedChatOfBot() {
-  const profile = botProfile("back-list", { id: "bot-1", name: "Mainly" })
+  const profile = botProfile("back-list", { id: BOT, name: "Mainly" })
   await seedChat({
     id: "back-chat",
     profile,
@@ -280,7 +292,7 @@ async function seedChatOfBot() {
 }
 
 test(
-  "a chat's bar leads with the app's menu, not its bot's list",
+  "a phone's chat carries its way back in the bar's corner, the drawer still at its left",
   atWidth(390, async () => {
     await seedChatOfBot()
     const history = atDepth(0)
@@ -296,9 +308,14 @@ test(
           "the bar leads with the drawer's own control",
         )
         assert.equal(
-          findAll('[aria-label="Back to Mainly"]').length,
+          findAll('[data-slot="header-actions"] button[aria-label="Back to Mainly"]').length,
+          1,
+          "and its corner carries the way back to the bot's list",
+        )
+        assert.equal(
+          findAll('[data-slot="header-leading"] [aria-label="Back to Mainly"]').length,
           0,
-          "and nothing anywhere leads back to the bot's list",
+          "which stands nowhere at the bar's left",
         )
       })
     } finally {
@@ -308,7 +325,7 @@ test(
 )
 
 test(
-  "a chat at the app's entry leaves the press to the app",
+  "a chat steps onto its bot's list, rather than leaving the app",
   atWidth(390, async () => {
     await seedChatOfBot()
     const history = atDepth(0)
@@ -318,10 +335,10 @@ test(
           async () => Boolean(document.querySelector('[data-slot="header-title"]')),
           "the chat",
         )
-        assert.equal(pressBack(), "app", "the press is the app's, which leaves it")
-        assert.deepEqual(history.backs, [], "and nothing steps")
-        assert.equal(path(), "/c/back-chat", "so the chat is still what is on")
-        assert.deepEqual(JSON.parse(state()), null, "with nothing written in its place")
+        assert.equal(pressBack(), "screen", "the screen takes the press rather than the app leaving")
+        assert.deepEqual(history.backs, [], "with no step to take: the list takes the chat's entry")
+        await until(async () => path() === `/b/${BOT}`, "the bot's list in the chat's place")
+        assert.ok(find("[data-bot-list]"), "the list the conversation stands one rung above")
       })
     } finally {
       history.restore()
@@ -335,15 +352,15 @@ test(
     await seedChatOfBot()
     const history = atDepth(0)
     try {
-      await mount(shellAt("back-chat"), async () => {
+      await mount(listAt(), async () => {
         await until(
           async () => Boolean(document.querySelector('[data-slot="header-title"]')),
-          "the chat",
+          "the bot's list",
         )
         await act(async () => {
           assert.equal(answerBackPress(), "armed", "the press at the root arms the exit")
         })
-        await until(async () => find(DRAWER_DIALOG) !== null, "the drawer's dialog over the chat")
+        await until(async () => find(DRAWER_DIALOG) !== null, "the drawer's dialog over the list")
         assert.equal(
           find(DRAWER_DIALOG)?.textContent,
           "Conversations",

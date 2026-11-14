@@ -17,6 +17,8 @@ import {
   laptop,
   missing,
   mount,
+  Nav,
+  nav,
   Path,
   path,
   seedSettings,
@@ -96,6 +98,7 @@ async function seed({ collapsed = false } = {}) {
 const screen = (entry: string | { pathname: string; state?: unknown }) => (
   <MemoryRouter initialEntries={[entry]}>
     <Path />
+    <Nav />
     <Routes>
       <Route element={<AppShell />}>
         <Route path="b/:profileId" element={<BotChatsPage />} />
@@ -153,10 +156,14 @@ test(
         "/c/c-a",
         "the row of the chat on screen is the one the list marks open",
       )
+      assert.ok(
+        find(`[data-slot="header-actions"] ${BACK_TO_BOT}`),
+        "and the chat's bar carries its way back to the bot's list in its corner",
+      )
       assert.equal(
-        missing(BACK_TO_BOT),
+        missing(`[data-slot="header-leading"] ${BACK_TO_BOT}`),
         true,
-        "and the chat carries no way back to its bot's list: the bar leads with the app's menu",
+        "in the corner alone: the left of the bar still leads with the app's menu",
       )
     })
   }),
@@ -171,7 +178,10 @@ test(
       await until(async () => titles().includes("Beta"), "the chat's own header")
       assert.match(laneClass(), /\bw-103\b/, "the list keeps the 412px lane a rail leaves room for")
       assert.equal(openRow()?.getAttribute("href"), "/c/c-b", "and marks the chat the address names")
-      assert.equal(missing(BACK_TO_BOT), true, "the chat carries no way back to the list either")
+      assert.ok(
+        find(`[data-slot="header-actions"] ${BACK_TO_BOT}`),
+        "the chat's corner carries its way back, the list beside it or not",
+      )
       assert.equal(missing(LIST_CONTROL), true, "and no way to it in the bar: it stands on screen beside")
     })
   }),
@@ -185,7 +195,10 @@ test(
     await mount(screen("/c/c-a"), async () => {
       await until(async () => titles().includes("Alpha"), "the chat's own header")
       assert.equal(missing(LANE), true, "no list stands beside it")
-      assert.equal(missing(BACK_TO_BOT), true, "and the chat leads with no way back to it")
+      assert.ok(
+        find(`[data-slot="header-actions"] ${BACK_TO_BOT}`),
+        "and the chat leads with a control, its way back standing in the corner",
+      )
       assert.match(
         find(DRAWER)?.getAttribute("class") ?? "",
         /\bmd:hidden\b/,
@@ -204,25 +217,28 @@ test(
       await until(async () => titles().includes("Alpha"), "the chat's own header")
       assert.equal(missing(LANE), true, "no list stands beside it")
       assert.equal(missing(DRAWER), false, "and the bar leads with the drawer's own control")
-      assert.equal(missing(BACK_TO_BOT), true, "with no way back to the list")
+      assert.ok(
+        find(`[data-slot="header-actions"] ${BACK_TO_BOT}`),
+        "with its way back to the list in the corner",
+      )
     })
   }),
 )
 
 test(
-  "a phone's chat carries no way to its bot's chats and no menu: the title is its settings",
+  "a phone's chat's corner carries its way back and its context, no menu: the title is its settings",
   atWidth(390, async () => {
     localStorage.clear()
     await seed()
     await mount(screen("/c/c-a"), async () => {
       await until(async () => titles().includes("Alpha"), "the chat's own header")
-      assert.equal(missing(LIST_CONTROL), true, "no control opens the bot's chats from the bar")
+      assert.equal(missing(LIST_CONTROL), true, "no separate control opens the bot's chats from the bar")
       assert.deepEqual(
         findAll('[data-slot="header-actions"] a, [data-slot="header-actions"] button').map(
           (node) => node.getAttribute("aria-label")?.split(",")[0],
         ),
-        ["Context"],
-        "and the corner holds the chat's context alone",
+        ["Context", "Back to Mainly"],
+        "and the corner holds the chat's context, with the way back drawn last",
       )
       assert.equal(
         find("[data-chat-settings-open]")?.getAttribute("aria-haspopup"),
@@ -251,6 +267,43 @@ test(
   }),
 )
 
+/**
+ * The lane beside the list, with nothing open in it, says so properly: a chat's mark on one line and
+ * the words under it on the next, both standing centred in the lane the state fills (F5).
+ */
+test(
+  "the item pane says what is not there",
+  laptop(async () => {
+    localStorage.clear()
+    await seed()
+    await mount(screen(`/b/${bot.id}`), async () => {
+      await until(async () => listRows().length === CHATS.length + 1, "the bot's chats in its list")
+      const empty = find('[data-slot="bot-chats-empty"]')
+      assert.ok(empty, "the lane beside the list says there is nothing open in it")
+      const mark = empty?.querySelector("svg")
+      assert.ok(mark, "and draws a chat's mark")
+      assert.equal(
+        mark?.parentElement,
+        empty,
+        "with the mark a line of the lane's own, not wrapped in the words' paragraph",
+      )
+      const words = [...(empty?.children ?? [])].find((child) => child.tagName === "P")
+      assert.equal(words?.textContent?.trim(), "No chat selected", "the words on the line under it")
+      assert.equal(empty?.textContent?.trim(), "No chat selected", "and no other words in the lane")
+      assert.match(
+        empty?.getAttribute("class") ?? "",
+        /\bflex-col\b/,
+        "the two stand as separate lines, one above the other",
+      )
+      assert.match(
+        empty?.getAttribute("class") ?? "",
+        /\bitems-center\b.*\bjustify-center\b/,
+        "and centred on both axes of the lane",
+      )
+    })
+  }),
+)
+
 test(
   "the list marks the chat its address names, and keeps its lane across the switch",
   laptop(async () => {
@@ -269,6 +322,30 @@ test(
       )
       assert.equal(missing(CHAT_BESIDE), false, "the chat still stands beside the list")
       assert.match(laneClass(), /\bw-103\b/, "and the list keeps its lane through the switch")
+    })
+  }),
+)
+
+/**
+ * Two rows of one list are siblings, not steps: a second conversation picked while one already stands
+ * beside the list takes its place, so a step back from it is still the list rather than the chat
+ * before it.
+ */
+test(
+  "a row pressed beside an open conversation replaces it, so back is still one rung",
+  laptop(async () => {
+    localStorage.clear()
+    await seed()
+    await mount(screen("/c/c-a"), async () => {
+      await until(
+        async () => openRow()?.getAttribute("href") === "/c/c-a",
+        "the chat the list opened",
+      )
+      await click(find('[data-slot="list-lane"] ul a[href="/c/c-b"]'))
+      await until(async () => path() === "/c/c-b", "the row's own chat")
+      assert.equal(nav(), "REPLACE:/c/c-b", "the row takes the item's place rather than stacking a second")
+      assert.equal(missing(CHAT_BESIDE), false, "the new conversation stands beside the same list")
+      assert.equal(openRow()?.getAttribute("href"), "/c/c-b", "with its row the one marked open")
     })
   }),
 )

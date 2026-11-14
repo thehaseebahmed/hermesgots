@@ -8,7 +8,7 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
-import { Link, MemoryRouter, Route, Routes } from "react-router"
+import { Link, MemoryRouter, Route, Routes, useNavigate } from "react-router"
 
 import { db } from "@/lib/db"
 import { BotChatsPage } from "@/routes/bot-chats"
@@ -18,6 +18,7 @@ import {
   Path,
   botProfile,
   click,
+  find,
   findAll,
   findText,
   json,
@@ -73,6 +74,7 @@ const screen = ({ from = "/", at }: { from?: string; at?: string } = {}) => (
     <Path />
     <Nav />
     <Link to={`/b/${bot.id}`}>the bot</Link>
+    <StepBack />
     <Routes>
       <Route path="b/:profileId" element={<BotChatsPage />} />
       <Route path="c/:id" element={<p data-chat />} />
@@ -80,6 +82,16 @@ const screen = ({ from = "/", at }: { from?: string; at?: string } = {}) => (
     </Routes>
   </MemoryRouter>
 )
+
+/** One step back through the entries a screen pushed, which is what "the list behind it" means. */
+function StepBack() {
+  const navigate = useNavigate()
+  return (
+    <button type="button" data-back onClick={() => navigate(-1)}>
+      back
+    </button>
+  )
+}
 
 const theBot = () => findText("a", "the bot")
 
@@ -158,7 +170,7 @@ test("the list is what a load of the address draws, memory or none", async () =>
   })
 })
 
-test("a chat's row opens it as the app's only entry", async () => {
+test("a chat's row opens it above the list it was picked from", async () => {
   await seed([
     { id: "a", at: 100 },
     { id: "b", at: 200 },
@@ -167,7 +179,11 @@ test("a chat's row opens it as the app's only entry", async () => {
     await until(async () => rowIds().length === 2, "the bot's chats")
     await click(findAll('ul a[href="/c/a"]')[0]!)
     await until(async () => path() === "/c/a", "the chat picked")
-    assert.equal(nav(), "REPLACE:/c/a", "taking the list's entry rather than pushing one")
+    assert.equal(nav(), "PUSH:/c/a", "above the list rather than in its place")
+    // The list is still the entry the conversation stands on, which is what a step back reads.
+    await click(find("[data-back]"))
+    await until(async () => rowIds().length === 2, "the list the chat was picked from")
+    assert.equal(path(), `/b/${bot.id}`, "the list still behind it")
   })
 })
 

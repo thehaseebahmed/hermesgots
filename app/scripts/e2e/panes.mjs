@@ -167,6 +167,12 @@ for (const [width, collapsed, panes] of CASES) {
       await page.locator(`main ul a[href="${botChat}"]`).click()
       await page.waitForURL(`**${botChat}`, { timeout: 15_000 })
       await until(async () => (await chatTitle()) === "Garden plan", 15_000, "the chat's own title")
+      // A conversation carries its way back in the bar's corner at every width, the list beside it or not.
+      assert.equal(
+        await page.getByRole("button", { name: "Back to Test bot" }).count(),
+        1,
+        "the conversation's bar carries its way back in the corner",
+      )
       if (panes === 2) {
         const lane = await page.evaluate(() => {
           const list = document.querySelector('[data-slot="list-lane"]')
@@ -181,15 +187,14 @@ for (const [width, collapsed, panes] of CASES) {
           `the bot's list keeps its 412px lane beside the chat (${lane.width})`,
         )
         assert.equal(lane.open, botChat, "and marks the chat on screen as the open one")
-        assert.equal(await page.getByRole("button", { name: "Back to Test bot" }).count(), 0)
         await shot("bot-chats")
         pass(`${look}: a bot's list beside its chat, the list's row marked open`)
       } else {
-        assert.equal(await page.getByRole("button", { name: "Back to Test bot" }).count(), 0)
         const chatRung = await rung(page)
-        await page.getByRole("link", { name: "Chats with Test bot" }).click()
+        assert.equal(chatRung, 1, "standing one rung above the list it was picked from")
+        await page.getByRole("button", { name: "Back to Test bot" }).click()
         await page.waitForURL(`**/b/${profileId}`, { timeout: 15_000 })
-        assert.equal(await rung(page), chatRung + 1, "the list stands a rung above the chat")
+        assert.equal(await rung(page), 0, "and that control lands the list in the entry it came from")
         await until(
           async () => (await page.locator(`main ul a[href="${botChat}"]`).count()) === 1,
           15_000,
@@ -198,10 +203,10 @@ for (const [width, collapsed, panes] of CASES) {
         assert.equal(
           await page.locator(`main ul a[href="${botChat}"][aria-current]`).count(),
           0,
-          "and no row of it marked, the chat it covers not being open beside it",
+          "and no row of it marked, nothing being open beside it",
         )
         await shot("bot-chats-list")
-        await page.getByRole("button", { name: "Back to chat" }).click()
+        await page.locator(`main ul a[href="${botChat}"]`).click()
         await page.waitForURL(`**${botChat}`, { timeout: 15_000 })
         await until(
           async () => (await chatTitle()) === "Garden plan",
@@ -209,7 +214,7 @@ for (const [width, collapsed, panes] of CASES) {
           "the chat the list led back to",
         )
         await shot("bot-chats")
-        pass(`${look}: the chat's list control opens the list above it, and back returns the chat`)
+        pass(`${look}: a conversation's corner control lands its bot's list, and a row returns to it`)
       }
 
       // Research.

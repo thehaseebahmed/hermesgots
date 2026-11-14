@@ -1,10 +1,12 @@
 import { app, assert, flow, markOffsetIn, pass, rung, settled } from "./lib.mjs"
 
 /**
- * A bot's list is the way into every conversation (ADR 0153): a bot pressed from the sidebar always
- * draws its list, the list is ordered by the last message *received* in each row, every row opens in
- * the pane beside it at 1280px, the bot's face is drawn once on that screen, and from a phone a row
- * opens its chat as the app's only entry with the sidebar the way back to the list.
+ * A bot's list is the way into every conversation (ADR 0153, ADR 0154): a bot pressed from the sidebar
+ * always draws its list, the list is ordered by the last message *received* in each row, every row
+ * opens in the pane beside it at 1280px, the bot's face is drawn once on that screen, and the corner
+ * control takes the reader back to the list with nothing beside it — a large chat mark over "No chat
+ * selected", centred on both axes. From a phone a row opens one step above the list, and the corner
+ * control or the drawer's bot row lands that list.
  *
  * The clocks are written here rather than left to the seed's "now", because the order is the claim:
  * the chat the reader spoke in last was answered first, so it is the list's last row.
@@ -171,6 +173,47 @@ await flow(
     await shot("run")
     pass("a routine's run opens in the second pane, the list still beside it")
 
+    // The corner control asks for the list with nothing beside it, and the item lane says so: a large
+    // chat mark above the words, centred on both axes of the lane — geometry, so it is measured here.
+    await page.getByRole("button", { name: "Back to Test bot" }).click()
+    await page.waitForURL(`**/b/${profileId}`, { timeout: 20_000 })
+    await until(
+      async () => Boolean(await page.locator(`${ITEM} [data-slot="bot-chats-empty"]`).count()),
+      20_000,
+      "the item lane's empty state",
+    )
+    const empty = await page.evaluate((selector) => {
+      const slot = document.querySelector(`${selector} [data-slot="bot-chats-empty"]`)
+      const lane = document.querySelector(selector)
+      if (!slot || !lane) return null
+      const box = slot.getBoundingClientRect()
+      const pane = lane.getBoundingClientRect()
+      return {
+        words: (slot.textContent ?? "").trim(),
+        hasMark: Boolean(slot.querySelector("svg")),
+        dx: Math.abs(box.left + box.width / 2 - (pane.left + pane.width / 2)),
+        dy: Math.abs(box.top + box.height / 2 - (pane.top + pane.height / 2)),
+      }
+    }, ITEM)
+    assert.ok(empty, "the list beside nothing draws the item lane's empty state")
+    assert.equal(empty.words, "No chat selected", "in the words it says")
+    assert.ok(empty.hasMark, "with a chat's mark above them")
+    assert.ok(
+      empty.dx <= 2 && empty.dy <= 2,
+      `both centred on the lane (${empty.dx} across, ${empty.dy} down)`,
+    )
+    assert.ok(await laneOpen(), "the list keeps its lane beside it")
+    assert.equal(
+      await page.evaluate(
+        (selector) => document.querySelectorAll(`${selector} ul a[aria-current]`).length,
+        LANE,
+      ),
+      0,
+      "and marks no row, since none is open beside it",
+    )
+    await shot("empty-pane")
+    pass("returning to the list beside nothing shows the mark and no chat selected")
+
     // A bot's row is the row the design gives a title with a line under it — 56px, taller than the
     // 44px menu above it because it carries a picture and two lines — and the picture hangs on the
     // row's own centre line rather than on the top of the line box it was drawn in.
@@ -179,7 +222,7 @@ await flow(
     await assertPictureCentred(`aside a[href="/b/${profileId}"]`, "in the sidebar")
     pass("a bot's row in the sidebar is the app's row, with its picture centred in it")
 
-    // A phone: the same bot draws the same list, and a row opens its chat as the app's only entry.
+    // A phone: the same bot draws the same list, and a row opens its chat one step above it.
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto(`${app}/b/${profileId}`)
     // Below the split width the list is the screen, so its rows are read in the main pane.
@@ -187,12 +230,20 @@ await flow(
     assert.deepEqual(await mine("main"), written, "the one order, at a phone's width too")
     await press(`main ul a[href="/c/${ANSWERED}"]`)
     await page.waitForURL(`**/c/${ANSWERED}`, { timeout: 20_000 })
-    assert.equal(await rung(page), 0, "a chat picked is the app's only entry, the list gone")
+    assert.equal(await rung(page), 1, "a chat picked on a phone stands one step above the list")
     assert.equal(await laneOpen(), false, "with no list beside it at this width")
     await shot("phone-chat")
-    pass("a row picked on a phone opens its chat as the app's only entry")
+    pass("a row picked on a phone opens its chat one step above the list")
 
-    // The sidebar is the way back to the list, and it lands there rather than in another chat.
+    // The bar's corner control is the way back, and it lands the list in the entry the chat stood in.
+    await page.getByRole("button", { name: "Back to Test bot" }).click()
+    await page.waitForURL(`**/b/${profileId}`, { timeout: 20_000 })
+    await until(async () => (await mine("main")).length === 4, 20_000, "the list again")
+    assert.equal(await rung(page), 0, "in the entry the conversation stood in")
+    await shot("phone-back-to-list")
+    pass("a phone's conversation carries its way back in the corner")
+
+    // The sidebar is the way to the list as well, and it lands there rather than in another chat.
     await page.getByRole("button", { name: "Open conversations" }).click()
     await page.locator(`aside, [role="dialog"]`).first().waitFor({ timeout: 10_000 })
     await page.locator(DRAWER_BOT_ROW(profileId)).first().waitFor({ timeout: 10_000 })

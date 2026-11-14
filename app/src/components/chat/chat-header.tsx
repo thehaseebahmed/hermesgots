@@ -44,6 +44,10 @@ export function SidebarButton({ className }: { className?: string }) {
  * is the screen's `<h1>` at the list's step, and `below` holds what the screen pins under the row (the
  * routines page's state chips). The row is the same row either way — the leading control, the title and
  * its line, the actions, every icon control a frosted outline circle.
+ * `back` is the bar's own way back — the control that steps onto the list or the screen this one was
+ * opened from — and it is drawn last in the actions row, in both forms: the corner is the bar's slot,
+ * not an order each caller keeps, so no two conversations' bars can disagree about where their way
+ * back stands.
  * `title` takes a node as well as a string, for a screen whose heading is also its way somewhere: the
  * chat list's name is the link to the bot's settings.
  * `onTitlePress` makes the whole block — the title and the line under it — one press, for a screen
@@ -65,6 +69,7 @@ export function ChatHeader({
   pinned = false,
   leading,
   actions,
+  back,
   below,
   onTitlePress,
   className,
@@ -81,6 +86,8 @@ export function ChatHeader({
   subtitle?: ReactNode
   leading?: ReactNode
   actions?: ReactNode
+  /** The bar's way back, drawn last in the actions row — the corner it is always drawn in. */
+  back?: ReactNode
   /** What a pinned bar holds under its row, inside the same sticky box. */
   below?: ReactNode
   /** The press the whole title block answers, for a title that is a control. */
@@ -119,7 +126,9 @@ export function ChatHeader({
         )}
       >
         {leading ? (
-          <div className="pointer-events-auto shrink-0">{leading}</div>
+          <div data-slot="header-leading" className="pointer-events-auto shrink-0">
+            {leading}
+          </div>
         ) : (
           <>
             <SidebarButton className="md:hidden" />
@@ -188,6 +197,7 @@ export function ChatHeader({
         >
           {centered && mark}
           {actions}
+          {back}
         </div>
       </div>
       {pinned && below && <div className="mx-auto max-w-2xl pt-3">{below}</div>}

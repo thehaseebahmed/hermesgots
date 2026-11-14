@@ -15,6 +15,7 @@ import { find, missing, mount } from "./component-kit.tsx"
 
 const options = <button type="button" aria-label="Chat options" />
 const back = <button type="button" aria-label="Back to Code" />
+const wayBack = <button type="button" aria-label="Back to Mainly" />
 
 function rowParts() {
   const header = find("header")
@@ -164,4 +165,44 @@ test("a muted centred header keeps the mark beside the actions", async () => {
       )
     },
   )
+})
+
+test("a header draws its way back last in the actions row, in either form", async () => {
+  await mount(
+    <ChatHeader title="A chat" subtitle="Working" actions={options} back={wayBack} />,
+    async () => {
+      const actions = rowParts().at(-1)!
+      assert.equal(
+        actions.getAttribute("data-slot"),
+        "header-actions",
+        "the actions are still the row's last part",
+      )
+      assert.ok(
+        actions.contains(find('[aria-label="Chat options"]')),
+        "with the actions the bar was handed in it",
+      )
+      assert.equal(
+        actions.lastElementChild?.getAttribute("aria-label"),
+        "Back to Mainly",
+        "and the way back drawn last in that row",
+      )
+      assert.equal(
+        missing('[data-slot="header-leading"] [aria-label="Back to Mainly"]'),
+        true,
+        "nothing of it leading the row, where the drawer stands",
+      )
+    },
+  )
+  await mount(<ChatHeader title="A chat" pinned actions={options} back={wayBack} />, async () => {
+    const actions = rowParts().at(-1)!
+    assert.ok(
+      actions.contains(find('[aria-label="Back to Mainly"]')),
+      "the pinned bar draws it in the same row",
+    )
+    assert.equal(
+      actions.lastElementChild?.getAttribute("aria-label"),
+      "Back to Mainly",
+      "still last, whatever the bar's other form",
+    )
+  })
 })
