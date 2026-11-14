@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **96 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 96 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **97 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 97 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --------- | ------ |
-| stay | 41 |
+| stay | 42 |
 | component | 51 |
 | plugin | 2 |
 | delete | 2 |
-| **total** | **96** |
+| **total** | **97** |
 
-Of those 96, 90 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 89 distinct files) and 6 point at the older
+Of those 97, 91 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 90 distinct files) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -208,20 +208,29 @@ tier's (`scripts/test-research-literature.tsx`). So the registry holds 94 + 1 = 
 component verdicts unchanged at **51**, the plugin verdicts **2**, the deletes **2**, and the stays
 are 39 + 1: **40**.
 
+A further stay arrived with the Code request budgets: `code-requests`, beside `idle-requests` and
+for its reason. What Code asks its server — as its list opens, while it is left alone, while the app
+is put away and as it comes back, and the same for a session opened from it — and how stale the list
+is when the host changes under it, are counts and timings over real time, a real fetch stack, the
+page's own visibility and every poll, stream and shared read the app runs at once; a component test
+fakes the boundary those requests cross, so it can say what one hook asks and never what the whole
+screen adds up to. So the registry holds 96 + 1 = **97** keys, the component verdicts unchanged at
+**51**, the plugin verdicts **2**, the deletes **2**, and the stays are 41 + 1: **42**.
+
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above
-that its rows don't add up to, or a stay beyond the forty fails the app's gates. A new flow is
+that its rows don't add up to, or a stay beyond the forty-two fails the app's gates. A new flow is
 then an argument this page has to carry, never a default (ADR 0019).
 
 Check any of it in one line:
 
 ```bash
-grep -c '^| `' docs/e2e-flow-audit.md                           # 95 rows, one per registry key
-grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 40
+grep -c '^| `' docs/e2e-flow-audit.md                           # 97 rows, one per registry key
+grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 42
 grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 51
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 2
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm -s e2e list | wc -l                             # 94 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 97 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
@@ -463,6 +472,7 @@ branch's question card landed after this page counted them — they are what the
 | `reattach` | stay | A reply still streaming when the page reloads picks its run up again and finishes. | A live run outliving a real reload. A component test can remount a tree, but it has no run still going on a test host to rejoin, so it would pass whether or not reattachment works. |
 | `live-poll` | stay | `runs/live` is read by one shared poll: at most 3 reads in 25s with a session, its project and the sidebar all open. | A request rate over wall-clock, with three screens mounted at once. |
 | `idle-requests` | stay | An idle open chat makes at most 12 requests in 65s. | A request budget over 65 seconds of real time and a real fetch stack. |
+| `code-requests` | stay | What Code asks its server stays inside a budget: the list opening, left alone, put away and brought back, and the same for a session opened from it; and how long the list takes to show a run that ended, a plan left pending, a pull request's checks that moved and a mode set elsewhere, reported for a host that streams and one that is polled. | A request budget and a staleness over real time, a real fetch stack and the page's own visibility. |
 | `foreign-run` | stay | A run started elsewhere shows as running in Code and on the open session screen, is followed to its end, and leaves no duplicate. | A run this browser never started, on a host that owns it: the app only discovers it. |
 | `steer-offer` | stay | A code session returned to mid-run, with two turns queued behind its run: the field offers "Steer the response…" for each of the three runs the page follows and never reads "Queue a message…", sampled from the screen's first paint, with the two queued turns' own ends gating the assertions. | The state it catches is a run the host lists that this page is not following. The component harness has no state where the pre-fix value is observable: an empty chat draws the fallback form, whose field carries no placeholder, and a chat holding a finished turn reads `Message …` on both trees (the liveness gap recorded in `fixes.md`). At the base commit a returned-to session reads `Queue a message…` for the run's whole duration, and that is what this measures. |
 | `compressed-run` | stay | A chat another device started and Hermes compressed before this device loaded it lands its transcript and follows its run to its end — whether the rotation came before the run or mid-run. | A test host rotating the session id mid-run, the mechanism the plugin's run keying broke on. A faked HTTP boundary would answer the shape the code expects rather than the one the host sends. |

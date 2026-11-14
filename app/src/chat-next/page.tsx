@@ -32,7 +32,13 @@ import { useRefusal } from "@/lib/use-refusal"
 import { tell } from "@/lib/tell"
 import { NOT_SENT } from "@/lib/words"
 import { onSessionMoved, useLive } from "@/lib/live"
-import { knownLiveRun, useHostBusy, useLiveRunId, useLiveSubagents } from "@/lib/waiting"
+import {
+  knownLiveRun,
+  readLiveRunOf,
+  useHostBusy,
+  useLiveRunId,
+  useLiveSubagents,
+} from "@/lib/waiting"
 import {
   db,
   getSettings,
@@ -64,12 +70,14 @@ import {
   HostAway,
   HostRefused,
   RunGone,
+  RunStalled,
   type Connection,
   type Queued,
 } from "./api"
 import { clarifyRead, clarifyUnwire, clarifyWire, questionAt } from "@/lib/clarify"
 import { WAITING_ON_ANSWER } from "@/lib/format"
 import { PROMPT_RETRY_MS } from "@/lib/freshness"
+import { onWake } from "@/lib/wake"
 import { heldParts, messageParts } from "./messages"
 import type { CanvasPoint } from "@/lib/point-marker"
 import {
@@ -681,10 +689,11 @@ interface ThreadOptions {
    */
   steerTurn?: (text: string, attachments: Attachment[]) => Promise<boolean>
   /**
-   * Called once the thread has read the host (`opened`), and each time a turn has ended (`turn`):
-   * where the app reads again what the plugin holds for the chat beside its transcript.
+   * Called once the thread has read the host (`opened`), each time a turn has ended (`turn`), and
+   * when the page comes back to the foreground and has caught up (`returned`): where the app reads
+   * again what the plugin holds for the chat beside its transcript.
    */
-  onSettled?: (reason: "opened" | "turn", thread: { turns: number }) => void
+  onSettled?: (reason: "opened" | "turn" | "returned", thread: { turns: number }) => void
   /** Told whether the host can be reached, which is the chat header's word while it cannot. */
   onAway?: (away: boolean) => void
   /** The app's own composer; without it, a bare text box. */
@@ -818,7 +827,7 @@ export function ChatNextThread({
   const reads = useRef(0)
   const failureSaid = useRef<string>(undefined)
   const reading = useRef<Promise<void> | null>(null)
-  const queued = useRef<{ final: boolean } | null>(null)
+  const queued = useRef<{ final: boolean; whole: boolean } | null>(null)
   const alive = useRef(new AbortController())
   // A host without the plugin has no list of children; once it has said so it is not asked again
   // for a while.
@@ -901,11 +910,19 @@ export function ChatNextThread({
     [server, key, session, store],
   )
 
+  /**
+   * Whether the timer's own reads ask for the children and the queue. Both are asked on every read
+   * until the page says otherwise below, once it knows what the thread holds.
+   */
+  const wants = useRef({ agents: true, queue: true })
   const catchUp = useCallback(
-    async function read(final = false): Promise<void> {
+    async function read(final = false, whole = true): Promise<void> {
       if (!server || !key || !session) return
       if (reading.current) {
-        queued.current = { final: final || Boolean(queued.current?.final) }
+        queued.current = {
+          final: final || Boolean(queued.current?.final),
+          whole: whole || Boolean(queued.current?.whole),
+        }
         return reading.current
       }
       const mine = reads.current
@@ -913,8 +930,15 @@ export function ChatNextThread({
         try {
           // What the device holds decides how much is read, so it is in memory before a read begins.
           await store.loaded().catch(() => undefined)
-          const asking = !awayNow.current && Date.now() >= noAgentsUntil.current
-          const askingQueue = !awayNow.current && Date.now() >= noQueueUntil.current
+          // A read on the page's own timer asks for the children and the queue only where something
+          // says they may have moved (`wants`); every other read — the open, a return, the host's
+          // word that the session moved, a turn's end — asks for both.
+          const asking =
+            (whole || wants.current.agents) &&
+            !awayNow.current &&
+            Date.now() >= noAgentsUntil.current
+          const askingQueue =
+            (whole || wants.current.queue) && !awayNow.current && Date.now() >= noQueueUntil.current
           // The children and the queue are asked beside the transcript and land when they answer, so
           // the thread is drawn as soon as its rows are, whichever read is the slowest.
           const listing = asking
@@ -978,7 +1002,7 @@ export function ChatNextThread({
       await reading.current
       const next = queued.current
       queued.current = null
-      if (next) await read(next.final)
+      if (next) await read(next.final, next.whole)
     },
     [server, key, session, dispatch, store, stopOlder, readOlder, landed],
   )
@@ -1002,9 +1026,12 @@ export function ChatNextThread({
     let resolve = () => {}
     firstRows.current = { promise: new Promise<void>((done) => (resolve = done)), resolve }
     void catchUp().then(() => settled.current?.("opened", asked()))
-    // A device that was away missed what the others wrote; it asks again as it comes back.
+    // A device that was away missed what the others wrote; it asks again as it comes back — the
+    // transcript first, then what the plugin holds beside it, which nothing else would read again
+    // until a turn ended.
     const back = () => {
-      if (document.visibilityState === "visible" && onlineNow()) void catchUp()
+      if (document.visibilityState === "visible" && onlineNow())
+        void catchUp().then(() => settled.current?.("returned", asked()))
     }
     document.addEventListener("visibilitychange", back)
     window.addEventListener("online", back)
@@ -1090,6 +1117,17 @@ export function ChatNextThread({
 
   const busy =
     live || following || working || owed || starting || inQueue > 0 || handedOff || hostBusy
+  // The children are worth asking for while one works, is owed its result or has yet to show, or the
+  // host says the session still has some; the queue while it holds a message or has just handed one
+  // over. A server that streams its changes says when either moves (`onSessionMoved`), so only a
+  // chat on one that doesn't keeps asking on every tick, as it always has.
+  const streamed = useLive(server && key ? { baseUrl: server, apiKey: key } : undefined)
+  useEffect(() => {
+    wants.current = {
+      agents: !streamed || listed === undefined || working || owed || starting || hostBusy,
+      queue: !streamed || held?.queue === undefined || inQueue > 0 || handedOff,
+    }
+  })
   // What the poll reads, held so a state object the reducer hands back new does not restart the
   // timer before it ever fires.
   const now = useRef({ busy, waiting: doing.waiting })
@@ -1120,7 +1158,7 @@ export function ChatNextThread({
     if (!server || !key || !session) return
     const { signal } = alive.current
     // The host answered, whatever it said: a run to join, or that it has none.
-    const answer = await readLiveRun({ server, key }, session, signal).catch(() => undefined)
+    const answer = await readLiveRunOf({ baseUrl: server, apiKey: key }, session)
     if (answer !== undefined) landed()
     if (answer && !signal.aborted) void joining.current?.(answer)
   }, [server, key, session, landed])
@@ -1131,6 +1169,11 @@ export function ChatNextThread({
       followingRun.current = run
       lastRun.current = run
       setLive(true)
+      // A phone that slept can come back holding a connection that died without closing: the stream
+      // is let go of as the app wakes, and read again from the host's own account of the run.
+      const woken = new AbortController()
+      const stopWaking = onWake(() => woken.abort())
+      let letGo = false
       try {
         await followRun(
           { server, key },
@@ -1144,17 +1187,23 @@ export function ChatNextThread({
             dispatch({ type: "run", event, at: Date.now() })
             if (wording) void catchUp()
           },
-          alive.current.signal,
+          AbortSignal.any([alive.current.signal, woken.signal]),
         )
       } catch (error) {
         if (alive.current.signal.aborted) return
+        // A stream let go of — silent past the host's keepalive, or held across a sleep — says
+        // nothing about the run: the transcript and the host's run list do.
+        letGo = error instanceof RunStalled || woken.signal.aborted
         // A stream that died mid-read is not a page that failed, nor is a run the host has dropped.
-        if (error instanceof RunGone) {
+        if (letGo) {
+          // Nothing to say: the read below is the answer.
+        } else if (error instanceof RunGone) {
           // Once per run, and the only trace: the reader is told nothing.
           if (!goneRuns.current.has(run)) console.debug("[chat-next] the host dropped run", run)
           goneRuns.current.add(run)
         } else if (!(error instanceof TypeError)) dispatch(failure(error))
       } finally {
+        stopWaking()
         streaming.current = false
         if (followingRun.current === run) followingRun.current = undefined
         setLive(false)
@@ -1162,6 +1211,12 @@ export function ChatNextThread({
       }
       // Whatever the stream said, the host's transcript is what the turn was.
       await catchUp(true)
+      // The run may well be going still: the host is asked afresh, and this run may be joined again.
+      if (letGo) {
+        if (alive.current.signal.aborted) return
+        if (lastRun.current === run) lastRun.current = undefined
+        return void joinLive()
+      }
       // A turn that finished settles the chat as it lands; one stopped or failed short never does.
       if (!threadTurns(store.get()).at(-1)?.done) settled.current?.("turn", asked())
       // A run that took over while this one was followed (a wake turn as the last one ends) is the
@@ -1171,7 +1226,7 @@ export function ChatNextThread({
       pendingRun.current = undefined
       if (next && next !== run && !alive.current.signal.aborted) void joining.current?.(next)
     },
-    [server, key, session, catchUp, dispatch, store, asked, landed],
+    [server, key, session, catchUp, dispatch, store, asked, landed, joinLive],
   )
   const waitsAsking = useRef(new Map<string, Promise<Waiting | undefined>>())
   /** Asks a run what it waits on: a host never re-sends a prompt to a subscriber that came later. */
@@ -1313,7 +1368,14 @@ export function ChatNextThread({
             : undefined
         if (known && known.runId !== lastRun.current) return void joining.current?.(known.runId)
         if (following && server && key && session) {
-          const run = await readLiveRun({ server, key }, session, alive.current.signal)
+          // Asked afresh: "no run" here is what stops the page following the turn.
+          const run = await readLiveRunOf({ baseUrl: server, apiKey: key }, session, {
+            join: false,
+          })
+          if (alive.current.signal.aborted) return
+          // The answer is shared with every screen, this one's own join among them (`hostRunId`),
+          // which may have taken the run while this read was coming back.
+          if (streaming.current) return
           if (run && !goneRuns.current.has(run)) {
             streaming.current = true
             reads.current++
@@ -1328,7 +1390,7 @@ export function ChatNextThread({
             setHostIdleAt(tipNow.current)
           }
         }
-        void catchUp()
+        void catchUp(false, false)
       },
       readPace({ busy, misses, streamOpen }, { pollMs, idleMs, safetyMs: SAFETY_MS }),
     )
