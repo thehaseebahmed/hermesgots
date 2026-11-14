@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CircleAlertIcon, MessageCircleIcon, RotateCcwClockIcon } from "lucide-react"
-import { Link, Navigate, useNavigate, useParams } from "react-router"
+import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router"
 
 import { Bot } from "@/components/bot"
 import { ChatHeader } from "@/components/chat/chat-header"
@@ -12,7 +12,7 @@ import { CHATS_SEARCH_FIELD_ID, ListFoot } from "@/components/list-foot"
 import { RoomFaces } from "@/components/room/room-faces"
 import { Spinner } from "@/components/ui/spinner"
 import { buttonVariants } from "@/components/ui/button"
-import { botPath, botRoutinesPath } from "@/lib/bot-tabs"
+import { botChatsPath, botPath, botRoutinesPath } from "@/lib/bot-tabs"
 import {
   BOT_CHATS,
   CHAT_FILTERS,
@@ -41,7 +41,7 @@ import { useBotLabels } from "@/lib/use-bot-labels"
 import { useXLarge } from "@/lib/media"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { setBackGuard } from "@/lib/native"
-import { opensAsRoot, useNav } from "@/lib/nav"
+import { useNav } from "@/lib/nav"
 import { useBotChatsPane, type BotPane } from "@/lib/pane"
 import { useReadMarks } from "@/lib/read-marks"
 import { quietly } from "@/lib/report"
@@ -70,13 +70,19 @@ export function BotChatsPane({ pane }: { pane: BotPane }) {
   return <BotChatsList profileId={pane.profileId} selected={pane.selected} beside />
 }
 
+/**
+ * The item lane with nothing open in it, at the two-pane width: a chat's mark over the words saying
+ * so, the two centred on both axes of the lane this fills. The single-pane width has no lane to fill
+ * — the list is the screen there — so nothing of this is drawn.
+ */
 function NoChatOpen() {
   return (
     <div
       data-slot="bot-chats-empty"
-      className="flex min-h-0 flex-1 items-center justify-center px-6 text-center"
+      className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center"
     >
-      <p className="text-sm text-muted-foreground">No chat open</p>
+      <MessageCircleIcon aria-hidden className="size-16 text-muted-foreground" />
+      <p className="text-sm text-muted-foreground">No chat selected</p>
     </div>
   )
 }
@@ -157,10 +163,10 @@ function ChatList({
   beside?: boolean
 }) {
   const navigate = useNavigate()
-  const { root, back } = useNav()
+  const { back } = useNav()
+  const { pathname } = useLocation()
   // The bar names the bot as the sidebar's row does (ADR 0149).
   const label = labelOf(useBotLabels(), bot)
-  const pane = Boolean(beside)
   const marks = useReadMarks()
   // The press is the app's at its first entry — where this list stands when nothing opened it — and a
   // step back wherever something did, which `back()` answers itself.
@@ -189,13 +195,15 @@ function ChatList({
   const shown = useMemo(() => chatList(kept, query), [kept, query])
   const empty = kept.length === 0 ? emptyOf(filter) : shown.length === 0 ? "No chats match." : null
 
+  // A row opens its conversation over this list: a push from the list's own screen, so the list stays
+  // the rung behind it. Where an item already stands beside the list the press replaces it instead —
+  // two rows of one list are siblings, not steps, so back from the second is still the list.
+  const replace = Boolean(beside) && pathname !== botChatsPath(bot.id)
+
   // A chat is made first and the address moved after it, so the screen that draws it is the one this
   // list opens. The entry says which bot it is for, so the shell keeps the list's lane while the new
   // row loads.
-  const openChat = (to: string) => {
-    if (pane) navigate(to, { state: { bot: bot.id } })
-    else root(to, { bot: bot.id })
-  }
+  const openChat = (to: string) => navigate(to, { replace, state: { bot: bot.id } })
   const start = async () => {
     const chat = await beginChat(bot.id)
     openChat(`/c/${chat.id}`)
@@ -265,10 +273,9 @@ function ChatList({
                 mark={marks[row.id]}
                 selected={row.id === selected}
                 profileId={bot.id}
-                // A chat of the bot's opens as the app's root, taking this list's place along with
-                // whatever stood behind it; a room and a routine's run are screens of their own whose
-                // way back is this list, so they stay above it, and a pane's rows open beside it.
-                pick={pane || row.room || row.routine ? undefined : () => openChat(`/c/${row.id}`)}
+                // Every row here is a sibling of the list's: a chat, a room and a routine's run alike
+                // open above it, and take the place of one already open beside it.
+                replace={replace}
                 live={row.session ? runs[row.session] : undefined}
               />
             </li>
@@ -316,7 +323,7 @@ export function BotChatItem({
   mark,
   selected,
   profileId,
-  pick,
+  replace,
   live,
 }: {
   row: ChatListRow
@@ -324,8 +331,8 @@ export function BotChatItem({
   mark?: number
   selected?: boolean
   profileId: string
-  /** Where a plain press opens this row's chat as the app's only entry: set on a screen, never a pane. */
-  pick?: () => void
+  /** Whether the press takes the place of an item already beside the list, rather than stepping onto it. */
+  replace?: boolean
   /** What the host says of this chat's run: `running` beats a reply still streaming here. */
   live?: LiveRunStatus
 }) {
@@ -358,7 +365,7 @@ export function BotChatItem({
       link={{
         to: `/c/${row.id}`,
         state: { bot: profileId },
-        onClick: pick ? opensAsRoot(pick) : undefined,
+        replace,
       }}
     />
   )

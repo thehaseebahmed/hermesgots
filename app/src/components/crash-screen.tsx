@@ -4,7 +4,6 @@ import { CheckIcon, CopyIcon, MenuIcon, RotateCwIcon } from "lucide-react"
 import { Bot } from "@/components/bot"
 import { useOpenDrawer } from "@/components/drawer-context"
 import { Button } from "@/components/ui/button"
-import { forgetLastChat } from "@/lib/launch"
 import { reportCrash } from "@/lib/sentry"
 
 type Crash = { error: unknown; componentStack?: string | null }
@@ -121,8 +120,6 @@ export class CrashBoundary extends Component<
 
   componentDidCatch(error: unknown, info: ErrorInfo) {
     reportCrash(error, info.componentStack)
-    // A chat that crashes shouldn't be reopened on the next launch.
-    forgetLastChat()
     this.setState((state) =>
       state.crash?.error === error
         ? { crash: { error, componentStack: info.componentStack } }

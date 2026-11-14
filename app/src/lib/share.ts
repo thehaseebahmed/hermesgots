@@ -4,7 +4,6 @@ import { useNavigate } from "react-router"
 
 import { countRefusal, sizeRefusal, unreadableRefusal, type Refusal } from "@/lib/attachment-caps"
 import { createStore } from "@/lib/store"
-import { skipLaunchRestore } from "@/lib/launch"
 import { isNative } from "@/lib/platform"
 import { randomId } from "@/lib/utils"
 
@@ -180,7 +179,6 @@ export function useShareReceiver() {
   const navigate = useNavigate()
   useEffect(() => {
     const open = (share: IncomingShare) => {
-      skipLaunchRestore()
       receiveShare(share)
       navigate("/share")
     }

@@ -6,7 +6,6 @@ import { Navigate, Route, Routes, useParams } from "react-router"
 import { AppShell } from "@/components/app-shell"
 import { botChatsPath } from "@/lib/bot-tabs"
 import { getActiveProfile } from "@/lib/db"
-import { useLaunchRestore, useRecordLastChat } from "@/lib/launch"
 import { warmCatalog } from "@/lib/models"
 import { useShareReceiver } from "@/lib/share"
 import { toHex } from "@/lib/theme"
@@ -82,7 +81,7 @@ function ThemeColor() {
   return null
 }
 
-/** Home is the selected bot's screen: the list of its chats, which opens where the reader left it. */
+/** Home is the selected bot's screen: the list of its chats, at the bot's own address. */
 export function Home() {
   const legacy = useLegacyChat()
   const active = useLiveQuery(
@@ -99,8 +98,8 @@ function MovedProject() {
   return <Navigate to={`/projects/${profileId}/${projectId}`} replace />
 }
 
+/** The app's screens behind the setup gate, which is what a test mounts to drive the real routing. */
 export function AppRoutes() {
-  useRecordLastChat()
   useShareReceiver()
   // The model sheet reads the models.dev catalog on every open, so warm it here: a returning
   // user's facts refresh in the background without the sheet fetching. The scores need no warm of
@@ -108,7 +107,6 @@ export function AppRoutes() {
   useEffect(() => {
     void warmCatalog()
   }, [])
-  if (!useLaunchRestore()) return null
   return (
     <Routes>
       <Route element={<AppShell />}>

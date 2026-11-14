@@ -1,4 +1,4 @@
-import type { MouseEvent, ReactNode } from "react"
+import type { ReactNode } from "react"
 import { ChevronUpIcon, PinIcon } from "lucide-react"
 import { Link } from "react-router"
 
@@ -136,10 +136,9 @@ export function ItemRow({
   onOpen?: () => void
   link?: {
     to: string
+    /** Whether the press takes the place of an item already beside the list, rather than stepping onto it. */
     replace?: boolean
     state?: unknown
-    /** The press the link answers itself, for a row that opens a top-level screen. */
-    onClick?: (event: MouseEvent<HTMLAnchorElement>) => void
   }
 }) {
   const className = cn(
@@ -210,7 +209,6 @@ export function ItemRow({
         to={link.to}
         replace={link.replace}
         state={link.state}
-        onClick={link.onClick}
         aria-current={selected ? "page" : undefined}
         className={className}
       >

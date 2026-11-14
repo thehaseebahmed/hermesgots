@@ -31,9 +31,7 @@ import { useNav } from "@/lib/nav"
 import { useDraws } from "@/lib/openui-draws"
 import { markRead } from "@/lib/read-marks"
 import { RUN_GONE, RUN_UNREAD, ranOn, useRoutineTranscript } from "@/lib/routine-transcript"
-import { labelOf } from "@/lib/bot-name"
 import { useWide } from "@/lib/media"
-import { useBotLabels } from "@/lib/use-bot-labels"
 
 /** No rows at all, as the same value on every render. */
 const NO_ROWS: Message[] = []
@@ -60,14 +58,9 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
   )
   const ready = Boolean(chat && bot && chat.id === id)
   const { root } = useNav()
-  const labels = useBotLabels()
   // The list this run was opened from is the bot's, never the chat a delivery arrived in: a routine's
-  // row is the bot's own, so its screen leads back to where its row stands.
-  const lead = useChatLead({
-    bot: chat?.profileId,
-    press: "list",
-    label: `Back to ${bot ? labelOf(labels, bot) : "bot"}`,
-  })
+  // row is the bot's own, so its bar's corner steps back to where its row stands.
+  const lead = useChatLead({ bot: chat?.profileId })
   const wide = useWide()
   useLayoutEffect(() => {
     if (ready) hold(slot, id)
@@ -116,7 +109,7 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
             // The bot's list beside this run already names the bot with its face.
             showBot={!lead.besideList}
             actions={actions}
-            leading={lead.leading}
+            back={lead.back}
           />
           <MessageScrollerProvider key={id} autoScroll defaultScrollPosition="end">
             <MessageScroller className="flex-1">

@@ -16,9 +16,11 @@ export const plainPress = (event: MouseEvent<HTMLAnchorElement>) =>
 /**
  * The `onClick` for a link that opens a top-level screen: the plain press opens it as the app's only
  * entry, and a press meant for a new tab or window — a modifier held, or a button other than the
- * left — is left to the link the browser already has.
+ * left — is left to the link the browser already has. Private to the sidebar's rows, since only a
+ * place is opened this way: a row of a bot's list pushes its conversation over that list instead of
+ * taking its entry (ADR 0154).
  */
-export const opensAsRoot = (open: () => void) => (event: MouseEvent<HTMLAnchorElement>) => {
+const opensAsRoot = (open: () => void) => (event: MouseEvent<HTMLAnchorElement>) => {
   if (!plainPress(event)) return
   event.preventDefault()
   open()
@@ -40,9 +42,10 @@ export const pressOpeningRoot =
   }
 
 /**
- * History mirrors the screen hierarchy: a top-level screen (a chat, Code, Settings) is the first
- * entry, and each entry after it is a child of the one before. So back from a top-level screen
- * leaves the app, and back from a deeper one returns to its parent.
+ * History mirrors the screen hierarchy: a top-level screen — Home, a bot's list, Code, Settings, a
+ * conversation opened cold at its own address — is the first entry, and each entry after it is a child
+ * of the one before. So back from a top-level screen leaves the app, and back from a deeper one
+ * returns to its parent: a conversation picked from a bot's list steps back onto that list.
  */
 export const depth = () => (window.history.state as { idx?: number } | null)?.idx ?? 0
 
