@@ -1,7 +1,9 @@
-import { useMemo, useRef, useState } from "react"
+import { Fragment, useMemo, useRef, useState, type ReactNode } from "react"
 import {
   ArrowLeftIcon,
+  BrainIcon,
   ChevronDownIcon,
+  EyeIcon,
   PlusIcon,
   XIcon,
 } from "lucide-react"
@@ -316,10 +318,14 @@ function sortProviders(providers: ModelProvider[]) {
     .sort((a, b) => byName.compare(a.name, b.name))
 }
 
-/** The capabilities a row names, in order, each only where models.dev says the model has it. */
+/**
+ * The capabilities a row marks, in order: an icon each, drawn only where models.dev says the model
+ * has it, so nothing is dimmed and nothing waits on a tooltip a phone never opens. The name rides
+ * beside the icon for a screen reader.
+ */
 const CAPABILITIES = [
-  { key: "vision", label: "Vision" },
-  { key: "reasoning", label: "Reasoning" },
+  { key: "vision", label: "Vision", Icon: EyeIcon },
+  { key: "reasoning", label: "Reasoning", Icon: BrainIcon },
 ] as const
 
 /** A provider's own name for a slug, for a row whose group doesn't already say it. */
@@ -355,21 +361,37 @@ function scoreCell(choice: ModelChoice, rankings: RankingsData) {
 
 /**
  * A model row's muted second line: the provider where the group doesn't name it, the cost as the
- * band's dollar signs, the context window, then the capabilities the model has — each part left
- * out where it isn't known, and nothing said about a capability it lacks. A model models.dev
- * doesn't list shows a dash where its facts would be, and no line at all while the catalog loads.
+ * band's dollar signs, the context window, then a mark for each capability the model has — each
+ * part left out where it isn't known, and nothing drawn for a capability it lacks. A model
+ * models.dev doesn't list shows a dash where its facts would be, and no line while the catalog loads.
  */
 function modelDetail(catalog: Catalog | undefined, choice: ModelChoice, provider?: string) {
   if (!catalog) return provider
   const facts = modelFacts(catalog, choice)
-  const parts = [provider]
+  const parts: ReactNode[] = provider ? [provider] : []
   if (!facts.listed) parts.push("—")
   else {
     if (facts.tier) parts.push("$".repeat(facts.tier))
-    if (facts.context) parts.push(`${formatTokens(facts.context)} context`)
-    for (const capability of CAPABILITIES) if (facts[capability.key]) parts.push(capability.label)
+    if (facts.context) parts.push(formatTokens(facts.context))
+    const marks = CAPABILITIES.filter((capability) => facts[capability.key])
+    if (marks.length)
+      parts.push(
+        <span className="inline-flex items-center gap-1.5 align-[-2px]">
+          {marks.map(({ key, label, Icon }) => (
+            <Fragment key={key}>
+              <Icon className="size-3.5" aria-hidden="true" />
+              <span className="sr-only">{label}</span>
+            </Fragment>
+          ))}
+        </span>,
+      )
   }
-  return parts.filter(Boolean).join(" · ")
+  return parts.map((part, i) => (
+    <Fragment key={i}>
+      {i > 0 && " · "}
+      {part}
+    </Fragment>
+  ))
 }
 
 // A fixed height, so the sheet doesn't grow and shrink between the lists.
