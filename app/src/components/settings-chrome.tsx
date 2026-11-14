@@ -328,19 +328,22 @@ export function Caption({ children }: { children: ReactNode }) {
 export function DestructiveButton({
   onClick,
   disabled,
+  className,
   children,
+  ...props
 }: {
   onClick: () => void
   disabled?: boolean
   children: ReactNode
-}) {
+} & Omit<ComponentProps<typeof Button>, "onClick" | "disabled" | "children" | "variant">) {
   return (
     <Button
       type="button"
       variant="destructive"
-      className="h-11 rounded-full"
+      className={cn("h-11 rounded-full", className)}
       onClick={onClick}
       disabled={disabled}
+      {...props}
     >
       <Trash2Icon data-icon="inline-start" />
       {children}
