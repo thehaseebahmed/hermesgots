@@ -76,7 +76,7 @@ export function bot(fields: DeviceBot): Profile {
     ...DEFAULT_PROFILE,
     baseUrl: "https://hermes.example/v1",
     apiKey: "story-key",
-    botId: "cubby",
+    botId: "bubble",
     createdAt: now,
     updatedAt: now,
     ...fields,
@@ -84,8 +84,8 @@ export function bot(fields: DeviceBot): Profile {
 }
 
 export const BOTS: DeviceBot[] = [
-  { id: "bot-cubby", name: "Cubby", botId: "cubby" },
-  { id: "bot-second", name: "Scout", botId: "penny" },
+  { id: "bot-cubby", name: "Cubby", botId: "bubble" },
+  { id: "bot-second", name: "Scout", botId: "wink" },
 ]
 
 /** The loader a screen story passes: seeds the device, then lets the story render. */

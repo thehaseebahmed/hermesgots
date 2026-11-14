@@ -339,15 +339,15 @@ test("General is the bot's own switches, then Bot Profile over its card, then it
 })
 
 test("every setting is a title over the line saying what it is for, and the value it holds", async () => {
-  await seed("general-values", { botId: "tri" })
+  await seed("general-values", { botId: "pixel" })
   await mount(general(), async () => {
     assert.ok(
       missing('[data-setting="name"]'),
       "no Name row: the name is the host's, so there is no field to write another",
     )
 
-    assert.equal(rowText("image"), "ImageTri", "Image is the character the bot wears")
-    assert.equal(accent("image"), "Tri")
+    assert.equal(rowText("image"), "ImagePixel", "Image is the character the bot wears")
+    assert.equal(accent("image"), "Pixel")
 
     const mute =
       findAll("[data-general-page] label").find((one) =>
@@ -497,12 +497,12 @@ test("the Image row opens the bot characters as a sheet, and a pick is written",
     await openPick("image")
     assert.ok(sheet("Image"), "the sheet's radio list is named for the setting it fills")
     assert.ok(choices("Image").length > 1, "with one row per character")
-    assert.ok(choice("Image", "Cubby"), "each by the name it is called")
+    assert.ok(choice("Image", "Bubble"), "each by the name it is called")
 
-    await click(choice("Image", "Cubby"))
-    assert.equal((await db.profiles.get("bot-1"))?.botId, "cubby", "the pick lands on the bot")
+    await click(choice("Image", "Bubble"))
+    assert.equal((await db.profiles.get("bot-1"))?.botId, "bubble", "the pick lands on the bot")
     await until(async () => !sheet("Image"), "the sheet to close behind the pick")
-    assert.equal(accent("image"), "Cubby", "and the row shows the character it now wears")
+    assert.equal(accent("image"), "Bubble", "and the row shows the character it now wears")
   })
 })
 

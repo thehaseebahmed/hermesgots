@@ -88,7 +88,7 @@ const bots: Profile[] = [
     baseUrl: HOST,
     apiKey: "rooms-key",
     hermesProfile: "writer",
-    botId: "hex",
+    botId: "byte",
   }),
 ]
 
@@ -171,7 +171,9 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.pathname.endsWith("/capabilities")) return json({ features: {} })
   if (url.pathname.endsWith("/plugins/gots/info")) return json({ features: ["draft_text"] })
   if (url.pathname.endsWith(`/plugins/gots/rooms/${ROOM}`))
-    return json(roomRead(url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined))
+    return json(
+      roomRead(url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined),
+    )
   if (url.pathname.endsWith("/plugins/gots/chats")) {
     merges += 1
     // The plugin's own answer: what the device sent, and the Host's rooms built fresh on every read.
@@ -192,13 +194,11 @@ db.conversations.hook("creating", () => void writes.rows++)
 db.conversations.hook("updating", () => void writes.rows++)
 db.conversations.hook("deleting", () => void writes.rows++)
 
-async function fresh(
-  {
-    chats = false,
-    ask = false,
-    layout = "legacy",
-  }: { chats?: boolean; ask?: boolean; layout?: "legacy" | "bots" } = {},
-) {
+async function fresh({
+  chats = false,
+  ask = false,
+  layout = "legacy",
+}: { chats?: boolean; ask?: boolean; layout?: "legacy" | "bots" } = {}) {
   moved.at = LAST_AT
   moved.title = "Planning"
   retired = false
@@ -244,10 +244,7 @@ async function merged() {
 }
 
 const owner = (row: Parameters<typeof chatOwner>[0]) =>
-  chatOwner(
-    row,
-    new Map(bots.map((bot) => [bot.id, bot])),
-  )
+  chatOwner(row, new Map(bots.map((bot) => [bot.id, bot])))
 
 const screen = (entry: string) => (
   <MemoryRouter initialEntries={[entry]}>
@@ -290,7 +287,11 @@ test("a room's record merged onto a fresh device is one row, carried by one bot"
   const rows = await db.conversations.where("id").equals(ROOM).toArray()
   assert.equal(rows.length, 1, "the room is one row, however many of the Host's bots carried it")
   const [row] = rows
-  assert.equal(row.profileId, CARRIER, "profileId says where the record was carried, and nothing more")
+  assert.equal(
+    row.profileId,
+    CARRIER,
+    "profileId says where the record was carried, and nothing more",
+  )
   assert.equal(row.title, "Planning", "its name")
   assert.equal(row.updatedAt, LAST_AT, "its last activity, on the Host's own clock")
   assert.deepEqual(
@@ -316,10 +317,7 @@ test("Recents draws the room once, with its name, its members and its last activ
     const text = rows[0].textContent ?? ""
     assert.ok(text.includes("Planning"), `the room's name, in "${text}"`)
     assert.ok(text.includes("Coder"), `its members, in "${text}"`)
-    assert.ok(
-      text.includes(formatRelative(LAST_AT, Date.now())),
-      `its last activity, in "${text}"`,
-    )
+    assert.ok(text.includes(formatRelative(LAST_AT, Date.now())), `its last activity, in "${text}"`)
   })
 })
 
@@ -448,14 +446,8 @@ test("a room draws in the list of every bot it seats, and in no other bot's", as
         return
       }
       // The carrier's list settles on its own empty answer, so nothing is the list's own word.
-      await until(
-        async () => Boolean(findText("p", "No chats yet.")),
-        "a list with nothing in it",
-      )
-      assert.ok(
-        missing(`a[href="/c/${ROOM}"]`),
-        "a bot the room does not seat never draws it",
-      )
+      await until(async () => Boolean(findText("p", "No chats yet.")), "a list with nothing in it")
+      assert.ok(missing(`a[href="/c/${ROOM}"]`), "a bot the room does not seat never draws it")
     })
   }
 })
@@ -753,7 +745,7 @@ test("a room's row draws its members' pictures, four at most, and counts the res
         name: profile,
         baseUrl: HOST,
         hermesProfile: profile,
-        botId: ["gem", "hex", "orbi", "penny", "stella"][at],
+        botId: ["nova", "byte", "pip", "wink", "sunny"][at],
       }),
     ),
   )
@@ -776,7 +768,12 @@ test("a room's row draws its members' pictures, four at most, and counts the res
     assert.equal(faces.length, 4, "four pictures, and no more")
     assert.deepEqual(
       faces.map((one) => one.getAttribute("src")),
-      ["/bots/gem.png", "/bots/hex.png", "/bots/orbi.png", "/bots/penny.png"],
+      [
+        "/bots/nova/happy.png",
+        "/bots/byte/happy.png",
+        "/bots/pip/happy.png",
+        "/bots/wink/happy.png",
+      ],
       "the seats in the Host's order",
     )
     assert.equal(find("[data-room-faces-more]")?.textContent, "+1", "and the fifth counted")

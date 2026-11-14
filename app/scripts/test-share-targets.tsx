@@ -83,8 +83,8 @@ const searchField = () =>
  * (ADR 0115).
  */
 const roomBots = (name: string) => [
-  botProfile(name, { id: "bot-1", name: "Cubby", hermesProfile: "default", botId: "cubby" }),
-  botProfile(name, { id: "bot-2", name: "Hex", hermesProfile: "coder", botId: "hex" }),
+  botProfile(name, { id: "bot-1", name: "Cubby", hermesProfile: "default", botId: "bubble" }),
+  botProfile(name, { id: "bot-2", name: "Hex", hermesProfile: "coder", botId: "byte" }),
 ]
 
 const roomRecord = (id: string, profiles: string[]) => ({

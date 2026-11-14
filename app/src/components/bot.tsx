@@ -5,6 +5,7 @@ import {
   BOTS,
   DEFAULT_BOT_ID,
   DEFAULT_MOOD,
+  botIdOf,
   botImage,
   type BotDefinition,
   type BotMood,
@@ -13,10 +14,10 @@ import { prefersReducedMotion } from "@/lib/media"
 import { cn } from "@/lib/utils"
 
 /**
- * Renders a bot still by default; `animate` (used by the header and the empty-state hero) brings it
- * to life. A posed bot (`posed` in bots.tsx) drawn with `animate` shows the pose `mood` names, moves
- * in that mood's own way and changes between moods in a poof; drawn still it is always its happy
- * pose, and a bot with one picture ignores `mood`.
+ * Renders a bot still by default — its happy pose, whatever `mood` says; `animate` (used by the
+ * header and the empty-state hero) shows the pose `mood` names, moves in that mood's own way and
+ * changes between moods in a poof. An id a device kept for a retired character draws the one that
+ * replaced it (`botIdOf`).
  */
 export function Bot({
   id = DEFAULT_BOT_ID,
@@ -29,24 +30,30 @@ export function Bot({
   mood?: BotMood
   className?: string
 }) {
-  const bot = BOTS.find((b) => b.id === id) ?? BOTS[0]
+  const bot = findBot(id)
 
-  if (bot.posed && animate) return <PosedBot bot={bot} mood={mood} className={className} />
+  if (animate) return <PosedBot bot={bot} mood={mood} className={className} />
 
   return (
     <span
       role="img"
       aria-label={bot.name}
-      className={cn("inline-block size-8 shrink-0", animate && "bot-animate", className)}
+      className={cn("inline-block size-8 shrink-0", className)}
     >
       <img
         src={botImage(bot)}
         alt=""
         draggable={false}
-        className={cn("size-full object-contain select-none", `bot-anim-${bot.id}`)}
+        className="size-full object-contain select-none"
       />
     </span>
   )
+}
+
+/** The character an id stands for, a retired one's replacement included, else the first. */
+export function findBot(id: string): BotDefinition {
+  const current = botIdOf(id)
+  return BOTS.find((b) => b.id === current) ?? BOTS[0]
 }
 
 /** The smoke's puffs: the like button's burst throws eight. */
