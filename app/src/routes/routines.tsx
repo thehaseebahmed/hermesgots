@@ -34,11 +34,10 @@ import {
   type CronState,
 } from "@/lib/cron"
 import { db, conversationsOf, getActiveProfile, type Conversation, type Profile } from "@/lib/db"
+import { useChatLead } from "@/lib/chat-lead"
 import { useLegacyChat } from "@/lib/legacy-chat"
 import { useChanges, useLive } from "@/lib/live"
 import { useNav } from "@/lib/nav"
-import { setBackGuard } from "@/lib/native"
-import { useBotChatsPane } from "@/lib/pane"
 import { usePoll } from "@/lib/poll"
 import { formatDuration, formatRelative } from "@/lib/format"
 import { describeSchedule } from "@/lib/schedule"
@@ -51,7 +50,8 @@ import { cn } from "@/lib/utils"
 /**
  * A bot's routines: its jobs and their runs, at `/b/<bot>/routines`. The page names the screen alone:
  * a routine belongs to the bot whose list opened this one, so no face, name or count of the bot is
- * drawn — the top bar is the bot's chat list's, and the pills over the jobs filter them by state.
+ * drawn — the top bar is the bot's chat list's, whose corner names only the screen its control returns
+ * to, and the pills over the jobs filter them by state.
  */
 export function RoutinesPage() {
   const { profileId = "" } = useParams()
@@ -61,15 +61,13 @@ export function RoutinesPage() {
     return { profileId, bot: bot ?? null }
   }, [profileId])
   const bot = answered && answered.profileId === profileId ? answered.bot : undefined
-  // The bot's list stands beside its routines where there is room (`useBotChatsPane`), so the page
-  // has nothing to lead back to; below that width the list is the screen this page was opened from,
-  // and is what back returns to.
-  const beside = Boolean(useBotChatsPane(useLegacyChat() === false))
-  const { up, back } = useNav()
-  const leave = useCallback(() => up(botChatsPath(profileId)), [up, profileId])
-  // Beside the list the page is the top-level screen, so the press is the app's where nothing stands
-  // behind it. The control above still steps to the list, wherever this page was opened.
-  useEffect(() => (beside ? undefined : setBackGuard(back())), [back, beside])
+  // A bot's screens all wear one way back — the bar's corner control, named for the list it lands on,
+  // with the platform's press registered to make the same move (ADR 0144, G8). The legacy layout has
+  // no bot's list for it to step onto, so there the page keeps the leading button it has always drawn,
+  // since a page with no way back is worse than one with the older control.
+  const legacy = useLegacyChat()
+  const lead = useChatLead({ bot: profileId, press: "list" })
+  const { up } = useNav()
   const [tick, setTick] = useState(0)
   const [pollTick, setPollTick] = useState(0)
   // Which state the reader asked the page for. A page remembers nothing across visits: this is the
@@ -90,15 +88,24 @@ export function RoutinesPage() {
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       {/*
         The app's bar in its pinned form (ADR 0140) — the same row, slots and frosted circles the chat
-        and the bot's list draw. Its leading control is the way back to that list where the list is not
-        already beside this page, its title is the screen's own, its action is Refresh, and the four
-        states it filters by are pinned under the row inside the same sticky box, so a long list is
-        filtered without scrolling back up to reach them.
+        and the bot's list draw. Its leading control is the legacy layout's only: everywhere a bot has a
+        list, that list is this page's way back and stands in the corner, as a conversation's does. Its
+        title is the screen's own, its action is Refresh, and the four states it filters by are pinned
+        under the row inside the same sticky box, so a long list is filtered without scrolling back up
+        to reach them.
       */}
       <ChatHeader
         pinned
         showBot={false}
-        leading={!beside && <BackButton label="Back to chats" onClick={leave} floating />}
+        leading={
+          legacy === true && (
+            <BackButton
+              label="Back to chats"
+              onClick={() => up(botChatsPath(profileId))}
+              floating
+            />
+          )
+        }
         title="Routines"
         actions={
           <Button
@@ -111,6 +118,7 @@ export function RoutinesPage() {
             <RefreshCwIcon />
           </Button>
         }
+        back={lead.back}
         below={
           <ChipRow label="Routine states">
             {FILTERS.map(({ key, label }) => (
