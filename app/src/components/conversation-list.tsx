@@ -612,7 +612,7 @@ function Waiting({
                   onClick={onNavigate}
                   aria-label={collapsed ? title : undefined}
                   className={(state) =>
-                    collapsed ? railClass(state) : cn(rowClass(state), "py-2")
+                    collapsed ? railClass(state) : cn(rowClass(state), "min-h-14 py-2")
                   }
                 >
                   <Icon
