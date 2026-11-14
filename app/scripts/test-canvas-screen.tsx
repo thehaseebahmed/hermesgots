@@ -335,9 +335,25 @@ test(
         )
         assert.ok(missing('[aria-label="All canvases"]'), "with no way back beside it")
         assert.ok(missing("[data-canvas-flip]"), "with no flip before there is a record")
-        await act(async () => release())
-        await settle()
       })
+      // The same frames with something behind the chat: whether a step back is the Preview corner's
+      // is still the record's to say, so no arrow is drawn for it either until the record lands.
+      const pushed = atDepth(1)
+      try {
+        await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
+          await until(() => /Reading the canvas…/.test(text()), "the reading line, pushed")
+          assert.ok(
+            missing('[aria-label="All canvases"]'),
+            "no arrow is drawn for a canvas the record has not answered for",
+          )
+          assert.ok(
+            find('[aria-label="Open conversations"]'),
+            "so the head leads with the drawer instead",
+          )
+        })
+      } finally {
+        pushed.restore()
+      }
     } finally {
       host.holdList = undefined
       // The held sweep is let go whichever way the assertions went: a read joined to it would
@@ -514,9 +530,9 @@ test(
         "the block is as tall as a thumb, where the ellipsis was (min-h-11)",
       )
       assert.equal(
-        /\bmin-h-/.test(heading!.className),
+        /\bmin-h-/.test(control!.className),
         false,
-        "and the title carries no minimum height of its own (its tightness is the sweep's)",
+        "and the title's control carries no minimum height, so the line begins where the words end",
       )
       assert.equal(control!.contains(line), false, "the line is no part of the control")
       saysTitleAlone(control, CANVAS.title)
@@ -711,7 +727,11 @@ test("a phone's canvas opens on Preview and Edit is an address with a way back",
       assert.ok(missing("[data-canvas-edit-pill]"), "the pill is gone")
 
       await click(edit)
-      assert.equal(nav(), `PUSH:/canvas/${CANVAS.id}/edit`, "Edit is a step, pushed")
+      assert.equal(
+        nav(),
+        `REPLACE:/canvas/${CANVAS.id}/edit`,
+        "Edit is the chat in the page's place, never a second entry",
+      )
       await until(() => Boolean(composerField()), "the chat to draw")
       assert.ok(missing("iframe[data-canvas-frame]"), "the edit screen draws no page")
       assert.ok(find('[data-canvas-flip="preview"]'), "its header offers Preview")

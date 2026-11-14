@@ -384,10 +384,11 @@ function CanvasHead({
   actions: ReactNode
 }) {
   const { up } = useNav()
-  // The chat is the address whose own way back is drawn as its Preview corner, so it draws no arrow
-  // once the canvas has a page (ADR 0130); every other screen the list opened leads back to it.
-  const chatWithPage = Boolean(useMatch("canvas/:id/edit")) && hasVersion(canvas)
-  const leadsBack = depth() > 0 && !chatWithPage
+  // The chat is the address whose own way back is drawn as its Preview corner (ADR 0130): no arrow
+  // once the canvas has a page, and none while the record is still being read — a canvas that turns
+  // out to have a page must not have been offered an arrow in the frames before it landed.
+  const cornerLeads = Boolean(useMatch("canvas/:id/edit")) && (!canvas || hasVersion(canvas))
+  const leadsBack = depth() > 0 && !cornerLeads
   return (
     <ChatHeader
       className="relative pb-2"
@@ -818,7 +819,10 @@ export function CanvasView() {
                   className={HEADER_BUTTON}
                   data-canvas-flip="edit"
                   aria-label={FLIP.edit}
-                  onClick={() => navigate(`/canvas/${id}/edit`)}
+                  // A replace, as the flip back to the page is: the two are one canvas's other half,
+                  // so a push would leave the page behind for the next back press to land on — the
+                  // same screen, drawn twice, and a head whose way back moves nothing (ADR 0130).
+                  onClick={() => navigate(`/canvas/${id}/edit`, { replace: true })}
                 >
                   <PencilIcon />
                 </Button>
