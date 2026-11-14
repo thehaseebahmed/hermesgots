@@ -1,5 +1,9 @@
 # A chat is the root, and a bot's list is a screen it opens
 
+**Superseded in part by [ADR 0154](0154-a-conversation-sits-one-step-off-its-bot-s-list.md)**
+(2026-11-14): a conversation is one step off its bot's list, so `root()` is for places and never for a
+conversation, and the memory this record's landing leaned on is deleted with `lib/launch.ts`.
+
 **Superseded in part by [ADR 0153](0153-a-bot-s-list-is-the-way-into-every-conversation.md)**
 (2026-11-13): a bot's address is its list rather than the chat this device was last in — so the
 landing, the memory behind it and the list control this record put in a chat's bar are gone, and a

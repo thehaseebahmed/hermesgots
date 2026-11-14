@@ -1,5 +1,10 @@
 # A bot's list is the way into every conversation
 
+**Superseded in part by [ADR 0154](0154-a-conversation-sits-one-step-off-its-bot-s-list.md)**
+(2026-11-14): a conversation picked from a bot's list now opens above it rather than as the app's only
+entry, so both ways back land the list, and a conversation's bar carries that control in its corner.
+What this record says about a bot's address being its list, its order, its panes and its rooms stands.
+
 **Supersedes in part [ADR 0144](0144-a-chat-is-the-root.md) and
 [ADR 0145](0145-a-picked-chat-opens-as-the-apps-only-entry.md).**
 
