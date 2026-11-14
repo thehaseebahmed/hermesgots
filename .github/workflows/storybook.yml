@@ -1,6 +1,6 @@
 name: Storybook
 
-# Storybook is a slot of the app's own Netlify site, not a site of its own (docs/adr/0153-...): a branch
+# Storybook is a slot of the app's own Netlify site, not a site of its own (docs/adr/0154-storybook-is-a-slot-of-the-app-site.md): a branch
 # deploy aliased `storybook`, served at storybook--<site>.netlify.app beside `candidate`. A pull
 # request builds it, so a story that stops compiling fails the PR; a merge to main deploys it. It is
 # always an alias deploy: `--prod` is deliberately never passed, because on this site that would
