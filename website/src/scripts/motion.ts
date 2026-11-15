@@ -1,7 +1,8 @@
 /**
- * Scroll motion for the landing page: one-shot reveals, and the bottom dock that steps aside while
- * the hero buttons, the waiting list or the footer are on screen. Everything is progressive: without the script (or
- * with reduced motion) the page is a plain stack, so nothing is hidden until this says it can animate.
+ * The site's script: one-shot reveals, the headline that becomes the name a moment after the page draws, the
+ * nav's glass once the page scrolls and the waiting list's form. Everything is progressive: without
+ * the script (or with reduced motion) the page is a plain stack, so nothing is hidden until this says
+ * it can animate.
  */
 
 const root = document.documentElement
@@ -21,20 +22,29 @@ if (!reduced && "IntersectionObserver" in window) {
     },
     { rootMargin: "0px 0px -10% 0px", threshold: 0.1 },
   )
-  document.querySelectorAll("[data-reveal]").forEach((element) => seen.observe(element))
+  document.querySelectorAll("[data-reveal]:not(.ss-stage *)").forEach((element) => seen.observe(element))
 }
 
-const dock = document.querySelector<HTMLElement>("[data-dock]")
-if (dock && "IntersectionObserver" in window) {
-  const covering = new Set<Element>()
-  const watch = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      if (entry.isIntersecting) covering.add(entry.target)
-      else covering.delete(entry.target)
-    }
-    dock.classList.toggle("is-away", covering.size > 0)
-  })
-  document.querySelectorAll("#pricing, .footer, .home-hero .cta").forEach((element) => watch.observe(element))
+// The nav takes its glass once the page has moved under it.
+const nav = document.querySelector<HTMLElement>("[data-nav]")
+if (nav) {
+  const update = () => nav.classList.toggle("is-scrolled", window.scrollY > 8)
+  update()
+  window.addEventListener("scroll", update, { passive: true })
+}
+
+// The headline becomes the name on its own a moment after the page draws, so a reader who never
+// touches the hero still meets it. A tab opened in the background waits until it is looked at.
+const title = document.querySelector<HTMLElement>("[data-hero-title]")
+if (title) {
+  const meet = () => window.setTimeout(() => title.classList.add("is-met"), 2400)
+  if (document.visibilityState === "visible") meet()
+  else
+    document.addEventListener(
+      "visibilitychange",
+      () => document.visibilityState === "visible" && meet(),
+      { once: true },
+    )
 }
 
 document.querySelectorAll<HTMLFormElement>("[data-waitlist]").forEach((form) => {

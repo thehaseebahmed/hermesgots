@@ -1,7 +1,7 @@
 ---
 import "@fontsource-variable/figtree"
-import "../styles/global.css"
-import "../styles/landing.css"
+import "@fontsource-variable/jetbrains-mono"
+import "../styles/site.css"
 import Footer from "../components/Footer.astro"
 import Nav from "../components/Nav.astro"
 
@@ -20,13 +20,15 @@ const ogImage = new URL(image, Astro.site)
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="description" content={description} />
     <meta name="color-scheme" content="light dark" />
-    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="theme-color" content="#eaf2fd" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#07090e" media="(prefers-color-scheme: dark)" />
     <title>{title}</title>
     <link rel="canonical" href={canonical} />
     <link rel="icon" type="image/png" href="/favicon.png" />
+    <link rel="preload" as="image" href="/bots/byte/happy.webp" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Gots" />
     <meta property="og:title" content={title} />

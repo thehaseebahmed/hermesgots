@@ -14,12 +14,12 @@ export interface RenderOptions {
   limit?: number
 }
 
-const BOTS = ["tri", "cubby", "penny", "hex", "stella", "orbi", "gem", "bloom"]
+const BOTS = ["pixel", "bubble", "wink", "byte", "sunny", "pip", "nova", "lovey", "crumb"]
 
 function picture(login: string, index: number, live: boolean) {
   const src = live
     ? `https://github.com/${encodeURIComponent(login)}.png?size=88`
-    : `/bots/${BOTS[index % BOTS.length]}.png`
+    : `/bots/${BOTS[index % BOTS.length]}/happy.webp`
   return `<img class="avatar${live ? " round" : ""}" src="${src}" alt="" width="44" height="44" loading="lazy" referrerpolicy="no-referrer" />`
 }
 
