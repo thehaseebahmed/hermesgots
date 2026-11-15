@@ -1,12 +1,17 @@
 """ntfy as a transport for the app's own news: what is kept, what is refused and what is published.
 
+The server and the token are Hermes's own ``NTFY_SERVER_URL`` and ``NTFY_TOKEN``, read through its
+credential helper; the tests plant that helper over a dict standing for the profile's environment.
+
 Run: python3 -m unittest plugin.tests.test_ntfy -v
 """
 
 from __future__ import annotations
 
 import re
+import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -14,55 +19,80 @@ from unittest import mock
 from plugin import link, ntfy, push
 from plugin.store import db_path
 
-TARGET = {"server": "https://ntfy.sh/", "topic": "gots-Zk3", "token": "tk_abc", "device": "phone-1"}
 
+class Env(unittest.TestCase):
+    """A profile whose environment is ``self.env``, read and written as Hermes would."""
 
-class Target(unittest.TestCase):
     def setUp(self):
         self.path = db_path(Path(tempfile.mkdtemp()))
+        self.env = {}
+        pool = types.ModuleType("agent.credential_pool")
+        pool.get_env_prefer_dotenv = lambda key: self.env.get(key, "")
+        agent = sys.modules.get("agent") or types.ModuleType("agent")
+        patches = [
+            mock.patch.dict(sys.modules, {"agent": agent, "agent.credential_pool": pool}),
+            mock.patch.object(link, "set_env", lambda home, key, value: self.env.__setitem__(key, value)),
+        ]
+        for patch in patches:
+            patch.start()
+            self.addCleanup(patch.stop)
 
-    def test_a_target_is_kept_without_its_token_ever_being_read_back(self):
-        held = ntfy.set_target(self.path, {**TARGET, "categories": ["chat_input"]})
-        self.assertEqual(held["server"], "https://ntfy.sh", "the address it is published to")
-        answer = ntfy.public(ntfy.stored(self.path), "phone-1")
-        self.assertNotIn("token", answer)
-        self.assertNotIn("tk_abc", repr(answer))
+
+TARGET = {"topic": "gots-Zk3", "device": "phone-1"}
+
+
+class Target(Env):
+    def test_the_server_and_token_are_hermes_own_and_only_the_topic_is_kept_here(self):
+        self.env.update(NTFY_SERVER_URL="https://ntfy.example.com/", NTFY_TOKEN="tk_abc")
+        ntfy.set_target(self.path, {**TARGET, "categories": ["chat_input"]})
+        self.assertEqual(set(ntfy.stored(self.path)) - {"devices", "categories"}, {"topic"})
+        answer = ntfy.public(ntfy.held(self.path), "phone-1")
+        self.assertNotIn("tk_abc", repr(answer), "a token is never read back")
         self.assertEqual(
-            {k: answer[k] for k in ("configured", "server", "topic", "token_set", "categories", "devices", "joined")},
+            {k: answer[k] for k in ("configured", "server", "server_set", "topic", "token_set", "joined")},
             {
                 "configured": True,
-                "server": "https://ntfy.sh",
+                "server": "https://ntfy.example.com",
+                "server_set": True,
                 "topic": "gots-Zk3",
                 "token_set": True,
-                "categories": ["chat_input"],
-                "devices": 1,
                 "joined": True,
             },
         )
 
-    def test_a_target_is_written_a_field_at_a_time_and_publishes_only_once_whole(self):
-        ntfy.set_target(self.path, {"server": "https://ntfy.sh"})
+    def test_with_no_server_set_it_is_ntfy_sh_as_hermes_reads_it(self):
+        self.env["NTFY_TOKEN"] = "tk_abc"
         ntfy.set_target(self.path, {"topic": "gots-Zk3"})
-        self.assertIsNone(ntfy.target(self.path), "no token, so nothing can publish: it is required")
-        self.assertEqual(ntfy.public(ntfy.stored(self.path))["configured"], False)
-        with self.assertRaisesRegex(push.PushError, "first"):
-            ntfy.set_target(self.path, {"device": "phone-1"})
-        ntfy.set_target(self.path, {"token": "tk_abc"})
-        self.assertIsNotNone(ntfy.target(self.path))
-        self.assertTrue(ntfy.public(ntfy.stored(self.path))["configured"])
+        answer = ntfy.public(ntfy.held(self.path))
+        self.assertEqual((answer["server"], answer["server_set"]), ("https://ntfy.sh", False))
+        self.assertEqual(ntfy.target(self.path)["server"], "https://ntfy.sh")
 
-    def test_a_new_topic_keeps_the_token_and_the_phones(self):
-        ntfy.set_target(self.path, TARGET)
-        held = ntfy.set_target(self.path, {"topic": "other"})
-        self.assertEqual((held["token"], held["devices"]), ("tk_abc", ["phone-1"]))
+    def test_server_and_token_are_written_to_hermes_own_variables(self):
+        ntfy.set_target(self.path, {"server": "http://192.168.1.5:2586/", "token": "tk_abc"})
+        self.assertEqual(self.env, {"NTFY_SERVER_URL": "http://192.168.1.5:2586", "NTFY_TOKEN": "tk_abc"})
+        ntfy.set_target(self.path, {"server": ""})
+        self.assertEqual(self.env["NTFY_SERVER_URL"], "", "an empty server is the default one")
+        self.assertEqual(self.env["NTFY_TOKEN"], "tk_abc", "the token is Hermes's: a server change keeps it")
 
-    def test_another_server_drops_the_token_it_wasnt_typed_for(self):
-        ntfy.set_target(self.path, TARGET)
-        held = ntfy.set_target(self.path, {"server": "https://ntfy.example.com"})
-        self.assertNotIn("token", held, "a token is never sent to a server it wasn't made on")
+    def test_no_token_means_nothing_publishes_so_the_token_is_required(self):
+        ntfy.set_target(self.path, {"topic": "gots-Zk3"})
         self.assertIsNone(ntfy.target(self.path))
-        self.assertFalse(ntfy.public(held)["token_set"])
-        self.assertEqual(ntfy.set_target(self.path, {"server": "https://ntfy.example.com/"}).get("token"), None)
+        self.assertFalse(ntfy.public(ntfy.held(self.path))["configured"])
+        with self.assertRaisesRegex(push.PushError, "token first"):
+            ntfy.set_target(self.path, {"device": "phone-1"})
+        self.env["NTFY_TOKEN"] = "tk_abc"
+        self.assertIsNotNone(ntfy.target(self.path))
+
+    def test_the_topic_hermes_listens_on_is_refused(self):
+        self.env.update(NTFY_TOPIC="hermes-in", NTFY_TOKEN="tk_abc")
+        with self.assertRaisesRegex(push.PushError, "Hermes listens on"):
+            ntfy.set_target(self.path, {"topic": "hermes-in"})
+        self.assertEqual(ntfy.stored(self.path), {}, "a refused write keeps nothing")
+
+    def test_a_refused_write_writes_no_variable_either(self):
+        with self.assertRaises(push.PushError):
+            ntfy.set_target(self.path, {"server": "https://ntfy.example.com", "topic": "a b"})
+        self.assertEqual(self.env, {})
 
     def test_any_http_server_the_host_can_reach_is_taken(self):
         for server, kept in (
@@ -71,7 +101,8 @@ class Target(unittest.TestCase):
             ("http://192.168.1.5", "http://192.168.1.5"),
             ("http://ntfy.lan:2586/prefix/", "http://ntfy.lan:2586/prefix"),
         ):
-            self.assertEqual(ntfy.set_target(self.path, {"server": server})["server"], kept)
+            ntfy.set_target(self.path, {"server": server})
+            self.assertEqual(self.env["NTFY_SERVER_URL"], kept)
 
     def test_only_an_address_and_ntfys_own_topics_are_taken(self):
         for server in ("ftp://ntfy.sh", "ntfy.sh", "https://u:p@ntfy.sh", "https://ntfy.sh/?a=1", "https://", 7):
@@ -82,17 +113,22 @@ class Target(unittest.TestCase):
                 ntfy.set_target(self.path, {"topic": topic})
         with self.assertRaises(push.PushError):
             ntfy.set_target(self.path, {"token": "two words"})
-        self.assertEqual(ntfy.stored(self.path), {}, "a refused write keeps nothing")
+        self.assertEqual(self.env, {})
 
-    def test_a_phone_leaving_keeps_the_bots_target(self):
+    def test_a_phone_leaving_keeps_the_target_and_remove_keeps_hermes_variables(self):
+        self.env["NTFY_TOKEN"] = "tk_abc"
         ntfy.set_target(self.path, TARGET)
         ntfy.set_target(self.path, {"device": "phone-2"})
         self.assertEqual(ntfy.remove(self.path, "phone-1")["devices"], ["phone-2"])
-        self.assertEqual(ntfy.remove(self.path, "phone-2")["devices"], [])
         self.assertIsNotNone(ntfy.target(self.path), "the target is the bot's, not its phones'")
-        self.assertEqual(ntfy.remove(self.path, None), {})
+        ntfy.remove(self.path, None)
         self.assertIsNone(ntfy.target(self.path))
-        self.assertFalse(ntfy.public(None)["configured"])
+        self.assertEqual(self.env, {"NTFY_TOKEN": "tk_abc"}, "Hermes's own token stays Hermes's")
+
+    def test_a_user_pass_token_is_basic_as_hermes_sends_it(self):
+        self.assertEqual(ntfy.auth_header("tk_abc"), {"Authorization": "Bearer tk_abc"})
+        self.assertEqual(ntfy.auth_header(" alice:secret\n")["Authorization"], "Basic YWxpY2U6c2VjcmV0")
+        self.assertEqual(ntfy.auth_header(""), {})
 
 
 class Message(unittest.TestCase):
@@ -128,13 +164,17 @@ class Message(unittest.TestCase):
         self.assertEqual(ntfy.UNTITLED, dict(re.findall(r'(\w+): "([^"]*)"', untitled)))
 
 
-class Deliver(unittest.TestCase):
+class Deliver(Env):
     def setUp(self):
-        self.path = db_path(Path(tempfile.mkdtemp()))
+        super().setUp()
+        self.env["NTFY_TOKEN"] = "tk_abc"
         self.sent = []
-        patch = mock.patch.object(ntfy, "publish", lambda held, body: self.sent.append((held, body)) or 200)
-        patch.start()
-        self.addCleanup(patch.stop)
+        self.publishing = mock.patch.object(
+            ntfy, "publish", lambda held, body: self.sent.append((held, body)) or 200
+        )
+        self.publishing.start()
+        self.publish_on = True
+        self.addCleanup(lambda: self.publish_on and self.publishing.stop())
 
     def test_nothing_is_published_without_a_target(self):
         self.assertIsNone(ntfy.deliver(self.path, "question", "chat_input", "gots-1"))
@@ -158,7 +198,8 @@ class Deliver(unittest.TestCase):
         self.assertEqual(len(self.sent), 1, "both are looking")
 
     def test_the_request_carries_the_token_and_posts_json_to_the_servers_root(self):
-        mock.patch.stopall()
+        self.publishing.stop()
+        self.publish_on = False
         seen = {}
 
         class Answer:
@@ -179,12 +220,12 @@ class Deliver(unittest.TestCase):
         self.assertEqual(seen, {"url": "https://ntfy.sh/", "auth": "Bearer tk_abc", "method": "POST"})
 
 
-class BothTransports(unittest.TestCase):
+class BothTransports(Env):
     """One event, one notification: what stops ntfy and Firebase both telling the same phone."""
 
     def setUp(self):
-        self.home = Path(tempfile.mkdtemp())
-        self.path = db_path(self.home)
+        super().setUp()
+        self.env["NTFY_TOKEN"] = "tk_abc"
 
     def test_a_push_goes_to_ntfy_and_the_registry_is_told_to_skip_that_phone(self):
         ntfy.set_target(self.path, {**TARGET, "categories": ["chat_input"]})

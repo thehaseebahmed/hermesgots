@@ -1,22 +1,24 @@
 """ntfy: the same news as a push, published to a topic the user's phone subscribes to.
 
 A phone built without Firebase, or one whose user would rather not go through it, gets its
-notifications from the ntfy app instead: the Gots app hands this profile a server, a topic and an
-access token (``POST push/ntfy``), and ``deliver`` publishes there whenever ``push.notify`` has news.
-The plugin publishes itself — ntfy needs no key that can't live on a host, so nothing goes through
-the registry — and what it says is what a push says: the title of what it is about and one sentence
-of what happened, never what was asked.
+notifications from the ntfy app instead, and ``deliver`` publishes there whenever ``push.notify`` has
+news. The plugin publishes itself — ntfy needs no key that can't live on a host, so nothing goes
+through the registry — and what it says is what a push says: the title of what it is about and one
+sentence of what happened, never what was asked.
 
-**This is not Hermes's ntfy delivery platform.** That one carries a routine's own answer to a channel
-the user set up in Hermes; this carries the app's "a session needs you" to the user's phone. The two
-share a protocol and nothing else, and neither reads the other's configuration.
+**The server and the token are Hermes's own.** Hermes's ntfy platform reads ``NTFY_SERVER_URL``
+(``https://ntfy.sh`` where unset) and ``NTFY_TOKEN`` (a bearer token, or ``user:pass`` for Basic) from
+the profile's environment, and this module reads the same two through Hermes's credential helper and
+writes them with Hermes's own ``.env`` writer, so a profile has one ntfy server and one token whichever
+side set them. **The topic is Gots's alone**, kept in the plugin's store: Hermes's platform subscribes
+to ``NTFY_TOPIC`` and reads what lands there as messages to the agent, so publishing Gots's news to
+that topic would hand the agent its own notifications, and a topic equal to it is refused.
 
-The target is the profile's own setting, one per store and written a field at a time, so it follows
-the bot to every phone: a phone that joins reads where to publish from the host, never from itself,
-and the categories it wants are one list for every phone on the topic. The devices that chose
-ntfy are kept beside it, for two things — the registry is told to skip them, so a Firebase token
-still on file can't deliver the same news twice, and a publish is held back while every one of them
-has the app on screen.
+The target follows the bot to every phone: a phone that joins reads where to publish from the host,
+never from itself, and the categories it wants are one list for every phone on the topic. The devices
+that chose ntfy are kept beside it, for two things — the registry is told to skip them, so a Firebase
+token still on file can't deliver the same news twice, and a publish is held back while every one of
+them has the app on screen.
 
 ntfy's Android app has a channel per *priority*, not per category, so a category's switch has nothing
 on the phone to stand on: the list the app sent is enforced here, before anything is published, and
@@ -36,11 +38,17 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .store import connect
+from . import link
+from .store import connect, home_of
 
 logger = logging.getLogger(__name__)
 
 KEY = "ntfy"
+# The environment Hermes's own ntfy platform reads (`plugins/platforms/ntfy/plugin.yaml`).
+SERVER_ENV = "NTFY_SERVER_URL"
+TOKEN_ENV = "NTFY_TOKEN"
+TOPIC_ENV = "NTFY_TOPIC"
+DEFAULT_SERVER = "https://ntfy.sh"
 SEND_TIMEOUT = 10
 MAX_DEVICES = 20
 # ntfy's own rule for a topic and for a sequence id (`topicRegex` in its server).
@@ -117,8 +125,23 @@ def clean_server(value: Any) -> str:
     return f"{parts.scheme}://{parts.netloc}{parts.path.rstrip('/')}"
 
 
+def _env(path: Path, key: str) -> str:
+    """One of Hermes's own variables for this profile, through its credential helper and under the
+    profile's scope — a delivery runs on a thread of its own, which carries no scope — or the
+    profile's ``.env`` where this host has no helper."""
+    from .profile_scope import profile_scope
+
+    home = home_of(path)
+    try:
+        from agent.credential_pool import get_env_prefer_dotenv
+    except ImportError:
+        return link.env_value(home, key).strip()
+    with profile_scope(home):
+        return str(get_env_prefer_dotenv(key) or "").strip()
+
+
 def stored(path: Path) -> Dict[str, Any]:
-    """What this profile holds about ntfy, whole or not: a target is written a field at a time."""
+    """What the plugin keeps for this profile's ntfy: the topic, the phones and their categories."""
     if not path.exists():
         return {}
     conn = connect(path)
@@ -133,15 +156,31 @@ def stored(path: Path) -> Dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
-def complete(held: Dict[str, Any]) -> bool:
-    return all(isinstance(held.get(k), str) and held[k] for k in ("server", "topic", "token"))
+def held(path: Path) -> Dict[str, Any]:
+    """The whole target as it stands: the plugin's own topic, and Hermes's server and token."""
+    value = dict(stored(path))
+    value.pop("token", None)
+    value.pop("server", None)
+    explicit = _env(path, SERVER_ENV)
+    value["server"] = (explicit or DEFAULT_SERVER).rstrip("/")
+    value["server_set"] = bool(explicit)
+    token = _env(path, TOKEN_ENV)
+    if token:
+        value["token"] = token
+    return value
+
+
+def complete(value: Dict[str, Any]) -> bool:
+    return all(isinstance(value.get(k), str) and value[k] for k in ("server", "topic", "token"))
 
 
 def target(path: Path) -> Optional[Dict[str, Any]]:
-    """Where this profile publishes, or None while any of the server, the topic or the token is
-    missing: a target with no token can't publish, which is what makes the token required."""
-    held = stored(path)
-    return held if complete(held) else None
+    """Where this profile publishes, or None while it has no topic or Hermes holds no token: a
+    target with no token publishes nothing, which is what makes the token required."""
+    if not stored(path).get("topic"):
+        return None
+    value = held(path)
+    return value if complete(value) else None
 
 
 def _write(path: Path, value: Optional[Dict[str, Any]]) -> None:
@@ -171,40 +210,47 @@ def _priorities(value: Any) -> Dict[str, int]:
 
 
 def set_target(path: Path, body: Dict[str, Any]) -> Dict[str, Any]:
-    """Writes what the body names of this profile's target, and that a device chose it. Raises
-    ``PushError`` with a message for the app.
+    """Writes what the body names, and that a device chose this target. Raises ``PushError`` with a
+    message for the app.
 
-    The target is the profile's setting, edited one field at a time, so each of the server, the topic
-    and the token is written only when named. The token is never read back, and it belongs to the
-    server it was made on: a write that moves the target to another server drops it, so a token is
-    never sent to a server it wasn't typed for.
+    The topic is kept here; the server and the token are Hermes's own variables and are written to
+    the profile's ``.env`` with Hermes's own writer, so Hermes's ntfy platform reads what was set
+    here and the other way round. An empty server is the default one. The token is never read back.
     """
     from .push import clean_categories
 
-    held = stored(path)
-    value = dict(held)
-    if "server" in body:
-        server = clean_server(body.get("server"))
-        if held.get("server") and server != held["server"]:
-            value.pop("token", None)
-        value["server"] = server
+    value = dict(stored(path))
+    value.pop("server", None)
+    value.pop("token", None)
+    home = home_of(path)
     if "topic" in body:
         topic = body.get("topic")
         if not isinstance(topic, str) or not TOPIC.match(topic):
             raise _error("Not an ntfy topic.")
+        if topic == _env(path, TOPIC_ENV):
+            raise _error(
+                "That's the topic Hermes listens on for messages, so it can't carry notifications."
+            )
         value["topic"] = topic
-    if body.get("token") is not None:
-        token = body["token"]
-        if not isinstance(token, str) or not TOKEN.match(token):
-            raise _error("Not an ntfy access token.")
-        value["token"] = token
+    server: Optional[str] = None
+    if "server" in body:
+        typed = body.get("server")
+        server = "" if typed in ("", None) else clean_server(typed)
+    token = body.get("token")
+    if token is not None and (not isinstance(token, str) or not TOKEN.match(token)):
+        raise _error("Not an ntfy access token.")
     device = body.get("device")
     if device is not None:
         if not isinstance(device, str) or not DEVICE.match(device):
             raise _error("Not a device.")
-        if not complete(value):
-            raise _error("Set this bot's ntfy server, topic and access token first.")
-        devices = [d for d in held.get("devices") or [] if d != device] + [device]
+        whole = {**held(path), **value}
+        if server is not None:
+            whole["server"] = server or DEFAULT_SERVER
+        if token:
+            whole["token"] = token
+        if not complete(whole):
+            raise _error("Set this bot's ntfy topic and Hermes's ntfy token first.")
+        devices = [d for d in value.get("devices") or [] if d != device] + [device]
         value["devices"] = devices[-MAX_DEVICES:]
     categories = clean_categories(body.get("categories"))
     if categories is not None:
@@ -212,35 +258,42 @@ def set_target(path: Path, body: Dict[str, Any]) -> Dict[str, Any]:
     priorities = _priorities(body.get("priorities"))
     if priorities:
         value["priorities"] = priorities
+    # Every check has passed, so nothing below is left half-written.
+    if server is not None:
+        link.set_env(home, SERVER_ENV, server)
+    if token:
+        link.set_env(home, TOKEN_ENV, token)
     _write(path, value)
-    return value
+    return held(path)
 
 
 def remove(path: Path, device: Optional[str]) -> Dict[str, Any]:
-    """A device stops using ntfy, and the target stays the bot's; with no device named, the whole
-    target goes, for every phone."""
+    """A device stops using ntfy, and the target stays the bot's. With no device named, the plugin's
+    own part goes — the topic and its phones — and Hermes's server and token stay, being Hermes's."""
     if not device:
         _write(path, None)
-        return {}
-    held = stored(path)
-    if held:
-        held["devices"] = [d for d in held.get("devices") or [] if d != device]
-        _write(path, held)
-    return held
+        return held(path)
+    value = stored(path)
+    if value:
+        value["devices"] = [d for d in value.get("devices") or [] if d != device]
+        _write(path, value)
+    return held(path)
 
 
-def public(held: Optional[Dict[str, Any]], device: Optional[str] = None) -> Dict[str, Any]:
+def public(value: Optional[Dict[str, Any]], device: Optional[str] = None) -> Dict[str, Any]:
     """The target as the app may read it: everything but the token, which is only ever a boolean.
-    ``configured`` is whether it can publish, ``joined`` whether the device asking chose ntfy here."""
-    held = held or {}
-    devices = [d for d in held.get("devices") or [] if isinstance(d, str)]
+    ``configured`` is whether it can publish, ``joined`` whether the device asking chose ntfy here,
+    and ``server_set`` whether the server is the profile's own or the default."""
+    value = value or {}
+    devices = [d for d in value.get("devices") or [] if isinstance(d, str)]
     return {
         "object": "gots.push_ntfy",
-        "configured": complete(held),
-        "server": held.get("server"),
-        "topic": held.get("topic"),
-        "token_set": bool(held.get("token")),
-        "categories": held.get("categories"),
+        "configured": complete(value),
+        "server": value.get("server") or DEFAULT_SERVER,
+        "server_set": bool(value.get("server_set")),
+        "topic": value.get("topic"),
+        "token_set": bool(value.get("token")),
+        "categories": value.get("categories"),
         "devices": len(devices),
         "joined": bool(device and device in devices),
     }
@@ -282,12 +335,23 @@ def message(
     }
 
 
+def auth_header(token: str) -> Dict[str, str]:
+    """The ``Authorization`` header Hermes's own ntfy platform builds from ``NTFY_TOKEN``: a
+    ``user:pass`` token is Basic, anything else Bearer — one token, read the same way on both sides."""
+    token = token.strip()
+    if not token:
+        return {}
+    if ":" in token:
+        return {"Authorization": "Basic " + base64.b64encode(token.encode()).decode()}
+    return {"Authorization": f"Bearer {token}"}
+
+
 def publish(held: Dict[str, Any], body: Dict[str, Any]) -> Optional[int]:
     """One message to the topic. The server's status, or None if it didn't answer."""
     request = urllib.request.Request(
         held["server"] + "/",
         data=json.dumps(body, separators=(",", ":")).encode(),
-        headers={"Authorization": f"Bearer {held['token']}", "Content-Type": "application/json"},
+        headers={**auth_header(held["token"]), "Content-Type": "application/json"},
         method="POST",
     )
     try:

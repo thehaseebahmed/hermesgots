@@ -1,9 +1,9 @@
 /**
  * A bot's Notifications page: the ntfy target its host publishes to, as the settings rules draw any
- * other value (ADR 0055). Each of the server, the topic and the access token is a row showing what
+ * other value (ADR 0055). The topic is Gots's, under a Gots caption; the server URL and the auth token
+ * are Hermes's own NTFY_SERVER_URL and NTFY_TOKEN, under a Hermes caption. Each is a row showing what
  * the host holds, and a tap opens one field's edit — the screen the route pushed below 1024px, a
- * centred card over the page from it. A target is written a field at a time; it publishes only once
- * it holds a token, the token is never shown, and moving it to another server asks for the token again.
+ * centred card over the page from it. The token is never shown, and Remove takes Gots's topic only.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -28,6 +28,7 @@ import {
   seedSettings,
   type,
   until,
+  withToasts,
   wordsOf,
 } from "./component-kit.tsx"
 import { ntfyHost } from "./ntfy-host.ts"
@@ -70,9 +71,14 @@ test("each value is a row, and on a phone its edit is the screen the route pushe
   const fake = ntfyHost()
   try {
     await mount(page(), async () => {
-      await until(async () => wordsOf(row("server")) === "ServerNot set", "the rows")
-      assert.equal(wordsOf(row("topic")), "TopicNot set")
-      assert.equal(wordsOf(row("token")), "Access tokenNot set")
+      await until(async () => wordsOf(row("topic")) === "TopicNot set", "the rows")
+      assert.equal(wordsOf(row("server")), "Server URLhttps://ntfy.sh", "Hermes's default server")
+      assert.equal(wordsOf(row("token")), "Auth tokenNot set")
+      assert.deepEqual(
+        findAll("[data-ntfy-field]").map((one) => one.getAttribute("data-ntfy-field")),
+        ["topic", "server", "token"],
+      )
+      assert.match(document.body.textContent ?? "", /Gots.*Topic.*Hermes.*Server URL/s)
       assert.ok(missing("form"), "the page holds no field: a value drills in")
 
       await click(row("topic"))
@@ -91,7 +97,7 @@ test("each value is a row, and on a phone its edit is the screen the route pushe
 
 test("on a laptop the edit is a card over the page, and the token is never shown", async () => {
   await seed()
-  const fake = ntfyHost({ server: "https://ntfy.sh", topic: "gots-bot", devices: [] })
+  const fake = ntfyHost({ topic: "gots-bot", devices: [] })
   try {
     await laptop(async () => {
       await mount(page(), async () => {
@@ -103,7 +109,7 @@ test("on a laptop the edit is a card over the page, and the token is never shown
         assert.equal(field()!.value, "", "a token is never read back")
         await type(field(), "tk_secret")
         await click(button("Save"))
-        await until(async () => wordsOf(row("token")) === "Access tokenSet", "the row saying so")
+        await until(async () => wordsOf(row("token")) === "Auth tokenSet", "the row saying so")
         assert.equal(document.body.textContent?.includes("tk_secret"), false)
       })
     })()
@@ -111,25 +117,23 @@ test("on a laptop the edit is a card over the page, and the token is never shown
     fake.restore()
   }
   assert.deepEqual(fake.posts[0].body, { token: "tk_secret" })
-  assert.equal(fake.host.target?.token, "tk_secret")
+  assert.equal(fake.host.env.NTFY_TOKEN, "tk_secret", "written to Hermes's own variable")
 })
 
-test("moving to another server asks for the token again, and Remove clears the target", async () => {
+test("the server is Hermes's own variable, and Remove leaves Hermes's settings alone", async () => {
   await seed()
-  const fake = ntfyHost({
-    server: "https://ntfy.sh",
-    topic: "gots-bot",
-    token: "tk_secret",
-    devices: ["phone-1"],
-  })
+  const fake = ntfyHost({ topic: "gots-bot", devices: ["phone-1"] }, { NTFY_TOKEN: "tk_secret" })
   try {
     await mount(page("/settings/bots/bot-1/notifications/server"), async () => {
       await until(async () => field()?.value === "https://ntfy.sh", "the server's edit")
       await type(field(), "http://192.168.1.5:2586")
       await click(button("Save"))
       await until(async () => path() === "/settings/bots/bot-1/notifications", "back on the page")
-      await until(async () => wordsOf(row("token")) === "Access tokenNot set", "the token dropped")
-      assert.equal(wordsOf(row("server")), "Serverhttp://192.168.1.5:2586", "any server")
+      await until(
+        async () => wordsOf(row("server")) === "Server URLhttp://192.168.1.5:2586",
+        "any server the host can reach",
+      )
+      assert.equal(wordsOf(row("token")), "Auth tokenSet", "Hermes's token is Hermes's: it stays")
 
       const remove = findAll("button").find((one) => one.textContent?.includes("Remove ntfy"))
       await click(remove ?? null)
@@ -138,17 +142,56 @@ test("moving to another server asks for the token again, and Remove clears the t
         (one) => one.textContent?.trim() === "Remove",
       )
       await click(confirm ?? null)
-      await until(async () => fake.host.target === undefined, "the target gone")
+      await until(async () => fake.host.target === undefined, "the topic gone")
     })
   } finally {
     fake.restore()
   }
   assert.deepEqual(fake.posts[0].body, { server: "http://192.168.1.5:2586" })
+  assert.equal(fake.host.env.NTFY_SERVER_URL, "http://192.168.1.5:2586")
   assert.equal(
     fake.posts.at(-1)?.body.device,
     undefined,
     "no device named: it goes for every phone",
   )
+  assert.equal(fake.host.env.NTFY_TOKEN, "tk_secret", "and Hermes's own token is untouched")
+})
+
+test("a server the profile set goes back to Hermes's default with Reset", async () => {
+  await seed()
+  const fake = ntfyHost({ topic: "gots-bot", devices: [] }, { NTFY_SERVER_URL: "https://ntfy.lan" })
+  try {
+    await mount(page("/settings/bots/bot-1/notifications/server"), async () => {
+      await until(async () => Boolean(button("Reset")), "the reset")
+      await click(button("Reset"))
+      await until(async () => fake.posts.length === 1, "the write")
+    })
+  } finally {
+    fake.restore()
+  }
+  assert.deepEqual(fake.posts[0].body, { server: "" }, "empty is the default, as Hermes reads it")
+})
+
+test("the topic Hermes listens on is refused in the host's words", async () => {
+  await seed()
+  const fake = ntfyHost(undefined, { NTFY_TOPIC: "hermes-in" })
+  try {
+    await withToasts(async (said) => {
+      await mount(page("/settings/bots/bot-1/notifications/topic"), async () => {
+        await until(async () => Boolean(field()), "the topic's edit")
+        await type(field(), "hermes-in")
+        await click(button("Save"))
+        await until(
+          async () =>
+            [...said, document.body.textContent ?? ""].some((one) => /Hermes listens on/.test(one)),
+          "the refusal",
+        )
+      })
+    })
+  } finally {
+    fake.restore()
+  }
+  assert.equal(fake.host.target, undefined)
 })
 
 test("a bot whose plugin can't hold a target has no Notifications page", async () => {

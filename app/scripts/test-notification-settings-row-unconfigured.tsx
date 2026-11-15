@@ -40,7 +40,9 @@ const screen = () => (
   </MemoryRouter>
 )
 
-const HELD = { server: "https://ntfy.sh", topic: "gots-account", token: "tk_secret", devices: [] }
+const HELD = { topic: "gots-account", devices: [] as string[] }
+/** Hermes's own ntfy token, in the profile's environment. */
+const TOKEN = { NTFY_TOKEN: "tk_secret" }
 
 test("an APK without Firebase still has its entry, on ntfy with nothing to pick", async () => {
   bridgeCalls.length = 0
@@ -61,7 +63,13 @@ test("an APK without Firebase still has its entry, on ntfy with nothing to pick"
       await until(async () => Boolean(find("[data-ntfy]")), "the bot's row")
       assert.ok(missing("[data-transport]"), "one transport is no choice")
       assert.ok(!findText("button", "Android notification settings"), "no phone screen to open")
-      await until(async () => /Not set/.test(wordsOf(find("[data-ntfy]"))), "no target yet")
+      await until(async () => wordsOf(find("[data-ntfy]")).endsWith("Off"), "no target yet")
+      // The Speech-to-text Bots tab's own row: a link with the bot's picture, into its settings.
+      assert.equal(
+        find("a[data-ntfy]")?.getAttribute("href"),
+        "/settings/bots/bot-1/notifications",
+      )
+      assert.ok(find("a[data-ntfy] img"), "the bot's own picture leads the row")
       await click(find("[data-ntfy]"))
       await until(async () => path() === "/settings/bots/bot-1/notifications", "the bot's page")
       assert.ok(missing("[data-notification-types]"), "the types wait for the switch")
@@ -101,18 +109,22 @@ test("a second phone finds the target on the host and joins it with no token typ
   await seedSettings({})
   await db.profiles.clear()
   await db.profiles.put(botProfile("ntfy-second"))
-  const fake = ntfyHost({ ...HELD, devices: ["phone-1"] })
+  const fake = ntfyHost({ ...HELD, devices: ["phone-1"] }, TOKEN)
   try {
     await mount(screen(), async () => {
       await until(
-        async () => /gots-account on ntfy\.sh/.test(wordsOf(find("[data-ntfy]"))),
+        async () => wordsOf(find("[data-ntfy]")).endsWith("On"),
         "the target, read from the host",
       )
       await click(find("#notifications"))
       await until(async () => Boolean(find("[data-notification-types]")), "the inline list")
       const joins = fake.posts.filter((post) => post.path.endsWith("/push/ntfy"))
       assert.equal(joins.length, 1)
-      assert.equal(joins[0].body.token, undefined, "the host holds the token: none is sent")
+      assert.equal(
+        joins[0].body.token,
+        undefined,
+        "the token is Hermes's, on the host: none is sent",
+      )
       assert.equal(joins[0].body.topic, "gots-account")
       const device = String(joins[0].body.device)
       assert.deepEqual(fake.host.target?.devices.sort(), ["phone-1", device].sort())

@@ -57,11 +57,11 @@ const FIXED: Partial<Record<BotTab, SubEntry[]>> = {
     { id: "base-url", kind: "edit", title: "Edit API base URL", label: "API base URL" },
     { id: "server-key", kind: "edit", title: "Edit Server key", label: "Server key" },
   ],
-  // Where the bot publishes over ntfy: its host's target, one field an edit (ADR 0156).
+  // The topic is Gots's; the server URL and the token are Hermes's own NTFY_ variables.
   notifications: [
-    { id: "server", kind: "edit", title: "Edit Server", label: "Server" },
     { id: "topic", kind: "edit", title: "Edit Topic", label: "Topic" },
-    { id: "token", kind: "edit", title: "Edit Access token", label: "Access token" },
+    { id: "server", kind: "edit", title: "Edit Server URL", label: "Server URL" },
+    { id: "token", kind: "edit", title: "Edit Auth token", label: "Auth token" },
   ],
   // General reads its rows from the host, so its edits are keyed below; the chain after the main
   // model is the one it holds a page of its own for.

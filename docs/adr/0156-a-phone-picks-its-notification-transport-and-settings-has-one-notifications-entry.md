@@ -19,19 +19,22 @@ no configuration, and nothing wires one to the other.
 
 **The choices that were Haseeb's** (asked 2026-11-15, not decided for him):
 
-- *Server*: **any** http or https server, `https://ntfy.sh` prefilled. Whether the bot's host can
-  reach it is the host's own network's business, so a LAN, loopback or plain-http server is taken.
-  The plugin therefore posts to whatever address the app hands it; the caller already holds the
-  bot's API key, which is the authority to start the agent on that host.
-- *Topic*: **per bot profile**, not per device and not per account (changed 2026-11-15, after first
-  being per account). The target — server, topic, token — is the profile's own, held by its host, so
-  it follows the bot to every phone: a second phone reads it from the host and joins it without the
-  token being typed again. A phone keeps only whether it is on (`Settings.ntfyOn`). The categories a
-  topic carries are still one list for every phone on it, and the "app is open, say nothing" rule can
-  only hold a publish back while *every* phone that chose ntfy has the app open.
-- *Auth*: an access token is **required**. It is stored in plain text on the bot's host beside the
-  bot's API key, sent as `Authorization: Bearer`, and never read back — a host answers only
-  `token_set`, and a form may leave the field empty to keep the one the host holds.
+- *Server and token*: **Hermes's own** (changed 2026-11-15). Hermes's ntfy platform reads
+  `NTFY_SERVER_URL` (`https://ntfy.sh` where unset) and `NTFY_TOKEN` (a bearer token, or `user:pass`
+  for Basic) from the profile's environment. The plugin reads the same two through
+  `agent.credential_pool.get_env_prefer_dotenv` under the profile's scope, and writes them with
+  Hermes's own `.env` writer, so a profile has one ntfy server and one token whichever side set
+  them. Any http or https server is accepted: whether the host can reach it is the host's own
+  network's business, and only a caller holding the bot's API key can set it. The token builds the
+  same header Hermes builds from it.
+- *Topic*: **Gots's own, per bot profile**, kept in the plugin's store, so it follows the bot to
+  every phone and a second phone joins without typing anything. A phone keeps only whether it is on
+  (`Settings.ntfyOn`). The topic Hermes listens on (`NTFY_TOPIC`) is refused, since Hermes reads
+  what lands there as messages to the agent and would be handed its own notifications. The
+  categories a topic carries are one list for every phone on it, and the "app is open, say nothing"
+  rule holds a publish back only while *every* phone that chose ntfy has the app open.
+- *Auth*: a token is **required** before anything is published, though Hermes's own platform
+  treats `NTFY_TOKEN` as optional. It never leaves the host: a read answers only `token_set`.
 - *Existing installs*: keep Firebase as the default where the build has it.
 - *Name*: the one entry is **Notifications**.
 - *Tap*: the notification carries `gots://open?kind=&id=`, which opens the Android app.
@@ -43,13 +46,13 @@ is the device's: the switch, the Delivery pick, and the types. It asks the trans
 (`src/lib/push-transport.ts`) rather than the platform: Firebase, whose categories are the phone's
 channels, gets the row that opens Android's own settings, shown while notifications are off too;
 Web Push and ntfy, with no channel per category, get the app's own list, which the sender enforces.
-With ntfy the screen also lists the bots, one row each saying where that bot publishes, and a row
-opens the bot's own **Notifications** page in its settings (`/settings/bots/<id>/notifications`,
-gated on `push_ntfy`). That page holds the bot's server, topic and access token as rows, each opening
-the edit every other setting uses — a pushed screen below 1024px and a centred card from it
-(ADR 0055) — and *Remove ntfy* at its foot behind a confirmation. The host takes the target a field at
-a time and publishes only once it holds all three; moving it to another server drops the token,
-which belongs to the server it was made on.
+With ntfy the screen also lists the bots exactly as Speech-to-text's Bots tab does — the Settings
+menu's own row, the bot's picture, On or Off — each opening the bot's own **Notifications** page in
+its settings (`/settings/bots/<id>/notifications`, gated on `push_ntfy`). That page captions its cards
+by owner: *Gots* holds the Topic, *Hermes* holds the Server URL and the Auth token. Each value is a row
+opening the edit every other setting uses — a pushed screen below 1024px and a centred card from it
+(ADR 0055) — the server's edit has a Reset back to Hermes's default, and *Remove ntfy* at the foot
+takes Gots's topic and its phones only, leaving Hermes's own variables alone.
 
 **No fourth copy of the lists.** The category ids stay in the three places they were. ntfy's sender
 reuses the plugin's `CATEGORIES` and `LEGACY_CATEGORIES`; each category's importance is sent by the

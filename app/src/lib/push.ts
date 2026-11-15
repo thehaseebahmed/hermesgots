@@ -876,15 +876,16 @@ async function disableNtfy() {
 export type NtfyField = "server" | "topic" | "token"
 
 /**
- * Writes one value of a bot's ntfy target to its host: the target is the bot's, so every phone reads
- * it from there. A target is whole once it holds a server, a topic and a token, and a phone that is on
- * joins it then. Moving it to another server drops the token, which belongs to the server it was made
- * on, so the token is asked for again.
+ * Writes one value of a bot's ntfy target to its host, so every phone reads it from there. The topic
+ * is Gots's own; the server URL and the token are Hermes's `NTFY_SERVER_URL` and `NTFY_TOKEN`, which
+ * the host writes into the profile's environment — Hermes's own ntfy platform reads the same two. A
+ * target is whole once it has a topic and Hermes holds a token, and a phone that is on joins it then.
  */
 export async function saveNtfyField(bot: Profile, field: NtfyField, value: string) {
   const typed = value.trim()
-  const next = field === "server" ? ntfyServer(typed) : typed
-  if (!next) throw new AppWords("That isn't a web address")
+  // An empty server is Hermes's default one, ntfy.sh.
+  const next = field === "server" ? (typed ? ntfyServer(typed) : "") : typed
+  if (next === undefined) throw new AppWords("That isn't a web address")
   if (field === "topic" && !ntfyTopicOk(next))
     throw new AppWords("A topic is letters, digits, - and _, 64 at most")
   if (field === "token" && !ntfyTokenOk(next)) throw new AppWords("That isn't an access token")
@@ -895,7 +896,8 @@ export async function saveNtfyField(bot: Profile, field: NtfyField, value: strin
   void syncNtfy().catch(() => {})
 }
 
-/** Takes a bot's ntfy target off its host, which stops it publishing to every phone. */
+/** Takes a bot's ntfy topic off its host, which stops it publishing to every phone; Hermes's own
+ * server and token stay, being Hermes's. */
 export async function clearNtfyTarget(bot: Profile) {
   await unregisterNtfy(bot)
   toldNtfy.delete(connectionKey(bot))

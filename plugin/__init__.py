@@ -2387,7 +2387,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return denied
         device = request.query.get("device") or None
         return web.json_response(
-            ntfy.public(await asyncio.to_thread(ntfy.stored, store_path()), device)
+            ntfy.public(await asyncio.to_thread(ntfy.held, store_path()), device)
         )
 
     async def push_ntfy_write(request: "web.Request") -> "web.Response":

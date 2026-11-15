@@ -79,8 +79,12 @@ export const NTFY_DEFAULT_SERVER = "https://ntfy.sh"
 /** What a bot's host holds about where it publishes: everything but the token, which is a boolean. */
 export interface NtfyState {
   configured: boolean
+  /** Hermes's `NTFY_SERVER_URL`, or ntfy.sh where the profile names none. */
   server?: string
-  topic?: string
+  /** Whether the profile names a server of its own rather than the default. */
+  server_set?: boolean
+  topic?: string | null
+  /** Whether Hermes holds an `NTFY_TOKEN`: the token itself never leaves the host. */
   token_set?: boolean
   categories?: string[] | null
   /** How many phones chose ntfy for this bot. */

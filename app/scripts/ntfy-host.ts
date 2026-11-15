@@ -5,27 +5,34 @@
 import { json } from "./component-kit.tsx"
 
 export interface NtfyTarget {
-  server?: string
   topic?: string
-  token?: string
   devices: string[]
 }
 
-export function ntfyHost(held?: NtfyTarget) {
+/** The profile's environment as Hermes reads it: its own ntfy server and token. */
+export interface NtfyEnv {
+  NTFY_SERVER_URL?: string
+  NTFY_TOKEN?: string
+  NTFY_TOPIC?: string
+}
+
+export function ntfyHost(held?: NtfyTarget, env: NtfyEnv = {}) {
   const posts: { path: string; body: Record<string, unknown> }[] = []
-  const host = { target: held }
+  const host = { target: held, env: { ...env } }
   const real = globalThis.fetch
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input))
     if (url.pathname.endsWith("/plugins/gots/info"))
       return json({ name: "gots", features: ["push", "push_ntfy"] })
     if (!url.pathname.includes("/push/ntfy")) return json({})
+    const server = () => (host.env.NTFY_SERVER_URL || "https://ntfy.sh").replace(/\/+$/, "")
     const shown = (device?: string | null) => ({
       object: "gots.push_ntfy",
-      configured: Boolean(host.target?.server && host.target.topic && host.target.token),
-      server: host.target?.server ?? null,
+      configured: Boolean(host.target?.topic && host.env.NTFY_TOKEN),
+      server: server(),
+      server_set: Boolean(host.env.NTFY_SERVER_URL),
       topic: host.target?.topic ?? null,
-      token_set: Boolean(host.target?.token),
+      token_set: Boolean(host.env.NTFY_TOKEN),
       devices: host.target?.devices.length ?? 0,
       joined: Boolean(device && host.target?.devices.includes(device)),
     })
@@ -41,25 +48,22 @@ export function ntfyHost(held?: NtfyTarget) {
         : undefined
       return json(shown())
     }
-    const next = { ...(host.target ?? { devices: [] }) } as Partial<NtfyTarget> & {
-      devices: string[]
-    }
-    if (body.server !== undefined) {
-      const server = String(body.server).replace(/\/+$/, "")
-      if (next.server && next.server !== server) delete next.token
-      next.server = server
-    }
+    if (body.topic !== undefined && body.topic === host.env.NTFY_TOPIC)
+      return json({ error: { message: "That's the topic Hermes listens on." } }, 400)
+    const next = { ...(host.target ?? { devices: [] }) }
     if (body.topic !== undefined) next.topic = String(body.topic)
-    if (body.token !== undefined) next.token = String(body.token)
+    if (body.server !== undefined)
+      host.env.NTFY_SERVER_URL = String(body.server).replace(/\/+$/, "")
+    if (body.token !== undefined) host.env.NTFY_TOKEN = String(body.token)
     if (body.device) {
-      if (!next.server || !next.topic || !next.token)
+      if (!next.topic || !host.env.NTFY_TOKEN)
         return json(
-          { error: { message: "Set this bot's ntfy server, topic and access token first." } },
+          { error: { message: "Set this bot's ntfy topic and Hermes's ntfy token first." } },
           400,
         )
       next.devices = [...next.devices.filter((d) => d !== body.device), String(body.device)]
     }
-    host.target = next as NtfyTarget
+    host.target = next
     return json(shown(body.device as string | undefined))
   }) as typeof fetch
   return { host, posts, restore: () => void (globalThis.fetch = real) }

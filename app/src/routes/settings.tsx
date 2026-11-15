@@ -2,7 +2,7 @@ import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTheme } from "next-themes"
-import { Navigate, useNavigate, useParams, useSearchParams } from "react-router"
+import { Navigate, useParams, useSearchParams } from "react-router"
 import {
   ActivityIcon,
   AudioLinesIcon,
@@ -43,7 +43,7 @@ import { AccountSettings } from "@/components/account-settings"
 import { BackButton } from "@/components/back-button"
 import { CommunitySettings } from "@/components/community-settings"
 import { BotSettingsList, BotSettingsPage } from "@/components/bot-settings"
-import { botsByLabel, labelOf } from "@/lib/bot-name"
+import { botsByLabel, byBotLabel, labelOf } from "@/lib/bot-name"
 import { useBotLabels } from "@/lib/use-bot-labels"
 import type { BotSub } from "@/lib/bot-subs"
 import { botPageOf, botPath, botTabOf, botTabPath, type BotPage, type BotTab } from "@/lib/bot-tabs"
@@ -106,7 +106,7 @@ import {
   useNtfyTargets,
   usePushTransport,
 } from "@/lib/push"
-import type { PushTransportId, PushTransportInfo } from "@/lib/push-transport"
+import type { NtfyState, PushTransportId, PushTransportInfo } from "@/lib/push-transport"
 import type { PushCategory, PushFeature } from "@/lib/push-kinds"
 import { presence, presenceLine, type PresenceAnswer } from "@/lib/presence"
 import { siteUrl } from "@/lib/registry"
@@ -487,12 +487,12 @@ export function NotificationsSettings() {
       <Group>
         <NotificationsSwitch transport={info} />
       </Group>
-      {(offered.length > 1 || id === "ntfy") && (
+      {offered.length > 1 && (
         <Group>
-          {offered.length > 1 && <TransportRow transport={info} offered={offered} />}
-          {id === "ntfy" && <NtfyRows />}
+          <TransportRow transport={info} offered={offered} />
         </Group>
       )}
+      {id === "ntfy" && <NtfyBots />}
       {info.categories === "system" ? (
         <Group>
           <SystemNotificationSettingsRow />
@@ -571,36 +571,42 @@ function TransportRow({
 }
 
 /**
- * ntfy's targets, one row a bot. Each is the bot's own setting, held by its host, so it is edited on
- * the bot's settings and this screen links there: the row says where the bot publishes, or that it
- * doesn't yet.
+ * ntfy is set per bot, so the screen lists the bots as Speech-to-text's Bots tab does — the Settings
+ * menu's own row, the bot's picture, and a line saying what its host does — each opening the bot's
+ * own Notifications page.
  */
-function NtfyRows() {
+function NtfyBots() {
   const targets = useNtfyTargets()
   const labels = useBotLabels()
-  const navigate = useNavigate()
+  if (!targets.length) return null
   return (
-    <>
-      {targets.map(({ bot, state }) => (
-        <ValueRow
-          key={bot.id}
-          title={labelOf(labels, bot)}
-          value={
-            state === null
-              ? "Can't reach this bot's host"
-              : state?.configured
-                ? `${state.topic} on ${state.server?.replace(/^https?:\/\//, "")}`
-                : state
-                  ? ""
-                  : "…"
-          }
-          muted={!state?.configured}
-          onClick={() => navigate(botTabPath(bot.id, "notifications"))}
-          data-ntfy={bot.id}
-        />
-      ))}
-    </>
+    <Group>
+      {[...targets]
+        .sort((a, b) => byBotLabel(labels)(a.bot, b.bot))
+        .map(({ bot, state }) => (
+          <LinkRow
+            key={bot.id}
+            to={botTabPath(bot.id, "notifications")}
+            data-ntfy={bot.id}
+            leading={
+              <Bot id={bot.botId} className={cn("size-8 shrink-0", bot.disabled && "opacity-40")} />
+            }
+            title={labelOf(labels, bot)}
+            subtitle={ntfyLine(state)}
+          />
+        ))}
+    </Group>
   )
+}
+
+/**
+ * What a bot's host does with ntfy, in Speech-to-text's words: on, off, or not known. A topic is 27
+ * characters nobody reads, so it is the bot's page that names it.
+ */
+function ntfyLine(state: NtfyState | null | undefined) {
+  if (state === undefined) return "Checking…"
+  if (state === null) return "Couldn't check"
+  return state.configured ? "On" : "Off"
 }
 
 /** Firebase: the phone's screen for this app, which the app can read but not draw. */
