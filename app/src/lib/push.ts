@@ -52,9 +52,10 @@ import {
 import {
   PUSH_TRANSPORTS,
   activeTransport,
-  ntfyMissing,
   ntfyPriorities,
   ntfyServer,
+  ntfyTokenOk,
+  ntfyTopicOk,
   transportsFor,
   type NtfyState,
   type PushEnv,
@@ -871,39 +872,27 @@ async function disableNtfy() {
   ntfyChanged()
 }
 
+/** The three values a bot's ntfy target holds, each written on its own. */
+export type NtfyField = "server" | "topic" | "token"
+
 /**
- * Writes a bot's ntfy target to its host: the target is the bot's, so every phone reads it from
- * there. The token is required, but a host that already holds one for this server and topic keeps it,
- * so a form may leave it empty to change nothing. A phone that is on stays on the topic it is moved to.
+ * Writes one value of a bot's ntfy target to its host: the target is the bot's, so every phone reads
+ * it from there. A target is whole once it holds a server, a topic and a token, and a phone that is on
+ * joins it then. Moving it to another server drops the token, which belongs to the server it was made
+ * on, so the token is asked for again.
  */
-export async function saveNtfyTarget(
-  bot: Profile,
-  input: { server: string; topic: string; token: string },
-) {
-  const server = ntfyServer(input.server)
-  if (!server) throw new AppWords("That isn't a web address")
-  const topic = input.topic.trim()
-  const held = await getNtfy(bot).catch(() => undefined)
-  const same = Boolean(held?.configured && held.server === server && held.topic === topic)
-  const missing = ntfyMissing({ server, topic, token: input.token }, same && held?.token_set)
-  if (missing) throw new AppWords(missing)
-  const { ntfyOn, pushCategories, meetings } = await getSettings()
-  await registerNtfy(bot, {
-    server,
-    topic,
-    token: input.token || undefined,
-    ...(ntfyOn
-      ? {
-          device: await nativeDevice(),
-          categories: wantedCategories(pushCategories).filter((id) =>
-            reachableCategories(meetings).some((category) => category.id === id),
-          ),
-          priorities: ntfyPriorities(PUSH_CATEGORIES),
-        }
-      : {}),
-  })
+export async function saveNtfyField(bot: Profile, field: NtfyField, value: string) {
+  const typed = value.trim()
+  const next = field === "server" ? ntfyServer(typed) : typed
+  if (!next) throw new AppWords("That isn't a web address")
+  if (field === "topic" && !ntfyTopicOk(next))
+    throw new AppWords("A topic is letters, digits, - and _, 64 at most")
+  if (field === "token" && !ntfyTokenOk(next)) throw new AppWords("That isn't an access token")
+  await registerNtfy(bot, { [field]: next })
   toldNtfy.delete(connectionKey(bot))
   ntfyChanged()
+  // A target this write made whole is one this phone, if it is on, can now join.
+  void syncNtfy().catch(() => {})
 }
 
 /** Takes a bot's ntfy target off its host, which stops it publishing to every phone. */
@@ -938,6 +927,33 @@ export function usePushTransport() {
     /** False until this device's settings have been read: the screen draws nothing it would undo. */
     ready: settings !== null,
   }
+}
+
+/** What one bot's host says about its ntfy target: nothing yet, or null where it couldn't say. */
+export function useNtfyTarget(bot: Profile): NtfyState | null | undefined {
+  const [tick, setTick] = useState(0)
+  const [state, setState] = useState<{ key: string; value: NtfyState | null }>()
+  const key = connectionKey(bot)
+  useEffect(() => {
+    const again = () => setTick((count) => count + 1)
+    ntfyListeners.add(again)
+    return () => void ntfyListeners.delete(again)
+  }, [])
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const device = (await getSettings()).fcm?.device
+      const settle = (value: NtfyState | null) => !cancelled && setState({ key, value })
+      getNtfy(bot, device).then(settle, () => settle(null))
+    })()
+    return () => {
+      cancelled = true
+    }
+    // The bot is read through its key: a live query hands back a new object on every write.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, tick])
+  // A bot switched to keeps no answer of the one before it.
+  return state?.key === key ? state.value : undefined
 }
 
 /**

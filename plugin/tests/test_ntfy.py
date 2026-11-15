@@ -24,11 +24,11 @@ class Target(unittest.TestCase):
     def test_a_target_is_kept_without_its_token_ever_being_read_back(self):
         held = ntfy.set_target(self.path, {**TARGET, "categories": ["chat_input"]})
         self.assertEqual(held["server"], "https://ntfy.sh", "the address it is published to")
-        answer = ntfy.public(ntfy.target(self.path))
+        answer = ntfy.public(ntfy.stored(self.path), "phone-1")
         self.assertNotIn("token", answer)
         self.assertNotIn("tk_abc", repr(answer))
         self.assertEqual(
-            {k: answer[k] for k in ("configured", "server", "topic", "token_set", "categories", "devices")},
+            {k: answer[k] for k in ("configured", "server", "topic", "token_set", "categories", "devices", "joined")},
             {
                 "configured": True,
                 "server": "https://ntfy.sh",
@@ -36,30 +36,33 @@ class Target(unittest.TestCase):
                 "token_set": True,
                 "categories": ["chat_input"],
                 "devices": 1,
+                "joined": True,
             },
         )
 
-    def test_a_token_is_required(self):
-        with self.assertRaisesRegex(push.PushError, "access token"):
-            ntfy.set_target(self.path, {"server": "https://ntfy.sh", "topic": "gots-Zk3"})
-        self.assertIsNone(ntfy.target(self.path), "a refused write keeps nothing")
+    def test_a_target_is_written_a_field_at_a_time_and_publishes_only_once_whole(self):
+        ntfy.set_target(self.path, {"server": "https://ntfy.sh"})
+        ntfy.set_target(self.path, {"topic": "gots-Zk3"})
+        self.assertIsNone(ntfy.target(self.path), "no token, so nothing can publish: it is required")
+        self.assertEqual(ntfy.public(ntfy.stored(self.path))["configured"], False)
+        with self.assertRaisesRegex(push.PushError, "first"):
+            ntfy.set_target(self.path, {"device": "phone-1"})
+        ntfy.set_target(self.path, {"token": "tk_abc"})
+        self.assertIsNotNone(ntfy.target(self.path))
+        self.assertTrue(ntfy.public(ntfy.stored(self.path))["configured"])
 
-    def test_a_second_write_to_the_same_topic_needs_no_token(self):
+    def test_a_new_topic_keeps_the_token_and_the_phones(self):
         ntfy.set_target(self.path, TARGET)
-        held = ntfy.set_target(
-            self.path,
-            {"server": "https://ntfy.sh", "topic": "gots-Zk3", "device": "phone-2", "categories": []},
-        )
-        self.assertEqual(held["token"], "tk_abc")
-        self.assertEqual(held["devices"], ["phone-1", "phone-2"])
-        self.assertEqual(held["categories"], [])
+        held = ntfy.set_target(self.path, {"topic": "other"})
+        self.assertEqual((held["token"], held["devices"]), ("tk_abc", ["phone-1"]))
 
-    def test_another_topic_starts_over_and_needs_its_own_token(self):
+    def test_another_server_drops_the_token_it_wasnt_typed_for(self):
         ntfy.set_target(self.path, TARGET)
-        with self.assertRaises(push.PushError):
-            ntfy.set_target(self.path, {"server": "https://ntfy.sh", "topic": "other"})
-        held = ntfy.set_target(self.path, {**TARGET, "topic": "other", "device": "phone-2"})
-        self.assertEqual(held["devices"], ["phone-2"], "the devices of the old topic didn't choose this one")
+        held = ntfy.set_target(self.path, {"server": "https://ntfy.example.com"})
+        self.assertNotIn("token", held, "a token is never sent to a server it wasn't made on")
+        self.assertIsNone(ntfy.target(self.path))
+        self.assertFalse(ntfy.public(held)["token_set"])
+        self.assertEqual(ntfy.set_target(self.path, {"server": "https://ntfy.example.com/"}).get("token"), None)
 
     def test_any_http_server_the_host_can_reach_is_taken(self):
         for server, kept in (
@@ -68,31 +71,28 @@ class Target(unittest.TestCase):
             ("http://192.168.1.5", "http://192.168.1.5"),
             ("http://ntfy.lan:2586/prefix/", "http://ntfy.lan:2586/prefix"),
         ):
-            self.assertEqual(ntfy.set_target(self.path, {**TARGET, "server": server})["server"], kept)
+            self.assertEqual(ntfy.set_target(self.path, {"server": server})["server"], kept)
 
     def test_only_an_address_and_ntfys_own_topics_are_taken(self):
         for server in ("ftp://ntfy.sh", "ntfy.sh", "https://u:p@ntfy.sh", "https://ntfy.sh/?a=1", "https://", 7):
             with self.assertRaises(push.PushError, msg=str(server)):
-                ntfy.set_target(self.path, {**TARGET, "server": server})
+                ntfy.set_target(self.path, {"server": server})
         for topic in ("", "has space", "a/b", "x" * 65, None):
             with self.assertRaises(push.PushError, msg=str(topic)):
-                ntfy.set_target(self.path, {**TARGET, "topic": topic})
+                ntfy.set_target(self.path, {"topic": topic})
         with self.assertRaises(push.PushError):
-            ntfy.set_target(self.path, {**TARGET, "token": "two words"})
+            ntfy.set_target(self.path, {"token": "two words"})
+        self.assertEqual(ntfy.stored(self.path), {}, "a refused write keeps nothing")
 
-    def test_a_phone_reads_the_target_and_whether_it_joined_from_the_host(self):
+    def test_a_phone_leaving_keeps_the_bots_target(self):
         ntfy.set_target(self.path, TARGET)
-        self.assertTrue(ntfy.public(ntfy.target(self.path), "phone-1")["joined"])
-        self.assertFalse(ntfy.public(ntfy.target(self.path), "phone-2")["joined"])
-        self.assertFalse(ntfy.public(ntfy.target(self.path))["joined"])
-
-    def test_the_target_goes_with_its_last_device(self):
-        ntfy.set_target(self.path, TARGET)
-        ntfy.set_target(self.path, {**TARGET, "device": "phone-2"})
+        ntfy.set_target(self.path, {"device": "phone-2"})
         self.assertEqual(ntfy.remove(self.path, "phone-1")["devices"], ["phone-2"])
-        self.assertIsNone(ntfy.remove(self.path, "phone-2"))
+        self.assertEqual(ntfy.remove(self.path, "phone-2")["devices"], [])
+        self.assertIsNotNone(ntfy.target(self.path), "the target is the bot's, not its phones'")
+        self.assertEqual(ntfy.remove(self.path, None), {})
         self.assertIsNone(ntfy.target(self.path))
-        self.assertEqual(ntfy.public(None), {"object": "gots.push_ntfy", "configured": False})
+        self.assertFalse(ntfy.public(None)["configured"])
 
 
 class Message(unittest.TestCase):

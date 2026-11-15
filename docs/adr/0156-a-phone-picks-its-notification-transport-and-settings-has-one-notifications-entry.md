@@ -37,12 +37,19 @@ no configuration, and nothing wires one to the other.
 - *Tap*: the notification carries `gots://open?kind=&id=`, which opens the Android app.
 - *Firebase's system row*: kept, inside the merged screen.
 
-**One entry.** The menu has a single *Notifications* row saying On or Off (and the transport, where
-there is a choice). Its screen holds the switch, the transport, ntfy's server, topic and token, and
-the types. The screen asks the transport what it can do (`src/lib/push-transport.ts`) rather than
-the platform: a transport whose categories are the phone's channels (Firebase) gets the row that
-opens Android's own settings, shown while notifications are off too; one with no channel per
-category (Web Push, ntfy) gets the app's own list, which the sender enforces.
+**Firebase is one setting for all bots; ntfy is a setting of each bot** (2026-11-15). The menu has a
+single *Notifications* row saying On or Off (and the transport, where there is a choice). Its screen
+is the device's: the switch, the Delivery pick, and the types. It asks the transport what it can do
+(`src/lib/push-transport.ts`) rather than the platform: Firebase, whose categories are the phone's
+channels, gets the row that opens Android's own settings, shown while notifications are off too;
+Web Push and ntfy, with no channel per category, get the app's own list, which the sender enforces.
+With ntfy the screen also lists the bots, one row each saying where that bot publishes, and a row
+opens the bot's own **Notifications** page in its settings (`/settings/bots/<id>/notifications`,
+gated on `push_ntfy`). That page holds the bot's server, topic and access token as rows, each opening
+the edit every other setting uses — a pushed screen below 1024px and a centred card from it
+(ADR 0055) — and *Remove ntfy* at its foot behind a confirmation. The host takes the target a field at
+a time and publishes only once it holds all three; moving it to another server drops the token,
+which belongs to the server it was made on.
 
 **No fourth copy of the lists.** The category ids stay in the three places they were. ntfy's sender
 reuses the plugin's `CATEGORIES` and `LEGACY_CATEGORIES`; each category's importance is sent by the
@@ -67,8 +74,3 @@ quiet.
 - **Privacy and limits.** The server operator sees the topic and every title. ntfy.sh caches a
   message for twelve hours and holds its publishers to its own daily limits.
 
-## Deviation
-
-ntfy's three fields are edited in a centred card at every width, one card per bot. The settings rule (ADR 0055) gives
-a phone a pushed edit screen, which the top-level sections have no route for; adding one is a
-follow-up rather than part of this change.

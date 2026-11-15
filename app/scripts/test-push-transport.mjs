@@ -10,7 +10,7 @@ import {
   PUSH_TRANSPORTS,
   activeTransport,
   mintTopic,
-  ntfyMissing,
+  ntfyTokenOk,
   ntfyPriorities,
   ntfyServer,
   ntfyTopicOk,
@@ -76,17 +76,9 @@ test("a minted topic is one ntfy takes and nobody guesses", () => {
     assert.equal(ntfyTopicOk(refused), false)
 })
 
-test("a target needs a server, a topic and a token, unless the host already holds one", () => {
-  const whole = { server: "https://ntfy.sh", topic: "gots-abc", token: "tk_abc" }
-  assert.equal(ntfyMissing(whole), undefined)
-  assert.equal(ntfyMissing({}), "Add your ntfy server first")
-  assert.equal(ntfyMissing({ ...whole, topic: "" }), "Add an ntfy topic first")
-  assert.equal(ntfyMissing({ ...whole, token: "" }), "Add an ntfy access token first", "required")
-  assert.equal(ntfyMissing({ ...whole, token: "" }, true), undefined, "the host's own is kept")
-  assert.equal(
-    ntfyMissing({ ...whole, token: "two words" }, true),
-    "Add an ntfy access token first",
-  )
+test("a token is what a header can carry", () => {
+  assert.ok(ntfyTokenOk("tk_abc"))
+  for (const refused of ["", "two words", "x".repeat(513)]) assert.equal(ntfyTokenOk(refused), false)
 })
 
 test("a category's importance is its ntfy priority", () => {

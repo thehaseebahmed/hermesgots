@@ -2883,8 +2883,9 @@ export async function unregisterPush(config: HermesConfig, endpoint: string) {
 
 /** Where a bot publishes its news over ntfy, as the app writes it (`plugin/ntfy.py`). */
 export interface NtfyRegistration {
-  server: string
-  topic: string
+  /** Each value is written only where named: a target is edited a field at a time. */
+  server?: string
+  topic?: string
   /** Left out where the host already holds one for this server and topic: it is never read back. */
   token?: string
   /** This device, so no other transport tells it the same news; left out to write the target alone. */

@@ -11,9 +11,9 @@ of what happened, never what was asked.
 the user set up in Hermes; this carries the app's "a session needs you" to the user's phone. The two
 share a protocol and nothing else, and neither reads the other's configuration.
 
-The target is the profile's, one per store, so it follows the bot to every phone: a phone that
-joins reads where to publish from the host, never from itself, and the categories it wants are one
-list for every phone on the topic. The devices that chose
+The target is the profile's own setting, one per store and written a field at a time, so it follows
+the bot to every phone: a phone that joins reads where to publish from the host, never from itself,
+and the categories it wants are one list for every phone on the topic. The devices that chose
 ntfy are kept beside it, for two things — the registry is told to skip them, so a Firebase token
 still on file can't deliver the same news twice, and a publish is held back while every one of them
 has the app on screen.
@@ -117,10 +117,10 @@ def clean_server(value: Any) -> str:
     return f"{parts.scheme}://{parts.netloc}{parts.path.rstrip('/')}"
 
 
-def target(path: Path) -> Optional[Dict[str, Any]]:
-    """Where this profile publishes, or None when it publishes nowhere."""
+def stored(path: Path) -> Dict[str, Any]:
+    """What this profile holds about ntfy, whole or not: a target is written a field at a time."""
     if not path.exists():
-        return None
+        return {}
     conn = connect(path)
     try:
         row = conn.execute("SELECT value FROM push_prefs WHERE key = ?", (KEY,)).fetchone()
@@ -129,12 +129,19 @@ def target(path: Path) -> Optional[Dict[str, Any]]:
     try:
         value = json.loads(row[0]) if row else None
     except (TypeError, ValueError):
-        return None
-    if not isinstance(value, dict):
-        return None
-    if not all(isinstance(value.get(k), str) and value[k] for k in ("server", "topic", "token")):
-        return None
-    return value
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def complete(held: Dict[str, Any]) -> bool:
+    return all(isinstance(held.get(k), str) and held[k] for k in ("server", "topic", "token"))
+
+
+def target(path: Path) -> Optional[Dict[str, Any]]:
+    """Where this profile publishes, or None while any of the server, the topic or the token is
+    missing: a target with no token can't publish, which is what makes the token required."""
+    held = stored(path)
+    return held if complete(held) else None
 
 
 def _write(path: Path, value: Optional[Dict[str, Any]]) -> None:
@@ -164,83 +171,84 @@ def _priorities(value: Any) -> Dict[str, int]:
 
 
 def set_target(path: Path, body: Dict[str, Any]) -> Dict[str, Any]:
-    """Keeps where this profile publishes, and that a device chose it. Raises ``PushError`` with a
-    message for the app.
+    """Writes what the body names of this profile's target, and that a device chose it. Raises
+    ``PushError`` with a message for the app.
 
-    The token is required and never read back: a write without one stands only where the host
-    already holds one for the same server and topic, which is how a second phone joins the account's
-    topic, or a category's switch is written, without the token being typed again.
+    The target is the profile's setting, edited one field at a time, so each of the server, the topic
+    and the token is written only when named. The token is never read back, and it belongs to the
+    server it was made on: a write that moves the target to another server drops it, so a token is
+    never sent to a server it wasn't typed for.
     """
     from .push import clean_categories
 
-    server = clean_server(body.get("server"))
-    topic = body.get("topic")
-    if not isinstance(topic, str) or not TOPIC.match(topic):
-        raise _error("Not an ntfy topic.")
-    held = target(path)
-    same = bool(held and held["server"] == server and held["topic"] == topic)
-    token = body.get("token")
-    if token is None and same:
-        token = held["token"]
-    if not isinstance(token, str) or not TOKEN.match(token):
-        raise _error("An access token is required.")
-    devices: List[str] = list(held.get("devices") or []) if same else []
+    held = stored(path)
+    value = dict(held)
+    if "server" in body:
+        server = clean_server(body.get("server"))
+        if held.get("server") and server != held["server"]:
+            value.pop("token", None)
+        value["server"] = server
+    if "topic" in body:
+        topic = body.get("topic")
+        if not isinstance(topic, str) or not TOPIC.match(topic):
+            raise _error("Not an ntfy topic.")
+        value["topic"] = topic
+    if body.get("token") is not None:
+        token = body["token"]
+        if not isinstance(token, str) or not TOKEN.match(token):
+            raise _error("Not an ntfy access token.")
+        value["token"] = token
     device = body.get("device")
     if device is not None:
         if not isinstance(device, str) or not DEVICE.match(device):
             raise _error("Not a device.")
-        devices = [d for d in devices if d != device] + [device]
+        if not complete(value):
+            raise _error("Set this bot's ntfy server, topic and access token first.")
+        devices = [d for d in held.get("devices") or [] if d != device] + [device]
+        value["devices"] = devices[-MAX_DEVICES:]
     categories = clean_categories(body.get("categories"))
-    if categories is None and same:
-        categories = held.get("categories")
-    priorities = _priorities(body.get("priorities")) or (held.get("priorities") if same else None) or {}
-    value = {
-        "server": server,
-        "topic": topic,
-        "token": token,
-        "categories": categories,
-        "priorities": priorities,
-        "devices": devices[-MAX_DEVICES:],
-    }
+    if categories is not None:
+        value["categories"] = categories
+    priorities = _priorities(body.get("priorities"))
+    if priorities:
+        value["priorities"] = priorities
     _write(path, value)
     return value
 
 
-def remove(path: Path, device: Optional[str]) -> Optional[Dict[str, Any]]:
-    """A device stops using ntfy; the target goes with the last of them, or when no device is named."""
-    held = target(path)
-    if not held:
-        return None
-    devices = [d for d in held.get("devices") or [] if d != device] if device else []
-    if not devices:
+def remove(path: Path, device: Optional[str]) -> Dict[str, Any]:
+    """A device stops using ntfy, and the target stays the bot's; with no device named, the whole
+    target goes, for every phone."""
+    if not device:
         _write(path, None)
-        return None
-    held["devices"] = devices
-    _write(path, held)
+        return {}
+    held = stored(path)
+    if held:
+        held["devices"] = [d for d in held.get("devices") or [] if d != device]
+        _write(path, held)
     return held
 
 
 def public(held: Optional[Dict[str, Any]], device: Optional[str] = None) -> Dict[str, Any]:
     """The target as the app may read it: everything but the token, which is only ever a boolean.
-    ``joined`` says whether the device asking is one of those that chose ntfy for this profile."""
-    if not held:
-        return {"object": "gots.push_ntfy", "configured": False}
+    ``configured`` is whether it can publish, ``joined`` whether the device asking chose ntfy here."""
+    held = held or {}
+    devices = [d for d in held.get("devices") or [] if isinstance(d, str)]
     return {
         "object": "gots.push_ntfy",
-        "configured": True,
-        "server": held["server"],
-        "topic": held["topic"],
-        "token_set": True,
+        "configured": complete(held),
+        "server": held.get("server"),
+        "topic": held.get("topic"),
+        "token_set": bool(held.get("token")),
         "categories": held.get("categories"),
-        "devices": len(held.get("devices") or []),
-        "joined": bool(device and device in (held.get("devices") or [])),
+        "devices": len(devices),
+        "joined": bool(device and device in devices),
     }
 
 
 def devices(path: Path) -> List[str]:
     """The devices that get this profile's news over ntfy, so no other transport tells them too."""
-    held = target(path)
-    return [d for d in (held or {}).get("devices") or [] if isinstance(d, str)]
+    return [d for d in stored(path).get("devices") or [] if isinstance(d, str)]
 
 
 def wants(held: Dict[str, Any], category: str) -> bool:

@@ -2,7 +2,7 @@ import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useTheme } from "next-themes"
-import { Navigate, useParams, useSearchParams } from "react-router"
+import { Navigate, useNavigate, useParams, useSearchParams } from "react-router"
 import {
   ActivityIcon,
   AudioLinesIcon,
@@ -107,7 +107,6 @@ import {
   usePushTransport,
 } from "@/lib/push"
 import type { PushTransportId, PushTransportInfo } from "@/lib/push-transport"
-import { NtfyTargetCard } from "@/components/ntfy-target"
 import type { PushCategory, PushFeature } from "@/lib/push-kinds"
 import { presence, presenceLine, type PresenceAnswer } from "@/lib/presence"
 import { siteUrl } from "@/lib/registry"
@@ -572,14 +571,14 @@ function TransportRow({
 }
 
 /**
- * ntfy's targets, one row a bot: each bot's host holds its own server, topic and token, so a second
- * phone finds them already set. A row says where the bot publishes, and opens the card that writes it.
+ * ntfy's targets, one row a bot. Each is the bot's own setting, held by its host, so it is edited on
+ * the bot's settings and this screen links there: the row says where the bot publishes, or that it
+ * doesn't yet.
  */
 function NtfyRows() {
   const targets = useNtfyTargets()
   const labels = useBotLabels()
-  const [editing, setEditing] = useState<string>()
-  const open = targets.find(({ bot }) => bot.id === editing)
+  const navigate = useNavigate()
   return (
     <>
       {targets.map(({ bot, state }) => (
@@ -589,27 +588,17 @@ function NtfyRows() {
           value={
             state === null
               ? "Can't reach this bot's host"
-              : state && state.configured
+              : state?.configured
                 ? `${state.topic} on ${state.server?.replace(/^https?:\/\//, "")}`
                 : state
                   ? ""
                   : "…"
           }
-          muted={state === null || state === undefined}
-          onClick={() => setEditing(bot.id)}
-          disabled={state === undefined}
+          muted={!state?.configured}
+          onClick={() => navigate(botTabPath(bot.id, "notifications"))}
           data-ntfy={bot.id}
         />
       ))}
-      {open && (
-        <NtfyTargetCard
-          key={open.bot.id}
-          bot={open.bot}
-          label={labelOf(labels, open.bot)}
-          state={open.state}
-          onClose={() => setEditing(undefined)}
-        />
-      )}
     </>
   )
 }

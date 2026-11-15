@@ -131,23 +131,6 @@ export function mintTopic(random: (count: number) => Uint8Array): string {
 export const ntfyTokenOk = (token: string) => /^[\x21-\x7e]{1,512}$/.test(token)
 
 /**
- * What stops a target being saved, in the app's words, or nothing when it can be. A token is
- * required, but a bot's host that already holds one for this server and topic keeps it, so the
- * field may be left empty there.
- */
-export function ntfyMissing(
-  config: { server?: string; topic?: string; token?: string },
-  tokenHeld = false,
-): string | undefined {
-  if (!config.server || !ntfyServer(config.server)) return "Add your ntfy server first"
-  if (!config.topic || !ntfyTopicOk(config.topic)) return "Add an ntfy topic first"
-  if (!tokenHeld && (!config.token || !ntfyTokenOk(config.token)))
-    return "Add an ntfy access token first"
-  if (config.token && !ntfyTokenOk(config.token)) return "Add an ntfy access token first"
-  return undefined
-}
-
-/**
  * Each category's importance as ntfy's priority. The numbers are the same on purpose — Android's 4
  * peeks and so does ntfy's `high`, 3 sounds as `default` does, 2 is silent as `low` is — and that is
  * all of a channel that survives: a category's own sound, and its own switch on the phone, do not.

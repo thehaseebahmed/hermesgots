@@ -56,6 +56,11 @@ export const BOT_PAGES = [
     title: "Delegation",
     subtitle: "Subagent model, limits and approvals",
   },
+  {
+    segment: "notifications",
+    title: "Notifications",
+    subtitle: "The ntfy server, topic and token this bot publishes to",
+  },
 ] as const
 
 /** The segment naming a page: the list names each one once. */

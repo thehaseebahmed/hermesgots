@@ -5,9 +5,9 @@
 import { json } from "./component-kit.tsx"
 
 export interface NtfyTarget {
-  server: string
-  topic: string
-  token: string
+  server?: string
+  topic?: string
+  token?: string
   devices: string[]
 }
 
@@ -17,38 +17,49 @@ export function ntfyHost(held?: NtfyTarget) {
   const real = globalThis.fetch
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input instanceof Request ? input.url : input))
+    if (url.pathname.endsWith("/plugins/gots/info"))
+      return json({ name: "gots", features: ["push", "push_ntfy"] })
     if (!url.pathname.includes("/push/ntfy")) return json({})
-    const shown = (device?: string | null) =>
-      host.target
-        ? {
-            object: "gots.push_ntfy",
-            configured: true,
-            server: host.target.server,
-            topic: host.target.topic,
-            token_set: true,
-            devices: host.target.devices.length,
-            joined: Boolean(device && host.target.devices.includes(device)),
-          }
-        : { object: "gots.push_ntfy", configured: false }
+    const shown = (device?: string | null) => ({
+      object: "gots.push_ntfy",
+      configured: Boolean(host.target?.server && host.target.topic && host.target.token),
+      server: host.target?.server ?? null,
+      topic: host.target?.topic ?? null,
+      token_set: Boolean(host.target?.token),
+      devices: host.target?.devices.length ?? 0,
+      joined: Boolean(device && host.target?.devices.includes(device)),
+    })
     if (init?.method !== "POST") return json(shown(url.searchParams.get("device")))
     const body = JSON.parse(String(init.body)) as Record<string, unknown>
     posts.push({ path: url.pathname, body })
     if (url.pathname.endsWith("/remove")) {
-      const left = host.target?.devices.filter((d) => d !== body.device) ?? []
-      host.target = body.device && left.length ? { ...host.target!, devices: left } : undefined
+      host.target = body.device
+        ? host.target && {
+            ...host.target,
+            devices: host.target.devices.filter((d) => d !== body.device),
+          }
+        : undefined
       return json(shown())
     }
-    const server = String(body.server).replace(/\/+$/, "")
-    const same = host.target?.server === server && host.target?.topic === body.topic
-    const token = (body.token as string | undefined) ?? (same ? host.target!.token : undefined)
-    if (!token) return json({ error: { message: "An access token is required." } }, 400)
-    const devices = same ? host.target!.devices.filter((d) => d !== body.device) : []
-    host.target = {
-      server,
-      topic: String(body.topic),
-      token,
-      devices: body.device ? [...devices, String(body.device)] : devices,
+    const next = { ...(host.target ?? { devices: [] }) } as Partial<NtfyTarget> & {
+      devices: string[]
     }
+    if (body.server !== undefined) {
+      const server = String(body.server).replace(/\/+$/, "")
+      if (next.server && next.server !== server) delete next.token
+      next.server = server
+    }
+    if (body.topic !== undefined) next.topic = String(body.topic)
+    if (body.token !== undefined) next.token = String(body.token)
+    if (body.device) {
+      if (!next.server || !next.topic || !next.token)
+        return json(
+          { error: { message: "Set this bot's ntfy server, topic and access token first." } },
+          400,
+        )
+      next.devices = [...next.devices.filter((d) => d !== body.device), String(body.device)]
+    }
+    host.target = next as NtfyTarget
     return json(shown(body.device as string | undefined))
   }) as typeof fetch
   return { host, posts, restore: () => void (globalThis.fetch = real) }

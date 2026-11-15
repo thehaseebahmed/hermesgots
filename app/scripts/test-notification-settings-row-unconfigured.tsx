@@ -1,7 +1,8 @@
 /**
  * An APK built without Firebase: ntfy is the only way it is notified, so there is nothing to pick
- * and no screen of the phone's to open. The target is each bot's own, held by its host: set up once,
- * it is already there on a second phone, which joins it without typing the token again. The types are
+ * and no screen of the phone's to open. The target is each bot's own setting, held by its host and
+ * edited on the bot's settings, so this screen lists the bots and links there; set up once, a target
+ * is already there on a second phone, which joins it without typing the token again. The types are
  * the app's own list, which is the only switch a category has, so each change is handed to the host.
  */
 import { bridgeCalls } from "./android-bridge.ts"
@@ -14,6 +15,7 @@ const { NotificationsRow, NotificationsSettings } = await import("@/routes/setti
 const { Screen } = await import("@/components/settings-chrome")
 const { db, getSettings } = await import("@/lib/db")
 const {
+  Path,
   botProfile,
   click,
   find,
@@ -21,6 +23,7 @@ const {
   findText,
   missing,
   mount,
+  path,
   seedSettings,
   type,
   until,
@@ -29,13 +32,13 @@ const {
 } = await import("./component-kit.tsx")
 
 const screen = () => (
-  <Screen title="Notifications">
-    <NotificationsSettings />
-  </Screen>
+  <MemoryRouter>
+    <Path />
+    <Screen title="Notifications">
+      <NotificationsSettings />
+    </Screen>
+  </MemoryRouter>
 )
-
-const save = () =>
-  findAll("[data-form-actions] button").find((one) => one.textContent?.trim() === "Save") ?? null
 
 const HELD = { server: "https://ntfy.sh", topic: "gots-account", token: "tk_secret", devices: [] }
 
@@ -59,46 +62,14 @@ test("an APK without Firebase still has its entry, on ntfy with nothing to pick"
       assert.ok(missing("[data-transport]"), "one transport is no choice")
       assert.ok(!findText("button", "Android notification settings"), "no phone screen to open")
       await until(async () => /Not set/.test(wordsOf(find("[data-ntfy]"))), "no target yet")
+      await click(find("[data-ntfy]"))
+      await until(async () => path() === "/settings/bots/bot-1/notifications", "the bot's page")
       assert.ok(missing("[data-notification-types]"), "the types wait for the switch")
     })
   } finally {
     fake.restore()
   }
   assert.deepEqual(bridgeCalls, [], "and no bridge was reached")
-})
-
-test("a target is written to the bot's host, from the card, with the token it asks for", async () => {
-  await seedSettings({})
-  await db.profiles.clear()
-  await db.profiles.put(botProfile("ntfy-write"))
-  const fake = ntfyHost()
-  try {
-    await withToasts(async (said) => {
-      await mount(screen(), async () => {
-        await until(async () => Boolean(find("[data-ntfy]")), "the bot's row")
-        await click(find("[data-ntfy]"))
-        await until(async () => Boolean(find("[data-ntfy-form]")), "the card")
-        assert.equal((find("#ntfy-server") as HTMLInputElement).value, "https://ntfy.sh")
-        assert.match((find("#ntfy-topic") as HTMLInputElement).value, /^gots-[A-Za-z0-9]{22}$/)
-        // Without a token nothing is sent: a host that holds none can't publish.
-        await click(save())
-        await until(async () => said.some((one) => /access token/.test(one)), "the refusal")
-        assert.deepEqual(fake.posts, [])
-        await type(find("#ntfy-server"), "http://192.168.1.5:2586")
-        await type(find("#ntfy-token"), "tk_secret")
-        await click(save())
-        await until(async () => fake.posts.length === 1, "the write")
-      })
-    })
-  } finally {
-    fake.restore()
-  }
-  const [{ path, body }] = fake.posts
-  assert.equal(path, "/api/plugins/gots/push/ntfy")
-  assert.equal(body.server, "http://192.168.1.5:2586", "any server the host can reach")
-  assert.equal(body.token, "tk_secret")
-  assert.equal(body.device, undefined, "a target written while off joins no phone")
-  assert.equal((await getSettings()).ntfyOn, undefined, "and keeps nothing on this phone")
 })
 
 test("without a target on any bot the switch refuses and nothing is joined", async () => {
@@ -167,28 +138,4 @@ test("a second phone finds the target on the host and joins it with no token typ
     fake.restore()
   }
   assert.deepEqual(bridgeCalls, [], "ntfy asks the phone for nothing")
-})
-
-test("removing a bot's target clears it for every phone", async () => {
-  await seedSettings({})
-  await db.profiles.clear()
-  await db.profiles.put(botProfile("ntfy-remove"))
-  const fake = ntfyHost({ ...HELD, devices: ["phone-1"] })
-  try {
-    await mount(screen(), async () => {
-      await until(async () => /gots-account/.test(wordsOf(find("[data-ntfy]"))), "the target")
-      await click(find("[data-ntfy]"))
-      await until(async () => Boolean(find("[data-ntfy-form]")), "the card")
-      assert.equal((find("#ntfy-topic") as HTMLInputElement).value, "gots-account")
-      assert.equal(
-        (find("#ntfy-token") as HTMLInputElement).placeholder,
-        "Set. Leave empty to keep it",
-      )
-      await click(find("[data-form-actions] button"))
-      await until(async () => fake.host.target === undefined, "the target gone")
-    })
-  } finally {
-    fake.restore()
-  }
-  assert.equal(fake.posts[0].body.device, undefined, "no device named: the whole target goes")
 })

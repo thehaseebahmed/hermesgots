@@ -24,9 +24,11 @@ const { ntfyHost } = await import("./ntfy-host.ts")
 
 /** The screen as Settings draws it: inside the chrome, which is what holds a refusal about it. */
 const row = () => (
-  <Screen title="Notifications">
-    <NotificationsSettings />
-  </Screen>
+  <MemoryRouter>
+    <Screen title="Notifications">
+      <NotificationsSettings />
+    </Screen>
+  </MemoryRouter>
 )
 
 const systemRow = () => findText("button", "Android notification settings")

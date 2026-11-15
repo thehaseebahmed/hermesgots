@@ -4711,65 +4711,49 @@ http
       pushSubscriptions.set(subscription.endpoint, { device, categories })
       return json(res, 200, { object: "gots.push", subscribed: true })
     }
-    // ntfy: the mock keeps the target the app wrote and publishes nothing (plugin/ntfy.py).
-    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/push/ntfy") {
-      const shown = () =>
-        ntfyTarget
-          ? {
-              object: "gots.push_ntfy",
-              configured: true,
-              server: ntfyTarget.server,
-              topic: ntfyTarget.topic,
-              token_set: true,
-              categories: ntfyTarget.categories ?? null,
-              devices: ntfyTarget.devices.length,
-            }
-          : { object: "gots.push_ntfy", configured: false }
-      if (req.method === "GET") {
-        const phone = url.searchParams.get("device")
-        return json(res, 200, {
-          ...shown(),
-          joined: Boolean(phone && ntfyTarget?.devices.includes(phone)),
-        })
+    // ntfy: the mock keeps the bot's target, written a field at a time, and publishes nothing
+    // (plugin/ntfy.py).
+    if (PLUGIN && !profile && url.pathname.startsWith("/api/plugins/gots/push/ntfy")) {
+      const held = ntfyTarget ?? { devices: [] }
+      const shown = (phone) => ({
+        object: "gots.push_ntfy",
+        configured: Boolean(held.server && held.topic && held.token),
+        server: held.server ?? null,
+        topic: held.topic ?? null,
+        token_set: Boolean(held.token),
+        categories: held.categories ?? null,
+        devices: held.devices.length,
+        joined: Boolean(phone && held.devices.includes(phone)),
+      })
+      if (req.method === "GET") return json(res, 200, shown(url.searchParams.get("device")))
+      const body = await readBody(req)
+      if (url.pathname.endsWith("/remove")) {
+        if (!body.device) ntfyTarget = undefined
+        else if (ntfyTarget)
+          ntfyTarget = { ...held, devices: held.devices.filter((d) => d !== body.device) }
+        return json(res, 200, { object: "gots.push_ntfy", configured: Boolean(ntfyTarget) })
       }
-      if (req.method === "POST") {
-        const { server, topic, token, device, categories } = await readBody(req)
-        const refuse = (message) => json(res, 400, { error: { message } })
-        if (typeof server !== "string" || !/^https?:\/\/[^/?#@]+$/.test(server.replace(/\/+$/, "")))
-          return refuse("Not an ntfy server address.")
-        if (typeof topic !== "string" || !/^[-_A-Za-z0-9]{1,64}$/.test(topic))
-          return refuse("Not an ntfy topic.")
-        const address = server.replace(/\/+$/, "")
-        const same = ntfyTarget?.server === address && ntfyTarget?.topic === topic
-        const held = token ?? (same ? ntfyTarget.token : undefined)
-        if (typeof held !== "string" || !held) return refuse("An access token is required.")
-        const devices = same ? ntfyTarget.devices.filter((d) => d !== device) : []
-        ntfyTarget = {
-          server: address,
-          topic,
-          token: held,
-          categories: categories ?? (same ? ntfyTarget.categories : undefined),
-          devices: device ? [...devices, device] : devices,
-        }
-        return json(res, 200, shown())
+      const refuse = (message) => json(res, 400, { error: { message } })
+      const next = { ...held }
+      if (body.server !== undefined) {
+        const server = String(body.server).replace(/\/+$/, "")
+        if (!/^https?:\/\/[^/?#@]+/.test(server)) return refuse("Not an ntfy server address.")
+        if (next.server && next.server !== server) delete next.token
+        next.server = server
       }
-    }
-    if (
-      PLUGIN &&
-      !profile &&
-      req.method === "POST" &&
-      url.pathname === "/api/plugins/gots/push/ntfy/remove"
-    ) {
-      const { device } = await readBody(req)
-      const left = device && ntfyTarget ? ntfyTarget.devices.filter((d) => d !== device) : []
-      ntfyTarget = left.length ? { ...ntfyTarget, devices: left } : undefined
-      return json(
-        res,
-        200,
-        ntfyTarget
-          ? { object: "gots.push_ntfy", configured: true, devices: left.length }
-          : { object: "gots.push_ntfy", configured: false },
-      )
+      if (body.topic !== undefined) {
+        if (!/^[-_A-Za-z0-9]{1,64}$/.test(String(body.topic))) return refuse("Not an ntfy topic.")
+        next.topic = body.topic
+      }
+      if (body.token != null) next.token = body.token
+      if (body.categories) next.categories = body.categories
+      if (body.device) {
+        if (!next.server || !next.topic || !next.token)
+          return refuse("Set this bot's ntfy server, topic and access token first.")
+        next.devices = [...next.devices.filter((d) => d !== body.device), body.device]
+      }
+      ntfyTarget = next
+      return json(res, 200, shown(body.device))
     }
     if (
       PLUGIN &&
