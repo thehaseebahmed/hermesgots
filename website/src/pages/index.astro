@@ -4,7 +4,6 @@ import Bot from "../components/Bot.astro"
 import GitHub from "../components/GitHub.astro"
 import GotsHero from "../components/hero/GotsHero.tsx"
 
-const INSTALL = "hermes plugins install thehaseebahmed/hermesgots/plugin --enable"
 
 const steps = [
   { key: "1", title: "Ask", body: "Type it or say it. Attach a repo, a file or a photo." },
@@ -68,24 +67,15 @@ const faq = [
     <section class="home-hero">
       <div class="sky" aria-hidden="true"></div>
       <div class="wrap hero-copy">
-        <a class="pill-link" href="#features" data-reveal>
-          <span class="pill-dot"></span>Hermes Bots that got your back
-        </a>
-        <h1 data-reveal style="--d:60ms">Ask. Close the app.<br />Come back to it done.</h1>
-        <p class="lede" data-reveal style="--d:120ms">
-          Gots is the app for your Hermes agent. The work runs on your own host, so it keeps going when your phone sleeps.
+        <h1 data-reveal>Meet Gots. <span class="hero-tag">Hermes bots that got your back.</span></h1>
+        <p class="lede" data-reveal style="--d:60ms">
+          Every Hermes bot you run, in one app on your phone and your laptop. Talk instead of typing, get a ping only when a bot needs you, and pick up any chat on whichever screen is nearest.
         </p>
-        <div class="cta" data-reveal style="--d:180ms">
+        <div class="cta" data-reveal style="--d:120ms">
           <a class="btn btn-ink" href="#waitlist">Join the waiting list</a>
           <a class="btn btn-glass" href="https://github.com/thehaseebahmed/hermesgots" rel="noreferrer"><GitHub /> Self-host for free</a>
         </div>
-        <div class="install" data-reveal style="--d:240ms">
-          <code>{INSTALL}</code>
-          <button type="button" class="copy" data-copy={INSTALL} aria-label="Copy the install command">
-            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
-          </button>
-        </div>
-        <p class="meta" data-reveal style="--d:280ms">Web app · Android · Hermes 0.22.5+</p>
+        <p class="meta" data-reveal style="--d:180ms">Web app · Android · Hermes 0.22.5+</p>
       </div>
 
       <figure class="hero-scene" aria-label="Leaving the office, dictating a text and asking Nova to plan a weekend in Lisbon on the phone, answering its question from the lock screen, then opening the finished plan on the laptop at home">

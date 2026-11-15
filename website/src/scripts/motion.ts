@@ -1,6 +1,6 @@
 /**
- * The site's script: one-shot reveals, the nav's glass once the page scrolls, the install command's
- * copy button and the waiting list's form. Everything is progressive: without the script (or
+ * The site's script: one-shot reveals, the nav's glass once the page scrolls and the waiting list's
+ * form. Everything is progressive: without the script (or
  * with reduced motion) the page is a plain stack, so nothing is hidden until this says it can animate.
  */
 
@@ -31,18 +31,6 @@ if (nav) {
   update()
   window.addEventListener("scroll", update, { passive: true })
 }
-
-document.querySelectorAll<HTMLButtonElement>("[data-copy]").forEach((button) => {
-  button.addEventListener("click", async () => {
-    try {
-      await navigator.clipboard.writeText(button.dataset.copy ?? "")
-      button.classList.add("is-done")
-      setTimeout(() => button.classList.remove("is-done"), 1600)
-    } catch {
-      // Clipboard blocked: the command is still on screen to select.
-    }
-  })
-})
 
 document.querySelectorAll<HTMLFormElement>("[data-waitlist]").forEach((form) => {
   form.addEventListener("submit", async (event) => {
