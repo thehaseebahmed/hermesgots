@@ -413,9 +413,9 @@ li:hover > .bot-swap .bot-alt {
   line-height: 0.98;
 }
 
-/* The headline starts as the tagline and becomes the name at the first scroll: both lines share
-   one cell, so the swap moves nothing below it. The old words drift up and blur out one after
-   another, then the new ones settle in from below. */
+/* The headline starts as the tagline and becomes the name at the first hover, tap or focus in
+   the hero: both lines share one cell, so the swap moves nothing below it. The old words drift
+   up and blur out one after another, then the new ones settle in from below. */
 .hero-title {
   display: grid;
 }
