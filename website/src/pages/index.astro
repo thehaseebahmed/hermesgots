@@ -4,13 +4,6 @@ import Bot from "../components/Bot.astro"
 import GitHub from "../components/GitHub.astro"
 import GotsHero from "../components/hero/GotsHero.tsx"
 
-
-const steps = [
-  { key: "1", title: "Ask", body: "Type it or say it. Attach a repo, a file or a photo." },
-  { key: "2", title: "Close the app", body: "The work runs on your Hermes host, so it keeps going while your phone sleeps." },
-  { key: "3", title: "Come back", body: "A draft pull request, a cited guide or one question waits on whichever screen is nearest." },
-]
-
 const bots = [
   { id: "byte", name: "Byte", role: "The Engineer" },
   { id: "pixel", name: "Pixel", role: "The Thinker" },
@@ -86,102 +79,18 @@ const faq = [
       </figure>
     </section>
 
-    <!-- How it works -->
-    <section class="steps" aria-labelledby="steps-title">
-      <div class="wrap">
-        <p class="eyebrow" data-reveal>How it works</p>
-        <h2 id="steps-title" class="title" data-reveal>Works while you're there.<br /><span class="soft">And while you're not.</span></h2>
-        <ol class="step-grid">
-          {
-            steps.map((s, i) => (
-              <li data-reveal style={`--d:${i * 90}ms`}>
-                <kbd class="key">{s.key}</kbd>
-                <h3>{s.title}</h3>
-                <p>{s.body}</p>
-              </li>
-            ))
-          }
-        </ol>
-      </div>
-    </section>
-
-    <!-- Features as a bento -->
+    <!-- Features: one lead card, then a grid of cards, each a drawn piece of the app over its name -->
     <section id="features" class="features" aria-labelledby="features-title">
       <div class="wrap">
-        <p class="eyebrow" data-reveal>What it does</p>
-        <h2 id="features-title" class="title" data-reveal>One app for everything<br /><span class="soft">your agent can do.</span></h2>
+        <h2 id="features-title" class="fc-title" data-reveal>Ask for anything.<br /><span class="soft">Your bots build it, ship it and keep it running.</span></h2>
 
-        <div class="bento">
-          <article class="tile t-code" data-reveal>
-            <div class="tile-copy">
-              <h3>Sessions that end in a pull request.</h3>
-              <p>Each session works in its own worktree and ships a draft PR. Read the plan first in plan mode, or leave AFK on and let it work through the issues you've labelled.</p>
-            </div>
-            <div class="art art-sessions" aria-hidden="true">
-              <p class="group">Waiting for you <b>1</b></p>
-              <div class="srow"><span class="ic ic-warn"></span><span>Migrate the lights to the new hub<small>Plan ready for review</small></span><em>2m</em></div>
-              <p class="group">Working <b>2</b></p>
-              <div class="srow"><span class="ic ic-spin"></span><span>Add retries to the uploader <i class="chip">AFK</i><small>#88 · hermesgots</small></span><em>now</em></div>
-              <div class="srow"><span class="ic ic-spin"></span><span>Fix the flaky retry test<small>Running tests</small></span><em>now</em></div>
-              <p class="group">Idle <b>1</b></p>
-              <div class="srow"><span class="ic ic-ok"></span><span>Dark mode for settings<small>Draft #209 · checks passing</small></span><em>1h</em></div>
-            </div>
-          </article>
-
-          <article class="tile t-research" data-reveal style="--d:80ms">
-            <div class="tile-copy">
-              <h3>Answers with receipts.</h3>
-              <p>Research missions read the web and cite every sentence. The host checks each quote and flags anything unsourced.</p>
-            </div>
-            <div class="art art-cite" aria-hidden="true">
-              <p>Attention lets every word look at every other word at once <sup>1</sup>, which is why it replaced recurrence <sup>2</sup>. <mark>It also halves training cost.</mark></p>
-              <span class="flag">No source</span>
-              <ul class="types"><li>Learn</li><li>Compare</li><li>Verify a claim</li><li>Literature review</li></ul>
-            </div>
-          </article>
-
-          <article class="tile t-approve" data-reveal>
-            <div class="tile-copy">
-              <h3>Asks before anything risky.</h3>
-              <p>Approvals and questions land where you'd type, and a push tells you when one is waiting.</p>
-            </div>
-            <div class="art art-approve" aria-hidden="true">
-              <p class="a-head"><span class="ic ic-warn"></span>Approval needed</p>
-              <code>rm -rf /var/log/app/*.log</code>
-              <div class="a-btns"><span class="b-ok">Allow once</span><span>Deny</span></div>
-            </div>
-          </article>
-
-          <article class="tile t-dictate" data-reveal style="--d:80ms">
-            <div class="tile-copy">
-              <h3>Talk. Your host types.</h3>
-              <p>Dictation runs on your own bot, tidied to the level you pick, with your names and jargon taught once.</p>
-            </div>
-            <div class="art art-wave" aria-hidden="true">
-              <span class="rec"></span>
-              <span class="bars">{Array.from({ length: 28 }, (_, i) => <i style={`--h:${20 + ((i * 37) % 70)}%;--i:${i}`}></i>)}</span>
-              <span class="time">0:07</span>
-            </div>
-          </article>
-
-          <article class="tile t-rooms" data-reveal style="--d:160ms">
-            <div class="tile-copy">
-              <h3>Put bots in a room.</h3>
-              <p>Several bots, one conversation. Each answers in its own voice.</p>
-            </div>
-            <div class="art art-room" aria-hidden="true">
-              <div class="msg"><Bot id="pixel" size={30} /><span><b>Pixel</b>Three options. The second is cheapest.</span></div>
-              <div class="msg"><Bot id="wink" size={30} /><span><b>Wink</b>Why not skip the migration?</span></div>
-              <div class="msg"><Bot id="byte" size={30} /><span><b>Byte</b>I can test both tonight.</span></div>
-            </div>
-          </article>
-
-          <article class="tile t-canvas" data-reveal>
-            <div class="tile-copy">
-              <h3>Ask for an app. Keep it.</h3>
-              <p>A canvas is a small page your bot builds and keeps updating: a tracker, a dashboard, a checklist. It lives beside your chats.</p>
-            </div>
-            <div class="art art-canvas" aria-hidden="true">
+        <article class="fc fc-lead" data-reveal>
+          <div class="fc-copy">
+            <h3><svg class="fc-ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>Canvas</h3>
+            <p>Ask for a tracker, a dashboard or a checklist. Your bot builds it, keeps it beside your chats and updates it whenever you ask.</p>
+          </div>
+          <div class="fc-panel" aria-hidden="true">
+            <div class="art art-canvas">
               <div class="cv-head"><b>Reading list</b><span>12 books</span></div>
               <div class="cv-grid">
                 <span class="cv-card c1"><b>Dune</b><i style="--p:100%"></i></span>
@@ -189,16 +98,92 @@ const faq = [
                 <span class="cv-card c3"><b>Klara</b><i style="--p:22%"></i></span>
               </div>
             </div>
+          </div>
+        </article>
+
+        <div class="fc-grid">
+          <article class="fc" data-reveal>
+            <div class="fc-visual" aria-hidden="true">
+              <div class="art art-sessions">
+                <p class="group">Waiting for you <b>1</b></p>
+                <div class="srow"><span class="ic ic-warn"></span><span>Migrate the lights to the new hub<small>Plan ready for review</small></span><em>2m</em></div>
+                <p class="group">Working <b>2</b></p>
+                <div class="srow"><span class="ic ic-spin"></span><span>Add retries to the uploader <i class="chip">AFK</i><small>#88 · hermesgots</small></span><em>now</em></div>
+                <div class="srow"><span class="ic ic-spin"></span><span>Fix the flaky retry test<small>Running tests</small></span><em>now</em></div>
+              </div>
+            </div>
+            <div class="fc-copy">
+              <h3><svg class="fc-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m16 18 6-6-6-6M8 6l-6 6 6 6"/></svg>Code</h3>
+              <p>Sessions work on their own branch and come back as a draft pull request. Leave AFK on and they work through your labelled issues.</p>
+            </div>
           </article>
 
-          <article class="tile t-routines" data-reveal style="--d:80ms">
-            <div class="tile-copy">
-              <h3>Routines that report back.</h3>
-              <p>Jobs on a schedule, run by your host. Results arrive as a row in your bot's chats.</p>
+          <article class="fc" data-reveal style="--d:80ms">
+            <div class="fc-visual" aria-hidden="true">
+              <div class="art art-cite">
+                <p>Attention lets every word look at every other word at once <sup>1</sup>, which is why it replaced recurrence <sup>2</sup>. <mark>It also halves training cost.</mark></p>
+                <span class="flag">No source</span>
+                <ul class="types"><li>Learn</li><li>Compare</li><li>Verify a claim</li><li>Literature review</li></ul>
+              </div>
             </div>
-            <div class="art art-routines" aria-hidden="true">
-              <div class="rt"><span>Inbox triage<small>Every hour</small></span><span class="hb">{Array.from({ length: 18 }, (_, i) => <i class={i === 11 ? "bad" : ""}></i>)}</span></div>
-              <div class="rt"><span>Morning digest<small>Daily at 8:00</small></span><span class="hb">{Array.from({ length: 18 }, (_, i) => <i class={i < 9 ? "off" : ""}></i>)}</span></div>
+            <div class="fc-copy">
+              <h3><svg class="fc-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 4h6a4 4 0 0 1 4 4v13a3 3 0 0 0-3-3H2zM22 4h-6a4 4 0 0 0-4 4v13a3 3 0 0 1 3-3h7z"/></svg>Research</h3>
+              <p>Missions read the web and cite every sentence. Anything without a source gets flagged.</p>
+            </div>
+          </article>
+
+          <article class="fc" data-reveal>
+            <div class="fc-visual fc-visual--centre" aria-hidden="true">
+              <div class="art art-wave">
+                <span class="rec"></span>
+                <span class="bars">{Array.from({ length: 28 }, (_, i) => <i style={`--h:${20 + ((i * 37) % 70)}%;--i:${i}`}></i>)}</span>
+                <span class="time">0:07</span>
+              </div>
+            </div>
+            <div class="fc-copy">
+              <h3><svg class="fc-ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3"/></svg>Dictation</h3>
+              <p>Talk instead of typing, in Gots or in any app on Android. Your own bot hears it and tidies it up.</p>
+            </div>
+          </article>
+
+          <article class="fc" data-reveal style="--d:80ms">
+            <div class="fc-visual fc-visual--centre" aria-hidden="true">
+              <div class="art art-routines">
+                <div class="rt"><span>Inbox triage<small>Every hour</small></span><span class="hb">{Array.from({ length: 18 }, (_, i) => <i class={i === 11 ? "bad" : ""}></i>)}</span></div>
+                <div class="rt"><span>Morning digest<small>Daily at 8:00</small></span><span class="hb">{Array.from({ length: 18 }, (_, i) => <i class={i < 9 ? "off" : ""}></i>)}</span></div>
+              </div>
+            </div>
+            <div class="fc-copy">
+              <h3><svg class="fc-ic" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Routines</h3>
+              <p>Jobs on a schedule, run by your bot. See every run at a glance and read what each one found.</p>
+            </div>
+          </article>
+
+          <article class="fc" data-reveal>
+            <div class="fc-visual" aria-hidden="true">
+              <div class="art art-room">
+                <div class="msg"><Bot id="pixel" size={30} /><span><b>Pixel</b>Three options. The second is cheapest.</span></div>
+                <div class="msg"><Bot id="wink" size={30} /><span><b>Wink</b>Why not skip the migration?</span></div>
+                <div class="msg"><Bot id="byte" size={30} /><span><b>Byte</b>I can test both tonight.</span></div>
+              </div>
+            </div>
+            <div class="fc-copy">
+              <h3><svg class="fc-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>Rooms</h3>
+              <p>Put several bots in one conversation. Each answers in its own voice.</p>
+            </div>
+          </article>
+
+          <article class="fc" data-reveal style="--d:80ms">
+            <div class="fc-visual" aria-hidden="true">
+              <div class="art art-approve">
+                <p class="a-head"><span class="ic ic-warn"></span>Approval needed</p>
+                <code>rm -rf /var/log/app/*.log</code>
+                <div class="a-btns"><span class="b-ok">Allow once</span><span>Deny</span></div>
+              </div>
+            </div>
+            <div class="fc-copy">
+              <h3><svg class="fc-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>Approvals</h3>
+              <p>Anything risky waits for your yes, and a push tells you when a bot needs you.</p>
             </div>
           </article>
         </div>
