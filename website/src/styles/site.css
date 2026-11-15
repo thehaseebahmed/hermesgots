@@ -19,6 +19,9 @@
   --sky-2: #eef4fe;
   --green: oklch(0.6 0.16 150);
   --green-ink: oklch(0.45 0.13 150);
+  --ai-1: oklch(0.62 0.17 145);
+  --ai-2: oklch(0.66 0.13 175);
+  --ai-3: oklch(0.66 0.17 130);
   --warn: oklch(0.72 0.16 70);
   --bad: oklch(0.62 0.2 25);
   --violet: oklch(0.62 0.2 295);
@@ -62,6 +65,9 @@
     --sky-2: #0a0d15;
     --green: oklch(0.7 0.15 150);
     --green-ink: oklch(0.78 0.13 150);
+    --ai-1: oklch(0.74 0.17 145);
+    --ai-2: oklch(0.78 0.12 180);
+    --ai-3: oklch(0.86 0.17 125);
     --shadow: 0 1px 1px rgb(0 0 0 / 30%), 0 16px 36px -14px rgb(0 0 0 / 70%);
     --shadow-lg: 0 2px 4px rgb(0 0 0 / 30%), 0 40px 90px -24px rgb(0 0 0 / 80%);
     --primary: oklch(0.448 0.119 151.328);
@@ -434,8 +440,7 @@ li:hover > .bot-swap .bot-alt {
   line-height: 0.98;
 }
 
-/* The headline starts as the tagline and becomes the name at the first hover, tap or focus in
-   the hero: both lines share one cell, so the swap moves nothing below it. The old words drift
+/* The headline starts as the tagline and becomes the name a moment after the page draws: both lines share one cell, so the swap moves nothing below it. The old words drift
    up and blur out one after another, then the new ones settle in from below. */
 .hero-title {
   display: grid;
@@ -457,6 +462,21 @@ li:hover > .bot-swap .bot-alt {
 
 .ht-got {
   color: var(--green);
+}
+
+.ht-to .ht-got {
+  background: linear-gradient(100deg, var(--ai-1), var(--ai-2) 45%, var(--ai-3) 75%, var(--ai-1));
+  background-size: 220% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: ht-sheen 7s ease-in-out infinite alternate;
+}
+
+@keyframes ht-sheen {
+  to {
+    background-position: 100% 0;
+  }
 }
 
 .ht-to .ht-w {
@@ -481,6 +501,9 @@ li:hover > .bot-swap .bot-alt {
 @media (prefers-reduced-motion: reduce) {
   .ht-w {
     transition: none;
+  }
+  .ht-to .ht-got {
+    animation: none;
   }
 }
 

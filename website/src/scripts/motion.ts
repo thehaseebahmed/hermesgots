@@ -1,5 +1,5 @@
 /**
- * The site's script: one-shot reveals, the headline that becomes the name at the first reach for the hero, the
+ * The site's script: one-shot reveals, the headline that becomes the name a moment after the page draws, the
  * nav's glass once the page scrolls and the waiting list's form. Everything is progressive: without
  * the script (or with reduced motion) the page is a plain stack, so nothing is hidden until this says
  * it can animate.
@@ -33,27 +33,18 @@ if (nav) {
   window.addEventListener("scroll", update, { passive: true })
 }
 
-// The headline becomes the name the first time the reader reaches for the hero: a mouse over it, a
-// tap anywhere in it, or the keyboard moving into it. A scroll would come too late on a phone,
-// where the hero is most of the first screen.
-const hero = document.querySelector<HTMLElement>("[data-hero]")
-const title = hero?.querySelector<HTMLElement>("[data-hero-title]")
-if (hero && title) {
-  // A mouse only counts once the reader moves it: the browser sends moves of its own, with no
-  // movement in them, under a cursor that was resting there as the page drew
-  const mouse = matchMedia("(hover: hover) and (pointer: fine)").matches
-  const onMove = (event: PointerEvent) => {
-    if (mouse && event.pointerType === "mouse" && (event.movementX || event.movementY)) meet()
-  }
-  const meet = () => {
-    title.classList.add("is-met")
-    hero.removeEventListener("pointermove", onMove)
-    hero.removeEventListener("pointerdown", meet)
-    hero.removeEventListener("focusin", meet)
-  }
-  hero.addEventListener("pointermove", onMove)
-  hero.addEventListener("pointerdown", meet)
-  hero.addEventListener("focusin", meet)
+// The headline becomes the name on its own a moment after the page draws, so a reader who never
+// touches the hero still meets it. A tab opened in the background waits until it is looked at.
+const title = document.querySelector<HTMLElement>("[data-hero-title]")
+if (title) {
+  const meet = () => window.setTimeout(() => title.classList.add("is-met"), 2400)
+  if (document.visibilityState === "visible") meet()
+  else
+    document.addEventListener(
+      "visibilitychange",
+      () => document.visibilityState === "visible" && meet(),
+      { once: true },
+    )
 }
 
 document.querySelectorAll<HTMLFormElement>("[data-waitlist]").forEach((form) => {
