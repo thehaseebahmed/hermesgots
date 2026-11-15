@@ -1,0 +1,19 @@
+---
+// One of the app's posed bots. `hover` swaps to a second mood under a pointer, the way the app's
+// bots poof between moods; without it the picture stays still.
+interface Props {
+  id: string
+  mood?: string
+  hover?: string
+  size?: number
+  class?: string
+  eager?: boolean
+}
+
+const { id, mood = "happy", hover, size = 96, class: extra, eager = false } = Astro.props
+---
+
+<span class:list={["bot", extra, { "bot-swap": hover }]} style={`--s:${size}px`} aria-hidden="true">
+  <img src={`/bots/${id}/${mood}.webp`} alt="" width={size} height={size} loading={eager ? "eager" : "lazy"} decoding="async" />
+  {hover && <img class="bot-alt" src={`/bots/${id}/${hover}.webp`} alt="" width={size} height={size} loading="lazy" decoding="async" />}
+</span>

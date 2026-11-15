@@ -3,7 +3,7 @@
  * `GET ?route=board`). Until a board is live the page shows a seeded sample of the same shape.
  */
 
-/** The app's eight bots (`app/src/components/bots.tsx`): the picture is `/bots/<id>.png`. */
+/** The app's bots (`app/src/components/bots.tsx`): the picture is `/bots/<id>/<mood>.webp`. */
 export const BOT_IDS = ["tri", "cubby", "penny", "hex", "stella", "orbi", "gem", "bloom"] as const
 
 /** How many models a person's tokens are split by; the rest is "Others". */
