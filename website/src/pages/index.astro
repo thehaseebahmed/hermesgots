@@ -54,7 +54,7 @@ const coming = [
 const faq = [
   {
     q: "Do I need a Hermes host?",
-    a: "Yes. Gots is the app for a Hermes agent, and the agent runs on a machine you control. Self-hosting is free. The hosted plan, for people who'd rather not run one, is on the waiting list.",
+    a: "Yes. Gots is the app for a Hermes agent, and the agent runs on a machine you control. That's true on both plans. Free means running your own copy of Gots too, where sync and notifications need your own Netlify site and Firebase project. Connected is Gots run for you, with both ready to go, and it's on the waiting list.",
   },
   {
     q: "Where does it run?",
@@ -93,7 +93,7 @@ const faq = [
         </p>
         <div class="cta" data-reveal style="--d:120ms">
           <a class="btn btn-ink" href="#waitlist">Join the waiting list</a>
-          <a class="btn btn-glass" href="https://github.com/thehaseebahmed/hermesgots" rel="noreferrer"><GitHub /> Self-host for free</a>
+          <a class="btn btn-glass" href="https://github.com/thehaseebahmed/hermesgots" rel="noreferrer"><GitHub /> Start for free</a>
         </div>
         <p class="meta" data-reveal style="--d:180ms">Web app · Android · Hermes 0.22.5+</p>
       </div>
@@ -322,31 +322,32 @@ const faq = [
     <!-- Pricing -->
     <section id="pricing" class="pricing" aria-labelledby="pricing-title">
       <div class="wrap">
-        <h2 id="pricing-title" class="title" data-reveal>Two ways in.<br /><span class="soft">Both simple.</span></h2>
+        <h2 id="pricing-title" class="title" data-reveal>One app, two plans.<br /><span class="soft">Only sync and notifications differ.</span></h2>
 
         <div class="plans">
           <article class="plan" data-reveal>
-            <h3>Self-host</h3>
-            <p class="plan-sub">Free, forever.</p>
+            <h3>Free</h3>
+            <p class="plan-sub">Run your own copy of Gots.</p>
             <p class="price">$0</p>
             <ul class="ticks">
               <li>Every feature in the app</li>
               <li>Your chats, runs and keys stay on your host</li>
-              <li>End-to-end encrypted sync</li>
               <li>Open source, MIT licensed</li>
+              <li class="no">Sync only with your own Netlify site</li>
+              <li class="no">Notifications only with your own Firebase project</li>
             </ul>
             <a class="btn btn-glass btn-block" href="https://github.com/thehaseebahmed/hermesgots" rel="noreferrer"><GitHub /> Get it on GitHub</a>
           </article>
 
           <article id="waitlist" class="plan plan-featured" data-reveal style="--d:100ms">
             <Bot id="bubble" mood="wave" size={72} class="plan-bot" />
-            <h3>Hosted</h3>
-            <p class="plan-sub">Gots, run for you.</p>
+            <h3>Connected</h3>
+            <p class="plan-sub">The same app, run for you.</p>
             <p class="price price-word">Waiting list</p>
             <ul class="ticks">
-              <li>No host to run</li>
-              <li>One email when your spot opens</li>
-              <li>First look at new features</li>
+              <li>Everything in Free</li>
+              <li>End-to-end encrypted sync across your phone, tablet and laptop, ready to go</li>
+              <li>Push notifications when a bot needs you, with nothing to set up</li>
             </ul>
             <form class="waitlist" name="waitlist" method="POST" action="/" data-netlify="true" netlify-honeypot="bot-field" data-waitlist>
               <input type="hidden" name="form-name" value="waitlist" />
@@ -389,7 +390,7 @@ const faq = [
         <h2 id="closing-title" class="title" data-reveal>Your bots are waiting.</h2>
         <div class="cta" data-reveal style="--d:80ms">
           <a class="btn btn-ink" href="#waitlist">Join the waiting list</a>
-          <a class="btn btn-glass" href="https://github.com/thehaseebahmed/hermesgots" rel="noreferrer"><GitHub /> Self-host for free</a>
+          <a class="btn btn-glass" href="https://github.com/thehaseebahmed/hermesgots" rel="noreferrer"><GitHub /> Start for free</a>
         </div>
       </div>
     </section>

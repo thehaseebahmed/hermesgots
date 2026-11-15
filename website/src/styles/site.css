@@ -1855,6 +1855,17 @@ li:hover > .bot-swap .bot-alt {
   content: "";
 }
 
+.ticks li.no {
+  color: var(--muted);
+}
+
+.ticks li.no::before {
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round'%3E%3Cpath d='M7 12h10'/%3E%3C/svg%3E")
+      center / 0.7rem no-repeat,
+    var(--line-2);
+}
+
 .plan .btn-block {
   margin-top: auto;
   border-color: var(--line-2);
