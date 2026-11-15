@@ -4,6 +4,28 @@ import Bot from "../components/Bot.astro"
 import GitHub from "../components/GitHub.astro"
 import GotsHero from "../components/hero/GotsHero.tsx"
 
+// Lucide's paths for the drawn app, so each card wears the app's own glyphs
+const I = {
+  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+  sort: '<path d="m3 16 4 4 4-4M7 20V4M11 4h10M11 8h7M11 12h4"/>',
+  alert: '<circle cx="12" cy="12" r="10"/><path d="M12 8v4M12 16h.01"/>',
+  pr: '<circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7M6 9v12"/>',
+  x: '<path d="M18 6 6 18M6 6l12 12"/>',
+  stop: '<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/>',
+  up: '<path d="m5 12 7-7 7 7M12 19V5"/>',
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4M12 16h.01"/>',
+  copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
+  more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+  plus: '<path d="M5 12h14M12 5v14"/>',
+  mic: '<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3"/>',
+  flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1zM4 22v-7"/>',
+  frame: '<path d="M22 6H2M22 18H2M6 2v20M18 2v20"/>',
+  refresh: '<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M8 16H3v5"/>',
+  back: '<path d="m12 19-7-7 7-7M19 12H5"/>',
+}
+const ic = (name: keyof typeof I, cls = "") => `<svg class="ai ${cls}" viewBox="0 0 24 24" aria-hidden="true">${I[name]}</svg>`
+
 const bots = [
   { id: "byte", name: "Byte", role: "The Engineer" },
   { id: "pixel", name: "Pixel", role: "The Thinker" },
@@ -90,12 +112,26 @@ const faq = [
             <p>Ask for a tracker, a dashboard or a checklist. Your bot builds it, keeps it beside your chats and updates it whenever you ask.</p>
           </div>
           <div class="fc-panel" aria-hidden="true">
-            <div class="art art-canvas">
-              <div class="cv-head"><b>Reading list</b><span>12 books</span></div>
-              <div class="cv-grid">
-                <span class="cv-card c1"><b>Dune</b><i style="--p:100%"></i></span>
-                <span class="cv-card c2"><b>Piranesi</b><i style="--p:64%"></i></span>
-                <span class="cv-card c3"><b>Klara</b><i style="--p:22%"></i></span>
+            <div class="app app-canvas">
+              <div class="cv-lane">
+                <div class="app-bar"><span class="cv-mark" set:html={ic("frame")} /><b>Reading list</b><span class="app-round" set:html={ic("undo")} /></div>
+                <div class="cv-thread">
+                  <p class="app-mine">Add a progress bar to each book.</p>
+                  <p class="app-reply">Done. Each book shows how far in you are, and Piranesi is at 64%.</p>
+                </div>
+                <div class="app-composer"><span>Message Nova…</span><span class="app-composer-row"><i set:html={ic("plus")} /><span class="app-send" set:html={ic("up")} /></span></div>
+              </div>
+              <div class="cv-page">
+                <div class="cv-head"><b>Reading list</b><span>12 books · 3 this month</span></div>
+                <div class="cv-grid">
+                  <span class="cv-card c1"><b>Dune</b><small>Frank Herbert</small><i style="--p:100%"></i></span>
+                  <span class="cv-card c2"><b>Piranesi</b><small>Susanna Clarke</small><i style="--p:64%"></i></span>
+                  <span class="cv-card c3"><b>Klara and the Sun</b><small>Kazuo Ishiguro</small><i style="--p:22%"></i></span>
+                </div>
+                <div class="cv-rows">
+                  <span><b>Next up</b><em>The Left Hand of Darkness</em></span>
+                  <span><b>Finished</b><em>9 of 12</em></span>
+                </div>
               </div>
             </div>
           </div>
@@ -104,12 +140,15 @@ const faq = [
         <div class="fc-grid">
           <article class="fc" data-reveal>
             <div class="fc-visual" aria-hidden="true">
-              <div class="art art-sessions">
-                <p class="group">Waiting for you <b>1</b></p>
-                <div class="srow"><span class="ic ic-warn"></span><span>Migrate the lights to the new hub<small>Plan ready for review</small></span><em>2m</em></div>
-                <p class="group">Working <b>2</b></p>
-                <div class="srow"><span class="ic ic-spin"></span><span>Add retries to the uploader <i class="chip">AFK</i><small>#88 · hermesgots</small></span><em>now</em></div>
-                <div class="srow"><span class="ic ic-spin"></span><span>Fix the flaky retry test<small>Running tests</small></span><em>now</em></div>
+              <div class="app app-list">
+                <div class="app-bar"><b class="app-h">Code</b><span class="app-icon" set:html={ic("search")} /><span class="app-icon" set:html={ic("sort")} /></div>
+                <p class="app-group">Waiting for You <b class="warn">1</b></p>
+                <div class="app-row is-open"><span class="app-roundic warn" set:html={ic("alert")} /><img class="app-face" src="/bots/byte/happy.webp" alt="" /><span class="app-rowtext"><b>Migrate the lights to the new hub</b><small>Home · Plan ready for review</small></span><em>2m</em></div>
+                <p class="app-group">Working <b>2</b></p>
+                <div class="app-row"><span class="app-roundic"><span class="app-spin"></span></span><img class="app-face" src="/bots/byte/happy.webp" alt="" /><span class="app-rowtext"><b>Add retries to the uploader <i class="app-chip">AFK</i></b><small>hermesgots · Running tests</small></span><em>now</em></div>
+                <div class="app-row"><span class="app-roundic"><span class="app-spin"></span></span><img class="app-face" src="/bots/pip/happy.webp" alt="" /><span class="app-rowtext"><b>Fix the flaky retry test</b><small>hermesgots · Editing retry.test.ts</small></span><em>now</em></div>
+                <p class="app-group">Idle <b>1</b></p>
+                <div class="app-row"><span class="app-roundic ok" set:html={ic("pr")} /><img class="app-face" src="/bots/byte/happy.webp" alt="" /><span class="app-rowtext"><b>Dark mode for settings</b><small>hermesgots · Draft #209 · Checks passing</small></span><em>1h</em></div>
               </div>
             </div>
             <div class="fc-copy">
@@ -117,13 +156,15 @@ const faq = [
               <p>Sessions work on their own branch and come back as a draft pull request. Leave AFK on and they work through your labelled issues.</p>
             </div>
           </article>
-
           <article class="fc" data-reveal style="--d:80ms">
             <div class="fc-visual" aria-hidden="true">
-              <div class="art art-cite">
-                <p>Attention lets every word look at every other word at once <sup>1</sup>, which is why it replaced recurrence <sup>2</sup>. <mark>It also halves training cost.</mark></p>
-                <span class="flag">No source</span>
-                <ul class="types"><li>Learn</li><li>Compare</li><li>Verify a claim</li><li>Literature review</li></ul>
+              <div class="app app-mission">
+                <div class="app-bar"><b class="app-t">How attention replaced recurrence</b><span class="app-pill">14 sources</span></div>
+                <p class="ms-meta">Learn &amp; understand · Pixel</p>
+                <h4>Why it won</h4>
+                <p class="ms-text">Attention lets every word look at every other word at once<span class="cite">3</span>, so a sentence is read in one step rather than one word at a time<span class="cite">4</span>. <span class="flagged">It also halves the cost of training.</span><span class="noflag"><i set:html={ic("flag")} />No source</span></p>
+                <h4>What it costs</h4>
+                <p class="ms-text">The work grows with the square of the length<span class="cite">7</span>, which is why long documents</p>
               </div>
             </div>
             <div class="fc-copy">
@@ -131,13 +172,18 @@ const faq = [
               <p>Missions read the web and cite every sentence. Anything without a source gets flagged.</p>
             </div>
           </article>
-
           <article class="fc" data-reveal>
-            <div class="fc-visual fc-visual--centre" aria-hidden="true">
-              <div class="art art-wave">
-                <span class="rec"></span>
-                <span class="bars">{Array.from({ length: 28 }, (_, i) => <i style={`--h:${20 + ((i * 37) % 70)}%;--i:${i}`}></i>)}</span>
-                <span class="time">0:07</span>
+            <div class="fc-visual" aria-hidden="true">
+              <div class="app app-voice">
+                <p class="app-mine">Remind me to book the dentist.</p>
+                <p class="app-reply">Sure. Which day works best for you?</p>
+                <div class="vbar">
+                  <span class="vb-round" set:html={ic("x")} />
+                  <span class="vb-wave">{Array.from({ length: 34 }, (_, i) => <i style={`--h:${18 + ((i * 41) % 76)}%;--i:${i}`}></i>)}</span>
+                  <span class="vb-time">0:07</span>
+                  <span class="vb-round" set:html={ic("stop")} />
+                  <span class="vb-send" set:html={ic("up")} />
+                </div>
               </div>
             </div>
             <div class="fc-copy">
@@ -145,12 +191,21 @@ const faq = [
               <p>Talk instead of typing, in Gots or in any app on Android. Your own bot hears it and tidies it up.</p>
             </div>
           </article>
-
           <article class="fc" data-reveal style="--d:80ms">
-            <div class="fc-visual fc-visual--centre" aria-hidden="true">
-              <div class="art art-routines">
-                <div class="rt"><span>Inbox triage<small>Every hour</small></span><span class="hb">{Array.from({ length: 18 }, (_, i) => <i class={i === 11 ? "bad" : ""}></i>)}</span></div>
-                <div class="rt"><span>Morning digest<small>Daily at 8:00</small></span><span class="hb">{Array.from({ length: 18 }, (_, i) => <i class={i < 9 ? "off" : ""}></i>)}</span></div>
+            <div class="fc-visual" aria-hidden="true">
+              <div class="app app-routines">
+                <div class="app-pills"><span class="on">All</span><span>Healthy</span><span>Paused</span><span>Failing</span></div>
+                <div class="rt-card">
+                  <div class="rt-top"><b>Inbox triage</b><span class="badge ok">Healthy</span><span class="app-icon" set:html={ic("more")} /></div>
+                  <small>Every hour</small>
+                  <div class="rt-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="bad"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="run"></i></div>
+                  <div class="rt-foot"><span>4 min. ago</span><span>Next in 56 min.</span></div>
+                </div>
+                <div class="rt-card">
+                  <div class="rt-top"><b>Morning digest</b><span class="badge bad">Failing</span><span class="app-icon" set:html={ic("more")} /></div>
+                  <small>Weekdays at 8:00 AM</small>
+                  <div class="rt-bars"><i class="none"></i><i class="none"></i><i class="none"></i><i class="none"></i><i class="none"></i><i class="none"></i><i class="none"></i><i class="none"></i><i class="none"></i><i class="none"></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i class="bad"></i><i class="bad"></i></div>
+                </div>
               </div>
             </div>
             <div class="fc-copy">
@@ -158,13 +213,14 @@ const faq = [
               <p>Jobs on a schedule, run by your bot. See every run at a glance and read what each one found.</p>
             </div>
           </article>
-
           <article class="fc" data-reveal>
             <div class="fc-visual" aria-hidden="true">
-              <div class="art art-room">
-                <div class="msg"><Bot id="pixel" size={30} /><span><b>Pixel</b>Three options. The second is cheapest.</span></div>
-                <div class="msg"><Bot id="wink" size={30} /><span><b>Wink</b>Why not skip the migration?</span></div>
-                <div class="msg"><Bot id="byte" size={30} /><span><b>Byte</b>I can test both tonight.</span></div>
+              <div class="app app-room">
+                <div class="app-bar"><span class="rm-faces"><img src="/bots/pixel/happy.webp" alt="" /><img src="/bots/wink/happy.webp" alt="" /><img src="/bots/byte/happy.webp" alt="" /></span><span class="rm-title"><b>Kitchen renovation</b><small>Pixel, Wink and Byte</small></span></div>
+                <p class="app-mine">Which quote should we take?</p>
+                <div class="rm-msg"><img src="/bots/pixel/happy.webp" alt="" /><span><b>Pixel</b>The second. Same work, £1,400 less.</span></div>
+                <div class="rm-msg"><img src="/bots/wink/happy.webp" alt="" /><span><b>Wink</b>Unless the first can start in May.</span></div>
+                <p class="rm-working"><span class="app-spin"></span>Byte is working</p>
               </div>
             </div>
             <div class="fc-copy">
@@ -172,13 +228,13 @@ const faq = [
               <p>Put several bots in one conversation. Each answers in its own voice.</p>
             </div>
           </article>
-
           <article class="fc" data-reveal style="--d:80ms">
             <div class="fc-visual" aria-hidden="true">
-              <div class="art art-approve">
-                <p class="a-head"><span class="ic ic-warn"></span>Approval needed</p>
-                <code>rm -rf /var/log/app/*.log</code>
-                <div class="a-btns"><span class="b-ok">Allow once</span><span>Deny</span></div>
+              <div class="app app-approve">
+                <p class="ap-head"><i set:html={ic("shield")} />Approval needed</p>
+                <p class="ap-desc">Delete and reinstall the dependencies</p>
+                <div class="ap-code"><span>terminal</span><i set:html={ic("copy")} /><code>rm -rf node_modules &amp;&amp; pnpm install</code></div>
+                <div class="ap-btns"><span class="ok">Allow once</span><span>Allow in chat</span><span>Always allow</span><span class="no">Deny</span></div>
               </div>
             </div>
             <div class="fc-copy">
