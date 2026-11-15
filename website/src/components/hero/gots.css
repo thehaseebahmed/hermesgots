@@ -1,0 +1,315 @@
+/* Gots's own look over the kit: the app's green, Figtree where the page has
+   it, white panes on a quiet canvas. One gutter for the window's top and left
+   and the phone's right. */
+.gh .ss-stage {
+  --gutter: 40px;
+  --ss-accent: #1f9a52;
+  --gh-ink: var(--ss-text-strong);
+  overflow: hidden;
+  font-family: 'Figtree Variable', 'Figtree', var(--ss-font, system-ui), sans-serif;
+}
+
+/* Pinned top-left, about a fifth off the bottom */
+.gh-win {
+  position: absolute;
+  top: var(--gutter);
+  left: var(--gutter);
+  width: 860px;
+  height: 490px;
+  box-shadow: var(--ss-shadow-hero);
+}
+
+.gh-side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 44px 12px 12px;
+}
+
+.gh-new {
+  align-self: flex-start;
+}
+
+.gh-title {
+  color: var(--gh-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.gh-bots {
+  display: grid;
+  gap: 2px;
+}
+
+.gh-bot {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 40px;
+  padding: 0 8px;
+  border-radius: 10px;
+}
+
+.gh-bot[data-selected] {
+  background: var(--ss-surface);
+  box-shadow: 0 0 0 1px var(--ss-line);
+}
+
+.gh-bot img {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+}
+
+.gh-bot__name {
+  color: var(--gh-ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* The thread is a reading column on the left of the pane; the pane's right
+   is the quiet margin the phone straddles. The composer ends 28px above the
+   stage's edge, so the window runs off below it. */
+.gh-pane {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  height: 100%;
+  padding: 24px 32px 128px;
+  box-sizing: border-box;
+  background: var(--ss-surface);
+}
+
+.gh-thread {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 12px;
+  width: 400px;
+  min-height: 0;
+  padding-bottom: 18px;
+  overflow: hidden;
+}
+
+.gh-empty {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  padding-bottom: 8px;
+}
+
+.gh-empty img {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+}
+
+.gh-greeting {
+  color: var(--ss-text);
+  font-size: 15px;
+}
+
+.gh-ask {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.gh-ask .ss-text {
+  max-width: 82%;
+  white-space: normal;
+  padding: 9px 14px;
+  border-radius: 18px 18px 6px 18px;
+  background: var(--ss-accent);
+  color: #fff;
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+
+.gh-work {
+  display: grid;
+  gap: 2px;
+}
+
+.gh-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 26px;
+  color: var(--ss-text);
+  font-size: 13px;
+}
+
+.gh-line[data-live] {
+  animation: gh-pulse 1.4s ease-in-out infinite;
+}
+
+.gh-mark {
+  display: grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  color: var(--ss-text);
+}
+
+.gh-reply {
+  display: grid;
+  gap: 12px;
+  padding-top: 2px;
+}
+
+.gh-stream {
+  color: var(--gh-ink);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.gh-pr {
+  will-change: transform;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.35s ease, transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.gh-pr[data-on] {
+  opacity: 1;
+  transform: none;
+}
+
+.gh-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  /* An even box, so the glyph never sits on a half pixel as the row settles */
+  width: 96px;
+  justify-content: center;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--ss-line);
+  color: var(--gh-ink);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.gh-pill svg {
+  flex: none;
+  color: var(--ss-accent);
+}
+
+.gh-composer {
+  width: 400px;
+}
+
+/* The app's composer is a pill with the send button inside its end */
+.gh-composer .ss-field__box {
+  height: 46px;
+  padding: 0 7px;
+  border-radius: 999px;
+  font-size: 14px;
+}
+
+.gh-plus {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--ss-ink-1);
+  color: var(--ss-text);
+}
+
+.gh-send {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--ss-ink-2);
+  color: #fff;
+  transition: background-color 0.2s ease;
+}
+
+.gh-send[data-ready] {
+  background: var(--ss-accent);
+}
+
+/* Straddles the window's right edge, a third outside, over the thread's quiet
+   margin; its top in the upper half, its base cropped by the stage */
+.gh-phone {
+  position: absolute;
+  top: 70px;
+  left: 728px;
+  box-shadow: var(--ss-shadow-satellite), 0 30px 50px -20px rgba(30, 40, 80, 0.35);
+}
+
+.gh-app {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+
+.gh-push {
+  will-change: transform;
+  opacity: 0;
+  transform: translateY(-10px) scale(0.96);
+  transition: opacity 0.4s ease, transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.gh-push[data-on] {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+/* Narrow, a second design: no sidebar, the window off the right with its own
+   new-chat button, and the phone at the size its notification reads at,
+   centred so its banner shows whole, off the bottom, over the window's foot
+   under the composer */
+.gh .ss-stage[data-layout='compact'] {
+  --gutter: 16px;
+}
+
+.gh .ss-stage[data-layout='compact'] .gh-win {
+  width: 400px;
+  height: 340px;
+}
+
+.gh .ss-stage[data-layout='compact'] .gh-composer .ss-field__box {
+  font-size: 13px;
+}
+
+.gh .ss-stage[data-layout='compact'] .gh-pane {
+  padding: 16px 16px 78px;
+}
+
+.gh .ss-stage[data-layout='compact'] .gh-thread,
+.gh .ss-stage[data-layout='compact'] .gh-composer {
+  width: 310px;
+}
+
+.gh .ss-stage[data-layout='compact'] .gh-empty img {
+  width: 60px;
+  height: 60px;
+}
+
+.gh .ss-stage[data-layout='compact'] .gh-phone {
+  top: 300px;
+  left: var(--gutter);
+}
+
+@keyframes gh-pulse {
+  50% {
+    opacity: 0.45;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gh-line[data-live] {
+    animation: none;
+  }
+}

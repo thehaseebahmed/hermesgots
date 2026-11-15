@@ -21,7 +21,7 @@ if (!reduced && "IntersectionObserver" in window) {
     },
     { rootMargin: "0px 0px -10% 0px", threshold: 0.1 },
   )
-  document.querySelectorAll("[data-reveal]").forEach((element) => seen.observe(element))
+  document.querySelectorAll("[data-reveal]:not(.ss-stage *)").forEach((element) => seen.observe(element))
 }
 
 // The nav takes its glass once the page has moved under it.

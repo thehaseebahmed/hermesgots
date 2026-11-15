@@ -2,6 +2,7 @@
 import Base from "../layouts/Base.astro"
 import Bot from "../components/Bot.astro"
 import GitHub from "../components/GitHub.astro"
+import GotsHero from "../components/hero/GotsHero.tsx"
 
 const INSTALL = "hermes plugins install thehaseebahmed/hermesgots/plugin --enable"
 
@@ -87,60 +88,8 @@ const faq = [
         <p class="meta" data-reveal style="--d:280ms">Web app · Android · Hermes 0.22.5+</p>
       </div>
 
-      <figure class="stage" aria-label="A coding session in Gots on a laptop, with its notification on a phone">
-        <div class="aurora" aria-hidden="true"></div>
-
-        <div class="window" data-reveal style="--d:200ms">
-          <div class="window-bar">
-            <span class="lights"><i></i><i></i><i></i></span>
-            <span class="window-title">Fix the flaky retry test</span>
-            <span class="kbd-row"><kbd>⌥</kbd><kbd>1</kbd></span>
-          </div>
-          <div class="window-body">
-            <aside class="rail">
-              <p class="rail-head">Bots</p>
-              <ul>
-                <li class="on"><Bot id="byte" size={28} eager /><span>Byte<small>Draft PR ready</small></span></li>
-                <li><Bot id="nova" size={28} eager /><span>Nova<small>Reading 14 sources</small></span><b class="dot-warn"></b></li>
-                <li><Bot id="pip" size={28} eager /><span>Pip<small>Morning digest</small></span></li>
-                <li><Bot id="crumb" size={28} eager /><span>Crumb<small>Sourdough schedule</small></span></li>
-              </ul>
-            </aside>
-            <div class="thread">
-              <p class="bubble-user">Fix the flaky retry test and open a PR.</p>
-              <p class="work"><span class="spark"></span>Thought for 6s</p>
-              <p class="work"><span class="tick"></span>Ran 3 commands, edited <code>retry.test.ts</code> <span class="diff"><b>+12</b> <s>−4</s></span></p>
-              <p class="reply">The test waited on a real timer. It now uses fake timers and passes 50 runs in a row.</p>
-              <div class="pr-row">
-                <span class="pr-pill"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><circle cx="6" cy="6" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="6" cy="18" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="18" cy="18" r="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M6 8.5v7M18 15.5V9a3 3 0 0 0-3-3h-4" fill="none" stroke="currentColor" stroke-width="2"/></svg>Draft #214</span>
-                <span class="checks">Checks passing</span>
-              </div>
-              <div class="composer"><span>Reply to Byte…</span><kbd>↵</kbd></div>
-            </div>
-          </div>
-        </div>
-
-        <div class="phone" data-reveal style="--d:320ms">
-          <div class="phone-screen">
-            <p class="phone-time">9:41</p>
-            <div class="notice">
-              <Bot id="byte" size={34} eager />
-              <span><b>Fix the flaky retry test</b><small>Your draft pull request is ready.</small></span>
-            </div>
-            <div class="notice notice-dim">
-              <Bot id="nova" size={34} eager />
-              <span><b>Which database?</b><small>Nova has a question for you.</small></span>
-            </div>
-          </div>
-        </div>
-
-        <div class="float-card fc-host" data-reveal style="--d:420ms"><i class="pulse"></i>Running on your host</div>
-        <div class="float-card fc-steps" data-reveal style="--d:480ms">
-          <b>3 of 4 done</b>
-          <span class="bar"><span></span></span>
-        </div>
-        <Bot id="sunny" mood="wave" size={92} class="fb fb-a" eager />
-        <Bot id="pixel" mood="curious" size={76} class="fb fb-b" eager />
+      <figure class="hero-scene" aria-label="Asking Byte to fix a flaky test on a laptop, putting it away, and the phone saying the draft pull request is ready">
+        <GotsHero client:only="react" />
       </figure>
     </section>
 
