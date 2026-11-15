@@ -1,315 +1,1377 @@
-/* Gots's own look over the kit: the app's green, Figtree where the page has
-   it, white panes on a quiet canvas. One gutter for the window's top and left
-   and the phone's right. */
+/* Gots's own look over the kit: the app's green and tokens, Figtree, white
+   panes. The phone leads the first half and the laptop the second; the
+   hand-over moves them, nothing else does. */
 .gh .ss-stage {
-  --gutter: 40px;
   --ss-accent: #1f9a52;
   --gh-ink: var(--ss-text-strong);
+  --gh-muted: var(--ss-text-muted, #737373);
+  --gh-line: var(--ss-line);
+  --gh-plate: #f5f5f5;
+  --gh-soft: #fafafa;
+  --gh-green: #1f8a4c;
+  --gh-warn: #b45309;
+  --gh-info: #2f6fdc;
+  --gh-ease: cubic-bezier(0.22, 1, 0.36, 1);
   overflow: hidden;
   font-family: 'Figtree Variable', 'Figtree', var(--ss-font, system-ui), sans-serif;
 }
 
-/* Pinned top-left, about a fifth off the bottom */
+.gh .ss-stage[data-theme='dark'] {
+  --gh-plate: #262626;
+  --gh-soft: #1c1c1c;
+  --gh-green: #2c7a4b;
+  --gh-warn: #f59e0b;
+}
+
+.gh-scene {
+  position: absolute;
+  inset: 0;
+  transition: opacity 450ms ease;
+}
+
+/* ---------- Devices and the hand-over ---------- */
+
+/* The laptop: pinned top-left, off the bottom; quiet while the phone leads */
 .gh-win {
   position: absolute;
-  top: var(--gutter);
-  left: var(--gutter);
-  width: 860px;
-  height: 490px;
+  top: 40px;
+  left: 32px;
+  width: 900px;
+  height: 740px;
   box-shadow: var(--ss-shadow-hero);
 }
 
-.gh-side {
+/* The phone in front, over the laptop's empty chat pane, then put down at
+   the right edge so the laptop has the stage */
+.gh-hand {
+  position: absolute;
+  top: 40px;
+  left: 610px;
+  transform-origin: 0 0;
+  transition: transform 900ms var(--gh-ease);
+  will-change: transform;
+}
+
+.gh-scene[data-home] .gh-hand {
+  transform: translate(300px, 132px) scale(0.76);
+}
+
+/* ---------- The finger ---------- */
+
+.gh-tap {
+  position: absolute;
+  z-index: 20;
+  width: 34px;
+  height: 34px;
+  margin: -17px 0 0 -17px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.55);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.12), 0 4px 14px rgba(0, 0, 0, 0.18);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.gh-tap[data-go] {
+  animation: gh-tap 520ms ease-out;
+}
+
+@keyframes gh-tap {
+  0% { opacity: 0; transform: scale(1.25); }
+  25% { opacity: 1; transform: scale(0.9); }
+  100% { opacity: 0; transform: scale(1); }
+}
+
+/* ---------- Phone screens, in the screen's own points ---------- */
+
+.gh-screens {
+  position: absolute;
+  inset: 48px 0 0;
+  overflow: hidden;
+}
+
+.gh-screen {
+  position: absolute;
+  inset: 0;
+  transition: transform 460ms var(--gh-ease), opacity 360ms ease;
+}
+
+.gh-screen[data-name='messages'],
+.gh-screen[data-name='gots'] {
+  background: #fff;
+}
+
+.gh-screens[data-app='gots'] [data-name='messages'] {
+  transform: translateX(-100%);
+}
+
+.gh-screens:not([data-app='messages']) [data-name='messages'] {
+  opacity: 0;
+}
+
+.gh-screens[data-app='messages'] [data-name='gots'] {
+  transform: translateX(100%);
+}
+
+.gh-screens[data-app='lock'] [data-name='gots'],
+.gh-screens:not([data-app='lock']) [data-name='lock'] {
+  opacity: 0;
+}
+
+.gh-screens[data-app='lock'] [data-name='gots'] {
+  transition: opacity 200ms ease;
+}
+
+/* A swipe along the gesture bar: a dot carried left to right */
+.gh-swipe {
+  position: absolute;
+  bottom: 14px;
+  left: 150px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.25);
+  opacity: 0;
+  z-index: 5;
+}
+
+.gh-swipe[data-go] {
+  animation: gh-swipe 520ms var(--gh-ease);
+}
+
+@keyframes gh-swipe {
+  0% { opacity: 0; transform: translateX(0); }
+  20% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { opacity: 0; transform: translateX(120px); }
+}
+
+/* Gboard's colours on the kit's keyboard; it rides up from under the screen */
+.gh-keys {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 3;
+  transform: translateY(105%);
+  transition: transform 380ms var(--gh-ease);
+}
+
+.gh-keys[data-on] {
+  transform: none;
+}
+
+.gh-keys .ss-kb {
+  --ss-kb-sheet: #edf0f5;
+  --ss-kb-key: #fff;
+  --ss-kb-down: #d3d8e0;
+  margin: 0;
+  border-radius: 0;
+  font-family: 'Roboto', system-ui, sans-serif;
+}
+
+/* ---------- Messages, a plain Android app ---------- */
+
+.gh-sms {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 44px 12px 12px;
+  color: #1b1b1f;
+  font-family: 'Roboto', system-ui, sans-serif;
 }
 
-.gh-new {
-  align-self: flex-start;
-}
-
-.gh-title {
-  color: var(--gh-ink);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.gh-bots {
-  display: grid;
-  gap: 2px;
-}
-
-.gh-bot {
+.gh-sms__bar {
   display: flex;
+  flex: none;
+  align-items: center;
+  gap: 18px;
+  height: 64px;
+  padding: 0 20px;
+  color: #44474f;
+}
+
+.gh-sms__face {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  margin-left: -4px;
+  place-items: center;
+  border-radius: 50%;
+  background: #f6d7c3;
+  color: #6b3a1e;
+  font-size: 17px;
+  font-weight: 500;
+}
+
+.gh-sms__name {
+  flex: 1;
+  margin-left: -6px;
+  color: #1b1b1f;
+  font-size: 21px;
+}
+
+.gh-sms__thread {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 16px 18px;
+}
+
+.gh-sms__msg {
+  display: grid;
+  gap: 8px;
+  max-width: 290px;
+  padding: 14px 18px;
+  border-radius: 22px;
+  font-size: 18px;
+  line-height: 1.35;
+}
+
+.gh-sms__msg[data-from='them'] {
+  justify-self: start;
+  align-self: flex-start;
+  background: #eceef3;
+  border-bottom-left-radius: 6px;
+}
+
+.gh-sms__msg[data-from='me'] {
+  margin-left: auto;
+  background: #d3e3fd;
+  color: #041e49;
+  border-bottom-right-radius: 6px;
+}
+
+.gh-sms__compose {
+  display: flex;
+  flex: none;
   align-items: center;
   gap: 10px;
-  height: 40px;
-  padding: 0 8px;
-  border-radius: 10px;
+  padding: 0 12px 316px;
+  transition: padding-bottom 380ms var(--gh-ease);
 }
 
-.gh-bot[data-selected] {
-  background: var(--ss-surface);
-  box-shadow: 0 0 0 1px var(--ss-line);
-}
-
-.gh-bot img {
+.gh-sms__round,
+.gh-sms__send {
+  display: grid;
   flex: none;
-  width: 28px;
-  height: 28px;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 50%;
+  color: #44474f;
+}
+
+.gh-sms__send {
+  background: #e2e4ea;
+  color: #8a8d95;
+  transition: background 200ms ease, color 200ms ease;
+}
+
+.gh-sms__send[data-ready] {
+  background: #0b57d0;
+  color: #fff;
+}
+
+.gh-sms__field {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 8px 18px;
+  border-radius: 26px;
+  background: #eceef3;
+  color: #44474f;
+  box-sizing: border-box;
+}
+
+.gh-sms__text {
+  color: #1b1b1f;
+  font-size: 17px;
+  line-height: 1.3;
+}
+
+.gh-sms__hint {
+  color: #74777f;
+}
+
+/* The Bubble at the screen's right edge, above the keyboard */
+.gh-bubble {
+  position: absolute;
+  right: 16px;
+  bottom: 486px;
+  display: grid;
+  width: 48px;
+  height: 48px;
+  border-radius: 24px;
+  background: rgba(28, 28, 30, 0.7);
+  color: #fff;
+  transition: width 320ms var(--gh-ease);
+}
+
+.gh-bubble > span {
+  grid-area: 1 / 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.gh-bubble[data-face='idle'] .gh-bubble__mark,
+.gh-bubble[data-face='rec'] .gh-bubble__pill,
+.gh-bubble[data-face='wait'] .gh-bubble__wait {
+  opacity: 1;
+  transition-delay: 120ms;
+}
+
+.gh-bubble[data-face='rec'] {
+  width: 232px;
+}
+
+.gh-bubble__mark {
+  gap: 3px;
+}
+
+.gh-bubble__mark i {
+  width: 2.5px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.gh-bubble__pill {
+  justify-content: space-between;
+  padding: 0 12px;
+}
+
+.gh-bubble__level {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 100%;
+}
+
+.gh-bubble__level i {
+  width: 3px;
+  height: 4px;
+  border-radius: 2px;
+  background: currentColor;
+}
+
+.gh-bubble[data-face='rec'] .gh-bubble__level i {
+  animation: gh-level 600ms ease-in-out infinite alternate;
+}
+
+@keyframes gh-level {
+  from { height: 4px; }
+  to { height: 22px; }
+}
+
+.gh-bubble__done {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+}
+
+/* ---------- Gots on the phone ---------- */
+
+.gh-app {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  color: #0a0a0a;
+}
+
+.gh-app__bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 12px;
+  height: 76px;
+  padding: 0 18px;
+}
+
+.gh-app__face {
+  width: 44px;
+  height: 44px;
   object-fit: contain;
 }
 
-.gh-bot__name {
-  color: var(--gh-ink);
-  font-size: 13px;
+.gh-app__title {
+  flex: 1;
+  font-size: 18px;
   font-weight: 600;
 }
 
-/* The thread is a reading column on the left of the pane; the pane's right
-   is the quiet margin the phone straddles. The composer ends 28px above the
-   stage's edge, so the window runs off below it. */
-.gh-pane {
+.gh-round {
   display: grid;
-  grid-template-rows: 1fr auto;
-  height: 100%;
-  padding: 24px 32px 128px;
-  box-sizing: border-box;
-  background: var(--ss-surface);
+  flex: none;
+  width: 52px;
+  height: 52px;
+  place-items: center;
+  border: 1px solid #e5e5e5;
+  border-radius: 50%;
+  color: #0a0a0a;
 }
 
-.gh-thread {
+.gh-app__thread {
   display: flex;
+  flex: 1;
   flex-direction: column;
-  justify-content: flex-end;
-  gap: 12px;
-  width: 400px;
-  min-height: 0;
-  padding-bottom: 18px;
-  overflow: hidden;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 24px 22px 0;
 }
 
 .gh-empty {
   display: grid;
-  justify-items: start;
-  gap: 10px;
-  padding-bottom: 8px;
+  justify-items: center;
+  gap: 18px;
+  padding: 150px 0 0;
 }
 
-.gh-empty img {
-  width: 72px;
-  height: 72px;
-  object-fit: contain;
+.gh-empty__line {
+  color: #737373;
+  font-size: 18px;
 }
 
-.gh-greeting {
-  color: var(--ss-text);
-  font-size: 15px;
-}
-
-.gh-ask {
-  display: flex;
-  justify-content: flex-end;
-}
-
-.gh-ask .ss-text {
-  max-width: 82%;
-  white-space: normal;
-  padding: 9px 14px;
-  border-radius: 18px 18px 6px 18px;
-  background: var(--ss-accent);
+.gh-mine {
+  max-width: 300px;
+  margin-left: auto;
+  padding: 14px 22px;
+  border-radius: 26px;
+  background: var(--gh-green);
   color: #fff;
-  font-size: 13.5px;
-  line-height: 1.4;
+  font-size: 18px;
+  line-height: 1.35;
 }
 
-.gh-work {
-  display: grid;
-  gap: 2px;
-}
-
-.gh-line {
+.gh-status {
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 26px;
-  color: var(--ss-text);
-  font-size: 13px;
+  gap: 10px;
+  padding: 6px 2px;
+  color: #737373;
+  font-size: 17px;
 }
 
-.gh-line[data-live] {
-  animation: gh-pulse 1.4s ease-in-out infinite;
+.gh-app__foot {
+  flex: none;
+  padding: 0 14px 30px;
 }
 
-.gh-mark {
+.gh-screens:has(.gh-keys[data-on]) .gh-app__foot {
+  padding-bottom: 316px;
+}
+
+.gh-app__foot {
+  transition: padding-bottom 380ms var(--gh-ease);
+}
+
+.gh-composer {
   display: grid;
+  gap: 14px;
+  padding: 18px 16px 12px 22px;
+  border: 1px solid #e5e5e5;
+  border-radius: 30px;
+  background: #fff;
+  color: #0a0a0a;
+  font-size: 18px;
+  transition: border-color 200ms ease;
+}
+
+.gh-composer[data-focus] {
+  border-color: #c9c9c9;
+}
+
+.gh-composer__hint {
+  color: #8a8a8a;
+}
+
+.gh-composer__text {
+  min-height: 24px;
+  line-height: 24px;
+}
+
+.gh-caret {
+  display: inline-block;
+  width: 2px;
+  height: 20px;
+  margin-left: 1px;
+  vertical-align: -3px;
+  background: var(--gh-green);
+}
+
+.gh-composer__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #525252;
+}
+
+.gh-composer__end {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  color: #a3a3a3;
+}
+
+.gh-composer__send {
+  display: grid;
+  width: 40px;
+  height: 40px;
   place-items: center;
-  width: 14px;
-  height: 14px;
-  color: var(--ss-text);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--gh-green) 55%, #fff);
+  color: #fff;
+  transition: background 200ms ease;
 }
 
-.gh-reply {
-  display: grid;
-  gap: 12px;
-  padding-top: 2px;
+.gh-composer__send[data-ready] {
+  background: var(--gh-green);
 }
 
-.gh-stream {
-  color: var(--gh-ink);
-  font-size: 14px;
-  line-height: 1.55;
+/* ---------- The lock screen ---------- */
+
+.gh-lock {
+  position: absolute;
+  inset: 0;
+  color: #fff;
+  font-family: 'Roboto', system-ui, sans-serif;
 }
 
-.gh-pr {
-  will-change: transform;
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.gh-lock__clock {
+  padding: 56px 0 0 40px;
+  font-size: 118px;
+  font-weight: 300;
+  line-height: 1;
+  letter-spacing: -2px;
+  white-space: pre;
+  font-variant-numeric: tabular-nums;
+  color: #dfe7f3;
+}
+
+.gh-lock__date {
+  margin-top: 28px;
+  padding: 0 0 0 44px;
+  line-height: 1.3;
+  font-size: 17px;
+  color: #c6d0de;
+}
+
+/* Android's notification card, with the two answers as its actions */
+.gh-note {
+  position: absolute;
+  top: 360px;
+  right: 14px;
+  left: 14px;
+  padding: 18px 20px 8px;
+  border-radius: 26px;
+  background: #f1f3f8;
+  color: #1b1b1f;
   opacity: 0;
-  transform: translateY(6px);
-  transition: opacity 0.35s ease, transform 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+  transform: translateY(18px) scale(0.97);
+  transition: opacity 360ms ease, transform 520ms var(--gh-ease);
+  will-change: transform;
 }
 
-.gh-pr[data-on] {
+.gh-note[data-on] {
   opacity: 1;
   transform: none;
 }
 
-.gh-pill {
-  display: inline-flex;
+.gh-note__head {
+  display: flex;
   align-items: center;
-  gap: 6px;
-  height: 28px;
-  /* An even box, so the glyph never sits on a half pixel as the row settles */
-  width: 96px;
-  justify-content: center;
-  border-radius: 999px;
-  box-shadow: inset 0 0 0 1px var(--ss-line);
-  color: var(--gh-ink);
-  font-size: 12.5px;
-  font-weight: 600;
-}
-
-.gh-pill svg {
-  flex: none;
-  color: var(--ss-accent);
-}
-
-.gh-composer {
-  width: 400px;
-}
-
-/* The app's composer is a pill with the send button inside its end */
-.gh-composer .ss-field__box {
-  height: 46px;
-  padding: 0 7px;
-  border-radius: 999px;
+  gap: 8px;
+  color: #44474f;
   font-size: 14px;
 }
 
-.gh-plus {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 32px;
-  height: 32px;
+.gh-note__head img {
+  width: 22px;
+  height: 22px;
   border-radius: 50%;
-  background: var(--ss-ink-1);
-  color: var(--ss-text);
 }
 
-.gh-send {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: var(--ss-ink-2);
-  color: #fff;
-  transition: background-color 0.2s ease;
+.gh-note__when {
+  color: #74777f;
 }
 
-.gh-send[data-ready] {
-  background: var(--ss-accent);
+.gh-note__title {
+  margin-top: 10px;
+  font-size: 18px;
+  font-weight: 500;
 }
 
-/* Straddles the window's right edge, a third outside, over the thread's quiet
-   margin; its top in the upper half, its base cropped by the stage */
-.gh-phone {
+.gh-note__body {
+  margin-top: 4px;
+  color: #44474f;
+  font-size: 17px;
+}
+
+.gh-note__actions,
+.gh-note__sent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 52px;
+  margin-top: 6px;
+  transition: opacity 240ms ease;
+}
+
+.gh-note__actions span {
+  padding: 10px 14px;
+  margin-left: -14px;
+  margin-right: 14px;
+  border-radius: 20px;
+  color: #0b57d0;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.gh-note__sent {
   position: absolute;
-  top: 70px;
-  left: 728px;
-  box-shadow: var(--ss-shadow-satellite), 0 30px 50px -20px rgba(30, 40, 80, 0.35);
-}
-
-.gh-app {
-  display: block;
-  width: 100%;
-  height: 100%;
-  border-radius: inherit;
-  object-fit: cover;
-}
-
-.gh-push {
-  will-change: transform;
+  bottom: 8px;
+  left: 20px;
+  color: #44474f;
+  font-size: 16px;
   opacity: 0;
-  transform: translateY(-10px) scale(0.96);
-  transition: opacity 0.4s ease, transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.gh-push[data-on] {
+.gh-note[data-answered] .gh-note__actions {
+  opacity: 0;
+}
+
+.gh-note[data-answered] .gh-note__sent {
   opacity: 1;
-  transform: translateY(0) scale(1);
 }
 
-/* Narrow, a second design: no sidebar, the window off the right with its own
-   new-chat button, and the phone at the size its notification reads at,
-   centred so its banner shows whole, off the bottom, over the window's foot
-   under the composer */
-.gh .ss-stage[data-layout='compact'] {
-  --gutter: 16px;
+/* ---------- The laptop ---------- */
+
+.gh-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 18px 0 0;
 }
 
-.gh .ss-stage[data-layout='compact'] .gh-win {
-  width: 400px;
-  height: 340px;
+.gh-rail__icon {
+  display: grid;
+  width: 40px;
+  height: 36px;
+  place-items: center;
+  color: var(--gh-muted);
 }
 
-.gh .ss-stage[data-layout='compact'] .gh-composer .ss-field__box {
+.gh-rail__rule {
+  width: 36px;
+  height: 1px;
+  margin: 8px 0;
+  background: var(--gh-line);
+}
+
+.gh-rail__bot {
+  display: grid;
+  width: 46px;
+  height: 46px;
+  place-items: center;
+  border-radius: 14px;
+}
+
+.gh-rail__bot[data-on] {
+  background: var(--ss-surface);
+  box-shadow: 0 0 0 1px var(--gh-line);
+}
+
+.gh-rail__bot img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+
+.gh-pane {
+  display: grid;
+  grid-template-columns: 290px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
+  background: var(--ss-surface);
+  color: var(--gh-ink);
+}
+
+.gh-list {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 14px 14px 0;
+  border-right: 1px solid var(--gh-line);
+}
+
+.gh-list__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.gh-list__head img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+
+.gh-list__head .gh-round {
+  margin-left: auto;
+}
+
+.gh-round--line {
+  width: 36px;
+  height: 36px;
+  border-color: var(--gh-line);
+  color: var(--gh-ink);
+}
+
+.gh-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  margin-top: 10px;
+  padding: 0 12px;
+  border: 1px solid var(--gh-line);
+  border-radius: 18px;
+  color: var(--gh-muted);
   font-size: 13px;
 }
 
+.gh-pills {
+  display: flex;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.gh-pills span {
+  padding: 7px 12px;
+  border: 1px solid var(--gh-line);
+  border-radius: 18px;
+  color: var(--gh-muted);
+  font-size: 12px;
+}
+
+.gh-pills span[data-on] {
+  border-color: var(--gh-ink);
+  background: var(--gh-ink);
+  color: var(--ss-surface);
+}
+
+.gh-rows {
+  display: grid;
+  margin: 10px -6px 0;
+}
+
+.gh-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  height: 58px;
+  padding: 0 8px;
+  border-radius: 14px;
+  transition: background 200ms ease;
+}
+
+.gh-row[data-selected] {
+  background: var(--gh-plate);
+}
+
+.gh-row__icon {
+  position: relative;
+  display: grid;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--gh-plate);
+  color: var(--gh-muted);
+  transition: color 200ms ease, background 200ms ease;
+}
+
+.gh-row__icon[data-tone='warning'] {
+  background: color-mix(in srgb, var(--gh-warn) 14%, transparent);
+  color: var(--gh-warn);
+}
+
+.gh-row__glyph {
+  grid-area: 1 / 1;
+  display: grid;
+  opacity: 0;
+  transform: scale(0.6);
+  transition: opacity 200ms ease, transform 250ms var(--gh-ease);
+}
+
+.gh-row__glyph[data-on] {
+  opacity: 1;
+  transform: none;
+}
+
+.gh-row__dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--ss-surface);
+  border-radius: 50%;
+  background: var(--gh-info);
+  opacity: 0;
+  transform: scale(0.4);
+  transition: opacity 200ms ease, transform 300ms var(--gh-ease);
+}
+
+.gh-row__dot[data-on] {
+  opacity: 1;
+  transform: none;
+}
+
+.gh-row__text {
+  display: grid;
+  flex: 1;
+  gap: 5px;
+  min-width: 0;
+}
+
+.gh-row__top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.gh-row__title {
+  overflow: hidden;
+  color: var(--gh-ink);
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.gh-row__when {
+  flex: none;
+  color: var(--gh-muted);
+  font-size: 11px;
+}
+
+.gh-row__line {
+  color: var(--gh-muted);
+  font-size: 12.5px;
+  white-space: nowrap;
+  transition: color 200ms ease;
+}
+
+.gh-row__line[data-warn] {
+  color: var(--gh-warn);
+}
+
+.gh-fab {
+  position: absolute;
+  right: 16px;
+  bottom: 120px;
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--gh-green);
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.16);
+}
+
+.gh-side {
+  position: relative;
+  min-width: 0;
+}
+
+.gh-none,
+.gh-chat {
+  position: absolute;
+  inset: 0;
+  transition: opacity 300ms ease, transform 420ms var(--gh-ease);
+}
+
+.gh-none {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding-bottom: 120px;
+  color: var(--gh-muted);
+  font-size: 13px;
+}
+
+.gh-scene[data-open] .gh-none {
+  opacity: 0;
+}
+
+.gh-chat {
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+}
+
+.gh-scene[data-open] .gh-chat {
+  opacity: 1;
+}
+
+.gh-chat__head {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  height: 54px;
+  padding: 0 14px 0 22px;
+}
+
+.gh-chat__title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.gh-chat__thread {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: 4px 30px 0;
+}
+
+.gh-chat .gh-mine {
+  max-width: 300px;
+  padding: 9px 16px;
+  border-radius: 20px;
+  font-size: 14px;
+}
+
+.gh-answered {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--gh-line);
+  border-radius: 20px;
+  background: var(--gh-soft);
+  font-size: 13px;
+}
+
+.gh-answered__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--gh-green);
+  font-weight: 500;
+}
+
+.gh-answered__q {
+  font-weight: 500;
+}
+
+.gh-answered__a {
+  justify-self: start;
+  padding: 6px 12px;
+  border-radius: 14px;
+  background: var(--ss-surface);
+}
+
+/* The interface: the app's card, its title and words, then the tiles */
+.gh-ui {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--gh-line);
+  border-radius: 18px;
+  background: var(--ss-surface);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+.gh-ui__title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.gh-ui__intro {
+  color: var(--gh-muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.gh-ui__places {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.gh-place {
+  display: grid;
+  gap: 3px;
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity 360ms ease, transform 460ms var(--gh-ease);
+}
+
+.gh-place[data-on] {
+  opacity: 1;
+  transform: none;
+}
+
+.gh-place__name {
+  margin-top: 5px;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.gh-place__where {
+  color: var(--gh-muted);
+  font-size: 11.5px;
+}
+
+/* Drawn stand-ins for photos, until licensed ones are in */
+.gh-photo {
+  aspect-ratio: 4 / 3;
+  border-radius: 12px;
+  background-size: cover;
+}
+
+.gh-photo[data-look='alfama'] {
+  background:
+    linear-gradient(170deg, transparent 55%, rgba(120, 50, 20, 0.15) 56%),
+    repeating-linear-gradient(100deg, #c96a3f 0 14px, #b8552f 14px 22px, #e3a46e 22px 30px) 0 60% / 100% 50% no-repeat,
+    linear-gradient(180deg, #8fb6d9 0%, #c9dcea 52%, #e9b98e 53%);
+}
+
+.gh-photo[data-look='monte'] {
+  background:
+    radial-gradient(40% 30% at 70% 38%, #ffe2a6 0%, transparent 70%),
+    linear-gradient(180deg, #f4b98a 0%, #e78f6b 40%, #9c6b8a 62%, #4d5b7c 63%, #3c4a66 100%);
+}
+
+.gh-photo[data-look='belem'] {
+  background:
+    repeating-linear-gradient(90deg, transparent 0 12px, rgba(110, 90, 60, 0.18) 12px 14px) 0 100% / 100% 48% no-repeat,
+    linear-gradient(180deg, #2f6fd1 0%, #6ea0e3 48%, #e9dcc2 49%, #d6c4a3 100%);
+}
+
+.gh-ui__table {
+  display: grid;
+  margin-top: 4px;
+  font-size: 13px;
+  opacity: 0;
+  transition: opacity 360ms ease;
+}
+
+.gh-ui__table[data-on] {
+  opacity: 1;
+}
+
+.gh-ui__caption {
+  padding-bottom: 6px;
+  color: var(--gh-muted);
+}
+
+.gh-ui__tr {
+  display: flex;
+  justify-content: space-between;
+  padding: 7px 0;
+  border-top: 1px solid var(--gh-line);
+}
+
+@keyframes gh-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---------- Compact: the phone, then a short laptop window over it ---------- */
+
+.gh .ss-stage[data-layout='compact'] .gh-win {
+  top: 16px;
+  left: 16px;
+  width: 700px;
+  height: 336px;
+  transform: translateY(640px);
+  transition: transform 800ms var(--gh-ease) 150ms, opacity 500ms ease;
+}
+
+.gh .ss-stage[data-layout='compact'] .gh-scene[data-home] .gh-win {
+  transform: none;
+}
+
+.gh .ss-stage[data-layout='compact'] .gh-hand {
+  top: 24px;
+  left: 24px;
+}
+
+/* Put down below the window, straddling its lower edge */
+.gh .ss-stage[data-layout='compact'] .gh-scene[data-home] .gh-hand {
+  transform: translate(110px, 312px);
+}
+
+/* Opening the chat pans the window from the list to the chat pane */
 .gh .ss-stage[data-layout='compact'] .gh-pane {
-  padding: 16px 16px 78px;
+  transition: transform 520ms var(--gh-ease);
+  will-change: transform;
 }
 
-.gh .ss-stage[data-layout='compact'] .gh-thread,
-.gh .ss-stage[data-layout='compact'] .gh-composer {
-  width: 310px;
+.gh .ss-stage[data-layout='compact'] .gh-scene[data-open] .gh-pane {
+  transform: translateX(-290px);
 }
 
-.gh .ss-stage[data-layout='compact'] .gh-empty img {
-  width: 60px;
-  height: 60px;
+.gh .ss-stage[data-layout='compact'] .gh-list {
+  border-right: 0;
 }
 
-.gh .ss-stage[data-layout='compact'] .gh-phone {
-  top: 300px;
-  left: var(--gutter);
+.gh .ss-stage[data-layout='compact'] .gh-fab,
+.gh .ss-stage[data-layout='compact'] .gh-none {
+  display: none;
 }
 
-@keyframes gh-pulse {
-  50% {
-    opacity: 0.45;
-  }
+/* The chat opens on its newest rows, as the app does */
+.gh .ss-stage[data-layout='compact'] .gh-chat__thread {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 0 84px 14px 16px;
+  overflow: hidden;
+  mask-image: linear-gradient(180deg, transparent 0, #000 36px);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .gh-line[data-live] {
-    animation: none;
-  }
+.gh .ss-stage[data-layout='compact'] .gh-ui {
+  padding: 12px;
+}
+
+.gh .ss-stage[data-layout='compact'] .gh-ui__places {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.gh .ss-stage[data-layout='compact'] .gh-place:nth-child(3) {
+  display: none;
+}
+
+.gh .ss-stage[data-layout='compact'] .gh-pane {
+  height: 298px;
+}
+
+.gh .ss-stage[data-layout='compact'] .gh-ui__table {
+  display: none;
+}
+
+.gh .ss-stage[data-layout='compact'] .gh-list {
+  transition: opacity 140ms ease;
+}
+
+.gh .ss-stage[data-layout='compact'] .gh-scene[data-open] .gh-pane {
+  transition-delay: 120ms;
+}
+
+.gh .ss-stage[data-layout='compact'] .gh-scene[data-open] .gh-list {
+  opacity: 0;
+}
+
+.gh .ss-stage[data-layout='compact'] .gh-chat__head {
+  padding-right: 84px;
+}
+
+.gh .ss-stage[data-layout='compact'] .gh-place__name {
+  font-size: 12px;
+}
+
+.gh .ss-stage[data-layout='compact'] .gh-place__where {
+  display: none;
+}
+
+.gh .ss-stage[data-layout='compact'] .gh-app__foot {
+  padding-bottom: 110px;
+}
+
+/* The laptop waits at home while the phone leads: quieter, never washed out */
+.gh-win.ss-recede {
+  transition: opacity 600ms ease, transform 800ms var(--gh-ease) 150ms;
+}
+
+.gh-win.ss-recede[data-receded='true'] {
+  opacity: 0.78;
+}
+
+/* The Bubble shows only while the keyboard is up, in the app it types into */
+.gh-bubble {
+  transition: width 320ms var(--gh-ease), opacity 200ms ease;
+}
+
+.gh-screens:not([data-app='messages']) .gh-bubble {
+  opacity: 0;
+}
+
+.gh-screen,
+.gh-keys,
+.gh-place {
+  will-change: transform;
+}
+
+.gh-scene[data-away] .gh-win {
+  transform: translateY(600px);
+}
+
+.gh-sms__field {
+  height: 78px;
+}
+
+.gh-sms__field svg,
+.gh-sms__compose svg {
+  flex: none;
+}
+
+.gh-row__glyph {
+  transform: none;
+}
+
+.gh-row[data-filler] .gh-row__text {
+  gap: 10px;
+}
+
+.gh-sms__field {
+  padding: 0 17px;
+}
+
+.gh-note__actions {
+  gap: 30px;
+}
+
+.gh-note__actions span {
+  margin: 0;
+  padding: 10px 0;
+}
+
+.gh-screens:has(.gh-keys[data-on]) .gh-app__foot {
+  padding-bottom: 340px;
+}
+
+.gh-bubble {
+  overflow: hidden;
+}
+
+.gh-bubble__pill {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 232px;
+  box-sizing: border-box;
+}
+
+.gh-scene[data-away] .gh-win {
+  opacity: 0;
+}
+
+.gh-app__thread {
+  position: relative;
+}
+
+.gh-empty {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  opacity: 0;
+  transition: opacity 260ms ease;
+}
+
+.gh-empty[data-on] {
+  opacity: 1;
+}
+
+.gh-sms__text {
+  font-size: 16px;
+}
+
+.gh-win {
+  will-change: transform;
+}
+
+.gh-sms__text {
+  display: block;
+}
+
+.gh-loader g {
+  transform-box: view-box;
+  transform-origin: 8px 8px;
+  animation: gh-spin 900ms linear infinite;
+}
+
+/* The ring under the arc, opaque, in each surface's own quiet tone */
+.gh-loader__track {
+  stroke: var(--gh-track, #e5e5e5);
+}
+
+.gh .ss-stage[data-theme='dark'] {
+  --gh-track: #3f3f3f;
+}
+
+.gh-bubble {
+  --gh-track: #5a5a5c;
+}
+
+.gh-row__icon[data-tone='warning'] {
+  --gh-track: #f3d9bf;
+}
+
+.gh-side {
+  will-change: transform;
+}
+
+.gh-app__foot {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+}
+
+.gh-keys {
+  transition: transform 380ms var(--gh-ease), opacity 200ms ease;
+  opacity: 0;
+}
+
+.gh-keys[data-on] {
+  opacity: 1;
+}
+
+.gh-screens[data-app='gots'] [data-name='messages'] {
+  transition: transform 460ms var(--gh-ease), opacity 160ms ease;
+}
+
+/* Compact opens the chat on its newest rows: the interface alone */
+.gh .ss-stage[data-layout='compact'] .gh-chat .gh-mine,
+.gh .ss-stage[data-layout='compact'] .gh-answered {
+  display: none;
+}
+
+.gh .ss-stage[data-layout='compact'] .gh-ui__title {
+  font-size: 15px;
+}
+
+.gh .ss-stage[data-layout='compact'] .gh-ui__intro {
+  font-size: 12px;
+}
+
+.gh .ss-stage[data-layout='compact'] .gh-photo {
+  aspect-ratio: 16 / 10;
 }

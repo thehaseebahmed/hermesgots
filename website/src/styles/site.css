@@ -533,12 +533,12 @@ li:hover > .bot-swap .bot-alt {
   width: min(100% - 2rem, 1040px);
   margin: 3.5rem auto 0;
   /* Held at the scene's own shape until it mounts, so nothing below it moves */
-  aspect-ratio: 1040 / 430;
+  aspect-ratio: 1040 / 560;
 }
 
 @media (max-width: 671px) {
   .hero-scene {
-    aspect-ratio: 358 / 600;
+    aspect-ratio: 358 / 640;
     max-width: 358px;
   }
 }
