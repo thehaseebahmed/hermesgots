@@ -19,13 +19,19 @@ no configuration, and nothing wires one to the other.
 
 **The choices that were Haseeb's** (asked 2026-11-15, not decided for him):
 
-- *Server*: any https server, `https://ntfy.sh` prefilled.
-- *Topic*: one per **account**, not per device. Every phone subscribes to the same topic, so the
-  categories it carries are one list for all of them, and the "app is open, say nothing" rule can
+- *Server*: **any** http or https server, `https://ntfy.sh` prefilled. Whether the bot's host can
+  reach it is the host's own network's business, so a LAN, loopback or plain-http server is taken.
+  The plugin therefore posts to whatever address the app hands it; the caller already holds the
+  bot's API key, which is the authority to start the agent on that host.
+- *Topic*: **per bot profile**, not per device and not per account (changed 2026-11-15, after first
+  being per account). The target — server, topic, token — is the profile's own, held by its host, so
+  it follows the bot to every phone: a second phone reads it from the host and joins it without the
+  token being typed again. A phone keeps only whether it is on (`Settings.ntfyOn`). The categories a
+  topic carries are still one list for every phone on it, and the "app is open, say nothing" rule can
   only hold a publish back while *every* phone that chose ntfy has the app open.
-- *Auth*: an access token is **required**. It is stored in plain text on each bot's host beside the
+- *Auth*: an access token is **required**. It is stored in plain text on the bot's host beside the
   bot's API key, sent as `Authorization: Bearer`, and never read back — a host answers only
-  `token_set`.
+  `token_set`, and a form may leave the field empty to keep the one the host holds.
 - *Existing installs*: keep Firebase as the default where the build has it.
 - *Name*: the one entry is **Notifications**.
 - *Tap*: the notification carries `gots://open?kind=&id=`, which opens the Android app.
@@ -60,11 +66,9 @@ quiet.
   *On* while the phone stays silent.
 - **Privacy and limits.** The server operator sees the topic and every title. ntfy.sh caches a
   message for twelve hours and holds its publishers to its own daily limits.
-- **A LAN server.** The plugin posts only to a public https address, the rule a push endpoint is
-  already held to, so a server reachable only on the host's own network is refused.
 
 ## Deviation
 
-ntfy's three fields are edited in a centred card at every width. The settings rule (ADR 0055) gives
+ntfy's three fields are edited in a centred card at every width, one card per bot. The settings rule (ADR 0055) gives
 a phone a pushed edit screen, which the top-level sections have no route for; adding one is a
 follow-up rather than part of this change.

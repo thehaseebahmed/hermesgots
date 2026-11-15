@@ -24,7 +24,11 @@ const page = { native: false, firebase: false, web: true }
 test("an APK without Firebase offers ntfy and nothing else", () => {
   assert.deepEqual(transportsFor(bare), ["ntfy"])
   assert.equal(activeTransport(bare), "ntfy")
-  assert.equal(activeTransport(bare, "firebase"), "ntfy", "a pick this build can't carry falls to ntfy")
+  assert.equal(
+    activeTransport(bare, "firebase"),
+    "ntfy",
+    "a pick this build can't carry falls to ntfy",
+  )
 })
 
 test("an APK with Firebase stays on it until ntfy is picked", () => {
@@ -46,11 +50,15 @@ test("only Firebase leaves a category's switch to the phone", () => {
   assert.equal(PUSH_TRANSPORTS.webpush.categories, "app")
 })
 
-test("a server is an https address, with or without the scheme typed", () => {
+test("any web address is a server, with or without the scheme typed", () => {
   assert.equal(ntfyServer("ntfy.sh"), "https://ntfy.sh")
   assert.equal(ntfyServer(" https://ntfy.example.com/ "), "https://ntfy.example.com")
   assert.equal(ntfyServer("https://example.com/ntfy/"), "https://example.com/ntfy")
-  for (const refused of ["http://ntfy.sh", "ntfy", "", "https://u:p@ntfy.sh", "https://ntfy.sh/?x=1"])
+  // Whether the bot's host can reach it is the host's business, so a LAN or plain-http one is taken.
+  assert.equal(ntfyServer("http://192.168.1.5:2586"), "http://192.168.1.5:2586")
+  assert.equal(ntfyServer("http://localhost"), "http://localhost")
+  assert.equal(ntfyServer("ntfy"), "https://ntfy")
+  for (const refused of ["", "ftp://ntfy.sh", "https://u:p@ntfy.sh", "https://ntfy.sh/?x=1"])
     assert.equal(ntfyServer(refused), undefined, refused)
 })
 
@@ -64,16 +72,21 @@ test("a minted topic is one ntfy takes and nobody guesses", () => {
   let calls = 0
   const skewed = (count) => new Uint8Array(count).fill(calls++ ? 7 : 255)
   assert.equal(mintTopic(skewed), `gots-${"h".repeat(22)}`)
-  for (const refused of ["", "a b", "a/b", "x".repeat(65)]) assert.equal(ntfyTopicOk(refused), false)
+  for (const refused of ["", "a b", "a/b", "x".repeat(65)])
+    assert.equal(ntfyTopicOk(refused), false)
 })
 
-test("ntfy can't be turned on until a server, a topic and a token are held", () => {
+test("a target needs a server, a topic and a token, unless the host already holds one", () => {
   const whole = { server: "https://ntfy.sh", topic: "gots-abc", token: "tk_abc" }
   assert.equal(ntfyMissing(whole), undefined)
-  assert.equal(ntfyMissing(undefined), "Add your ntfy server first")
+  assert.equal(ntfyMissing({}), "Add your ntfy server first")
   assert.equal(ntfyMissing({ ...whole, topic: "" }), "Add an ntfy topic first")
-  assert.equal(ntfyMissing({ ...whole, token: "" }), "Add an ntfy access token first", "a token is required")
-  assert.equal(ntfyMissing({ ...whole, token: "two words" }), "Add an ntfy access token first")
+  assert.equal(ntfyMissing({ ...whole, token: "" }), "Add an ntfy access token first", "required")
+  assert.equal(ntfyMissing({ ...whole, token: "" }, true), undefined, "the host's own is kept")
+  assert.equal(
+    ntfyMissing({ ...whole, token: "two words" }, true),
+    "Add an ntfy access token first",
+  )
 })
 
 test("a category's importance is its ntfy priority", () => {

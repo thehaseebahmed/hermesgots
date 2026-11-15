@@ -76,17 +76,23 @@ export function activeTransport(env: PushEnv, picked?: string): PushTransportId 
 
 export const NTFY_DEFAULT_SERVER = "https://ntfy.sh"
 
-export interface NtfyConfig {
-  server: string
-  topic: string
-  token: string
-  on: boolean
+/** What a bot's host holds about where it publishes: everything but the token, which is a boolean. */
+export interface NtfyState {
+  configured: boolean
+  server?: string
+  topic?: string
+  token_set?: boolean
+  categories?: string[] | null
+  /** How many phones chose ntfy for this bot. */
+  devices?: number
+  /** Whether the phone that asked is one of them. */
+  joined?: boolean
 }
 
 /**
- * A server's address as it is published to — https, a host, any path it sits under, no trailing
- * slash — or nothing where it isn't one. The host's own check is stricter (it refuses a private
- * address); this is what stops a typo before it is sent.
+ * A server's address as it is published to — a scheme (https where none is typed), a host, any path
+ * it sits under, no trailing slash — or nothing where it isn't one. Any server is taken: whether the
+ * bot's host can reach it is the host's own network's business, and its answer is what the screen says.
  */
 export function ntfyServer(value: string): string | undefined {
   const typed = value.trim()
@@ -96,10 +102,9 @@ export function ntfyServer(value: string): string | undefined {
   } catch {
     return undefined
   }
-  if (url.protocol !== "https:" || !url.hostname.includes(".") || url.search || url.hash)
-    return undefined
-  if (url.username || url.password) return undefined
-  return `https://${url.host}${url.pathname.replace(/\/+$/, "")}`
+  if (url.protocol !== "https:" && url.protocol !== "http:") return undefined
+  if (!url.hostname || url.search || url.hash || url.username || url.password) return undefined
+  return `${url.protocol}//${url.host}${url.pathname.replace(/\/+$/, "")}`
 }
 
 /** ntfy's own rule for a topic: letters, digits, `-` and `_`, 64 at most. */
@@ -125,11 +130,20 @@ export function mintTopic(random: (count: number) => Uint8Array): string {
 /** A token as a header can carry it: no spaces, as ntfy's `tk_…` tokens are. */
 export const ntfyTokenOk = (token: string) => /^[\x21-\x7e]{1,512}$/.test(token)
 
-/** What stops ntfy being turned on, in the app's words, or nothing when it can be. */
-export function ntfyMissing(config: Partial<NtfyConfig> | undefined): string | undefined {
-  if (!config?.server || !ntfyServer(config.server)) return "Add your ntfy server first"
+/**
+ * What stops a target being saved, in the app's words, or nothing when it can be. A token is
+ * required, but a bot's host that already holds one for this server and topic keeps it, so the
+ * field may be left empty there.
+ */
+export function ntfyMissing(
+  config: { server?: string; topic?: string; token?: string },
+  tokenHeld = false,
+): string | undefined {
+  if (!config.server || !ntfyServer(config.server)) return "Add your ntfy server first"
   if (!config.topic || !ntfyTopicOk(config.topic)) return "Add an ntfy topic first"
-  if (!config.token || !ntfyTokenOk(config.token)) return "Add an ntfy access token first"
+  if (!tokenHeld && (!config.token || !ntfyTokenOk(config.token)))
+    return "Add an ntfy access token first"
+  if (config.token && !ntfyTokenOk(config.token)) return "Add an ntfy access token first"
   return undefined
 }
 

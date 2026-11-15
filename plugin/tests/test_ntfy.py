@@ -61,8 +61,17 @@ class Target(unittest.TestCase):
         held = ntfy.set_target(self.path, {**TARGET, "topic": "other", "device": "phone-2"})
         self.assertEqual(held["devices"], ["phone-2"], "the devices of the old topic didn't choose this one")
 
-    def test_only_a_public_https_server_and_ntfys_own_topics_are_taken(self):
-        for server in ("http://ntfy.sh", "https://localhost", "https://10.0.0.4", "https://ntfy.sh/?a=1", 7):
+    def test_any_http_server_the_host_can_reach_is_taken(self):
+        for server, kept in (
+            ("http://ntfy.sh", "http://ntfy.sh"),
+            ("https://localhost:8080/", "https://localhost:8080"),
+            ("http://192.168.1.5", "http://192.168.1.5"),
+            ("http://ntfy.lan:2586/prefix/", "http://ntfy.lan:2586/prefix"),
+        ):
+            self.assertEqual(ntfy.set_target(self.path, {**TARGET, "server": server})["server"], kept)
+
+    def test_only_an_address_and_ntfys_own_topics_are_taken(self):
+        for server in ("ftp://ntfy.sh", "ntfy.sh", "https://u:p@ntfy.sh", "https://ntfy.sh/?a=1", "https://", 7):
             with self.assertRaises(push.PushError, msg=str(server)):
                 ntfy.set_target(self.path, {**TARGET, "server": server})
         for topic in ("", "has space", "a/b", "x" * 65, None):
@@ -70,6 +79,12 @@ class Target(unittest.TestCase):
                 ntfy.set_target(self.path, {**TARGET, "topic": topic})
         with self.assertRaises(push.PushError):
             ntfy.set_target(self.path, {**TARGET, "token": "two words"})
+
+    def test_a_phone_reads_the_target_and_whether_it_joined_from_the_host(self):
+        ntfy.set_target(self.path, TARGET)
+        self.assertTrue(ntfy.public(ntfy.target(self.path), "phone-1")["joined"])
+        self.assertFalse(ntfy.public(ntfy.target(self.path), "phone-2")["joined"])
+        self.assertFalse(ntfy.public(ntfy.target(self.path))["joined"])
 
     def test_the_target_goes_with_its_last_device(self):
         ntfy.set_target(self.path, TARGET)

@@ -122,10 +122,10 @@ export interface Settings {
    */
   pushTransport?: "firebase" | "ntfy"
   /**
-   * The account's ntfy topic as this device holds it, local only: every bot's plugin is handed it and
-   * publishes there. The token goes to those hosts and nowhere else.
+   * Whether this phone is notified over ntfy. The target — server, topic, token — is each bot's own,
+   * held by its host, so a second phone reads it from there; local only.
    */
-  ntfy?: { server: string; topic: string; token: string; on: boolean }
+  ntfyOn?: boolean
   /** Which categories of push this device wants; unset ones follow `PUSH_CATEGORIES`. Local only. */
   pushCategories?: Partial<Record<string, boolean>>
 }

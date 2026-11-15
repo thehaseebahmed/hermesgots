@@ -59,8 +59,6 @@ import { DictationSettings } from "@/components/settings/dictation"
 import { LabSettings } from "@/components/settings/lab"
 import {
   ActionRow,
-  EditCard,
-  EditForm,
   Group,
   LinkRow,
   PickList,
@@ -98,22 +96,18 @@ import { useNav } from "@/lib/nav"
 import {
   disablePush,
   enablePush,
-  ensureNtfy,
   pushAvailable,
-  saveNtfy,
   sendTestPush,
   setPushCategory,
   setPushFeature,
   setPushTransport,
   usePush,
   usePushFeatures,
+  useNtfyTargets,
   usePushTransport,
 } from "@/lib/push"
-import {
-  NTFY_DEFAULT_SERVER,
-  type PushTransportId,
-  type PushTransportInfo,
-} from "@/lib/push-transport"
+import type { PushTransportId, PushTransportInfo } from "@/lib/push-transport"
+import { NtfyTargetCard } from "@/components/ntfy-target"
 import type { PushCategory, PushFeature } from "@/lib/push-kinds"
 import { presence, presenceLine, type PresenceAnswer } from "@/lib/presence"
 import { siteUrl } from "@/lib/registry"
@@ -577,45 +571,44 @@ function TransportRow({
   )
 }
 
-/** The ntfy target's three values, each a row over the edit that writes it. */
-const NTFY_FIELDS = [
-  { id: "server", title: "Server", kind: "url", placeholder: NTFY_DEFAULT_SERVER },
-  { id: "topic", title: "Topic", kind: "text", placeholder: "gots-…" },
-  { id: "token", title: "Access token", kind: "secret", placeholder: "tk_…" },
-] as const
-
+/**
+ * ntfy's targets, one row a bot: each bot's host holds its own server, topic and token, so a second
+ * phone finds them already set. A row says where the bot publishes, and opens the card that writes it.
+ */
 function NtfyRows() {
-  const { ntfy } = usePushTransport()
-  const [editing, setEditing] = useState<(typeof NTFY_FIELDS)[number]>()
-  // A phone whose only transport is ntfy never picked it, so its target is made on first sight.
-  useEffect(() => void ensureNtfy(), [])
+  const targets = useNtfyTargets()
+  const labels = useBotLabels()
+  const [editing, setEditing] = useState<string>()
+  const open = targets.find(({ bot }) => bot.id === editing)
   return (
     <>
-      {NTFY_FIELDS.map((field) => (
+      {targets.map(({ bot, state }) => (
         <ValueRow
-          key={field.id}
-          title={field.title}
-          // A token is held, never shown: the row says only that there is one.
-          value={field.id === "token" ? (ntfy?.token ? "Set" : "") : (ntfy?.[field.id] ?? "")}
-          onClick={() => setEditing(field)}
-          data-ntfy={field.id}
+          key={bot.id}
+          title={labelOf(labels, bot)}
+          value={
+            state === null
+              ? "Can't reach this bot's host"
+              : state && state.configured
+                ? `${state.topic} on ${state.server?.replace(/^https?:\/\//, "")}`
+                : state
+                  ? ""
+                  : "…"
+          }
+          muted={state === null || state === undefined}
+          onClick={() => setEditing(bot.id)}
+          disabled={state === undefined}
+          data-ntfy={bot.id}
         />
       ))}
-      {editing && (
-        <EditCard title={`Edit ${editing.title}`} onClose={() => setEditing(undefined)}>
-          <EditForm
-            label={editing.title}
-            value={ntfy?.[editing.id] ?? ""}
-            placeholder={editing.placeholder}
-            kind={editing.kind}
-            surface="card"
-            onSave={async (value) => {
-              await saveNtfy({ [editing.id]: value.trim() })
-              setEditing(undefined)
-            }}
-            onCancel={() => setEditing(undefined)}
-          />
-        </EditCard>
+      {open && (
+        <NtfyTargetCard
+          key={open.bot.id}
+          bot={open.bot}
+          label={labelOf(labels, open.bot)}
+          state={open.state}
+          onClose={() => setEditing(undefined)}
+        />
       )}
     </>
   )

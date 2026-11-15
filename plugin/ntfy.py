@@ -11,8 +11,9 @@ of what happened, never what was asked.
 the user set up in Hermes; this carries the app's "a session needs you" to the user's phone. The two
 share a protocol and nothing else, and neither reads the other's configuration.
 
-The target is the profile's, one per store: the topic is the account's, shared by every phone that
-subscribes to it, so the categories it wants are one list for all of them. The devices that chose
+The target is the profile's, one per store, so it follows the bot to every phone: a phone that
+joins reads where to publish from the host, never from itself, and the categories it wants are one
+list for every phone on the topic. The devices that chose
 ntfy are kept beside it, for two things — the registry is told to skip them, so a Firebase token
 still on file can't deliver the same news twice, and a publish is held back while every one of them
 has the app on screen.
@@ -94,16 +95,26 @@ def _error(message: str) -> Exception:
 
 
 def clean_server(value: Any) -> str:
-    """The server's address as it is published to: a public https origin, with any path it sits
-    under, and nothing else — the plugin posts to whatever it is handed."""
-    from .push import _public_endpoint
-
-    if not isinstance(value, str) or not _public_endpoint(value.strip()):
-        raise _error("Not a public https ntfy server.")
+    """The server's address as it is published to: an http or https origin, with any path it sits
+    under, and nothing else. Which servers are reachable is the host's own network's business, so a
+    LAN server, a loopback one and a plain-http one are all taken; the caller holds the bot's key."""
+    if not isinstance(value, str):
+        raise _error("Not an ntfy server address.")
     parts = urllib.parse.urlsplit(value.strip())
-    if parts.query or parts.fragment:
-        raise _error("Not a public https ntfy server.")
-    return f"https://{parts.netloc}{parts.path.rstrip('/')}"
+    try:
+        parts.port
+    except ValueError:
+        raise _error("Not an ntfy server address.") from None
+    if (
+        parts.scheme not in ("http", "https")
+        or not parts.hostname
+        or parts.username
+        or parts.password
+        or parts.query
+        or parts.fragment
+    ):
+        raise _error("Not an ntfy server address.")
+    return f"{parts.scheme}://{parts.netloc}{parts.path.rstrip('/')}"
 
 
 def target(path: Path) -> Optional[Dict[str, Any]]:
@@ -209,8 +220,9 @@ def remove(path: Path, device: Optional[str]) -> Optional[Dict[str, Any]]:
     return held
 
 
-def public(held: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """The target as the app may read it: everything but the token, which is only ever a boolean."""
+def public(held: Optional[Dict[str, Any]], device: Optional[str] = None) -> Dict[str, Any]:
+    """The target as the app may read it: everything but the token, which is only ever a boolean.
+    ``joined`` says whether the device asking is one of those that chose ntfy for this profile."""
     if not held:
         return {"object": "gots.push_ntfy", "configured": False}
     return {
@@ -221,6 +233,7 @@ def public(held: Optional[Dict[str, Any]]) -> Dict[str, Any]:
         "token_set": True,
         "categories": held.get("categories"),
         "devices": len(held.get("devices") or []),
+        "joined": bool(device and device in (held.get("devices") or [])),
     }
 
 

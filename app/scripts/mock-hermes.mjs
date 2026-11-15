@@ -4725,12 +4725,18 @@ http
               devices: ntfyTarget.devices.length,
             }
           : { object: "gots.push_ntfy", configured: false }
-      if (req.method === "GET") return json(res, 200, shown())
+      if (req.method === "GET") {
+        const phone = url.searchParams.get("device")
+        return json(res, 200, {
+          ...shown(),
+          joined: Boolean(phone && ntfyTarget?.devices.includes(phone)),
+        })
+      }
       if (req.method === "POST") {
         const { server, topic, token, device, categories } = await readBody(req)
         const refuse = (message) => json(res, 400, { error: { message } })
-        if (typeof server !== "string" || !/^https:\/\/[^/?#]+\.[^/?#]+/.test(server))
-          return refuse("Not a public https ntfy server.")
+        if (typeof server !== "string" || !/^https?:\/\/[^/?#@]+$/.test(server.replace(/\/+$/, "")))
+          return refuse("Not an ntfy server address.")
         if (typeof topic !== "string" || !/^[-_A-Za-z0-9]{1,64}$/.test(topic))
           return refuse("Not an ntfy topic.")
         const address = server.replace(/\/+$/, "")

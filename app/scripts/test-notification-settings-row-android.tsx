@@ -18,7 +18,9 @@ const { NotificationsRow, NotificationsSettings } = await import("@/routes/setti
 const { click, find, findAll, findText, missing, mount, seedSettings, text, until, wordsOf } =
   await import("./component-kit.tsx")
 const { Screen } = await import("@/components/settings-chrome")
-const { getSettings } = await import("@/lib/db")
+const { db, getSettings } = await import("@/lib/db")
+const { botProfile } = await import("./component-kit.tsx")
+const { ntfyHost } = await import("./ntfy-host.ts")
 
 /** The screen as Settings draws it: inside the chrome, which is what holds a refusal about it. */
 const row = () => (
@@ -38,7 +40,11 @@ test("the menu carries one notification entry, and it opens the one screen", asy
     async () => {
       const links = findAll('a[href="/settings/notifications"]')
       assert.equal(links.length, 1, "one entry")
-      assert.equal(wordsOf(links[0]), "NotificationsOff", "named Notifications, saying they are off")
+      assert.equal(
+        wordsOf(links[0]),
+        "NotificationsOff",
+        "named Notifications, saying they are off",
+      )
       assert.equal(text().includes("Notification settings"), false, "and no second row beside it")
       assert.ok(missing("#notifications"), "the switch is behind the entry, not on the menu")
     },
@@ -59,24 +65,29 @@ test("on Firebase the screen is the switch, the transport and the phone's own se
   })
 })
 
-test("picking ntfy swaps the phone's row for ntfy's fields", async () => {
+test("picking ntfy swaps the phone's row for the bots' own targets", async () => {
   await seedSettings({ fcm: { device: "device-1", on: false } })
-  await mount(row(), async () => {
-    await click(find("[data-transport]"))
-    await until(async () => Boolean(findText("button", "Through an ntfy server")), "the pick")
-    await click(findText("button", "Through an ntfy server"))
-    await until(async () => find("[data-transport]")?.getAttribute("data-transport") === "ntfy", "ntfy")
-    await until(
-      async () => wordsOf(find('[data-ntfy="server"]')) === "Serverhttps://ntfy.sh",
-      "the target",
-    )
-    assert.match(wordsOf(find('[data-ntfy="topic"]')), /^Topicgots-[A-Za-z0-9]{22}$/)
-    assert.equal(wordsOf(find('[data-ntfy="token"]')), "Access tokenNot set")
-    assert.ok(!systemRow(), "ntfy has no channels of this app's to open")
-  })
-  const { pushTransport, ntfy } = await getSettings()
+  await db.profiles.clear()
+  await db.profiles.put(botProfile("android-pick"))
+  const fake = ntfyHost()
+  try {
+    await mount(row(), async () => {
+      await click(find("[data-transport]"))
+      await until(async () => Boolean(findText("button", "Through an ntfy server")), "the pick")
+      await click(findText("button", "Through an ntfy server"))
+      await until(
+        async () => find("[data-transport]")?.getAttribute("data-transport") === "ntfy",
+        "ntfy",
+      )
+      await until(async () => Boolean(find("[data-ntfy]")), "the bot's row")
+      assert.ok(!systemRow(), "ntfy has no channels of this app's to open")
+    })
+  } finally {
+    fake.restore()
+  }
+  const { pushTransport, ntfyOn } = await getSettings()
   assert.equal(pushTransport, "ntfy")
-  assert.equal(ntfy?.on, false, "picked, not switched on: it has a token to be given first")
+  assert.ok(!ntfyOn, "picked, not switched on: it has a target to be set up first")
 })
 
 test("with the app's switch off, the row still shows", async () => {
