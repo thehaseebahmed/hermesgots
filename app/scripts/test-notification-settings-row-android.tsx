@@ -96,8 +96,30 @@ test("with the app's switch off, the row still shows", async () => {
   await seedSettings({ fcm: { device: "device-1", on: false } })
   await mount(row(), async () => {
     assert.ok(systemRow(), "the row is there with notifications off")
+    assert.ok(find("[data-transport]"), "the pick between Firebase and ntfy stays")
+    assert.ok(missing("[data-ntfy]"), "and Firebase, off or on, draws no bots")
     assert.ok(missing("[data-notification-types]"), "and the app's own list is not")
   })
+})
+
+test("on ntfy with the switch off, the pick and the bots stay", async () => {
+  await seedSettings({
+    fcm: { device: "device-1", on: false },
+    pushTransport: "ntfy",
+    ntfyOn: false,
+  })
+  await db.profiles.clear()
+  await db.profiles.put(botProfile("android-ntfy-off"))
+  const fake = ntfyHost()
+  try {
+    await mount(row(), async () => {
+      await until(async () => Boolean(find("[data-ntfy]")), "the bot's row")
+      assert.equal(find("[data-transport]")?.getAttribute("data-transport"), "ntfy")
+      assert.ok(missing("[data-notification-types]"), "the types wait for the switch")
+    })
+  } finally {
+    fake.restore()
+  }
 })
 
 test("tapping it opens the phone's own notification settings", async () => {
