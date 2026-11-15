@@ -938,9 +938,9 @@
   display: flex;
   flex: none;
   align-items: center;
-  justify-content: space-between;
+  gap: 12px;
   height: 54px;
-  padding: 0 14px 0 22px;
+  padding: 0 22px 0 14px;
 }
 
 .gh-chat__title {
