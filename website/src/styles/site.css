@@ -1199,82 +1199,136 @@ li:hover > .bot-swap .bot-alt {
   font-size: 0.78rem;
 }
 
-/* Approvals: the approval card, in the composer's place, with its four answers */
-.app-approve {
-  padding: 1rem;
+/* LLM Wiki backups: the canvas's options with its backup on, over one note it writes */
+.app-wiki {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  align-items: start;
+  gap: 0.75rem;
+  background: var(--tile-2);
 }
 
-.app .ap-head {
+@media (max-width: 1020px) {
+  .app-wiki {
+    grid-template-columns: 1fr;
+  }
+
+  .wk-rows span:first-child {
+    display: none;
+  }
+}
+
+.wk-sheet,
+.wk-note {
+  padding: 0.75rem 0.875rem;
+  border: 1px solid var(--line);
+  border-radius: 1.1rem;
+  background: var(--tile);
+}
+
+.app .wk-head {
   display: flex;
   align-items: center;
-  gap: 0.45rem;
-  color: color-mix(in oklab, var(--warn) 85%, var(--ink));
-  font-weight: 500;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
 }
 
-.app .ap-desc {
-  margin: 0.6rem 0;
+.wk-rows {
+  display: grid;
 }
 
-.ap-code {
+.wk-rows span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.45rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.wk-rows .on {
+  font-weight: 600;
+}
+
+.sw {
   position: relative;
-  display: grid;
-  gap: 0.4rem;
-  padding: 0.6rem 0.75rem;
-  border-radius: 0.75rem;
-  background: var(--tile-2);
-}
-
-.ap-code span {
-  color: var(--muted);
-  font-size: 0.65rem;
-}
-
-.ap-code i {
-  position: absolute;
-  top: 0.55rem;
-  right: 0.65rem;
-  color: var(--muted);
-}
-
-.ap-code .ai {
-  width: 0.8rem;
-  height: 0.8rem;
-}
-
-.ap-code code {
-  font-size: 0.72rem;
-}
-
-.ap-btns {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 0.375rem;
-  margin-top: 0.7rem;
-}
-
-.ap-btns span {
-  overflow: hidden;
-  padding: 0.5rem 0.25rem;
-  border: 1px solid var(--line);
+  width: 2rem;
+  height: 1.15rem;
   border-radius: 999px;
-  background: var(--tile-2);
+  background: var(--line-2);
+}
+
+.sw::after {
+  position: absolute;
+  top: 0.15rem;
+  left: 0.15rem;
+  width: 0.85rem;
+  height: 0.85rem;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 20%);
+  content: "";
+}
+
+.sw.is-on {
+  background: var(--green);
+}
+
+.sw.is-on::after {
+  left: auto;
+  right: 0.15rem;
+}
+
+.app .wk-path {
+  overflow: hidden;
+  margin-bottom: 0.4rem;
+  color: var(--muted);
   font-size: 0.7rem;
-  text-align: center;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.ap-btns .ok {
-  border-color: transparent;
-  background: var(--green);
-  color: #fff;
+.wk-path b {
+  color: var(--ink);
+  font-weight: 600;
 }
 
-.ap-btns .no {
-  border-color: transparent;
-  background: color-mix(in oklab, var(--bad) 12%, var(--tile));
-  color: var(--bad);
+.wk-note pre {
+  margin: 0;
+  color: var(--ink-2);
+  font-family: "JetBrains Mono Variable", ui-monospace, monospace;
+  font-size: 0.72rem;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+.wk-note .fm {
+  color: var(--soft);
+}
+
+.wk-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+  grid-column: 1 / -1;
+}
+
+.wk-files span {
+  padding: 0.3rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--tile);
+  color: var(--muted);
+  font-family: "JetBrains Mono Variable", ui-monospace, monospace;
+  font-size: 0.66rem;
+}
+
+.wk-files .is-on {
+  border-color: var(--line-2);
+  color: var(--ink);
+}
+
+.wk-note .k {
+  color: var(--green-ink);
 }
 
 /* Canvas: the lane with the canvas's chat beside its page, as the app draws it from 1024px */
@@ -1448,9 +1502,6 @@ li:hover > .bot-swap .bot-alt {
     min-height: 6rem;
   }
 
-  .ap-btns {
-    grid-template-columns: 1fr 1fr;
-  }
 }
 
 /* Bots */
@@ -1652,7 +1703,6 @@ li:hover > .bot-swap .bot-alt {
   border-radius: var(--radius);
 }
 
-
 @media (max-width: 1020px) {
   .coming-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1673,7 +1723,6 @@ li:hover > .bot-swap .bot-alt {
 }
 
 /* Pricing */
-
 
 .plans {
   display: grid;

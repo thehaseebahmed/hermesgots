@@ -13,8 +13,6 @@ const I = {
   x: '<path d="M18 6 6 18M6 6l12 12"/>',
   stop: '<rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/>',
   up: '<path d="m5 12 7-7 7 7M12 19V5"/>',
-  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="M12 8v4M12 16h.01"/>',
-  copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
   undo: '<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>',
   more: '<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
   plus: '<path d="M5 12h14M12 5v14"/>',
@@ -78,7 +76,7 @@ const faq = [
   },
   {
     q: "Which features are ready?",
-    a: "Chats, coding sessions, research missions, canvases, rooms, dictation and routines work today. SuperAgent, meetings, calling, an iPhone app, Gots as your Android assistant, your phone's data and a Raycast extension are coming soon.",
+    a: "Chats, coding sessions, research missions, canvases and their LLM Wiki backups, rooms, dictation and routines work today. SuperAgent, meetings, calling, an iPhone app, Gots as your Android assistant, your phone's data and a Raycast extension are coming soon.",
   },
 ]
 ---
@@ -240,16 +238,30 @@ const faq = [
           </article>
           <article class="fc" data-reveal style="--d:80ms">
             <div class="fc-visual" aria-hidden="true">
-              <div class="app app-approve">
-                <p class="ap-head"><i set:html={ic("shield")} />Approval needed</p>
-                <p class="ap-desc">Delete and reinstall the dependencies</p>
-                <div class="ap-code"><span>terminal</span><i set:html={ic("copy")} /><code>rm -rf node_modules &amp;&amp; pnpm install</code></div>
-                <div class="ap-btns"><span class="ok">Allow once</span><span>Allow in chat</span><span>Always allow</span><span class="no">Deny</span></div>
+              <div class="app app-wiki">
+                <div class="wk-sheet">
+                  <p class="wk-head"><span class="cv-mark" set:html={ic("frame")} /><b>Reading list</b></p>
+                  <div class="wk-rows">
+                    <span>Pin to sidebar<i class="sw"></i></span>
+                    <span>Archive<i class="sw"></i></span>
+                    <span class="on">Back up to a wiki<i class="sw is-on"></i></span>
+                  </div>
+                </div>
+                <div class="wk-note">
+                  <p class="wk-path">llm-wiki / books / <b>dune.md</b></p>
+                  <pre><span class="fm">---</span>
+<span class="k">type:</span> canvas.document
+<span class="k">title:</span> Dune
+<span class="k">author:</span> Frank Herbert
+<span class="k">progress:</span> 100
+<span class="fm">---</span></pre>
+                </div>
+                <div class="wk-files"><span>index.md</span><span class="is-on">dune.md</span><span>piranesi.md</span><span>klara-and-the-sun.md</span><span>my-notes.md</span></div>
               </div>
             </div>
             <div class="fc-copy">
-              <h3><svg class="fc-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></svg>Approvals</h3>
-              <p>Anything risky waits for your yes, and a push tells you when a bot needs you.</p>
+              <h3><svg class="fc-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="m16 6 4 14M12 6v14M8 8v12M4 4v16"/></svg>LLM Wiki backups</h3>
+              <p>Switch it on and a canvas's data is copied to your host as markdown notes. Edit them and they stay yours.</p>
             </div>
           </article>
         </div>
