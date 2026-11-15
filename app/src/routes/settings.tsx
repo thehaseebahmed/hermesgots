@@ -487,19 +487,12 @@ export function NotificationsSettings() {
       <Group>
         <NotificationsSwitch transport={info} />
       </Group>
-      {offered.length > 1 && (
-        <Group>
-          <TransportRow transport={info} offered={offered} />
-        </Group>
-      )}
-      {id === "ntfy" && <NtfyBots />}
-      {info.categories === "system" ? (
-        <Group>
-          <SystemNotificationSettingsRow />
-        </Group>
-      ) : (
-        on && <NotificationTypes />
-      )}
+      <Group>
+        {offered.length > 1 && <TransportRow transport={info} offered={offered} />}
+        {id === "ntfy" && <NtfyBots />}
+        {info.categories === "system" && <SystemNotificationSettingsRow />}
+      </Group>
+      {info.categories === "app" && on && <NotificationTypes />}
     </>
   )
 }
@@ -580,7 +573,7 @@ function NtfyBots() {
   const labels = useBotLabels()
   if (!targets.length) return null
   return (
-    <Group>
+    <>
       {[...targets]
         .sort((a, b) => byBotLabel(labels)(a.bot, b.bot))
         .map(({ bot, state }) => (
@@ -595,7 +588,7 @@ function NtfyBots() {
             subtitle={ntfyLine(state)}
           />
         ))}
-    </Group>
+    </>
   )
 }
 

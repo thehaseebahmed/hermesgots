@@ -97,6 +97,11 @@ test("with the app's switch off, the row still shows", async () => {
   await mount(row(), async () => {
     assert.ok(systemRow(), "the row is there with notifications off")
     assert.ok(find("[data-transport]"), "the pick between Firebase and ntfy stays")
+    assert.ok(
+      find("[data-transport]")?.closest("[data-settings-group]") ===
+        systemRow()?.closest("[data-settings-group]"),
+      "the pick and the phone's row are one group",
+    )
     assert.ok(missing("[data-ntfy]"), "and Firebase, off or on, draws no bots")
     assert.ok(missing("[data-notification-types]"), "and the app's own list is not")
   })
@@ -115,6 +120,11 @@ test("on ntfy with the switch off, the pick and the bots stay", async () => {
     await mount(row(), async () => {
       await until(async () => Boolean(find("[data-ntfy]")), "the bot's row")
       assert.equal(find("[data-transport]")?.getAttribute("data-transport"), "ntfy")
+      assert.ok(
+        find("[data-transport]")?.closest("[data-settings-group]") ===
+          find("[data-ntfy]")?.closest("[data-settings-group]"),
+        "the pick and the bots are one group",
+      )
       assert.ok(missing("[data-notification-types]"), "the types wait for the switch")
     })
   } finally {
