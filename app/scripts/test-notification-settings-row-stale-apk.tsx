@@ -15,8 +15,8 @@ withoutPlugin("NotificationSettings")
 const env = (globalThis as unknown as { __HERMES_ENV__: Record<string, unknown> }).__HERMES_ENV__
 env.VITE_FIREBASE = "1"
 
-const { NotificationSettingsRow } = await import("@/routes/settings")
-const { click, find, mount, seedSettings, text } = await import("./component-kit.tsx")
+const { NotificationsSettings } = await import("@/routes/settings")
+const { click, findText, mount, seedSettings } = await import("./component-kit.tsx")
 
 test("a tap on a build without the plugin says nothing and breaks nothing", async () => {
   await seedSettings({ fcm: { device: "device-1", on: false } })
@@ -26,9 +26,10 @@ test("a tap on a build without the plugin says nothing and breaks nothing", asyn
     said.push(message)
   }) as typeof toast.error
   try {
-    await mount(<NotificationSettingsRow />, async () => {
-      assert.match(text(), /Notification settings/, "the row is there all the same")
-      await click(find("button"))
+    await mount(<NotificationsSettings />, async () => {
+      const row = findText("button", "Android notification settings")
+      assert.ok(row, "the row is there all the same")
+      await click(row)
     })
   } finally {
     toast.error = shouted

@@ -59,11 +59,16 @@ import { DictationSettings } from "@/components/settings/dictation"
 import { LabSettings } from "@/components/settings/lab"
 import {
   ActionRow,
+  EditCard,
+  EditForm,
   Group,
   LinkRow,
+  PickList,
+  PickSurface,
   RowText,
   SheetRow,
   SwitchRow,
+  ValueRow,
   rowClass,
   Screen,
   useLeaveGuard,
@@ -89,18 +94,26 @@ import { useLiveStatus, type LiveStatus } from "@/lib/live"
 import { legacyChatOn } from "@/lib/legacy-chat"
 import { useLarge } from "@/lib/media"
 import { openNotificationSettings, setBackGuard } from "@/lib/native"
-import { isNative } from "@/lib/platform"
 import { useNav } from "@/lib/nav"
 import {
   disablePush,
   enablePush,
+  ensureNtfy,
   pushAvailable,
+  saveNtfy,
   sendTestPush,
   setPushCategory,
   setPushFeature,
+  setPushTransport,
   usePush,
   usePushFeatures,
+  usePushTransport,
 } from "@/lib/push"
+import {
+  NTFY_DEFAULT_SERVER,
+  type PushTransportId,
+  type PushTransportInfo,
+} from "@/lib/push-transport"
 import type { PushCategory, PushFeature } from "@/lib/push-kinds"
 import { presence, presenceLine, type PresenceAnswer } from "@/lib/presence"
 import { siteUrl } from "@/lib/registry"
@@ -114,7 +127,10 @@ import { spoken } from "@/lib/words"
 import { APP_VERSION, pluginOutdated } from "@/lib/version"
 
 /** What both the notification row and the screen it opens are called: one name, two places. */
-export const NOTIFICATION_SETTINGS = "Notification settings"
+export const NOTIFICATIONS = "Notifications"
+
+/** The row that opens the phone's own screen, where a Firebase phone switches its channels. */
+export const SYSTEM_NOTIFICATION_SETTINGS = "Android notification settings"
 
 /** The sections of the menu, by the URL segment that opens each, with the title its screen carries. */
 const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
@@ -122,7 +138,7 @@ const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
   appearance: { title: "Appearance", render: () => <AppearanceSettings /> },
   dictation: { title: "AI Dictation", render: () => <DictationSettings /> },
   community: { title: "Community", render: () => <CommunitySettings /> },
-  notifications: { title: NOTIFICATION_SETTINGS, render: () => <NotificationTypes /> },
+  notifications: { title: NOTIFICATIONS, render: () => <NotificationsSettings /> },
   data: { title: "Local data", render: () => <DataSettings /> },
   lab: { title: "Labs", render: () => <LabSettings /> },
   developer: { title: "Developer", render: () => developerOnly(<DeveloperSettings />) },
@@ -379,7 +395,6 @@ function MenuScreen({
         <Row to="appearance" icon={PaletteIcon} title="Appearance" subtitle={themeLabel(theme)} />
         <DictationRow />
         <NotificationsRow />
-        <NotificationSettingsRow />
       </Group>
       <Group>
         <CommunityRow />
@@ -436,11 +451,71 @@ function LinkBotRow({ onLink }: { onLink: () => void }) {
   return <ActionRow icon={PlusIcon} title="Link a bot" onClick={onLink} />
 }
 
-function NotificationsRow() {
+/**
+ * The one notification entry: whether they are on, and by which transport where this build offers
+ * more than one. Everything about them — the switch, the transport and the types — is behind it.
+ */
+export function NotificationsRow() {
+  const { permission, on } = usePush()
+  const { info, offered } = usePushTransport()
+  if (!pushAvailable() || !info) return null
+  const blocked = permission === "denied" ? BLOCKED[info.permission] : undefined
+  const state = on ? (offered.length > 1 ? `On · ${info.title}` : "On") : "Off"
+  return (
+    <Row to="notifications" icon={BellIcon} title={NOTIFICATIONS} subtitle={blocked ?? state} />
+  )
+}
+
+/** What a withheld permission is called, by whose it is; ntfy's is the ntfy app's, not ours. */
+const BLOCKED: Record<PushTransportInfo["permission"], string | undefined> = {
+  browser: "Blocked in browser settings",
+  phone: "Blocked in system settings",
+  none: undefined,
+}
+
+function CommunityRow() {
+  const { account } = useSyncState()
+  if (account.status !== "signed-in") return null
+  return <Row to="community" icon={TrophyIcon} title="Community" />
+}
+
+/**
+ * The Notifications screen: the switch, how they are delivered, and their types. The transport is
+ * asked what it can do rather than the platform: one whose categories are the phone's channels gets
+ * the row that opens the phone's own settings — shown while notifications are off too, since that
+ * screen is where they are turned back on — and one with no channels gets the app's own list.
+ */
+export function NotificationsSettings() {
+  const { on } = usePush()
+  const { id, info, offered, ready } = usePushTransport()
+  if (!pushAvailable() || !ready || !info) return null
+  return (
+    <>
+      <Group>
+        <NotificationsSwitch transport={info} />
+      </Group>
+      {(offered.length > 1 || id === "ntfy") && (
+        <Group>
+          {offered.length > 1 && <TransportRow transport={info} offered={offered} />}
+          {id === "ntfy" && <NtfyRows />}
+        </Group>
+      )}
+      {info.categories === "system" ? (
+        <Group>
+          <SystemNotificationSettingsRow />
+        </Group>
+      ) : (
+        on && <NotificationTypes />
+      )}
+    </>
+  )
+}
+
+function NotificationsSwitch({ transport }: { transport: PushTransportInfo }) {
   const { permission, on } = usePush()
   const [busy, setBusy] = useState(false)
   const refusal = useScreenRefusal()
-  if (!pushAvailable()) return null
+  const blocked = BLOCKED[transport.permission]
   const toggle = async (checked: boolean) => {
     setBusy(true)
     await refusal.write("turn on notifications", async () => {
@@ -449,7 +524,7 @@ function NotificationsRow() {
       // passing, since the host wrote none of it.
       if ((await enablePush()) === "denied")
         throw new AppWords(
-          isNative()
+          transport.permission === "phone"
             ? "Notifications are blocked in system settings"
             : "Notifications are blocked in your browser",
         )
@@ -460,14 +535,8 @@ function NotificationsRow() {
     <SwitchRow
       id="notifications"
       icon={BellIcon}
-      title="Notifications"
-      subtitle={
-        permission === "denied"
-          ? isNative()
-            ? "Blocked in system settings"
-            : "Blocked in browser settings"
-          : "A session needs you"
-      }
+      title={NOTIFICATIONS}
+      subtitle={permission === "denied" && blocked ? blocked : "A session needs you"}
       checked={on}
       disabled={busy}
       onCheckedChange={toggle}
@@ -475,24 +544,84 @@ function NotificationsRow() {
   )
 }
 
-function CommunityRow() {
-  const { account } = useSyncState()
-  if (account.status !== "signed-in") return null
-  return <Row to="community" icon={TrophyIcon} title="Community" />
+/** How this phone is notified, where the build offers a choice: the value, and the pick behind it. */
+function TransportRow({
+  transport,
+  offered,
+}: {
+  transport: PushTransportInfo
+  offered: PushTransportInfo[]
+}) {
+  const [open, setOpen] = useState(false)
+  const refusal = useScreenRefusal()
+  return (
+    <>
+      <ValueRow
+        title="Delivery"
+        value={transport.title}
+        onClick={() => setOpen(true)}
+        data-transport={transport.id}
+      />
+      <PickSurface open={open} onOpenChange={setOpen} title="Delivery">
+        <PickList
+          label="Delivery"
+          selected={transport.id}
+          options={offered.map((one) => ({ id: one.id, label: one.title, detail: one.detail }))}
+          onPick={(id) => {
+            setOpen(false)
+            void refusal.write("change that", () => setPushTransport(id as PushTransportId))
+          }}
+        />
+      </PickSurface>
+    </>
+  )
 }
 
-/**
- * The row that hands its platform the notification switches, named for what it opens. A phone has
- * channels, which only Android's own screen switches, so there it opens that screen and shows even
- * while notifications are off — that is where they are turned back on. The web has no channels, so
- * there it opens the app's own list, and hides while notifications are off.
- */
-export function NotificationSettingsRow() {
-  if (!pushAvailable()) return null
-  return isNative() ? <SystemNotificationSettingsRow /> : <NotificationListRow />
+/** The ntfy target's three values, each a row over the edit that writes it. */
+const NTFY_FIELDS = [
+  { id: "server", title: "Server", kind: "url", placeholder: NTFY_DEFAULT_SERVER },
+  { id: "topic", title: "Topic", kind: "text", placeholder: "gots-…" },
+  { id: "token", title: "Access token", kind: "secret", placeholder: "tk_…" },
+] as const
+
+function NtfyRows() {
+  const { ntfy } = usePushTransport()
+  const [editing, setEditing] = useState<(typeof NTFY_FIELDS)[number]>()
+  // A phone whose only transport is ntfy never picked it, so its target is made on first sight.
+  useEffect(() => void ensureNtfy(), [])
+  return (
+    <>
+      {NTFY_FIELDS.map((field) => (
+        <ValueRow
+          key={field.id}
+          title={field.title}
+          // A token is held, never shown: the row says only that there is one.
+          value={field.id === "token" ? (ntfy?.token ? "Set" : "") : (ntfy?.[field.id] ?? "")}
+          onClick={() => setEditing(field)}
+          data-ntfy={field.id}
+        />
+      ))}
+      {editing && (
+        <EditCard title={`Edit ${editing.title}`} onClose={() => setEditing(undefined)}>
+          <EditForm
+            label={editing.title}
+            value={ntfy?.[editing.id] ?? ""}
+            placeholder={editing.placeholder}
+            kind={editing.kind}
+            surface="card"
+            onSave={async (value) => {
+              await saveNtfy({ [editing.id]: value.trim() })
+              setEditing(undefined)
+            }}
+            onCancel={() => setEditing(undefined)}
+          />
+        </EditCard>
+      )}
+    </>
+  )
 }
 
-/** Android: the phone's screen for this app, which the app can read but not draw. */
+/** Firebase: the phone's screen for this app, which the app can read but not draw. */
 function SystemNotificationSettingsRow() {
   const refusal = useScreenRefusal()
   const open = async () => {
@@ -512,17 +641,10 @@ function SystemNotificationSettingsRow() {
   return (
     <ActionRow
       icon={SlidersHorizontalIcon}
-      title={NOTIFICATION_SETTINGS}
+      title={SYSTEM_NOTIFICATION_SETTINGS}
       onClick={() => void open()}
     />
   )
-}
-
-/** The web: the app's list of types, the only switch a browser has. */
-function NotificationListRow() {
-  const { on } = usePush()
-  if (!on) return null
-  return <Row to="notifications" icon={SlidersHorizontalIcon} title={NOTIFICATION_SETTINGS} />
 }
 
 const CATEGORY_ICONS: Record<PushCategory, LucideIcon> = {
@@ -556,13 +678,13 @@ const FEATURE_ICONS: Record<PushFeature, LucideIcon> = {
 
 /**
  * Which pushes this device gets, by feature: a switch for the whole feature and one for each kind
- * in it. Each kind is a channel of its own in Android's settings too.
+ * in it — drawn where the transport has no channels, so this list is the only switch there is.
  */
 function NotificationTypes() {
   const features = usePushFeatures()
   const refusal = useScreenRefusal()
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4" data-notification-types>
       {features.map((feature) => {
         const [only] = feature.categories
         const single = feature.categories.length === 1
@@ -664,7 +786,7 @@ export function DeveloperSettings() {
           onCheckedChange={(checked) => saveSettings({ showProgressReminders: checked })}
         />
       </Group>
-      {isNative() && pushAvailable() && <TestPushRow />}
+      <TestPushRow />
       <Group>
         <SyncServerRow />
         <DeviceStateRow />
@@ -714,6 +836,7 @@ export function DeveloperSettings() {
 
 function TestPushRow() {
   const { on } = usePush()
+  const { id } = usePushTransport()
   const [busy, setBusy] = useState(false)
   const refusal = useScreenRefusal()
   const send = async () => {
@@ -724,6 +847,8 @@ function TestPushRow() {
       tell.note("Test notification sent")
     setBusy(false)
   }
+  // The test is the registry's own send, so it is Firebase's alone.
+  if (id !== "firebase") return null
   return (
     <Group>
       <button type="button" className={rowClass} disabled={!on || busy} onClick={send}>

@@ -116,6 +116,16 @@ export interface Settings {
   push?: { device: string; vapidKey: string; vapidPublic: string; on: boolean }
   /** The Android app's push identity, local only: Firebase gives the token, this is its device id. */
   fcm?: { device: string; on: boolean; trying?: boolean }
+  /**
+   * How the Android app is notified where the user picked: unset is the build's default, Firebase
+   * where the APK has it and ntfy where it doesn't (`push-transport.ts`). Local only.
+   */
+  pushTransport?: "firebase" | "ntfy"
+  /**
+   * The account's ntfy topic as this device holds it, local only: every bot's plugin is handed it and
+   * publishes there. The token goes to those hosts and nowhere else.
+   */
+  ntfy?: { server: string; topic: string; token: string; on: boolean }
   /** Which categories of push this device wants; unset ones follow `PUSH_CATEGORIES`. Local only. */
   pushCategories?: Partial<Record<string, boolean>>
 }

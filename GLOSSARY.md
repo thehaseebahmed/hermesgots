@@ -895,9 +895,13 @@ refuses turns. It is also listed on its bot's routines screen, which is where a 
 row can still be read.
 _Avoid_: job run, execution, log, cron session
 
-**Notification settings**:
-The screen that decides what a device is told about: the app's own list of categories on the web, and the phone's own list of channels in the Android app.
-_Avoid_: notification types, notification preferences, alert settings
+**Notifications**:
+The one Settings entry and screen that decides whether a device is told anything, how, and about what: the switch, the **Transport**, and the categories — the app's own list where the transport has no channels, and the row that opens Android's own notification settings where it has.
+_Avoid_: notification settings, notification types, notification preferences, alert settings
+
+**Transport**:
+How a device's notifications reach it: Web Push in a browser, Firebase or ntfy in the Android app. One device has one at a time. ntfy here is the app's own news to the user's phone, never Hermes's ntfy delivery platform, which carries a routine's answer.
+_Avoid_: channel, provider, push backend
 
 **Gots plugin**:
 The plugin Gots installs into a bot's Hermes host, enabled under the name `gots`. It was called `memento`; the old name survives only where older sessions still carry it.

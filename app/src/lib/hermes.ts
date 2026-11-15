@@ -2880,6 +2880,39 @@ export async function unregisterPush(config: HermesConfig, endpoint: string) {
   })
 }
 
+/** Where a bot publishes its news over ntfy, as the app writes it (`plugin/ntfy.py`). */
+export interface NtfyRegistration {
+  server: string
+  topic: string
+  /** Left out where the host already holds one for this server and topic: it is never read back. */
+  token?: string
+  /** This device, so no other transport tells it the same news. */
+  device: string
+  categories: string[]
+  /** Each category's importance, which ntfy carries as the message's priority. */
+  priorities: Record<string, number>
+}
+
+/** Hands a bot's plugin the account's ntfy topic. A plugin without the route refuses with a 404. */
+export async function registerNtfy(config: HermesConfig, registration: NtfyRegistration) {
+  await request(`${pluginRoot(config.baseUrl)}/push/ntfy`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(registration),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+}
+
+/** This device stops getting a bot's news over ntfy; the topic goes with its last device. */
+export async function unregisterNtfy(config: HermesConfig, device: string) {
+  await request(`${pluginRoot(config.baseUrl)}/push/ntfy/remove`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ device }),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+}
+
 /** A fresh `API_SERVER_KEY`: 32 random bytes as 64 hex characters, like `openssl rand -hex 32`. */
 export function generateApiKey() {
   const bytes = crypto.getRandomValues(new Uint8Array(32))

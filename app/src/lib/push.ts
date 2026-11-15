@@ -15,7 +15,13 @@ import {
   updateProfile,
   type Settings,
 } from "@/lib/db"
-import { registerPush, setPushMuted, unregisterPush } from "@/lib/hermes"
+import {
+  registerNtfy,
+  registerPush,
+  setPushMuted,
+  unregisterNtfy,
+  unregisterPush,
+} from "@/lib/hermes"
 import { connectionKey, reconnectLive } from "@/lib/live"
 import { isNative } from "@/lib/platform"
 import { quietly } from "@/lib/report"
@@ -29,6 +35,7 @@ import {
   channelPlan,
   categoryOn,
   chatSubject,
+  linkedPush,
   pushPath,
   pushSubject,
   pushTarget,
@@ -39,6 +46,20 @@ import {
   type PushCategory,
   type PushFeature,
 } from "@/lib/push-kinds"
+import {
+  NTFY_DEFAULT_SERVER,
+  PUSH_TRANSPORTS,
+  activeTransport,
+  mintTopic,
+  ntfyMissing,
+  ntfyPriorities,
+  ntfyServer,
+  transportsFor,
+  type NtfyConfig,
+  type PushEnv,
+  type PushTransportId,
+} from "@/lib/push-transport"
+import { AppWords } from "@/lib/refusal"
 import { fromBase64Url, toBase64Url } from "./base64url.ts"
 
 /**
@@ -51,9 +72,22 @@ import { fromBase64Url, toBase64Url } from "./base64url.ts"
 
 export type PushPermission = NotificationPermission | "unsupported"
 
-/** Whether this device can get push: a browser with the Push API, or the Android app. */
+/** What this build is, as the transports are chosen from it (`push-transport.ts`). */
+function pushEnv(): PushEnv {
+  return { native: isNative(), firebase: nativeConfigured, web: webSupported() }
+}
+
+/**
+ * Whether this device can get push at all: a browser with the Push API, or the Android app — which
+ * always can, since ntfy needs nothing built into the APK.
+ */
 export function pushAvailable() {
-  return isNative() ? nativeConfigured : webSupported()
+  return transportsFor(pushEnv()).length > 0
+}
+
+/** The transport this device's notifications go by: its pick where the build offers it. */
+async function currentTransport() {
+  return activeTransport(pushEnv(), (await getSettings()).pushTransport)
 }
 
 /** The Android app's WebView has no Push API; it gets Firebase messaging (see below) instead. */
@@ -570,7 +604,7 @@ async function syncNative() {
     await saveSettings({ fcm: { device: fcm.device, on: false } })
     return
   }
-  if (!fcm?.on || !nativeConfigured) return
+  if (!fcm?.on || !nativeConfigured || (await currentTransport()) !== "firebase") return
   const { push } = await plugin()
   await listen(push)
   const read = await readPhone(push)
@@ -586,16 +620,34 @@ async function syncNative() {
 
 /** On launch and whenever the app returns, a rotated token or a new sign-in is told to the registry. */
 function startNative() {
-  void syncNative().catch(() => {})
-  void App.addListener("resume", () => {
+  const pass = () => {
     void syncNative().catch(() => {})
+    void syncNtfy().catch(() => {})
+  }
+  pass()
+  void App.addListener("resume", pass)
+  // A bot linked or turned off after ntfy was switched on is handed the topic, or told to forget it.
+  let timer: number | undefined
+  liveQuery(() => db.profiles.toArray()).subscribe(() => {
+    window.clearTimeout(timer)
+    timer = window.setTimeout(() => void syncNtfy().catch(() => {}), 1000)
   })
+  // An ntfy notification is the ntfy app's, so its tap arrives as a link rather than as an action.
+  const linked = (url: string | undefined) => {
+    const path = url ? linkedPush(url) : null
+    if (path) void openPush(path)
+  }
+  void App.addListener("appUrlOpen", ({ url }) => linked(url))
+  void App.getLaunchUrl()
+    .then((launch) => linked(launch?.url))
+    .catch(() => {})
 }
 
 /** Asks the registry to push to this phone now, with the app open or not. */
 export async function sendTestPush() {
   const { fcm } = await getSettings()
-  if (!isNative() || !fcm?.on) throw new Error("Notifications are off")
+  if (!isNative() || !fcm?.on || (await currentTransport()) !== "firebase")
+    throw new Error("Notifications are off")
   // Its channel is made here, on the tap that sends one, so a device that never sends a test never
   // lists it. Before the POST: a push must never arrive ahead of the channel it names.
   const { push } = await plugin()
@@ -609,15 +661,25 @@ export async function sendTestPush() {
   if (!response.ok) throw await failure(response)
 }
 
-/** Turns some categories of push on or off where the app's own list is the switch: the web. */
+/**
+ * Turns some categories of push on or off where the app's own list is the switch: Web Push and
+ * ntfy, whose senders enforce it since neither has a channel per category.
+ */
 async function setCategories(ids: PushCategory[], on: boolean) {
-  // A phone reads its own channels instead, so a list stored there would have no reader (ADR 0050).
-  if (isNative()) return
+  const transport = await currentTransport()
+  // Firebase's switches are the phone's channels, which it reads back instead: a list stored for it
+  // would have no reader (ADR 0050).
+  if (!transport || PUSH_TRANSPORTS[transport].categories !== "app") return
   const { pushCategories } = await getSettings()
   await saveSettings({
     pushCategories: { ...pushCategories, ...Object.fromEntries(ids.map((id) => [id, on])) },
   })
-  // Every bot's plugin keeps what this device asked for with its subscription.
+  // Every bot's plugin keeps what this device asked for, with its subscription or its topic.
+  if (transport === "ntfy") {
+    const { taken, refused } = await syncNtfy()
+    if (!taken && refused) throw refused
+    return
+  }
   given.clear()
   await syncPush()
 }
@@ -676,12 +738,202 @@ function useNativePermission(): PushPermission {
   return permission
 }
 
-export function enablePush() {
-  return isNative() ? enableNative() : enableWeb()
+const ENABLE: Record<PushTransportId, () => Promise<PushPermission>> = {
+  webpush: enableWeb,
+  firebase: enableNative,
+  ntfy: enableNtfy,
 }
 
-export function disablePush() {
-  return isNative() ? disableNative() : disableWeb()
+const DISABLE: Record<PushTransportId, () => Promise<void>> = {
+  webpush: disableWeb,
+  firebase: disableNative,
+  ntfy: disableNtfy,
+}
+
+export async function enablePush(): Promise<PushPermission> {
+  const transport = await currentTransport()
+  return transport ? ENABLE[transport]() : "unsupported"
+}
+
+export async function disablePush() {
+  const transport = await currentTransport()
+  if (transport) await DISABLE[transport]()
+}
+
+/**
+ * ntfy, for the Android app: the account's topic on a server the user names, which every bot's
+ * plugin is handed and publishes to itself (`plugin/ntfy.py`). The ntfy app shows the notification,
+ * so there is no token of the phone's to collect and no permission of this app's to ask for.
+ */
+
+/** This phone's id, the one its stream carries: Firebase's where it has one, else minted here. */
+async function nativeDevice() {
+  const { fcm } = await getSettings()
+  if (fcm?.device) return fcm.device
+  const device = crypto.randomUUID()
+  await saveSettings({ fcm: { device, on: false } })
+  return device
+}
+
+/** What each bot was last handed, by its address and key, so a sync only posts what changed. */
+const toldNtfy = new Map<string, string>()
+
+/**
+ * Hands every bot the topic, with the categories the app's own list has on and each one's
+ * importance. Answers how many took it and the first refusal, so turning the switch on can say why
+ * nothing will arrive; a sync in passing ignores both.
+ */
+async function syncNtfy() {
+  const { ntfy, pushCategories, meetings } = await getSettings()
+  let taken = 0
+  let refused: unknown
+  if (!ntfy?.on || (await currentTransport()) !== "ntfy") return { taken, refused }
+  const device = await nativeDevice()
+  const categories = wantedCategories(pushCategories).filter((id) =>
+    reachableCategories(meetings).some((category) => category.id === id),
+  )
+  const registration = {
+    server: ntfy.server,
+    topic: ntfy.topic,
+    token: ntfy.token,
+    device,
+    categories,
+    priorities: ntfyPriorities(PUSH_CATEGORIES),
+  }
+  const wire = JSON.stringify(registration)
+  await Promise.all(
+    (await listProfiles()).map(async (bot) => {
+      if (!bot.apiKey || !bot.baseUrl.trim()) return
+      const id = connectionKey(bot)
+      if (bot.disabled) {
+        // A bot turned off stops asking for this device's attention too.
+        if (toldNtfy.delete(id)) await unregisterNtfy(bot, device).catch(() => undefined)
+        return
+      }
+      if (toldNtfy.get(id) === wire) return void taken++
+      try {
+        await registerNtfy(bot, registration)
+        toldNtfy.set(id, wire)
+        taken++
+      } catch (error) {
+        // An older plugin, a server it refused, or a host that is away: asked again on a change.
+        refused ??= error
+      }
+    }),
+  )
+  return { taken, refused }
+}
+
+async function enableNtfy(): Promise<PushPermission> {
+  const settings = await getSettings()
+  const missing = ntfyMissing(settings.ntfy)
+  if (missing || !settings.ntfy) throw new AppWords(missing ?? "Add your ntfy server first")
+  // One device, one transport: a token Firebase still holds for this phone is taken back first.
+  if (settings.fcm?.on) await disableNative()
+  await saveSettings({ ntfy: { ...settings.ntfy, on: true } })
+  toldNtfy.clear()
+  const { taken, refused } = await syncNtfy()
+  if (!taken) {
+    // Otherwise the switch would read on while no bot knows where to publish.
+    await saveSettings({ ntfy: { ...settings.ntfy, on: false } })
+    if (refused) throw refused
+    throw new AppWords("Link a bot first: its host is what publishes to ntfy")
+  }
+  // The plugin holds a publish back while the app is open, which it learns from the stream.
+  reconnectLive()
+  return "granted"
+}
+
+async function disableNtfy() {
+  const { ntfy, fcm } = await getSettings()
+  if (!ntfy) return
+  await saveSettings({ ntfy: { ...ntfy, on: false } })
+  toldNtfy.clear()
+  if (!fcm?.device) return
+  await Promise.all(
+    (await listEnabledProfiles()).map((bot) =>
+      unregisterNtfy(bot, fcm.device).catch(() => undefined),
+    ),
+  )
+}
+
+/**
+ * Writes part of the ntfy target. A phone that is already on is handed the change at once; a server
+ * or a topic that changed is another target, so the bots are told to forget the old one first.
+ */
+export async function saveNtfy(patch: Partial<Omit<NtfyConfig, "on">>) {
+  const { ntfy, fcm } = await getSettings()
+  const held = ntfy ?? freshNtfy()
+  const server = patch.server === undefined ? held.server : ntfyServer(patch.server)
+  if (!server) throw new AppWords("That isn't an https address")
+  const next = { ...held, ...patch, server }
+  const missing = ntfyMissing(next)
+  // A field emptied while notifications are on would leave them on with nowhere to go.
+  if (held.on && missing) throw new AppWords(missing)
+  const moved = held.on && (held.server !== next.server || held.topic !== next.topic)
+  if (moved && fcm?.device)
+    await Promise.all(
+      (await listEnabledProfiles()).map((bot) =>
+        unregisterNtfy(bot, fcm.device).catch(() => undefined),
+      ),
+    )
+  await saveSettings({ ntfy: next })
+  if (!next.on) return
+  toldNtfy.clear()
+  const { taken, refused } = await syncNtfy()
+  if (!taken && refused) throw refused
+}
+
+/** A target to start from: the public server and a topic nobody can guess, with no token yet. */
+function freshNtfy(): NtfyConfig {
+  return {
+    server: NTFY_DEFAULT_SERVER,
+    topic: mintTopic((count) => crypto.getRandomValues(new Uint8Array(count))),
+    token: "",
+    on: false,
+  }
+}
+
+/** Gives a phone whose only transport is ntfy the target its rows are drawn from. */
+export async function ensureNtfy() {
+  if ((await currentTransport()) !== "ntfy" || (await getSettings()).ntfy) return
+  await saveSettings({ ntfy: freshNtfy() })
+}
+
+/**
+ * Picks how this phone is notified. The transport left behind is turned off first — its token or
+ * its place on the topic taken back — so one event is never told twice; the one picked starts off,
+ * since ntfy has fields to fill in and Firebase a permission to ask for.
+ */
+export async function setPushTransport(id: PushTransportId) {
+  const from = await currentTransport()
+  if (from === id || !transportsFor(pushEnv()).includes(id)) return
+  if (from) await DISABLE[from]()
+  if (id === "webpush") return
+  const { ntfy } = await getSettings()
+  await saveSettings({
+    pushTransport: id,
+    // A first pick of ntfy starts with the public server and a topic nobody can guess.
+    ...(id === "ntfy" && !ntfy ? { ntfy: freshNtfy() } : {}),
+  })
+}
+
+/** The transports this build offers, the one in use and, for ntfy, the target this device holds. */
+export function usePushTransport() {
+  const settings = useLiveQuery(async () => {
+    const { pushTransport, ntfy } = await getSettings()
+    return { pushTransport, ntfy }
+  }, [])
+  const env = pushEnv()
+  const id = activeTransport(env, settings?.pushTransport)
+  return {
+    id,
+    info: id ? PUSH_TRANSPORTS[id] : undefined,
+    offered: transportsFor(env).map((offered) => PUSH_TRANSPORTS[offered]),
+    ntfy: settings?.ntfy,
+    /** False until this device's settings have been read: the screen draws nothing it would undo. */
+    ready: settings !== undefined,
+  }
 }
 
 /**
@@ -741,7 +993,16 @@ export function startPush() {
 export function usePush() {
   const web = useWebPush()
   const nativePermission = useNativePermission()
-  const fcm = useLiveQuery(async () => (await getSettings()).fcm, [])
+  const held = useLiveQuery(async () => {
+    const { fcm, ntfy, pushTransport } = await getSettings()
+    return { fcm, ntfy, pushTransport }
+  }, [])
   if (!isNative()) return web
-  return { permission: nativePermission, on: Boolean(fcm?.on) && nativePermission !== "denied" }
+  // ntfy's notification is the ntfy app's to show, so this app's own permission says nothing of it.
+  if (activeTransport(pushEnv(), held?.pushTransport) === "ntfy")
+    return { permission: "granted" as PushPermission, on: Boolean(held?.ntfy?.on) }
+  return {
+    permission: nativePermission,
+    on: Boolean(held?.fcm?.on) && nativePermission !== "denied",
+  }
 }

@@ -3480,6 +3480,8 @@ const ROOT_RUN_IDS = process.env.MOCK_RUNS_LIVE_ROOT_IDS !== "0"
 // The plugin's change stream: one log per profile (the "" key is the default one). Runs and sessions
 // belong to no profile here, so they go to every log.
 const pushSubscriptions = new Map()
+/** The ntfy target the app wrote, as `plugin/ntfy.py` keeps one per profile. */
+let ntfyTarget
 // The main model the plugin's `model` route set, per profile ("" is the default one).
 const hostModels = new Map()
 const REMINDER_LEVELS = ["off", "quiet", "normal", "chatty"]
@@ -4238,6 +4240,7 @@ http
           "merge_resolve",
           ...(EVENTS ? ["events"] : []),
           "push",
+          "push_ntfy",
           "host_model",
           "fallbacks",
           "delegation_model",
@@ -4707,6 +4710,60 @@ http
       }
       pushSubscriptions.set(subscription.endpoint, { device, categories })
       return json(res, 200, { object: "gots.push", subscribed: true })
+    }
+    // ntfy: the mock keeps the target the app wrote and publishes nothing (plugin/ntfy.py).
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/push/ntfy") {
+      const shown = () =>
+        ntfyTarget
+          ? {
+              object: "gots.push_ntfy",
+              configured: true,
+              server: ntfyTarget.server,
+              topic: ntfyTarget.topic,
+              token_set: true,
+              categories: ntfyTarget.categories ?? null,
+              devices: ntfyTarget.devices.length,
+            }
+          : { object: "gots.push_ntfy", configured: false }
+      if (req.method === "GET") return json(res, 200, shown())
+      if (req.method === "POST") {
+        const { server, topic, token, device, categories } = await readBody(req)
+        const refuse = (message) => json(res, 400, { error: { message } })
+        if (typeof server !== "string" || !/^https:\/\/[^/?#]+\.[^/?#]+/.test(server))
+          return refuse("Not a public https ntfy server.")
+        if (typeof topic !== "string" || !/^[-_A-Za-z0-9]{1,64}$/.test(topic))
+          return refuse("Not an ntfy topic.")
+        const address = server.replace(/\/+$/, "")
+        const same = ntfyTarget?.server === address && ntfyTarget?.topic === topic
+        const held = token ?? (same ? ntfyTarget.token : undefined)
+        if (typeof held !== "string" || !held) return refuse("An access token is required.")
+        const devices = same ? ntfyTarget.devices.filter((d) => d !== device) : []
+        ntfyTarget = {
+          server: address,
+          topic,
+          token: held,
+          categories: categories ?? (same ? ntfyTarget.categories : undefined),
+          devices: device ? [...devices, device] : devices,
+        }
+        return json(res, 200, shown())
+      }
+    }
+    if (
+      PLUGIN &&
+      !profile &&
+      req.method === "POST" &&
+      url.pathname === "/api/plugins/gots/push/ntfy/remove"
+    ) {
+      const { device } = await readBody(req)
+      const left = device && ntfyTarget ? ntfyTarget.devices.filter((d) => d !== device) : []
+      ntfyTarget = left.length ? { ...ntfyTarget, devices: left } : undefined
+      return json(
+        res,
+        200,
+        ntfyTarget
+          ? { object: "gots.push_ntfy", configured: true, devices: left.length }
+          : { object: "gots.push_ntfy", configured: false },
+      )
     }
     if (
       PLUGIN &&
