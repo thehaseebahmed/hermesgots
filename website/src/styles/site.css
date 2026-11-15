@@ -219,8 +219,29 @@ summary:focus-visible {
   text-transform: uppercase;
 }
 
-.title {
-  font-size: clamp(2.25rem, 5.2vw, 4rem);
+.title,
+.fc-title {
+  max-width: 52rem;
+  margin-inline: auto;
+  font-size: clamp(2rem, 4.4vw, 3.25rem);
+  letter-spacing: -0.04em;
+  line-height: 1.08;
+  text-align: center;
+  text-wrap: balance;
+}
+
+.title .soft,
+.fc-title .soft {
+  display: inline-block;
+}
+
+.sub,
+.lede {
+  text-wrap: balance;
+}
+
+p {
+  text-wrap: pretty;
 }
 
 .soft {
@@ -524,11 +545,6 @@ li:hover > .bot-swap .bot-alt {
    each a drawn piece of the app over its icon, name and one line */
 .fc-title {
   max-width: 60rem;
-  margin: 0 auto;
-  font-size: clamp(1.75rem, 3.6vw, 2.75rem);
-  letter-spacing: -0.035em;
-  line-height: 1.12;
-  text-align: center;
 }
 
 .fc {
@@ -914,7 +930,7 @@ li:hover > .bot-swap .bot-alt {
   display: inline-grid;
   min-width: 1.15rem;
   height: 1.15rem;
-  margin: 0 0.15rem;
+  margin: 0 0.1rem 0 0.2rem;
   padding: 0 0.3rem;
   place-items: center;
   border-radius: 999px;
@@ -1449,9 +1465,10 @@ li:hover > .bot-swap .bot-alt {
 .bot-row {
   display: flex;
   justify-content: center;
-  gap: clamp(0.5rem, 2vw, 1.5rem);
+  gap: clamp(0.5rem, 1.6vw, 1.25rem);
   margin: 3.5rem 0 0;
-  padding: 1rem 1rem 1.5rem;
+  padding: 1rem max(1rem, calc((100vw - 72rem) / 2)) 1.5rem;
+  scroll-padding-inline: 1rem;
   overflow-x: auto;
   list-style: none;
   scroll-snap-type: x mandatory;
@@ -1460,7 +1477,7 @@ li:hover > .bot-swap .bot-alt {
 
 .bot-row li {
   display: flex;
-  min-width: 7.5rem;
+  min-width: 6.75rem;
   flex-direction: column;
   align-items: center;
   scroll-snap-align: center;
@@ -1485,6 +1502,8 @@ li:hover > .bot-swap .bot-alt {
 @media (max-width: 1180px) {
   .bot-row {
     justify-content: flex-start;
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 1.5rem, #000 calc(100% - 3rem), transparent);
+    mask-image: linear-gradient(90deg, transparent, #000 1.5rem, #000 calc(100% - 3rem), transparent);
   }
 }
 
@@ -1594,25 +1613,24 @@ li:hover > .bot-swap .bot-alt {
   list-style: none;
 }
 
+.coming-grid h3 {
+  font-size: 1.375rem;
+}
+
+.coming-grid p {
+  margin-top: 0.5rem;
+  color: var(--muted);
+}
+
 .coming-grid li {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 1.5rem;
   padding: 1.75rem;
   border: 1px dashed var(--line-2);
   border-radius: var(--radius);
 }
 
-.soon {
-  display: inline-block;
-  margin-bottom: 0.5rem;
-  color: var(--soft);
-  font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 0.68rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
 
 @media (max-width: 760px) {
   .coming-grid {
@@ -1627,10 +1645,7 @@ li:hover > .bot-swap .bot-alt {
 }
 
 /* Pricing */
-.pricing .wrap > .title,
-.pricing .eyebrow {
-  text-align: center;
-}
+
 
 .plans {
   display: grid;
@@ -1676,6 +1691,9 @@ li:hover > .bot-swap .bot-alt {
 }
 
 .price {
+  display: flex;
+  min-height: 3.5rem;
+  align-items: flex-end;
   margin: 2.5rem 0 1.5rem;
   font-size: 3.5rem;
   font-weight: 700;
@@ -1717,6 +1735,8 @@ li:hover > .bot-swap .bot-alt {
 
 .plan .btn-block {
   margin-top: auto;
+  border-color: var(--line-2);
+  box-shadow: none;
 }
 
 .waitlist {
@@ -1783,8 +1803,8 @@ li:hover > .bot-swap .bot-alt {
 /* FAQ */
 .faq-wrap {
   display: grid;
-  grid-template-columns: 1fr 2fr;
-  gap: 3rem;
+  max-width: 48rem;
+  gap: clamp(2.5rem, 5vw, 3.5rem);
 }
 
 .faq-list {
@@ -1831,8 +1851,7 @@ li:hover > .bot-swap .bot-alt {
 
 @media (max-width: 760px) {
   .faq-wrap {
-    grid-template-columns: 1fr;
-    gap: 1.5rem;
+    gap: 2rem;
   }
 }
 

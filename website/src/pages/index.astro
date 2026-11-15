@@ -249,7 +249,6 @@ const faq = [
     <!-- Bots -->
     <section id="bots" class="bots" aria-labelledby="bots-title">
       <div class="wrap">
-        <p class="eyebrow" data-reveal>Bots</p>
         <h2 id="bots-title" class="title" data-reveal>Every profile is a bot.<br /><span class="soft">Every bot has a character.</span></h2>
         <p class="sub" data-reveal>Link each Hermes profile you run. Give it a face, a model and a voice.</p>
       </div>
@@ -287,15 +286,13 @@ const faq = [
     <!-- Coming soon -->
     <section class="coming" aria-labelledby="coming-title">
       <div class="wrap">
-        <p class="eyebrow" data-reveal>Coming soon</p>
-        <h2 id="coming-title" class="title" data-reveal>Next in the room.</h2>
+        <h2 id="coming-title" class="title" data-reveal>Coming soon.<br /><span class="soft">Next in the room.</span></h2>
         <ul class="coming-grid">
           {
             coming.map((c, i) => (
               <li data-reveal style={`--d:${i * 80}ms`}>
                 <Bot id={c.bot} mood="curious" size={88} />
                 <div>
-                  <span class="soon">Coming soon</span>
                   <h3>{c.title}</h3>
                   <p>{c.body}</p>
                 </div>
@@ -309,7 +306,6 @@ const faq = [
     <!-- Pricing -->
     <section id="pricing" class="pricing" aria-labelledby="pricing-title">
       <div class="wrap">
-        <p class="eyebrow" data-reveal>Pricing</p>
         <h2 id="pricing-title" class="title" data-reveal>Two ways in.<br /><span class="soft">Both simple.</span></h2>
 
         <div class="plans">
