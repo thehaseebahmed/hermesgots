@@ -42,19 +42,13 @@ const yours = [
   { title: "Open source", body: "MIT licensed. Read it, run it, change it." },
 ]
 
-const superAgent = {
-  bot: "byte",
-  title: "SuperAgent",
-  body: "One bot that watches your other bots, your chats and your repos, and picks up work as it lands, so you oversee one agent instead of five.",
-}
-
 const coming = [
-  { bot: "lovey", title: "Meetings", body: "Hand over a recording. Get back what was decided, what's yours to do and a timeline to check it against." },
-  { bot: "sunny", title: "Calling", body: "Ring a bot and talk it through, or let it ring you when something is waiting on you." },
-  { bot: "pip", title: "iPhone app", body: "Gots as an app on your iPhone, with your chats, pushes and bots in your pocket." },
-  { bot: "bubble", title: "Android assistant", body: "Set Gots as your phone's assistant and ask your bot from anywhere on Android." },
-  { bot: "nova", title: "Your phone's data", body: "Let your bot read your calendar, contacts and health data from your phone, only when you allow it." },
-  { bot: "wink", title: "Raycast extension", body: "Ask your bots and check on their work from Raycast on your Mac." },
+  { bot: "lovey", mood: "love", title: "Meetings", body: "Hand over a recording. Get back what was decided, what's yours to do and a timeline to check it against." },
+  { bot: "sunny", mood: "wave", title: "Calling", body: "Ring a bot and talk it through, or let it ring you when something is waiting on you." },
+  { bot: "pip", mood: "excited", title: "iPhone app", body: "Gots as an app on your iPhone, with your chats, pushes and bots in your pocket." },
+  { bot: "bubble", mood: "sleepy", title: "Android assistant", body: "Set Gots as your phone's assistant and ask your bot from anywhere on Android." },
+  { bot: "nova", mood: "curious", title: "Your phone's data", body: "Let your bot read your calendar, contacts and health data from your phone, only when you allow it." },
+  { bot: "wink", mood: "happy", title: "Raycast extension", body: "Ask your bots and check on their work from Raycast on your Mac." },
 ]
 
 const faq = [
@@ -76,7 +70,7 @@ const faq = [
   },
   {
     q: "Which features are ready?",
-    a: "Chats, coding sessions, research missions, canvases and their LLM Wiki backups, rooms, dictation and routines work today. SuperAgent, meetings, calling, an iPhone app, Gots as your Android assistant, your phone's data and a Raycast extension are coming soon.",
+    a: "Chats, coding sessions, research missions, canvases and their LLM Wiki backups, rooms, dictation and routines work today. Meetings, calling, an iPhone app, Gots as your Android assistant, your phone's data and a Raycast extension are coming soon.",
   },
 ]
 ---
@@ -309,18 +303,11 @@ const faq = [
     <section class="coming" aria-labelledby="coming-title">
       <div class="wrap">
         <h2 id="coming-title" class="title" data-reveal>Coming soon.<br /><span class="soft">Next in the room.</span></h2>
-        <article class="coming-lead" data-reveal>
-          <Bot id={superAgent.bot} mood="curious" size={104} />
-          <div>
-            <h3>{superAgent.title}</h3>
-            <p>{superAgent.body}</p>
-          </div>
-        </article>
         <ul class="coming-grid">
           {
             coming.map((c, i) => (
               <li data-reveal style={`--d:${(i % 3) * 80}ms`}>
-                <Bot id={c.bot} mood="curious" size={64} />
+                <Bot id={c.bot} mood={c.mood} size={64} />
                 <div>
                   <h3>{c.title}</h3>
                   <p>{c.body}</p>

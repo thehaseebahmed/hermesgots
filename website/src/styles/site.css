@@ -1678,32 +1678,14 @@ li:hover > .bot-swap .bot-alt {
 }
 
 /* Coming soon */
-.coming-lead {
-  display: flex;
-  align-items: center;
-  gap: 1.75rem;
-  margin-top: 3.5rem;
-  padding: 2rem;
-  border: 1px dashed var(--line-2);
-  border-radius: var(--radius);
-}
 
-.coming-lead h3 {
-  font-size: 1.625rem;
-}
 
-.coming-lead p {
-  max-width: 40rem;
-  margin-top: 0.5rem;
-  color: var(--muted);
-  font-size: 1.0625rem;
-}
 
 .coming-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1rem;
-  margin: 1rem 0 0;
+  margin: clamp(2.5rem, 5vw, 4rem) 0 0;
   padding: 0;
   list-style: none;
 }
@@ -1735,13 +1717,6 @@ li:hover > .bot-swap .bot-alt {
 @media (max-width: 640px) {
   .coming-grid {
     grid-template-columns: 1fr;
-  }
-
-  .coming-lead {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 1rem;
-    padding: 1.5rem;
   }
 }
 
