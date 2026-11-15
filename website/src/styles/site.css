@@ -19,9 +19,6 @@
   --sky-2: #eef4fe;
   --green: oklch(0.6 0.16 150);
   --green-ink: oklch(0.45 0.13 150);
-  --ai-1: oklch(0.62 0.17 145);
-  --ai-2: oklch(0.66 0.13 175);
-  --ai-3: oklch(0.66 0.17 130);
   --warn: oklch(0.72 0.16 70);
   --bad: oklch(0.62 0.2 25);
   --violet: oklch(0.62 0.2 295);
@@ -65,9 +62,6 @@
     --sky-2: #0a0d15;
     --green: oklch(0.7 0.15 150);
     --green-ink: oklch(0.78 0.13 150);
-    --ai-1: oklch(0.74 0.17 145);
-    --ai-2: oklch(0.78 0.12 180);
-    --ai-3: oklch(0.86 0.17 125);
     --shadow: 0 1px 1px rgb(0 0 0 / 30%), 0 16px 36px -14px rgb(0 0 0 / 70%);
     --shadow-lg: 0 2px 4px rgb(0 0 0 / 30%), 0 40px 90px -24px rgb(0 0 0 / 80%);
     --primary: oklch(0.448 0.119 151.328);
@@ -460,23 +454,75 @@ li:hover > .bot-swap .bot-alt {
   transition-delay: calc(var(--i) * 55ms);
 }
 
-.ht-got {
-  color: var(--green);
+/* Byte stands between the words in the headline's own ink, his visor cut out of it, and his eyes
+   go through a few moods on a loop: a blink, a look round, curiosity, a smile, a doze. */
+.ht-byte svg {
+  display: block;
+  width: 0.98em;
+  height: 0.85em;
+  margin-inline: 0.04em;
+  transform: translateY(0.08em);
+  overflow: visible;
 }
 
-.ht-to .ht-got {
-  background: linear-gradient(100deg, var(--ai-1), var(--ai-2) 45%, var(--ai-3) 75%, var(--ai-1));
-  background-size: 220% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: ht-sheen 7s ease-in-out infinite alternate;
+.hb-body {
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 16;
+  stroke-linejoin: round;
 }
 
-@keyframes ht-sheen {
-  to {
-    background-position: 100% 0;
-  }
+.hb-visor {
+  fill: var(--paper);
+}
+
+.hb-eye {
+  fill: currentColor;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: hb-l 10s ease-in-out infinite;
+}
+
+.hb-r {
+  animation-name: hb-r;
+}
+
+.hb-joy {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 5.5;
+  stroke-linecap: round;
+  opacity: 0;
+  animation: hb-joy 10s ease-in-out infinite;
+}
+
+@keyframes hb-l {
+  0%, 9%, 15%, 20% { transform: none; }
+  12% { transform: scaleY(0.08); }
+  24%, 32% { transform: translateX(10px); }
+  36%, 44% { transform: translateX(-10px); }
+  48%, 56% { transform: translate(-1px, 3px) scale(0.6); }
+  60%, 71% { transform: scaleY(0); }
+  75%, 86% { transform: translateY(5px) scaleY(0.18); }
+  89% { transform: scaleY(0.08); }
+  92%, 100% { transform: none; }
+}
+
+@keyframes hb-r {
+  0%, 9%, 15%, 20% { transform: none; }
+  12% { transform: scaleY(0.08); }
+  24%, 32% { transform: translateX(10px); }
+  36%, 44% { transform: translateX(-10px); }
+  48%, 56% { transform: translate(1px, -2px) scale(1.15); }
+  60%, 71% { transform: scaleY(0); }
+  75%, 86% { transform: translateY(5px) scaleY(0.18); }
+  89% { transform: scaleY(0.08); }
+  92%, 100% { transform: none; }
+}
+
+@keyframes hb-joy {
+  0%, 58%, 73%, 100% { opacity: 0; }
+  61%, 70% { opacity: 1; }
 }
 
 .ht-to .ht-w {
@@ -502,7 +548,8 @@ li:hover > .bot-swap .bot-alt {
   .ht-w {
     transition: none;
   }
-  .ht-to .ht-got {
+  .hb-eye,
+  .hb-joy {
     animation: none;
   }
 }
