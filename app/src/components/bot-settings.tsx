@@ -2,6 +2,7 @@ import { Fragment, useCallback, useEffect, useState, type ReactNode } from "reac
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   AudioLinesIcon,
+  BellIcon,
   BotIcon,
   CodeXmlIcon,
   KeyRoundIcon,
@@ -27,6 +28,7 @@ import { Segmented } from "@/components/segmented"
 import { DictationTab } from "@/components/bot-dictation-tab"
 import { McpsTab } from "@/components/mcps-tab"
 import { SkillsTab } from "@/components/skills-tab"
+import { NTFY_FEATURE, NtfyTab } from "@/components/bot-ntfy-tab"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import {
   Caption,
@@ -133,6 +135,8 @@ const PAGE_META: Record<BotTab, PageMeta> = {
   mcps: { icon: PlugZapIcon, feature: MCP_FEATURES.list },
   skills: { icon: WrenchIcon, feature: SKILL_FEATURES.list },
   delegation: { icon: NetworkIcon, feature: DELEGATION_PAGE },
+  // A bot's ntfy target is its host's: a plugin without the route draws no row.
+  notifications: { icon: BellIcon, feature: NTFY_FEATURE },
 }
 
 /** The pages a plugin can withhold, by the segment naming them: the rest are always there. */
@@ -447,6 +451,8 @@ const PAGE_BODIES: Record<BotTab, (page: PageBody) => ReactNode> = {
       sub={sub}
       close={close}
     />
+  ),  notifications: ({ profile, sub, close, large }) => (
+    <NtfyTab key={`${profile.id}:ntfy`} profile={profile} sub={sub} close={close} large={large} />
   ),
 }
 

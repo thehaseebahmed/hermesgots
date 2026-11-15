@@ -1,14 +1,30 @@
 /**
- * The Settings row that hands its platform the notification switches: on the web it is the way into
- * the app's own list of types, and it goes away while notifications are off, since there is nothing
- * to switch then.
+ * The web's one notification entry: it is there whether notifications are on or off, since the
+ * switch itself is behind it, and its screen carries the app's own list of types once they are on.
+ * A browser has one transport, so there is nothing to pick.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
 
-import { NOTIFICATION_SETTINGS, NotificationSettingsRow, SettingsPage } from "@/routes/settings"
-import { Path, click, find, findText, mount, path, seedSettings, text } from "./component-kit.tsx"
+import {
+  NOTIFICATIONS,
+  NotificationsRow,
+  NotificationsSettings,
+  SettingsPage,
+} from "@/routes/settings"
+import {
+  Path,
+  click,
+  find,
+  findAll,
+  findText,
+  missing,
+  mount,
+  path,
+  seedSettings,
+  wordsOf,
+} from "./component-kit.tsx"
 
 /** A browser that can take push: the jsdom the suite runs in has neither notifications nor push. */
 function pushCapable() {
@@ -32,38 +48,51 @@ const push = (on: boolean) => ({
 const settingsRow = (
   <MemoryRouter initialEntries={["/settings"]}>
     <Routes>
-      <Route path="/settings" element={<NotificationSettingsRow />} />
+      <Route path="/settings" element={<NotificationsRow />} />
       <Route path="/settings/notifications" element={<Path />} />
     </Routes>
   </MemoryRouter>
 )
 
-test("the web's row opens the app's list of types", async () => {
+test("the web's entry opens the one notifications screen", async () => {
   pushCapable()
   await seedSettings(push(true))
   await mount(settingsRow, async () => {
+    assert.equal(findAll("a").length, 1, "one entry, not a switch and a row")
+    assert.equal(wordsOf(find("a")), "NotificationsOn", "one transport, so it names none")
     await click(find('a[href="/settings/notifications"]'))
-    assert.equal(path(), "/settings/notifications", "the row opens the app's own list")
+    assert.equal(path(), "/settings/notifications")
   })
 })
 
-test("off, the web's row is not there at all", async () => {
+test("off, the entry is still there: the switch is behind it", async () => {
   pushCapable()
   await seedSettings(push(false))
   await mount(settingsRow, async () => {
-    assert.equal(
-      text().includes(NOTIFICATION_SETTINGS),
-      false,
-      "with notifications off the row hides, as it did before",
-    )
+    assert.equal(wordsOf(find('a[href="/settings/notifications"]')), "NotificationsOff")
+  })
+  await mount(<NotificationsSettings />, async () => {
+    assert.ok(find("#notifications"), "the switch that turns them on")
+    assert.ok(missing("[data-notification-types]"), "and no types to switch while they are off")
+    assert.ok(missing("[data-transport]"), "a browser has one transport: nothing to pick")
   })
 })
 
-test("the row and the screen it opens carry one name", async () => {
+test("on, the screen carries the app's own list of types", async () => {
+  pushCapable()
+  await seedSettings(push(true))
+  await mount(<NotificationsSettings />, async () => {
+    assert.ok(find("[data-notification-types]"), "the web has no channels: this list is the switch")
+    assert.ok(find("#push-chat_input"))
+    assert.ok(!findText("button", "Android notification settings"), "no phone screen on the web")
+  })
+})
+
+test("the entry and the screen it opens carry one name", async () => {
   pushCapable()
   await seedSettings(push(true))
   await mount(settingsRow, async () => {
-    assert.ok(findText("a", NOTIFICATION_SETTINGS), "the row is called what its screen is called")
+    assert.ok(findText("a", NOTIFICATIONS), "the entry is called what its screen is called")
   })
   await mount(
     <MemoryRouter initialEntries={["/settings/notifications"]}>
@@ -74,7 +103,7 @@ test("the row and the screen it opens carry one name", async () => {
     async () => {
       assert.equal(
         document.querySelector("h1")?.textContent,
-        NOTIFICATION_SETTINGS,
+        NOTIFICATIONS,
         "and the screen's own title is that same name",
       )
     },

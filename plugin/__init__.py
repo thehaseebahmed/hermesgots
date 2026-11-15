@@ -73,6 +73,7 @@ from . import (
     speech_probe,
     sessions,
     skill_catalog,
+    ntfy,
     push,
     ship,
     stream,
@@ -661,6 +662,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "merge_resolve",
                     "events",
                     "push",
+                    "push_ntfy",
                     "host_model",
                     "fallbacks",
                     "delegation_model",
@@ -2379,6 +2381,40 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             await asyncio.to_thread(push.set_bot, store_path(), character)
         return web.json_response({"object": "gots.push", "muted": muted})
 
+    async def push_ntfy_read(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        device = request.query.get("device") or None
+        return web.json_response(
+            ntfy.public(await asyncio.to_thread(ntfy.held, store_path()), device)
+        )
+
+    async def push_ntfy_write(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        try:
+            held = await asyncio.to_thread(ntfy.set_target, store_path(), body)
+        except push.PushError as exc:
+            return _error(web, str(exc), 400)
+        return web.json_response(ntfy.public(held))
+
+    async def push_ntfy_remove(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        device = body.get("device") if body else None
+        if device is not None and not isinstance(device, str):
+            return _error(web, "Not a device", 400)
+        return web.json_response(
+            ntfy.public(await asyncio.to_thread(ntfy.remove, store_path(), device))
+        )
+
     async def push_unsubscribe(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -2735,6 +2771,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/push", push_subscribe)
     app.router.add_post(f"{PREFIX}/push/remove", push_unsubscribe)
     app.router.add_post(f"{PREFIX}/push/mute", push_mute)
+    app.router.add_get(f"{PREFIX}/push/ntfy", push_ntfy_read)
+    app.router.add_post(f"{PREFIX}/push/ntfy", push_ntfy_write)
+    app.router.add_post(f"{PREFIX}/push/ntfy/remove", push_ntfy_remove)
     app.router.add_post(f"{PREFIX}/runs/{{run_id}}/clarify", answer_clarify)
     async def get_speech(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)

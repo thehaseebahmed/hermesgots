@@ -153,12 +153,15 @@ export function useHeaderAction(key: string, action: ReactNode) {
   }, [publish, key])
 }
 
-/** The rounded card list with hairline separators the Settings rows sit in. */
+/**
+ * The rounded card list with hairline separators the Settings rows sit in. A group whose rows are
+ * all left out draws nothing, rather than an empty card.
+ */
 export function Group({ children }: { children: ReactNode }) {
   return (
     <div
       data-settings-group
-      className="flex flex-col gap-px overflow-hidden rounded-3xl bg-border ring-1 ring-foreground/10 *:rounded-none"
+      className="flex flex-col gap-px overflow-hidden rounded-3xl bg-border ring-1 ring-foreground/10 *:rounded-none empty:hidden"
     >
       {children}
     </div>

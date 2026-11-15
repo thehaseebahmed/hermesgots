@@ -27,6 +27,14 @@
                 <data android:scheme="gots" android:host="auth" />
             </intent-filter>
 
+            <!-- A tap on an ntfy notification: the ntfy app opens the link the plugin published. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="gots" android:host="open" />
+            </intent-filter>
+
             <!-- Text, links and any file shared from other apps open the share screen. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

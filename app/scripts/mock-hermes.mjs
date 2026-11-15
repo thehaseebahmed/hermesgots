@@ -3480,6 +3480,10 @@ const ROOT_RUN_IDS = process.env.MOCK_RUNS_LIVE_ROOT_IDS !== "0"
 // The plugin's change stream: one log per profile (the "" key is the default one). Runs and sessions
 // belong to no profile here, so they go to every log.
 const pushSubscriptions = new Map()
+/** The ntfy topic the app wrote, as `plugin/ntfy.py` keeps one per profile. */
+let ntfyTarget
+/** Hermes's own ntfy variables for the profile, which the plugin reads and writes. */
+const ntfyEnv = {}
 // The main model the plugin's `model` route set, per profile ("" is the default one).
 const hostModels = new Map()
 const REMINDER_LEVELS = ["off", "quiet", "normal", "chatty"]
@@ -4238,6 +4242,7 @@ http
           "merge_resolve",
           ...(EVENTS ? ["events"] : []),
           "push",
+          "push_ntfy",
           "host_model",
           "fallbacks",
           "delegation_model",
@@ -4707,6 +4712,48 @@ http
       }
       pushSubscriptions.set(subscription.endpoint, { device, categories })
       return json(res, 200, { object: "gots.push", subscribed: true })
+    }
+    // ntfy: the mock keeps the bot's topic and stands in for Hermes's own NTFY_SERVER_URL and
+    // NTFY_TOKEN, and publishes nothing (plugin/ntfy.py).
+    if (PLUGIN && !profile && url.pathname.startsWith("/api/plugins/gots/push/ntfy")) {
+      const held = ntfyTarget ?? { devices: [] }
+      const shown = (phone) => ({
+        object: "gots.push_ntfy",
+        configured: Boolean(held.topic && ntfyEnv.NTFY_TOKEN),
+        server: (ntfyEnv.NTFY_SERVER_URL || "https://ntfy.sh").replace(/\/+$/, ""),
+        server_set: Boolean(ntfyEnv.NTFY_SERVER_URL),
+        topic: held.topic ?? null,
+        token_set: Boolean(ntfyEnv.NTFY_TOKEN),
+        categories: held.categories ?? null,
+        devices: held.devices.length,
+        joined: Boolean(phone && held.devices.includes(phone)),
+      })
+      if (req.method === "GET") return json(res, 200, shown(url.searchParams.get("device")))
+      const body = await readBody(req)
+      if (url.pathname.endsWith("/remove")) {
+        if (!body.device) ntfyTarget = undefined
+        else if (ntfyTarget)
+          ntfyTarget = { ...held, devices: held.devices.filter((d) => d !== body.device) }
+        return json(res, 200, shown())
+      }
+      const refuse = (message) => json(res, 400, { error: { message } })
+      const next = { ...held }
+      if (body.topic !== undefined) {
+        if (!/^[-_A-Za-z0-9]{1,64}$/.test(String(body.topic))) return refuse("Not an ntfy topic.")
+        next.topic = body.topic
+      }
+      if (body.server !== undefined && body.server !== "") {
+        const server = String(body.server).replace(/\/+$/, "")
+        if (!/^https?:\/\/[^/?#@]+/.test(server)) return refuse("Not an ntfy server address.")
+      }
+      if (body.device && !(next.topic && (body.token || ntfyEnv.NTFY_TOKEN)))
+        return refuse("Set this bot's ntfy topic and Hermes's ntfy token first.")
+      if (body.server !== undefined) ntfyEnv.NTFY_SERVER_URL = String(body.server).replace(/\/+$/, "")
+      if (body.token != null) ntfyEnv.NTFY_TOKEN = body.token
+      if (body.categories) next.categories = body.categories
+      if (body.device) next.devices = [...next.devices.filter((d) => d !== body.device), body.device]
+      ntfyTarget = next
+      return json(res, 200, shown(body.device))
     }
     if (
       PLUGIN &&

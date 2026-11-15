@@ -234,6 +234,19 @@ export function pushPath(kind: unknown, id: unknown) {
   return typeof id === "string" && id ? `/s/${encodeURIComponent(id)}` : null
 }
 
+/**
+ * Where a link an ntfy notification carries goes: `gots://open?kind=&id=`, which the plugin writes
+ * (`click` in `plugin/ntfy.py`) and the Android app is registered for. The link names the kind and
+ * the id and never a route, so the screen is decided here, by the rule every other tap goes by.
+ */
+export function linkedPush(url: string) {
+  // Read by hand: a WebView's `URL` gave a scheme it doesn't know no host before Chrome 130.
+  const match = /^gots:\/\/open\/?\?([^#]*)/.exec(url)
+  if (!match) return null
+  const named = new URLSearchParams(match[1])
+  return pushPath(named.get("kind"), named.get("id"))
+}
+
 /** The Hermes session a tapped notification names, when it names one. */
 export function pushedSession(path: string) {
   const match = /^\/s\/([^/?#]+)$/.exec(path)

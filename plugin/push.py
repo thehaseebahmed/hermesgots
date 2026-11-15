@@ -45,7 +45,7 @@ from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-from . import link
+from . import link, ntfy
 from .store import connect, current_path, home_of
 
 logger = logging.getLogger(__name__)
@@ -387,7 +387,8 @@ def _relay(path: Path, kind: str, category: str, session_id: str, extra: Dict[st
                     "kind": kind,
                     "category": category,
                     "session_id": session_id,
-                    "skip": _on_screen_devices(path)[:50],
+                    # A device that chose ntfy is told there, so a token it left on file stays quiet.
+                    "skip": list(dict.fromkeys(_on_screen_devices(path) + ntfy.devices(path)))[:50],
                     # Android shows no bot picture, so the registry isn't told which bot it is.
                     **{k: v for k, v in extra.items() if k != "bot"},
                 },
@@ -406,8 +407,9 @@ def _relay(path: Path, kind: str, category: str, session_id: str, extra: Dict[st
 
 
 def reachable(path: Path) -> bool:
-    """Whether any device could be told: a browser subscription, or a link to the registry."""
-    return bool(_rows(path)) or _linked(path)
+    """Whether any device could be told: a browser subscription, an ntfy topic, or a link to the
+    registry."""
+    return bool(_rows(path)) or ntfy.target(path) is not None or _linked(path)
 
 
 def _linked(path: Path) -> bool:
@@ -429,6 +431,10 @@ def _deliver(path: Path, kind: str, category: str, session_id: str, extra: Optio
             unsubscribe(path, row["endpoint"])
         elif status is None or status >= 300:
             logger.debug("gots: push to %s answered %s", urllib.parse.urlsplit(row["endpoint"]).netloc, status)
+    try:
+        ntfy.deliver(path, kind, category, session_id, extra, _on_screen_devices(path))
+    except Exception:
+        logger.debug("gots: an ntfy publish failed", exc_info=True)
     _relay(path, kind, category, session_id, extra)
 
 

@@ -32,6 +32,7 @@ import { ask, sawFrame, sawWords, sent, sentFrom } from "@/lib/net-watch"
 import type { Fingerprint, Totals } from "@/lib/dictation-log"
 import { promptEntry } from "@/lib/run-prompt"
 import type { CronSchedule } from "@/lib/schedule"
+import type { NtfyState } from "@/lib/push-transport"
 import { readStt, type SttValue } from "@/lib/stt-settings"
 import { readGeneral } from "@/lib/general-settings"
 import { readLlmProviders, type LlmEndpointBody } from "@/lib/llm-providers"
@@ -2877,6 +2878,54 @@ export async function unregisterPush(config: HermesConfig, endpoint: string) {
     method: "POST",
     headers: headers(config),
     body: JSON.stringify({ endpoint }),
+  })
+}
+
+/** Where a bot publishes its news over ntfy, as the app writes it (`plugin/ntfy.py`). */
+export interface NtfyRegistration {
+  /** Each value is written only where named: a target is edited a field at a time. */
+  server?: string
+  topic?: string
+  /** Left out where the host already holds one for this server and topic: it is never read back. */
+  token?: string
+  /** This device, so no other transport tells it the same news; left out to write the target alone. */
+  device?: string
+  categories?: string[]
+  /** Each category's importance, which ntfy carries as the message's priority. */
+  priorities?: Record<string, number>
+}
+
+/** Where a bot's host publishes, and whether this phone is one it publishes to; the token never comes back. */
+export async function getNtfy(config: HermesConfig, device?: string): Promise<NtfyState> {
+  const query = device ? `?device=${encodeURIComponent(device)}` : ""
+  const response = await request(`${pluginRoot(config.baseUrl)}/push/ntfy${query}`, {
+    headers: headers(config),
+    signal: AbortSignal.timeout(READ_TIMEOUT_MS),
+  })
+  return (await response.json()) as NtfyState
+}
+
+/** Hands a bot's plugin its ntfy target. A plugin without the route refuses with a 404. */
+export async function registerNtfy(
+  config: HermesConfig,
+  registration: NtfyRegistration,
+): Promise<NtfyState> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/push/ntfy`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify(registration),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return (await response.json()) as NtfyState
+}
+
+/** This device stops getting a bot's news over ntfy; with no device named, the bot's target is cleared. */
+export async function unregisterNtfy(config: HermesConfig, device?: string) {
+  await request(`${pluginRoot(config.baseUrl)}/push/ntfy/remove`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ device }),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
   })
 }
 
