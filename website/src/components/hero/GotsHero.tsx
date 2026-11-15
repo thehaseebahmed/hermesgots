@@ -8,7 +8,6 @@ import {
   FolderOpen,
   Frame,
   History,
-  Menu,
   MessageCircle,
   MessageCircleQuestion,
   Mic,
@@ -321,14 +320,11 @@ function GotsPhone({ s }: { s: S }) {
     <div className="gh-app">
       <div className="gh-app__bar">
         <span className="gh-round">
-          <Menu size={20} />
+          <ArrowLeft size={20} />
         </span>
         <img src={nova} alt="" className="gh-app__face" />
         <span className="gh-app__title">
           <States align="start" value={s.asked ? 'asked' : 'new'} states={{ new: 'New chat', asked: TITLE }} />
-        </span>
-        <span className="gh-round">
-          <ArrowLeft size={20} />
         </span>
       </div>
       <div className="gh-app__thread">
@@ -479,10 +475,10 @@ function Chat({ s }: { s: S }) {
   return (
     <div className="gh-chat">
       <div className="gh-chat__head">
-        <span className="gh-chat__title">{TITLE}</span>
         <span className="gh-round gh-round--line">
           <ArrowLeft size={16} />
         </span>
+        <span className="gh-chat__title">{TITLE}</span>
       </div>
       <div className="gh-chat__thread">
         <div className="gh-mine">
