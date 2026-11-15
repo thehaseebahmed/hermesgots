@@ -54,7 +54,7 @@ const coming = [
 const faq = [
   {
     q: "Do I need a Hermes host?",
-    a: "Yes. Gots is the app for a Hermes agent, and the agent runs on a machine you control. That's true on both plans. Free means running your own copy of Gots too, where sync and notifications need your own Netlify site and Firebase project. Connected is Gots run for you, with both ready to go, and it's on the waiting list.",
+    a: "Yes. Gots is the app for a Hermes agent, and the agent runs on a machine you control. That's true on both plans. Free means running your own copy of Gots too, with notifications through ntfy and cross-device sync only after extra setup. Connected is Gots run for you, with sync and push notifications ready to go, and it's on the waiting list.",
   },
   {
     q: "Where does it run?",
@@ -322,7 +322,7 @@ const faq = [
     <!-- Pricing -->
     <section id="pricing" class="pricing" aria-labelledby="pricing-title">
       <div class="wrap">
-        <h2 id="pricing-title" class="title" data-reveal>One app, two plans.<br /><span class="soft">Only sync and notifications differ.</span></h2>
+        <h2 id="pricing-title" class="title" data-reveal>One app, two plans.<br /><span class="soft">Sync is the difference.</span></h2>
 
         <div class="plans">
           <article class="plan" data-reveal>
@@ -332,9 +332,9 @@ const faq = [
             <ul class="ticks">
               <li>Every feature in the app</li>
               <li>Your chats, runs and keys stay on your host</li>
+              <li>Notifications through ntfy</li>
               <li>Open source, MIT licensed</li>
-              <li class="no">Sync only with your own Netlify site</li>
-              <li class="no">Notifications only with your own Firebase project</li>
+              <li class="no">Cross-device sync (requires extra setup)</li>
             </ul>
             <a class="btn btn-glass btn-block" href="https://github.com/thehaseebahmed/hermesgots" rel="noreferrer"><GitHub /> Get it on GitHub</a>
           </article>
@@ -346,8 +346,8 @@ const faq = [
             <p class="price price-word">Waiting list</p>
             <ul class="ticks">
               <li>Everything in Free</li>
-              <li>End-to-end encrypted sync across your phone, tablet and laptop, ready to go</li>
-              <li>Push notifications when a bot needs you, with nothing to set up</li>
+              <li>Cross-device sync, ready to go</li>
+              <li>Push notifications, nothing to set up</li>
             </ul>
             <form class="waitlist" name="waitlist" method="POST" action="/" data-netlify="true" netlify-honeypot="bot-field" data-waitlist>
               <input type="hidden" name="form-name" value="waitlist" />
