@@ -305,10 +305,23 @@ export interface Conversation {
   /** Its pushes are muted. Synced through the chat list, which is where the plugin reads it. */
   muted?: boolean
   /**
-   * Held above the Code list's status groups (ADR 0103). Synced through the chat record; a session
-   * that is not pinned carries no field.
+   * Held above the Code list's status groups (ADR 0103), and at the top of a bot's own list, in the
+   * order `pinnedAt` gives. Synced through the chat record; a session that is not pinned carries no
+   * field.
    */
   pinned?: boolean
+  /**
+   * When the reader pinned it, which is the order the pinned group is drawn in — the earliest pin on
+   * top, the last at its bottom. Synced beside `pinned`; a pin written before the app kept a clock
+   * carries none and reads as the earliest, so nothing stored is migrated to gain one.
+   */
+  pinnedAt?: number
+  /**
+   * Archived by the reader: out of every pill but Archived, and out of every band, count and search
+   * until it is unarchived. Synced like `pinned`, and archiving takes the pin with it in the same
+   * write, so no pin is left behind the pill where no list could turn it off (`chat-marks.ts`).
+   */
+  archived?: boolean
   /** The bot's Main thread: its permanent chat, which can't be deleted or discarded. Synced. */
   main?: boolean
   /** Permission mode. The plugin holds it live; the user's saved pick also travels in the chat record. */

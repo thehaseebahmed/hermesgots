@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { BellOffIcon } from "lucide-react"
+import { ArchiveIcon, BellOffIcon, PinIcon } from "lucide-react"
 
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
@@ -10,8 +10,12 @@ import {
   fieldInnerClass,
   fieldLabelClass,
 } from "@/components/settings-chrome"
+import { Button } from "@/components/ui/button"
 import { InputGroup, InputGroupInput } from "@/components/ui/input-group"
+import { pinSwitchOf } from "@/lib/chat-list"
+import { setArchived, setPinned, usePinsInList } from "@/lib/chat-marks"
 import { deleteConversation, updateConversation, type Conversation } from "@/lib/db"
+import { useLegacyChat } from "@/lib/legacy-chat"
 import { setThreadMuted } from "@/lib/push"
 import { stopMessage } from "@/lib/chat"
 
@@ -40,25 +44,37 @@ export function ChatTitlePress({ title, open }: { title: string; open: boolean }
  * A chat's bar carries no `…` and no way to its bot's list — the list is where a conversation is
  * reached from, and back is how it is left (ADR 0153). What the menu that stood there held is this
  * sheet, as the rows the app's settings screens are drawn with: the name is typed where it is shown,
- * the mute is a switch in a card of its own, and the delete is the same confirmation the menu opened,
- * asked in the same words.
+ * the mute and the pin are the switches of one card, the archive is the outline above the delete, and
+ * the delete is the same confirmation the menu opened, asked in the same words.
  *
  * Everything here is the conversation's: a project session keeps its `…`, whose resolve, discard and
  * delete are not a chat's settings, and the bot's own mute and delete stay on its settings page.
  */
 export function ChatSettings({
   chat,
+  profileId,
   open,
   onOpenChange,
   onDeleted,
 }: {
   chat: Conversation
+  /**
+   * The bot's list the pin cap is counted over: the profile this chat is a row of. The route passes it
+   * rather than the record naming it, since a room lists in every bot its roster seats and the cap is
+   * counted per list (`chat-marks.ts`).
+   */
+  profileId: string
   open: boolean
   onOpenChange: (open: boolean) => void
   /** Where to go once the chat is gone. */
   onDeleted: () => void
 }) {
   const [deleting, setDeleting] = useState(false)
+  const pins = usePinsInList(profileId)
+  const pin = pinSwitchOf({ pinned: Boolean(chat.pinned) }, pins ?? [])
+  // The Archived pill is the only way back to an archived row, and the legacy bands hold none: the
+  // layout the pill belongs to is the one this sheet is drawn in, so the control waits for it.
+  const archivesHere = useLegacyChat() === false
   // The field holds what is being typed, and the record what was last written: an edit abandoned or
   // refused leaves the name as it was.
   const [name, setName] = useState(chat.title)
@@ -112,10 +128,34 @@ export function ChatSettings({
                 checked={Boolean(chat.muted)}
                 onCheckedChange={(checked) => void setThreadMuted(chat.id, checked)}
               />
+              <SwitchRow
+                id="chat-pin"
+                data-chat-pin
+                icon={PinIcon}
+                title="Pin"
+                subtitle={pin.subtitle}
+                checked={pin.checked}
+                disabled={pin.disabled}
+                onCheckedChange={(checked) => void setPinned(chat.id, checked)}
+              />
             </Group>
-            {!chat.main && (
-              <DestructiveButton onClick={() => setDeleting(true)}>Delete chat</DestructiveButton>
-            )}
+            <div className="flex flex-col gap-2">
+              {archivesHere && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  data-chat-archive
+                  className="h-11 rounded-full"
+                  onClick={() => void setArchived(chat.id, !chat.archived)}
+                >
+                  <ArchiveIcon data-icon="inline-start" />
+                  {chat.archived ? "Unarchive" : "Archive"}
+                </Button>
+              )}
+              {!chat.main && (
+                <DestructiveButton onClick={() => setDeleting(true)}>Delete chat</DestructiveButton>
+              )}
+            </div>
           </div>
         </PopupContent>
       </Popup>

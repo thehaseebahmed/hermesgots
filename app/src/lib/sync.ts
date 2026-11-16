@@ -112,6 +112,10 @@ const CHAT_FIELDS = [
   "modelChoice",
   "muted",
   "pinned",
+  // The reader's marks on a row of a bot's own list: when the pin was made, which is its place in the
+  // pinned group, and whether it is archived out of the list (`chat-marks.ts` is the only writer).
+  "pinnedAt",
+  "archived",
   "main",
   "room",
   "canvasId",

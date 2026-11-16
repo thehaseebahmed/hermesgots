@@ -499,6 +499,7 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
           {editable && (
             <ChatSettings
               chat={chat}
+              profileId={chat.profileId}
               open={settingsOpen}
               onOpenChange={setSettingsOpen}
               onDeleted={() => root("/")}
@@ -1359,6 +1360,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
       {editable && conversation && (
         <ChatSettings
           chat={conversation}
+          profileId={conversation.profileId}
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
           onDeleted={() => root("/")}
