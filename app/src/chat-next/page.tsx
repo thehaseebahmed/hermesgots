@@ -1523,6 +1523,7 @@ export function ChatNextThread({
     streaming.current = true
     const drawn = {
       type: "sent" as const,
+      send: id,
       user: asked.user,
       ...(retry ? { retry: true } : {}),
       ...(asked.points?.length ? { points: asked.points } : {}),
@@ -1539,7 +1540,7 @@ export function ChatNextThread({
     try {
       prepared = prepareTurn ? await prepareTurn(words, attachments, at) : undefined
       saved = prepared?.sent.map(sentFileOf) ?? []
-      if (!resend && saved.length) dispatch({ type: "saved", at, files: saved })
+      if (!resend && saved.length) dispatch({ type: "saved", send: id, files: saved })
       const posting = {
         signal: alive.current.signal,
         timeoutMs: sendTimeoutMs(away, READ_TIMEOUT_MS),

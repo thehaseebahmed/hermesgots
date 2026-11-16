@@ -74,6 +74,8 @@ export interface SentFile {
 export interface Turn {
   /** The id of the row that opened the turn, where the transcript has it. */
   row?: number
+  /** The send that drew this turn, while this device still draws it; a transcript's copy has none. */
+  sendId?: string
   user: string
   /** When the turn began, in ms: its request's row, or else the row that opened it. */
   at?: number

@@ -133,6 +133,8 @@ export type ThreadEvent =
   | {
       type: "sent"
       user: string
+      /** The send's own id, which is what a `saved` names to find the message it belongs to. */
+      send?: string
       files?: SentFile[]
       /** The elements of a canvas's page the message points at. */
       points?: CanvasPoint[]
@@ -154,8 +156,8 @@ export type ThreadEvent =
     }
   /** A message that didn't go is taken back: it leaves the thread for good. */
   | { type: "cancelled"; id: string }
-  /** The files a send carried, as the host saved them, onto the message drawn when it went. */
-  | { type: "saved"; at: number; files: SentFile[] }
+  /** The files a send carried, as the host saved them, onto the message that send drew. */
+  | { type: "saved"; send: string; files: SentFile[] }
   /**
    * A steer the host took: it stands in the reply at once, rather than waiting for the transcript's
    * row, which the host writes only when the run reads the steer.
@@ -805,6 +807,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         live: {
           turn: {
             user: event.user,
+            ...(event.send ? { sendId: event.send } : {}),
             ...(event.retry ? { retry: true } : {}),
             ...(event.at !== undefined ? { at: event.at, timing: { startedAt: event.at } } : {}),
             ...(event.files?.length ? { files: event.files } : {}),
@@ -820,7 +823,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
     case "saved": {
       if (!event.files.length) return state
       const live = state.live
-      if (!live || live.turn.at !== event.at) return state
+      if (!live || live.turn.sendId !== event.send) return state
       if (equal(live.turn.files, event.files)) return state
       return { ...state, live: { ...live, turn: { ...live.turn, files: event.files } } }
     }
