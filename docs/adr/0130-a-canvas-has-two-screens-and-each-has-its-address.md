@@ -33,10 +33,10 @@ would land on the page and be sent to Edit again.
 Back is what the addresses are for, and both screens answer it the same way: each guard steps back to
 whatever opened the screen, as a list's own child does, and a press with nothing behind it is left to
 the app, which arms its exit. Flipping to the preview replaces the edit entry: the page stands where
-the chat stood, so back from either screen leaves the canvas for the list rather than ping-ponging
-between them. The version decides when the `Preview` corner is drawn: absent while the bot is
-building, present from the first version, from the same live read the frame is drawn from, so nothing
-has to be reloaded to see it.
+the chat stood, so back from either screen leaves the canvas rather than ping-ponging between them.
+The version decides when the `Preview` corner is drawn: absent while the bot is building, present from
+the first version, from the same live read the frame is drawn from, so nothing has to be reloaded to
+see it.
 
 The list's create opens the canvas's own address and lets that one rule decide the screen: a canvas the
 bot has not finished has a session to read and no page to look at, so a phone forwards to the edit
