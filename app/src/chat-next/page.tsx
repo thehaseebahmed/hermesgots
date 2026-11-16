@@ -918,8 +918,10 @@ export function ChatNextThread({
   const wants = useRef({ agents: true, queue: true })
   // Whether this host keeps what its last failed run ended with (failures.py, ADR 0157). Asked until
   // the host answers "no": a plugin from before the route is what the answer saves a request on, and
-  // the open's own read must not wait for it.
-  const hostKeepsFailures =
+  // the open's own read must not wait for it. Held in a ref, like `wants`: the answer landing must
+  // not rebuild the read that asks, which would restart the page's timer and read the rows again.
+  const keepsFailures = useRef(true)
+  keepsFailures.current =
     usePluginFeature({ baseUrl: server ?? "", apiKey: key ?? "" }, "failed_turn_reason") !== "no"
   const catchUp = useCallback(
     async function read(final = false, whole = true): Promise<void> {
@@ -957,7 +959,7 @@ export function ChatNextThread({
           // — this one opened later, or another — reads the reason rather than the notice the
           // transcript holds. Asked on the open and again after a turn, which is where one lands.
           const failing =
-            whole && hostKeepsFailures
+            whole && keepsFailures.current
               ? readSessionFailure({ server, key }, session, alive.current.signal)
               : undefined
           // A turn's end reads the whole transcript: rows older than the ones that join what is held
@@ -1018,7 +1020,7 @@ export function ChatNextThread({
       queued.current = null
       if (next) await read(next.final, next.whole)
     },
-    [server, key, session, dispatch, store, stopOlder, readOlder, landed, hostKeepsFailures],
+    [server, key, session, dispatch, store, stopOlder, readOlder, landed],
   )
 
   /** How many of the thread's turns the user asked, as the app counts a chat's turns. */
