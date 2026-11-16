@@ -2,6 +2,8 @@
 
 **Supersedes [ADR 0121](0121-a-rooms-pin-is-the-devices-because-the-record-has-none.md).**
 
+Its number is shared with [a failed turn's reason being the run's](0157-a-failed-turns-reason-is-the-runs-not-the-notices.md), written the same week on another branch: two records, one number, as the folder already carries elsewhere.
+
 ADR 0121 made a room's pin this device's alone, because the Host's room record carries a name, a
 roster and a clock and nothing else, and inventing a `pinned` on the Host's object would be a second
 truth. That was right about the Host and wrong about the reader: a room pinned on a phone was
