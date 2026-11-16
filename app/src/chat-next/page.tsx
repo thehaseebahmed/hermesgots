@@ -87,6 +87,7 @@ import {
   requestOf,
   sentFileOf,
   type Row,
+  type SentFile,
   type ToolCall,
   type Turn,
 } from "./fold"
@@ -1533,11 +1534,12 @@ export function ChatNextThread({
     // again leaves it exactly where it was (ADR 0071).
     if (!resend) dispatch(drawn)
     let prepared: PreparedTurn | undefined
+    let saved: SentFile[] = []
     let run: string
     try {
       prepared = prepareTurn ? await prepareTurn(words, attachments, at) : undefined
-      if (!resend && prepared)
-        dispatch({ type: "saved", at, files: prepared.sent.map(sentFileOf) })
+      saved = prepared?.sent.map(sentFileOf) ?? []
+      if (!resend && saved.length) dispatch({ type: "saved", at, files: saved })
       const posting = {
         signal: alive.current.signal,
         timeoutMs: sendTimeoutMs(away, READ_TIMEOUT_MS),
@@ -1583,7 +1585,7 @@ export function ChatNextThread({
     if (resend)
       dispatch({
         ...drawn,
-        ...(prepared && attachments.length ? { files: prepared.sent.map(sentFileOf) } : {}),
+        ...(saved.length ? { files: saved } : {}),
         replaces: resend.id,
       })
     prepared?.settled(true)
