@@ -19,24 +19,22 @@ import {
   sendPress,
   settle,
   type,
+  until,
 } from "./component-kit.tsx"
 
 const bot = botProfile("hermes")
 const id = "c-sent-photo"
 const pick = { provider: "anthropic", model: "claude-sonnet-5-5" }
+// The screen polls at its own pace, so the wait is the kit's; the budget stays this screen's, as
+// every other chat-next test reads it.
+const SOON = 6_000
 
 /** The photo's cell in a message, as the thread draws one: the button a tap opens it from. */
 const cell = () => find('[data-chat-next] button[aria-label="Open photo.png"]')
 
-/** Waits on the screen as a person would: the real screen polls at its real pace, so up to 6s. */
-async function until(check: () => boolean | Promise<boolean>, what: string) {
-  const by = Date.now() + 6_000
-  while (!(await check()) && Date.now() < by) {
-    await settle()
-    await act(async () => new Promise((resolve) => setTimeout(resolve, 25)))
-  }
-  assert.ok(await check(), what)
-}
+/** What that cell's picture draws from: the URL the host signed, or the bytes this device held. */
+const signed = () =>
+  cell()?.querySelector("img")?.getAttribute("src") ?? ""
 
 /** Attaches a photo the way a paste does, without sending: the composer's own intake. */
 async function pastePhoto() {
@@ -65,19 +63,27 @@ test("a photo sent with a message draws while the host's transcript is still out
   // the send drew is the thread's only copy of the message, as it is for a chat's first turn.
   const transcript = host.hold(0)
   await mount(chatScreen(id), async () => {
-    await until(() => Boolean(composerField()), "the app's composer is drawn")
+    await until(async () => Boolean(composerField()), "the app's composer is drawn", SOON)
     await pastePhoto()
     await type(composerField(), "what is in this photo?")
     await sendPress()
-    await until(() => host.saved.length > 0, "the host to save the photo")
+    await until(async () => host.saved.length > 0, "the host to save the photo", SOON)
     assert.equal(host.saved[0].name, "photo.png", "the file the message carried")
+    assert.equal(host.saved[0].size, 24, "with the bytes it was sent with")
     await until(
-      () => cell() !== null,
+      async () => cell() !== null,
       "the photo's cell on the message, before the host's transcript names the turn",
+      SOON,
     )
-    // The host's own copy of the turn, which carries the same path, draws it too.
-    transcript.release()
-    await until(() => host.offsets.length > 0, "the transcript's read to be answered")
-    await until(() => cell() !== null, "the photo's cell once the transcript landed")
+    // The cell draws from the path the host answered — a URL it signs — and not from bytes this
+    // device held, which is what the drawn message was missing. The transcript's own copy is out of
+    // reach here: the page's read went out before the turn existed, so a host answering it late
+    // answers it with nothing.
+    const path = host.saved[0].path
+    await until(
+      async () => signed().includes(encodeURIComponent(path)),
+      "the photo's cell to draw from the path the host saved it at",
+      SOON,
+    )
   })
 })

@@ -2,6 +2,7 @@ import { sameSummaryRows, type SummaryRows } from "@/lib/compaction-seam"
 import { questionsAround } from "@/lib/clarify-questions"
 import { clarifyAnswered, questionAt, type ClarifyResponse } from "@/lib/clarify"
 import type { ClarifyQuestion, LiveTurn, MessageStats, Unsent } from "@/lib/db"
+import { equal } from "@/lib/equal"
 import type { CanvasPoint } from "@/lib/point-marker"
 import { progressReminderNote } from "@/lib/progress-reminder"
 import { measureReply } from "@/lib/reply-stats"
@@ -156,9 +157,10 @@ export type ThreadEvent =
   /**
    * The files a send carried, as the host saved them: the message drawn when it went names each
    * one's path, which is what its cell is minted from — a photo with neither a path nor its bytes is
-   * drawn as nothing at all. `at` is the send's own clock, so the files land on that message only.
+   * drawn as nothing at all. `at` is the send's own clock, and says which message the files belong
+   * to: a send always has one, so a dispatch without it is not this event.
    */
-  | { type: "saved"; at?: number; files: SentFile[] }
+  | { type: "saved"; at: number; files: SentFile[] }
   /**
    * A steer the host took: it stands in the reply at once, rather than waiting for the transcript's
    * row, which the host writes only when the run reads the steer.
@@ -821,11 +823,15 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       }
     }
     case "saved": {
+      // A message with no files has none to name, and the drawn message's own list is not this
+      // event's to empty.
+      if (!event.files.length) return state
       // The message drawn when its send went is the thread's copy until the transcript's lands, and
       // a cell of it can't be minted without the path the host saved the file at. A row drawn for
       // another send is not this event's: the send's own clock says which one it is.
       const live = state.live
       if (!live || live.turn.at !== event.at) return state
+      if (equal(live.turn.files, event.files)) return state
       return { ...state, live: { ...live, turn: { ...live.turn, files: event.files } } }
     }
     case "unsent": {

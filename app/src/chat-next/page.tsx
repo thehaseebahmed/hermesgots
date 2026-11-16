@@ -1534,16 +1534,14 @@ export function ChatNextThread({
     if (!resend) dispatch(drawn)
     let prepared: PreparedTurn | undefined
     let run: string
-    // The row drawn above is the message until the transcript names the turn, and its files' cells
-    // are minted from the paths the host saved them at — paths the send did not have as it went, and
-    // has once its files are on the host (ADR 0111).
-    const keepSaved = () => {
-      if (prepared && attachments.length)
-        dispatch({ type: "saved", at, files: prepared.sent.map(sentFileOf) })
-    }
     try {
       prepared = prepareTurn ? await prepareTurn(words, attachments, at) : undefined
-      keepSaved()
+      // The row drawn above is the message until the transcript names the turn, and its files' cells
+      // are minted from the paths the host saved them at — paths the send did not have as it went,
+      // and has once its files are on the host (ADR 0111). A message sent again is drawn once the
+      // host has taken it, below, with those paths already in hand.
+      if (!resend && prepared)
+        dispatch({ type: "saved", at, files: prepared.sent.map(sentFileOf) })
       const posting = {
         signal: alive.current.signal,
         timeoutMs: sendTimeoutMs(away, READ_TIMEOUT_MS),
@@ -1586,10 +1584,14 @@ export function ChatNextThread({
     }
     // The host has taken it: only now does the row leave, and the turn the thread follows draws the
     // message in its place.
-    if (resend) {
-      dispatch({ ...drawn, replaces: resend.id })
-      keepSaved()
-    }
+    if (resend)
+      dispatch({
+        ...drawn,
+        // A send that carried files keeps the paths the host answered for them; one that carried
+        // none keeps the markers its words name, as `drawn` has them.
+        ...(prepared && attachments.length ? { files: prepared.sent.map(sentFileOf) } : {}),
+        replaces: resend.id,
+      })
     prepared?.settled(true)
     void follow(run)
   }
