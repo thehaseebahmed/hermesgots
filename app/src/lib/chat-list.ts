@@ -1,8 +1,8 @@
 /**
  * A bot's chat list as a rule: what one row says, the order the rows are drawn in, what a search keeps
- * and how many pins the list holds. The screen draws exactly this (`routes/bot-chats.tsx`), and the
- * sidebar's bot rows and this list read one bot's chats, so the row's shape lives here rather than in
- * either of them.
+ * and how many pins the list holds. The screen draws exactly this (`components/chat/chat-list.tsx`),
+ * and the sidebar's bot rows and this list read one bot's chats, so the row's shape lives here rather
+ * than in either of them.
  *
  * A row's line is the last thing the reader was told: the bot's newest words, and the reader's own only
  * while the bot has not answered them yet, because what they typed is not news to them. Its time is that
@@ -21,10 +21,10 @@ import type { Conversation, Message } from "./db.ts"
 /**
  * How many of a bot's newest chats one screen reads the tail of. Every chat the bot has is a row of
  * its list — a bound on the rows would put a chat out of reach — and a record is cheap; what a row
- * costs is the read of its newest message, which is what this bounds (`routes/bot-chats.tsx`, and the
- * sidebar's one preview read here too). Two kinds have their tail read wherever their clock puts them:
- * a pinned chat, whose pin is the reader's own word that it matters, and an archived one, whose line
- * only the Archived pill draws.
+ * costs is the read of its newest message, which is what this bounds
+ * (`components/chat/chat-list.tsx`, and the sidebar's one preview read here too). Two kinds have their
+ * tail read wherever their clock puts them: a pinned chat, whose pin is the reader's own word that it
+ * matters, and an archived one, whose line only the Archived pill draws.
  */
 export const BOT_CHATS = 50
 

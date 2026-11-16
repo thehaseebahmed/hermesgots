@@ -3,6 +3,7 @@
  * tails that are read, the row each chat draws as, and the rooms the list seats (ADR 0115).
  */
 import { useLiveQuery } from "dexie-react-hooks"
+import { useMemo } from "react"
 
 import {
   BOT_CHATS,
@@ -22,7 +23,7 @@ import {
 } from "@/lib/db"
 import { draftKey, unsentAmong } from "@/lib/drafts"
 import { listsAsChat } from "@/lib/lists-as-chat"
-import type { RoomNeedsRow } from "@/lib/room"
+import { useRoomNeeds, type RoomNeedsRow } from "@/lib/room"
 import { roomRowOf } from "@/lib/rooms"
 
 /**
@@ -129,9 +130,8 @@ async function rowOfChat(chat: Conversation, tailed: ReadonlySet<string>): Promi
 
 /**
  * The rooms one bot's list seats, as rows: a room is nobody's chat, and it lists in every bot its
- * roster seats (ADR 0115), so each screen that draws a bot's list takes the rooms this device read and
- * adds them to the chats it holds — the list and the pin count alike, since a row written twice is a
- * row that parts ways.
+ * roster seats (ADR 0115), so `useBotRows` adds the rooms this device read to the chats it holds and
+ * `chat-marks` counts a list's pins over both — a row written twice is a row that parts ways.
  */
 export function seatedRoomRows(rooms: readonly RoomNeedsRow[], profileId: string): ChatListRow[] {
   return rooms
@@ -149,7 +149,10 @@ export interface BotChats {
 }
 
 /**
- * A bot's chats as its list draws them, read live, each row dated by the newest reply the bot sent.
+ * The chats this bot's list draws, newest first, read live, each row dated by the newest reply the
+ * bot sent. The rooms its roster seats are `useBotRows`'s to add: a screen reads its rows through
+ * that one door, so no screen builds a list of its own.
+ *
  * The answer names the address it ran for, so a screen that has moved to another bot draws nothing
  * rather than this bot's rows under its name.
  *
@@ -157,7 +160,7 @@ export interface BotChats {
  * Archived pill draws are read only while that pill is the one pressed, and no other pill reads a tail
  * it will not draw.
  */
-export function useBotChats(profileId: string, filter?: ChatFilter): BotChats | undefined {
+function useBotChats(profileId: string, filter?: ChatFilter): BotChats | undefined {
   return useLiveQuery(async (): Promise<BotChats> => {
     const bot = (await db.profiles.get(profileId)) ?? null
     if (!bot) return { profileId, bot, rows: [] }
@@ -168,4 +171,25 @@ export function useBotChats(profileId: string, filter?: ChatFilter): BotChats | 
     const rows = await Promise.all(chats.map((chat) => rowOfChat(chat, tailed)))
     return { profileId, bot, rows }
   }, [profileId, filter])
+}
+
+/**
+ * One bot's rows as its list draws them: the chats it holds, each dated by what arrived in it, and
+ * the rooms its roster seats — one list, one order, composed here rather than by each screen that
+ * draws them.
+ */
+export function useBotRows(profileId: string, filter?: ChatFilter): BotChats | undefined {
+  const answer = useBotChats(profileId, filter)
+  // The rooms this device lists, read by their membership: a room belongs to its Host and lists in
+  // every bot its roster seats, whatever bot carried the record here (ADR 0115).
+  const rooms = useRoomNeeds()
+  // The answer names the address it ran for, so one bot's answer can never pass for another's.
+  const fresh = answer && answer.profileId === profileId ? answer : undefined
+  return useMemo(
+    () =>
+      fresh
+        ? { ...fresh, rows: [...fresh.rows, ...seatedRoomRows(rooms ?? [], profileId)] }
+        : undefined,
+    [fresh, rooms, profileId],
+  )
 }

@@ -1,7 +1,7 @@
 /**
  * A bot's chat list as a rule: what one row says, the order the rows are drawn in, and what a search
- * keeps. The screen draws exactly this (`routes/bot-chats.tsx`), so an ordering, a line or a search
- * that went wrong is read here, with a seeded row and no DOM (AGENTS.md's unit tier).
+ * keeps. The screen draws exactly this (`components/chat/chat-list.tsx`), so an ordering, a line or a
+ * search that went wrong is read here, with a seeded row and no DOM (AGENTS.md's unit tier).
  */
 import assert from "node:assert/strict"
 import test from "node:test"
