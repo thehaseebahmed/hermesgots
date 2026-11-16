@@ -886,18 +886,19 @@ export function CanvasView() {
 }
 
 /**
- * A canvas's edit screen, at `/canvas/:id/edit`: its chat, full screen, with the header's Preview and
- * the hardware back both leading out of it the way the preview is led — back to wherever the reader
- * came from, which is the list, or the app's own press where the app opened the canvas itself
- * (ADR 0130). A wide screen already has the chat beside the page, so there the address folds into the
- * canvas's own and draws no flip at all.
+ * A canvas's edit screen, at `/canvas/:id/edit`: its chat, full screen, with the hardware back leading
+ * out of it the way the preview's does — back to wherever the reader came from, which is the list, or
+ * the app's own press where the app opened the canvas itself — and the header's Preview a flip to the
+ * page beside it, never out (ADR 0130). A wide screen already has the chat beside the page, so there
+ * the address folds into the canvas's own and draws no flip at all.
  *
  * The version decides the corners: with one, Preview is the flip to the page; without one there is
- * nothing to preview, so no flip is drawn and the head's leading control is the only way out. A
- * record that hasn't landed yet is reading: the same muted line the preview draws, and the same
- * leading control, never a corner that a record landing a moment later would move under the reader's
- * thumb. The head follows the arrival on both screens, so a reader who came from the list is offered
- * the way back to it whether or not the canvas has a page yet.
+ * nothing to preview, so no flip is drawn and the way out is the head's own — the list's arrow where
+ * the list opened this screen, the app's press where the app did. A record that hasn't landed yet is
+ * reading: the same muted line the preview draws, and the same leading control, never a corner that a
+ * record landing a moment later would move under the reader's thumb. The head follows the arrival on
+ * both screens, so a reader who came from the list is offered the way back to it whether or not the
+ * canvas has a page yet.
  *
  * A canvas with no version opens on this screen on a phone — it is the only screen it has — so this
  * one carries the preview's options menu too, or the canvas could never be archived or deleted.
@@ -946,10 +947,8 @@ export function CanvasEdit() {
   )
   // A record that hasn't landed yet: nothing of the canvas is known, so the body says it is reading.
   const reading = !canvas && !loaded
-  // The guard is the preview's, so the press and the head's leading control are one move: back to
-  // wherever the reader came from, and the app's own answer where nothing stands behind this screen
-  // at all — an address opened cold. The Preview corner is the way to the page, never the way out
-  // (ADR 0130).
+  // The guard is the preview's, so the press and the head's leading control are one move; the
+  // Preview corner is the way to the page, never the way out (ADR 0130).
   useEffect(() => setBackGuard(back()), [back])
   // A wide screen's lane is the same chat, so this address has nowhere of its own to be: it is the
   // canvas's address in its place, never a step, and back cannot return here.

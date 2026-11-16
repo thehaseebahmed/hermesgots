@@ -1498,10 +1498,6 @@ test(
 test(
   "a canvas's chat the list opened is led back to the list, and the press steps there",
   atWidth(390, async () => {
-    // The chat wears the head the page wears: what leads it is how the reader arrived, not which of
-    // the two screens is drawn. A canvas the list opened leads back to that list, and the back press
-    // is the same step — the Preview corner beside it is the way to the page, and no longer the only
-    // one out of the chat.
     serveCanvases({ version: 3, undos: 0 })
     await seedCanvasChat(CANVAS.id)
     const history = atDepth(1)
@@ -1530,8 +1526,7 @@ test(
   "a canvas's chat the app opened is led by the drawer, and the press is the app's",
   atWidth(390, async () => {
     // Nothing stands behind the app's own entry — a pinned canvas, or an address opened cold — so the
-    // chat's head leads with the drawer the sidebar is collapsed into, and the back press is the
-    // app's, which arms its exit rather than stepping onto a screen that isn't there.
+    // press is the app's, which arms its exit rather than stepping onto a screen that isn't there.
     serveCanvases({ version: 3, undos: 0 })
     await seedCanvasChat(CANVAS.id)
     const history = atDepth(0)
