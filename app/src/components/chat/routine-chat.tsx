@@ -5,14 +5,16 @@
  * It is a screen of its own rather than a chat's, because no turn was ever taken in this session by
  * this app: a routine's answer is published as a row whose session is the run's, and Hermes refuses a
  * turn on a `cron` session while allowing it to be read. So there is no composer, no steer and no
- * approval — and what is left of a chat's controls is its own menu, so the row is still the reader's
- * to rename, mute or put away.
+ * approval — and what is left of a chat's controls is its sheet: the row is still the reader's to
+ * rename, mute, pin, archive or put away, and its bar keeps the context ring alone, since the use is
+ * what a reader reads while reading the run (ADR 0153).
  */
 import { useEffect, useLayoutEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
-import { ChatActions, useChatSurface } from "@/components/chat/chat-actions"
-import { UsageSheet } from "@/components/chat/usage-sheet"
+import { useChatSurface } from "@/components/chat/chat-actions"
+import { ChatSettings, ChatTitlePress } from "@/components/chat/chat-settings"
+import { ContextRing, UsageSheet } from "@/components/chat/usage-sheet"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { MessageItem } from "@/components/chat/message-item"
 import {
@@ -31,7 +33,6 @@ import { useNav } from "@/lib/nav"
 import { useDraws } from "@/lib/openui-draws"
 import { markRead } from "@/lib/read-marks"
 import { RUN_GONE, RUN_UNREAD, ranOn, useRoutineTranscript } from "@/lib/routine-transcript"
-import { useWide } from "@/lib/media"
 
 /** No rows at all, as the same value on every render. */
 const NO_ROWS: Message[] = []
@@ -61,7 +62,6 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
   // The list this run was opened from is the bot's, never the chat a delivery arrived in: a routine's
   // row is the bot's own, so its bar's leading control steps back to where its row stands.
   const lead = useChatLead({ bot: chat?.profileId })
-  const wide = useWide()
   useLayoutEffect(() => {
     if (ready) hold(slot, id)
   }, [ready, slot, id])
@@ -76,20 +76,18 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
   const messages = transcript.messages ?? NO_ROWS
   const draws = useDraws(messages, server)
   const [usageOpen, setUsageOpen] = useState(false)
+  // The press the run's title answers opens the one Edit sheet, as a chat's does.
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const { usage, providerUsage } = useChatSurface(chat, bot, () => setUsageOpen(true))
   // A run the host has emptied is one it no longer holds; a read that failed is the host being away,
   // which is a different thing to say and is said in the same place.
   const gone = transcript.loaded && messages.length === 0
-  const actions = chat && bot && (
-    <ChatActions
-      chat={chat}
-      profile={bot}
-      wide={wide}
-      usage={usage}
-      onUsageOpenChange={setUsageOpen}
-      onDeleted={() => (lead.list ? lead.ontoList() : root("/"))}
-    />
-  )
+  // The bar keeps the ring and nothing else: the `…` it held is the sheet its title opens, and a run
+  // runs no turn of its own to offer anything more.
+  const actions =
+    chat && bot && bot.baseUrl.trim() ? (
+      <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
+    ) : undefined
 
   return (
     <div
@@ -102,7 +100,8 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
       {chat && bot && ready ? (
         <>
           <ChatHeader
-            title={chat.title}
+            title={<ChatTitlePress title={chat.title} open={settingsOpen} />}
+            onTitlePress={() => setSettingsOpen(true)}
             subtitle={`Ran ${ranOn(chat.updatedAt)}`}
             botId={bot.botId}
             muted={Boolean(chat.muted || bot.muted)}
@@ -144,6 +143,13 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
               }.`}
             </p>
           </div>
+          <ChatSettings
+            chat={chat}
+            profileId={chat.profileId}
+            open={settingsOpen}
+            onOpenChange={setSettingsOpen}
+            onDeleted={() => (lead.list ? lead.ontoList() : root("/"))}
+          />
         </>
       ) : (
         <PendingRoutine />
