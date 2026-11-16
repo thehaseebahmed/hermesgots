@@ -298,6 +298,10 @@ function SentAttachments({
     const one = state(attachment)
     return one?.status === "failed" ? one.note : undefined
   }
+  // A picture the host has not saved yet and this device holds no bytes of — the message that went
+  // before its upload answered — keeps its place with a skeleton, rather than being drawn as nothing.
+  const arriving = (attachment: Attachment) =>
+    !attachment.path && !attachment.blob && Boolean(attachment.image)
   const item = (attachment: Attachment, cell: MediaCell): MediaItem => ({
     key: attachment.id,
     kind: mediaKind(attachment.type, attachment.name),
@@ -307,7 +311,7 @@ function SentAttachments({
     size: attachment.size,
     path: attachment.path,
     src: srcOf(attachment),
-    state: mediaStage(state(attachment)),
+    state: arriving(attachment) ? "reading" : mediaStage(state(attachment)),
     note: note(attachment),
   })
   // A message the host answered nothing for is not drawn; one this device holds the bytes of is,
@@ -316,6 +320,7 @@ function SentAttachments({
     (attachment) =>
       drawnCell(attachment.type, attachment.name) === "file" ||
       attachment.blob !== undefined ||
+      arriving(attachment) ||
       state(attachment)?.status !== "undrawable",
   )
   const download = (one: MediaItem) => {

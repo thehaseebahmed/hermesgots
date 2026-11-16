@@ -223,6 +223,8 @@ export function fakeHost(
   const offsets: number[] = []
   /** The files the plugin's attachment route saved, in the order they came. */
   const saved: { name: string; path: string; size: number }[] = []
+  /** The attachment route as a test can drive it: how many uploads came, and a gate to hold them. */
+  const saving: { asked: number; gate?: Promise<void> } = { asked: 0 }
   /** Pages the host holds back until released, and pages it fails with a 500, by offset. */
   const gates = new Map<number, { wait: Promise<void>; release: () => void }>()
   const failing = new Set<number>()
@@ -701,6 +703,8 @@ export function fakeHost(
       const name = url.searchParams.get("name") ?? "file"
       if (!(init.body instanceof Blob))
         return reply({ error: { message: "an attachment needs its bytes" } }, 400)
+      saving.asked++
+      await saving.gate
       const at = `/host/attachments/${session}/${name}`
       saved.push({ name, path: at, size: init.body.size })
       return reply({ name, path: at, size: init.body.size })
@@ -1081,6 +1085,20 @@ export function fakeHost(
   }
 
   /**
+   * Holds the plugin's attachment route: an upload waits, as it does on a slow link, until `release`.
+   */
+  function holdUploads() {
+    let release = () => {}
+    saving.gate = new Promise<void>((resolve) => (release = resolve))
+    return {
+      release: () => {
+        release()
+        saving.gate = undefined
+      },
+    }
+  }
+
+  /**
    * The children a cooperative stop asked for reach their boundary and end, closed the way core
    * closes a stopped child: `agent_close` on its own row, whatever the turn went on to do.
    */
@@ -1099,6 +1117,8 @@ export function fakeHost(
     seed,
     offsets,
     saved,
+    saving,
+    holdUploads,
     hold,
     holdRuns,
     fail,

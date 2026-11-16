@@ -48,6 +48,28 @@ async function pastePhoto() {
   await settle()
 }
 
+test("a photo the host has not saved yet keeps its place with a skeleton", async () => {
+  await seedChats([{ id, title: "Sky colours" }], {
+    bots: [{ ...bot, baseUrl: `http://${id}.test/v1`, modelChoice: pick }],
+  })
+  const host = fakeHost(`gots-${id}`, { plugin: true, uploads: true })
+  host.hold(0)
+  const upload = host.holdUploads()
+  await mount(chatScreen(id), async () => {
+    await until(async () => Boolean(composerField()), "the app's composer is drawn", SOON)
+    await pastePhoto()
+    await type(composerField(), "what is in this photo?")
+    await sendPress()
+    await until(async () => host.saving.asked > 0, "the host to be asked to save the photo", SOON)
+    assert.ok(
+      find('[data-chat-next] [data-slot="message"] [data-slot="skeleton"]'),
+      "the message keeps the photo's place while the host saves it",
+    )
+    upload.release()
+    await until(async () => cell() !== null, "the photo's cell once the host has it", SOON)
+  })
+})
+
 test("a photo sent with a message draws while the host's transcript is still out", async () => {
   await seedChats([{ id, title: "Sky colours" }], {
     bots: [{ ...bot, baseUrl: `http://${id}.test/v1`, modelChoice: pick }],
