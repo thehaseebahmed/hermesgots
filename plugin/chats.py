@@ -14,6 +14,12 @@ The store also holds one record per room the reader marked — a pin, an archive
 were made at, under the room's own id (``ROOM_MARKS``). That record is never a chat: the Host's room
 has no field for a mark (ADR 0121), so the app keeps the reader's own here, and every read of a chat
 answers nothing for it (ADR 0157).
+
+A chat's and a run's archive is not this store's to decide: it is Hermes's own ``sessions.archived``
+flag, and a record's ``archived`` is the copy of it every device merges. The plugin writes the flag
+when the reader archives (``sessions.set_archived``), writes the field onto the record
+(``set_archived``), and lays the flag back over every list answer (``carrying_archive``) so an
+archive made on the Dashboard hides the row here — and an unarchive there brings it back (ADR 0159).
 """
 
 from __future__ import annotations
@@ -56,6 +62,53 @@ def carries_room_marks(value: Any) -> bool:
     about which records are chats.
     """
     return isinstance(value, dict) and value.get(ROOM_MARKS) is not None
+
+
+def _with_archive(value: Dict[str, Any], archived: bool) -> Dict[str, Any]:
+    """One record's value with its archive spelled the way the app spells it: set, or the key gone.
+
+    A chat's archive is one field of the record the app merges (ADR 0159), written and read back by
+    the two places below; spelled twice, one of them would drift from the app's own spelling of an
+    unset flag — absent, never false.
+    """
+    return (
+        {**value, "archived": True}
+        if archived
+        else {field: item for field, item in value.items() if field != "archived"}
+    )
+
+
+def carrying_archive(
+    records: Dict[str, Dict[str, Any]], flags: Dict[str, bool]
+) -> Dict[str, Dict[str, Any]]:
+    """Every record, with the archive Hermes holds for its session laid in — both ways.
+
+    A chat's and a run's archive is Hermes's ``sessions.archived`` flag, not a mark of this store's
+    (ADR 0159), so the list answer takes the flag as the truth: a session archived on the Dashboard
+    is archived here, and one unarchived there comes back. ``flags`` is ``{session_id: bool}`` read in
+    one pass over the profile's store; a record whose session it doesn't name keeps what it holds, so
+    a host from before the column, or a chat whose session has gone, answers exactly as before.
+
+    A room's mark record is skipped: a room has no session of its own, and its archive is the
+    reader's own mark (``carries_room_marks``, ADR 0157). A deletion is a deletion.
+    """
+    if not flags:
+        return records
+    carried: Dict[str, Dict[str, Any]] = {}
+    for chat_id, record in records.items():
+        value = (record or {}).get("value")
+        session_id = value.get("hermesSessionId") if isinstance(value, dict) else None
+        if (
+            not isinstance(value, dict)
+            or carries_room_marks(value)
+            or not isinstance(session_id, str)
+            or session_id not in flags
+        ):
+            carried[chat_id] = record
+            continue
+        updated = _with_archive(value, flags[session_id])
+        carried[chat_id] = {**record, "value": updated} if updated != value else record
+    return carried
 
 
 def _records(conn: sqlite3.Connection) -> Dict[str, Dict[str, Any]]:
@@ -308,6 +361,29 @@ def set_title(path: Path, chat_id: str, title: str) -> None:
     _set(path, chat_id, {"title": title, "titleEdited": True})
 
 
+def set_archived(
+    path: Path, chat_id: str, archived: bool, now: int
+) -> Optional[Dict[str, Any]]:
+    """Writes the reader's archive into a chat's record, keeping every other field.
+
+    The record's own copy of the mark is what reaches every device through the ordinary merge, and
+    what a chat still reads as once its session is gone; Hermes's ``sessions.archived`` flag is the
+    one both surfaces are drawn from (``sessions.set_archived``, ADR 0159). Unarchiving drops the key,
+    which is how the app spells an unset flag.
+
+    ``now`` is the clock the press was made at, and the record's own clock is moved past it — a merge
+    keeps only a strictly newer record, so a write at the record's own clock would be dropped in
+    silence and the mark would never reach a device. A chat with no record, or a deleted one, takes
+    nothing and answers None.
+    """
+    entry = one(path, chat_id)
+    value = (entry or {}).get("value")
+    if not isinstance(value, dict) or closed(entry):
+        return None
+    carried = _with_archive(value, archived)
+    return merge(path, {chat_id: {"at": _ahead(entry, now), "value": carried}}).get(chat_id)
+
+
 def _set(path: Path, chat_id: str, fields: Dict[str, Any]) -> None:
     """Writes ``fields`` into a chat's record, keeping the rest of it, and nothing into a chat that
     is gone: a record's clock moves past whatever it carried, since the merge keeps the newer one."""
@@ -318,11 +394,14 @@ def _set(path: Path, chat_id: str, fields: Dict[str, Any]) -> None:
     merge(path, {chat_id: {"at": _ahead(entry), "value": {**value, **fields}}})
 
 
-def _ahead(entry: Dict[str, Any]) -> int:
-    """A change clock past the record's own: now, unless that record was written from further ahead.
-    """
+def _ahead(entry: Dict[str, Any], now: Optional[int] = None) -> int:
+    """A change clock past the record's own: ``now`` (the device's press, or this host's clock),
+    unless that record was written from further ahead."""
     held = entry.get("at")
-    return max(int(time.time() * 1000), int(held) + 1 if isinstance(held, int) else 0)
+    return max(
+        int(time.time() * 1000) if now is None else int(now),
+        int(held) + 1 if isinstance(held, int) else 0,
+    )
 
 
 def tombstone(path: Path, chat_id: str, now: Optional[int] = None) -> None:

@@ -605,6 +605,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # row posts no mark record, so a room's pin stays on the device that made it,
                     # exactly as it did before the record existed (ADR 0121).
                     "room_marks",
+                    # A chat's and a run's archive written into Hermes's own ``sessions.archived``
+                    # flag (`POST chats/{id}/archived`), so archiving here leaves `hermes sessions
+                    # list`, `/resume` and the Dashboard too, and an archive made there leaves this
+                    # list (ADR 0159). Advertised apart from `room_marks`: a room keeps its own mark,
+                    # and a plugin from before this row leaves the app its device-only archive.
+                    "session_archive",
                     "context",
                     "todos",
                     "projects",
@@ -1178,13 +1184,21 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         mark record is no chat (chats.carries_room_marks): answered as one it would be an untitled row
         in every list. The projection is written last — a room's row is a read of the Host's room,
         never a stored chat (ADR 0116), and the Host's own fields on it stay the Host's (ADR 0121).
+
+        Hermes's own archive flag is laid over the answer, read once per request: a chat archived on
+        the Dashboard leaves this list and an unarchive there brings it back, since a chat's archive
+        is Hermes's and not this store's (chats.carrying_archive, ADR 0159). A store that can't say —
+        no ``state.db``, no ``archived`` column — answers no flags, and every row stands as it was.
         """
         kept = {
             chat_id: record
             for chat_id, record in records.items()
             if not chats.carries_room_marks((record or {}).get("value"))
         }
-        return {**kept, **rooms.carrying_marks(await projected_rooms(), records)}
+        flags = await asyncio.to_thread(sessions.archived_flags, profile_home())
+        return chats.carrying_archive(
+            {**kept, **rooms.carrying_marks(await projected_rooms(), records)}, flags
+        )
 
     async def list_chats(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1208,6 +1222,46 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except chats.InvalidChats as error:
             return _error(web, str(error), 400)
         return web.json_response({"object": "gots.chats", "chats": await merged_chats(records)})
+
+    async def archive_chat(request: "web.Request") -> "web.Response":
+        """A chat set aside, or brought back: Hermes's own archive flag, and the chat's record.
+
+        Archive is Hermes's feature and not a Gots mark (ADR 0159), so the flag in the profile's
+        ``state.db`` is written where the chat's session lives — through its live tip, so a compacted
+        chat archives as a unit. The record takes the same flag as well: that is what reaches every
+        device through the ordinary merge, and what a chat still reads as once its session has gone.
+
+        ``host`` says whether Hermes's own session took the flag. A store with no ``archived`` column,
+        or no store at all, answers ``false`` and the app keeps its own mark, which is the behaviour
+        every device had before this route existed.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be JSON", 400)
+        archived = body.get("archived")
+        if not isinstance(archived, bool):
+            return _error(web, "archived must be true or false", 400)
+        chat_id = request.match_info["chat_id"].strip()
+        record = await asyncio.to_thread(chats.one, store_path(), chat_id)
+        value = (record or {}).get("value")
+        session_id = value.get("hermesSessionId") if isinstance(value, dict) else None
+        if not isinstance(session_id, str) or not session_id:
+            # A room and a chat nothing has been said in have no session of their own: a room keeps
+            # its own mark (ADR 0157), and there is nothing here for Hermes to archive.
+            return _error(web, "No such chat.", 404)
+        reason = await asyncio.to_thread(
+            sessions.set_archived, profile_home(), session_id, archived
+        )
+        # Always, whatever the host answered: the flag is every device's way to hear of it, and a
+        # chat whose session has gone still reads as one the reader put away.
+        await asyncio.to_thread(chats.set_archived, store_path(), chat_id, archived, int(time.time() * 1000))
+        logger.debug("gots: archive of %s: %s", chat_id, reason or "host")
+        return web.json_response(
+            {"object": "gots.chat.archived", "archived": archived, "host": reason is None}
+        )
 
     async def create_room(request: "web.Request") -> "web.Response":
         """A room of this Host's bots, under the id the app minted for it (rooms.py, ADR 0117)."""
@@ -2449,6 +2503,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/info", info)
     app.router.add_get(f"{PREFIX}/chats", list_chats)
     app.router.add_post(f"{PREFIX}/chats", merge_chats)
+    app.router.add_post(f"{PREFIX}/chats/{{chat_id}}/archived", archive_chat)
     app.router.add_post(f"{PREFIX}/rooms", create_room)
     app.router.add_get(f"{PREFIX}/rooms/{{room_id}}", read_room)
     app.router.add_post(f"{PREFIX}/rooms/{{room_id}}", rename_room)

@@ -4,7 +4,9 @@
  * so no pin is left behind the Archived pill where no list could turn it off.
  *
  * A chat's and a run's marks go through `updateConversation`, which stamps `changedAt`, so the next
- * sync pass carries the mark to every device. A room's are the reader's rather than the Host's (ADR
+ * sync pass carries the mark to every device. Their archive is Hermes's own flag and not this app's
+ * mark (ADR 0159): where the bot's plugin can write it, the press writes it on the Host too, so the
+ * session leaves every Hermes surface as well. A room's are the reader's rather than the Host's (ADR
  * 0121): its row's `changedAt` is the Host's clock and stays it, the marks are stamped in a field of
  * their own, and the pass that carries them is the bots' whose roster seats the room (ADR 0157). The
  * rules that read the marks — the cap and what its switch says — are `chat-list.ts`'s: this module
@@ -14,7 +16,9 @@ import { useLiveQuery } from "dexie-react-hooks"
 
 import { chatRowOf, PIN_LIMIT, pinsOf, type ChatListRow } from "./chat-list"
 import { readListedChats, seatedRoomRows } from "./chat-rows"
+import { hasServer, serverConfig } from "./connection"
 import { db, updateConversation, type Conversation, type Room } from "./db"
+import { hasPluginFeature, setSessionArchived } from "./hermes"
 import { readRoomNeeds, useRoomNeeds, type RoomNeedsRow } from "./room"
 import { seatingBots } from "./rooms"
 import { syncChatsOf } from "./sync"
@@ -55,6 +59,13 @@ export async function setPinned(id: string, on: boolean): Promise<boolean> {
  * clears the pin in the same write — a pin sitting behind the pill could not be unpinned from any
  * list, and the cap counts pins — while unarchiving leaves the row as unpinned as archiving made it.
  * A room takes both the same way.
+ *
+ * A chat's and a run's archive is Hermes's own (`sessions.archived`), not a mark this app owns
+ * (ADR 0159): where the bot can be asked and its plugin advertises `session_archive`, the flag is
+ * written on the Host too, so the session leaves `hermes sessions list`, `/resume` and the Desktop's
+ * list as well. The row here is written first and either way — the press is drawn at once, and a
+ * chat whose session has gone still reads as one the reader put away. A host that can't hold the
+ * flag answers `host: false`, and this device's mark is all the archive there is, exactly as before.
  */
 export async function setArchived(id: string, on: boolean) {
   const now = Date.now()
@@ -65,6 +76,27 @@ export async function setArchived(id: string, on: boolean) {
   const room = row?.room
   if (row && room) return markRoom(row, room, marks, now)
   await updateConversation(id, marks)
+  if (row) await writeSessionArchive(row, on)
+}
+
+/**
+ * Hermes's archive flag for one chat's session, where the Host can be asked for it.
+ *
+ * Two gates, held here and not by the sheet: a bot this device can call at all (`hasServer`), and a
+ * plugin new enough to write the flag — `session_archive` (ADR 0159). An older plugin stores the
+ * record and nothing else, so asking it would be a request whose answer the app would ignore; a
+ * failed ask is swallowed for the same reason, since the write above is already the reader's mark.
+ */
+async function writeSessionArchive(row: Conversation, on: boolean) {
+  const bot = await db.profiles.get(row.profileId)
+  if (!hasServer(bot)) return
+  const config = serverConfig(bot)
+  try {
+    if (!(await hasPluginFeature(config, "session_archive"))) return
+    await setSessionArchived(config, row.id, on)
+  } catch {
+    // Away, or a Host from before the route: the mark on the row above is what this device reads.
+  }
 }
 
 /**

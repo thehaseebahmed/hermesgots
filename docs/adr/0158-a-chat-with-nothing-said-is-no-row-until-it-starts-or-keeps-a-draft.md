@@ -42,3 +42,5 @@ and the legacy bands cannot draw one chat and hide another.
   happened. The rule still exempts an archived row whatever its clocks say, so a record that somehow
   carries both marks stays a row under the **Archived** pill — and out of every other one, which is
   the archive mark's own rule.
+- Archive for a chat and a run is Hermes's own `sessions.archived` flag and not a mark of this app's
+  (ADR 0159), so the rows the rule hides and the sessions Hermes hides are the same ones.
