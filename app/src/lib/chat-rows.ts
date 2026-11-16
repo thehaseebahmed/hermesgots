@@ -9,6 +9,8 @@ import {
   BOT_CHATS,
   chatRowOf,
   isListed,
+  orderChatRows,
+  type ChatClock,
   type ChatFilter,
   type ChatListRow,
   type ChatRecord,
@@ -117,6 +119,10 @@ export function newestReplyOf(chatId: string) {
 /**
  * One chat's row, with its tail read where the bound put it: a routine's row reads its line and time
  * off the record, so its tail isn't asked for at all.
+ *
+ * The read that dates the row is the newest message of *either* role, so the row's other clock —
+ * `latest`, which the Side Chat List lists by — is stamped off the same read and costs nothing extra.
+ * A row the bound left unread carries neither, and a list orders it by the record's own clock.
  */
 async function rowOfChat(chat: Conversation, tailed: ReadonlySet<string>): Promise<ChatListRow> {
   if (chat.routine || !tailed.has(chat.id)) return chatRowOf(chat)
@@ -150,8 +156,10 @@ export interface BotChats {
 
 /**
  * The chats this bot's list draws, newest first, read live, each row dated by the newest reply the
- * bot sent. The rooms its roster seats are `useBotRows`'s to add: a screen reads its rows through
- * that one door, so no screen builds a list of its own.
+ * bot sent — and carrying `latest`, the newest message of either role, off the same tail read, so a
+ * caller that lists them by when the chat last moved at all needs no second query. The rooms its
+ * roster seats are `useBotRows`'s to add: a screen reads its rows through that one door, so no screen
+ * builds a list of its own.
  *
  * The answer names the address it ran for, so a screen that has moved to another bot draws nothing
  * rather than this bot's rows under its name.
@@ -177,8 +185,17 @@ function useBotChats(profileId: string, filter?: ChatFilter): BotChats | undefin
  * One bot's rows as its list draws them: the chats it holds, each dated by what arrived in it, and
  * the rooms its roster seats — one list, one order, composed here rather than by each screen that
  * draws them.
+ *
+ * `clock` is the order its caller lists them in (`ChatClock`): the flat layout takes the default, the
+ * received one it has always drawn, and the Side Chat List asks for `latest` so the chat the reader has
+ * just written in stands where they are. Both clocks are on the rows already — the one tail read
+ * answers for both — so asking for the other orders the list without reading anything again.
  */
-export function useBotRows(profileId: string, filter?: ChatFilter): BotChats | undefined {
+export function useBotRows(
+  profileId: string,
+  filter?: ChatFilter,
+  clock: ChatClock = "at",
+): BotChats | undefined {
   const answer = useBotChats(profileId, filter)
   // The rooms this device lists, read by their membership: a room belongs to its Host and lists in
   // every bot its roster seats, whatever bot carried the record here (ADR 0115).
@@ -188,8 +205,14 @@ export function useBotRows(profileId: string, filter?: ChatFilter): BotChats | u
   return useMemo(
     () =>
       fresh
-        ? { ...fresh, rows: [...fresh.rows, ...seatedRoomRows(rooms ?? [], profileId)] }
+        ? {
+            ...fresh,
+            rows: orderChatRows(
+              [...fresh.rows, ...seatedRoomRows(rooms ?? [], profileId)],
+              clock,
+            ),
+          }
         : undefined,
-    [fresh, rooms, profileId],
+    [fresh, rooms, profileId, clock],
   )
 }

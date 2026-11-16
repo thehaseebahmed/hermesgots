@@ -10,6 +10,14 @@
  * chat the reader has just spoken in is not one that has said anything since: it keeps the bot's last
  * word as its line and sits where that word put it. A bot that has said nothing in a chat yet keeps the
  * record's own clock and draws no line, and so does a row past `BOT_CHATS`, whose tail no screen reads.
+ *
+ * A row carries a second clock beside that one — `latest`, the newest message of either role — which
+ * rides the same tail read, so a list can be ordered by when a chat last moved at all without paying
+ * for another read: the Side Chat List reads that one, because a chat the reader has just written in is
+ * the one they are in, and the flat list keeps the received clock it has always drawn (`ChatClock`).
+ *
+ * A bot's **Main** is a row like any other, drawn at the app's own word (`MAIN_TITLE`) rather than the
+ * host's title, and `sideChats` is the one rule for the rows a bot's screen lists beside it.
  */
 import { filterByFuzzy } from "./fuzzy.ts"
 import { isUnread } from "./session-work.ts"
@@ -27,6 +35,13 @@ import type { Conversation, Message } from "./db.ts"
  * matters, and an archived one, whose line only the Archived pill draws.
  */
 export const BOT_CHATS = 50
+
+/**
+ * The word the app draws on Main: a bot's one permanent conversation is the host's Bot Chat, whose
+ * title is Hermes's, so the UI says its own word over it. A record that stops being Main reads as its
+ * own thread rather than a second row called Main.
+ */
+export const MAIN_TITLE = "Main"
 
 /**
  * The fields a chat's record is judged by before it is drawn as a row: the three kinds the rule never
@@ -92,8 +107,12 @@ export function isListed(chat: ChatStanding): boolean {
  * Whether a row may be put away at all: a conversation that exists may, and a chat nothing has been
  * said in may not, because putting it away would be the one thing that took it out of the sheet that
  * is its only way in. A row already archived is always offered the way back, whatever it holds.
+ *
+ * A bot's **Main** is never put away (G2): it is the bot's own conversation with its host, not a chat
+ * the reader made and may set aside, so no surface is offered the press.
  */
 export function mayArchive(chat: ChatStanding): boolean {
+  if (chat.main) return false
   return Boolean(chat.archived) || isListed(chat)
 }
 
@@ -109,7 +128,7 @@ export interface ChatMarks {
 
 export type ChatRecord = Pick<
   Conversation,
-  "id" | "title" | "pinned" | "updatedAt" | "routine" | "line" | "hermesSessionId"
+  "id" | "title" | "pinned" | "updatedAt" | "routine" | "line" | "hermesSessionId" | "main"
 > &
   ChatMarks
 
@@ -124,8 +143,25 @@ export interface ChatListRow {
   id: string
   title: string
   line?: string
+  /**
+   * The clock this row is ordered by when a list keeps the received one: the newest message the *bot*
+   * sent, since a chat is as new as the last thing the reader was told. A row whose reply has not
+   * arrived falls to the record's own clock.
+   */
   at: number
+  /**
+   * The newest message of either role in the chat, where this device read its tail: a list that puts
+   * the chat the reader has just written in where they are orders by this instead (`ChatClock`). It
+   * rides the one tail read `at` comes from, so both clocks are on the row at no extra cost, and a row
+   * past the bound — whose tail no screen read — carries none and is ordered by `at`.
+   */
+  latest?: number
   pinned: boolean
+  /**
+   * A bot's Main: its one permanent conversation with its host, drawn at `MAIN_TITLE` rather than the
+   * record's own, and offered no pin, no archive and no delete anywhere (G2).
+   */
+  main?: boolean
   /**
    * When the reader pinned it, so the pinned group reads the order the pins were made: the earliest on
    * top, the last pin at its bottom. Absent for a pin written before the app kept a clock, which reads
@@ -227,16 +263,46 @@ export function chatRowOf(
   const reason = reply ? waitReasonOf(reply) : undefined
   return {
     id: chat.id,
-    title: chat.title,
+    // Main is the host's record with Hermes's title ("Bot Chat"); the app says its own word over it.
+    title: chat.main ? MAIN_TITLE : chat.title,
     line: plainLine((reply ?? newest)?.content ?? "") ?? NO_MESSAGES,
     at: reply?.createdAt ?? chat.updatedAt,
+    ...(newest ? { latest: newest.createdAt } : {}),
     pinned: Boolean(chat.pinned),
     ...rowMarksOf(chat),
+    ...(chat.main ? { main: true } : {}),
     ...(chat.hermesSessionId ? { session: chat.hermesSessionId } : {}),
     // Nothing settled in a chat whose newest reply is still being written.
     ...(newest?.status === "streaming" ? { streaming: true } : {}),
     ...(reason ? { needs: reasonText(reason) } : {}),
   }
+}
+
+/**
+ * The rows a bot's screen lists as its side chats: one rule for the Side Chat List, its subtitle's
+ * count and Main's badge, so no two of them can disagree about what a side chat is (G5).
+ *
+ * A side chat is a **chat** or a **room** that is neither Main nor a routine's run — the bot's Main is
+ * the screen it is drawn from, and a run is the routines page's row, not a conversation of the bot's.
+ * The archive is deliberately not this rule's: `keptBy`/`KEEPS` decide that, so a row the reader put
+ * away is still a side chat and stands under the Archived pill, which is the only pill that draws it.
+ * What a screen shows of these is this less the archived rows.
+ */
+export function sideChats(rows: readonly ChatListRow[]): ChatListRow[] {
+  return rows.filter((row) => !row.main && !row.routine)
+}
+
+/**
+ * The clock a list orders its rows by. `at` is what a bot's list of its chats has always been ordered
+ * by — the newest word the bot sent, so a chat is as new as the last thing the reader was told — and
+ * `latest` is the newest message of either role, which is the clock the Side Chat List reads: a chat
+ * the reader has just written in is where they are, so it stands on top. The flat layout keeps `at`.
+ */
+export type ChatClock = "at" | "latest"
+
+/** A row's clock as the list asked for it: its `latest` where a tail was read, and its `at` otherwise. */
+function clockOf(row: Pick<ChatListRow, "at" | "latest">, clock: ChatClock): number {
+  return clock === "latest" ? (row.latest ?? row.at) : row.at
 }
 
 /**
@@ -246,10 +312,14 @@ export function chatRowOf(
  * list's own rule, as does the whole unpinned band under them: what was last said in the row, newest
  * on top, ties by id so every device draws them alike. Named on its own so a list that draws the same
  * rows for another screen — the legacy layout's Rooms section — ranks them by the same rule.
+ *
+ * `clock` is the row's own time the band is read by (`ChatClock`): one rule for both lists, so the two
+ * layouts cannot order the same rows two ways.
  */
 export function compareChatOrder(
-  a: Pick<ChatListRow, "id" | "at" | "pinned" | "pinnedAt">,
-  b: Pick<ChatListRow, "id" | "at" | "pinned" | "pinnedAt">,
+  a: Pick<ChatListRow, "id" | "at" | "latest" | "pinned" | "pinnedAt">,
+  b: Pick<ChatListRow, "id" | "at" | "latest" | "pinned" | "pinnedAt">,
+  clock: ChatClock = "at",
 ): number {
   const band = Number(b.pinned) - Number(a.pinned)
   if (band) return band
@@ -257,24 +327,31 @@ export function compareChatOrder(
     const pin = (a.pinnedAt ?? 0) - (b.pinnedAt ?? 0)
     if (pin) return pin
   }
-  return b.at - a.at || (a.id < b.id ? -1 : 1)
+  return clockOf(b, clock) - clockOf(a, clock) || (a.id < b.id ? -1 : 1)
 }
 
 /**
  * The list's one order, applied: one flat band — a second ordering rule would move rows under the
  * reader.
  */
-export function orderChatRows(rows: readonly ChatListRow[]): ChatListRow[] {
-  return [...rows].sort(compareChatOrder)
+export function orderChatRows(
+  rows: readonly ChatListRow[],
+  clock: ChatClock = "at",
+): ChatListRow[] {
+  return [...rows].sort((a, b) => compareChatOrder(a, b, clock))
 }
 
 /**
  * The rows the list draws for a search: the order above, narrowed to the chats whose title or last
  * line answers the query through the matcher Code's list uses. A search narrows the list, it never
- * re-orders it.
+ * re-orders it — which is why it is handed the same clock the list is drawn by.
  */
-export function chatList(rows: readonly ChatListRow[], query: string): ChatListRow[] {
-  return filterByFuzzy(orderChatRows(rows), query, (row) => [row.title, row.line])
+export function chatList(
+  rows: readonly ChatListRow[],
+  query: string,
+  clock: ChatClock = "at",
+): ChatListRow[] {
+  return filterByFuzzy(orderChatRows(rows, clock), query, (row) => [row.title, row.line])
 }
 
 /**
@@ -330,10 +407,13 @@ export interface PinSwitch {
  * thing about an archived row rather than testing the mark itself.
  */
 export function pinSwitchOf(
-  row: Pick<ChatRecord, "pinned" | "archived">,
+  row: Pick<ChatRecord, "pinned" | "archived" | "main">,
   rows: readonly ChatListRow[] | undefined,
 ): PinSwitch {
   const checked = Boolean(row.pinned)
+  // A bot's Main stands where it stands (G2): it is the bot's one permanent conversation, so no sheet
+  // offers a pin it may not make. The archive rule is here for the same reason, beside it.
+  if (row.main) return { offered: false, checked, disabled: true, subtitle: PIN_SUBTITLE }
   if (row.archived) return { offered: false, checked, disabled: true, subtitle: PIN_SUBTITLE }
   if (!rows) return { offered: true, checked, disabled: true, subtitle: PIN_UNKNOWN_SUBTITLE }
   const full = !checked && pinsOf(rows).length >= PIN_LIMIT

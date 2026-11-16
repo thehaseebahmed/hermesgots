@@ -101,7 +101,9 @@ function PinRow({ chat, profileId }: { chat: Conversation; profileId: string }) 
  * where the Host advertises `rooms_write`, and each carries an id minted once per opening of its
  * question, so a retry after a dropped answer is the same rename and the same stop (ADR 0123). Its pin
  * and its archive are still the reader's own marks, drawn on any Host. A **run** keeps the name and the
- * mute a chat has, and a chat keeps everything else. A project session keeps its `…`, whose resolve,
+ * mute a chat has, and a chat keeps everything else. A bot's **Main** keeps its mute alone: its title is
+ * the Host's, its place is permanent, and nothing on any surface renames, pins, archives or deletes it
+ * (G2). A project session keeps its `…`, whose resolve,
  * discard and delete are not a chat's settings, and the bot's own mute and delete stay on its settings
  * page.
  */
@@ -134,6 +136,10 @@ export function ChatSettings({
   onDeleted?: () => void
 }) {
   const room = Boolean(chat.room)
+  // A bot's Main is the host's record with the host's title: it may not be renamed, pinned, archived or
+  // deleted from any surface (G2), so the sheet opens with none of those on it. Its mute stays — what a
+  // reader says about Main's notifications is still theirs.
+  const main = Boolean(chat.main)
   // A room's writes are its Host's, and a control that can only come back refused is worse than none.
   const canWrite = usePluginFeatureOn(answerer, "rooms_write")
   const roomHost = room && canWrite && answerer ? answerer : undefined
@@ -199,8 +205,9 @@ export function ChatSettings({
           </PopupHeader>
           <div className="flex flex-col gap-6 px-4 pb-4 sm:px-6">
             {/* A room's name is its Host's, so the field waits for a Host that can write one; a chat's
-                and a run's are this device's own row. */}
-            {(!room || roomHost) && (
+                and a run's are this device's own row. Main's is Hermes's, and is drawn as the app's own
+                word wherever a row or a bar names it. */}
+            {(!room || roomHost) && !main && (
               <div className="flex flex-col gap-2">
                 <label htmlFor="chat-name" className={fieldLabelClass}>
                   Name
@@ -274,7 +281,7 @@ export function ChatSettings({
                   Disband room
                 </DestructiveButton>
               )}
-              {!room && !chat.main && (
+              {!room && !main && (
                 <DestructiveButton onClick={() => setDeleting(true)}>Delete chat</DestructiveButton>
               )}
             </div>

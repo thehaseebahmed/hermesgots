@@ -11,9 +11,10 @@ import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { ChatPage } from "@/routes/chat"
-import { setPinned } from "@/lib/chat-marks"
+import { setArchived, setPinned } from "@/lib/chat-marks"
 import { db, type Conversation } from "@/lib/db"
 import {
+  absentText,
   atWidth,
   botProfile,
   click,
@@ -380,4 +381,44 @@ test("a project session keeps its menu: its settings are not a chat's", async ()
     await until(async () => Boolean(find('[aria-label="Chat options"]')), "the session's menu")
     assert.ok(missing("[data-chat-settings-open]"), "and no title that opens a chat's settings")
   })
+})
+
+/**
+ * Main is the bot's own conversation with its host, and it stays that: it may not be renamed, pinned,
+ * archived or deleted from any surface (G2), so the sheet a press opens on it offers none of them.
+ * Its title is Hermes's, its place is permanent, and its delete is already refused where the record is
+ * read — this is the surface that must not offer a press the write would refuse.
+ */
+test("Main is offered no name, no pin and no archive", async () => {
+  await seed({ id: "main-1", title: "Bot Chat", main: true, updatedAt: 11, hermesSessionId: "s-main" })
+  globalThis.fetch = async () => json({})
+  await mount(screen("main-1"), async () => {
+    await until(async () => Boolean(titlePress()), "Main's bar")
+    await click(titlePress())
+    await until(async () => Boolean(sheet()), "the sheet the title opens")
+    assert.equal(missing("[data-chat-name]"), true, "no name field: the host's title is not ours to write")
+    assert.equal(missing("[data-chat-pin]"), true, "no pin: Main stands where it stands")
+    assert.equal(missing("[data-chat-archive]"), true, "and no way to put it away")
+    absentText("button", "Delete chat")
+    // What is left is what a reader may still say about it: its notifications.
+    assert.equal(findAll('[role="switch"]').length, 1, "one switch, the mute")
+  })
+})
+
+/**
+ * The sheet is one way in and the marks are written by two writers besides it, so the refusal lives
+ * in them rather than in the surface that offers the press: a pin or an archive written straight
+ * through — by a screen, a queue or a caller this build has not written yet — is refused, and
+ * nothing is written at all.
+ */
+test("the writers refuse Main, and write nothing", async () => {
+  await seed({ id: "main-1", title: "Bot Chat", main: true, createdAt: 1, updatedAt: 11 })
+  globalThis.fetch = async () => json({})
+  assert.equal(await setPinned("main-1", true), false, "a pin on Main is refused")
+  await setArchived("main-1", true)
+  const row = await db.conversations.get("main-1")
+  assert.equal(row?.pinned, undefined, "and nothing was pinned")
+  assert.equal(row?.pinnedAt, undefined)
+  assert.equal(row?.archived, undefined, "nor put away")
+  assert.equal(row?.main, true, "Main is still Main")
 })

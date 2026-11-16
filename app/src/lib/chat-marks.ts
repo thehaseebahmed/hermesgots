@@ -44,6 +44,9 @@ export async function setPinned(id: string, on: boolean): Promise<boolean> {
   // ever the wire's way of saying "no pin", never this device's (`sync.ts` spells it there).
   const marks = on ? { pinned: true, pinnedAt: now } : { pinned: undefined, pinnedAt: undefined }
   const row = await db.conversations.get(id)
+  // A bot's Main is not the reader's to mark (G2): it stands where it stands on every surface, so the
+  // press is refused here rather than only by the switch that offers it.
+  if (row?.main) return false
   if (on && row && !(await hasRoomForPin(row))) return false
   const room = row?.room
   if (row && room) {
@@ -73,6 +76,9 @@ export async function setArchived(id: string, on: boolean) {
     ? { archived: true, pinned: undefined, pinnedAt: undefined }
     : { archived: undefined }
   const row = await db.conversations.get(id)
+  // Main is never put away, on any Host (G2): nothing is written on the row and nothing is asked of
+  // the Host, so no press can leave a bot without the conversation its screen opens on.
+  if (row?.main) return
   const room = row?.room
   if (row && room) return markRoom(row, room, marks, now)
   await updateConversation(id, marks)

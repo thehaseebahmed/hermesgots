@@ -13,11 +13,13 @@ import {
   CHAT_FILTERS,
   filterChatRows,
   isListed,
+  MAIN_TITLE,
   mayArchive,
   orderChatRows,
   PIN_LIMIT,
   pinsOf,
   pinSwitchOf,
+  sideChats,
 } from "../src/lib/chat-list.ts"
 import { roomRowOf } from "../src/lib/rooms.ts"
 
@@ -167,7 +169,11 @@ test("a chat nothing was said in is offered no way to put it away", () => {
   assert.equal(mayArchive(standing()), false, "an unstarted chat may not be archived")
   assert.equal(mayArchive(standing({ updatedAt: 1_001 })), true, "one that was spoken in may")
   assert.equal(mayArchive(standing({ draftAt: 1_500 })), true, "and so may one holding a draft")
-  assert.equal(mayArchive(standing({ main: true })), true, "a bot's Main may, like any chat")
+  assert.equal(
+    mayArchive(standing({ main: true, updatedAt: 1_001 })),
+    false,
+    "while a bot's Main is never put away, whatever it holds (G2)",
+  )
   assert.equal(
     mayArchive(standing({ room: { id: "room-1", members: [] } })),
     true,
@@ -660,4 +666,110 @@ test("a filter narrows before the search, so a search inside a pill finds only t
     ["trip"],
     "and a pill with rows the words do not find is the search's emptiness, not the pill's",
   )
+})
+
+/**
+ * Main is the bot's one permanent conversation, and it is the host's record: its title is Hermes's
+ * ("Bot Chat"), and the app draws its own word over it rather than the host's, so a record that stops
+ * being Main reads as its own thread rather than a second row called Main.
+ */
+test("Main's row says it is Main, and wears the app's word over the host's title", () => {
+  const row = chatRowOf(
+    chat("main-1", 100, { main: true, title: "Bot Chat" }),
+    said("morning", 240),
+  )
+  assert.equal(MAIN_TITLE, "Main", "the word the UI draws over a Main record's own title")
+  assert.equal(row.main, true, "the row knows it is the bot's Main")
+  assert.equal(row.title, MAIN_TITLE, "and draws that word, not the host's title")
+  assert.equal(row.line, "morning", "while the rest of the row is any chat's")
+  assert.equal(row.at, 240)
+  assert.equal(chatRowOf(chat("a", 100)).main, undefined, "an ordinary chat says nothing of the kind")
+  assert.equal(chatRowOf(chat("r", 100, { routine: true })).main, undefined, "and a run is no Main")
+})
+
+/**
+ * One rule for what a bot's screen lists as its side chats: a chat or a room that is neither Main nor
+ * a run. The archive is deliberately not part of it — the pills decide that (`keptBy`/`KEEPS`), so
+ * the row the reader put away still has a pill to stand under, and the screen's count and Main's
+ * badge read this rule less the archived rows.
+ */
+test("a side chat is a chat or a room that is neither Main nor a run", () => {
+  const rows = [
+    chatRowOf(chat("chat", 300)),
+    roomRow("room", 200),
+    chatRowOf(chat("run", 100, { routine: true })),
+    chatRowOf(chat("main-1", 150, { main: true })),
+    chatRowOf(chat("archived", 50, { archived: true })),
+  ]
+  assert.deepEqual(
+    sideChats(rows).map((row) => row.id),
+    ["chat", "room", "archived"],
+    "rooms are side chats, Main and a run are not, and an archived chat is one still",
+  )
+  assert.deepEqual(
+    sideChats(rows)
+      .filter((row) => !row.archived)
+      .map((row) => row.id),
+    ["chat", "room"],
+    "and the count and the badge read it less the archived ones, which their pill still draws",
+  )
+  assert.equal(sideChats(rows).length, rows.length - 2, "nothing else is dropped")
+})
+
+/**
+ * The two clocks a row carries: `at` is the newest word the bot sent — the received clock the flat
+ * list has always ordered by — and `latest` is the newest message of either role, so a list can put
+ * the chat the reader has just written in where they are, on top. One row, both answers, since both
+ * come out of the one tail read.
+ */
+test("a row's latest is the newest message of either role, and the list orders by the clock given", () => {
+  const rows = [
+    chatRowOf(chat("answered", 100), said("said last", 400)),
+    chatRowOf(chat("spoken-in-last", 100), said("now do the next thing", 500, { role: "user" }), said("said first", 200)),
+  ]
+  assert.equal(rows[1].latest, 500, "the reader's own message is the newest thing in the chat")
+  assert.equal(rows[1].at, 200, "while `at` stays the newest word the bot sent")
+  assert.deepEqual(
+    orderChatRows(rows, "latest").map((row) => row.id),
+    ["spoken-in-last", "answered"],
+    "the side list puts the chat the reader just wrote in on top",
+  )
+  assert.deepEqual(
+    orderChatRows(rows).map((row) => row.id),
+    ["answered", "spoken-in-last"],
+    "and the flat list keeps the received clock, exactly as it stands today",
+  )
+  assert.deepEqual(
+    chatList(rows, "", "latest").map((row) => row.id),
+    ["spoken-in-last", "answered"],
+    "a search cannot re-order what the clock put in place",
+  )
+})
+
+test("a row past the bound carries no latest, and keeps the clock it has", () => {
+  // Its tail is past `BOT_CHATS`, so no screen read it: the row knows only the record's clock, and
+  // falls back to it rather than sinking to the bottom of a list ordered by `latest`.
+  const past = chatRowOf(chat("past", 900))
+  assert.equal(past.latest, undefined, "no tail was read, so no newest message is known")
+  const rows = [
+    past,
+    chatRowOf(chat("spoken", 100), said("mine", 400, { role: "user" }), said("theirs", 50)),
+  ]
+  assert.deepEqual(
+    orderChatRows(rows, "latest").map((row) => row.id),
+    ["past", "spoken"],
+    "an unread tail keeps the record's clock rather than becoming the oldest row",
+  )
+})
+
+test("Main is offered no pin and no way to put it away", () => {
+  // Both rules are read off the record, as every surface reads them.
+  const main = chat("main-1", 100, { main: true, createdAt: 1 })
+  assert.equal(mayArchive(main), false, "Main is never archived, though it is a listed chat")
+  assert.equal(pinSwitchOf(main, []).offered, false, "and is offered no pin at all")
+  assert.equal(pinSwitchOf(main, []).checked, false)
+  const ordinary = chat("a", 100, { createdAt: 1 })
+  assert.equal(mayArchive(ordinary), true, "a chat of the reader's own is offered both")
+  assert.equal(pinSwitchOf(ordinary, []).offered, true)
+  assert.equal(chatRowOf(main).main, true, "and the row says which of the two it is")
 })

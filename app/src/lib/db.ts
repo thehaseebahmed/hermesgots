@@ -1880,6 +1880,30 @@ db.version(49).upgrade((tx) =>
 )
 
 /**
+ * v50: a Main this build does not publish. Main is the host's canonical Bot Chat now, resolved and laid
+ * over the list answers by the plugin, so a record an older build wrote under a `main-*` id is no Main
+ * at all — the flag it carries is cleared, and the record stays as an ordinary side chat with its
+ * history. Only ids of that shape lose the flag: a Main this build holds is keyed by the host's session
+ * id, and no record of any other id is touched, so a device's real Main keeps the mark it was given.
+ *
+ * Nothing else about these records moves: they keep their title, their messages, their marks and their
+ * drafts, and one that the host's Bot Chat has since replaced is simply a conversation of the bot's.
+ */
+db.version(50).upgrade((tx) =>
+  tx
+    .table("conversations")
+    .filter(
+      (conversation: Record<string, unknown>) =>
+        typeof conversation.id === "string" &&
+        conversation.id.startsWith("main-") &&
+        "main" in conversation,
+    )
+    .modify((conversation: Record<string, unknown>) => {
+      delete conversation.main
+    }),
+)
+
+/**
  * How many rows of one room's log this device keeps: the page a reader can scroll back through.
  * A room's log lives on its Host and is read by sequence, so a page is what a screen needs and no
  * more — without a bound, every fold and every read mark would pay for the room's whole history.
