@@ -10,7 +10,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react"
-import { useSearchParams } from "react-router"
+import { useLocation, useNavigate, useSearchParams } from "react-router"
 
 import { Refusal } from "@/components/banner"
 import { PointChips } from "@/components/chat/canvas-points"
@@ -695,6 +695,14 @@ export interface ComposerControls {
   stop: () => boolean | Promise<boolean>
   /** The run that Stop is for, so its acknowledgement ends when another run takes the button. */
   runId?: string
+}
+
+/** A message the new chat's surface hands the thread that opens: its words and the files it carried. */
+export interface Handover {
+  /** Its own id, so a thread that mounts twice takes it once. */
+  id: string
+  text: string
+  attachments: Attachment[]
 }
 
 interface ThreadOptions {
@@ -1626,6 +1634,18 @@ export function ChatNextThread({
     setDraft("")
     await sendTurn(text)
   }
+
+  // A message the new chat's surface handed over: the thread that opens sends it as its first turn,
+  // so the row drawn is this thread's own (ADR 0111). Taken once, and the address forgets it.
+  const navigate = useNavigate()
+  const handed = (useLocation().state as { handover?: Handover } | null)?.handover
+  const takenBy = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (!handed || takenBy.current === handed.id) return
+    takenBy.current = handed.id
+    void sendTurn(handed.text, handed.attachments)
+    navigate(".", { replace: true, state: { quiet: true } })
+  })
 
   function retryUnsent(id: string) {
     const row = store.get().unsent?.find((one) => one.id === id)
