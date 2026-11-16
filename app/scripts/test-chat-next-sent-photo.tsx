@@ -29,8 +29,12 @@ const pick = { provider: "anthropic", model: "claude-sonnet-5-5" }
 // every other chat-next test reads it.
 const SOON = 6_000
 
-/** The photo's cell in a message, as the thread draws one: the button a tap opens it from. */
-const cell = () => find('[data-chat-next] button[aria-label="Open photo.png"]')
+/**
+ * The photo's cell in a message, as the thread draws one: the button a tap opens it from. A staged
+ * file's tile in the composer wears the same label, so the find is the thread's row alone.
+ */
+const cell = () =>
+  find('[data-chat-next] [data-slot="message"] button[aria-label="Open photo.png"]')
 
 /** What that cell's picture draws from: the URL the host signed, or the bytes this device held. */
 const signed = () =>
