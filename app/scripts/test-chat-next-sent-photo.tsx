@@ -4,8 +4,6 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
-import { act } from "react"
-
 import { fakeHost } from "./chat-next-host.ts"
 import {
   botProfile,
@@ -14,8 +12,8 @@ import {
   find,
   mount,
   seedChats,
+  paste,
   sendPress,
-  settle,
   type,
   until,
 } from "./component-kit.tsx"
@@ -31,22 +29,8 @@ const cell = () =>
 const signed = () =>
   cell()?.querySelector("img")?.getAttribute("src") ?? ""
 
-async function pastePhoto() {
-  const field = composerField()
-  assert.ok(field, "the composer's field is on screen")
-  const file = new File([new Uint8Array(24)], "photo.png", {
-    type: "image/png",
-    lastModified: 7,
-  })
-  const event = new Event("paste", { bubbles: true, cancelable: true })
-  Object.defineProperty(event, "clipboardData", {
-    value: { files: [file], items: [{ kind: "file", getAsFile: () => file }] },
-  })
-  await act(async () => {
-    field.dispatchEvent(event)
-  })
-  await settle()
-}
+const pastePhoto = () =>
+  paste([new File([new Uint8Array(24)], "photo.png", { type: "image/png", lastModified: 7 })])
 
 test("a photo the host has not saved yet keeps its place with a skeleton", async () => {
   await seedChats([{ id, title: "Sky colours" }], {
