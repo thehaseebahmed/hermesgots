@@ -1017,6 +1017,34 @@ test("a reply the host wrote with no finish reason is not drawn as still being w
   })
 })
 
+test("a chat opened where the run was never watched reads the reason the host kept", async () => {
+  const { host } = await onChatNext("c-host-failure", {}, { plugin: true })
+  const notice =
+    "Your request was not processed. Send it again if you still want me to carry it out."
+  const said = "You have used up this account's usage for now. It comes back at 14:00 UTC."
+  host.seed([{ user: "Look around", reply: "", failed: notice }])
+  // What the host's own turn end kept of the run, which this device never saw (failures.py).
+  host.keepFailure(said)
+  await mount(chatScreen("c-host-failure"), async () => {
+    await until(() => text().includes(said), "the reason the host kept")
+    assert.ok(!text().includes(notice), "rather than the notice the transcript holds")
+    assert.ok(find("[data-retry]"), "with Retry on the failed turn")
+  })
+  assert.ok(host.asked.failures > 0, "and the host was asked for it")
+})
+
+test("a reason the host kept for another failure leaves a turn that worked alone", async () => {
+  const { host } = await onChatNext("c-stale-failure", {}, { plugin: true })
+  const said = "You have used up this account's usage for now. It comes back at 14:00 UTC."
+  host.seed([{ user: "Look around", reply: "All done.", finished: true }])
+  host.keepFailure(said)
+  await mount(chatScreen("c-stale-failure"), async () => {
+    await until(() => replies().includes("All done."), "the reply is drawn")
+    assert.ok(!text().includes(said), "the reason is not drawn")
+    assert.ok(!find("[role=img][aria-label='Failed']"), "and the turn is not marked failed")
+  })
+})
+
 test("Retry re-asks the element a failed request pointed at", async () => {
   const { host } = await onChatNext("c-retry-point", {}, { plugin: true })
   const total = { label: "The total", selector: "#total" }

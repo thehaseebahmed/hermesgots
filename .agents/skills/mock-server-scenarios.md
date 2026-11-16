@@ -71,7 +71,7 @@ Send these phrases in a chat message to trigger specific mock behaviors:
 | `draw the interface` | A reply carrying an interface: an `openui-lang` block with `# id: sales`, the receipt under it (long enough to scroll a phone's thread), a pause, then a patch block reusing that id — it changes the card and table in place and draws nothing where it sits — then a block naming a component the library doesn't have (it draws as the code the model sent), then a closing line. One reply, so a patch never arrives as a second message |
 | `fail` | Tool call fails with "Permission denied" |
 | `fail the turn` | The run ends as failed before it says anything, with no answer in the transcript |
-| `out of usage` | The provider refuses the turn — the account's usage is spent — so the run ends as failed with the provider's words, and the transcript's notice stands in the turn's place as it does on a real host |
+| `out of usage` | The provider refuses the turn — the account's usage is spent — so the run ends as failed with the provider's words, and the transcript's notice stands in the turn's place as it does on a real host; `GET /api/plugins/gots/sessions/{id}/failure` then answers those words, as the plugin's own table does |
 | `ask` | Single clarify question: "Which logs should I count as old?" |
 | `ask five` | Five clarify questions (env, services, name, data handling, reviewers) |
 | `commit` (in project session) | Prevents workspace removal on `workspace/remove` (simulates unpushed work) |

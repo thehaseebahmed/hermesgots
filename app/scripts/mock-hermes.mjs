@@ -1615,6 +1615,9 @@ function afkReason(project) {
 const RUN_ERROR = "Timed out waiting for https://status.example.com"
 // What Hermes writes in the transcript in place of a turn it gave up on — never the provider's own
 // words, which only the run's ending carries (agent/turn_failure_copy.py's FAILED_TURN_NOTICE).
+// What the host keeps of a chat's last failed run, by session: the plugin's own table
+// (plugin/failures.py), which a device that never watched the run reads instead of the notice.
+const keptFailures = new Map()
 const FAILED_TURN_NOTICE =
   "Your request was not processed. Send it again if you still want me to carry it out."
 // A provider refusing the turn for a reason of its own: the account's usage window is spent.
@@ -4035,6 +4038,8 @@ function startRun(req, body, options = {}) {
     run.status = run.stopped ? "cancelled" : failed ? "failed" : "completed"
     if (failed) run.error = typeof failed === "string" ? failed : "The model provider didn't respond."
     run.endedAt = Date.now()
+    // The turn's own end keeps what its run failed of, for a device that never watches it.
+    if (failed) keptFailures.set(run.sessionId, { text: run.error, at: Math.floor(run.endedAt / 1000) })
     // A scenario can name the final message alone, as Hermes's `final_response` carries it.
     const final = output ?? spoken
     run.output = final
@@ -4276,6 +4281,9 @@ http
           "delegation_page",
           ...(SKILLS ? ["skills", "skills_write", "skills_remove", "skills_view"] : []),
           "queue",
+          // What a chat's last failed turn ended with, kept for a device that never watched the run
+          // (plugin/failures.py, ADR 0157).
+          "failed_turn_reason",
           // The queue Hermes itself keeps for a session, and the turn a restart lost under it
           // (plugin/pending.py): the card that names it and the one control that clears it.
           "pending",
@@ -5693,6 +5701,17 @@ http
         ? null
         : ([...pool].sort((a, b) => b.used_percent - a.used_percent)[0] ?? null)
       return json(res, 200, { object: "gots.usage", provider, plan: "Pro", windows, deciding })
+    }
+    const sessionFailure = /^\/api\/plugins\/gots\/sessions\/([^/]+)\/failure$/.exec(url.pathname)
+    if (PLUGIN && !profile && req.method === "GET" && sessionFailure) {
+      const id = decodeURIComponent(sessionFailure[1])
+      const kept = keptFailures.get(id)
+      return json(res, 200, {
+        object: "gots.failure",
+        session_id: id,
+        text: kept?.text ?? null,
+        at: kept?.at ?? null,
+      })
     }
     const sessionTodos = /^\/api\/plugins\/gots\/sessions\/([^/]+)\/todos$/.exec(url.pathname)
     if (PLUGIN && !profile && req.method === "GET" && sessionTodos) {

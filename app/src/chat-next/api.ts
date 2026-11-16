@@ -308,6 +308,32 @@ export async function readRun(
 }
 
 /**
+ * What the session's last failed run ended with, as the plugin kept it (`failures.py`). Hermes writes
+ * one notice for every failed turn and keeps the provider's own words out of the transcript, so a
+ * device that never watched the run — a second one, or this one opened the next morning — reads the
+ * reason here. A host without the plugin, or one whose store kept none, has no answer.
+ */
+export async function readSessionFailure(
+  connection: Connection,
+  session: string,
+  signal?: AbortSignal,
+): Promise<{ text: string; at?: number } | undefined> {
+  try {
+    const response = await ask(
+      `${plugin(connection)}/sessions/${encodeURIComponent(session)}/failure`,
+      { headers: headers(connection), signal: within(signal) },
+    )
+    if (!response.ok) return undefined
+    const { text, at } = (await response.json()) as { text?: unknown; at?: unknown }
+    if (typeof text !== "string" || !text.trim()) return undefined
+    // The host's clock, in ms: a reason older than the turn it would explain is another failure's.
+    return { text, ...(typeof at === "number" && at > 0 ? { at: at * 1000 } : {}) }
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * The children a session delegated to, by the Gots plugin's list of them. A host without the plugin
  * has no answer, and a card can then only say what the transcript does.
  */

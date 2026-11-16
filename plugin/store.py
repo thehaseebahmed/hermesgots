@@ -59,7 +59,9 @@ logger = logging.getLogger(__name__)
 # 72 keeps the mark a pinned canvas's row draws (`canvases.py`'s record, #1065): one column — the
 # icon's name or the emoji — empty for every canvas an older store holds, since a canvas nobody has
 # marked draws the app's own frame.
-SCHEMA_VERSION = 72
+# 73 keeps what a chat's last failed turn ended with (`failures.py`, ADR 0157): one new table, one row
+# per session, replaced as each failure lands, so nothing already written has to move.
+SCHEMA_VERSION = 73
 
 
 def data_dir(hermes_home: Path) -> Path:
@@ -1074,6 +1076,17 @@ def _migrate(conn: sqlite3.Connection) -> None:
         )
         if version < 62:
             _drop_uncallable_tools(conn)
+        # v73: what a chat's last failed turn ended with (failures.py, ADR 0157). `text` is the run's
+        # own words for the failure, which the transcript's notice never carries, and `at` is when
+        # that run ended, so a reason older than the turn it would explain is left alone. One row per
+        # session: a chat draws its newest failure, and the one before it is history.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS session_failures (
+                   session_id TEXT PRIMARY KEY,
+                   text TEXT NOT NULL,
+                   at INTEGER NOT NULL
+               )"""
+        )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
 
 

@@ -25,6 +25,17 @@ chat-next already keeps. A failure heard before the transcript named the row wai
 until the next read supplies it. Keyed by the row, a later failure can never lend its words to an
 older turn, and a turn nobody heard fail keeps the host's notice.
 
+**And the host keeps them, for the device that was never there.** A device's own copy only helps the
+device that watched the run, so the turn's own end keeps the reason on the host: the
+`on_session_end` hook reads the run's `error` from the API server's own run statuses — the one place
+it outlives the turn — and `failures.py` keeps it in the plugin's store, one row per session, served
+at `GET /api/plugins/gots/sessions/{id}/failure` with the moment the run ended. A chat opening reads
+it once (on the open and again when a turn ends) and files it under the row of the turn it explains,
+under two guards: the rows must already call that turn failed, and the run must have ended after
+the turn began. The reason that comes this way is the session's newest, not its history — a chat
+whose older failure had a different reason keeps the notice on that older turn, which the browser
+flow pins.
+
 **A wordless failure keeps the notice.** Hermes falls back to `agent run failed` where the ending
 says nothing else, and that names the failure less than the notice does; those endings — and a run
 that was cancelled or interrupted — draw nothing of their own.
@@ -40,8 +51,9 @@ that was cancelled or interrupted — draw nothing of their own.
   it. The row keeps the host's sentence; only what the screen draws changes.
 - **The reason read back from the host on opening a chat (`GET /v1/runs/{id}`).** A run's status is
   kept briefly after it ends, and the id is not on the transcript, so a chat opened the next morning
-  would ask about a run the host has forgotten. The device's own memory is the only reader that
-  outlives it.
+  would ask about a run the host has forgotten — and the device has no id to ask with. Kept on the
+  host by the turn's own end, the reason outlives both; read from the live run's status at that
+  moment, it is still the run's own words, not a summary of them.
 - **Interpolating the reason into the notice in the plugin, at the turn's end.** The plugin writes no
   transcript rows, and the notice is the host's: a row rewritten by the plugin is one the host's own
   readers no longer recognise.
@@ -50,9 +62,14 @@ that was cancelled or interrupted — draw nothing of their own.
 
 - A failed turn reads as "You have used up this account's usage for now" rather than as "Your request
   was not processed", and Retry stays where every failure offers it.
-- A second device, and a device that never saw the run, still read the host's notice: the words are
-  the watching device's until a plugin route carries them, which this change does not add.
+- A second device, and one opened the next morning, read it too: the reason is kept on the host by
+  the turn's own end, so only the plugin's store has to outlive the run. A Host whose plugin is older
+  than this route falls back to the notice, which is what every device read before.
+- The host keeps a session's newest failure: two failures in one chat, and the older turn reads the
+  notice again on a device that never watched it.
 - `app/scripts/chat-next-host.ts`'s `fail()` takes the notice and the run's ending separately, since
-  Hermes keeps them apart, and `app/scripts/mock-hermes.mjs` models the same pair for "out of usage".
+  Hermes keeps them apart, and `app/scripts/mock-hermes.mjs` models the same pair for "out of usage"
+  with the route that serves it back.
 - `app/scripts/test-chat-next-mount.tsx` holds both halves: the reason on the turn as the run ends,
-  and the reason still there on the chat opened again.
+  the reason still there on the chat opened again, and the reason read from a host that kept it while
+  this device watched nothing.

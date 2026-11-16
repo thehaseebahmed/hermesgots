@@ -50,6 +50,21 @@ async function body({ page, seed, send, shot, until, lastReply, row }) {
   await again.waitFor({ timeout: 20_000 })
   assert.equal(await row(NOTICE).count(), 0, "and it is still the reason after a reload")
   await shot("provider-reloaded")
+
+  // A device that never watched the run holds none of this one's copy: what it reads is the host's
+  // own record of the turn's end (plugin/failures.py), which is where the reason survives.
+  await page.evaluate(async () => {
+    const { db } = await import("/src/lib/db.ts")
+    await db.sessionStates.clear()
+    await db.sessionRows.clear()
+  })
+  await page.reload()
+  const elsewhere = row(SPENT)
+  await elsewhere.waitFor({ timeout: 20_000 })
+  // The host keeps a chat's newest failure, not its history: the older failed turn has no reason
+  // here, so it falls back to the notice this device no longer remembers past.
+  assert.equal(await row(NOTICE).count(), 1, "a device with no copy of its own still reads the reason")
+  await shot("provider-second-device")
 }
 
 // The error line has to read right on a laptop and on a phone in the dark.
