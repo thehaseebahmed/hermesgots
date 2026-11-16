@@ -15,6 +15,7 @@ import { BRIDGE_MESSAGE, POINT_MESSAGE, type CanvasDoc } from "@/lib/canvas-brid
 import { SCROLL_MESSAGE } from "@/lib/canvas-document"
 import { takePoint, keepPoint } from "@/lib/canvas-point-pick"
 import { refreshCanvas, refreshCanvases, startCanvas } from "@/lib/canvases"
+import { recordOf } from "@/lib/canvas-cache"
 import { BUILDING_ACTIVITY } from "@/lib/format"
 import { db } from "@/lib/db"
 import { pressBack } from "@/lib/native"
@@ -233,10 +234,11 @@ function serveCanvases(host: Host) {
         host.holdList = undefined
         await hold()
       }
+      // A listing is records, as the host's own is: the page comes with the canvas's own read.
       return json({
         object: "gots.canvases",
         canvases: (host.listed ?? ["c1", "c2"]).map((id) =>
-          canvasAt(host.version, id, undefined, host.at),
+          recordOf(canvasAt(host.version, id, undefined, host.at)),
         ),
       })
     }
@@ -907,6 +909,38 @@ test(
   }),
 )
 
+test(
+  "a canvas with a version whose bot is away says it in the header, not over its chat",
+  atWidth(390, async () => {
+    // The away sentence above the chat belongs to a canvas with no version: one that has a page says
+    // it in the header, where the same words are, and the body stays the chat alone. The gate is
+    // `loaded && !versioned && awayNow`, so the version is what keeps the body quiet (ADR 0130).
+    const host: Host = { version: 3, undos: 0, listed: [CANVAS.id] }
+    serveCanvases(host)
+    await seedCanvasChat(CANVAS.id)
+    await refreshCanvases()
+    // The host stops answering at all, with the record already known from the read above.
+    serveCanvases({ version: 3, undos: 0, failAll: true, listed: [CANVAS.id] })
+    try {
+      await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
+        await until(
+          () => /isn't answering/.test(find("header")?.textContent ?? ""),
+          "the header's away words",
+        )
+        assert.doesNotMatch(
+          text(),
+          /isn't on this device, and its bot isn't answering/,
+          "and no away sentence over the chat",
+        )
+        assert.ok(composerField(), "which is the chat alone")
+      })
+    } finally {
+      serveCanvases({ version: 3, undos: 0 })
+      await refreshCanvas(CANVAS.id)
+    }
+  }),
+)
+
 test("a canvas with no version opens on Edit and gains Preview when the first version lands", async () => {
   // Nothing to preview is said honestly (ADR 0130): a phone replaces the canvas's own address with
   // the edit one — a replace, never a push — and the header's Preview is drawn only once a version
@@ -995,15 +1029,25 @@ test("a canvas with no version opens on Edit and gains Preview when the first ve
       assert.doesNotMatch(text(), BUILDING_LINE, "and not called a build")
     })
 
-    // A canvas with a page draws the page, and the empty state is the page-that-isn't-there's alone:
-    // the two never stand in the same pane (ADR 0130, amended 2026-11-16).
+    // A canvas that has a page is never called a build: a record known from a listing carries no page,
+    // so while its document is still out the pane says it is reading, and once the page lands the pane
+    // draws it and no empty state at all (ADR 0130, amended 2026-11-16).
     const VERSIONED = "c5"
-    serveCanvases({ version: 3, undos: 0, listed: [VERSIONED] })
+    const host: Host = { version: 3, undos: 0, listed: [VERSIONED] }
+    serveCanvases(host)
     await seedCanvasChat(VERSIONED)
+    await refreshCanvases()
+    let release: () => void = () => {}
+    host.hold = () => new Promise<void>((done) => (release = done))
+    const read = refreshCanvas(VERSIONED)
     await drawCanvas([`/canvas/${VERSIONED}`], async () => {
+      await until(() => Boolean(find("[data-slot=canvas-empty]")), "the pane's empty state")
+      assert.match(text(), /Reading the canvas…/, "a page being read is not a page being built")
+      assert.doesNotMatch(text(), BUILDING_LINE, "and is not called a build")
+      await act(async () => release())
+      await read
       await until(() => Boolean(find("iframe[data-canvas-frame]")), "the page to draw")
-      assert.ok(missing("[data-slot=canvas-empty]"), "and no empty page beside it")
-      assert.doesNotMatch(text(), BUILDING_LINE, "nor the words of a build")
+      assert.ok(missing("[data-slot=canvas-empty]"), "and the empty page goes with it")
     })
   }
   try {
