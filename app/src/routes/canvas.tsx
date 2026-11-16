@@ -16,6 +16,7 @@ import { ChatBody } from "@/chat-next/chat-body"
 import { BackButton } from "@/components/back-button"
 import { CanvasConsentDialog, CanvasOptions, useCanvasConsent } from "@/components/canvas-consent"
 import { CanvasMark } from "@/components/canvas-mark"
+import { EmptyPane } from "@/components/empty-pane"
 import { Refusal } from "@/components/banner"
 import { CanvasPointsProvider, type CanvasPoints } from "@/components/chat/canvas-points"
 import { ChatHeader } from "@/components/chat/chat-header"
@@ -115,7 +116,7 @@ const openedBy = (id: string) => (event: MouseEvent<HTMLAnchorElement>) => {
  * reader chose stands in, which is the same slot the sidebar's row draws it in.
  */
 function CanvasTile({ canvas, now }: { canvas: Canvas; now: number }) {
-  const line = canvas.version > 0 ? `Version ${canvas.version}` : "Building it…"
+  const line = canvas.version > 0 ? `Version ${canvas.version}` : BUILDING_ACTIVITY
   return (
     <Link
       to={`/canvas/${canvas.id}`}
@@ -475,6 +476,11 @@ function CanvasPagePane({
   onFrameLoad: () => void
   onCancelPick: () => void
 }) {
+  // The page that isn't there yet says which of the three it is: the bot has not written the first
+  // version — the only state in which a canvas has no page at all — this screen is still reading the
+  // document of one that has, or the bot holding it isn't answering (ADR 0130).
+  const line =
+    awayNow && !html ? APART : loaded && canvas && !hasVersion(canvas) ? BUILDING_ACTIVITY : READING
   return (
     <div
       data-canvas-page
@@ -512,9 +518,9 @@ function CanvasPagePane({
           data-canvas-frame
         />
       ) : (
-        <p className="p-4 text-center text-sm text-muted-foreground">
-          {awayNow && !html ? APART : loaded && !html ? BUILDING_ACTIVITY : READING}
-        </p>
+        <EmptyPane icon={FrameIcon} slot="canvas-empty">
+          {line}
+        </EmptyPane>
       )}
     </div>
   )
@@ -903,9 +909,11 @@ export function CanvasView() {
  * A canvas with no version opens on this screen on a phone — it is the only screen it has — so this
  * one carries the preview's options menu too, or the canvas could never be archived or deleted.
  *
- * The two states the preview says in its body are said here in the same words: a canvas no bot holds
- * is gone, and a canvas whose bot isn't answering says so rather than calling itself a page being
- * built, since the header is one row and the body is where the reader is looking.
+ * What this screen says in its body are the sentences about a canvas it cannot draw a chat for: a
+ * canvas no bot holds is gone, a record that hasn't landed is being read, and a canvas with no version
+ * whose bot isn't answering says so rather than leaving the chat bare. The build is not one of them:
+ * the empty page and the line about it are the preview's, and a phone is sent to this screen before it
+ * draws a page (ADR 0130, amended 2026-11-16).
  *
  * A point is a tap on a page, and the page is this screen's other half — so pointing here means going
  * to it: the chat's Point row replaces this address with the page's pointing one, and the element the
@@ -947,6 +955,20 @@ export function CanvasEdit() {
   )
   // A record that hasn't landed yet: nothing of the canvas is known, so the body says it is reading.
   const reading = !canvas && !loaded
+  /**
+   * The one line this screen says above its chat, if any: a canvas no bot holds is gone, a record that
+   * hasn't landed is being read, and a canvas with no version whose bot isn't answering says so rather
+   * than leaving the chat bare. The build itself is not said here — this screen is the chat, and on a
+   * phone it is the only screen a canvas with no version has, so the line about the build sat over the
+   * only thing it draws (ADR 0130, amended 2026-11-16).
+   */
+  const line = missing
+    ? GONE
+    : reading
+      ? READING
+      : loaded && !versioned && awayNow
+        ? APART
+        : undefined
   // The guard is the preview's, so the press and the head's leading control are one move; the
   // Preview corner is the way to the page, never the way out (ADR 0130).
   useEffect(() => setBackGuard(back()), [back])
@@ -980,18 +1002,7 @@ export function CanvasEdit() {
           </>
         }
       />
-      {missing ? (
-        <p className="p-4 text-center text-sm text-muted-foreground">{GONE}</p>
-      ) : reading ? (
-        <p className="p-4 text-center text-sm text-muted-foreground">{READING}</p>
-      ) : loaded && !versioned ? (
-        /* Nothing to preview is said honestly: the page is not drawn yet, in the same words the
-           preview's empty frame uses — and a host that isn't answering is not a bot that is
-           building, so it says which of the two this is (ADR 0130). */
-        <p className="p-4 text-center text-sm text-muted-foreground">
-          {awayNow ? APART : BUILDING_ACTIVITY}
-        </p>
-      ) : null}
+      {line ? <p className="p-4 text-center text-sm text-muted-foreground">{line}</p> : null}
       <CanvasChat
         canvas={canvas}
         bot={profile}

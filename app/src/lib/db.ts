@@ -605,6 +605,8 @@ export interface Attachment {
 export interface Steer {
   id: string
   text: string
+  /** The files it was sent with, where it carried any. */
+  files?: Attachment[]
   /** Where in the reply's text it was sent, so it sits there in the thread. */
   contentOffset: number
   /** Calls drawn above it, as a compaction's seam counts them; absent before the app kept one. */

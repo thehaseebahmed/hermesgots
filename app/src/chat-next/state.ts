@@ -2,6 +2,7 @@ import { sameSummaryRows, type SummaryRows } from "@/lib/compaction-seam"
 import { questionsAround } from "@/lib/clarify-questions"
 import { clarifyAnswered, questionAt, type ClarifyResponse } from "@/lib/clarify"
 import type { ClarifyQuestion, LiveTurn, MessageStats, Unsent } from "@/lib/db"
+import { equal } from "@/lib/equal"
 import type { CanvasPoint } from "@/lib/point-marker"
 import { progressReminderNote } from "@/lib/progress-reminder"
 import { measureReply } from "@/lib/reply-stats"
@@ -157,6 +158,8 @@ export type ThreadEvent =
   | {
       type: "sent"
       user: string
+      /** The send's own id, which is what a `saved` names to find the message it belongs to. */
+      send?: string
       files?: SentFile[]
       /** The elements of a canvas's page the message points at. */
       points?: CanvasPoint[]
@@ -178,11 +181,13 @@ export type ThreadEvent =
     }
   /** A message that didn't go is taken back: it leaves the thread for good. */
   | { type: "cancelled"; id: string }
+  /** The files a send carried, as the host saved them, onto the message that send drew. */
+  | { type: "saved"; send: string; files: SentFile[] }
   /**
    * A steer the host took: it stands in the reply at once, rather than waiting for the transcript's
    * row, which the host writes only when the run reads the steer.
    */
-  | { type: "steered"; text: string }
+  | { type: "steered"; text: string; files?: SentFile[] }
   /** A read the host answered with something other than the rows: said as a toast, drawn nowhere. */
   | { type: "read-failed" }
   /** `run` is the run being joined: a wait this page already read for it is that run's own. */
@@ -673,12 +678,18 @@ const WORDLESS = new Set(["agent run failed", "run failed"])
  * The row a failure goes under, where it is this turn's: the words a page watched are the run that
  * was writing the turn the stream held, and the host's record explains only a turn the rows already
  * call failed — and only one that began before that run ended, so an old failure never lands on a
- * newer turn.
+ * newer turn. The host keeps whole seconds, so a reason stamped in the turn's own second may be the
+ * turn's: only a second strictly before the turn's start rules it out.
  */
 function landsOn(failure: Failure | undefined, turn: Turn | undefined): number | undefined {
   if (!failure || !turn || turn.row === undefined) return undefined
   if (!failure.watched && !turn.failed) return undefined
-  if (failure.at !== undefined && turn.at !== undefined && failure.at < turn.at) return undefined
+  if (
+    failure.at !== undefined &&
+    turn.at !== undefined &&
+    Math.floor(failure.at / 1000) < Math.floor(turn.at / 1000)
+  )
+    return undefined
   return turn.row
 }
 
@@ -885,6 +896,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         live: {
           turn: {
             user: event.user,
+            ...(event.send ? { sendId: event.send } : {}),
             ...(event.retry ? { retry: true } : {}),
             ...(event.at !== undefined ? { at: event.at, timing: { startedAt: event.at } } : {}),
             ...(event.files?.length ? { files: event.files } : {}),
@@ -896,6 +908,13 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
           replaces: false,
         },
       }
+    }
+    case "saved": {
+      if (!event.files.length) return state
+      const live = state.live
+      if (!live || live.turn.sendId !== event.send) return state
+      if (equal(live.turn.files, event.files)) return state
+      return { ...state, live: { ...live, turn: { ...live.turn, files: event.files } } }
     }
     case "unsent": {
       const unsent = [
@@ -921,7 +940,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // Only a reply this page draws can be steered: with none, the transcript's row for the steer is
       // what draws it, and `withCarried` puts it where the run read it.
       if (!state.live) return state
-      const turn = withSteer(state.live.turn, event.text)
+      const turn = withSteer(state.live.turn, event.text, event.files)
       return turn === state.live.turn ? state : { ...state, live: { ...state.live, turn } }
     }
     case "read-failed":

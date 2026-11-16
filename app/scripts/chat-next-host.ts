@@ -176,7 +176,8 @@ function durable(input: unknown): string | null {
 const FAILED_TURN = { finish_reason: null, display_kind: "failed_turn" } as const
 
 /**
- * `plugin` serves the Gots plugin's `runs/live`; `version` is what `/health` says Hermes is;
+ * `plugin` serves the Gots plugin's `runs/live`; `uploads` serves its attachment route and offers it
+ * in `info`'s features, so a composer can attach a file; `version` is what `/health` says Hermes is;
  * `latency` is how long, in ms, a transcript read takes to be answered; `withhold` sends a prompt's
  * request only to the subscribers there when it was made, never to one that joins afterwards.
  * `cooperative` keeps a stopped child working until its own boundary, which is how core's
@@ -187,6 +188,7 @@ export function fakeHost(
   session: string,
   {
     plugin = false,
+    uploads = false,
     version = "0.22.5",
     latency = 0,
     withhold = false,
@@ -195,6 +197,7 @@ export function fakeHost(
     keepsFailures = true,
   }: {
     plugin?: boolean
+    uploads?: boolean
     version?: string
     latency?: number
     withhold?: boolean
@@ -233,6 +236,10 @@ export function fakeHost(
   }
   /** The offset of each transcript page asked for, in the order the asks came. */
   const offsets: number[] = []
+  /** The files the plugin's attachment route saved, in the order they came. */
+  const saved: { name: string; path: string; size: number }[] = []
+  /** The attachment route as a test can drive it: how many uploads came, and a gate to hold them. */
+  const saving: { asked: number; gate?: Promise<void> } = { asked: 0 }
   /** Pages the host holds back until released, and pages it fails with a 500, by offset. */
   const gates = new Map<number, { wait: Promise<void>; release: () => void }>()
   const failing = new Set<number>()
@@ -706,8 +713,21 @@ export function fakeHost(
           // What a failed turn ended with, kept by the host for a device that never watched the run
           // (failures.py): on unless a test says this host is older.
           ...(keepsFailures ? ["failed_turn_reason"] : []),
+          ...(uploads ? ["attachments"] : []),
         ],
       })
+    }
+    // The plugin's attachment route: the file is saved under the session's own folder, and the path
+    // it answers is what the message names it by.
+    if (plugin && uploads && path === `/api/plugins/gots/sessions/${session}/attachments` && init?.method === "POST") {
+      const name = url.searchParams.get("name") ?? "file"
+      if (!(init.body instanceof Blob))
+        return reply({ error: { message: "an attachment needs its bytes" } }, 400)
+      saving.asked++
+      await saving.gate
+      const at = `/host/attachments/${session}/${name}`
+      saved.push({ name, path: at, size: init.body.size })
+      return reply({ name, path: at, size: init.body.size })
     }
     // The plugin's media route: a URL minted for one path, which the route serves as the image or
     // file its suffix names.
@@ -1094,6 +1114,20 @@ export function fakeHost(
   }
 
   /**
+   * Holds the plugin's attachment route: an upload waits, as it does on a slow link, until `release`.
+   */
+  function holdUploads() {
+    let release = () => {}
+    saving.gate = new Promise<void>((resolve) => (release = resolve))
+    return {
+      release: () => {
+        release()
+        saving.gate = undefined
+      },
+    }
+  }
+
+  /**
    * The children a cooperative stop asked for reach their boundary and end, closed the way core
    * closes a stopped child: `agent_close` on its own row, whatever the turn went on to do.
    */
@@ -1111,6 +1145,9 @@ export function fakeHost(
     handle,
     seed,
     offsets,
+    saved,
+    saving,
+    holdUploads,
     hold,
     holdRuns,
     fail,

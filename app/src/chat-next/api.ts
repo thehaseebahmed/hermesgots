@@ -355,11 +355,19 @@ export async function readAgents(
   }
 }
 
+/** A file a message the plugin holds was sent with, as the plugin keeps it. */
+export interface QueuedFile {
+  name: string
+  type: string
+  size: number
+  path?: string
+}
+
 /** A message the plugin holds for the session, to start once the run before it is over. */
 export interface Queued {
   id: string
   text: string
-  files: string[]
+  files: QueuedFile[]
   /** Why the plugin couldn't start it; it waits until it's sent again. */
   error?: string
 }
@@ -386,7 +394,7 @@ export async function readQueue(
       items?: {
         id?: unknown
         text?: unknown
-        attachments?: { name?: unknown }[]
+        attachments?: { name?: unknown; type?: unknown; size?: unknown; path?: unknown }[]
         error?: unknown
       }[]
       paused?: unknown
@@ -397,9 +405,12 @@ export async function readQueue(
       items: body.items.map((item) => ({
         id: String(item.id),
         text: typeof item.text === "string" ? item.text : "",
-        files: (Array.isArray(item.attachments) ? item.attachments : []).map((file) =>
-          String(file?.name ?? "file"),
-        ),
+        files: (Array.isArray(item.attachments) ? item.attachments : []).map((file) => ({
+          name: String(file?.name ?? "file"),
+          type: String(file?.type ?? ""),
+          size: Number(file?.size ?? 0),
+          ...(typeof file?.path === "string" && file.path ? { path: file.path } : {}),
+        })),
         ...(typeof item.error === "string" && item.error ? { error: item.error } : {}),
       })),
     }

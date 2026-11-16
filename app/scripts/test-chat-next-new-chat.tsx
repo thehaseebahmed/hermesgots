@@ -23,6 +23,7 @@ import {
   findAll,
   json,
   missing,
+  paste,
   mount,
   seedChats,
   settle,
@@ -160,6 +161,31 @@ test("the blank surface's first send makes the chat and the thread sends it as i
       "the draft the send retired",
     )
     assert.equal(composerField()?.value, "", "and the thread's composer starts empty")
+  })
+})
+
+test("a new chat's first message draws its photo as the thread sends it", async () => {
+  await seedChats([], { bots: [bot], legacyChat: true })
+  const host = anySession({ plugin: true, uploads: true })
+  await mount(blankScreen, async () => {
+    await until(() => Boolean(find("[data-blank]")), "the blank surface")
+    await paste([new File([new Uint8Array(24)], "photo.png", { type: "image/png" })])
+    await type(composerField(), "what is in this photo?")
+    await click(find('button[aria-label="Send"]'))
+    await until(
+      () =>
+        Boolean(
+          find('[data-chat-next] [data-slot="message"] button[aria-label="Open photo.png"]'),
+        ),
+      "the photo's cell, on the message the thread drew",
+    )
+    const [chat] = await db.conversations.toArray()
+    assert.equal(host.hostFor(chat.hermesSessionId).saved.length, 1, "from the file the host saved")
+    assert.equal(
+      await db.messages.count(),
+      0,
+      "and the surface wrote no message of its own: the thread that opens is the one that sends it",
+    )
   })
 })
 
