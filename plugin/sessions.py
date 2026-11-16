@@ -936,6 +936,34 @@ def archived_flags(home: Path) -> Dict[str, bool]:
         return {}
 
 
+def _bot_chat_row(conn: sqlite3.Connection) -> Optional[Dict[str, Any]]:
+    """The canonical Bot Chat, read from a connection already open: ``bot_chat``'s own query.
+
+    Shared so the two questions asked about that conversation — which row Main is
+    (``bot_chat``), and whether a turn's session is a turn in Main (``is_chat``) — can never
+    disagree about which row is canonical. Raises ``sqlite3.Error`` for a store that can't be
+    asked; what that means is the caller's answer.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
+    if "id" not in columns:
+        return None
+    asked = ["id"] + [column for column in ("hidden", "started_at") if column in columns]
+    archived = " AND archived = 0" if "archived" in columns else ""
+    order = " ORDER BY started_at" if "started_at" in columns else ""
+    row = conn.execute(
+        f"SELECT {', '.join(asked)} FROM sessions WHERE title = ?{archived}{order} LIMIT 1",
+        (chats.MAIN_TITLE,),
+    ).fetchone()
+    if row is None or not row["id"]:
+        return None
+    started = row["started_at"] if "started_at" in columns else None
+    return {
+        "id": row["id"],
+        "hidden": bool(row["hidden"]) if "hidden" in columns else False,
+        "at": int(float(started or 0) * 1000),
+    }
+
+
 def bot_chat(home: Path) -> Optional[Dict[str, Any]]:
     """The profile's canonical Bot Chat: the unarchived session Hermes keeps titled ``"Bot Chat"``.
 
@@ -957,27 +985,10 @@ def bot_chat(home: Path) -> Optional[Dict[str, Any]]:
         return None
     try:
         with closing(conn):
-            columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
-            if "id" not in columns:
-                return None
-            asked = ["id"] + [column for column in ("hidden", "started_at") if column in columns]
-            archived = " AND archived = 0" if "archived" in columns else ""
-            order = " ORDER BY started_at" if "started_at" in columns else ""
-            row = conn.execute(
-                f"SELECT {', '.join(asked)} FROM sessions WHERE title = ?{archived}{order} LIMIT 1",
-                (chats.MAIN_TITLE,),
-            ).fetchone()
+            return _bot_chat_row(conn)
     except sqlite3.Error:
         logger.debug("gots: couldn't read %s's Bot Chat", home / "state.db", exc_info=True)
         return None
-    if row is None or not row["id"]:
-        return None
-    started = row["started_at"] if "started_at" in columns else None
-    return {
-        "id": row["id"],
-        "hidden": bool(row["hidden"]) if "hidden" in columns else False,
-        "at": int(float(started or 0) * 1000),
-    }
 
 
 async def mint_bot_chat(home: Path) -> Optional[str]:
@@ -1037,7 +1048,8 @@ def _bot_chat_authority(home: Path) -> Any:
 
 
 def is_chat(home: Path, session_id: str) -> bool:
-    """Whether a session is a Gots chat's: the app minted its id, or one of its ancestors'.
+    """Whether a session is a Gots chat's: the app minted its id, one of its ancestors' — or it is
+    a turn in the profile's own Main.
 
     An app-minted id is answered before the store is opened, so the common path — every call in a
     Gots chat's own session — costs no read; only an id with no ``ID_PREFIXES`` prefix is walked.
@@ -1047,13 +1059,21 @@ def is_chat(home: Path, session_id: str) -> bool:
     honours its mute, and ``alerts.turn_finished`` counts its subagents as the chat's own work. A
     delegation child of a session the app never minted is still nobody's.
 
+    Main is the profile's canonical Bot Chat (``bot_chat``), which Hermes made and so carries no
+    prefix of the app's: a turn there is the bot's own news like any other chat's (G2), and a
+    compaction of it or a subagent forked off it reaches it on the same ancestry this already walks.
+    That comparison is asked only after the prefix search came up empty, on the connection the walk
+    already holds — so the fast path pays nothing for it — and an archived Bot Chat, a retired Main,
+    answers false, exactly as it is no Main to draw.
+
     One read-only query over the whole ancestry, bounded by ``COMPRESSION_DEPTH``, on a connection
     that waits no longer than ``LINEAGE_TIMEOUT_S``: this is asked inside Hermes's hooks, on a
     push's thread, so a store another writer holds has to answer quickly or not at all.
 
     False when the store can't answer — missing, empty, corrupt or locked — as well as when no row
-    on the ancestry carries an ``ID_PREFIXES`` prefix. Fail closed: a push for another surface's
-    session is a nuisance, while one for a session that isn't a chat's is the leak this stops.
+    on the ancestry carries an ``ID_PREFIXES`` prefix and none of them is the profile's Bot Chat.
+    Fail closed: a push for another surface's session is a nuisance, while one for a session that
+    isn't a chat's is the leak this stops.
     """
     if session_id.startswith(ID_PREFIXES):
         return True
@@ -1075,10 +1095,14 @@ def is_chat(home: Path, session_id: str) -> bool:
                    SELECT id, depth FROM lineage ORDER BY depth""",
                 (session_id, COMPRESSION_DEPTH),
             ).fetchall()
+            ids = [row["id"] for row in rows if isinstance(row["id"], str)]
+            if any(one.startswith(ID_PREFIXES) for one in ids):
+                return True
+            main = _bot_chat_row(conn)
     except sqlite3.Error:
         logger.debug("gots: couldn't read a session's ancestry", exc_info=True)
         return False
-    return any(row["id"].startswith(ID_PREFIXES) for row in rows if isinstance(row["id"], str))
+    return main is not None and main["id"] in ids
 
 
 def live_runs(
