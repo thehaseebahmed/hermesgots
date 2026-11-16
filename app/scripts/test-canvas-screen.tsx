@@ -336,19 +336,20 @@ test(
         assert.ok(missing('[aria-label="All canvases"]'), "with no way back beside it")
         assert.ok(missing("[data-canvas-flip]"), "with no flip before there is a record")
       })
-      // The same frames with something behind the chat: whether a step back is the Preview corner's
-      // is still the record's to say, so no arrow is drawn for it either until the record lands.
+      // The same frames with something behind the chat: what leads the row is the arrival, not the
+      // record, so the way back to the list is drawn from the first frame rather than appearing a
+      // moment later under the reader's thumb.
       const pushed = atDepth(1)
       try {
         await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
           await until(() => /Reading the canvas…/.test(text()), "the reading line, pushed")
           assert.ok(
-            missing('[aria-label="All canvases"]'),
-            "no arrow is drawn for a canvas the record has not answered for",
+            find('[aria-label="All canvases"]'),
+            "the way back to the list leads a chat the list opened, before the record lands",
           )
           assert.ok(
-            find('[aria-label="Open conversations"]'),
-            "so the head leads with the drawer instead",
+            missing('[aria-label="Open conversations"]'),
+            "so the drawer is not drawn beside it",
           )
         })
       } finally {
@@ -737,8 +738,9 @@ test("a phone's canvas opens on Preview and Edit is an address with a way back",
       assert.ok(find('[data-canvas-flip="preview"]'), "its header offers Preview")
       assert.ok(missing('[data-canvas-flip="edit"]'), "and no Edit, which is the screen it is")
 
-      // Back is the edit screen's own: it draws the canvas's own address, the screen its Preview
-      // names, rather than stepping back to whatever happens to sit behind this one.
+      // Back is the edit screen's own, and it is the same move as the head's leading control: a step
+      // back to where the reader came from. The page is the Preview corner's, which replaces this
+      // entry — so the way back to the page costs the corner, never the press.
       const history = atDepth(1)
       try {
         let pressed = ""
@@ -746,13 +748,15 @@ test("a phone's canvas opens on Preview and Edit is an address with a way back",
           pressed = pressBack()
         })
         assert.equal(pressed, "screen", "the edit screen takes the press")
-        assert.equal(nav(), `REPLACE:/canvas/${CANVAS.id}`, "and draws the canvas's own screen")
-        assert.deepEqual(history.backs, [], "without stepping back to the list behind it")
+        assert.deepEqual(history.backs, [1], "and steps back to the list behind it")
+        assert.ok(missing("iframe[data-canvas-frame]"), "drawing no page in its place")
       } finally {
         history.restore()
       }
 
-      await until(() => Boolean(find("iframe[data-canvas-frame]")), "the page drawn by the press")
+      await click(find('[data-canvas-flip="preview"]'))
+      await until(() => Boolean(find("iframe[data-canvas-frame]")), "the page the corner draws")
+      assert.equal(nav(), `REPLACE:/canvas/${CANVAS.id}`, "Preview puts the page where the chat was")
       assert.match(drawn(), /var at=450/, "the page comes back where the reader left it")
     })
   }
@@ -832,53 +836,6 @@ test(
       } finally {
         history.restore()
       }
-    })
-  }),
-)
-
-test(
-  "back from the edit screen draws the canvas's own screen, whatever is behind it",
-  atWidth(390, async () => {
-    // The edit address can sit on the list (a start opens it) or be the only entry (a cold link), so
-    // the press is answered by the screen's own rule rather than by the history behind it: a canvas
-    // with a version is drawn at its own address, and the press is consumed (ADR 0130).
-    serveCanvases({ version: 2, undos: 0 })
-    await seedCanvasChat(CANVAS.id)
-    const drawn = () => find("iframe[data-canvas-frame]")?.getAttribute("srcdoc") ?? ""
-    const press = async () => {
-      let pressed = ""
-      await act(async () => {
-        pressed = pressBack()
-      })
-      return pressed
-    }
-
-    // The list behind it: a step back would land there, and the page would never be drawn.
-    await drawCanvas(["/canvas", `/canvas/${CANVAS.id}/edit`], async () => {
-      await until(() => Boolean(composerField()), "the edit screen to draw")
-      const history = atDepth(1)
-      try {
-        assert.equal(await press(), "screen", "the edit screen takes the press")
-        assert.equal(nav(), `REPLACE:/canvas/${CANVAS.id}`, "and draws the canvas's own address")
-        assert.deepEqual(history.backs, [], "never stepping back to the list")
-      } finally {
-        history.restore()
-      }
-      await until(() => drawn().includes("<h1>Tip, second</h1>"), "the page to be drawn")
-      assert.ok(missing("[data-canvas-list]"), "and the list is not what it fell back to")
-    })
-
-    // And the only entry: the press is the screen's, not the app's to leave on.
-    await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
-      await until(() => Boolean(composerField()), "the edit address to draw")
-      const history = atDepth(0)
-      try {
-        assert.equal(await press(), "screen", "the edit screen answers the press, not the app")
-        assert.equal(nav(), `REPLACE:/canvas/${CANVAS.id}`, "and draws the canvas's own address")
-      } finally {
-        history.restore()
-      }
-      await until(() => drawn().includes("<h1>Tip, second</h1>"), "the page to be drawn")
     })
   }),
 )
@@ -1539,24 +1496,56 @@ test(
 )
 
 test(
-  "a canvas's chat is led by the drawer, and its corner is its way back to the page",
+  "a canvas's chat the list opened is led back to the list, and the press steps there",
   atWidth(390, async () => {
-    // A canvas with a page draws its chat with the one control to that page — the Preview corner,
-    // which replaces this entry — so no second arrow is drawn for the same move (ADR 0130), even on
-    // a screen the page pushed. A back press is still the chat's own, answered with the page.
     serveCanvases({ version: 3, undos: 0 })
     await seedCanvasChat(CANVAS.id)
     const history = atDepth(1)
     try {
       await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
         await until(() => Boolean(composerField()), "the chat to draw")
-        assert.ok(find('[data-canvas-flip="preview"]'), "the corner is the way back to the page")
+        assert.ok(find('[data-canvas-flip="preview"]'), "the corner is still the way to the page")
+        const back = labelled("button", "All canvases")
+        assert.ok(back, "and the head leads back to the list the chat was opened from")
+        assert.ok(
+          missing('[aria-label="Open conversations"]'),
+          "with no drawer drawn beside it",
+        )
+        assert.equal(pressBack(), "screen", "the chat takes the press")
+        assert.deepEqual(history.backs, [1], "and steps back to the list behind it")
+        await click(back)
+        assert.deepEqual(history.backs, [1, 1], "and its own control takes the same step")
+      })
+    } finally {
+      history.restore()
+    }
+  }),
+)
+
+test(
+  "a canvas's chat the app opened is led by the drawer, and the press is the app's",
+  atWidth(390, async () => {
+    // Nothing stands behind the app's own entry — a pinned canvas, or an address opened cold — so the
+    // press is the app's, which arms its exit rather than stepping onto a screen that isn't there.
+    serveCanvases({ version: 3, undos: 0 })
+    await seedCanvasChat(CANVAS.id)
+    const history = atDepth(0)
+    try {
+      await drawCanvas([`/canvas/${CANVAS.id}/edit`], async () => {
+        await until(() => Boolean(composerField()), "the chat to draw")
+        assert.ok(find('[data-canvas-flip="preview"]'), "the corner is still the way to the page")
+        const drawer = labelled("button", "Open conversations")
+        assert.ok(drawer, "the drawer's button leads a chat with nothing behind it")
+        assert.ok(
+          document.querySelector('[data-slot="header-row"]')!.contains(drawer),
+          "and it is the head's first control",
+        )
         assert.ok(
           missing('[aria-label="All canvases"]'),
-          "and no arrow is drawn for the move the corner already makes",
+          "no way back is drawn where there is no screen behind",
         )
-        assert.ok(labelled("button", "Open conversations"), "so the head leads with the drawer")
-        assert.equal(pressBack(), "screen", "and the press is the chat's, which the page answers")
+        assert.equal(pressBack(), "app", "the press is the app's, which leaves it")
+        assert.deepEqual(history.backs, [], "nothing goes up")
       })
     } finally {
       history.restore()
