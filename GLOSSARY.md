@@ -313,7 +313,7 @@ A row's own pin and archive together, as the reader left them, and the clock the
 _Avoid_: flags, state, settings
 
 **Archived**:
-A row the reader has put away: it keeps its record and its words, and it is kept by no pill but **Archived**, which stands straight after Unread in a bot's list. It leaves the search with the other pills, the sidebar's preview and unread count, and the legacy layout's bands, and nothing else changes about it — it is not deleted, nothing is swept early, and a chat that answers while archived says nothing anywhere. Archiving clears a pin in the same write, since a pin behind the pill could not be turned off from any list.
+A row the reader has put away: it keeps its record and its words, and it is kept by no pill but **Archived**, which stands straight after Unread in a bot's list. It leaves the search with the other pills, the sidebar's preview and unread count, and the legacy layout's bands. A conversation that has not happened cannot be put away — a chat nothing has been said in is offered no Archive — and a row that is archived is never judged unstarted, so one that somehow carries both marks is still a row under the pill, which is the only way back to what it kept. Nothing else changes about it: it is not deleted, nothing is swept early, and a chat that answers while archived says nothing anywhere. Archiving clears a pin in the same write, since a pin behind the pill could not be turned off from any list. It is not a compaction's **Archived row**, which is a message the live transcript dropped and only a reach back draws: this mark is the reader's, and that row is the chat's.
 _Avoid_: hidden, deleted, muted, put away, snoozed
 
 **Model change**:

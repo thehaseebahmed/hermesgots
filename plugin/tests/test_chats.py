@@ -14,6 +14,7 @@ from unittest import mock
 
 from plugin import chats
 from plugin.store import SCHEMA_VERSION, db_path
+from plugin.tests._helpers import room_marks
 
 
 class DraftsAndModes(unittest.TestCase):
@@ -320,8 +321,8 @@ class RoomMarks(unittest.TestCase):
         return chats.merge(self.path, {chat_id: {"at": at, "value": value}})
 
     def marks(self, **fields):
-        held = {"pinned": False, "pinnedAt": 0, "archived": False, "marksAt": 1, **fields}
-        return {chats.ROOM_MARKS: held}
+        """The value the app posts for one marked room."""
+        return {chats.ROOM_MARKS: room_marks(**fields)}
 
     def test_a_mark_record_is_stored_and_merges_by_its_clock_like_any_record(self):
         self.merge("room-1", self.marks(pinned=True, pinnedAt=2, marksAt=5), at=5)

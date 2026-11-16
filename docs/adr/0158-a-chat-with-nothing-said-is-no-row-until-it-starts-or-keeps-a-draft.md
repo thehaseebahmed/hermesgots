@@ -37,3 +37,8 @@ and the legacy bands cannot draw one chat and hide another.
 - A device whose list is drawn by something other than `chat-rows.ts` would draw them again, which is
   why the rule lives with the reader rather than in the screen.
 - A chat hidden this way is still reachable by its own address, and by anything that holds its id.
+- A chat nothing has been said in is offered no way to put it away: archiving is for a conversation
+  that exists, and the sheet that would put a chat away is the only way into one that has not
+  happened. The rule still exempts an archived row whatever its clocks say, so a record that somehow
+  carries both marks stays a row under the **Archived** pill — and out of every other one, which is
+  the archive mark's own rule.

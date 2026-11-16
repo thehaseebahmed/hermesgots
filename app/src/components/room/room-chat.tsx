@@ -145,8 +145,9 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
   // rename the user just made is on the row before the room's next read names it (ADR 0123).
   const name = chat?.title || live.name || "Room"
   // The press the room's name answers opens the one Edit sheet: its name and its disband through the
-  // Host, its pin and its archive on this device. The bar carries no menu of its own and no context
-  // ring either, since a room runs no model call of its own (ADR 0153).
+  // Host, its pin and its archive as the reader's own marks, carried to it as a record of their own
+  // (ADR 0157). The bar carries no menu of its own and no context ring either, since a room runs no
+  // model call of its own (ADR 0153).
   const [settingsOpen, setSettingsOpen] = useState(false)
 
   return (
@@ -256,7 +257,7 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
           chat={chat}
           // The cap is counted over the list this room is a row of, which is the one the row was
           // opened from where the address says, else the bot that carried it here.
-          profileId={carrier ?? chat.profileId ?? ""}
+          profileId={carrier ?? chat.profileId}
           answerer={answerer}
           open={settingsOpen}
           onOpenChange={setSettingsOpen}

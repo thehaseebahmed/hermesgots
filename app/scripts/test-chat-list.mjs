@@ -13,6 +13,7 @@ import {
   CHAT_FILTERS,
   filterChatRows,
   isListed,
+  mayArchive,
   orderChatRows,
   PIN_LIMIT,
   pinsOf,
@@ -111,22 +112,18 @@ test("a chat nothing was said in is no row, and a word or a draft makes it one",
   // The record a New chat press mints has its two clocks level, and they stay level until something is
   // sent in it — so stepping back from a chat the reader opened and left without a word leaves no row
   // behind (ADR 0158). This is a listing rule alone: the chat is still there to open, and the row comes
-  // back the moment it has something to say.
-  assert.equal(isListed(standing(), false), false, "a chat whose clock never moved has said nothing")
+  // back the moment it has something to say. What only the device knows — a keystroke still queued, a
+  // message a sync left behind a record that never moved — is `listingChats`' to add to this answer.
+  assert.equal(isListed(standing()), false, "a chat whose clock never moved has said nothing")
   assert.equal(
-    isListed(standing({ updatedAt: 1_001 }), false),
+    isListed(standing({ updatedAt: 1_001 })),
     true,
     "a word sent in it moves the clock past its making, which is what a started chat is",
   )
   assert.equal(
-    isListed(standing({ draftAt: 1_500 }), false),
+    isListed(standing({ draftAt: 1_500 })),
     true,
     "a saved draft is a word waiting to be sent, and every device sees it",
-  )
-  assert.equal(
-    isListed(standing(), true),
-    true,
-    "and unsent words this device is still holding count too, though the record knows nothing of them",
   )
 })
 
@@ -135,16 +132,52 @@ test("Main, a room and a run are never judged by it", () => {
   // that had not yet said anything in it would otherwise open on a list with no way in; a room's record
   // is the Host's and arrives with its own clock; and a run's line and time are written onto the record
   // by the delivery, whose session this device holds no message of.
-  assert.equal(isListed(standing({ main: true }), false), true, "a bot's Main is a row though it is empty")
+  assert.equal(isListed(standing({ main: true })), true, "a bot's Main is a row though it is empty")
   assert.equal(
-    isListed(standing({ room: { id: "room-1", members: [] } }), false),
+    isListed(standing({ room: { id: "room-1", members: [] } })),
     true,
     "a room is nobody's chat, and never judged by a chat's rule",
   )
   assert.equal(
-    isListed(standing({ routine: true, line: "The tide turns at 06:40" }), false),
+    isListed(standing({ routine: true, line: "The tide turns at 06:40" })),
     true,
     "and a routine's run is a row from the moment the delivery writes it",
+  )
+})
+
+test("an archived row is never judged unstarted, whatever its clocks say", () => {
+  // Archiving is an act the reader took on a row that may have nothing said in it yet, and the
+  // Archived pill is the only way back to it: judged by the rule, such a row would be reachable from
+  // nowhere (ADR 0158).
+  assert.equal(
+    isListed(standing({ archived: true })),
+    true,
+    "a chat nothing was said in and the reader put away is still a row",
+  )
+  assert.equal(
+    isListed(standing({ archived: true, updatedAt: 1_001 })),
+    true,
+    "and one that was spoken in is a row with or without the mark",
+  )
+})
+
+test("a chat nothing was said in is offered no way to put it away", () => {
+  // A reader cannot archive a conversation that has not happened: the sheet that could put it away is
+  // the only way back to it, so the control is not offered at all (ADR 0158).
+  assert.equal(mayArchive(standing()), false, "an unstarted chat may not be archived")
+  assert.equal(mayArchive(standing({ updatedAt: 1_001 })), true, "one that was spoken in may")
+  assert.equal(mayArchive(standing({ draftAt: 1_500 })), true, "and so may one holding a draft")
+  assert.equal(mayArchive(standing({ main: true })), true, "a bot's Main may, like any chat")
+  assert.equal(
+    mayArchive(standing({ room: { id: "room-1", members: [] } })),
+    true,
+    "a room may, whatever its clocks say",
+  )
+  assert.equal(mayArchive(standing({ routine: true })), true, "and so may a routine's run")
+  assert.equal(
+    mayArchive(standing({ archived: true })),
+    true,
+    "and a row already put away is always offered the way back",
   )
 })
 
@@ -302,7 +335,7 @@ test("the unpinned band under the pins still reads newest first", () => {
 
 test("a routine's row reads its line and its time from its record, not from a message", () => {
   // A delivery's words are in the run's own session, so this device holds no message for the row at
-  // all: the plugin writes the first line onto the record, and the row draws that (G4).
+  // all: the plugin writes the first line onto the record, and the row draws that.
   const row = chatRowOf(
     chat("routine-job-1-cron_1", 400, { routine: true, line: "The tide turns at 06:40" }),
   )
@@ -466,6 +499,28 @@ test("a pin on an archived row is no pin the list counts", () => {
     true,
     "and five it draws shuts the switch, whatever sits behind the pill",
   )
+})
+
+test("a switch read before the list has answered is shut, and says so rather than the cap", () => {
+  // `usePinsInList` answers nothing until both of its reads have: read as an empty list, a sheet
+  // would offer a sixth pin over a list already holding five.
+  const sixth = chatRowOf(chat("sixth", 900))
+  const waiting = pinSwitchOf(sixth, undefined)
+  assert.equal(waiting.offered, true, "the switch is this row's to draw")
+  assert.equal(waiting.disabled, true, "but it cannot be turned on a count nothing has made")
+  assert.equal(
+    waiting.subtitle,
+    "This list's pins are still being read.",
+    "and the line says what it waits on rather than the cap, which nothing has counted",
+  )
+})
+
+test("an archived row is offered no pin at all", () => {
+  // The rule belongs to the switch, not to a screen: a pin on a row out of every list is a mark no
+  // list could draw, so every surface that asks for a switch is told to draw none.
+  const behind = chatRowOf(chat("behind-the-pill", 900, { pinned: true, pinnedAt: 90, archived: true }))
+  assert.equal(pinSwitchOf(behind, []).offered, false, "an archived row has no switch")
+  assert.equal(pinSwitchOf(chatRowOf(chat("plain", 1)), []).offered, true, "a row nobody archived has one")
 })
 
 test("the sixth pin's switch is off and says why, and a pinned row can always be unpinned", () => {

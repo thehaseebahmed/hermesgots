@@ -214,7 +214,7 @@ test("the sheet's pin writes the flag and its clock, and clears both when turned
  * same write — and the control says what pressing it again would do.
  */
 test("Archive takes the pin with it, and Unarchive clears the archive", async () => {
-  await seed({ pinned: true, pinnedAt: 7 })
+  await seed({ pinned: true, pinnedAt: 7, updatedAt: 11 })
   globalThis.fetch = async () => json({})
   await mount(screen(), async () => {
     await until(async () => Boolean(titlePress()), "the chat's bar")
@@ -246,7 +246,7 @@ test("Archive takes the pin with it, and Unarchive clears the archive", async ()
  * it keeps is its name, its mute, the way back and the delete.
  */
 test("an archived chat's sheet draws no Pin, only its name, its mute and Unarchive", async () => {
-  await seed({ archived: true })
+  await seed({ archived: true, updatedAt: 11 })
   globalThis.fetch = async () => json({})
   await mount(screen(), async () => {
     await until(async () => Boolean(titlePress()), "the chat's bar")
@@ -265,6 +265,22 @@ test("an archived chat's sheet draws no Pin, only its name, its mute and Unarchi
       "no pin: a mark on a row out of every list is a mark nothing could draw",
     )
     assert.ok(findText("button", "Delete chat"), "and the one control that ends it")
+  })
+})
+
+test("a chat nothing was said in is offered no way to put it away", async () => {
+  // Nothing was said in it, so the sheet is the only way into it: a control that put it out of every
+  // list would be the one thing that lost it (ADR 0158).
+  await seed()
+  globalThis.fetch = async () => json({})
+  await mount(screen(), async () => {
+    await until(async () => Boolean(titlePress()), "the chat's bar")
+    await click(titlePress())
+    await until(async () => Boolean(sheet()), "the chat's settings")
+    const row = await db.conversations.get(CHAT)
+    assert.equal(row?.updatedAt, row?.createdAt, "the record a New chat press mints")
+    assert.equal(missing("[data-chat-archive]"), true, "no Archive, and no Unarchive either")
+    assert.ok(findText("button", "Delete chat"), "while the one control that ends it stays")
   })
 })
 

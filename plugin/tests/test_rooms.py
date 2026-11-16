@@ -30,7 +30,14 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 
 import plugin
 from plugin import chats, events, media, push, rooms, store
-from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
+from plugin.tests._helpers import (
+    FakeWeb,
+    RouteAdapter,
+    room_mark_record,
+    route,
+    temp_hermes_home,
+    wire,
+)
 
 
 class Host:
@@ -1162,13 +1169,8 @@ class RoomInTheChatList(unittest.TestCase):
         chats = self.chats(host=Host(listed=many, page=2))
         self.assertEqual(sorted(chats), ["room-0", "room-1", "room-2"], "every page is a row")
 
-    def marks(self, **fields):
-        """The record the app posts for one marked room, at the clock that record carries."""
-        held = {"pinned": False, "pinnedAt": 0, "archived": False, "marksAt": 1, **fields}
-        return {"at": held["marksAt"], "value": {chats.ROOM_MARKS: held}}
-
     def test_the_list_carries_a_rooms_marks_and_never_the_record_itself(self):
-        held = self.marks(pinned=True, pinnedAt=1_760_000_500_000, marksAt=1_760_000_700_000)
+        held = room_mark_record(pinned=True, pinnedAt=1_760_000_500_000, marksAt=1_760_000_700_000)
         chats.merge(store.db_path(self.home), {"room-1": held})
         listed = self.chats([ROOM])
         self.assertEqual(sorted(listed), ["room-1"], "a room's mark record is no chat of its own")
@@ -1182,7 +1184,7 @@ class RoomInTheChatList(unittest.TestCase):
     def test_a_merge_answers_a_rooms_marks_and_not_the_record_it_posted(self):
         # The door the app itself posts through: the record it stored is laid over the room, and
         # never answered beside it as a chat.
-        held = self.marks(pinned=True, archived=False, marksAt=1_760_000_700_000)
+        held = room_mark_record(pinned=True, archived=False, marksAt=1_760_000_700_000)
         with dispatcher(Host(listed=[ROOM])), no_loopback():
             answer = self.asked(
                 plugin.PREFIX + "/chats", body={"chats": {"room-1": held}}, method="POST"
@@ -1205,10 +1207,6 @@ class RoomMarks(unittest.TestCase):
     (ADR 0121); the room stays the Host's, so the marks are overlaid where it is projected.
     """
 
-    def marks(self, **fields):
-        held = {"pinned": False, "pinnedAt": 0, "archived": False, "marksAt": 1, **fields}
-        return {"at": held["marksAt"], "value": {chats.ROOM_MARKS: held}}
-
     def projected(self, *room_ids):
         return {
             room_id: rooms.chat_record({**ROOM, "room_id": room_id})
@@ -1220,7 +1218,7 @@ class RoomMarks(unittest.TestCase):
         host = json.loads(json.dumps(projected["room-1"]))
         carried = rooms.carrying_marks(
             projected,
-            {"room-1": self.marks(pinned=True, pinnedAt=1_760_000_100_000, marksAt=1_760_000_200_000)},
+            {"room-1": room_mark_record(pinned=True, pinnedAt=1_760_000_100_000, marksAt=1_760_000_200_000)},
         )
         self.assertEqual(carried["room-1"]["at"], host["at"], "the Host's own clock is the room's")
         for field in ("title", "createdAt", "updatedAt", "room"):
@@ -1228,7 +1226,7 @@ class RoomMarks(unittest.TestCase):
         for field in ("pinned", "pinnedAt", "archived", "marksAt"):
             self.assertEqual(
                 carried["room-1"]["value"][field],
-                self.marks(pinned=True, pinnedAt=1_760_000_100_000, marksAt=1_760_000_200_000)["value"][chats.ROOM_MARKS][field],
+                room_mark_record(pinned=True, pinnedAt=1_760_000_100_000, marksAt=1_760_000_200_000)["value"][chats.ROOM_MARKS][field],
                 field,
             )
         self.assertNotIn(
@@ -1237,7 +1235,7 @@ class RoomMarks(unittest.TestCase):
 
     def test_a_disbanded_room_carries_none(self):
         projected = {"room-1": rooms.chat_record({**ROOM, "disbanded_at": 1_760_001_000.0})}
-        carried = rooms.carrying_marks(projected, {"room-1": self.marks(pinned=True, marksAt=9)})
+        carried = rooms.carrying_marks(projected, {"room-1": room_mark_record(pinned=True, marksAt=9)})
         self.assertEqual(
             carried["room-1"],
             {"at": 1_760_001_000_000, "deleted": True},
@@ -1246,7 +1244,7 @@ class RoomMarks(unittest.TestCase):
 
     def test_a_store_record_for_a_room_nothing_projects_invents_none(self):
         projected = self.projected("room-1", "room-2")
-        carried = rooms.carrying_marks(projected, {"room-9": self.marks(pinned=True, marksAt=9)})
+        carried = rooms.carrying_marks(projected, {"room-9": room_mark_record(pinned=True, marksAt=9)})
         self.assertEqual(carried, projected, "the Host is which rooms exist")
 
 

@@ -1,21 +1,17 @@
 /**
- * One bot's chats: the query its list and the sidebar both read, the bound on the tails that are read,
- * and the row each chat draws as. It was written twice — once for the list, once for the sidebar's
- * count — and only one copy knew that a pinned chat's tail is read wherever its clock puts it, so the
- * rule lives here and both ask it (`routes/bot-chats.tsx`, `useBotSummaries` in `threads.ts`).
- *
- * It is also the one place a chat is judged a row at all: a chat nothing has been said in is no row
- * until it holds a word or a draft (`isListed` in `chat-list.ts`, ADR 0158), so the list, the
- * sidebar's preview and the legacy bands cannot disagree about which chats a bot has — the legacy
- * sidebar runs its own query and hands the records here (`listingChats`), since a rule written twice
- * is a rule that parts ways.
- *
- * Rooms are not these rows: a room belongs to its Host and lists in every bot its roster seats, so
- * each screen merges the rooms it seats itself (ADR 0115).
+ * One bot's chats as a list draws them: the query its list and the sidebar both read, the bound on the
+ * tails that are read, the row each chat draws as, and the rooms the list seats (ADR 0115).
  */
 import { useLiveQuery } from "dexie-react-hooks"
 
-import { BOT_CHATS, chatRowOf, isListed, type ChatListRow, type ChatRecord } from "@/lib/chat-list"
+import {
+  BOT_CHATS,
+  chatRowOf,
+  isListed,
+  type ChatFilter,
+  type ChatListRow,
+  type ChatRecord,
+} from "@/lib/chat-list"
 import {
   conversationsOf,
   db,
@@ -26,6 +22,8 @@ import {
 } from "@/lib/db"
 import { draftKey, unsentAmong } from "@/lib/drafts"
 import { listsAsChat } from "@/lib/lists-as-chat"
+import type { RoomNeedsRow } from "@/lib/room"
+import { roomRowOf } from "@/lib/rooms"
 
 /**
  * Every chat the bot has, newest first. Every one of them is a row of its list — a chat older than any
@@ -68,10 +66,13 @@ async function spokenChats(ids: readonly string[]): Promise<Set<string>> {
  * it: a draft landing or being cleared wakes the list, which is what makes the row appear and go.
  */
 export async function listingChats(chats: readonly Conversation[]): Promise<Conversation[]> {
-  const doubted = chats.filter((chat) => !isListed(chat, false))
+  const doubted = chats.filter((chat) => !isListed(chat))
   if (!doubted.length) return [...chats]
-  const unsent = await unsentAmong(doubted.map((chat) => draftKey(chat.id)))
-  const spoken = await spokenChats(doubted.map((chat) => chat.id))
+  // The two device reads at once: neither needs the other's answer, and a list waits on both.
+  const [unsent, spoken] = await Promise.all([
+    unsentAmong(doubted.map((chat) => draftKey(chat.id))),
+    spokenChats(doubted.map((chat) => chat.id)),
+  ])
   const dropped = new Set(doubted.map((chat) => chat.id))
   return chats.filter(
     (chat) => !dropped.has(chat.id) || unsent.has(draftKey(chat.id)) || spoken.has(chat.id),
@@ -87,16 +88,20 @@ export async function readListedChats(profileId: string): Promise<Conversation[]
 }
 
 /**
- * The chats whose newest message is read: the newest `BOT_CHATS`, every pinned one — a pin is the
- * reader's own word that the chat matters, wherever its clock puts it — and every archived one, since
- * the Archived pill draws those rows' lines and ages and no other pill draws them at all. A row past
- * this bound draws its title and age from the record alone.
+ * The chats whose newest message is read: the newest `BOT_CHATS`, and every pinned one — a pin is the
+ * reader's own word that the chat matters, wherever its clock puts it. An archived one is read too
+ * where `filter` says the list is drawing the Archived pill, since that is the one pill that draws the
+ * rows' lines and ages; with no `filter` given, every archived row is read, as the sidebar and the
+ * other callers have always read them. A row past this bound draws its title and age from the record
+ * alone.
  */
-export function tailedIds(chats: readonly ChatRecord[]): Set<string> {
+export function tailedIds(chats: readonly ChatRecord[], filter?: ChatFilter): Set<string> {
+  const archived = filter === undefined || filter === "archived"
   return new Set(
-    [...chats.slice(0, BOT_CHATS), ...chats.filter((chat) => chat.pinned || chat.archived)].map(
-      (chat) => chat.id,
-    ),
+    [
+      ...chats.slice(0, BOT_CHATS),
+      ...chats.filter((chat) => chat.pinned || (archived && chat.archived)),
+    ].map((chat) => chat.id),
   )
 }
 
@@ -122,6 +127,18 @@ async function rowOfChat(chat: Conversation, tailed: ReadonlySet<string>): Promi
   return chatRowOf(chat, newest, reply)
 }
 
+/**
+ * The rooms one bot's list seats, as rows: a room is nobody's chat, and it lists in every bot its
+ * roster seats (ADR 0115), so each screen that draws a bot's list takes the rooms this device read and
+ * adds them to the chats it holds — the list and the pin count alike, since a row written twice is a
+ * row that parts ways.
+ */
+export function seatedRoomRows(rooms: readonly RoomNeedsRow[], profileId: string): ChatListRow[] {
+  return rooms
+    .filter((room) => room.seated.includes(profileId))
+    .map((room) => roomRowOf(room.chat, room.faces, room.said))
+}
+
 /** What one bot's list is drawn from: the address the answer ran for, the bot, and its rows. */
 export interface BotChats {
   /** The address this answer was read for, so one bot's answer can never pass for another's. */
@@ -135,16 +152,20 @@ export interface BotChats {
  * A bot's chats as its list draws them, read live, each row dated by the newest reply the bot sent.
  * The answer names the address it ran for, so a screen that has moved to another bot draws nothing
  * rather than this bot's rows under its name.
+ *
+ * `filter` is the pill the screen has pressed, and it is what the tail read is widened by: rows the
+ * Archived pill draws are read only while that pill is the one pressed, and no other pill reads a tail
+ * it will not draw.
  */
-export function useBotChats(profileId: string): BotChats | undefined {
+export function useBotChats(profileId: string, filter?: ChatFilter): BotChats | undefined {
   return useLiveQuery(async (): Promise<BotChats> => {
     const bot = (await db.profiles.get(profileId)) ?? null
     if (!bot) return { profileId, bot, rows: [] }
     // The chats its list draws — a chat nothing has been said in and no draft is holding is no row
     // (ADR 0158) — so a row left behind by a chat that never started is never drawn.
     const chats = await readListedChats(profileId)
-    const tailed = tailedIds(chats)
+    const tailed = tailedIds(chats, filter)
     const rows = await Promise.all(chats.map((chat) => rowOfChat(chat, tailed)))
     return { profileId, bot, rows }
-  }, [profileId])
+  }, [profileId, filter])
 }

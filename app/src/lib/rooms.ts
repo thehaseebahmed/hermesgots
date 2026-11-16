@@ -53,6 +53,20 @@ export function roomAnswerers(
 }
 
 /**
+ * The bots that seat one room on this device: its roster resolved against every bot this device holds,
+ * anchored on the bot that carried the record here. The question every caller that draws a room or
+ * carries its marks asks — so none of them resolves the roster itself, and a room cannot list in one
+ * bot's list and be carried by another.
+ */
+export function seatingBots(
+  room: Room,
+  chat: Pick<Conversation, "profileId">,
+  bots: Map<string, Profile>,
+): Profile[] {
+  return roomAnswerers(room, bots, bots.get(chat.profileId))
+}
+
+/**
  * The bot that answers for a room: the first of the bots it lists for, so one rule decides both
  * which bots draw the room and which one speaks in it (ADR 0115).
  */
@@ -144,9 +158,9 @@ export function roomNeedsOf(
  * sentence its log ends asking the reader for.
  *
  * It is aged and ordered by the record's own clock, because a room's words live on its Host and
- * nothing of its transcript syncs (ADR 0116), and its pin and its archive are this device's (ADR 0121)
- * — so a room takes its place among the chats by the same rule every other row does, and leaves them
- * the same way.
+ * nothing of its transcript syncs (ADR 0116), and its pin and its archive are the reader's, carried as
+ * a record of their own rather than written into the Host's room (ADR 0157) — so a room takes its
+ * place among the chats by the same rule every other row does, and leaves them the same way.
  *
  * `faces` is what the list that draws it read for the room (`roomFaces`, off the same roster), and
  * `said` the last message received in it (`roomLastLine`, off the page this device holds), so a screen

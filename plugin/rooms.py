@@ -25,11 +25,6 @@ committed under (``groups.attachment.*``). `room_media` is advertised only where
 both of those methods, since a store that takes a file and can't give it back is one no screen could
 draw from. The address the app draws a file through is this plugin's own signature over the room,
 the event and the file, so nothing here has to ask the Host for a URL before a gallery cell can fill.
-
-A room's own pin and its archive are the reader's, and the Host keeps neither: they are posted into
-this plugin's chat store instead, under the room's id, and `carrying_marks` lays them over the room
-where it is projected (ADR 0157). So the row a device reads is the Host's room plus the marks this
-store holds — the Host's object is never written with a field it doesn't have (ADR 0121).
 """
 
 from __future__ import annotations

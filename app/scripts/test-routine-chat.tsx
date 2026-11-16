@@ -1,5 +1,5 @@
 /**
- * A routine's row opens its run, read-only (G4): the chat screen's picker sends a row carrying the
+ * A routine's row opens its run, read-only: the chat screen's picker sends a row carrying the
  * plugin's routine marker to a screen of its own before either chat screen claims it — the run's
  * transcript, under the header naming the routine, with the composer's place saying why nothing can
  * be sent there and the way back to the bot's list. Its bar keeps the context ring and draws no `…`:

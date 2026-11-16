@@ -12,7 +12,7 @@ import {
 } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
 import { InputGroup, InputGroupInput } from "@/components/ui/input-group"
-import { pinSwitchOf } from "@/lib/chat-list"
+import { mayArchive, pinSwitchOf } from "@/lib/chat-list"
 import { setArchived, setPinned, usePinsInList } from "@/lib/chat-marks"
 import {
   deleteConversation,
@@ -47,6 +47,30 @@ export function ChatTitlePress({ title, open }: { title: string; open: boolean }
 }
 
 /**
+ * The sheet's pin row, and the only surface that reads the list's pins: `usePinsInList` mounts a
+ * second `useRoomNeeds` — every room's row, and a read of its Host's log for each of them — so it is
+ * read here, where a sheet that is shut unmounts it. What it answers decides whether a switch is drawn
+ * at all and whether it may be turned: both rules are `pinSwitchOf`'s, this row and its line included.
+ */
+function PinRow({ chat, profileId }: { chat: Conversation; profileId: string }) {
+  const pins = usePinsInList(profileId)
+  const pin = pinSwitchOf(chat, pins)
+  if (!pin.offered) return null
+  return (
+    <SwitchRow
+      id="chat-pin"
+      data-chat-pin
+      icon={PinIcon}
+      title="Pin"
+      subtitle={pin.subtitle}
+      checked={pin.checked}
+      disabled={pin.disabled}
+      onCheckedChange={(checked) => void setPinned(chat.id, checked)}
+    />
+  )
+}
+
+/**
  * A conversation's own settings, from the press its bar's title answers.
  *
  * A bar carries no `…` and no way to its bot's list — the list is where a conversation is reached
@@ -55,8 +79,8 @@ export function ChatTitlePress({ title, open }: { title: string; open: boolean }
  * the pin as the switches of one card, the archive as the outline above the delete, and the delete as
  * the same confirmation the menu opened, asked in the same words.
  *
- * What is being edited is read off the record rather than taken as a prop a caller could disagree
- * with. A **room** is its Host's: its name and its disband are the Host's own writes, offered only
+ * What is being edited is read off the record it is handed rather than off scalar props beside it. A
+ * **room** is its Host's: its name and its disband are the Host's own writes, offered only
  * where the Host advertises `rooms_write`, and each carries an id minted once per opening of its
  * question, so a retry after a dropped answer is the same rename and the same stop (ADR 0123). Its pin
  * and its archive are still the reader's own marks, drawn on any Host. A **run** keeps the name and the
@@ -74,11 +98,11 @@ export function ChatSettings({
 }: {
   chat: Conversation
   /**
-   * The bot's list the pin cap is counted over: the profile this chat is a row of. The route passes it
-   * rather than the record naming it, since a room lists in every bot its roster seats and the cap is
-   * counted per list (`chat-marks.ts`).
+   * The bot's list the pin cap is counted over: the profile this chat is a row of, defaulting to the
+   * one the record names. A room lists in every bot its roster seats, so a screen that opened the
+   * room from one bot's list passes that bot's (`chat-marks.ts`).
    */
-  profileId: string
+  profileId?: string
   /**
    * The bot that answers for a room: its writes go through it, and its Host is the gate. A chat and a
    * run write to this device and name none.
@@ -108,21 +132,18 @@ export function ChatSettings({
     if (!next) {
       setRenameId("")
       setCancelId("")
-      // The next opening starts from the name the record holds, and from nothing said about the last
-      // one: an edit abandoned here is not a field that stands refused for good.
+      // An edit abandoned here is not a field that stands refused for good.
       setTyped(undefined)
       setRefusal(undefined)
     }
     onOpenChange(next)
   }
-  const pins = usePinsInList(profileId)
-  const pin = pinSwitchOf({ pinned: Boolean(chat.pinned) }, pins ?? [])
-  // The Archived pill is the only way back to an archived row, and the legacy bands hold none: the
-  // layout the pill belongs to is the one this sheet is drawn in, so the control waits for it.
+  // The Archived pill is the only place a row is set aside *from*, and the legacy bands hold none:
+  // archiving is offered only where that pill is. The way back is offered everywhere — an archive that
+  // arrived by merge is in no band on this layout, and a row nothing could bring back is a trap.
   const archivesHere = useLegacyChat() === false
   // The field holds what is being typed, and the record what was last written: an edit abandoned or
   // refused leaves the name as it was, and the Host's words stand under the field that asked for it.
-  // Nothing typed is kept once the sheet closes, so the next opening shows the record's own name.
   const [typed, setTyped] = useState<string>()
   const name = typed ?? chat.title
   const [refusal, setRefusal] = useState<string>()
@@ -207,23 +228,13 @@ export function ChatSettings({
                   onCheckedChange={(checked) => void setThreadMuted(chat.id, checked)}
                 />
               )}
-              {/* An archived row is drawn by the Archived pill alone and archiving cleared the pin it
-                  had in the same write, so a switch here would write a mark no list could draw. */}
-              {!chat.archived && (
-                <SwitchRow
-                  id="chat-pin"
-                  data-chat-pin
-                  icon={PinIcon}
-                  title="Pin"
-                  subtitle={pin.subtitle}
-                  checked={pin.checked}
-                  disabled={pin.disabled}
-                  onCheckedChange={(checked) => void setPinned(chat.id, checked)}
-                />
-              )}
+              {/* The pin row is a component of its own, so the reads behind its cap are mounted with
+                  the sheet and shut with it: a conversation screen would otherwise read every room's
+                  row and its Host's log for a count nobody asked for. */}
+              {open && <PinRow chat={chat} profileId={profileId ?? chat.profileId} />}
             </Group>
             <div className="flex flex-col gap-2">
-              {archivesHere && (
+              {(archivesHere || chat.archived) && mayArchive(chat) && (
                 <Button
                   type="button"
                   variant="outline"

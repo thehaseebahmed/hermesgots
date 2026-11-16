@@ -13,10 +13,10 @@
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { chatRowOf, pinsOf, type ChatListRow } from "./chat-list"
-import { readListedChats } from "./chat-rows"
-import { db, updateConversation, type Conversation } from "./db"
+import { readListedChats, seatedRoomRows } from "./chat-rows"
+import { db, updateConversation, type Conversation, type Room } from "./db"
 import { useRoomNeeds } from "./room"
-import { roomAnswerers, roomRowOf } from "./rooms"
+import { seatingBots } from "./rooms"
 import { syncChatsOf } from "./sync"
 
 /**
@@ -26,12 +26,13 @@ import { syncChatsOf } from "./sync"
  */
 export async function setPinned(id: string, on: boolean) {
   const now = Date.now()
+  // One pair of marks for either kind of row: a room is no different a row to mark, and `0` is only
+  // ever the wire's way of saying "no pin", never this device's (`sync.ts` spells it there).
+  const marks = on ? { pinned: true, pinnedAt: now } : { pinned: undefined, pinnedAt: undefined }
   const row = await db.conversations.get(id)
-  if (row?.room) return markRoom(row, { pinned: on, pinnedAt: on ? now : 0 }, now)
-  await updateConversation(
-    id,
-    on ? { pinned: true, pinnedAt: now } : { pinned: undefined, pinnedAt: undefined },
-  )
+  const room = row?.room
+  if (row && room) return markRoom(row, room, marks, now)
+  await updateConversation(id, marks)
 }
 
 /**
@@ -42,17 +43,13 @@ export async function setPinned(id: string, on: boolean) {
  */
 export async function setArchived(id: string, on: boolean) {
   const now = Date.now()
+  const marks = on
+    ? { archived: true, pinned: undefined, pinnedAt: undefined }
+    : { archived: undefined }
   const row = await db.conversations.get(id)
-  if (row?.room)
-    return markRoom(
-      row,
-      on ? { archived: true, pinned: false, pinnedAt: 0 } : { archived: false },
-      now,
-    )
-  await updateConversation(
-    id,
-    on ? { archived: true, pinned: undefined, pinnedAt: undefined } : { archived: undefined },
-  )
+  const room = row?.room
+  if (row && room) return markRoom(row, room, marks, now)
+  await updateConversation(id, marks)
 }
 
 /**
@@ -69,21 +66,21 @@ export async function setArchived(id: string, on: boolean) {
  */
 async function markRoom(
   row: Conversation,
+  room: Room,
   marks: Pick<Conversation, "pinned" | "pinnedAt" | "archived">,
   marksAt: number,
 ) {
   await db.conversations.update(row.id, { ...marks, marksAt })
-  if (!row.room) return
   const bots = new Map((await db.profiles.toArray()).map((bot) => [bot.id, bot]))
-  const seated = roomAnswerers(row.room, bots, bots.get(row.profileId)).map((bot) => bot.id)
+  const seated = seatingBots(room, row, bots).map((bot) => bot.id)
   if (seated.length) void syncChatsOf(seated)
 }
 
 /**
  * The pinned rows of one bot's list — the chats it holds, a routine's run among them, and the rooms
  * its roster seats — which is what the cap is counted over: a room and a run count toward the same
- * five as a chat. `undefined` until both reads have answered, so a sheet never reads a list as empty
- * and offers a sixth pin; the rows carry the marks, and nothing here filters them.
+ * five as a chat. `undefined` until both reads have answered, and that answer is what a sheet reads a
+ * switch by: a list read as empty would offer a sixth pin over one already holding five.
  */
 export function usePinsInList(profileId: string): ChatListRow[] | undefined {
   const rooms = useRoomNeeds()
@@ -93,8 +90,5 @@ export function usePinsInList(profileId: string): ChatListRow[] | undefined {
     return held.map((chat) => chatRowOf(chat))
   }, [profileId])
   if (!chats || !rooms) return undefined
-  const seated = rooms
-    .filter((room) => room.seated.includes(profileId))
-    .map((room) => roomRowOf(room.chat, room.faces, room.said))
-  return pinsOf([...chats, ...seated])
+  return pinsOf([...chats, ...seatedRoomRows(rooms, profileId)])
 }

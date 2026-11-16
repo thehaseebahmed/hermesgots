@@ -25,7 +25,7 @@ import {
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller"
 import { hold, type HoldSlot } from "@/lib/chat-hold"
-import { serverConfig } from "@/lib/connection"
+import { hasServer, serverConfig } from "@/lib/connection"
 import { db, type Message } from "@/lib/db"
 import { COMPOSER_SLOT } from "@/lib/layout"
 import { useChatLead } from "@/lib/chat-lead"
@@ -76,16 +76,14 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
   const messages = transcript.messages ?? NO_ROWS
   const draws = useDraws(messages, server)
   const [usageOpen, setUsageOpen] = useState(false)
-  // The press the run's title answers opens the one Edit sheet, as a chat's does.
+  // The press the run's title answers opens the one Edit sheet.
   const [settingsOpen, setSettingsOpen] = useState(false)
   const { usage, providerUsage } = useChatSurface(chat, bot, () => setUsageOpen(true))
   // A run the host has emptied is one it no longer holds; a read that failed is the host being away,
   // which is a different thing to say and is said in the same place.
   const gone = transcript.loaded && messages.length === 0
-  // The bar keeps the ring and nothing else: the `…` it held is the sheet its title opens, and a run
-  // runs no turn of its own to offer anything more.
   const actions =
-    chat && bot && bot.baseUrl.trim() ? (
+    chat && hasServer(bot) ? (
       <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
     ) : undefined
 
@@ -145,7 +143,6 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
           </div>
           <ChatSettings
             chat={chat}
-            profileId={chat.profileId}
             open={settingsOpen}
             onOpenChange={setSettingsOpen}
             onDeleted={() => (lead.list ? lead.ontoList() : root("/"))}

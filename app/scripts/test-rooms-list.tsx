@@ -879,10 +879,10 @@ test("Rooms ranks a room by the list's own rule, and offers no order of its own"
 })
 
 test("the Rooms band keeps the list's order with a pin", async () => {
-  // A pinned row's place is when the pin was made, not its own clock: the earliest pin on top and
-  // the last at the bottom of the group, whoever has spoken most recently (G1) — so the band reads
-  // the order the bot's list reads. A pin written before the app kept a clock reads as the earliest
-  // and keeps the top of the group, which is what spares every stored pin a migration.
+  // A pinned row's place is when the pin was made, not its own clock: the earliest pin on top and the
+  // last at the bottom of the group, whoever has spoken most recently — so the band reads the order
+  // the bot's list reads. A pin written before the app kept a clock reads as the earliest and keeps
+  // the top of the group, which is what spares every stored pin a migration.
   await fresh()
   const at = (offset: number) => LAST_AT + offset
   await db.conversations.bulkPut(
@@ -915,10 +915,10 @@ test("the Rooms band keeps the list's order with a pin", async () => {
 })
 
 /**
- * A room's marks are the reader's, and the Host's room has no field to keep them in (ADR 0121), so
- * they travel as one record of their own in the Host's chat store, under the room's id, and the
- * plugin lays them over the room it projects (ADR 0157). The record is written at the clock of the
- * mark and carries both booleans spelled, since a projection cannot say "no opinion" about a mark.
+ * The Host's room has no field to keep a pin or an archive in (ADR 0121), so a room's marks are the
+ * reader's, carried as one record of their own in the Host's chat store under the room's id and laid
+ * over the room where it is projected (ADR 0157). The record is written at the clock of the mark and
+ * carries both booleans spelled, since a projection cannot say "no opinion" about a mark.
  */
 test("a room's pin posts one record of marks to every bot that seats it, and no chat's field", async () => {
   await fresh({ marks: true, layout: "bots" })

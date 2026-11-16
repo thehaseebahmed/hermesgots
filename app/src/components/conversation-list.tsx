@@ -33,9 +33,9 @@ import { stateLine } from "@/lib/bot-chrome"
 import { closeCanvas, useCanvasOpened } from "@/lib/canvas-open"
 import { useCanvasEnabled, usePinnedCanvases, type Canvas } from "@/lib/canvases"
 import { chatOwner } from "@/lib/chat-owner"
-import { compareChatOrder, waitsOnUser } from "@/lib/chat-list"
+import { compareChatOrder, keptBy, waitReasonOf } from "@/lib/chat-list"
 import { listingChats } from "@/lib/chat-rows"
-import type { Conversation, Message, Profile } from "@/lib/db"
+import type { Conversation, Profile } from "@/lib/db"
 import { db, isReply, newestMessage } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useCanMakeRoom, useRoomNeeds } from "@/lib/room"
@@ -270,8 +270,8 @@ function CanvasRow({
  * waits on the user. Project sessions stay on Code, and rooms have a section of their own. An archived
  * chat stands in no band — the Archived pill is its only place, and this layout holds none — and a
  * chat nothing was said in and no draft holds is no row at all (ADR 0158). A pinned chat is lifted
- * into the band above in the order the pins were made — ADR 0103's rule, applied as the bot's list
- * applies it.
+ * into the band above in the order the pins were made, which is the list's own order
+ * (`compareChatOrder`) and not one this sidebar keeps apart.
  */
 function Recents({
   onNavigate,
@@ -289,9 +289,9 @@ function Recents({
     const held = await db.conversations
       .orderBy("updatedAt")
       .reverse()
-      // Rooms have a section of their own, so Recents holds chats alone (ADR 0127), and an archived
-      // chat is the Archived pill's alone: a band holds no pill, and no way back to what it kept.
-      .filter((c) => chatOwner(c, bots).listed && !c.room && !c.archived)
+      // Rooms have a section of their own, so Recents holds chats alone (ADR 0127), and the rows a
+      // band draws are one pill's: All's, which is every archived row's exclusion (`keptBy`).
+      .filter((c) => chatOwner(c, bots).listed && !c.room && keptBy("all", c))
       .toArray()
     // A chat nothing was said in and no draft is holding is no row of any list (ADR 0158), read by
     // the one rule and the same two reads the bot's list uses (`listingChats`).
@@ -303,15 +303,13 @@ function Recents({
     // This device's own unanswered approval or question, which a keyless bot or one without the
     // plugin can't report. Only a chat's newest reply can wait, so only that one is read.
     const newest = await Promise.all(chats.map((c) => newestMessage(c.id, isReply)))
-    const open = newest.filter((m): m is Message => m !== undefined && waitsOnUser(m))
-    const local = new Map<string, WaitingReason>(
-      open.map((m) => [
-        m.conversationId,
-        m.clarify && !m.clarify.resolved
-          ? { kind: "question", count: m.clarify.questions.length || 1 }
-          : { kind: "approval", command: m.approval?.command },
-      ]),
-    )
+    // One reader for the wait: `waitReasonOf` is the rule the bot's own list words a row with, so a
+    // reason cannot be read one way here and another there.
+    const local = new Map<string, WaitingReason>()
+    for (const message of newest) {
+      const reason = message ? waitReasonOf(message) : undefined
+      if (message && reason) local.set(message.conversationId, reason)
+    }
     return chats.map((chat) => ({
       chat,
       bot: chatOwner(chat, bots).bot,
@@ -319,9 +317,6 @@ function Recents({
     }))
   }, [])
 
-  // The pinned band is the list's own order, which is the order the pins were made in — earliest on
-  // top, the last at its bottom — so it is ranked by that and not by each chat's own clock, which is
-  // only the unpinned band's rule.
   const pinned = [...(recents?.filter((one) => one.chat.pinned) ?? [])].sort((one, two) =>
     compareChatOrder(placeOf(one.chat), placeOf(two.chat)),
   )
@@ -522,10 +517,9 @@ function Rooms({
   const canMake = useCanMakeRoom()
   if (!rows) return null
   // An archived room is the Archived pill's alone, and a band holds no pill: it stands in no band
-  // here, as it stands in no other list's rows (ADR 0158's sibling rule). Rooms are never judged
-  // unstarted — `isListed` exempts them, since a room's words are its Host's log, not a chat's.
+  // here, as it stands in no other list's row.
   const ordered = rows
-    .filter(({ chat }) => !chat.archived)
+    .filter(({ chat }) => keptBy("all", chat))
     .sort((one, two) => compareChatOrder(placeOf(one.chat), placeOf(two.chat)))
   return (
     <>
@@ -585,10 +579,8 @@ function Rooms({
 }
 
 /**
- * A row's place in the list's one order (`compareChatOrder`), off the record a band drew it from: the
- * clock it is ranked by when it is unpinned, and — for a pinned row — when the pin was made, since
- * that is what orders the pinned group. A pin written before the app kept a clock carries none and
- * reads as the earliest, so it keeps the top of the group.
+ * A row's place in the list's one order (`compareChatOrder`), off the record a band drew it from:
+ * `updatedAt` is the clock an unpinned row is ranked by, and `pinnedAt` the one a pin is.
  */
 const placeOf = (chat: Pick<Conversation, "id" | "updatedAt" | "pinned" | "pinnedAt">) => ({
   id: chat.id,

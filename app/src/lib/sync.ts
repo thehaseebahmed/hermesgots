@@ -47,7 +47,7 @@ import {
 } from "@/lib/db"
 import { mergeDocs, type Doc, type Entry } from "@/lib/merge"
 import { syncRegistry } from "@/lib/registry"
-import { roomAnswerers } from "@/lib/rooms"
+import { seatingBots } from "@/lib/rooms"
 import { markResume } from "@/lib/resume-trace"
 import {
   generateDataKey,
@@ -124,18 +124,14 @@ const CHAT_FIELDS = [
 type ChatValue = Pick<Conversation, (typeof CHAT_FIELDS)[number]>
 
 /**
- * A room's marks as its record carries them: the reader's pin, when it was made, the reader's
- * archive, and the clock both were last written at (ADR 0157). Both booleans are always spelled —
- * a projection has no way to say "no opinion" about a mark, so a record that left one out would read
- * as silence and an unpin or an unarchive would never travel — and `pinnedAt` is a number, `0` where
- * the room is not pinned.
+ * A room's marks as its record carries them, read off the row's own fields so a fifth mark cannot be
+ * added to one and missed by the other: the reader's pin and when it was made, the reader's archive,
+ * and `marksAt`, the clock all of them were last written at (ADR 0157). Every one is always spelled —
+ * a projection has no way to say "no opinion" about a mark, so a record that left one out would read as
+ * silence and an unpin or an unarchive would never travel — and `pinnedAt` is a number, `0` where the
+ * room is not pinned, since the wire has no `undefined`.
  */
-interface RoomMarks {
-  pinned: boolean
-  pinnedAt: number
-  archived: boolean
-  marksAt: number
-}
+type RoomMarks = Required<Pick<Conversation, "pinned" | "pinnedAt" | "archived" | "marksAt">>
 
 /**
  * One record of a bot's chat list: a chat's own fields, or a room's marks alone — which is all a
@@ -621,8 +617,7 @@ const encoder = new TextEncoder()
 
 async function localChats(
   profileId: string,
-  drafts: boolean,
-  marks: boolean,
+  { drafts, marks }: { drafts: boolean; marks: boolean },
 ): Promise<Doc<SyncedValue>> {
   const doc: Doc<SyncedValue> = {}
   // A room is the Host's rather than any bot's, so the rooms whose marks this bot may carry are read
@@ -675,8 +670,7 @@ function markRecord(
   const room = chat.room
   const marksAt = chat.marksAt
   if (!room || !marksAt) return undefined
-  const carrier = bots.get(chat.profileId)
-  const seated = roomAnswerers(room, bots, carrier)
+  const seated = seatingBots(room, chat, bots)
   if (!seated.some((bot) => bot.id === profileId)) return undefined
   return {
     at: marksAt,
@@ -771,7 +765,7 @@ async function mergePluginChats(profile: Profile) {
     hasPluginFeature(profile, "draft_text"),
     hasPluginFeature(profile, "room_marks"),
   ])
-  const local = await localChats(profile.id, drafts, marks)
+  const local = await localChats(profile.id, { drafts, marks })
   try {
     const merged = await mergeChatList(profile, local, AbortSignal.timeout(READ_TIMEOUT_MS))
     markResume("chats-merge-end", { requests: 1 })
@@ -779,8 +773,9 @@ async function mergePluginChats(profile: Profile) {
     // taken away, not a room with new marks, so it is nothing for a mark's clock to out-rank. Left in,
     // a mark made after the Host's disband would shadow the deletion on every merge and stand a row
     // here for a room nothing owns (ADR 0157; ADR 0121's row carried no record that could).
-    for (const [id, entry] of Object.entries(merged))
-      if (entry.deleted && local[id]?.value?.roomMarks) delete local[id]
+    if (marks)
+      for (const id of Object.keys(merged))
+        if (merged[id].deleted && local[id]?.value?.roomMarks) delete local[id]
     return { local, merged }
   } catch (error) {
     noteFailure(`Syncing ${profile.name}'s chats`, error)

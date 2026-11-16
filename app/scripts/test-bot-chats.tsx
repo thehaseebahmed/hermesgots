@@ -77,13 +77,13 @@ interface Seed {
   mine?: string
   /** The newest reply is still arriving, so the row has a run in flight to draw. */
   streaming?: boolean
-  /** Archived by the reader: the row every pill but Archived leaves out (G2). */
+  /** Archived by the reader: the row every pill but Archived leaves out. */
   archived?: boolean
-  /** The run a routine's delivery is: the marker and the line the record itself carries (G4). */
+  /** The run a routine's delivery is: the marker and the line the record itself carries. */
   routine?: { line: string }
   /** The room this row is: the Host's record, with this bot seated in it. */
   room?: boolean
-  /** The bot's own Main thread, which is never hidden however little has been said in it (G4). */
+  /** The bot's own Main thread, which is never hidden however little has been said in it. */
   main?: boolean
 }
 
@@ -411,7 +411,7 @@ test("the dot is this device's read mark, not the host's word", async () => {
 
 test("a routine's delivery is a row of its own, with the routine's icon and the record's line", async () => {
   // A run has no message on this device at all: the row's line and time are the record's, which is why
-  // a device that never opened the run still draws it (G4).
+  // a device that never opened the run still draws it.
   const at = Date.now() - 120_000
   await seed([
     {
@@ -727,7 +727,7 @@ test("the picks' New chat makes a chat of this bot's, and their New room opens t
     const made = (await db.conversations.toArray()).find((one) => one.id === path().slice(3))
     assert.ok(made, "the chat is the bot's, written before the address moved")
     assert.equal(made.profileId, bot.id, "a chat of this bot's")
-    assert.ok(!made.main, "a plain chat: nothing makes a Main any more (G1)")
+    assert.ok(!made.main, "a plain chat: nothing makes a Main any more")
   })
   await mount(screen(), async () => {
     await until(async () => Boolean(find("[data-new-menu]")), "the button")
@@ -763,9 +763,9 @@ test("a pick in a bot's list opens its chat above the list", async () => {
 })
 
 test("a chat opened and left behind is no row of the list it steps back to, and one holding a draft is", async () => {
-  // F3 (ADR 0158). The New chat press mints a record whose two clocks are level, and nothing is said in
-  // it: the list the reader steps back to draws no row for it. Main is never hidden, empty or not, and
-  // a chat holding words typed and not sent is a row until the words go.
+  // The New chat press mints a record whose two clocks are level, and nothing is said in it: the list
+  // the reader steps back to draws no row for it (ADR 0158). Main is never hidden, empty or not, and a
+  // chat holding words typed and not sent is a row until the words go.
   await seed([
     { id: "main", title: "Main", at: 100, main: true },
     { id: "said", title: "A chat", at: 300, said: "Hello" },
@@ -967,6 +967,20 @@ test("an archived chat is out of every pill but Archived, and All's search never
   })
 })
 
+test("a chat nothing was said in, archived, is still the Archived pill's row", async () => {
+  // Archiving is an act the reader took, and the pill is the only way back to the row it kept: a chat
+  // the New chat press minted and the reader put away before saying anything is exactly the state the
+  // sheet writes, and nothing else would draw it.
+  await seed([{ id: "put-away", title: "Set aside", at: 100, archived: true }])
+  await mount(screen(), async () => {
+    await until(async () => Boolean(findText("p", "No chats yet.")), "All's own sentence")
+    assert.deepEqual(rowIds(), [], "out of All, which is the rows nobody archived")
+    await click(filterPill("Archived"))
+    await until(async () => rowIds().length === 1, "the row the reader put away")
+    assert.deepEqual(rowIds(), ["put-away"], "drawn by the one pill that holds it")
+  })
+})
+
 test("a bot whose every chat is archived says All's own emptiness", async () => {
   // A pill that keeps nothing says its own sentence; Archived is the pill that holds these, and All
   // says what it says of any bot with nothing to draw rather than a second emptiness of its own.
@@ -981,7 +995,8 @@ test("a bot whose every chat is archived says All's own emptiness", async () => 
 
 test("an archived chat past the bound still says what was last said in it", async () => {
   // The pill draws the archived row's line and its age, so its tail is read wherever its clock puts
-  // it: the bound is on what a list costs to draw, and this row is on it.
+  // it: the bound is on what a list costs to draw, and this row is on it. The read starts when the
+  // pill is pressed — no other pill draws these rows — so the line lands with the pill's answer.
   const many: Seed[] = [
     {
       id: "archived-old",
@@ -1002,10 +1017,9 @@ test("an archived chat past the bound still says what was last said in it", asyn
     await until(async () => rowIds().length === BOT_CHATS + 1, "every chat nobody archived")
     assert.ok(!rowIds().includes("archived-old"), "the archived chat is out of All")
     await click(filterPill("Archived"))
-    await until(async () => rowIds().length === 1, "the Archived pill")
-    assert.ok(
-      wordsOf(rowOf("archived-old")).includes("The last word in it"),
-      "its line is read, though its clock put it past the bound",
+    await until(
+      async () => wordsOf(rowOf("archived-old")).includes("The last word in it"),
+      "its line, read though its clock put it past the bound",
     )
   })
 })

@@ -147,6 +147,7 @@ import { ChatBody } from "@/chat-next/chat-body"
 import { isUnsent } from "@/chat-next/unsent"
 import { useSessionLeave } from "@/components/chat/session-leave"
 import { chatFlow } from "@/lib/chat-flow"
+import { hasStarted } from "@/lib/chat-list"
 import { useChatLead } from "@/lib/chat-lead"
 
 export { SETUP_COPY } from "@/components/chat/empty-states"
@@ -163,10 +164,17 @@ import { SubagentsSheet } from "@/components/chat/subagents"
 
 const NO_ROWS: Message[] = []
 
-/** Nothing was sent in a chat of this screen's own store: no turn and no message in its row. */
+/**
+ * Nothing was sent in a chat of this screen's own store: no word in its clocks and no message in its
+ * row.
+ *
+ * The clocks are `hasStarted`'s — the comparison the list's own rule is built on — and the messages
+ * are asked here because a listing answers a different question: `isListed` also keeps a chat on a
+ * draft, while a screen deciding what to do with a chat nothing was sent in must not take words that
+ * were never sent for a start.
+ */
 const hasNoMessages = async (chat: Conversation) =>
-  !(chat.updatedAt > chat.createdAt) &&
-  (await db.messages.where("conversationId").equals(chat.id).count()) === 0
+  !hasStarted(chat) && (await db.messages.where("conversationId").equals(chat.id).count()) === 0
 const wait = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
 function PendingChat() {
@@ -499,7 +507,6 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
           {editable && (
             <ChatSettings
               chat={chat}
-              profileId={chat.profileId}
               open={settingsOpen}
               onOpenChange={setSettingsOpen}
               onDeleted={() => root("/")}
@@ -1360,7 +1367,6 @@ function CurrentChatPage({ slot }: ChatPageProps) {
       {editable && conversation && (
         <ChatSettings
           chat={conversation}
-          profileId={conversation.profileId}
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
           onDeleted={() => root("/")}

@@ -374,9 +374,9 @@ export interface Conversation {
    * When the reader last pinned or archived this room, on this device's clock. A room's marks are the
    * reader's and the Host's room has no field for them (ADR 0121), so they travel as a record of their
    * own in the Host's chat store, and this is the clock that record is written at and merged by: one
-   * whose `marksAt` does not beat the row's leaves its marks alone (ADR 0157). Local only, like
-   * `roomSeenSeq` beside it, and only a room carries it — a chat's marks ride its own record, on
-   * `changedAt`.
+   * whose `marksAt` does not beat the row's leaves its marks alone (ADR 0157). It is no chat's field —
+   * it rides only the record the app posts, and is not in `CHAT_FIELDS` — and only a room carries it,
+   * since a chat's marks ride its own record, on `changedAt`.
    */
   marksAt?: number
 }
@@ -2241,14 +2241,24 @@ export interface RoomRecord {
 }
 
 /** The fields a room's record is allowed to say; every other field on the row is this device's. */
-const ROOM_FIELDS = ["title", "createdAt", "updatedAt", "room"] as const
+const ROOM_FIELDS = [
+  "title",
+  "createdAt",
+  "updatedAt",
+  "room",
+] as const satisfies readonly (keyof Conversation)[]
 
 /**
  * The fields a room's marks are, compared by the one clock among them: a record whose `marksAt` beats
  * the row's lands all four together, since a mark is a whole answer and the record always spells both
  * booleans (ADR 0157).
  */
-const MARK_FIELDS = ["pinned", "pinnedAt", "archived", "marksAt"] as const
+const MARK_FIELDS = [
+  "pinned",
+  "pinnedAt",
+  "archived",
+  "marksAt",
+] as const satisfies readonly (keyof Conversation)[]
 
 /**
  * One room's row, written from the record the plugin projects or a write answers (ADR 0123).
@@ -2277,26 +2287,28 @@ export async function writeRoomRow(id: string, record: RoomRecord, profileId: st
   // An empty roster is not a roster either — a Host that answers no members has said nothing about
   // them, and writing `[]` over the seats would cost the room its answering bot (ADR 0115).
   const rosterless = Boolean(existing?.room) && !value.room?.members.length
-  const named = ROOM_FIELDS.filter(
-    (field) => value[field] !== undefined && !(field === "room" && rosterless),
-  )
-  const patch: Record<string, unknown> = Object.fromEntries(
-    named.map((field) => [field, value[field]]),
-  )
+  const patch: Partial<Conversation> = {}
+  const written: (keyof Conversation)[] = []
+  for (const field of ROOM_FIELDS) {
+    if (value[field] === undefined) continue
+    if (field === "room" && rosterless) continue
+    Object.assign(patch, { [field]: value[field] })
+    written.push(field)
+  }
   // A room's marks are compared by their own clock rather than by the record's: the projection is
   // cached, so one that left the Host before the reader's own mark was made says nothing about it, and
-  // one naming marks this row already holds is the reader's own record come back. A newer one lands
-  // all four fields together, because the record always spells both booleans (ADR 0157).
+  // one naming marks this row already holds is the reader's own record come back.
   if (value.marksAt !== undefined && value.marksAt > (existing?.marksAt ?? 0))
-    for (const field of MARK_FIELDS) patch[field] = value[field]
+    for (const field of MARK_FIELDS) {
+      Object.assign(patch, { [field]: value[field] })
+      written.push(field)
+    }
   // A room is projected unchanged on every read: writing it again would wake every live query over a
   // chat list for news that nothing happened — and its marks are echoed back the same way.
   const same =
     existing !== undefined &&
     existing.changedAt === record.at &&
-    Object.keys(patch).every((field) =>
-      equal((existing as unknown as Record<string, unknown>)[field], patch[field]),
-    )
+    written.every((field) => equal(existing[field], patch[field]))
   if (same) return
   await db.transaction("rw", db.conversations, db.tombstones, async () => {
     await db.conversations.put({
