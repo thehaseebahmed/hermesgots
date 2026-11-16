@@ -74,8 +74,8 @@ small hand-over keyed by the canvas and taken once, so a point the reader remove
   control goes to the canvas's other screen, which is a different move from leaving the one the
   reader is on, and the left of the row is where a reader looks for that move — so the arrow is
   drawn there, following the arrival as it does on the preview. Counting the two as one control for
-  one move left the chat with the corner as its only way out, and made its back press answer with the
-  preview rather than with the step the corner takes.
+  one move made the corner the way out as well as the way across, and had the chat's back press
+  answer with the preview rather than with the step the leading control takes.
 - **Arming the page under the chat.** Keeping the frame behind the edit screen, outlined and tappable,
   would save the trip — and it is the sheet again: a page half-covered by the screen that exists to
   replace it.
