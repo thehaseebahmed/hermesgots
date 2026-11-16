@@ -495,9 +495,29 @@ await flow(
       "a canvas the list opened leads back to the list, and draws no drawer beside it",
     )
     await shot("head-pushed")
+
+    // The chat wears the same head (ADR 0130): the Edit corner opens it, and its leading control is
+    // still the way back to the list the page was opened from — named for that list, with the drawer
+    // not drawn beside it, and taking the step rather than drawing anything in its place.
+    await page.locator('[data-canvas-flip="edit"]').click()
+    await page.waitForURL(new RegExp(`/canvas/c_[^/]+/edit$`), { timeout: 20_000 })
+    await settled(page)
+    const chatHead = await page.evaluate(() => ({
+      back:
+        document
+          .querySelector('header [aria-label="All canvases"]')
+          ?.getAttribute("aria-label") ?? null,
+      drawer: Boolean(document.querySelector('header [aria-label="Open conversations"]')),
+    }))
+    assert.deepEqual(
+      chatHead,
+      { back: "All canvases", drawer: false },
+      "the chat leads back to the list the page was opened from, and draws no drawer beside it",
+    )
+    await shot("head-chat")
     await page.getByRole("button", { name: "All canvases" }).click()
     await page.waitForURL(`${app}/canvas`, { timeout: 20_000 })
-    pass("the preview screen: a canvas the list opened is led back to the list, and steps there")
+    pass("both screens: a canvas the list opened is led back to the list, and steps there")
   },
   { viewport: { width: 390, height: 844 }, touch: true },
 )
