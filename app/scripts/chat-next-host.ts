@@ -172,7 +172,8 @@ function durable(input: unknown): string | null {
 const FAILED_TURN = { finish_reason: null, display_kind: "failed_turn" } as const
 
 /**
- * `plugin` serves the Gots plugin's `runs/live`; `version` is what `/health` says Hermes is;
+ * `plugin` serves the Gots plugin's `runs/live`; `uploads` serves its attachment route and offers it
+ * in `info`'s features, so a composer can attach a file; `version` is what `/health` says Hermes is;
  * `latency` is how long, in ms, a transcript read takes to be answered; `withhold` sends a prompt's
  * request only to the subscribers there when it was made, never to one that joins afterwards.
  * `cooperative` keeps a stopped child working until its own boundary, which is how core's
@@ -183,6 +184,7 @@ export function fakeHost(
   session: string,
   {
     plugin = false,
+    uploads = false,
     version = "0.22.5",
     latency = 0,
     withhold = false,
@@ -190,6 +192,7 @@ export function fakeHost(
     refuseStops = false,
   }: {
     plugin?: boolean
+    uploads?: boolean
     version?: string
     latency?: number
     withhold?: boolean
@@ -218,6 +221,8 @@ export function fakeHost(
   }
   /** The offset of each transcript page asked for, in the order the asks came. */
   const offsets: number[] = []
+  /** The files the plugin's attachment route saved, in the order they came. */
+  const saved: { name: string; path: string; size: number }[] = []
   /** Pages the host holds back until released, and pages it fails with a 500, by offset. */
   const gates = new Map<number, { wait: Promise<void>; release: () => void }>()
   const failing = new Set<number>()
@@ -686,8 +691,18 @@ export function fakeHost(
           "media",
           "media_url",
           "subagents_stop_all",
+          ...(uploads ? ["attachments"] : []),
         ],
       })
+    }
+    // The plugin's attachment route: the file is saved under the session's own folder, and the path
+    // it answers is what the message names it by.
+    if (plugin && uploads && path === `/api/plugins/gots/sessions/${session}/attachments` && init?.method === "POST") {
+      const name = url.searchParams.get("name") ?? "file"
+      const size = (init.body as Blob | undefined)?.size ?? 0
+      const at = `/host/attachments/${session}/${name}`
+      saved.push({ name, path: at, size })
+      return reply({ name, path: at, size })
     }
     // The plugin's media route: a URL minted for one path, which the route serves as the image or
     // file its suffix names.
@@ -1082,6 +1097,7 @@ export function fakeHost(
     handle,
     seed,
     offsets,
+    saved,
     hold,
     holdRuns,
     fail,
