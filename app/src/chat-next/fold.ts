@@ -53,7 +53,7 @@ export type Part =
   /** The host compacted the conversation here; the rows above are summarised in what follows. */
   | { kind: "compaction"; row?: number; at?: number }
   /** A message the user sent while the reply ran, which the agent read after its calls. */
-  | { kind: "steer"; text: string }
+  | { kind: "steer"; text: string; files?: SentFile[] }
   /**
    * A progress reminder's note, drawn only behind *Show progress reminders*: the call it refused never
    * ran, so it stands as a row of its own rather than in the group beside it (ADR 0068).
@@ -322,7 +322,11 @@ export function foldTurns(
     if (row.role === "user") {
       // A steer is the user's, but it goes on the reply it steered rather than opening a turn.
       if (row.display_kind === "steer") {
-        turns.at(-1)?.parts.push({ kind: "steer", text: steerWords(row.content) })
+        turns.at(-1)?.parts.push({
+          kind: "steer",
+          text: steerWords(row.content),
+          files: requestOf(row.content).files,
+        })
         continue
       }
       // A model switch, a restatement, the task snapshot and the pruned-skills notice are the model's
@@ -523,9 +527,13 @@ export function withCarried(live: Turn, copy: Turn): Turn {
  * its next tool result, or at the turn's end. `withCarried` pairs the row off against this part, so
  * the two never draw twice.
  */
-export function withSteer(live: Turn, text: string): Turn {
+export function withSteer(live: Turn, text: string, files?: SentFile[]): Turn {
   const said = text.trim()
-  return said ? { ...live, parts: [...live.parts, { kind: "steer", text: said }] } : live
+  if (!said) return live
+  return {
+    ...live,
+    parts: [...live.parts, { kind: "steer", text: said, ...(files?.length ? { files } : {}) }],
+  }
 }
 
 /** Whether a reply already drawn ended on these very words. */

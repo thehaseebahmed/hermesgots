@@ -344,11 +344,22 @@ export function SentAttachments({
 }
 
 /** Something the user steered the reply with, where it reached the agent. */
-function SteerBubble({ text }: { text: string }) {
+function SteerBubble({
+  conversationId,
+  text,
+  attachments,
+}: {
+  conversationId: string
+  text: string
+  attachments?: Attachment[]
+}) {
   const said = steerWords(text)
   return (
     <MessageRow align="end" className={COLUMN}>
       <MessageContent className="items-end gap-1">
+        {attachments?.length ? (
+          <SentAttachments conversationId={conversationId} attachments={attachments} dim />
+        ) : null}
         <UserBubble>{said}</UserBubble>
         <div className="flex items-center gap-1 px-1 text-xs text-muted-foreground">
           <CornerDownRightIcon className="size-3.5" />
@@ -640,7 +651,13 @@ export const MessageItem = memo(function MessageItem({
       offset: steer.contentOffset,
       time: steer.at,
       toolsBefore: steer.toolsBefore,
-      node: <SteerBubble text={steer.text} />,
+      node: (
+        <SteerBubble
+          conversationId={message.conversationId}
+          text={steer.text}
+          attachments={steer.files}
+        />
+      ),
     })
   for (const seam of message.seams ?? []) {
     if (replaced?.has(seam.id)) continue

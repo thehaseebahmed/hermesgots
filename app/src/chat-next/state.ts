@@ -162,7 +162,7 @@ export type ThreadEvent =
    * A steer the host took: it stands in the reply at once, rather than waiting for the transcript's
    * row, which the host writes only when the run reads the steer.
    */
-  | { type: "steered"; text: string }
+  | { type: "steered"; text: string; files?: SentFile[] }
   /** A read the host answered with something other than the rows: said as a toast, drawn nowhere. */
   | { type: "read-failed" }
   /** `run` is the run being joined: a wait this page already read for it is that run's own. */
@@ -851,7 +851,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // Only a reply this page draws can be steered: with none, the transcript's row for the steer is
       // what draws it, and `withCarried` puts it where the run read it.
       if (!state.live) return state
-      const turn = withSteer(state.live.turn, event.text)
+      const turn = withSteer(state.live.turn, event.text, event.files)
       return turn === state.live.turn ? state : { ...state, live: { ...state.live, turn } }
     }
     case "read-failed":

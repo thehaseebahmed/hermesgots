@@ -712,7 +712,10 @@ interface ThreadOptions {
    * Steers the running reply through the plugin's queue; without it, nothing can be steered. Answers
    * whether the reply took it, which is when the thread may draw it.
    */
-  steerTurn?: (text: string, attachments: Attachment[]) => Promise<boolean>
+  steerTurn?: (
+    text: string,
+    attachments: Attachment[],
+  ) => Promise<{ took: boolean; files: SentFile[] }>
   /**
    * Called once the thread has read the host (`opened`), each time a turn has ended (`turn`), and
    * when the page comes back to the foreground and has caught up (`returned`): where the app reads
@@ -1658,7 +1661,8 @@ export function ChatNextThread({
     if (!steerTurn) throw new Error("This reply can't be steered.")
     // A steer the host took stands in the reply at once: its transcript row lands only when the run
     // reads it. One it refused stays queued, and the queue row is what draws it.
-    if (await steerTurn(text, attachments)) dispatch({ type: "steered", text })
+    const steered = await steerTurn(text, attachments)
+    if (steered.took) dispatch({ type: "steered", text, files: steered.files })
     void catchUp()
   }
 

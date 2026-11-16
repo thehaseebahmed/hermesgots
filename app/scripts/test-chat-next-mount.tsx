@@ -425,6 +425,29 @@ test("with Steer by default, a message sent mid-reply steers it and is drawn in 
   })
 })
 
+test("a file steered into a reply is drawn where the steer stands", async () => {
+  const { host } = await onChatNext(
+    "c-steer-file",
+    {},
+    { plugin: true, settings: { steerByDefault: true }, host: { uploads: true } },
+  )
+  await mount(chatScreen("c-steer-file"), async () => {
+    const run = await midReply(host, "Write a poem")
+    await paste([new File(["notes"], "notes.txt", { type: "text/plain" })])
+    await type(composerField(), "Make it rhyme")
+    await sendPress()
+    await until(
+      () => host.rows.some((row) => row.display_kind === "steer"),
+      "the plugin steered the running reply",
+    )
+    await until(
+      () => Boolean(find('[data-chat-next] [data-message-id$="-a"] [aria-label="Download notes.txt"]')),
+      "the file is drawn in the reply the steer stands in",
+    )
+    run.finish("Roses are red.")
+  })
+})
+
 test("a bot whose plugin can't queue hands a mid-reply message back", async () => {
   const { host } = await onChatNext("c-noqueue")
   await mount(chatScreen("c-noqueue"), async () => {
