@@ -117,8 +117,12 @@ export interface Run {
   say(delta: string): void
   /** The reply ends: its row is written and `run.completed` closes the stream. */
   finish(output: string): void
-  /** The host gives up on the turn, as Hermes does when a provider errors mid-turn. */
-  fail(reason: string): void
+  /**
+   * The host gives up on the turn, as Hermes does when a provider errors mid-turn: `notice` is what
+   * it writes in the turn's place, and `said` — the run's own ending — is where the provider's
+   * words ride, so the two can differ the way Hermes keeps them apart.
+   */
+  fail(notice: string, said?: string): void
 }
 
 /** One open event stream: what it is sent, and the two ways it can end. */
@@ -496,9 +500,9 @@ export function fakeHost(
         push("run.completed", { output, usage: { input_tokens: 1, output_tokens: 1 } })
         end()
       },
-      fail(reason) {
-        write("assistant", reason, { ...reasoning(), ...FAILED_TURN })
-        push("run.failed", { error: reason })
+      fail(notice, said = notice) {
+        write("assistant", notice, { ...reasoning(), ...FAILED_TURN })
+        push("run.failed", { error: said })
         end()
       },
     }

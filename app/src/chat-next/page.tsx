@@ -801,10 +801,10 @@ export function ChatNextThread({
   const { turns, origin } = useMemo(() => {
     const next = shared(
       drawn.current.turns,
-      turnsOf(folded, held?.live, doing.waiting, held?.answers),
+      turnsOf(folded, held?.live, doing.waiting, held?.answers, held?.failures),
     )
     return (drawn.current = { turns: next, origin: originOf(drawn.current, next) })
-  }, [folded, held?.live, doing.waiting, held?.answers])
+  }, [folded, held?.live, doing.waiting, held?.answers, held?.failures])
   const offersEarlier = compacted || seamIn(turns)
   const [draft, setDraft] = useState("")
   const [earlier, setEarlier] = useState<"idle" | "reading" | "failed" | "spent">("idle")

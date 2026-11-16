@@ -1051,6 +1051,26 @@ test("a turn the host gave up on is drawn as failed, in the host's words, and no
   })
 })
 
+test("a provider's refusal reads as itself, not as the notice the host writes in its place", async () => {
+  const { host } = await onChatNext("c-provider")
+  const notice =
+    "Your request was not processed. Send it again if you still want me to carry it out."
+  const said = "You have used up this account's usage for now. It comes back at 14:00 UTC."
+  await mount(chatScreen("c-provider"), async () => {
+    const run = await midReply(host, "Look around")
+    run.fail(notice, said)
+    await until(() => text().includes(said), "the provider's own words, as the run ended with them")
+    assert.ok(!text().includes(notice), "not the host's notice, which says nothing of the reason")
+    assert.ok(find("[data-retry]"), "and the turn offers Retry like any other failure")
+  })
+  // The transcript holds the notice for the turn either way: what the run said is this device's, so
+  // a chat opened again on it reads the reason rather than the notice it was folded under.
+  await mount(chatScreen("c-provider"), async () => {
+    await until(() => text().includes(said), "the reason, on the chat opened again")
+    assert.ok(!text().includes(notice), "still in place of the notice")
+  })
+})
+
 test("Retry re-asks the request under its own marker, and deletes none of the failed turn", async () => {
   const { host } = await onChatNext("c-retry", {}, { plugin: true })
   host.seed([
