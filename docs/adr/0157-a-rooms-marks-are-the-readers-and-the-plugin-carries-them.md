@@ -23,7 +23,8 @@ chat — and the room it belongs to is the only place it is drawn. The marker ca
 key: `writeRoomRow` writes every field a record names, so `room: true` would write `true` over a
 room's roster.
 
-**A room's `changedAt` stays the Host's clock.** The marks carry their own `marksAt` instead, and the
+**A room's `changedAt` stays the Host's clock.** The marks carry their own clock instead — `marksAt`
+on the wire, `roomMarksAt` on the row, since a row's field says which record carries it — and the
 merge takes a record's marks only when its `marksAt` beats the row's. Stamping a reader's press into
 `changedAt` would make the projection's own idempotence check rewrite the row on every read and would
 make the room's screen pull its log for a pin — and the projection is cached, so a stale one has to

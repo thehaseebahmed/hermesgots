@@ -371,14 +371,18 @@ export interface Conversation {
    */
   roomSeenSeq?: number
   /**
-   * When the reader last pinned or archived this room, on this device's clock. A room's marks are the
-   * reader's and the Host's room has no field for them (ADR 0121), so they travel as a record of their
-   * own in the Host's chat store, and this is the clock that record is written at and merged by: one
-   * whose `marksAt` does not beat the row's leaves its marks alone (ADR 0157). It is no chat's field —
-   * it rides only the record the app posts, and is not in `CHAT_FIELDS` — and only a room carries it,
-   * since a chat's marks ride its own record, on `changedAt`.
+   * When the reader last pinned or archived this **room**, on this device's clock. A room's marks are
+   * the reader's and the Host's room has no field for them (ADR 0121), so they travel as a record of
+   * their own in the Host's chat store, and this is the clock that record is written at and merged
+   * by: one whose mark clock does not beat the row's leaves its marks alone (ADR 0157).
+   *
+   * The row names it for the record that carries it — every other field of a row says which record it
+   * belongs to as well — while the wire inside that record calls the same clock `marksAt`
+   * (`RoomRecordValue`, and `RoomMarks` in `sync.ts`). It is no chat's field — it rides only the
+   * record the app posts, and is not in `CHAT_FIELDS` — and only a room carries it, since a chat's
+   * marks ride its own record, on `changedAt`.
    */
-  marksAt?: number
+  roomMarksAt?: number
 }
 
 /**
@@ -2223,21 +2227,29 @@ export interface RoomRecord {
   deleted?: boolean
   /** The profiles a create added to the making profile's roster to seat its picks (ADR 0129). */
   seated?: string[]
-  value?: {
-    title?: string
-    createdAt?: number
-    updatedAt?: number
-    room?: Room
-    /**
-     * The reader's marks on the room, laid over it where the plugin projects it rather than written
-     * into the Host's room, which has no field for either (ADR 0121, ADR 0157), and the clock they
-     * were last written at. All four are the record's to name, and they land together.
-     */
-    pinned?: boolean
-    pinnedAt?: number
-    archived?: boolean
-    marksAt?: number
-  }
+  value?: RoomRecordValue
+}
+
+/**
+ * One room record's value, as the wire spells it: the Host's own fields, and — laid over them where
+ * the plugin projects the room rather than written into the Host's room, which has no field for
+ * either — the reader's marks and the clock they were last written at (ADR 0121, ADR 0157). All four
+ * marks are the record's to name, and they land together.
+ *
+ * This is the record's shape and not the row's: `writeRoomRow` maps it onto `Conversation`, whose own
+ * field for the clock is `roomMarksAt` — a row's field says which record carries it, and the wire
+ * keeps the name the plugin reads.
+ */
+export interface RoomRecordValue {
+  title?: string
+  createdAt?: number
+  updatedAt?: number
+  room?: Room
+  pinned?: boolean
+  pinnedAt?: number
+  archived?: boolean
+  /** The clock the marks were made at, as the plugin's `roomMarks` names it; the row's `roomMarksAt`. */
+  marksAt?: number
 }
 
 /** The fields a room's record is allowed to say; every other field on the row is this device's. */
@@ -2249,16 +2261,21 @@ const ROOM_FIELDS = [
 ] as const satisfies readonly (keyof Conversation)[]
 
 /**
- * The fields a room's marks are, compared by the one clock among them: a record whose `marksAt` beats
- * the row's lands all four together, since a mark is a whole answer and the record always spells both
- * booleans (ADR 0157).
+ * The fields a room's marks are, as the row names them and as the record names them — the reader's
+ * pin and the clock it is ordered by, the reader's archive, and the clock all of them were last
+ * written at, which the two sides spell differently (`roomMarksAt` on the row, `marksAt` on the wire).
+ *
+ * The two sides part only at the clock — the row keeps it as `roomMarksAt` and the wire names it
+ * `marksAt` — so the pairing is stated once here rather than guessed at where the patch is built: a
+ * fifth mark cannot be added to one side and missed by the other, and neither side is reached by a
+ * cast.
  */
 const MARK_FIELDS = [
-  "pinned",
-  "pinnedAt",
-  "archived",
-  "marksAt",
-] as const satisfies readonly (keyof Conversation)[]
+  ["pinned", "pinned"],
+  ["pinnedAt", "pinnedAt"],
+  ["archived", "archived"],
+  ["roomMarksAt", "marksAt"],
+] as const satisfies readonly (readonly [keyof Conversation, keyof RoomRecordValue])[]
 
 /**
  * One room's row, written from the record the plugin projects or a write answers (ADR 0123).
@@ -2298,9 +2315,9 @@ export async function writeRoomRow(id: string, record: RoomRecord, profileId: st
   // A room's marks are compared by their own clock rather than by the record's: the projection is
   // cached, so one that left the Host before the reader's own mark was made says nothing about it, and
   // one naming marks this row already holds is the reader's own record come back.
-  if (value.marksAt !== undefined && value.marksAt > (existing?.marksAt ?? 0))
-    for (const field of MARK_FIELDS) {
-      Object.assign(patch, { [field]: value[field] })
+  if (value.marksAt !== undefined && value.marksAt > (existing?.roomMarksAt ?? 0))
+    for (const [field, wire] of MARK_FIELDS) {
+      Object.assign(patch, { [field]: value[wire] })
       written.push(field)
     }
   // A room is projected unchanged on every read: writing it again would wake every live query over a

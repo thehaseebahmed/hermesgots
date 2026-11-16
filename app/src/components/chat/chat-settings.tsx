@@ -51,10 +51,16 @@ export function ChatTitlePress({ title, open }: { title: string; open: boolean }
  * second `useRoomNeeds` — every room's row, and a read of its Host's log for each of them — so it is
  * read here, where a sheet that is shut unmounts it. What it answers decides whether a switch is drawn
  * at all and whether it may be turned: both rules are `pinSwitchOf`'s, this row and its line included.
+ *
+ * The cap is also held by the writer (`setPinned` counts the list before it writes), which answers
+ * whether the mark was made. A refused write is what the switch cannot see — a room is drawn in every
+ * list that seats it, and one of them can be full while this one is not — so the row says so under its
+ * own title, in the sheet's voice, and the count it was read against decides the next press.
  */
 function PinRow({ chat, profileId }: { chat: Conversation; profileId: string }) {
   const pins = usePinsInList(profileId)
   const pin = pinSwitchOf(chat, pins)
+  const [refused, setRefused] = useState(false)
   if (!pin.offered) return null
   return (
     <SwitchRow
@@ -63,9 +69,20 @@ function PinRow({ chat, profileId }: { chat: Conversation; profileId: string }) 
       icon={PinIcon}
       title="Pin"
       subtitle={pin.subtitle}
+      extra={
+        refused ? (
+          <span role="alert" data-chat-pin-refused className="text-sm text-destructive">
+            {chat.room
+              ? "Not pinned — one of the lists this room is in already holds five."
+              : "Not pinned — this list already holds five."}
+          </span>
+        ) : undefined
+      }
       checked={pin.checked}
       disabled={pin.disabled}
-      onCheckedChange={(checked) => void setPinned(chat.id, checked)}
+      onCheckedChange={(checked) => {
+        void setPinned(chat.id, checked).then((written) => setRefused(!written))
+      }}
     />
   )
 }

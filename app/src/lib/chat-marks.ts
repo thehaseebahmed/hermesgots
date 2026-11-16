@@ -8,31 +8,46 @@
  * 0121): its row's `changedAt` is the Host's clock and stays it, the marks are stamped in a field of
  * their own, and the pass that carries them is the bots' whose roster seats the room (ADR 0157). The
  * rules that read the marks — the cap and what its switch says — are `chat-list.ts`'s: this module
- * writes a mark, and answers the list one is counted over.
+ * writes a mark, counts the list before it writes one, and answers the list one is counted over.
  */
 import { useLiveQuery } from "dexie-react-hooks"
 
-import { chatRowOf, pinsOf, type ChatListRow } from "./chat-list"
+import { chatRowOf, PIN_LIMIT, pinsOf, type ChatListRow } from "./chat-list"
 import { readListedChats, seatedRoomRows } from "./chat-rows"
 import { db, updateConversation, type Conversation, type Room } from "./db"
-import { useRoomNeeds } from "./room"
+import { readRoomNeeds, useRoomNeeds, type RoomNeedsRow } from "./room"
 import { seatingBots } from "./rooms"
 import { syncChatsOf } from "./sync"
 
 /**
- * Pins a conversation, or unpins it. The flag and the clock it is ordered by are one write: a pin
- * without a clock would land on top of every pin made before it, and a clock without its pin would
- * reorder the group the moment one was made.
+ * Pins a conversation, or unpins it, and answers whether the write was made: `false` where a sixth pin
+ * was refused, which is what lets a caller say so rather than leave a switch flipped over a mark
+ * nothing wrote.
+ *
+ * The flag and the clock it is ordered by are one write: a pin without a clock would land on top of
+ * every pin made before it, and a clock without its pin would reorder the group the moment one was
+ * made. Unpinning is never refused — it is what makes room.
+ *
+ * The cap is held here and not only by the switch that offers it (`pinSwitchOf`): a switch is one way
+ * in, and a pin written straight through this function — by a screen, a queue, or a caller this build
+ * has not written yet — would spend a slot its list has not got. A chat and a run are drawn in the one
+ * list their record names (`profileId`); a room is drawn in every list whose roster seats it, and the
+ * same pin spends a slot in each of them, so every one of those lists must have room.
  */
-export async function setPinned(id: string, on: boolean) {
+export async function setPinned(id: string, on: boolean): Promise<boolean> {
   const now = Date.now()
   // One pair of marks for either kind of row: a room is no different a row to mark, and `0` is only
   // ever the wire's way of saying "no pin", never this device's (`sync.ts` spells it there).
   const marks = on ? { pinned: true, pinnedAt: now } : { pinned: undefined, pinnedAt: undefined }
   const row = await db.conversations.get(id)
+  if (on && row && !(await hasRoomForPin(row))) return false
   const room = row?.room
-  if (row && room) return markRoom(row, room, marks, now)
+  if (row && room) {
+    await markRoom(row, room, marks, now)
+    return true
+  }
   await updateConversation(id, marks)
+  return true
 }
 
 /**
@@ -53,12 +68,57 @@ export async function setArchived(id: string, on: boolean) {
 }
 
 /**
+ * The lists one row is drawn in, by the bot whose list it is: a chat's and a run's is the one their
+ * record names, and a room's are the bots whose roster seats it (ADR 0115) — resolved by
+ * `seatingBots`, the one reading of a room's seats the app carries, so a count here and the sync pass
+ * that carries the mark cannot disagree about which lists a room is in.
+ */
+async function listsOf(row: Conversation): Promise<string[]> {
+  if (!row.room) return [row.profileId]
+  const bots = new Map((await db.profiles.toArray()).map((bot) => [bot.id, bot]))
+  return seatingBots(row.room, row, bots).map((bot) => bot.id)
+}
+
+/**
+ * Whether every list that draws this row has room for one more pin. A list's pins are the chats it
+ * draws and the rooms it seats — `chat-rows.ts` owns both halves — counted as the sheet's switch
+ * counts them, an archived pin being no pin (`pinsOf`).
+ *
+ * The row's own pin is left out of the count: a pin already made is no sixth, so a list holding five
+ * with this row among them still has room for the pin it has. A row drawn in no list at all — a room
+ * whose every member is unlinked on this device — has no list to spend a pin in, and nothing refuses
+ * it.
+ */
+async function hasRoomForPin(row: Conversation): Promise<boolean> {
+  const lists = await listsOf(row)
+  if (!lists.length) return true
+  const rooms = await readRoomNeeds()
+  for (const profileId of lists) if (!(await listHasRoom(rooms, profileId, row.id))) return false
+  return true
+}
+
+/** One list's room for a pin, counted over the rows it draws with this row's own mark left out. */
+async function listHasRoom(
+  rooms: readonly RoomNeedsRow[],
+  profileId: string,
+  exceptId: string,
+): Promise<boolean> {
+  const chats = await readListedChats(profileId)
+  // The record alone is enough: a row's marks are on it, and no tail is read for a count.
+  const rows = [
+    ...chats.map((chat) => chatRowOf(chat)),
+    ...seatedRoomRows(rooms, profileId),
+  ].filter((drawn) => drawn.id !== exceptId)
+  return pinsOf(rows).length < PIN_LIMIT
+}
+
+/**
  * A room's marks, and the clock they were made at, written onto its row and carried to the Host.
  *
  * The write is `db.conversations.update` and not `updateConversation`: a room's `changedAt` is the
  * Host's own clock, and a reader's press in it would make the projection's idempotence check rewrite
- * the row on every read — and `useRoomNeeds` pull the room's log for a pin. `marksAt` is what a merge
- * compares instead, so a projection that left the Host before this press cannot undo it.
+ * the row on every read — and `useRoomNeeds` pull the room's log for a pin. `roomMarksAt` is what a
+ * merge compares instead, so a projection that left the Host before this press cannot undo it.
  *
  * The record goes to every bot whose roster seats the room, since any of a room's bots may carry it
  * (ADR 0115) and the mark has to read from every list that draws the room (ADR 0157). The pass is not
@@ -70,7 +130,7 @@ async function markRoom(
   marks: Pick<Conversation, "pinned" | "pinnedAt" | "archived">,
   marksAt: number,
 ) {
-  await db.conversations.update(row.id, { ...marks, marksAt })
+  await db.conversations.update(row.id, { ...marks, roomMarksAt: marksAt })
   const bots = new Map((await db.profiles.toArray()).map((bot) => [bot.id, bot]))
   const seated = seatingBots(room, row, bots).map((bot) => bot.id)
   if (seated.length) void syncChatsOf(seated)

@@ -332,6 +332,9 @@ const listScreen = (profileId: string) => (
 const listRows = () =>
   findAll('ul a[href^="/c/"]').map((row) => (row.getAttribute("href") ?? "").slice(3))
 
+/** The sheet's Pin switch, by the row it is drawn in. */
+const pinSwitch = () => find("[data-chat-pin] [role=switch]")
+
 test("a room's record merged onto a fresh device is one row, carried by one bot", async () => {
   await fresh()
   await merged()
@@ -915,6 +918,89 @@ test("the Rooms band keeps the list's order with a pin", async () => {
 })
 
 /**
+ * A list that has spent its five: five started chats of one bot's, each pinned — what `pinsOf` counts
+ * as a list's whole room.
+ */
+async function seedPinnedList(profileId: string, at: number) {
+  await db.conversations.bulkPut(
+    [0, 1, 2, 3, 4].map((i) => ({
+      id: `w-pin-${i}`,
+      profileId,
+      title: `A pinned chat ${i}`,
+      hermesSessionId: `gots-w-pin-${i}`,
+      createdAt: at - 1_000 - i,
+      updatedAt: at - i,
+      changedAt: at - i,
+      pinned: true,
+      pinnedAt: at - i,
+    })),
+  )
+}
+
+/**
+ * A room lists in every bot its roster seats, and the same pin spends a slot in each of those lists:
+ * so a pin is written only where every one of them has room, and the writer — not only the switch the
+ * sheet draws — is what refuses it. A list's own pins are the chats it draws and the rooms it seats,
+ * counted as `pinSwitchOf` counts them.
+ */
+test("a room's pin is refused unless every list that seats it has room", async () => {
+  await fresh({ marks: true, layout: "bots" })
+  await merged()
+  const at = LAST_AT - 60_000
+  // The writer's list, one of the two that seat the room, has spent its five.
+  await seedPinnedList(WRITER, at)
+  assert.equal(
+    await setPinned(ROOM, true),
+    false,
+    "a pin that would spend a slot the writer's list hasn't got is refused",
+  )
+  const refused = await db.conversations.get(ROOM)
+  assert.notEqual(refused?.pinned, true, "and nothing is written: the room stays unpinned")
+  assert.deepEqual(stored, {}, "with no record posted for a mark it never made")
+  // One slot freed in the list that was full, and the same press lands in every list it is drawn in.
+  await db.conversations.update("w-pin-0", { pinned: undefined, pinnedAt: undefined })
+  assert.equal(await setPinned(ROOM, true), true, "every list that seats the room has room now")
+  assert.equal((await db.conversations.get(ROOM))?.pinned, true, "so the room is pinned")
+  // The pass the pin fired is read to its end, so nothing of this room outlives the test that made it.
+  await until(async () => Boolean(stored[ROOM]), "the mark to reach the Host's store")
+})
+
+/**
+ * The room's sheet counts the list it was opened from (`usePinsInList`), and a room is drawn in every
+ * list that seats it: where another of those lists has spent its five, the switch looks turnable and
+ * the writer is still right to refuse. Nothing is written, the switch stays off, and the row says why
+ * rather than failing silently under a switch that flipped.
+ */
+test("a room's sheet says its pin was refused where another list that seats it is full", async () => {
+  await fresh({ marks: true, layout: "bots" })
+  await merged()
+  // The writer's list is full; the carrier's, whose list the room is opened from, has room — so only
+  // the writer's count can refuse this press.
+  await seedPinnedList(WRITER, LAST_AT - 60_000)
+  await mount(roomScreen(), async () => {
+    await until(async () => Boolean(find("[data-chat-settings-open]")), "the room's bar")
+    await click(find("[data-chat-settings-open]"))
+    await until(async () => Boolean(findText("[role=dialog]", "Edit room")), "its sheet")
+    await until(async () => Boolean(pinSwitch()), "its pin")
+    assert.equal(pinSwitch()?.getAttribute("aria-checked"), "false", "the room starts unpinned")
+    await click(pinSwitch())
+    await until(
+      async () => Boolean(find("[data-chat-pin-refused]")),
+      "the sheet saying the pin was refused",
+    )
+    assert.ok(
+      findText(
+        "[data-chat-pin]",
+        "Not pinned — one of the lists this room is in already holds five.",
+      ),
+      "in the sheet's own words",
+    )
+    assert.notEqual((await db.conversations.get(ROOM))?.pinned, true, "and nothing was written")
+    assert.equal(pinSwitch()?.getAttribute("aria-checked"), "false", "the switch stays off")
+  })
+})
+
+/**
  * The Host's room has no field to keep a pin or an archive in (ADR 0121), so a room's marks are the
  * reader's, carried as one record of their own in the Host's chat store under the room's id and laid
  * over the room where it is projected (ADR 0157). The record is written at the clock of the mark and
@@ -927,7 +1013,7 @@ test("a room's pin posts one record of marks to every bot that seats it, and no 
   await setPinned(ROOM, true)
   await until(async () => posts.length >= before + 2, "a record from each bot that seats the room")
   const row = await db.conversations.get(ROOM)
-  assert.ok(row?.marksAt, "the press is stamped on the row, in a clock of its own")
+  assert.ok(row?.roomMarksAt, "the press is stamped on the row, in a clock of its own")
   assert.equal(row?.changedAt, moved.at, "and the room's own clock stays the Host's")
   const sent = posts
     .slice(before)
@@ -950,7 +1036,7 @@ test("a room's pin posts one record of marks to every bot that seats it, and no 
     assert.equal(held.archived, false, "and the archive spelled, though this device said nothing")
     assert.equal(typeof held.pinnedAt, "number", "when the pin was made")
     assert.ok(held.pinnedAt > 0)
-    assert.equal(held.marksAt, row?.marksAt, "the clock of the mark, as the row holds it")
+    assert.equal(held.marksAt, row?.roomMarksAt, "the clock of the mark, as the row holds it")
     assert.equal(entry.at, held.marksAt, "the record is written at the clock of the mark")
   }
   for (const one of posts)
@@ -967,7 +1053,7 @@ test("a room pinned here draws pinned on a device that has only the store's reco
     pinned: undefined,
     pinnedAt: undefined,
     archived: undefined,
-    marksAt: undefined,
+    roomMarksAt: undefined,
   })
   assert.notEqual((await db.conversations.get(ROOM))?.pinned, true, "the mark is gone from the row")
   // One bot of the room's roster, and only its own list is merged: the record the store holds is
@@ -979,7 +1065,7 @@ test("a room pinned here draws pinned on a device that has only the store's reco
     "the mark to land from the store",
   )
   const row = await db.conversations.get(ROOM)
-  assert.equal(row?.marksAt, stored[ROOM].marksAt, "all four marks land together")
+  assert.equal(row?.roomMarksAt, stored[ROOM].marksAt, "all four marks land together")
   assert.equal(row?.pinnedAt, stored[ROOM].pinnedAt)
   assert.equal(row?.archived, false)
   assert.equal(row?.changedAt, moved.at, "on the Host's own clock")
@@ -1001,7 +1087,7 @@ test("a mark record lands all four marks, and the Host's clock, name and roster 
   assert.equal(row?.pinned, true, "the pin")
   assert.equal(row?.pinnedAt, at, "and when it was made")
   assert.equal(row?.archived, false, "the archive, spelled as the record spells it")
-  assert.equal(row?.marksAt, at, "and the clock the marks were made at")
+  assert.equal(row?.roomMarksAt, at, "and the clock the marks were made at")
   assert.equal(row?.changedAt, moved.at, "while the row's own clock stays the Host's")
   assert.equal(row?.title, "Planning", "and its name the Host's")
   assert.equal(row?.updatedAt, moved.at, "and its last activity")
@@ -1027,7 +1113,7 @@ test("a newer mark record lands, an older one changes nothing, and the same one 
   const stale = await db.conversations.get(ROOM)
   assert.equal(stale?.pinned, true, "an older record leaves the row's pin alone")
   assert.notEqual(stale?.archived, true, "and its archive with it")
-  assert.equal(stale?.marksAt, first, "the row keeps the clock it had")
+  assert.equal(stale?.roomMarksAt, first, "the row keeps the clock it had")
   const second = first + 1_000
   const before = writes.rows
   await writeRoomRow(
@@ -1039,7 +1125,7 @@ test("a newer mark record lands, an older one changes nothing, and the same one 
   const archived = await db.conversations.get(ROOM)
   assert.equal(archived?.archived, true, "and it lands all four marks together")
   assert.notEqual(archived?.pinned, true, "the pin it spells off with them")
-  assert.equal(archived?.marksAt, second)
+  assert.equal(archived?.roomMarksAt, second)
   // The projection a merge answers names the marks the row already holds: nothing is written again.
   const quiet = writes.rows
   await writeRoomRow(

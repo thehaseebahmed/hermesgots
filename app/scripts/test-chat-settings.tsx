@@ -11,6 +11,7 @@ import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { ChatPage } from "@/routes/chat"
+import { setPinned } from "@/lib/chat-marks"
 import { db, type Conversation } from "@/lib/db"
 import {
   atWidth,
@@ -313,6 +314,47 @@ test("a pinned chat keeps its switch on and turnable at five", async () => {
     )
     assert.equal(shut(pinSwitch()), false, "and unpinning it is how room is made")
   })
+})
+
+/**
+ * The sheet's switch is only one way in, and a shut switch is not a rule: a sixth pin written
+ * straight through the writer would spend a slot the list does not have, so the writer counts the
+ * list itself and refuses. The count is over the pins the list holds — the one this row already
+ * made is no sixth — so the same write lands the moment one is freed, and a pin already made is
+ * never taken away by a full list.
+ */
+test("a sixth pin written straight through the writer is refused, and a fifth lands", async () => {
+  // The chat is a row of the list — started, so it is counted among them — and unpinned.
+  await seedPins(5, { updatedAt: 11 })
+  globalThis.fetch = async () => json({})
+  assert.equal(
+    await setPinned(CHAT, true),
+    false,
+    "five pins is one list's whole room, so the writer refuses a sixth",
+  )
+  const refused = await db.conversations.get(CHAT)
+  assert.equal(refused?.pinned, undefined, "and writes nothing: the chat is still unpinned")
+  assert.equal(refused?.pinnedAt, undefined, "nor a clock for a pin it never made")
+  // One of the five unpinned: the cap is a count, not a shut door.
+  await db.conversations.update("c-pin-0", { pinned: undefined, pinnedAt: undefined })
+  assert.equal(await setPinned(CHAT, true), true, "the fifth lands")
+  const pinned = await db.conversations.get(CHAT)
+  assert.equal(pinned?.pinned, true, "the chat is pinned")
+  assert.equal(typeof pinned?.pinnedAt, "number", "with the clock its place is ordered by")
+  // The same press again on the list's five: a pin already made is no sixth, and unpinning is the
+  // one way to make room — so the writer is never the reason a pin cannot be kept.
+  assert.equal(await setPinned(CHAT, true), true, "a row keeps the pin it holds")
+  assert.equal((await db.conversations.get(CHAT))?.pinned, true, "still pinned")
+  // And a sixth, written straight through for the count the sheet would not offer.
+  await db.conversations.put(
+    chatRow({ id: "c-late", title: "A late chat", hermesSessionId: "s-late", updatedAt: 30 }),
+  )
+  assert.equal(await setPinned("c-late", true), false, "the list is full")
+  assert.equal(
+    (await db.conversations.get("c-late"))?.pinned,
+    undefined,
+    "and the late chat stays out",
+  )
 })
 
 test("Delete asks first, and takes the chat away only when answered", async () => {

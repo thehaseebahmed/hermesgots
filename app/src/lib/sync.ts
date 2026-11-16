@@ -124,14 +124,22 @@ const CHAT_FIELDS = [
 type ChatValue = Pick<Conversation, (typeof CHAT_FIELDS)[number]>
 
 /**
- * A room's marks as its record carries them, read off the row's own fields so a fifth mark cannot be
- * added to one and missed by the other: the reader's pin and when it was made, the reader's archive,
- * and `marksAt`, the clock all of them were last written at (ADR 0157). Every one is always spelled —
- * a projection has no way to say "no opinion" about a mark, so a record that left one out would read as
- * silence and an unpin or an unarchive would never travel — and `pinnedAt` is a number, `0` where the
- * room is not pinned, since the wire has no `undefined`.
+ * A room's marks as its record carries them, and as the wire spells them: the reader's pin and when it
+ * was made, the reader's archive, and `marksAt`, the clock all of them were last written at (ADR 0157).
+ *
+ * This is the record's shape and not the row's — `db.ts` maps it to and from the row, whose own field
+ * for the clock is `roomMarksAt`, because a row's field says which record carries it. Every field is
+ * always spelled: a projection has no way to say "no opinion" about a mark, so a record that left one
+ * out would read as silence and an unpin or an unarchive would never travel — and `pinnedAt` is a
+ * number, `0` where the room is not pinned, since the wire has no `undefined`.
  */
-type RoomMarks = Required<Pick<Conversation, "pinned" | "pinnedAt" | "archived" | "marksAt">>
+interface RoomMarks {
+  pinned: boolean
+  pinnedAt: number
+  archived: boolean
+  /** The clock the marks were made at, which the row keeps as `roomMarksAt` (`db.ts`). */
+  marksAt: number
+}
 
 /**
  * One record of a bot's chat list: a chat's own fields, or a room's marks alone — which is all a
@@ -668,7 +676,9 @@ function markRecord(
   profileId: string,
 ): Entry<SyncedValue> | undefined {
   const room = chat.room
-  const marksAt = chat.marksAt
+  // The row keeps the clock as `roomMarksAt` and the wire names it `marksAt`: the record is written at
+  // that clock, so the store keeps the newest one it is given (`db.ts` maps it back).
+  const marksAt = chat.roomMarksAt
   if (!room || !marksAt) return undefined
   const seated = seatingBots(room, chat, bots)
   if (!seated.some((bot) => bot.id === profileId)) return undefined

@@ -239,6 +239,39 @@ export function useCanMakeRoom(): boolean {
 }
 
 /**
+ * Every room this device holds, as a list draws it: its row, the bot that answers for it and the bots
+ * that seat it, the pictures the row wears and the last message received in it.
+ *
+ * A plain read rather than the hook's own body, since a room's rows are not only a screen's: the pin
+ * writer counts a list's pins before it writes one, and it is no component (`chat-marks.ts`). What is
+ * read here is exactly what the hook reads — the bots, the room rows, and each room's page — so a
+ * count and a screen cannot see different rooms.
+ */
+export async function readRoomNeeds(): Promise<RoomNeedsRow[]> {
+  const bots = new Map((await db.profiles.toArray()).map((one) => [one.id, one]))
+  const held = await db.conversations.filter((chat) => Boolean(chat.room)).toArray()
+  // A room's row says the last message received in it, which is the newest member's words of the
+  // page this device holds. Reading the page here is what makes the row follow it: a member's reply
+  // that lands on its own wakes this read, and the row says what was said without opening the room.
+  const said = await Promise.all(
+    held.map(async (chat) => roomLastLine(await pageRange(chat.id).toArray())),
+  )
+  return held.map((chat, at) => {
+    const answerers = chat.room ? roomAnswerers(chat.room, bots, bots.get(chat.profileId)) : []
+    return {
+      chat,
+      bot: answerers[0],
+      seated: answerers.map((one) => one.id),
+      faces: chat.room
+        ? roomFaces(chat.room, bots.values(), bots.get(chat.profileId))
+        : { shown: [], more: 0 },
+      said: said[at],
+      read: chat.roomNeeds?.at,
+    }
+  })
+}
+
+/**
  * Keeps the chat lists' rooms read: a room whose record moved since this device last read its page,
  * and every listed room the Host says has moved — one read a second per room at most, and none at
  * all for a room at rest.
@@ -250,29 +283,7 @@ export function useCanMakeRoom(): boolean {
  * Returns the rooms it lists, so the list that draws them reads the table once.
  */
 export function useRoomNeeds(): RoomNeedsRow[] | undefined {
-  const rooms = useLiveQuery(async () => {
-    const bots = new Map((await db.profiles.toArray()).map((one) => [one.id, one]))
-    const held = await db.conversations.filter((chat) => Boolean(chat.room)).toArray()
-    // A room's row says the last message received in it, which is the newest member's words of the
-    // page this device holds. Reading the page here is what makes the row follow it: a member's reply
-    // that lands on its own wakes this query, and the row says what was said without opening the room.
-    const said = await Promise.all(
-      held.map(async (chat) => roomLastLine(await pageRange(chat.id).toArray())),
-    )
-    return held.map((chat, at) => {
-      const answerers = chat.room ? roomAnswerers(chat.room, bots, bots.get(chat.profileId)) : []
-      return {
-        chat,
-        bot: answerers[0],
-        seated: answerers.map((one) => one.id),
-        faces: chat.room
-          ? roomFaces(chat.room, bots.values(), bots.get(chat.profileId))
-          : { shown: [], more: 0 },
-        said: said[at],
-        read: chat.roomNeeds?.at,
-      }
-    })
-  }, [])
+  const rooms = useLiveQuery(() => readRoomNeeds(), [])
   const current = useRef(rooms)
   useEffect(() => {
     current.current = rooms
