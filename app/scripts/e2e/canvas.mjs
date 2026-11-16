@@ -52,11 +52,12 @@ await flow(
     await page.getByLabel("Message", { exact: true }).waitFor({ timeout: 20_000 })
     // Both read in one turn of the page, so no later moment can answer for the one it opened at. The
     // chat is the whole of what this screen draws: the empty page, its icon and its line are the
-    // preview's, and a canvas with no version on a phone has no preview to show them on (ADR 0130).
+    // preview's, and a phone is sent here once the record lands — a cold open draws that pane for a
+    // frame before the address is replaced, which is the one moment it is seen at this width.
     const building = await page.evaluate(
       (frame) => ({
         said: document.body.innerText.includes("Canvas is building…"),
-        empty: Boolean(document.querySelector("[data-canvas-empty]")),
+        empty: Boolean(document.querySelector("[data-slot=canvas-empty]")),
         frame: Boolean(document.querySelector(frame)),
         flip: Boolean(document.querySelector('[data-canvas-flip="preview"]')),
       }),
@@ -67,7 +68,7 @@ await flow(
       { said: false, empty: false, frame: false, flip: false },
       "the edit screen is the chat alone: nothing about the build, no page and no Preview",
     )
-    await shot("edit-building")
+    await shot("edit-no-build")
     pass("the edit screen: a canvas made from a prompt lands on its chat, with no page and no Preview")
 
     // The first version lands through the live record, so Preview is drawn without a reload, and
@@ -549,7 +550,7 @@ await flow(
         }
       }
       const look = () => {
-        const block = document.querySelector("[data-canvas-empty]")
+        const block = document.querySelector("[data-slot=canvas-empty]")
         const line = block?.querySelector("p")
         if (!block || !line?.textContent) return
         window.__emptySeen = {
@@ -557,6 +558,8 @@ await flow(
           icon: box(block.querySelector("svg")),
           line: box(line),
           pane: box(document.querySelector("[data-canvas-page]")),
+          beside: block.parentElement?.children.length ?? 0,
+          root: parseFloat(getComputedStyle(document.documentElement).fontSize),
         }
         watch.disconnect()
       }
@@ -576,7 +579,8 @@ await flow(
         `line at ${empty.line?.y} in the pane ${empty.pane?.x}+${empty.pane?.width}`,
     )
     assert.equal(empty.words, "Canvas is building…", "an empty page says the canvas is building")
-    assert.equal(empty.icon?.width, 64, "under the Canvas icon, at the chat pane's own size")
+    assert.equal(empty.icon?.width, 4 * empty.root, "under the Canvas icon, at size-16 in rems")
+    assert.equal(empty.beside, 1, "and the pane draws nothing beside it")
     assert.ok(
       empty.icon && empty.line && empty.icon.bottom <= empty.line.y,
       "the icon over the line",

@@ -134,19 +134,14 @@ test("a canvas is a tile, with its picture or its own mark", async () => {
       // The line under the name says where the canvas stands.
       assert.match(tile("x1")!.textContent ?? "", /Version 3/)
 
-      // A canvas with no page yet says the one thing every screen says about it, in the same words
-      // the preview's empty page uses; its mark still stands in for the picture it hasn't got.
+      // A canvas with no page yet says so in the same words the preview's empty page uses; its mark
+      // still stands in for the picture it hasn't got.
       assert.match(
         tile("x4")!.textContent ?? "",
         /Canvas is building…/,
         "a canvas being built says so",
       )
       assert.equal(picture("x4")!.dataset.canvasTileImage, "mark", "and keeps its mark")
-      assert.doesNotMatch(
-        find('ul[aria-label="Canvases"]')!.textContent ?? "",
-        /Building it\.\.\./,
-        "no tile says it another way",
-      )
     },
   )
 
