@@ -7,55 +7,83 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT"></a>
 </p>
 
-**Hermes Bots that got your back!** Gots is the playful, mobile-first companion app for [Hermes Agent](https://github.com/NousResearch/hermes-agent), built as an installable PWA and native Android app. Chat with your Bots, manage multi-step coding projects, inspect automated routines, and approve tool calls on the go—from your phone, tablet, or desktop.
+**Hermes Bots that got your back!** Gots is the playful, mobile-first companion app for [Hermes Agent](https://github.com/NousResearch/hermes-agent). Chat with your bots, send them off to code, research and build, and answer the one question that actually needs you — from your phone, tablet or laptop.
 
-Switch between multiple Hermes profiles with distinct models and keys, or let your Bots run autonomously while you are away from keyboard.
+Web app · Android · needs a Hermes host on 0.22.5 or newer
 
 <table>
-<tr><td><b>Mobile-first PWA & Android</b></td><td>Installable on phones and tablets with light and dark themes. Responsive split-pane layout adapts smoothly from mobile screens to tablet and desktop workstations.</td></tr>
-<tr><td><b>Real-time chat & tool approvals</b></td><td>Live streaming replies with interactive tool progress cards. When a Bot requests a sensitive action, an approval card (Once / Session / Always / Deny) replaces the composer for inline permission control.</td></tr>
-<tr><td><b>Multi-Bot management</b></td><td>Switch instantly between Hermes profiles. Each Bot maintains its own Host API URL, key, model selection, and distinct glassy character avatar.</td></tr>
-<tr><td><b>Autonomous Projects & AFK</b></td><td>Run multi-repo coding sessions, track pull requests, and let Bots claim ready tasks from GitHub issues autonomously via AFK mode.</td></tr>
-<tr><td><b>Routines & Cron dashboard</b></td><td>Monitor and control all Hermes cron jobs grouped by Bot. View 24-run status histories and trigger Run now, Pause, or Resume directly from your device.</td></tr>
-<tr><td><b>Zero-knowledge encrypted sync</b></td><td>End-to-end encrypted with passkeys (WebAuthn PRF) and recovery codes via Netlify Blobs. Transcripts and server data stay on your Hermes Host; only ciphertext touches sync.</td></tr>
-<tr><td><b>Agent-to-agent communication</b> <i>(Upcoming)</i></td><td>Direct inter-bot collaboration, delegation, and multi-agent coordination across profiles and hosts.</td></tr>
+<tr>
+<td><img src="assets/screenshots/research.png" width="210" alt="Research missions, two of them waiting on an outline to approve"></td>
+<td><img src="assets/screenshots/code.png" width="210" alt="Coding sessions with their pull requests, one working away from keyboard"></td>
+<td><img src="assets/screenshots/canvas.png" width="210" alt="A canvas holding a trip checklist, built and kept by a bot"></td>
+<td><img src="assets/screenshots/dictation.png" width="210" alt="A history of dictated sentences, each with its bot and word count"></td>
+</tr>
+<tr>
+<td align="center"><b>Research</b><br><sub>Missions that read the web and cite every sentence.</sub></td>
+<td align="center"><b>Code</b><br><sub>Sessions on their own branch, back as draft pull requests.</sub></td>
+<td align="center"><b>Canvas</b><br><sub>Apps your bot builds and keeps beside your chats.</sub></td>
+<td align="center"><b>Dictation</b><br><sub>Talk instead of typing, in Gots or any app on Android.</sub></td>
+</tr>
 </table>
 
----
+## What Gots does
 
-## Quick Start
+- **Chats and routines.** Live replies with tool cards, an approval card in place of the composer when a bot wants to run something, and every scheduled job's run history beside them — run now, pause or resume from the phone.
+- **Code.** Sessions work on their own branch and come back as a draft pull request. Leave AFK on and a project works through its labelled GitHub issues while you are away.
+- **Research.** A mission reads the web and cites what it read. Anything without a source gets flagged rather than quietly believed.
+- **Canvases.** Ask for a tracker, a dashboard or a checklist: your bot builds it as a small app, keeps it with your chats and updates it when you ask. Turn on backups and a canvas lands on your host as markdown you can edit and own.
+- **Bots and rooms.** Every Hermes profile you link becomes a bot with its own model, key and character. Seat several in one room and each answers in its own voice.
+- **Dictation.** Talk instead of typing — in Gots, or from any app on Android — and your own bot hears the take and tidies it up.
 
-### 1. Setup Your Hermes Host
+## Getting Started
 
-Install the Gots plugin on your Hermes host and restart the gateway:
+### 1. Get the app
+
+**Web and PWA.** Open [app.hermesgots.dev](https://app.hermesgots.dev) and install it from your browser. It works on a phone, on a tablet and on a laptop, and the chats are the same on each.
+
+**Android.** Two ways in, and what you get differs:
+
+| | [GitHub](https://github.com/thehaseebahmed/hermesgots/releases) | Firebase App Tester |
+| --- | --- | --- |
+| Who it's for | anyone | the beta programme |
+| Cross-device sync | yours to set up: self-host the sync server | ready to go, hosted by us |
+| Notifications | ntfy | push, hosted by us |
+| Updates | with each dated release | every merge to main |
+
+A signed APK ships with each dated release. The beta build follows main, so it's the one to install if you want sync and push without running a server for them.
+
+### 2. Put the plugin on your host
+
+Gots is a window onto your Hermes host, and the plugin is what lets it see your bots' chats, routines, projects and canvases. Install it, then restart the gateway:
 
 ```bash
 hermes plugins install thehaseebahmed/hermesgots/plugin --enable
 hermes gateway restart
 ```
 
-Enable the API server by adding the following configuration to `~/.hermes/.env` (or via the Hermes Dashboard under **Channels → API server**):
+### 3. Open the API server
+
+Add this to `~/.hermes/.env` — or use the Hermes Dashboard under **Channels → API server**:
 
 ```bash
 API_SERVER_ENABLED=true
-API_SERVER_KEY=<your-64-character-key>    # Generate with `openssl rand -hex 32`
-API_SERVER_CORS_ORIGINS=https://app.hermesgots.dev,https://<your-site>.netlify.app
+API_SERVER_KEY=<your-64-character-key>    # generate with: openssl rand -hex 32
+API_SERVER_CORS_ORIGINS=https://app.hermesgots.dev
 ```
 
-> **Profiles & Multiplexing:** To connect multiple Bots from different Hermes profiles on the same gateway, configure `gateway.multiplex_profiles` and point Gots to `/p/<profile>/v1` with that profile's `API_SERVER_KEY`. Ensure the plugin is installed per profile:
-> ```bash
-> hermes -p <profile> plugins install thehaseebahmed/hermesgots/plugin --enable
-> ```
+### 4. Connect a bot
 
-### 2. Connect Your Bot
+In Gots, choose **Link a bot**. It shows a code and the commands that use it; the code lasts half an hour. Run the link command on your host: it claims the code and checks in with the bot's name, address and key, so the bot reaches every device you sign in on.
 
-Open Gots on your device:
-- **Web / PWA:** Open [hermesgots.dev](https://hermesgots.dev) in your browser and install it as a PWA.
-- **Android:** Download the signed APK from [Releases](https://github.com/thehaseebahmed/hermesgots/releases).
+```bash
+hermes gots link <code> --site https://app.hermesgots.dev
+```
 
-Follow the first-run setup wizard, enter your Host API URL (e.g. `http://localhost:8642/v1` or your HTTPS server URL) and API key, and tap **Test connection**.
+Once it is linked, the bot's host address and key live in its own settings, so a host that moved can be repointed there without linking again.
 
-> **Remote Access over HTTPS:** Browsers block plain HTTP calls to remote servers from HTTPS origins. To use Gots from your phone over the internet, expose your Hermes Host over HTTPS (such as via Tailscale Serve or a Cloudflare Tunnel) and add that origin to `API_SERVER_CORS_ORIGINS`.
+> **Reaching your host over HTTPS.** A browser on an HTTPS page won't call a plain HTTP server, so using Gots from your phone over the internet needs the host exposed over HTTPS — Tailscale Serve and Cloudflare Tunnel both do it — with that origin added to `API_SERVER_CORS_ORIGINS`.
+
+Another profile is another bot: install the plugin there too (`hermes -p <profile> plugins install …`) and point Gots at `/p/<profile>/v1` with that profile's key. [The plugin's README](plugin/README.md) has the rest.
 
 ---
 
@@ -69,7 +97,7 @@ There are three pieces, and only the first two really matter day to day.
 
 **The sync server** is optional and only useful if you use more than one device (say a phone and a tablet). It's a small web service, and it does two things: it signs you in with GitHub, and it keeps a copy of your bot list and settings so a new device can pick them up. Everything it stores is encrypted on your device before it leaves, and the key never goes with it — so the server holds scrambled data it cannot read. Your messages and your bots' work never touch it at all; those stay on your Host.
 
-Skip the sync server entirely and Gots still works. You just add your bots by hand on each device.
+Skip the sync server entirely and Gots still works on the device you set it up on; the server is what carries your bot list to the next device.
 
 ---
 
@@ -111,8 +139,12 @@ pnpm dev       # Vite dev server on :5173
 
 ## Roadmap
 
-- 🤖 **Agent-to-Agent Communication:** Direct inter-bot coordination, collaborative swarm execution, and cross-bot task delegation.
-- 📱 **Native iOS App:** Capacitor iOS wrapper with Native Share Extension and App Groups.
+- **Meetings.** Hand over a recording, get back what was decided, what's yours to do and a timeline to check it against.
+- **Calling.** Ring a bot and talk it through, or let it ring you when something is waiting.
+- **iPhone app.** Gots in your pocket, with your chats, pushes and bots.
+- **Android assistant.** Make Gots your phone's assistant and ask your bot from anywhere.
+- **Your phone's data.** Calendar, contacts and health, read by your bot only when you allow it.
+- **Raycast extension.** Ask your bots and check on their work from a Mac.
 
 ---
 
