@@ -39,18 +39,18 @@ import { quietly } from "@/lib/report"
 import { useCanMakeRoom, useRoomNeeds } from "@/lib/room"
 import { useAllLiveRuns } from "@/lib/waiting"
 import { isUnread, runInFlight } from "@/lib/session-work"
-import { useLegacyChat } from "@/lib/legacy-chat"
+import { useChatLayout } from "@/lib/chat-layout"
 import { beginChat, useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 
 export function BotChatsPage() {
   const { profileId } = useParams()
-  const legacy = useLegacyChat()
-  const enabled = legacy === false
+  const layout = useChatLayout()
+  const enabled = layout === "flat"
   const pane = useBotChatsPane(enabled)
   // Nothing is drawn before the layout answers, and a device on the legacy layout — where a bot has
   // no screen — lands home rather than on a list it cannot fill.
-  if (legacy === undefined) return null
+  if (layout === undefined) return null
   if (!enabled || !profileId) return <Navigate to="/" replace />
   if (pane) return <NoChatOpen />
   return <BotChatsList profileId={profileId} />

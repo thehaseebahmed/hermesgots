@@ -21,7 +21,7 @@ import {
   type Profile,
 } from "@/lib/db"
 import { usePluginFeatureOn } from "@/lib/features"
-import { useLegacyChat } from "@/lib/legacy-chat"
+import { useChatLayout } from "@/lib/chat-layout"
 import { setThreadMuted } from "@/lib/push"
 import { disbandRoomNow, renameRoomTo } from "@/lib/room-writes"
 import { stopMessage } from "@/lib/chat"
@@ -158,7 +158,7 @@ export function ChatSettings({
   // The Archived pill is the only place a row is set aside *from*, and the legacy bands hold none:
   // archiving is offered only where that pill is. The way back is offered everywhere — an archive that
   // arrived by merge is in no band on this layout, and a row nothing could bring back is a trap.
-  const archivesHere = useLegacyChat() === false
+  const archivesHere = useChatLayout() === "flat"
   // The field holds what is being typed, and the record what was last written: an edit abandoned or
   // refused leaves the name as it was, and the Host's words stand under the field that asked for it.
   const [typed, setTyped] = useState<string>()

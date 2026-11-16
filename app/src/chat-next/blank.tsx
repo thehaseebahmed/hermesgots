@@ -19,7 +19,7 @@ import { dictationHint } from "@/lib/dictation-hint"
 import { draftKey } from "@/lib/drafts"
 import { COLUMN_BOX, COMPOSER_SLOT } from "@/lib/layout"
 import { chosenOf, storedPick } from "@/lib/model-pick"
-import { useLegacyChat } from "@/lib/legacy-chat"
+import { useChatLayout } from "@/lib/chat-layout"
 import { tell } from "@/lib/tell"
 import { beginChat } from "@/lib/threads"
 
@@ -30,7 +30,7 @@ import { beginChat } from "@/lib/threads"
  */
 export function ChatNextBlank({ botId, slot }: { botId: string; slot: HoldSlot }) {
   const bot = useLiveQuery(() => db.profiles.get(botId), [botId])
-  const legacy = useLegacyChat()
+  const layout = useChatLayout()
   const navigate = useNavigate()
   const [modelPick, setModelPick] = useState<ModelChoice>()
   // A press that lands while the first chat is being made must not make a second one.
@@ -73,7 +73,7 @@ export function ChatNextBlank({ botId, slot }: { botId: string; slot: HoldSlot }
         data-toast-above
         className={COMPOSER_SLOT}
       >
-        {legacy === true && (
+        {layout === "recents" && (
           <div className={`${COLUMN_BOX} flex pb-2`}>
             <BotPicker profile={bot} />
           </div>

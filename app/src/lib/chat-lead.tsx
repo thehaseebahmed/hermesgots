@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef } from "react"
 
 import { BackButton } from "@/components/back-button"
 import { botChatsPath } from "@/lib/bot-tabs"
-import { useLegacyChat } from "@/lib/legacy-chat"
+import { useChatLayout } from "@/lib/chat-layout"
 import { useNav } from "@/lib/nav"
 import { setBackGuard } from "@/lib/native"
 import { useSplit } from "@/lib/pane"
@@ -37,7 +37,7 @@ export function useChatLead({
   /** Where that control goes; the session's own way out of Code. */
   leave?: () => void
 }) {
-  const legacy = useLegacyChat()
+  const layout = useChatLayout()
   const split = useSplit()
   const { up } = useNav()
   // The label this device's lists give that bot, so a bot whose namesake answers elsewhere is told
@@ -46,7 +46,7 @@ export function useChatLead({
   // leave the row's first slot empty until it landed.
   const named = useBotLabels().get(bot ?? "")
   // The legacy layout has no bot's screen at all, so nothing of the list is drawn there.
-  const list = legacy === false && bot ? botChatsPath(bot) : undefined
+  const list = layout === "flat" && bot ? botChatsPath(bot) : undefined
   const besideList = (beside ?? split) && Boolean(list)
   const ontoList = useCallback(() => {
     if (list) up(list)

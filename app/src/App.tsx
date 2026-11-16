@@ -9,7 +9,7 @@ import { getActiveProfile } from "@/lib/db"
 import { warmCatalog } from "@/lib/models"
 import { useShareReceiver } from "@/lib/share"
 import { toHex } from "@/lib/theme"
-import { useLegacyChat } from "@/lib/legacy-chat"
+import { useChatLayout } from "@/lib/chat-layout"
 import { NewRoomScreen } from "@/components/room/new-room-screen"
 import { ChatPage } from "@/routes/chat"
 import { SetupGate } from "@/routes/setup"
@@ -82,12 +82,12 @@ function ThemeColor() {
 
 /** Home is the selected bot's screen: the list of its chats, at the bot's own address. */
 export function Home() {
-  const legacy = useLegacyChat()
+  const layout = useChatLayout()
   const active = useLiveQuery(
-    async () => (legacy === false ? ((await getActiveProfile()) ?? null) : null),
-    [legacy],
+    async () => (layout === "flat" ? ((await getActiveProfile()) ?? null) : null),
+    [layout],
   )
-  if (legacy === undefined || (legacy === false && active === undefined)) return null
+  if (layout === undefined || (layout === "flat" && active === undefined)) return null
   return active ? <Navigate to={botChatsPath(active.id)} replace /> : <ChatPage slot="route" />
 }
 

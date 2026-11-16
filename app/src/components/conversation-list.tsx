@@ -40,7 +40,7 @@ import { db, isReply, newestMessage } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useCanMakeRoom, useRoomNeeds } from "@/lib/room"
 import { roomMembersLine, roomNeedsOf } from "@/lib/rooms"
-import { useLegacyChat } from "@/lib/legacy-chat"
+import { useChatLayout } from "@/lib/chat-layout"
 import { useMeetingsEnabled } from "@/lib/meetings"
 import { pressOpeningRoot, plainPress, useNav } from "@/lib/nav"
 import { useSyncState } from "@/lib/sync"
@@ -696,7 +696,7 @@ export function ConversationList({
   onToggleCollapsed?: () => void
 }) {
   const { root } = useNav()
-  const legacy = useLegacyChat()
+  const layout = useChatLayout()
   const meetings = useMeetingsEnabled()
   const canvas = useCanvasEnabled()
 
@@ -785,7 +785,7 @@ export function ConversationList({
               {!collapsed && <LabLabel fill>Meetings</LabLabel>}
             </RootLink>
           )}
-          {legacy === true && (
+          {layout === "recents" && (
             <RootLink
               to="/routines"
               onClick={onNavigate}
@@ -800,10 +800,10 @@ export function ConversationList({
         </nav>
         <Separator className="mx-1 my-3 data-horizontal:w-auto" />
         <Waiting onNavigate={onNavigate} collapsed={collapsed} />
-        {legacy === false ? (
+        {layout === "flat" ? (
           <Bots onNavigate={onNavigate} collapsed={collapsed} />
         ) : (
-          legacy === true && (
+          layout === "recents" && (
             <>
               <Recents onNavigate={onNavigate} collapsed={collapsed} />
               <Rooms onNavigate={onNavigate} collapsed={collapsed} />
@@ -820,7 +820,7 @@ export function ConversationList({
       >
         <ProfileButton onNavigate={onNavigate} />
         <div className={cn("flex items-center gap-2", collapsed && "flex-col gap-2")}>
-          {legacy === true && (
+          {layout === "recents" && (
             <Button
               size="lg"
               className={cn("h-11 rounded-full", collapsed ? "w-11 px-0" : "px-5")}

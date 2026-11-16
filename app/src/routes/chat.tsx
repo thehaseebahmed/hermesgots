@@ -138,7 +138,7 @@ import {
 } from "@/lib/workspace"
 import { lastActivityAt } from "@/lib/session-work"
 import { hold, type HoldSlot } from "@/lib/chat-hold"
-import { useLegacyChat } from "@/lib/legacy-chat"
+import { useChatLayout } from "@/lib/chat-layout"
 import { EmptyChatState, MissingThread } from "@/components/chat/empty-states"
 import type { DiagReadFailure } from "@/lib/read-failure"
 import { describeReadFailure, formatReadFailure } from "@/lib/read-failure"
@@ -546,7 +546,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
   // Settings answer "no row" on a device that never wrote one, so an absent answer is `null` here
   // rather than the `undefined` a query that has not run hands back.
   const settings = useLiveQuery(async () => (await db.settings.get("settings")) ?? null, [])
-  const legacy = useLegacyChat()
+  const layout = useChatLayout()
   const found = useLiveQuery(
     async () => (id ? ((await db.conversations.get(id)) ?? null) : undefined),
     [id],
@@ -615,7 +615,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
   const flow = useMemo(() => chatFlow({ thread, compacted }), [thread, compacted])
   const answered =
     settings !== undefined &&
-    legacy !== undefined &&
+    layout !== undefined &&
     (id === undefined || conversation !== undefined) &&
     profile !== undefined &&
     messages !== undefined
@@ -1228,7 +1228,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
             </div>
           </div>
         )}
-        {!id && profile && legacy && (
+        {!id && profile && layout === "recents" && (
           <div className={`${COLUMN_BOX} flex pb-2`}>
             <BotPicker profile={profile} />
           </div>

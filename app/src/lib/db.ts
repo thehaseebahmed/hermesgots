@@ -57,7 +57,7 @@ export interface Settings {
   /**
    * The layout the app drew before a bot's screen became the list of its chats: Recents in the
    * sidebar and a New chat screen. Local and off by default; on is the opt-out, read by
-   * `useLegacyChat` in `legacy-chat.ts`.
+   * `chatLayout` in `chat-layout.ts`.
    */
   legacyChat?: boolean
   /**

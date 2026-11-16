@@ -28,7 +28,7 @@ import { formatRelative } from "@/lib/format"
 import { forgetPluginAnswer } from "@/lib/hermes"
 import { connectionKey, noteChange } from "@/lib/live"
 import { syncChatsOf, syncNow } from "@/lib/sync"
-import { useLegacyChat } from "@/lib/legacy-chat"
+import { useChatLayout } from "@/lib/chat-layout"
 import { pressBack } from "@/lib/native"
 import { useBotChatsPane } from "@/lib/pane"
 
@@ -428,7 +428,7 @@ test(
 )
 
 function Pane() {
-  const pane = useBotChatsPane(useLegacyChat() === false)
+  const pane = useBotChatsPane(useChatLayout() === "flat")
   return <span data-pane>{JSON.stringify(pane ? { bot: pane.profileId } : null)}</span>
 }
 
