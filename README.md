@@ -61,17 +61,9 @@ hermes plugins install thehaseebahmed/hermesgots/plugin --enable
 hermes gateway restart
 ```
 
-### 3. Open the API server
+> **The API server has to be on.** The app talks to your host through Hermes's API server, so the profile needs `API_SERVER_ENABLED=true` and an `API_SERVER_KEY`. You don't have to write them by hand: linking a bot in the next step offers to add both, along with the CORS origins the app comes from, and says what to restart.
 
-Add this to `~/.hermes/.env` — or use the Hermes Dashboard under **Channels → API server**:
-
-```bash
-API_SERVER_ENABLED=true
-API_SERVER_KEY=<your-64-character-key>    # generate with: openssl rand -hex 32
-API_SERVER_CORS_ORIGINS=https://app.hermesgots.dev
-```
-
-### 4. Connect a bot
+### 3. Connect a bot
 
 In Gots, choose **Link a bot**. It shows a code and the commands that use it; the code lasts half an hour. Run the link command on your host: it claims the code and checks in with the bot's name, address and key, so the bot reaches every device you sign in on.
 
@@ -79,7 +71,7 @@ In Gots, choose **Link a bot**. It shows a code and the commands that use it; th
 hermes gots link <code> --site https://app.hermesgots.dev
 ```
 
-Once it is linked, the bot's host address and key live in its own settings, so a host that moved can be repointed there without linking again.
+The app follows the address you linked the bot at. If the host moves, run `hermes gots unlink` and link it again with the new one.
 
 > **Reaching your host over HTTPS.** A browser on an HTTPS page won't call a plain HTTP server, so using Gots from your phone over the internet needs the host exposed over HTTPS — Tailscale Serve and Cloudflare Tunnel both do it — with that origin added to `API_SERVER_CORS_ORIGINS`.
 
