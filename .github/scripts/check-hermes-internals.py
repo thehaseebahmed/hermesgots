@@ -87,6 +87,13 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     (("gateway/session_authority.py",), "async def resolve_unknown_as_owner"),
     (("gateway/session_api.py",), "def restore_api_session"),
     (("gateway/session_authorities.py",), "def authority_for_home"),
+    # The gateway's own Bot Chat creation, which `plugin/sessions.py`'s mint asks for by name (G9),
+    # with the principal it is handed and the tracked task it runs as. A rename here would leave every
+    # Main a Gots chat of its own instead of the profile's real chat, and no test of ours can see it:
+    # the tests stub these modules, the host renames them without knowing this plugin exists.
+    (("gateway/session_bot.py",), "async def _create_bot_chat"),
+    (("gateway/session_contract.py",), "class Principal"),
+    (("gateway/session_runtime_workers.py",), "def track_mutation"),
     # The Host's rooms, as `plugin/rooms.py` reaches them (ADR 0117): the dispatcher the seam hands a
     # request to in process, the two contract entries it calls and the `groups.capabilities` fields
     # it reads (`driver`, `methods`, `features`, `seatable_profiles`), and the loopback client it

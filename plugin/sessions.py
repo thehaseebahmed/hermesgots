@@ -17,6 +17,7 @@ Markdown file under the project's ``plans/`` folder, named after the session bra
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -933,6 +934,106 @@ def archived_flags(home: Path) -> Dict[str, bool]:
     except sqlite3.Error:
         logger.debug("gots: couldn't read %s's archive flags", home / "state.db", exc_info=True)
         return {}
+
+
+def bot_chat(home: Path) -> Optional[Dict[str, Any]]:
+    """The profile's canonical Bot Chat: the unarchived session Hermes keeps titled ``"Bot Chat"``.
+
+    Main is that conversation (Bot Mode's, shared with the Desktop), so it is read out of the one
+    store that holds it rather than invented: ``{"id", "hidden", "at"}`` — the session, whether
+    Hermes holds it hidden (its own canonical chat is), and when it began in the app's millis, which
+    is the clock a record minted for it carries — or None where this profile has none.
+
+    None is an answer, not a failure: no store, no ``sessions`` table, no row titled so, and a row
+    that has been **archived** — which is a retired Bot Chat, not a Main to draw, since the reader
+    put it away on the Dashboard and G2 forbids an archived Main.
+
+    Read-only, and never retitles anything: a store that can't answer answers nothing. A schema from
+    before ``archived`` or ``hidden`` still answers (the row is unarchived and visible as far as it
+    can say), which is the host the plugin has to keep working on rather than guess about.
+    """
+    conn = _open_state(home)
+    if conn is None:
+        return None
+    try:
+        with closing(conn):
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
+            if "id" not in columns:
+                return None
+            asked = ["id"] + [column for column in ("hidden", "started_at") if column in columns]
+            archived = " AND archived = 0" if "archived" in columns else ""
+            order = " ORDER BY started_at" if "started_at" in columns else ""
+            row = conn.execute(
+                f"SELECT {', '.join(asked)} FROM sessions WHERE title = ?{archived}{order} LIMIT 1",
+                (chats.MAIN_TITLE,),
+            ).fetchone()
+    except sqlite3.Error:
+        logger.debug("gots: couldn't read %s's Bot Chat", home / "state.db", exc_info=True)
+        return None
+    if row is None or not row["id"]:
+        return None
+    started = row["started_at"] if "started_at" in columns else None
+    return {
+        "id": row["id"],
+        "hidden": bool(row["hidden"]) if "hidden" in columns else False,
+        "at": int(float(started or 0) * 1000),
+    }
+
+
+async def mint_bot_chat(home: Path) -> Optional[str]:
+    """Asks the gateway to mint this profile's canonical Bot Chat, and answers its session.
+
+    The chat is Hermes's, so Hermes makes it: this is the gateway's own creation
+    (``gateway.session_bot._create_bot_chat``), the call the Desktop's Bots roster and a Bot Mode
+    delivery make — a local session the gateway's FIFO owns, never a row of this plugin's making.
+    That creation looks the title up under the authority's titled-create lock before it writes, so a
+    "Bot Chat" another surface already holds is *deferred to*: it mints nothing, answers nothing, and
+    this plugin neither retitles it nor fights the title. `sessions.title` is the identity of the
+    canonical chat, and a squatter is how a profile ends up with a bot whose chat never resolves.
+
+    A host that cannot answer answers None, plainly: no API server wired, no authority serving this
+    home, no such call (a Hermes from before it), or a refusal (an owner draining, a store that would
+    not take it). That is the capability answer the caller falls back on, never an exception across a
+    list read. Nothing here spends a turn: the creation writes the row and stops.
+    """
+    owner = _bot_chat_authority(home)
+    if owner is None:
+        return None
+    try:
+        from gateway.session_bot import _create_bot_chat
+        from gateway.session_contract import Principal
+        from gateway.session_runtime_workers import track_mutation
+    except ImportError:
+        logger.debug("gots: this Hermes has no Bot Chat creation to ask")
+        return None
+    actor = Principal(
+        "gots-main",
+        owner.profile_id,
+        frozenset({"session:create", "session:read", "session:submit"}),
+        "gots-main",
+    )
+    try:
+        open_for_work = getattr(owner, "_require_admission_open", None)
+        if callable(open_for_work):
+            open_for_work()
+        ref = await asyncio.shield(track_mutation(owner, _create_bot_chat(owner, actor)))
+    except Exception:
+        logger.debug("gots: this host wouldn't mint a Bot Chat", exc_info=True)
+        return None
+    session_id = getattr(ref, "session_id", None)
+    return session_id if isinstance(session_id, str) and session_id else None
+
+
+def _bot_chat_authority(home: Path) -> Any:
+    """The session authority serving this profile, or None — the one lookup the mint needs.
+
+    The same resolver ``pending.authority`` makes: the API server the plugin is wired into holds the
+    gateway runner, and the runner answers which authority owns this home (a multiplexed gateway
+    serves several). One copy because a host seam that moves should have one place to move it.
+    """
+    from . import pending
+
+    return pending.authority(adapter, home)
 
 
 def is_chat(home: Path, session_id: str) -> bool:

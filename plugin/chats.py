@@ -20,10 +20,17 @@ flag, and a record's ``archived`` is the copy of it every device merges. The plu
 when the reader archives (``sessions.set_archived``), writes the field onto the record
 (``set_archived``), and lays the flag back over every list answer (``carrying_archive``) so an
 archive made on the Dashboard hides the row here — and an unarchive there brings it back (ADR 0159).
+
+One record of a bot's list is its **Main**: the permanent conversation Hermes Bot Mode keeps for the
+profile, which the Desktop shows as the bot's own chat. It is Hermes's session, so the plugin only
+ever lays it over the answer (``carrying_main``) — the record already bound to that session, else one
+minted under the session's own id — and where a host has no such chat it falls back to a Gots chat of
+the bot's own, minted once into this store (``own_main``).
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import sqlite3
@@ -109,6 +116,114 @@ def carrying_archive(
         updated = _with_archive(value, flags[session_id])
         carried[chat_id] = {**record, "value": updated} if updated != value else record
     return carried
+
+
+# The flag a record carries when it is the bot's Main, and the title such a record is minted with:
+# Hermes's own word for the profile's canonical chat (`BOT_CHAT_TITLE` in
+# ``tools.bot_mode_probe``), which the app draws its own "Main" over. A record that stops being Main
+# keeps that title and reads as the thread it is, rather than as a second row called Main.
+MAIN = "main"
+MAIN_TITLE = "Bot Chat"
+
+
+def _naming(record: Any, session_id: str) -> bool:
+    """Whether one record is about this Hermes session — what "already bound to it" means.
+
+    The app keeps the session in ``hermesSessionId`` under a chat id of its own making, so a record
+    is found by what it names and not by its key: two devices can hold one session under two ids,
+    and the first one is the one Main becomes.
+    """
+    value = (record or {}).get("value")
+    return isinstance(value, dict) and value.get("hermesSessionId") == session_id
+
+
+def _main_record(session: Dict[str, Any]) -> Dict[str, Any]:
+    """The record a session's Main is, from the session alone so a second answer mints the same one.
+
+    Its clock is when the session began, which is stable across answers and real enough to date the
+    row by; the title is the host's own for the chat, and ``main`` is what every surface reads it by.
+    """
+    at = session.get("at")
+    at = at if isinstance(at, int) else 0
+    return {
+        "at": at,
+        "value": {
+            "title": MAIN_TITLE,
+            "hermesSessionId": session["id"],
+            "createdAt": at,
+            "updatedAt": at,
+            MAIN: True,
+        },
+    }
+
+
+def carrying_main(
+    records: Dict[str, Dict[str, Any]], session: Optional[Dict[str, Any]]
+) -> Dict[str, Dict[str, Any]]:
+    """Every record, with exactly one of them Main: the session ``sessions.bot_chat`` names.
+
+    Shaped like ``carrying_archive``: a projection over one list answer, idempotent, and nothing
+    written — so a device that never asks keeps what it holds, and asking twice says the same thing.
+
+    The record already bound to that session is the one flagged, under whichever id a device gave it:
+    a re-pointed chat id would graft a new session's history onto the old chat's drafts and marks.
+    With none, a record is minted under the session's own id — derived from it, so a store wiped clean
+    mints the very same one again. Every other record carrying the flag loses it and keeps everything
+    else, so a Main an older build wrote stays a side chat with its history (G10).
+
+    It runs after ``carrying_archive`` and drops the archive from the record it flags: a Bot Chat
+    archived on the Dashboard is a *retired* Main and never an archived one, and G2 forbids an
+    archived Main while the app has one flag to read (G9).
+    """
+    session_id = session.get("id") if isinstance(session, dict) else None
+    if not isinstance(session_id, str) or not session_id:
+        return records
+    main = next(
+        (chat_id for chat_id, record in records.items() if _naming(record, session_id)), session_id
+    )
+    laid: Dict[str, Dict[str, Any]] = {}
+    for chat_id, record in records.items():
+        value = (record or {}).get("value")
+        if not isinstance(value, dict) or carries_room_marks(value):
+            # A deletion is a deletion, and a room's marks are not a chat's.
+            laid[chat_id] = record
+        elif chat_id == main:
+            flagged = _with_archive(value, False)
+            # The archive comes off (a retired Main is nobody's archived chat) and the session goes
+            # on, unless the record already names it.
+            flagged.setdefault("hermesSessionId", session_id)
+            laid[chat_id] = {**record, "value": {**flagged, MAIN: True}}
+        elif value.get(MAIN):
+            laid[chat_id] = {
+                **record,
+                "value": {field: held for field, held in value.items() if field != MAIN},
+            }
+        else:
+            laid[chat_id] = record
+    if main not in laid:
+        laid[main] = _main_record(session)
+    return laid
+
+
+def own_main(records: Dict[str, Dict[str, Any]], path: Path, now: int) -> Dict[str, Any]:
+    """A Gots chat of this bot's own for Main, for a host that can neither name nor mint one.
+
+    The fallback G9 asks for where the gateway cannot be asked: the plugin is Main's only writer, so
+    the one conversation it may make is its own. Its session id is derived from the bot and not from
+    the clock, so a store wiped clean mints the same one again, and it starts with the app's own id
+    prefix, so every reader already knows it for a chat's session. It is minted *once*: an answer
+    after it finds the record and writes nothing, and a host that names a Bot Chat later takes the
+    flag off it, leaving it a side chat with everything it had.
+
+    ``now`` is this host's clock, which is the record's change clock and the date its row draws.
+    """
+    session_id = f"gots-main-{hashlib.sha1(str(path).encode('utf-8')).hexdigest()[:12]}"
+    held = next((record for record in records.values() if _naming(record, session_id)), None)
+    if held is not None:
+        return {"id": session_id, "hidden": False, "at": int(held.get("at") or 0)}
+    session: Dict[str, Any] = {"id": session_id, "hidden": False, "at": int(now)}
+    merge(path, {session_id: _main_record(session)})
+    return session
 
 
 def _records(conn: sqlite3.Connection) -> Dict[str, Dict[str, Any]]:

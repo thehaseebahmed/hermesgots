@@ -1182,6 +1182,29 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         """
         return await asyncio.to_thread(rooms.chat_records, home=rooms_home())
 
+    async def main_session(records: Dict[str, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Which session this bot's Main is, resolved once per list answer.
+
+        The profile's canonical Bot Chat, read out of the store that holds it
+        (``sessions.bot_chat``). Where this host names none — no Bot Mode, nothing minted yet — the
+        gateway is asked to mint one, through its own creation and never a row of this plugin's
+        making; a mint that named a chat is read back, since a "Bot Chat" another surface already
+        holds is deferred to rather than fought over the title. Where the host cannot answer at all,
+        Main is a Gots chat of the bot's own (``chats.own_main``), which is the one this plugin may
+        make.
+
+        Asked on each answer that finds no Bot Chat, so a host that gains one is adopted without a
+        restart; the mint itself looks the title up under the gateway's lock and writes nothing where
+        one exists, so the repeat costs a lookup and never a second chat.
+        """
+        home = profile_home()
+        found = await asyncio.to_thread(sessions.bot_chat, home)
+        if found is None and await sessions.mint_bot_chat(home) is not None:
+            found = await asyncio.to_thread(sessions.bot_chat, home)
+        if found is not None:
+            return found
+        return await asyncio.to_thread(chats.own_main, records, store_path(), int(time.time() * 1000))
+
     async def merged_chats(records: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         """The list a device is answered with: this bot's chats, and its rooms under their marks.
 
@@ -1194,6 +1217,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         the Dashboard leaves this list and an unarchive there brings it back, since a chat's archive
         is Hermes's and not this store's (chats.carrying_archive, ADR 0159). A store that can't say —
         no ``state.db``, no ``archived`` column — answers no flags, and every row stands as it was.
+
+        Main is laid over that, last and on top: exactly one record flagged ``main``, the profile's
+        canonical Bot Chat (chats.carrying_main, G9). It runs after the archive, since a Bot Chat
+        archived on the Dashboard is a retired Main rather than an archived one.
         """
         kept = {
             chat_id: record
@@ -1201,9 +1228,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             if not chats.carries_room_marks((record or {}).get("value"))
         }
         flags = await asyncio.to_thread(sessions.archived_flags, profile_home())
-        return chats.carrying_archive(
+        carried = chats.carrying_archive(
             {**kept, **rooms.carrying_marks(await projected_rooms(), records)}, flags
         )
+        return chats.carrying_main(carried, await main_session(records))
 
     async def list_chats(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1252,6 +1280,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         chat_id = request.match_info["chat_id"].strip()
         record = await asyncio.to_thread(chats.one, store_path(), chat_id)
         value = (record or {}).get("value")
+        if isinstance(value, dict) and value.get(chats.MAIN):
+            # Main is the bot's permanent conversation: not archivable, not deletable, and offered no
+            # mark by any surface (G2). A device that asks anyway is refused in words it can show,
+            # rather than answered with a record the next list answer would hand back unarchived.
+            return _error(web, "Main can't be archived.", 409)
         session_id = value.get("hermesSessionId") if isinstance(value, dict) else None
         if not isinstance(session_id, str) or not session_id:
             # A room and a chat nothing has been said in have no session of their own: a room keeps
