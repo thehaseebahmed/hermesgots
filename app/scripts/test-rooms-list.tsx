@@ -22,10 +22,12 @@ import { ConversationList } from "@/components/conversation-list"
 import { RoomChat } from "@/components/room/room-chat"
 import { BotChatsPage } from "@/routes/bot-chats"
 import { chatOwner } from "@/lib/chat-owner"
-import { db, chatTombstones, type Profile } from "@/lib/db"
+import { setPinned } from "@/lib/chat-marks"
+import { db, chatTombstones, writeRoomRow, type Profile } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
+import { forgetPluginAnswer } from "@/lib/hermes"
 import { connectionKey, noteChange } from "@/lib/live"
-import { syncNow } from "@/lib/sync"
+import { syncChatsOf, syncNow } from "@/lib/sync"
 import { useLegacyChat } from "@/lib/legacy-chat"
 import { pressBack } from "@/lib/native"
 import { useBotChatsPane } from "@/lib/pane"
@@ -164,24 +166,61 @@ const roomRead = (since?: number) => {
 }
 
 let merges = 0
+/**
+ * The features the Host's plugin advertises. `room_marks` is the one a room's pin travels behind
+ * (ADR 0157): without it the plugin can store a record but not lay it over the room it names, so the
+ * app posts none and the pin stays on the device that made it, exactly as ADR 0121 has it.
+ */
+let features = ["draft_text"]
+/** The four fields a room's mark record carries. */
+interface Marks {
+  pinned: boolean
+  pinnedAt: number
+  archived: boolean
+  marksAt: number
+}
+/** The mark records the Host's chat store holds, by the room's own id: every one the app posted. */
+let stored: Record<string, Marks> = {}
+/** The chat lists the app posted, so what a room's record says is read where it is written. */
+let posts: Record<string, { at: number; value?: { roomMarks?: Marks } }>[] = []
 
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input))
   const body = init?.body ? JSON.parse(String(init.body)) : undefined
   if (url.pathname.endsWith("/capabilities")) return json({ features: {} })
-  if (url.pathname.endsWith("/plugins/gots/info")) return json({ features: ["draft_text"] })
+  if (url.pathname.endsWith("/plugins/gots/info")) return json({ features })
   if (url.pathname.endsWith(`/plugins/gots/rooms/${ROOM}`))
     return json(
       roomRead(url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined),
     )
   if (url.pathname.endsWith("/plugins/gots/chats")) {
     merges += 1
-    // The plugin's own answer: what the device sent, and the Host's rooms built fresh on every read.
+    const sent = (body?.chats ?? {}) as Record<
+      string,
+      { at: number; value?: { roomMarks?: Marks } }
+    >
+    posts.push(sent)
+    // The store keeps a mark record by its own clock and never answers one as a chat: it is laid over
+    // the room it names instead, which is the plugin's own rule (ADR 0157).
+    for (const [id, entry] of Object.entries(sent)) {
+      const held = entry?.value?.roomMarks
+      if (held && entry.at > (stored[id]?.marksAt ?? -1)) stored[id] = held
+    }
+    const chats = Object.fromEntries(
+      Object.entries(sent).filter(([, entry]) => !entry?.value?.roomMarks),
+    )
+    const held = stored[ROOM]
+    // The plugin's own answer: what the device sent, and the Host's rooms built fresh on every read,
+    // with the marks this store holds laid over the room they belong to.
     return json({
       object: "gots.chats",
       chats: {
-        ...(body?.chats ?? {}),
-        [ROOM]: retired ? { at: moved.at + 60_000, deleted: true } : record(),
+        ...chats,
+        [ROOM]: retired
+          ? { at: moved.at + 60_000, deleted: true }
+          : held
+            ? { ...record(), value: { ...record().value, ...held } }
+            : record(),
       },
     })
   }
@@ -198,12 +237,24 @@ async function fresh({
   chats = false,
   ask = false,
   layout = "legacy",
-}: { chats?: boolean; ask?: boolean; layout?: "legacy" | "bots" } = {}) {
+  marks = false,
+}: {
+  chats?: boolean
+  ask?: boolean
+  layout?: "legacy" | "bots"
+  marks?: boolean
+} = {}) {
   moved.at = LAST_AT
   moved.title = "Planning"
   retired = false
   split = false
   log = ask ? asks() : []
+  features = marks ? ["draft_text", "room_marks"] : ["draft_text"]
+  // What a connection's plugin answered is remembered for the page, so a test of a Host that
+  // advertises another feature list has to forget the last one (component-kit's `connection`).
+  forgetPluginAnswer(bots[0])
+  stored = {}
+  posts = []
   await seedSettings({
     onboarded: true,
     legacyChat: layout === "legacy",
@@ -825,4 +876,170 @@ test("Rooms ranks a room by the list's own rule, and offers no order of its own"
     await until(async () => band("rooms")[0] === "/c/room-zebra", "the pinned room first")
     assert.equal(band("rooms").length, 3, "with the other two under it")
   })
+})
+
+/**
+ * A room's marks are the reader's, and the Host's room has no field to keep them in (ADR 0121), so
+ * they travel as one record of their own in the Host's chat store, under the room's id, and the
+ * plugin lays them over the room it projects (ADR 0157). The record is written at the clock of the
+ * mark and carries both booleans spelled, since a projection cannot say "no opinion" about a mark.
+ */
+test("a room's pin posts one record of marks to every bot that seats it, and no chat's field", async () => {
+  await fresh({ marks: true, layout: "bots" })
+  await merged()
+  const before = posts.length
+  await setPinned(ROOM, true)
+  await until(async () => posts.length >= before + 2, "a record from each bot that seats the room")
+  const row = await db.conversations.get(ROOM)
+  assert.ok(row?.marksAt, "the press is stamped on the row, in a clock of its own")
+  assert.equal(row?.changedAt, moved.at, "and the room's own clock stays the Host's")
+  const sent = posts
+    .slice(before)
+    .map((one) => one[ROOM])
+    .filter(Boolean)
+  assert.equal(
+    posts.length - before,
+    sent.length,
+    "the room is asked of every bot whose roster seats it, and of no bot whose doesn't",
+  )
+  assert.ok(sent.length >= 2, "the two of the Host's bots the roster seats")
+  for (const entry of sent) {
+    assert.deepEqual(
+      Object.keys(entry.value ?? {}),
+      ["roomMarks"],
+      "a room's record carries nothing of a chat's",
+    )
+    const held = entry.value!.roomMarks!
+    assert.equal(held.pinned, true, "the pin")
+    assert.equal(held.archived, false, "and the archive spelled, though this device said nothing")
+    assert.equal(typeof held.pinnedAt, "number", "when the pin was made")
+    assert.ok(held.pinnedAt > 0)
+    assert.equal(held.marksAt, row?.marksAt, "the clock of the mark, as the row holds it")
+    assert.equal(entry.at, held.marksAt, "the record is written at the clock of the mark")
+  }
+  for (const one of posts)
+    if (one[ROOM]) assert.ok(one[ROOM].value?.roomMarks, "a room is never carried back as a chat")
+})
+
+test("a room pinned here draws pinned on a device that has only the store's record", async () => {
+  await fresh({ marks: true, layout: "bots" })
+  await merged()
+  await setPinned(ROOM, true)
+  await until(async () => Boolean(stored[ROOM]), "the record to reach the Host's store")
+  // A device that never made the mark: its row is the Host's room alone.
+  await db.conversations.update(ROOM, {
+    pinned: undefined,
+    pinnedAt: undefined,
+    archived: undefined,
+    marksAt: undefined,
+  })
+  assert.notEqual((await db.conversations.get(ROOM))?.pinned, true, "the mark is gone from the row")
+  // One bot of the room's roster, and only its own list is merged: the record the store holds is
+  // what the mark comes back through, which is the whole point of it being there.
+  await syncChatsOf([WRITER])
+  await settle()
+  await until(
+    async () => (await db.conversations.get(ROOM))?.pinned === true,
+    "the mark to land from the store",
+  )
+  const row = await db.conversations.get(ROOM)
+  assert.equal(row?.marksAt, stored[ROOM].marksAt, "all four marks land together")
+  assert.equal(row?.pinnedAt, stored[ROOM].pinnedAt)
+  assert.equal(row?.archived, false)
+  assert.equal(row?.changedAt, moved.at, "on the Host's own clock")
+  assert.equal(row?.title, "Planning", "the Host's name")
+  assert.deepEqual(row?.room, record().value.room, "and its roster")
+})
+
+test("a mark record lands all four marks, and the Host's clock, name and roster stay its own", async () => {
+  await fresh({ marks: true })
+  await merged()
+  const host = await db.conversations.get(ROOM)
+  const at = Date.now() - 1_000
+  await writeRoomRow(
+    ROOM,
+    { at: moved.at, value: { pinned: true, pinnedAt: at, archived: false, marksAt: at } },
+    CARRIER,
+  )
+  const row = await db.conversations.get(ROOM)
+  assert.equal(row?.pinned, true, "the pin")
+  assert.equal(row?.pinnedAt, at, "and when it was made")
+  assert.equal(row?.archived, false, "the archive, spelled as the record spells it")
+  assert.equal(row?.marksAt, at, "and the clock the marks were made at")
+  assert.equal(row?.changedAt, moved.at, "while the row's own clock stays the Host's")
+  assert.equal(row?.title, "Planning", "and its name the Host's")
+  assert.equal(row?.updatedAt, moved.at, "and its last activity")
+  assert.deepEqual(row?.room, host?.room, "and its roster")
+})
+
+test("a newer mark record lands, an older one changes nothing, and the same one twice writes nothing", async () => {
+  await fresh({ marks: true })
+  await merged()
+  const first = Date.now() - 2_000
+  await writeRoomRow(
+    ROOM,
+    { at: moved.at, value: { pinned: true, pinnedAt: first, archived: false, marksAt: first } },
+    CARRIER,
+  )
+  assert.equal((await db.conversations.get(ROOM))?.pinned, true, "a mark the row has none of lands")
+  // A record that left the Host before this row's marks were made says nothing about them.
+  await writeRoomRow(
+    ROOM,
+    { at: moved.at, value: { pinned: false, pinnedAt: 0, archived: true, marksAt: first - 1 } },
+    CARRIER,
+  )
+  const stale = await db.conversations.get(ROOM)
+  assert.equal(stale?.pinned, true, "an older record leaves the row's pin alone")
+  assert.notEqual(stale?.archived, true, "and its archive with it")
+  assert.equal(stale?.marksAt, first, "the row keeps the clock it had")
+  const second = first + 1_000
+  const before = writes.rows
+  await writeRoomRow(
+    ROOM,
+    { at: moved.at, value: { pinned: false, pinnedAt: 0, archived: true, marksAt: second } },
+    CARRIER,
+  )
+  assert.equal(writes.rows - before, 1, "a newer record is written once")
+  const archived = await db.conversations.get(ROOM)
+  assert.equal(archived?.archived, true, "and it lands all four marks together")
+  assert.notEqual(archived?.pinned, true, "the pin it spells off with them")
+  assert.equal(archived?.marksAt, second)
+  // The projection a merge answers names the marks the row already holds: nothing is written again.
+  const quiet = writes.rows
+  await writeRoomRow(
+    ROOM,
+    { at: moved.at, value: { pinned: false, pinnedAt: 0, archived: true, marksAt: second } },
+    CARRIER,
+  )
+  assert.equal(writes.rows, quiet, "a projection naming the same marks writes nothing")
+})
+
+test("a plugin without room_marks is posted nothing, and the room's pin stays here", async () => {
+  await fresh({ layout: "bots" })
+  await merged()
+  await setPinned(ROOM, true)
+  await settle()
+  await syncNow()
+  await settle()
+  assert.equal((await db.conversations.get(ROOM))?.pinned, true, "the device keeps its own pin")
+  assert.deepEqual(stored, {}, "and the Host's store holds no mark")
+  for (const one of posts) assert.equal(one[ROOM], undefined, "nothing is posted for a room")
+})
+
+test("a room the Host disbands leaves though this device pinned it after that", async () => {
+  await fresh({ marks: true, layout: "bots" })
+  await merged()
+  await setPinned(ROOM, true)
+  await until(async () => Boolean(stored[ROOM]), "the record to reach the Host's store")
+  // The bot that carried the record is turned off, so every merge from here is one of the room's own
+  // seats — and each of those carries the mark as well. The Host disbanded the room before the pin was
+  // made here, and this device had not heard: the deletion's own clock is the older of the two, and a
+  // mark must not out-rank a room being gone. One that did would shadow the deletion on every merge
+  // and stand a row here for a room nothing owns.
+  await db.profiles.update(CARRIER, { disabled: true })
+  retired = true
+  await syncNow()
+  await settle()
+  await until(async () => !(await db.conversations.get(ROOM)), "the room to leave")
+  assert.deepEqual(await chatTombstones(), [], "the Host said so, so nothing is pushed back")
 })

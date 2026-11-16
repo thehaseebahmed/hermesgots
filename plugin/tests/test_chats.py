@@ -302,5 +302,66 @@ class ThePinRule(unittest.TestCase):
         self.assertEqual(chats.choice(found), {"provider": "deepseek", "model": "d"})
 
 
+class RoomMarks(unittest.TestCase):
+    """A room's own pin and archive: a record in this store, and never a chat (ADR 0157).
+
+    The Host's room has no field for a pin (ADR 0121), so the app posts one record per marked room
+    under the room's own id. It is stored and merged by its clock like any record — that is what
+    carries a room's marks between devices — and it is no chat: the summaries a list draws and a
+    single read both answer nothing for it.
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = db_path(Path(self.tmp.name))
+
+    def merge(self, chat_id, value, at=1):
+        return chats.merge(self.path, {chat_id: {"at": at, "value": value}})
+
+    def marks(self, **fields):
+        held = {"pinned": False, "pinnedAt": 0, "archived": False, "marksAt": 1, **fields}
+        return {chats.ROOM_MARKS: held}
+
+    def test_a_mark_record_is_stored_and_merges_by_its_clock_like_any_record(self):
+        self.merge("room-1", self.marks(pinned=True, pinnedAt=2, marksAt=5), at=5)
+        self.assertEqual(chats.read(self.path)["room-1"]["value"], self.marks(pinned=True, pinnedAt=2, marksAt=5))
+        self.merge("room-1", self.marks(archived=True, marksAt=9), at=9)
+        self.assertEqual(
+            chats.read(self.path)["room-1"]["value"], self.marks(archived=True, marksAt=9)
+        )
+        self.merge("room-1", self.marks(pinned=True, marksAt=2), at=2)
+        self.assertEqual(
+            chats.read(self.path)["room-1"]["value"],
+            self.marks(archived=True, marksAt=9),
+            "an older record is the one it replaced, exactly as for a chat",
+        )
+
+    def test_a_record_naming_roomMarks_is_no_chat_in_summaries_or_in_a_single_read(self):
+        self.merge("room-1", self.marks(pinned=True, pinnedAt=7, marksAt=5), at=5)
+        self.merge("chat-1", {"title": "Mine"}, at=4)
+        self.assertEqual(
+            [(one["id"], one["title"]) for one in chats.summaries(self.path, 10)],
+            [("chat-1", "Mine")],
+            "a canvas' chat picker draws no untitled chat for a room's marks",
+        )
+        self.assertIsNone(chats.one(self.path, "room-1"), "the other door into the store knows it too")
+        self.assertEqual(chats.one(self.path, "chat-1")["value"], {"title": "Mine"})
+
+    def test_the_predicate_names_a_mark_record_and_nothing_else(self):
+        self.assertTrue(chats.carries_room_marks(self.marks()))
+        for value in (
+            {},
+            {"title": "a chat"},
+            {"room": {"id": "room-1"}},
+            {"projectId": "p1"},
+            {"canvasId": "c1"},
+            None,
+            [],
+            {chats.ROOM_MARKS: None},
+        ):
+            self.assertFalse(chats.carries_room_marks(value), f"{value!r} is not a mark record")
+
+
 if __name__ == "__main__":
     unittest.main()

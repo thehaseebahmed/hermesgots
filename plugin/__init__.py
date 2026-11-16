@@ -600,6 +600,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     *general_features,
                     *llm_features,
                     "draft_text",
+                    # A room's own pin and archive, kept in this plugin's chat store and laid over
+                    # the room it projects (rooms.carrying_marks, ADR 0157). An app older than this
+                    # row posts no mark record, so a room's pin stays on the device that made it,
+                    # exactly as it did before the record existed (ADR 0121).
+                    "room_marks",
                     "context",
                     "todos",
                     "projects",
@@ -1166,12 +1171,29 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         """
         return await asyncio.to_thread(rooms.chat_records, home=rooms_home())
 
+    async def merged_chats(records: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        """The list a device is answered with: this bot's chats, and its rooms under their marks.
+
+        One door for both routes, so a read and a merge can never answer a different list. A room's
+        mark record is kept in this same store and is no chat (chats.carries_room_marks): answered
+        as one it would be an untitled row in every list, so it is dropped here and laid over the
+        room it belongs to instead (rooms.carrying_marks, ADR 0157). The projection is written last,
+        as it always has been — a room's row is a read of the Host's room, never a stored chat
+        (ADR 0116), and the Host's own fields on it stay the Host's (ADR 0121).
+        """
+        kept = {
+            chat_id: record
+            for chat_id, record in records.items()
+            if not chats.carries_room_marks((record or {}).get("value"))
+        }
+        return {**kept, **rooms.carrying_marks(await projected_rooms(), records)}
+
     async def list_chats(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
             return denied
         records = await asyncio.to_thread(chats.read, store_path())
-        return web.json_response({"object": "gots.chats", "chats": {**records, **await projected_rooms()}})
+        return web.json_response({"object": "gots.chats", "chats": await merged_chats(records)})
 
     async def merge_chats(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1187,7 +1209,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             )
         except chats.InvalidChats as error:
             return _error(web, str(error), 400)
-        return web.json_response({"object": "gots.chats", "chats": {**records, **await projected_rooms()}})
+        return web.json_response({"object": "gots.chats", "chats": await merged_chats(records)})
 
     async def create_room(request: "web.Request") -> "web.Response":
         """A room of this Host's bots, under the id the app minted for it (rooms.py, ADR 0117)."""

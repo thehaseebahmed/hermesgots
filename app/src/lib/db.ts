@@ -370,6 +370,15 @@ export interface Conversation {
    * Local only, and only a room carries it.
    */
   roomSeenSeq?: number
+  /**
+   * When the reader last pinned or archived this room, on this device's clock. A room's marks are the
+   * reader's and the Host's room has no field for them (ADR 0121), so they travel as a record of their
+   * own in the Host's chat store, and this is the clock that record is written at and merged by: one
+   * whose `marksAt` does not beat the row's leaves its marks alone (ADR 0157). Local only, like
+   * `roomSeenSeq` beside it, and only a room carries it — a chat's marks ride its own record, on
+   * `changedAt`.
+   */
+  marksAt?: number
 }
 
 /**
@@ -2219,6 +2228,15 @@ export interface RoomRecord {
     createdAt?: number
     updatedAt?: number
     room?: Room
+    /**
+     * The reader's marks on the room, laid over it where the plugin projects it rather than written
+     * into the Host's room, which has no field for either (ADR 0121, ADR 0157), and the clock they
+     * were last written at. All four are the record's to name, and they land together.
+     */
+    pinned?: boolean
+    pinnedAt?: number
+    archived?: boolean
+    marksAt?: number
   }
 }
 
@@ -2226,14 +2244,22 @@ export interface RoomRecord {
 const ROOM_FIELDS = ["title", "createdAt", "updatedAt", "room"] as const
 
 /**
+ * The fields a room's marks are, compared by the one clock among them: a record whose `marksAt` beats
+ * the row's lands all four together, since a mark is a whole answer and the record always spells both
+ * booleans (ADR 0157).
+ */
+const MARK_FIELDS = ["pinned", "pinnedAt", "archived", "marksAt"] as const
+
+/**
  * One room's row, written from the record the plugin projects or a write answers (ADR 0123).
  *
- * A room's record carries the Host's own clock, its name and its roster, and nothing else: no chat's
- * field is its to say, so the row keeps this device's own — its pin (ADR 0121), what its log this
- * device holds ends asking for, and the newest sequence it has drawn. A record that is a deletion is
- * the Host's disband arriving (ADR 0116), so the row and the room's page go with it, and no chat
- * tombstone is written: a room is never carried as a chat, so a tombstone would push a deletion for a
- * row the plugin's store never had.
+ * A room's record carries the Host's own clock, its name and its roster, and — where the reader
+ * marked the room — its pin and its archive, which the plugin lays over the room rather than storing
+ * on it (ADR 0157). No chat's field is the record's to say, so the row keeps this device's own: what
+ * its log this device holds ends asking for, and the newest sequence it has drawn. A record that is a
+ * deletion is the Host's disband arriving (ADR 0116), so the row and the room's page go with it, and no
+ * chat tombstone is written: a room is never carried as a chat, so a tombstone would push a deletion
+ * for a row the plugin's store never had.
  *
  * One writer, because two would drift: the chat-list merge and a lifecycle write's answer are the same
  * record, so they must leave the same row.
@@ -2254,13 +2280,23 @@ export async function writeRoomRow(id: string, record: RoomRecord, profileId: st
   const named = ROOM_FIELDS.filter(
     (field) => value[field] !== undefined && !(field === "room" && rosterless),
   )
-  const patch = Object.fromEntries(named.map((field) => [field, value[field]]))
+  const patch: Record<string, unknown> = Object.fromEntries(
+    named.map((field) => [field, value[field]]),
+  )
+  // A room's marks are compared by their own clock rather than by the record's: the projection is
+  // cached, so one that left the Host before the reader's own mark was made says nothing about it, and
+  // one naming marks this row already holds is the reader's own record come back. A newer one lands
+  // all four fields together, because the record always spells both booleans (ADR 0157).
+  if (value.marksAt !== undefined && value.marksAt > (existing?.marksAt ?? 0))
+    for (const field of MARK_FIELDS) patch[field] = value[field]
   // A room is projected unchanged on every read: writing it again would wake every live query over a
-  // chat list for news that nothing happened.
+  // chat list for news that nothing happened — and its marks are echoed back the same way.
   const same =
     existing !== undefined &&
     existing.changedAt === record.at &&
-    named.every((field) => equal(existing[field], patch[field]))
+    Object.keys(patch).every((field) =>
+      equal((existing as unknown as Record<string, unknown>)[field], patch[field]),
+    )
   if (same) return
   await db.transaction("rw", db.conversations, db.tombstones, async () => {
     await db.conversations.put({

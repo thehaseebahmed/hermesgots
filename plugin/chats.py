@@ -9,6 +9,11 @@ One field has a rule of its own: ``draftText`` is the unsent text of a chat the 
 draft (the value also carries ``draftAt``), and only that is stored. A live composer's text stays
 on the device that typed it, so a record naming a draft without ``draftAt`` is stored without it,
 and v54 removed the copies earlier builds wrote that way.
+
+The store also holds one record per room the reader marked — a pin, an archive and the clock they
+were made at, under the room's own id (``ROOM_MARKS``). That record is never a chat: the Host's room
+has no field for a mark (ADR 0121), so the app keeps the reader's own here, and every read of a chat
+answers nothing for it (ADR 0157).
 """
 
 from __future__ import annotations
@@ -28,9 +33,29 @@ logger = logging.getLogger(__name__)
 MAX_ID_LENGTH = 256
 MAX_VALUE_BYTES = 64 * 1024
 
+# The one key a record carries when it is not a chat at all: a room's pin, its archive and the clock
+# they were made at. A room's marks are the reader's own, kept in this store because the Host's room
+# has no field for them (ADR 0121), so the app posts one such record per marked room under the room's
+# own id and every read of a chat has to know it for what it is (ADR 0157).
+ROOM_MARKS = "roomMarks"
+
 
 class InvalidChats(ValueError):
     pass
+
+
+def carries_room_marks(value: Any) -> bool:
+    """Whether one record's value is a room's marks rather than a chat's.
+
+    A mark record has no title, no session and no roster: drawn as a chat it is an untitled row in
+    every list and in the canvas' chat picker, so the three doors into this store — ``summaries``,
+    ``one`` and the list answer — each ask this and answer nothing for one.
+
+    A null under the key names nothing, which is how the SQL that skips these rows in ``summaries``
+    reads a missing key too (``json_extract`` answers NULL for both), so the two doors never disagree
+    about which records are chats.
+    """
+    return isinstance(value, dict) and value.get(ROOM_MARKS) is not None
 
 
 def _records(conn: sqlite3.Connection) -> Dict[str, Dict[str, Any]]:
@@ -89,7 +114,9 @@ def summaries(path: Path, limit: int) -> list[Dict[str, Any]]:
     Only this bot's own chats are a chat here, by the app's own rule (``listsAsChat``): a Host room,
     a project session and a canvas's chat are each drawn by their own screen, so they are absent
     from the answer rather than listed as chats. An empty string is no room, no project and no
-    canvas, which is how the app reads one, so the comparison is against the empty string too.
+    canvas, which is how the app reads one, so the comparison is against the empty string too. A
+    room's mark record is skipped for the same reason — it is a pin, not a chat, and a canvas'
+    picker that drew it would show one untitled row per marked room.
     """
     if not path.exists():
         return []
@@ -101,6 +128,7 @@ def summaries(path: Path, limit: int) -> list[Dict[str, Any]]:
                  AND COALESCE(json_extract(value, '$.room'), '') = ''
                  AND COALESCE(json_extract(value, '$.projectId'), '') = ''
                  AND COALESCE(json_extract(value, '$.canvasId'), '') = ''
+                 AND json_extract(value, '$.roomMarks') IS NULL
                ORDER BY at DESC, id
                LIMIT ?""",
             (limit,),
@@ -114,7 +142,11 @@ def summaries(path: Path, limit: int) -> list[Dict[str, Any]]:
 
 
 def one(path: Path, chat_id: str) -> Optional[Dict[str, Any]]:
-    """One chat's record, read by its id: asking about a single session doesn't cost the whole list."""
+    """One chat's record, read by its id: asking about a single session doesn't cost the whole list.
+
+    A room's mark record is no chat, so it answers None here as it does in ``summaries``: a caller
+    holding a room's id must not be handed a record it would draw as an empty chat.
+    """
     if not chat_id or not path.exists():
         return None
     conn = connect(path)
@@ -127,7 +159,10 @@ def one(path: Path, chat_id: str) -> Optional[Dict[str, Any]]:
     if row is None:
         return None
     at, deleted, value = row
-    return {"at": at, "deleted": True} if deleted else {"at": at, "value": json.loads(value)}
+    if deleted:
+        return {"at": at, "deleted": True}
+    held = json.loads(value)
+    return None if carries_room_marks(held) else {"at": at, "value": held}
 
 
 def by_session(path: Path, session_id: str) -> Optional[Dict[str, Any]]:

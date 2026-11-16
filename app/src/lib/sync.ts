@@ -47,6 +47,7 @@ import {
 } from "@/lib/db"
 import { mergeDocs, type Doc, type Entry } from "@/lib/merge"
 import { syncRegistry } from "@/lib/registry"
+import { roomAnswerers } from "@/lib/rooms"
 import { markResume } from "@/lib/resume-trace"
 import {
   generateDataKey,
@@ -121,6 +122,28 @@ const CHAT_FIELDS = [
   "canvasId",
 ] as const
 type ChatValue = Pick<Conversation, (typeof CHAT_FIELDS)[number]>
+
+/**
+ * A room's marks as its record carries them: the reader's pin, when it was made, the reader's
+ * archive, and the clock both were last written at (ADR 0157). Both booleans are always spelled —
+ * a projection has no way to say "no opinion" about a mark, so a record that left one out would read
+ * as silence and an unpin or an unarchive would never travel — and `pinnedAt` is a number, `0` where
+ * the room is not pinned.
+ */
+interface RoomMarks {
+  pinned: boolean
+  pinnedAt: number
+  archived: boolean
+  marksAt: number
+}
+
+/**
+ * One record of a bot's chat list: a chat's own fields, or a room's marks alone — which is all a
+ * room's record may carry, since a room is never stored as a chat. The plugin's store and this
+ * module's `applyChats` both read which kind a record is, and a marks record is written under the
+ * room's own id, which is how the plugin lays it back over the room it names.
+ */
+type SyncedValue = Partial<ChatValue> & { roomMarks?: RoomMarks }
 
 /** Whether the bot's Gots plugin answered the last chat list sync. */
 export type ChatStore = "plugin" | "unreachable"
@@ -596,11 +619,26 @@ async function syncAppearance(key: CryptoKey) {
 const DRAFT_RECORD_CAP = 64 * 1024
 const encoder = new TextEncoder()
 
-async function localChats(profileId: string, drafts: boolean): Promise<Doc<ChatValue>> {
-  const doc: Doc<ChatValue> = {}
+async function localChats(
+  profileId: string,
+  drafts: boolean,
+  marks: boolean,
+): Promise<Doc<SyncedValue>> {
+  const doc: Doc<SyncedValue> = {}
+  // A room is the Host's rather than any bot's, so the rooms whose marks this bot may carry are read
+  // apart from its own chats — and only where the plugin can lay them back over the room, which is
+  // what `room_marks` says it can (ADR 0157). The bots are read with them, since a room's roster is
+  // the one rule for who seats it (ADR 0115), and one read answers that for every room here.
+  if (marks) {
+    const bots = new Map((await db.profiles.toArray()).map((bot) => [bot.id, bot]))
+    for (const room of await db.conversations.filter((chat) => Boolean(chat.room)).toArray()) {
+      const record = markRecord(room, bots, profileId)
+      if (record) doc[room.id] = record
+    }
+  }
   for (const c of await db.conversations.where("profileId").equals(profileId).toArray()) {
     // A room is the Host's, projected into every read of its list: it is never stored as a chat, so
-    // it is never carried back as one (ADR 0116).
+    // it is never carried back as one (ADR 0116) — its marks went in above, as a record of their own.
     if (c.room) continue
     const value = Object.fromEntries(CHAT_FIELDS.map((field) => [field, c[field]])) as ChatValue
     if (
@@ -619,6 +657,41 @@ async function localChats(profileId: string, drafts: boolean): Promise<Doc<ChatV
 }
 
 /**
+ * The one record a room posts into its Host's chat store, or nothing: the room of a row this bot's
+ * roster does not seat is no bot's to carry, and a room the reader has never marked has no mark to
+ * send (ADR 0121).
+ *
+ * It is written at the clock of the mark, so the store keeps the newest record it is given, and under
+ * the room's own id, so the plugin can lay it back over the room it projects (ADR 0157). It names no
+ * chat's field: the plugin's store reads such a record as a room's marks by this key alone, and
+ * `applyChats` reads a row that names `room` as a room — a record of marks that carried a title as
+ * well would be a chat of the marks.
+ */
+function markRecord(
+  chat: Conversation,
+  bots: Map<string, Profile>,
+  profileId: string,
+): Entry<SyncedValue> | undefined {
+  const room = chat.room
+  const marksAt = chat.marksAt
+  if (!room || !marksAt) return undefined
+  const carrier = bots.get(chat.profileId)
+  const seated = roomAnswerers(room, bots, carrier)
+  if (!seated.some((bot) => bot.id === profileId)) return undefined
+  return {
+    at: marksAt,
+    value: {
+      roomMarks: {
+        pinned: Boolean(chat.pinned),
+        pinnedAt: chat.pinnedAt ?? 0,
+        archived: Boolean(chat.archived),
+        marksAt,
+      },
+    },
+  }
+}
+
+/**
  * Whether a record says what this device already holds: the clock it was written at, and every field
  * it names. A field it leaves out has no opinion, which is what the write would do with it as well —
  * comparing it against the row's own value would read every chat with a pinned model or a live
@@ -631,7 +704,7 @@ function sameChat(existing: Conversation, synced: Record<string, unknown>, at: n
   )
 }
 
-async function applyChats(profileId: string, pull: [string, Entry<ChatValue>][]) {
+async function applyChats(profileId: string, pull: [string, Entry<SyncedValue>][]) {
   for (const [id, entry] of pull) {
     const existing = await db.conversations.get(id)
     // Two bots on one server share its chat list; each chat stays with the bot that has it. A room
@@ -677,7 +750,7 @@ async function applyChats(profileId: string, pull: [string, Entry<ChatValue>][])
 }
 
 /** Drops tombstones the merged list now carries. */
-async function settleChatTombstones(profileId: string, merged: Doc<ChatValue>) {
+async function settleChatTombstones(profileId: string, merged: Doc<SyncedValue>) {
   for (const tombstone of await chatTombstones()) {
     if (tombstone.profileId !== profileId) continue
     const id = tombstone.id.slice("chat:".length)
@@ -691,11 +764,23 @@ async function settleChatTombstones(profileId: string, merged: Doc<ChatValue>) {
  * device's problem and leaves the pass, rather than being blamed on the server.
  */
 async function mergePluginChats(profile: Profile) {
-  const drafts = await hasPluginFeature(profile, "draft_text")
-  const local = await localChats(profile.id, drafts)
+  // The two features one merge reads: whether a saved draft may travel, and whether the plugin can lay
+  // a room's marks back over the room they belong to. Without the second it may store a record but not
+  // read one, so a room's pin stays on the device that made it, exactly as ADR 0121 has it.
+  const [drafts, marks] = await Promise.all([
+    hasPluginFeature(profile, "draft_text"),
+    hasPluginFeature(profile, "room_marks"),
+  ])
+  const local = await localChats(profile.id, drafts, marks)
   try {
     const merged = await mergeChatList(profile, local, AbortSignal.timeout(READ_TIMEOUT_MS))
     markResume("chats-merge-end", { requests: 1 })
+    // A room the Host has retired is gone whatever clock this device marked it at: a deletion is a room
+    // taken away, not a room with new marks, so it is nothing for a mark's clock to out-rank. Left in,
+    // a mark made after the Host's disband would shadow the deletion on every merge and stand a row
+    // here for a room nothing owns (ADR 0157; ADR 0121's row carried no record that could).
+    for (const [id, entry] of Object.entries(merged))
+      if (entry.deleted && local[id]?.value?.roomMarks) delete local[id]
     return { local, merged }
   } catch (error) {
     noteFailure(`Syncing ${profile.name}'s chats`, error)
