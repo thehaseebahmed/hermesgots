@@ -760,7 +760,7 @@ def _open_state_for_write(home: Path) -> Optional[sqlite3.Connection]:
     try:
         return sqlite3.connect(f"{state.as_uri()}?mode=rw", uri=True, timeout=2, isolation_level=None)
     except sqlite3.Error:
-        logger.warning("gots: couldn't open %s to repair session labels", state, exc_info=True)
+        logger.warning("gots: couldn't open %s to write to it", state, exc_info=True)
         return None
 
 
@@ -853,6 +853,86 @@ def _forks(row: Any) -> bool:
     except ValueError:
         return False
     return isinstance(config, dict) and any(config.get(marker) for marker in _FORK_MARKERS)
+
+
+# Why an archive write could not be made, in the words the app is answered with. The flag is
+# Hermes's own, so a store that can't hold it is no archive at all, and the app keeps its own mark.
+NO_STORE = "no store"
+NO_ARCHIVE_FLAG = "no archive flag"
+NO_SESSION = "no session"
+
+# Hermes's own lineage selector (``_LINEAGE_CTE_SQL``), from a session forward: a child whose parent
+# was written by a compaction continues the conversation, and Hermes lists a chat by its newest row.
+# So a chat archives as one unit — the whole chain takes the flag — and an old compression segment is
+# never the row that hides the chat (Hermes's `sessions archive` flips the lineage the same way).
+_ARCHIVE_LINEAGE_SQL = """
+    WITH RECURSIVE lineage(id) AS (
+        SELECT ?
+        UNION
+        SELECT child.id
+          FROM lineage
+          JOIN sessions parent ON parent.id = lineage.id
+          JOIN sessions child ON child.parent_session_id = parent.id
+         WHERE parent.end_reason = 'compression'
+    )
+    UPDATE sessions SET archived = ? WHERE id IN (SELECT id FROM lineage)
+"""
+
+
+def set_archived(home: Path, session_id: str, archived: bool) -> Optional[str]:
+    """Sets Hermes's own archive flag on a chat's session, or says why it couldn't.
+
+    Archive is Hermes's feature, not Gots's: this is the flag that takes a session out of
+    ``hermes sessions list`` and ``/resume`` and the Desktop's own list, so writing it here is what
+    makes the two surfaces agree. The chat's first session is resolved first (``chat_session``), and
+    the write then runs on from it to the live tip — a compacted conversation archives as a unit,
+    and the row Hermes lists is the tip, never an old compression segment.
+
+    One column, and nothing else: an older store's schema is not ours to migrate. A profile with no
+    store, a store whose schema has no ``archived`` column (or no ``sessions`` table), and an id the
+    store has never seen each answer a short reason instead of raising — a route that says ``host:
+    false`` is how the app learns to keep its own mark (ADR 0159).
+    """
+    session_id = chat_session(home, session_id)
+    conn = _open_state_for_write(home)
+    if conn is None:
+        return NO_STORE
+    try:
+        with closing(conn):
+            # ``total_changes`` and not the cursor's ``rowcount``: a ``WITH … UPDATE`` answers -1
+            # there, and the rows a write changed is the whole of what says whether the store holds
+            # this session at all.
+            before = conn.total_changes
+            conn.execute(_ARCHIVE_LINEAGE_SQL, (session_id, 1 if archived else 0))
+            written = conn.total_changes - before
+    except sqlite3.OperationalError:
+        # No ``sessions`` table, no ``archived`` column, or a schema without the lineage's own
+        # columns: this store can't carry the flag.
+        logger.debug("gots: %s can't hold an archive flag", home / "state.db", exc_info=True)
+        return NO_ARCHIVE_FLAG
+    except sqlite3.Error:
+        logger.warning("gots: couldn't set a session's archive in %s", home / "state.db", exc_info=True)
+        return NO_STORE
+    return None if written else NO_SESSION
+
+
+def archived_flags(home: Path) -> Dict[str, bool]:
+    """Hermes's archive flag for every session this profile's store holds, by session id.
+
+    One read for one list answer: the plugin lays these over the chats it answers with
+    (``chats.carrying_archive``), so an archive made on the Dashboard hides the row in Gots and an
+    unarchive there brings it back. Empty where this Hermes has no store, no ``sessions`` table or no
+    ``archived`` column — a host that can't say keeps every row as the device holds it (ADR 0159).
+    """
+    conn = _open_state(home)
+    if conn is None:
+        return {}
+    try:
+        with closing(conn):
+            return {row[0]: bool(row[1]) for row in conn.execute("SELECT id, archived FROM sessions")}
+    except sqlite3.Error:
+        logger.debug("gots: couldn't read %s's archive flags", home / "state.db", exc_info=True)
+        return {}
 
 
 def is_chat(home: Path, session_id: str) -> bool:

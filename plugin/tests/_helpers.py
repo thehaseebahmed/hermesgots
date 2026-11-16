@@ -297,6 +297,24 @@ def probe_record(
     }
 
 
+def room_marks(**fields: Any) -> Dict[str, Any]:
+    """A room's four mark fields as the record the app posts spells them.
+
+    A projection has no way to say "no opinion" about a mark, so all four travel together: the pin,
+    when it was made, the archive, and the clock they were last written at. A case names only the ones
+    it means, and ``marksAt`` is the clock the record carrying them is written at.
+    """
+    return {"pinned": False, "pinnedAt": 0, "archived": False, "marksAt": 1, **fields}
+
+
+def room_mark_record(**fields: Any) -> Dict[str, Any]:
+    """The record the app posts for one marked room: ``room_marks`` under the clock it carries."""
+    from plugin import chats
+
+    marks = room_marks(**fields)
+    return {"at": marks["marksAt"], "value": {chats.ROOM_MARKS: marks}}
+
+
 def js_constant(source: str, name: str) -> str:
     """``name``'s value from a JavaScript or TypeScript source: its string literals, joined.
 

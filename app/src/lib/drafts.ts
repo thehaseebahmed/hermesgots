@@ -17,6 +17,25 @@ export async function loadDraft(key: string) {
   return pending.get(key) ?? (await db.drafts.get(key))?.text ?? ""
 }
 
+/**
+ * The keys among these that hold unsent words: a keystroke still in the queue, or what a flush kept.
+ * Text that is only whitespace is no draft — a composer the reader emptied holds nothing — and the
+ * queue is asked first so a word typed a moment ago counts before it lands in the store.
+ *
+ * One read for the lot, since a list asks this of a screenful of chats at once (`chat-rows.ts`). The
+ * queue is this page's alone, so a key it holds is answered without touching the store at all.
+ */
+export async function unsentAmong(keys: readonly string[]): Promise<Set<string>> {
+  const unsent = new Set(keys.filter((key) => Boolean(pending.get(key)?.trim())))
+  if (!keys.length || unsent.size === keys.length) return unsent
+  const rows = await db.drafts
+    .where("id")
+    .anyOf([...keys])
+    .toArray()
+  for (const row of rows) if (row.text?.trim()) unsent.add(row.id)
+  return unsent
+}
+
 /** The unsent text kept at a draft key, kept up to date. */
 export function useDraftText(key?: string) {
   return useLiveQuery(() => (key ? db.drafts.get(key) : undefined), [key])?.text

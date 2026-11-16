@@ -15,11 +15,9 @@ import { Spinner } from "@/components/ui/spinner"
 import { buttonVariants } from "@/components/ui/button"
 import { botChatsPath, botPath, botRoutinesPath } from "@/lib/bot-tabs"
 import {
-  BOT_CHATS,
   CHAT_FILTERS,
   chatAge,
   chatList,
-  chatRowOf,
   emptyOf,
   filterChatRows,
   isChatFilter,
@@ -27,27 +25,18 @@ import {
   type ChatListRow,
 } from "@/lib/chat-list"
 import { labelOf } from "@/lib/bot-name"
-import {
-  chatFilterOf,
-  conversationsOf,
-  db,
-  isReply,
-  newestMessage,
-  saveChatFilter,
-  type Profile,
-} from "@/lib/db"
+import { seatedRoomRows, useBotChats } from "@/lib/chat-rows"
+import { chatFilterOf, saveChatFilter, type Profile } from "@/lib/db"
 import type { LiveRunStatus } from "@/lib/hermes"
 import { HEADER_BUTTON } from "@/lib/layout"
 import { useBotLabels } from "@/lib/use-bot-labels"
 import { useXLarge } from "@/lib/media"
-import { listsAsChat } from "@/lib/lists-as-chat"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { useBotChatsPane, type BotPane } from "@/lib/pane"
 import { useReadMarks } from "@/lib/read-marks"
 import { quietly } from "@/lib/report"
 import { useCanMakeRoom, useRoomNeeds } from "@/lib/room"
-import { roomRowOf } from "@/lib/rooms"
 import { useAllLiveRuns } from "@/lib/waiting"
 import { isUnread, runInFlight } from "@/lib/session-work"
 import { useLegacyChat } from "@/lib/legacy-chat"
@@ -101,46 +90,25 @@ function BotChatsList({
   // The rooms this device lists, read by their membership: a room belongs to its Host and lists in
   // every bot its roster seats, whatever bot carried the record here (ADR 0115).
   const rooms = useRoomNeeds()
+  // The pill this bot's list keeps on this device, read as the key itself rather than the settings
+  // row: a live query that answered a fresh object would re-render the list on every sync write (the
+  // reason `useStoredSort` records), and anything that is not one of the pills reads as All. It is
+  // read here rather than in the list because the tail read is what the pill widens.
+  const keptKey = useLiveQuery(async () => (await chatFilterOf(profileId)) ?? null, [profileId])
+  const filter: ChatFilter = isChatFilter(keptKey) ? keptKey : "all"
+  const answer = useBotChats(profileId, filter)
   // The answer names the address it ran for, so one bot's answer can never pass for another's.
-  const answer = useLiveQuery(async () => {
-    const bot = await db.profiles.get(profileId)
-    if (!bot) return { profileId, bot: null, rows: [] }
-    // Every chat the bot has, newest first: a chat older than any bound is still a row of this list,
-    // since a bound is not something a reader can see (ADR 0136).
-    const chats = await conversationsOf(profileId).reverse().filter(listsAsChat).toArray()
-    // What a row costs is the read of its newest message, never its record, so the tails are read
-    // for the newest `BOT_CHATS` chats and every pinned one — a pin is the reader's own word that
-    // the chat matters, wherever its clock puts it — and a row past that bound draws its title and
-    // age from the record alone.
-    const tailed = new Set(
-      [...chats.slice(0, BOT_CHATS), ...chats.filter((chat) => chat.pinned)].map((chat) => chat.id),
-    )
-    const rows = await Promise.all(
-      // A routine's row reads its line and time off the record, so its tail isn't asked for at all.
-      chats.map(async (chat) => {
-        if (chat.routine || !tailed.has(chat.id)) return chatRowOf(chat)
-        const newest = await newestMessage(chat.id)
-        // The row says what the bot last said, and a question or an approval sits on a reply: a read
-        // of the newest message that already is one answers both, and one that is the reader's own
-        // asks for the reply above it.
-        const reply = !newest || isReply(newest) ? newest : await newestMessage(chat.id, isReply)
-        return chatRowOf(chat, newest, reply)
-      }),
-    )
-    return { profileId, bot, rows }
-  }, [profileId])
   const fresh = answer && answer.profileId === profileId ? answer : undefined
   if (!fresh) return null
   // A bot that is gone — deleted here or on another device — lands home rather than on a list it
   // cannot fill.
   if (!fresh.bot) return <Navigate to="/" replace />
-  const seated = (rooms ?? [])
-    .filter((room) => room.seated.includes(profileId))
-    .map((room) => roomRowOf(room.chat, room.faces, room.said))
   return (
     <ChatList
       bot={fresh.bot}
-      rows={[...fresh.rows, ...seated]}
+      filter={filter}
+      onFilter={(next) => void saveChatFilter(profileId, next).catch(quietly("Saving the filter"))}
+      rows={[...fresh.rows, ...seatedRoomRows(rooms ?? [], profileId)]}
       selected={selected}
       beside={beside}
     />
@@ -149,11 +117,16 @@ function BotChatsList({
 
 function ChatList({
   bot,
+  filter,
+  onFilter,
   rows,
   selected,
   beside,
 }: {
   bot: Profile
+  /** The pill this list is drawn under, and the way the reader presses another. */
+  filter: ChatFilter
+  onFilter: (filter: ChatFilter) => void
   rows: ChatListRow[]
   selected?: string
   /** Whether the list stands beside a chat, which is what its rows' presses turn on. */
@@ -179,13 +152,6 @@ function ChatList({
   // search at all there: one field, in the one place this width puts it (ADR 0145).
   const wide = useXLarge()
   const [query, setQuery] = useState("")
-  // The pill this bot's list keeps on this device, read as the key itself rather than the settings
-  // row: a live query that answered a fresh object would re-render the list on every sync write (the
-  // reason `useStoredSort` records), and anything that is not one of the pills reads as All.
-  const keptKey = useLiveQuery(async () => (await chatFilterOf(bot.id)) ?? null, [bot.id])
-  const filter: ChatFilter = isChatFilter(keptKey) ? keptKey : "all"
-  const chooseFilter = (next: ChatFilter) =>
-    void saveChatFilter(bot.id, next).catch(quietly("Saving the filter"))
   // The pill narrows first and the search narrows what it kept, so the two emptinesses stay apart: a pill
   // that holds nothing says its own sentence, and a pill whose rows the words miss says the search's.
   const kept = useMemo(() => filterChatRows(rows, filter, marks), [rows, filter, marks])
@@ -249,7 +215,7 @@ function ChatList({
             )}
             <ChipRow label="Filter chats">
               {CHAT_FILTERS.map(({ key, label }) => (
-                <Chip key={key} active={filter === key} onClick={() => chooseFilter(key)}>
+                <Chip key={key} active={filter === key} onClick={() => onFilter(key)}>
                   {label}
                 </Chip>
               ))}

@@ -17,6 +17,7 @@ import test from "node:test"
 import { MemoryRouter } from "react-router"
 
 import { ConversationList } from "@/components/conversation-list"
+import { db } from "@/lib/db"
 import { botProfile, find, mount, seedChat, settle } from "./component-kit.tsx"
 
 /** The failure an assertion raised, which a green one did not. */
@@ -35,6 +36,9 @@ test("a red assertion handed a mounted element prints its message, at once", asy
     profile: botProfile("assert-shim"),
     settings: { onboarded: true, legacyChat: true },
   })
+  // A chat something was said in: the legacy bands draw no row for one nothing was said in
+  // (ADR 0158), and this case needs the row the assertion is handed.
+  await db.conversations.update("chat-1", { updatedAt: 2 })
   await mount(
     <MemoryRouter initialEntries={["/"]}>
       <ConversationList />

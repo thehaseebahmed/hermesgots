@@ -1,5 +1,9 @@
 # A room's pin is the device's, because the record has none to carry
 
+**Superseded by [ADR 0157](0157-a-rooms-marks-are-the-readers-and-the-plugin-carries-them.md)**
+(2026-11-16): a room's pin and archive now travel in the plugin's own chat store, laid over the room
+it projects, so the Host's object still carries no mark and the reader's does.
+
 The chat list lifts a pinned row into a band above Recents (ADR 0103), and a room is lifted by the
 same rule as a chat. What sets a chat's pin is its record — `pinned` travels in the chat list the
 plugin answers, and a chat pinned on one device is pinned on every device. A room has no such field:

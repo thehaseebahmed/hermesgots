@@ -29,8 +29,15 @@ from unittest import mock
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 import plugin
-from plugin import events, media, push, rooms, store
-from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
+from plugin import chats, events, media, push, rooms, store
+from plugin.tests._helpers import (
+    FakeWeb,
+    RouteAdapter,
+    room_mark_record,
+    route,
+    temp_hermes_home,
+    wire,
+)
 
 
 class Host:
@@ -1161,6 +1168,84 @@ class RoomInTheChatList(unittest.TestCase):
         many = [{**ROOM, "room_id": f"room-{n}", "name": f"Room {n}"} for n in range(3)]
         chats = self.chats(host=Host(listed=many, page=2))
         self.assertEqual(sorted(chats), ["room-0", "room-1", "room-2"], "every page is a row")
+
+    def test_the_list_carries_a_rooms_marks_and_never_the_record_itself(self):
+        held = room_mark_record(pinned=True, pinnedAt=1_760_000_500_000, marksAt=1_760_000_700_000)
+        chats.merge(store.db_path(self.home), {"room-1": held})
+        listed = self.chats([ROOM])
+        self.assertEqual(sorted(listed), ["room-1"], "a room's mark record is no chat of its own")
+        self.assertEqual(listed["room-1"]["value"]["pinned"], True)
+        self.assertEqual(listed["room-1"]["value"]["marksAt"], 1_760_000_700_000)
+        self.assertEqual(
+            listed["room-1"]["value"]["title"], "Planning", "the room it describes is still the Host's"
+        )
+        self.assertNotIn(chats.ROOM_MARKS, listed["room-1"]["value"])
+
+    def test_a_merge_answers_a_rooms_marks_and_not_the_record_it_posted(self):
+        # The door the app itself posts through: the record it stored is laid over the room, and
+        # never answered beside it as a chat.
+        held = room_mark_record(pinned=True, archived=False, marksAt=1_760_000_700_000)
+        with dispatcher(Host(listed=[ROOM])), no_loopback():
+            answer = self.asked(
+                plugin.PREFIX + "/chats", body={"chats": {"room-1": held}}, method="POST"
+            )
+        self.assertEqual(answer["status"], 200)
+        answered = answer["payload"]["chats"]
+        self.assertEqual(sorted(answered), ["room-1"], "nothing of the mark record reads as a chat")
+        self.assertEqual(answered["room-1"]["value"]["pinned"], True)
+        self.assertEqual(answered["room-1"]["value"]["archived"], False)
+        self.assertEqual(
+            chats.read(store.db_path(self.home))["room-1"], held, "the record the app posted is kept"
+        )
+        self.assertIsNone(chats.one(store.db_path(self.home), "room-1"), "and is still no chat")
+
+
+class RoomMarks(unittest.TestCase):
+    """A room's own pin and archive, laid over the room and never written into it (ADR 0157).
+
+    The record is Gots's, kept in the chat store because the Host's room has no field for a mark
+    (ADR 0121); the room stays the Host's, so the marks are overlaid where it is projected.
+    """
+
+    def projected(self, *room_ids):
+        return {
+            room_id: rooms.chat_record({**ROOM, "room_id": room_id})
+            for room_id in room_ids or ("room-1",)
+        }
+
+    def test_a_projected_room_carries_the_marks_its_store_holds(self):
+        projected = self.projected()
+        host = json.loads(json.dumps(projected["room-1"]))
+        carried = rooms.carrying_marks(
+            projected,
+            {"room-1": room_mark_record(pinned=True, pinnedAt=1_760_000_100_000, marksAt=1_760_000_200_000)},
+        )
+        self.assertEqual(carried["room-1"]["at"], host["at"], "the Host's own clock is the room's")
+        for field in ("title", "createdAt", "updatedAt", "room"):
+            self.assertEqual(carried["room-1"]["value"][field], host["value"][field], field)
+        for field in ("pinned", "pinnedAt", "archived", "marksAt"):
+            self.assertEqual(
+                carried["room-1"]["value"][field],
+                room_mark_record(pinned=True, pinnedAt=1_760_000_100_000, marksAt=1_760_000_200_000)["value"][chats.ROOM_MARKS][field],
+                field,
+            )
+        self.assertNotIn(
+            chats.ROOM_MARKS, carried["room-1"]["value"], "the record's own shape never rides on a room"
+        )
+
+    def test_a_disbanded_room_carries_none(self):
+        projected = {"room-1": rooms.chat_record({**ROOM, "disbanded_at": 1_760_001_000.0})}
+        carried = rooms.carrying_marks(projected, {"room-1": room_mark_record(pinned=True, marksAt=9)})
+        self.assertEqual(
+            carried["room-1"],
+            {"at": 1_760_001_000_000, "deleted": True},
+            "a room the Host retired leaves the list, and a record it left behind marks nothing",
+        )
+
+    def test_a_store_record_for_a_room_nothing_projects_invents_none(self):
+        projected = self.projected("room-1", "room-2")
+        carried = rooms.carrying_marks(projected, {"room-9": room_mark_record(pinned=True, marksAt=9)})
+        self.assertEqual(carried, projected, "the Host is which rooms exist")
 
 
 def event(seq, kind, actor, payload, at=1_760_000_100.0):

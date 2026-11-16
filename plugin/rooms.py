@@ -42,7 +42,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 
-from . import attachments, config_keys, events, link, media, push, ticker
+from . import attachments, chats, config_keys, events, link, media, push, ticker
 from .store import db_path
 
 logger = logging.getLogger(__name__)
@@ -61,6 +61,11 @@ WRITES: Tuple[str, ...] = ("groups.create", "groups.rename", "groups.disband")
 # takes a file and can't say it back has stored one that no screen could ever draw.
 ATTACHMENT_METHODS: Tuple[str, str] = ("groups.attachment.upload", "groups.attachment.download")
 MEDIA_FEATURE = "room_media"
+
+# The four fields a room's mark record carries, in the app's own words: how the row is drawn, and
+# the clock the reader made the marks at. They are overlaid onto the room's projected value and
+# never written into the Host's room, which has no field for either mark (ADR 0121, ADR 0157).
+MARK_FIELDS: Tuple[str, ...] = ("pinned", "pinnedAt", "archived", "marksAt")
 
 # The two names a roster row spells differently at either end of this seam: the app types camelCase
 # (`RoomMember`), the Host writes `member_id` and `display_name`. `_member` reads one way, `_host_member`
@@ -1477,6 +1482,46 @@ def chat_records(*, timeout: float = PROBE_TIMEOUT, home: Any = None) -> Dict[st
         with _projections_lock:
             _projections[key] = Projection(time.monotonic(), records, ttl)
         return dict(records)
+
+
+def _marks(entry: Any) -> Optional[Dict[str, Any]]:
+    """The mark fields one stored record holds, or None where it holds no room's marks."""
+    value = entry.get("value") if isinstance(entry, dict) else None
+    if not chats.carries_room_marks(value):
+        return None
+    held = value[chats.ROOM_MARKS]
+    if not isinstance(held, dict):
+        return None
+    return {field: held[field] for field in MARK_FIELDS if field in held}
+
+
+def carrying_marks(
+    projected: Dict[str, Dict[str, Any]], records: Dict[str, Dict[str, Any]]
+) -> Dict[str, Dict[str, Any]]:
+    """The projected rooms, each carrying the marks its own store record holds.
+
+    A room's pin and its archive are the reader's, and the Host's room has no field to keep them in
+    (ADR 0121), so the app posts one mark record per marked room into this plugin's chat store and
+    the marks are laid over the room here, where it is projected (ADR 0157). The record is Gots's,
+    not the Host's: the room's ``at``, ``createdAt``, ``updatedAt`` and ``room`` are the Host's own
+    and are handed back exactly as they came, with only the four marks added to the value.
+
+    A deletion is the room gone rather than a room with no marks: a disbanded room carries none, so
+    a record left behind by a room the Host retired never marks the row that takes it away. And a
+    stored record for an id this projection doesn't name invents nothing, since the Host is which
+    rooms exist.
+    """
+    carried: Dict[str, Dict[str, Any]] = {}
+    for room_id, record in projected.items():
+        value = record.get("value") if isinstance(record, dict) else None
+        held = _marks(records.get(room_id))
+        # A deletion carries no value to lay a mark over, and none is invented for one either: a
+        # disbanded room rides back as the tombstone it is.
+        if held is None or not isinstance(value, dict) or record.get("deleted"):
+            carried[room_id] = record
+            continue
+        carried[room_id] = {**record, "value": {**value, **held}}
+    return carried
 
 
 def available(home: Any = None) -> Optional[str]:

@@ -3238,6 +3238,32 @@ export async function mergeChatList<T>(
   return body.chats
 }
 
+/**
+ * Sets, or clears, a chat's archive on its Host — Hermes's own `sessions.archived` flag (ADR 0159),
+ * written through the plugin so the same session leaves `hermes sessions list`, `/resume` and the
+ * Desktop's list, and an archive made there leaves this one.
+ *
+ * `host` is whether Hermes's session took the flag: `false` is a store whose schema has no
+ * `archived` column (or no store at all), where the reader's mark stays the device's own.
+ */
+export async function setSessionArchived(
+  config: HermesConfig,
+  chatId: string,
+  archived: boolean,
+): Promise<{ archived: boolean; host: boolean }> {
+  const response = await request(
+    `${pluginRoot(config.baseUrl)}/chats/${encodeURIComponent(chatId)}/archived`,
+    {
+      method: "POST",
+      headers: headers(config),
+      body: JSON.stringify({ archived }),
+      signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+    },
+  )
+  const body = (await response.json()) as Record<string, unknown>
+  return { archived: body?.archived === true, host: body?.host === true }
+}
+
 /** A model one of a chat's calls ran on, as its host recorded it. */
 export interface ModelChange {
   /** When that call ran, on the host's own clock. */

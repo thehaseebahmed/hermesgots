@@ -10,12 +10,13 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { act } from "react"
-import { MemoryRouter, Route, Routes, type InitialEntry } from "react-router"
+import { MemoryRouter, Route, Routes, useNavigate, type InitialEntry } from "react-router"
 
 import { Home } from "@/App"
 import { BotChatsPage, BotChatsPane } from "@/routes/bot-chats"
 import { BOT_CHATS } from "@/lib/chat-list"
 import { db, deleteConversation, getSettings, saveChatFilter, saveSettings, type Message } from "@/lib/db"
+import { draftKey, flushDrafts, saveDraft } from "@/lib/drafts"
 import { pressBack } from "@/lib/native"
 import { markRead } from "@/lib/read-marks"
 import {
@@ -76,10 +77,14 @@ interface Seed {
   mine?: string
   /** The newest reply is still arriving, so the row has a run in flight to draw. */
   streaming?: boolean
-  /** The run a routine's delivery is: the marker and the line the record itself carries (G4). */
+  /** Archived by the reader: the row every pill but Archived leaves out. */
+  archived?: boolean
+  /** The run a routine's delivery is: the marker and the line the record itself carries. */
   routine?: { line: string }
   /** The room this row is: the Host's record, with this bot seated in it. */
   room?: boolean
+  /** The bot's own Main thread, which is never hidden however little has been said in it. */
+  main?: boolean
 }
 
 function message(chat: string, content: string, at: number, patch: Partial<Message> = {}): Message {
@@ -111,11 +116,13 @@ async function seed(
       profileId: host.id,
       title: one.title,
       pinned: one.pinned,
+      ...(one.archived ? { archived: true } : {}),
       hermesSessionId: `gots-${one.id}`,
       createdAt: one.at,
       updatedAt: one.at,
       changedAt: one.at,
       ...(one.routine ? { routine: true, line: one.routine.line } : {}),
+      ...(one.main ? { main: true } : {}),
       ...(one.room
         ? { room: { id: `room-${one.id}`, members: [{ profile: "default", displayName: "Mainly" }] } }
         : {}),
@@ -188,6 +195,32 @@ const screen = (entry: InitialEntry = `/b/${bot.id}`) => (
   </MemoryRouter>
 )
 
+/**
+ * The same addresses with one step back on the page: a chat stands above the list, and the step behind
+ * it draws that list again — the move a reader makes when they open a chat and leave it without a word.
+ */
+const steppedScreen = () => (
+  <MemoryRouter initialEntries={[`/b/${bot.id}`]}>
+    <Path />
+    <Nav />
+    <StepBack />
+    <Routes>
+      <Route path="b/:profileId" element={<BotChatsPage />} />
+      <Route path="c/:id" element={<p data-chat />} />
+    </Routes>
+  </MemoryRouter>
+)
+
+/** One step back through the entries a screen pushed, which is what "the list behind it" means. */
+function StepBack() {
+  const navigate = useNavigate()
+  return (
+    <button type="button" data-step-back onClick={() => navigate(-1)}>
+      back
+    </button>
+  )
+}
+
 test("Home is the active bot's screen: `/` sends the reader to its list", async () => {
   // A bot with nothing to open, so the address `/` lands on is the list itself: the door, seen without
   // another screen answering for it.
@@ -215,11 +248,13 @@ test("Home is the active bot's screen: `/` sends the reader to its list", async 
 })
 
 test("a bot's screen lists the chats it holds, its pinned one first and then by what was last said", async () => {
+  // Every one of them has been said in: a chat nothing was said in is no row of the list at all
+  // (ADR 0158), which is the case after this one.
   await seed([
-    { id: "quiet", title: "An old chat", at: 100 },
-    { id: "busy", title: "The newest chat", at: 300 },
-    { id: "pinned", title: "Held on top", at: 50, pinned: true },
-    { id: "middle", title: "In between", at: 200 },
+    { id: "quiet", title: "An old chat", at: 100, said: "The first word" },
+    { id: "busy", title: "The newest chat", at: 300, said: "The last word" },
+    { id: "pinned", title: "Held on top", at: 50, pinned: true, said: "Held here" },
+    { id: "middle", title: "In between", at: 200, said: "In the middle" },
   ])
   await mount(screen(), async () => {
     await until(async () => rowIds().length === 4, "the bot's chats")
@@ -376,7 +411,7 @@ test("the dot is this device's read mark, not the host's word", async () => {
 
 test("a routine's delivery is a row of its own, with the routine's icon and the record's line", async () => {
   // A run has no message on this device at all: the row's line and time are the record's, which is why
-  // a device that never opened the run still draws it (G4).
+  // a device that never opened the run still draws it.
   const at = Date.now() - 120_000
   await seed([
     {
@@ -416,7 +451,7 @@ test("a routine's delivery is a row of its own, with the routine's icon and the 
 })
 
 test("the list answers the press with the step behind it, and leaves the app its own", async () => {
-  await seed([{ id: "quiet", title: "An old chat", at: 100 }])
+  await seed([{ id: "quiet", title: "An old chat", at: 100, said: "Something said" }])
   const stepped = atDepth(1)
   try {
     await mount(screen(), async () => {
@@ -692,7 +727,7 @@ test("the picks' New chat makes a chat of this bot's, and their New room opens t
     const made = (await db.conversations.toArray()).find((one) => one.id === path().slice(3))
     assert.ok(made, "the chat is the bot's, written before the address moved")
     assert.equal(made.profileId, bot.id, "a chat of this bot's")
-    assert.ok(!made.main, "a plain chat: nothing makes a Main any more (G1)")
+    assert.ok(!made.main, "a plain chat: nothing makes a Main any more")
   })
   await mount(screen(), async () => {
     await until(async () => Boolean(find("[data-new-menu]")), "the button")
@@ -724,6 +759,36 @@ test("a pick in a bot's list opens its chat above the list", async () => {
     await click(newRow("New chat"))
     await until(async () => path() !== `/b/${bot.id}`, "the chat it made")
     assert.ok(nav().startsWith("PUSH:/c/"), "and the foot's New chat takes the same move")
+  })
+})
+
+test("a chat opened and left behind is no row of the list it steps back to, and one holding a draft is", async () => {
+  // The New chat press mints a record whose two clocks are level, and nothing is said in it: the list
+  // the reader steps back to draws no row for it (ADR 0158). Main is never hidden, empty or not, and a
+  // chat holding words typed and not sent is a row until the words go.
+  await seed([
+    { id: "main", title: "Main", at: 100, main: true },
+    { id: "said", title: "A chat", at: 300, said: "Hello" },
+  ])
+  await mount(steppedScreen(), async () => {
+    await until(async () => rowIds().length === 2, "the bot's chats")
+    assert.deepEqual(rowIds(), ["said", "main"], "Main is a row though nothing has been said in it")
+
+    await click(find("[data-new-menu]"))
+    await until(async () => picksOpen(), "the picks")
+    await click(newRow("New chat"))
+    await until(async () => path() !== `/b/${bot.id}`, "the chat it made")
+    const made = path().slice(3)
+    await click(find("[data-step-back]"))
+    await until(async () => path() === `/b/${bot.id}`, "the list it steps back to")
+    await until(async () => rowIds().length === 2, "the list as the reader left it")
+    assert.deepEqual(rowIds(), ["said", "main"], "a chat left without a word is no row of it")
+
+    // Three words typed in it and not sent make it one, and the list is woken by the draft landing: the
+    // read that draws the list is over `db.drafts`, so no screen has to be opened again for the row.
+    saveDraft(draftKey(made), "three words")
+    await flushDrafts()
+    await until(async () => rowIds().includes(made), "the row its draft brings back")
   })
 })
 
@@ -835,8 +900,8 @@ test("the pills narrow the rows to the kind each names, and say what their empti
     const pills = () => findAll('[role="group"][aria-label="Filter chats"] button')
     assert.deepEqual(
       pills().map((one) => (one.textContent ?? "").trim()),
-      ["All", "Unread", "Chats", "Rooms", "Routines"],
-      "the five pills, in the rule's own order",
+      ["All", "Unread", "Archived", "Chats", "Rooms", "Routines"],
+      "the six pills, in the rule's own order, Archived straight after Unread",
     )
     assert.equal(filterPill("All")?.getAttribute("aria-pressed"), "true", "All is what the list opens on")
 
@@ -857,6 +922,105 @@ test("the pills narrow the rows to the kind each names, and say what their empti
     await type(find("#chats-search"), "lisbon")
     assert.deepEqual(rowIds(), [], "the pill keeps the room, and the words find nothing in it")
     assert.ok(findText("p", "No chats match."), "which is the search's sentence")
+  })
+})
+
+test("an archived chat is out of every pill but Archived, and All's search never finds it", async () => {
+  const at = Date.now() - 90_000
+  await seed([
+    { id: "live", title: "Trip to Lisbon", at, said: "Booked the flights" },
+    {
+      id: "packed",
+      title: "Packing list",
+      at: at - 60_000,
+      said: "Two pairs of shoes",
+      archived: true,
+    },
+  ])
+  await mount(screen(), async () => {
+    // The list opens on All, and the archived chat is no row of it.
+    await until(async () => rowIds().length === 1, "the list, less what the reader set aside")
+    assert.deepEqual(rowIds(), ["live"], "All keeps no archived row")
+    await click(filterPill("Unread"))
+    assert.deepEqual(rowIds(), [], "nor does Unread")
+    await click(filterPill("Chats"))
+    assert.deepEqual(rowIds(), ["live"], "nor Chats")
+    await click(filterPill("Archived"))
+    await until(async () => rowIds().length === 1, "the row the pill keeps")
+    assert.deepEqual(rowIds(), ["packed"], "Archived is the one pill that draws it")
+    const words = wordsOf(rowOf("packed"))
+    assert.ok(words.includes("Packing list"), "with the chat's title")
+    assert.ok(words.includes("Two pairs of shoes"), "what was last said in it, read from its tail")
+    assert.ok(words.length > "Packing list Two pairs of shoes".length, "and its age")
+
+    // The search narrows the pill it stands in, so a search over All cannot reach the archived row —
+    // while the pill that holds it still searches its own.
+    await click(filterPill("All"))
+    await click(find("[data-search-toggle]"))
+    await until(async () => Boolean(find("#chats-search")), "the foot's field")
+    await type(find("#chats-search"), "packing")
+    assert.deepEqual(rowIds(), [], "the words name a chat All does not hold")
+    assert.ok(findText("p", "No chats match."), "which is the search's emptiness, not a pill's")
+    await click(filterPill("Archived"))
+    await until(async () => rowIds().length === 1, "the row its own search finds")
+    assert.deepEqual(rowIds(), ["packed"], "and the Archived pill finds it under the same words")
+  })
+})
+
+test("a chat nothing was said in, archived, is still the Archived pill's row", async () => {
+  // Archiving is an act the reader took, and the pill is the only way back to the row it kept: a chat
+  // the New chat press minted and the reader put away before saying anything is exactly the state the
+  // sheet writes, and nothing else would draw it.
+  await seed([{ id: "put-away", title: "Set aside", at: 100, archived: true }])
+  await mount(screen(), async () => {
+    await until(async () => Boolean(findText("p", "No chats yet.")), "All's own sentence")
+    assert.deepEqual(rowIds(), [], "out of All, which is the rows nobody archived")
+    await click(filterPill("Archived"))
+    await until(async () => rowIds().length === 1, "the row the reader put away")
+    assert.deepEqual(rowIds(), ["put-away"], "drawn by the one pill that holds it")
+  })
+})
+
+test("a bot whose every chat is archived says All's own emptiness", async () => {
+  // A pill that keeps nothing says its own sentence; Archived is the pill that holds these, and All
+  // says what it says of any bot with nothing to draw rather than a second emptiness of its own.
+  await seed([{ id: "only", title: "Put away", at: 100, said: "Nothing to show", archived: true }])
+  await mount(screen(), async () => {
+    await until(async () => Boolean(findText("p", "No chats yet.")), "All's own sentence")
+    assert.deepEqual(rowIds(), [], "with no row under it")
+    await click(filterPill("Archived"))
+    await until(async () => rowIds().length === 1, "the row Archived keeps")
+  })
+})
+
+test("an archived chat past the bound still says what was last said in it", async () => {
+  // The pill draws the archived row's line and its age, so its tail is read wherever its clock puts
+  // it: the bound is on what a list costs to draw, and this row is on it. The read starts when the
+  // pill is pressed — no other pill draws these rows — so the line lands with the pill's answer.
+  const many: Seed[] = [
+    {
+      id: "archived-old",
+      title: "Set aside",
+      at: 1,
+      said: "The last word in it",
+      archived: true,
+    },
+    ...Array.from({ length: BOT_CHATS + 1 }, (_, index) => ({
+      id: `chat-${index}`,
+      title: `Chat ${index}`,
+      at: 1_000 + index * 10,
+      said: `Said ${index}`,
+    })),
+  ]
+  await seed(many)
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === BOT_CHATS + 1, "every chat nobody archived")
+    assert.ok(!rowIds().includes("archived-old"), "the archived chat is out of All")
+    await click(filterPill("Archived"))
+    await until(
+      async () => wordsOf(rowOf("archived-old")).includes("The last word in it"),
+      "its line, read though its clock put it past the bound",
+    )
   })
 })
 
@@ -957,8 +1121,9 @@ test("a pill pressed on one bot leaves every other bot's list on its own", async
       id: "other-chat",
       profileId: other.id,
       title: "Other chat",
+      // Said in, so it is a row of that bot's list: a chat nothing was said in is no row (ADR 0158).
       createdAt: 200,
-      updatedAt: 200,
+      updatedAt: 210,
       changedAt: 200,
     },
     {
