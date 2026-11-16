@@ -1,18 +1,15 @@
 import { useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
-  conversationsOf,
   createConversation,
-  isReply,
   listEnabledProfiles,
-  newestMessage,
   type BotSort,
   type Conversation,
   type ModelChoice,
   type Profile,
 } from "@/lib/db"
 import { labelOf } from "@/lib/bot-name"
-import { listsAsChat } from "@/lib/lists-as-chat"
+import { newestReplyOf, readBotChats } from "@/lib/chat-rows"
 import { byName } from "@/lib/compare"
 import { useRoomNeeds } from "@/lib/room"
 import { withDir, type Sort, type SortKey } from "@/lib/sort"
@@ -108,12 +105,12 @@ export function useBotSummaries(): BotSummary[] | undefined {
       bots.map(async (bot) => {
         // Every chat the bot has, newest first: a chat older than a read bound is still a row of its
         // list, so it still counts (ADR 0136).
-        const chats = await conversationsOf(bot.id).reverse().filter(listsAsChat).toArray()
+        const chats = await readBotChats(bot.id)
         // Only a chat's newest reply can wait on the user, and a reply's read is what a row costs, so
         // only the newest `BOT_CHATS` are read — a bound on the reads, never on what the row counts.
-        const newest = await Promise.all(
-          chats.slice(0, BOT_CHATS).map((c) => newestMessage(c.id, isReply)),
-        )
+        // The list's own bound widens by a pinned chat; this count's is the newest alone, as it has
+        // always been.
+        const newest = await Promise.all(chats.slice(0, BOT_CHATS).map((c) => newestReplyOf(c.id)))
         const local = new Set(newest.filter((m) => waitsOnUser(m)).map((m) => m!.conversationId))
         return { bot, chats, local }
       }),

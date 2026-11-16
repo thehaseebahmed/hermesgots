@@ -14,11 +14,9 @@ import { Spinner } from "@/components/ui/spinner"
 import { buttonVariants } from "@/components/ui/button"
 import { botChatsPath, botPath, botRoutinesPath } from "@/lib/bot-tabs"
 import {
-  BOT_CHATS,
   CHAT_FILTERS,
   chatAge,
   chatList,
-  chatRowOf,
   emptyOf,
   filterChatRows,
   isChatFilter,
@@ -26,20 +24,12 @@ import {
   type ChatListRow,
 } from "@/lib/chat-list"
 import { labelOf } from "@/lib/bot-name"
-import {
-  chatFilterOf,
-  conversationsOf,
-  db,
-  isReply,
-  newestMessage,
-  saveChatFilter,
-  type Profile,
-} from "@/lib/db"
+import { useBotChats } from "@/lib/chat-rows"
+import { chatFilterOf, saveChatFilter, type Profile } from "@/lib/db"
 import type { LiveRunStatus } from "@/lib/hermes"
 import { HEADER_BUTTON } from "@/lib/layout"
 import { useBotLabels } from "@/lib/use-bot-labels"
 import { useXLarge } from "@/lib/media"
-import { listsAsChat } from "@/lib/lists-as-chat"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
 import { useBotChatsPane, type BotPane } from "@/lib/pane"
@@ -104,34 +94,8 @@ function BotChatsList({
   // The rooms this device lists, read by their membership: a room belongs to its Host and lists in
   // every bot its roster seats, whatever bot carried the record here (ADR 0115).
   const rooms = useRoomNeeds()
+  const answer = useBotChats(profileId)
   // The answer names the address it ran for, so one bot's answer can never pass for another's.
-  const answer = useLiveQuery(async () => {
-    const bot = await db.profiles.get(profileId)
-    if (!bot) return { profileId, bot: null, rows: [] }
-    // Every chat the bot has, newest first: a chat older than any bound is still a row of this list,
-    // since a bound is not something a reader can see (ADR 0136).
-    const chats = await conversationsOf(profileId).reverse().filter(listsAsChat).toArray()
-    // What a row costs is the read of its newest message, never its record, so the tails are read
-    // for the newest `BOT_CHATS` chats and every pinned one — a pin is the reader's own word that
-    // the chat matters, wherever its clock puts it — and a row past that bound draws its title and
-    // age from the record alone.
-    const tailed = new Set(
-      [...chats.slice(0, BOT_CHATS), ...chats.filter((chat) => chat.pinned)].map((chat) => chat.id),
-    )
-    const rows = await Promise.all(
-      // A routine's row reads its line and time off the record, so its tail isn't asked for at all.
-      chats.map(async (chat) => {
-        if (chat.routine || !tailed.has(chat.id)) return chatRowOf(chat)
-        const newest = await newestMessage(chat.id)
-        // The row says what the bot last said, and a question or an approval sits on a reply: a read
-        // of the newest message that already is one answers both, and one that is the reader's own
-        // asks for the reply above it.
-        const reply = !newest || isReply(newest) ? newest : await newestMessage(chat.id, isReply)
-        return chatRowOf(chat, newest, reply)
-      }),
-    )
-    return { profileId, bot, rows }
-  }, [profileId])
   const fresh = answer && answer.profileId === profileId ? answer : undefined
   if (!fresh) return null
   // A bot that is gone — deleted here or on another device — lands home rather than on a list it
