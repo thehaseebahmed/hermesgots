@@ -145,6 +145,23 @@ export function seatedRoomRows(rooms: readonly RoomNeedsRow[], profileId: string
     .map((room) => roomRowOf(room.chat, room.faces, room.said))
 }
 
+/**
+ * The chat this device holds as one bot's **Main**: the one record carrying the flag the plugin
+ * publishes, read live.
+ *
+ * `undefined` until the query answers — a screen draws nothing rather than a guess while it is out —
+ * and `null` where the bot has none, which is a device that has never met a plugin publishing one.
+ */
+export function useBotMain(profileId: string): string | null | undefined {
+  return useLiveQuery(async () => {
+    if (!profileId) return null
+    const main = await conversationsOf(profileId)
+      .filter((chat) => Boolean(chat.main))
+      .first()
+    return main?.id ?? null
+  }, [profileId])
+}
+
 /** What one bot's list is drawn from: the address the answer ran for, the bot, and its rows. */
 export interface BotChats {
   /** The address this answer was read for, so one bot's answer can never pass for another's. */

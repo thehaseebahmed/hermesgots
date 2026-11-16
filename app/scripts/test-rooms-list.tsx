@@ -711,7 +711,7 @@ test("a room opened from a bot's list leads back to that list, by its control an
       <Path />
       <Routes>
         <Route path="/c/:id" element={<RoomChat id={ROOM} slot="route" />} />
-        <Route path="/b/:profileId" element={<p data-list />} />
+        <Route path="/b/:profileId/sidechats" element={<p data-list />} />
       </Routes>
     </MemoryRouter>
   )
@@ -728,7 +728,7 @@ test("a room opened from a bot's list leads back to that list, by its control an
       "and draws no drawer beside a bar that leads back",
     )
     await click(find(`[aria-label="Back to Coder"]`))
-    await until(async () => path() === `/b/${CODER}`, "the list the row stands in")
+    await until(async () => path() === `/b/${CODER}/sidechats`, "the list the row stands in")
     assert.ok(find("[data-list]"), "and the room's screen is what was left")
   })
   await mount(roomFromList(), async () => {
@@ -737,7 +737,7 @@ test("a room opened from a bot's list leads back to that list, by its control an
       "the screen's own way out",
     )
     assert.equal(pressBack(), "screen", "Android's back is the same answer")
-    await until(async () => path() === `/b/${CODER}`, "the list behind it")
+    await until(async () => path() === `/b/${CODER}/sidechats`, "the list behind it")
   })
 })
 

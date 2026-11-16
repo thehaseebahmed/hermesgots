@@ -1,6 +1,7 @@
 /**
- * A bot's address is its list: whatever this device last had open there, `/b/<bot>` draws the chats to
- * pick from, and a row pressed in it opens that conversation.
+ * A bot's list is a list: whatever this device last had open in one of its chats, the screen draws the
+ * chats to pick from and nothing opens itself, and a row pressed in it opens that conversation. What a
+ * bot's own entry opens on is `scripts/test-main-navigation`'s to hold; this holds the list's screen.
  *
  * A memory of the chat a bot was last in is this device's own, so a case writes it where an older
  * build kept it — the address, under the bot's id — and never through a module the app no longer has.

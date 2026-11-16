@@ -28,7 +28,7 @@ import { RoomFaces } from "@/components/room/room-faces"
 import { SortMenu } from "@/components/sort-menu"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
-import { botChatsPath } from "@/lib/bot-tabs"
+import { botMainPath } from "@/lib/bot-tabs"
 import { stateLine } from "@/lib/bot-chrome"
 import { closeCanvas, useCanvasOpened } from "@/lib/canvas-open"
 import { useCanvasEnabled, usePinnedCanvases, type Canvas } from "@/lib/canvases"
@@ -426,7 +426,7 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
                   44px one: a 36px picture and two lines leave a 44px row no air, and draw the
                   picture against its top edge (ADR 0153, amended 2026-11-14). */}
               <RootLink
-                to={botChatsPath(bot.id)}
+                to={botMainPath(bot.id)}
                 onClick={onNavigate}
                 aria-label={collapsed ? label : undefined}
                 className={({ isActive }) =>

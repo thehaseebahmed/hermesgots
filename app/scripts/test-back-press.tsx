@@ -265,7 +265,8 @@ const chatAt = (id: string) => (
     <State />
     <Routes>
       <Route path="c/:id" element={<ChatPage slot="route" />} />
-      <Route path="b/:profileId" element={<p data-bot-list />} />
+      {/* A chat's way back is its bot's list, which has an address of its own. */}
+      <Route path="b/:profileId/sidechats" element={<p data-bot-list />} />
     </Routes>
   </MemoryRouter>
 )
@@ -337,7 +338,7 @@ test(
         )
         assert.equal(pressBack(), "screen", "the screen takes the press rather than the app leaving")
         assert.deepEqual(history.backs, [], "with no step to take: the list takes the chat's entry")
-        await until(async () => path() === `/b/${BOT}`, "the bot's list in the chat's place")
+        await until(async () => path() === `/b/${BOT}/sidechats`, "the bot's list in the chat's place")
         assert.ok(find("[data-bot-list]"), "the list the conversation stands one rung above")
       })
     } finally {

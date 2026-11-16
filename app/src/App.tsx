@@ -4,7 +4,8 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { Navigate, Route, Routes, useParams } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
-import { botChatsPath } from "@/lib/bot-tabs"
+import { botMainPath } from "@/lib/bot-tabs"
+import { useBotMain } from "@/lib/chat-rows"
 import { getActiveProfile } from "@/lib/db"
 import { warmCatalog } from "@/lib/models"
 import { useShareReceiver } from "@/lib/share"
@@ -80,7 +81,7 @@ function ThemeColor() {
   return null
 }
 
-/** Home is the selected bot's screen: the list of its chats, at the bot's own address. */
+/** Home is the selected bot's screen: its entry, which lands on the bot's Main chat. */
 export function Home() {
   const layout = useChatLayout()
   const active = useLiveQuery(
@@ -88,7 +89,30 @@ export function Home() {
     [layout],
   )
   if (layout === undefined || (layout === "flat" && active === undefined)) return null
-  return active ? <Navigate to={botChatsPath(active.id)} replace /> : <ChatPage slot="route" />
+  return active ? <Navigate to={botMainPath(active.id)} replace /> : <ChatPage slot="route" />
+}
+
+/**
+ * A bot's entry, which is a doorway rather than a screen: it lands on the bot's Main chat, taking that
+ * chat's address in this entry's place so that back from Main is the app rather than this address
+ * again. The entry is tagged with the bot it is a chat of, so the shell keeps the list's lane while
+ * the row loads.
+ *
+ * A bot whose Main this device does not hold — a host that publishes none yet — keeps its list where
+ * the address stands rather than drawing a blank, and the answer is still out on the first read, so
+ * nothing is drawn until it lands. Nothing is ever made here: the plugin is Main's only writer.
+ */
+function BotMain() {
+  const { profileId } = useParams()
+  const layout = useChatLayout()
+  const main = useBotMain(profileId ?? "")
+  if (layout === undefined) return null
+  // A device on the Recents layout draws no bot's screen at all, so a bot's addresses still fall back
+  // home there — the one gate the flat list keeps until the switch means the layout under it.
+  if (layout !== "flat" || !profileId) return <Navigate to="/" replace />
+  if (main === undefined) return null
+  if (!main) return <BotChatsPage />
+  return <Navigate to={`/c/${main}`} replace state={{ bot: profileId }} />
 }
 
 /** A project's old address, from before projects had a place of their own. */
@@ -110,7 +134,9 @@ export function AppRoutes() {
     <Routes>
       <Route element={<AppShell />}>
         <Route index element={<Home />} />
-        <Route path="b/:profileId" element={<BotChatsPage />} />
+        {/* A bot's entry is a doorway onto its Main; its list has an address of its own. */}
+        <Route path="b/:profileId" element={<BotMain />} />
+        <Route path="b/:profileId/sidechats" element={<BotChatsPage />} />
         <Route path="b/:profileId/routines" element={<RoutinesPage />} />
         <Route path="c/:id" element={<ChatPage slot="route" />} />
         {/* A room that does not exist yet: its first send makes it (ADR 0125). */}

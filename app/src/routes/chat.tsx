@@ -391,8 +391,10 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
   })
   const lead = useChatLead({
     bot: chat && listsAsChat(chat) ? chat.profileId : undefined,
-    // A bot's conversation is one rung off its list, so the hook registers its leading control's move
-    // as the platform's back; a session holds no list, so nothing is registered for it.
+    // A bot's Main is what its own entry opens onto, so it names no list and leads nowhere. A bot's
+    // other conversation is one rung off its list, so the hook registers its leading control's move as
+    // the platform's back; a session holds no list, so nothing is registered for it.
+    main: Boolean(chat?.main),
     underCode,
     leave,
   })
@@ -1018,8 +1020,10 @@ function CurrentChatPage({ slot }: ChatPageProps) {
   })
   const lead = useChatLead({
     bot: conversation && listsAsChat(conversation) ? conversation.profileId : undefined,
-    // The same guard as the leading control's: a bot's conversation is answered by its list. A session
-    // holds no list, so nothing is registered for it.
+    // The same guard as the leading control's: a bot's conversation is answered by its list — except
+    // Main, which is the bot's entry and answers with nothing. A session holds no list, so nothing is
+    // registered for it.
+    main: Boolean(conversation?.main),
     underCode,
     leave,
   })

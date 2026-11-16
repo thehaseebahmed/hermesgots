@@ -119,7 +119,8 @@ const screen = (entry = `/c/${rowOf()}`) => (
     <Path />
     <Routes>
       <Route path="c/:id" element={<ChatPage slot="route" />} />
-      <Route path="b/:profileId" element={<p data-list />} />
+      {/* A run's way back is its bot's list, which has an address of its own. */}
+      <Route path="b/:profileId/sidechats" element={<p data-list />} />
     </Routes>
   </MemoryRouter>
 )
@@ -221,7 +222,7 @@ test("the way back is the bot's list, not the chat the run was opened from", asy
     )
     assert.equal(missing('[aria-label="Open conversations"]'), true, "with no drawer beside it")
     await click(back)
-    await until(async () => path() === `/b/${bot.id}`, "the bot's list")
+    await until(async () => path() === `/b/${bot.id}/sidechats`, "the bot's list")
     absent("[data-slot=routine-note]", "and the run's screen is what was left")
   })
 })

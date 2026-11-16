@@ -18,6 +18,10 @@ import { quietly } from "@/lib/report"
 import { useBotLabels } from "@/lib/use-bot-labels"
 import { cn } from "@/lib/utils"
 
+/**
+ * A bot's chats at the list's own address (`/b/<bot>/sidechats`): the entry that leads a reader to a
+ * bot lands on its Main instead, so this screen is one they open rather than the one a bot opens on.
+ */
 export function BotChatsPage() {
   const { profileId } = useParams()
   const layout = useChatLayout()

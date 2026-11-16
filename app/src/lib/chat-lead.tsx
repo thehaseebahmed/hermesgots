@@ -8,6 +8,9 @@
  * decides for itself is which bot carries it (a chat's own, a room's `state.bot`); the words its
  * control wears come from here, named for the list it lands on, so four screens cannot word one move
  * four ways.
+ *
+ * The bot's **Main** is the one screen of a bot's that leads nowhere: it is what the bot's own entry
+ * opens onto (G1), so it names no list and draws no way back from it.
  */
 import { useCallback, useEffect, useRef } from "react"
 
@@ -24,12 +27,18 @@ export const UNNAMED = "Back to chats"
 
 export function useChatLead({
   bot,
+  main = false,
   beside,
   underCode = false,
   leave,
 }: {
   /** The bot whose list this screen's row stands in, where one holds it. */
   bot: string | undefined
+  /**
+   * Whether this screen is that bot's **Main**, which leads back to nothing: Main is where a bot
+   * opens, so there is no list behind it and no control onto one.
+   */
+  main?: boolean
   /** Whether that list is on screen beside this one; the split width's answer by default. */
   beside?: boolean
   /** A project session under Code leads back to Code rather than to any list. */
@@ -45,8 +54,9 @@ export function useChatLead({
   // the bot's own row: the screens this leads already hold that row, and a second read of it would
   // leave the row's first slot empty until it landed.
   const named = useBotLabels().get(bot ?? "")
-  // The legacy layout has no bot's screen at all, so nothing of the list is drawn there.
-  const list = layout === "flat" && bot ? botChatsPath(bot) : undefined
+  // The legacy layout has no bot's screen at all, so nothing of the list is drawn there. Main is the
+  // bot's own entry rather than a rung above it, so it names no list either.
+  const list = layout === "flat" && bot && !main ? botChatsPath(bot) : undefined
   const besideList = (beside ?? split) && Boolean(list)
   const ontoList = useCallback(() => {
     if (list) up(list)

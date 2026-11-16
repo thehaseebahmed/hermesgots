@@ -167,7 +167,7 @@ const routinesScreen = (profileId: string) => (
     <Path />
     <Routes>
       <Route path="b/:profileId/routines" element={<RoutinesPage />} />
-      <Route path="b/:profileId" element={<p data-list />} />
+      <Route path="b/:profileId/sidechats" element={<p data-list />} />
       <Route path="c/:id" element={<p data-chat />} />
     </Routes>
   </MemoryRouter>
@@ -297,7 +297,7 @@ test(
           "the screen takes the press rather than the app arming its exit",
         )
         assert.deepEqual(history.backs, [], "with no step to take: the list takes the page's entry")
-        await until(async () => path() === `/b/${BOT_A.id}`, "the bot's list in the page's place")
+        await until(async () => path() === `/b/${BOT_A.id}/sidechats`, "the bot's list in the page's place")
         assert.ok(find("[data-list]"), "the list the routines stand one rung above")
       })
     } finally {
@@ -332,7 +332,7 @@ test("the page leads with the bot's way back, as a conversation does", async () 
     assert.ok((back?.className ?? "").includes("size-11"), "the list's control size")
     assert.ok((back?.className ?? "").includes("rounded-full"), "and its round shape")
     await click(back)
-    await until(async () => path() === `/b/${BOT_A.id}`, "the bot's list")
+    await until(async () => path() === `/b/${BOT_A.id}/sidechats`, "the bot's list")
   })
 })
 

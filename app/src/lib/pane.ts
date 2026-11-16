@@ -85,10 +85,10 @@ export interface BotPane extends FeaturePane {
 
 /**
  * A bot's own chats stay beside the chat they opened, the way Code's sessions stay beside theirs:
- * its screen (`/b/<bot>`, and the routines under it) keeps the list's lane with nothing selected,
- * and a chat of that bot's (`/c/<id>`) opens it with the chat's row selected. A chat is read from
- * its address's row, and the list's own links say which bot they are for in `state.bot`, so the
- * lane holds while the row loads.
+ * its own addresses (`/b/<bot>`, its list and the routines under it) keep the list's lane with
+ * nothing selected, and a chat of that bot's (`/c/<id>`) opens it with the chat's row selected. A
+ * chat is read from its address's row, and the list's own links say which bot they are for in
+ * `state.bot`, so the lane holds while the row loads.
  *
  * Everything the list draws is a row of it — the bot's chats, the rooms its roster seats and its
  * routines' runs — so each opens beside it; a project session is Code's and a canvas is its own
