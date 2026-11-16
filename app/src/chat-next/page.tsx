@@ -1534,8 +1534,16 @@ export function ChatNextThread({
     if (!resend) dispatch(drawn)
     let prepared: PreparedTurn | undefined
     let run: string
+    // The row drawn above is the message until the transcript names the turn, and its files' cells
+    // are minted from the paths the host saved them at — paths the send did not have as it went, and
+    // has once its files are on the host (ADR 0111).
+    const keepSaved = () => {
+      if (prepared && attachments.length)
+        dispatch({ type: "saved", at, files: prepared.sent.map(sentFileOf) })
+    }
     try {
       prepared = prepareTurn ? await prepareTurn(words, attachments, at) : undefined
+      keepSaved()
       const posting = {
         signal: alive.current.signal,
         timeoutMs: sendTimeoutMs(away, READ_TIMEOUT_MS),
@@ -1578,7 +1586,10 @@ export function ChatNextThread({
     }
     // The host has taken it: only now does the row leave, and the turn the thread follows draws the
     // message in its place.
-    if (resend) dispatch({ ...drawn, replaces: resend.id })
+    if (resend) {
+      dispatch({ ...drawn, replaces: resend.id })
+      keepSaved()
+    }
     prepared?.settled(true)
     void follow(run)
   }
