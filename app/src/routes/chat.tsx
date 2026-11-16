@@ -383,7 +383,7 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
   })
   const lead = useChatLead({
     bot: chat && listsAsChat(chat) ? chat.profileId : undefined,
-    // A bot's conversation is one rung off its list, so the hook registers the corner control's move
+    // A bot's conversation is one rung off its list, so the hook registers its leading control's move
     // as the platform's back; a session holds no list, so nothing is registered for it.
     underCode,
     leave,
@@ -486,9 +486,6 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
             centered={Boolean(session)}
             showBot={!session && !lead.besideList}
             actions={actions}
-            back={lead.back}
-            // Only a project session under Code leads with a control here: a conversation's way back
-            // stands in its bar's corner, and its left keeps the app's drawer (D3).
             leading={lead.leading}
           />
           <ChatBody
@@ -1013,7 +1010,7 @@ function CurrentChatPage({ slot }: ChatPageProps) {
   })
   const lead = useChatLead({
     bot: conversation && listsAsChat(conversation) ? conversation.profileId : undefined,
-    // The same guard as the corner control's: a bot's conversation is answered by its list. A session
+    // The same guard as the leading control's: a bot's conversation is answered by its list. A session
     // holds no list, so nothing is registered for it.
     underCode,
     leave,
@@ -1103,9 +1100,6 @@ function CurrentChatPage({ slot }: ChatPageProps) {
         centered={centered}
         showBot={!session && !lead.besideList}
         actions={actions}
-        back={lead.back}
-        // Only a project session under Code leads with a control here: a conversation's way back
-        // stands in its bar's corner, and its left keeps the app's drawer (D3).
         leading={lead.leading}
       />
 

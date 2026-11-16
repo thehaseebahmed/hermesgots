@@ -1,6 +1,6 @@
 /**
  * The lead a chat-shaped screen draws and the press it answers (ADR 0144, ADR 0154): which bot's list
- * its row stands in, what its bar's corner carries, and what the platform's back does there.
+ * its row stands in, what its bar leads with, and what the platform's back does there.
  *
  * A bot's chat, a room, a routine's run and the routines screen are all screens of one bot, so all
  * four ask the same three questions — is my list a real screen here, is it already on screen beside
@@ -20,7 +20,7 @@ import { useSplit } from "@/lib/pane"
 import { useBotLabels } from "@/lib/use-bot-labels"
 
 /** What the control says where this device cannot name the bot whose list it lands. */
-const UNNAMED = "Back to chats"
+export const UNNAMED = "Back to chats"
 
 export function useChatLead({
   bot,
@@ -43,7 +43,7 @@ export function useChatLead({
   // The label this device's lists give that bot, so a bot whose namesake answers elsewhere is told
   // apart in this control too (ADR 0149). Read off the one map every list draws from rather than from
   // the bot's own row: the screens this leads already hold that row, and a second read of it would
-  // leave the corner empty until it landed.
+  // leave the row's first slot empty until it landed.
   const named = useBotLabels().get(bot ?? "")
   // The legacy layout has no bot's screen at all, so nothing of the list is drawn there.
   const list = legacy === false && bot ? botChatsPath(bot) : undefined
@@ -63,21 +63,20 @@ export function useChatLead({
     return true
   }, [list])
   // A conversation — and the routines screen — answer the platform's back with the list, whether the
-  // list opened them or the reader arrived at the address another way: the press's move is the corner
+  // list opened them or the reader arrived at the address another way: the press's move is the leading
   // control's, so the two can never disagree about where back goes.
   useEffect(() => {
     if (!list) return
     return setBackGuard(listed)
   }, [list, listed])
-  // A Code session's way out is the one leading control: it leads back to Code, which is a place a
-  // screen opened, not a list its row stands in.
+  // A Code session's way out leads to Code, which is a place a screen opened, not a list its row
+  // stands in; every other screen of a bot leads back to the list its row stands in.
+  const words = named ? `Back to ${named}` : UNNAMED
   const leading = underCode ? (
     <BackButton label="Back to Code" onClick={() => void leave?.()} floating />
+  ) : list ? (
+    <BackButton label={words} onClick={ontoList} floating />
   ) : undefined
-  // The bar's corner, at every width: the list beside a conversation is a lane of the same screen, so
-  // the control stands there too rather than letting each width guess where its way back is.
-  const words = named ? `Back to ${named}` : UNNAMED
-  const wayBack = list ? <BackButton label={words} onClick={() => ontoList()} floating /> : undefined
   return {
     /** Whether the list stands beside this screen, so its bar drops the bot's face. */
     besideList,
@@ -85,9 +84,7 @@ export function useChatLead({
     list,
     /** Steps back onto that list, which is what a room's and a run's control answers with. */
     ontoList,
-    /** The bar's corner: the control that steps onto that list, named for where it lands. */
-    back: wayBack,
-    /** A Code session's leading control, where this screen is one: nothing leads a bot's conversation. */
+    /** The bar's leading control: the way back onto that list, or to Code for a session under it. */
     leading,
   }
 }

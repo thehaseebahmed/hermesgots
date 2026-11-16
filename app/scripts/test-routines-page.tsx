@@ -306,23 +306,28 @@ test(
   },
 )
 
-test("the page wears the bot's way back in the bar's corner, as a conversation does", async () => {
+test("the page leads with the bot's way back, as a conversation does", async () => {
   await seed()
   await mount(routinesScreen(BOT_A.id), async () => {
     await until(async () => Boolean(find('[aria-label="Back to Mainly"]')), "the page's way back")
     const back = find('[aria-label="Back to Mainly"]')
     // The app's bar, not a second header invented here (ADR 0140): the same row and slots the chat's
-    // header draws, and the corner a conversation's way back stands in (G8).
+    // header draws, and the place a phone's back stands in (ADR 0154).
     assert.ok(find('header [data-slot="header-row"]'), "the bar's own row")
     assert.equal(
-      findAll('[data-slot="header-actions"] [aria-label="Back to Mainly"]').length,
+      findAll('[data-slot="header-leading"] [aria-label="Back to Mainly"]').length,
       1,
-      "the corner carries the way back to the bot's list, named for where it lands",
+      "the bar leads with the way back to the bot's list, named for where it lands",
     )
     assert.equal(
-      findAll('[data-slot="header-leading"] [aria-label="Back to Mainly"]').length,
+      findAll('[data-slot="header-actions"] [aria-label="Back to Mainly"]').length,
       0,
-      "and it stands nowhere at the bar's left",
+      "and the corner is the actions' alone",
+    )
+    assert.equal(
+      missing('[aria-label="Open conversations"]'),
+      true,
+      "with no drawer beside it: a page that leads back has nowhere for the app's menu",
     )
     assert.ok((back?.className ?? "").includes("size-11"), "the list's control size")
     assert.ok((back?.className ?? "").includes("rounded-full"), "and its round shape")
@@ -422,12 +427,12 @@ test(
           find('[data-slot="item-lane"]')?.textContent?.includes("Morning watch"),
           "and the routines stand beside it, in the item lane",
         )
-        // The same control at the two-pane width (G8, D2): beside its list a bot's screen is still
-        // the bot's, and the corner is where its way back stands there too.
+        // The same control at the two-pane width (ADR 0154): beside its list a bot's screen is still
+        // bot's, and the left of its bar is where its way back stands there too.
         assert.equal(
-          findAll('[data-slot="header-actions"] [aria-label="Back to Mainly"]').length,
+          findAll('[data-slot="header-leading"] [aria-label="Back to Mainly"]').length,
           1,
-          "the page's way back to the bot's list stands in the corner at this width too",
+          "the page's way back to the bot's list leads it at this width too",
         )
         assert.equal(
           missing('[aria-label="Back to chats"]'),

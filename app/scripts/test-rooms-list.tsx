@@ -663,6 +663,16 @@ test("a room opened from a bot's list leads back to that list, by its control an
   )
   await mount(roomFromList(), async () => {
     await until(async () => Boolean(find(`[aria-label="Back to Coder"]`)), "the way back")
+    assert.equal(
+      findAll('[data-slot="header-leading"] [aria-label="Back to Coder"]').length,
+      1,
+      "the room's bar leads with it, the list it was picked from",
+    )
+    assert.equal(
+      missing('[aria-label="Open conversations"]'),
+      true,
+      "and draws no drawer beside a bar that leads back",
+    )
     await click(find(`[aria-label="Back to Coder"]`))
     await until(async () => path() === `/b/${CODER}`, "the list the row stands in")
     assert.ok(find("[data-list]"), "and the room's screen is what was left")

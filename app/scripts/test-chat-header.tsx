@@ -167,42 +167,46 @@ test("a muted centred header keeps the mark beside the actions", async () => {
   )
 })
 
-test("a header draws its way back last in the actions row, in either form", async () => {
+test("a caller's way back leads the bar in the drawer's place, in either form", async () => {
   await mount(
-    <ChatHeader title="A chat" subtitle="Working" actions={options} back={wayBack} />,
+    <ChatHeader title="A chat" subtitle="Working" actions={options} leading={wayBack} />,
     async () => {
-      const actions = rowParts().at(-1)!
+      const row = rowParts()
+      const leading = row[0]
       assert.equal(
-        actions.getAttribute("data-slot"),
-        "header-actions",
-        "the actions are still the row's last part",
+        leading.getAttribute("data-slot"),
+        "header-leading",
+        "the caller's control is the row's first part",
       )
       assert.ok(
-        actions.contains(find('[aria-label="Chat options"]')),
-        "with the actions the bar was handed in it",
+        leading.contains(find('[aria-label="Back to Mainly"]')),
+        "where it draws the way back the caller handed it",
       )
       assert.equal(
-        actions.lastElementChild?.getAttribute("aria-label"),
-        "Back to Mainly",
-        "and the way back drawn last in that row",
-      )
-      assert.equal(
-        missing('[data-slot="header-leading"] [aria-label="Back to Mainly"]'),
+        missing('[aria-label="Open conversations"]'),
         true,
-        "nothing of it leading the row, where the drawer stands",
+        "and no drawer beside it: a bar that leads back has nowhere for the app's menu",
+      )
+      assert.ok(
+        row.at(-1)!.contains(find('[aria-label="Chat options"]')),
+        "the actions are the row's last part",
+      )
+      assert.equal(
+        missing(`[data-slot="header-actions"] [aria-label="Back to Mainly"]`),
+        true,
+        "the corner carrying the actions alone",
       )
     },
   )
-  await mount(<ChatHeader title="A chat" pinned actions={options} back={wayBack} />, async () => {
-    const actions = rowParts().at(-1)!
+  await mount(<ChatHeader title="A chat" pinned actions={options} leading={wayBack} />, async () => {
+    const row = rowParts()
     assert.ok(
-      actions.contains(find('[aria-label="Back to Mainly"]')),
-      "the pinned bar draws it in the same row",
+      row[0].contains(find('[aria-label="Back to Mainly"]')),
+      "the pinned bar leads with it in the same place",
     )
-    assert.equal(
-      actions.lastElementChild?.getAttribute("aria-label"),
-      "Back to Mainly",
-      "still last, whatever the bar's other form",
+    assert.ok(
+      row.at(-1)!.contains(find('[aria-label="Chat options"]')),
+      "and the actions are still the row's last part",
     )
   })
 })

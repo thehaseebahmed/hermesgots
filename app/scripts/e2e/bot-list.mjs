@@ -3,9 +3,9 @@ import { app, assert, flow, markOffsetIn, pass, rung, settled } from "./lib.mjs"
 /**
  * A bot's list is the way into every conversation (ADR 0153, ADR 0154): a bot pressed from the sidebar
  * always draws its list, the list is ordered by the last message *received* in each row, every row
- * opens in the pane beside it at 1280px, the bot's face is drawn once on that screen, and the corner
- * control takes the reader back to the list with nothing beside it — a large chat mark over "No chat
- * selected", centred on both axes. From a phone a row opens one step above the list, and the corner
+ * opens in the pane beside it at 1280px, the bot's face is drawn once on that screen, and the control
+ * leading the bar takes the reader back to the list with nothing beside it — a large chat mark over
+ * "No chat selected", centred on both axes. From a phone a row opens one step above the list, and that
  * control or the drawer's bot row lands that list.
  *
  * The clocks are written here rather than left to the seed's "now", because the order is the claim:
@@ -173,8 +173,9 @@ await flow(
     await shot("run")
     pass("a routine's run opens in the second pane, the list still beside it")
 
-    // The corner control asks for the list with nothing beside it, and the item lane says so: a large
-    // chat mark above the words, centred on both axes of the lane — geometry, so it is measured here.
+    // The control leading the bar asks for the list with nothing beside it, and the item lane says so:
+    // a large chat mark above the words, centred on both axes of the lane — geometry, so it is
+    // measured here.
     await page.getByRole("button", { name: "Back to Test bot" }).click()
     await page.waitForURL(`**/b/${profileId}`, { timeout: 20_000 })
     await until(
@@ -235,13 +236,24 @@ await flow(
     await shot("phone-chat")
     pass("a row picked on a phone opens its chat one step above the list")
 
-    // The bar's corner control is the way back, and it lands the list in the entry the chat stood in.
+    // The control leading the bar is the way back — the leading slot, with no drawer beside it, which
+    // is the place the change moved it to — and it lands the list in the entry the chat stood in.
+    assert.equal(
+      await page.locator('[data-slot="header-leading"] button[aria-label="Back to Test bot"]').count(),
+      1,
+      "a phone's conversation leads with its way back",
+    )
+    assert.equal(
+      await page.locator('header button[aria-label="Open conversations"]').count(),
+      0,
+      "and draws no drawer beside a bar that leads back",
+    )
     await page.getByRole("button", { name: "Back to Test bot" }).click()
     await page.waitForURL(`**/b/${profileId}`, { timeout: 20_000 })
     await until(async () => (await mine("main")).length === 4, 20_000, "the list again")
     assert.equal(await rung(page), 0, "in the entry the conversation stood in")
     await shot("phone-back-to-list")
-    pass("a phone's conversation carries its way back in the corner")
+    pass("a phone's conversation carries its way back, leading its bar")
 
     // The sidebar is the way to the list as well, and it lands there rather than in another chat.
     await page.getByRole("button", { name: "Open conversations" }).click()

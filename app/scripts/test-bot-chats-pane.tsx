@@ -157,13 +157,13 @@ test(
         "the row of the chat on screen is the one the list marks open",
       )
       assert.ok(
-        find(`[data-slot="header-actions"] ${BACK_TO_BOT}`),
-        "and the chat's bar carries its way back to the bot's list in its corner",
+        find(`[data-slot="header-leading"] ${BACK_TO_BOT}`),
+        "and the chat's bar leads with its way back to the bot's list",
       )
       assert.equal(
-        missing(`[data-slot="header-leading"] ${BACK_TO_BOT}`),
+        missing(`[data-slot="header-actions"] ${BACK_TO_BOT}`),
         true,
-        "in the corner alone: the left of the bar still leads with the app's menu",
+        "which the corner does not carry",
       )
     })
   }),
@@ -179,8 +179,8 @@ test(
       assert.match(laneClass(), /\bw-103\b/, "the list keeps the 412px lane a rail leaves room for")
       assert.equal(openRow()?.getAttribute("href"), "/c/c-b", "and marks the chat the address names")
       assert.ok(
-        find(`[data-slot="header-actions"] ${BACK_TO_BOT}`),
-        "the chat's corner carries its way back, the list beside it or not",
+        find(`[data-slot="header-leading"] ${BACK_TO_BOT}`),
+        "the chat leads with its way back, the list beside it or not",
       )
       assert.equal(missing(LIST_CONTROL), true, "and no way to it in the bar: it stands on screen beside")
     })
@@ -188,7 +188,7 @@ test(
 )
 
 test(
-  "with the sidebar open at 1024px the chat stands alone, its bar leading with the drawer",
+  "with the sidebar open at 1024px the chat stands alone, its bar leading back",
   atWidth(1024, async () => {
     localStorage.clear()
     await seed()
@@ -196,37 +196,37 @@ test(
       await until(async () => titles().includes("Alpha"), "the chat's own header")
       assert.equal(missing(LANE), true, "no list stands beside it")
       assert.ok(
-        find(`[data-slot="header-actions"] ${BACK_TO_BOT}`),
-        "and the chat leads with a control, its way back standing in the corner",
+        find(`[data-slot="header-leading"] ${BACK_TO_BOT}`),
+        "and the bar leads with the chat's way back",
       )
-      assert.match(
-        find(DRAWER)?.getAttribute("class") ?? "",
-        /\bmd:hidden\b/,
-        "the drawer's own control leads instead, hidden from md up where the sidebar is the menu",
+      assert.equal(
+        missing(DRAWER),
+        true,
+        "with no drawer beside it: a bar that leads back has nowhere for the app's menu",
       )
     })
   }),
 )
 
 test(
-  "a phone draws the chat alone, its bar leading with the drawer",
+  "a phone draws the chat alone, its bar leading back",
   atWidth(390, async () => {
     localStorage.clear()
     await seed()
     await mount(screen("/c/c-a"), async () => {
       await until(async () => titles().includes("Alpha"), "the chat's own header")
       assert.equal(missing(LANE), true, "no list stands beside it")
-      assert.equal(missing(DRAWER), false, "and the bar leads with the drawer's own control")
+      assert.equal(missing(DRAWER), true, "and no drawer leads the bar")
       assert.ok(
-        find(`[data-slot="header-actions"] ${BACK_TO_BOT}`),
-        "with its way back to the list in the corner",
+        find(`[data-slot="header-leading"] ${BACK_TO_BOT}`),
+        "which leads with its way back to the list instead",
       )
     })
   }),
 )
 
 test(
-  "a phone's chat's corner carries its way back and its context, no menu: the title is its settings",
+  "a phone's chat keeps its context in the corner, its way back leading: the title is its settings",
   atWidth(390, async () => {
     localStorage.clear()
     await seed()
@@ -237,8 +237,12 @@ test(
         findAll('[data-slot="header-actions"] a, [data-slot="header-actions"] button').map(
           (node) => node.getAttribute("aria-label")?.split(",")[0],
         ),
-        ["Context", "Back to Mainly"],
-        "and the corner holds the chat's context, with the way back drawn last",
+        ["Context"],
+        "and the corner holds the chat's context alone",
+      )
+      assert.ok(
+        find(`[data-slot="header-leading"] ${BACK_TO_BOT}`),
+        "the way back leading the bar, where a phone's back sits",
       )
       assert.equal(
         find("[data-chat-settings-open]")?.getAttribute("aria-haspopup"),

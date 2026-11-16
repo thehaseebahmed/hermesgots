@@ -22,6 +22,7 @@ import {
   find,
   findAll,
   json,
+  missing,
   mount,
   path,
   seedSettings,
@@ -176,6 +177,12 @@ test("the way back is the bot's list, not the chat the run was opened from", asy
     assert.ok(find("[data-slot=routine-note]"), "the run's own screen is what is on")
     const back = find(`[aria-label="Back to ${LABEL}"]`)
     assert.ok(back, "a control leads back")
+    assert.equal(
+      findAll(`[data-slot="header-leading"] [aria-label="Back to ${LABEL}"]`).length,
+      1,
+      "in the bar's leading slot, where a phone's back stands",
+    )
+    assert.equal(missing('[aria-label="Open conversations"]'), true, "with no drawer beside it")
     await click(back)
     await until(async () => path() === `/b/${bot.id}`, "the bot's list")
     absent("[data-slot=routine-note]", "and the run's screen is what was left")

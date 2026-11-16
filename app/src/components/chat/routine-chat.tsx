@@ -59,7 +59,7 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
   const ready = Boolean(chat && bot && chat.id === id)
   const { root } = useNav()
   // The list this run was opened from is the bot's, never the chat a delivery arrived in: a routine's
-  // row is the bot's own, so its bar's corner steps back to where its row stands.
+  // row is the bot's own, so its bar's leading control steps back to where its row stands.
   const lead = useChatLead({ bot: chat?.profileId })
   const wide = useWide()
   useLayoutEffect(() => {
@@ -109,7 +109,7 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
             // The bot's list beside this run already names the bot with its face.
             showBot={!lead.besideList}
             actions={actions}
-            back={lead.back}
+            leading={lead.leading}
           />
           <MessageScrollerProvider key={id} autoScroll defaultScrollPosition="end">
             <MessageScroller className="flex-1">

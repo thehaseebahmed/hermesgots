@@ -445,7 +445,7 @@ The mark Gots leaves on a task it has claimed.
 _Avoid_: claimed, in-progress, assigned, taken
 
 **Bar**:
-A child screen's top bar: the leading control, the title, the line under it, the actions and the slot a screen pins with it, drawn by one component in two forms — floating over a thread, pinned in a list's scroll flow. The leading control is the app's menu on a bot's chat, which is where the app is, so there is nothing behind it to go back to; it is a way back only where a screen was opened from another — a project session's "Back to Code", a bot's list's back to the chat it covers. Every icon control on it is a frosted outline circle.
+A child screen's top bar: the leading control, the title, the line under it, the actions and the slot a screen pins with it, drawn by one component in two forms — floating over a thread, pinned in a list's scroll flow. Its leading control is the app's menu only on a bot's list, which is where the app is; every screen opened off that list — a chat, a room, a routine's run, the routines page, a new room's picker — leads with its way back to it instead, and a project session with "Back to Code". One slot, one of the two, never both. Every icon control on it is a frosted outline circle.
 _Avoid_: topbar, navbar, toolbar, app bar, header
 
 **Foot**:

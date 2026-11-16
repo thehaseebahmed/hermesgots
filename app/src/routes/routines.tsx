@@ -34,8 +34,7 @@ import {
   type CronState,
 } from "@/lib/cron"
 import { db, conversationsOf, getActiveProfile, type Conversation, type Profile } from "@/lib/db"
-import { useChatLead } from "@/lib/chat-lead"
-import { useLegacyChat } from "@/lib/legacy-chat"
+import { UNNAMED, useChatLead } from "@/lib/chat-lead"
 import { useChanges, useLive } from "@/lib/live"
 import { useNav } from "@/lib/nav"
 import { usePoll } from "@/lib/poll"
@@ -50,8 +49,8 @@ import { cn } from "@/lib/utils"
 /**
  * A bot's routines: its jobs and their runs, at `/b/<bot>/routines`. The page names the screen alone:
  * a routine belongs to the bot whose list opened this one, so no face, name or count of the bot is
- * drawn — the top bar is the bot's chat list's, whose corner names only the screen its control returns
- * to, and the pills over the jobs filter them by state.
+ * drawn — the top bar is the bot's chat list's, whose one control names only the screen it returns to,
+ * and the pills over the jobs filter them by state.
  */
 export function RoutinesPage() {
   const { profileId = "" } = useParams()
@@ -61,10 +60,9 @@ export function RoutinesPage() {
     return { profileId, bot: bot ?? null }
   }, [profileId])
   const bot = answered && answered.profileId === profileId ? answered.bot : undefined
-  // A bot's screens all wear one way back — the bar's corner control, named for the list it lands on —
-  // with the platform's press registered beside it (ADR 0144, G8). The legacy layout has no bot's list
-  // for the lead to step onto, so there this page registers the press itself.
-  const legacy = useLegacyChat()
+  // A bot's screens all wear one way back — the control leading the bar, named for the list it lands on
+  // — with the platform's press registered beside it (ADR 0144). The legacy layout has no bot's list
+  // for the lead to step onto, so the fallback below is what leads there.
   const lead = useChatLead({ bot: profileId })
   const { up } = useNav()
   const [tick, setTick] = useState(0)
@@ -87,22 +85,17 @@ export function RoutinesPage() {
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       {/*
         The app's bar in its pinned form (ADR 0140) — the same row, slots and frosted circles the chat
-        and the bot's list draw. Its leading control is the legacy layout's only: everywhere a bot has a
-        list, that list is this page's way back and stands in the corner, as a conversation's does. Its
-        title is the screen's own, its action is Refresh, and the four states it filters by are pinned
-        under the row inside the same sticky box, so a long list is filtered without scrolling back up
-        to reach them.
+        and the bot's list draw. Its leading control is the way back at every width — a bot's list, or
+        the legacy layout's chats. Its title is the screen's own, its action is Refresh, and the four
+        states it filters by are pinned under the row inside the same sticky box, so a long list is
+        filtered without scrolling back up to reach them.
       */}
       <ChatHeader
         pinned
         showBot={false}
         leading={
-          legacy === true && (
-            <BackButton
-              label="Back to chats"
-              onClick={() => up(botChatsPath(profileId))}
-              floating
-            />
+          lead.leading ?? (
+            <BackButton label={UNNAMED} onClick={() => up(botChatsPath(profileId))} floating />
           )
         }
         title="Routines"
@@ -117,7 +110,6 @@ export function RoutinesPage() {
             <RefreshCwIcon />
           </Button>
         }
-        back={lead.back}
         below={
           <ChipRow label="Routine states">
             {FILTERS.map(({ key, label }) => (

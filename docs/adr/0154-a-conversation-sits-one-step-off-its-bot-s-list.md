@@ -4,6 +4,10 @@
 [ADR 0153](0153-a-bot-s-list-is-the-way-into-every-conversation.md) and
 [ADR 0144](0144-a-chat-is-the-root.md).**
 
+**Amended 2026-11-14**: the way back stands in the bar's **leading** slot, not in the corner this
+record first named, and a bot's list is the only screen that keeps the drawer there. The rejection of
+two back controls stands.
+
 [ADR 0144](0144-a-chat-is-the-root.md) made a chat the app's root: `/b/<bot>` opened the chat this
 device was last in there, and a chat's address was where the app stood.
 [ADR 0153](0153-a-bot-s-list-is-the-way-into-every-conversation.md) took the memory and the landing
@@ -30,13 +34,15 @@ list beside an open conversation, a second row takes the place the first held, s
 the list and not the conversation the reader rejected. That is the one place the app uses a replacement
 for a press, and it is why a row's link carries a `replace` at the two-pane width.
 
-**The way back is one control in one corner, and it says where it goes.** A conversation's bar — a
-chat's, a room's, a run's — carries it last in its right-hand row, named `Back to <bot>`, with the
-app's drawer keeping the left where a phone needs it. Routines wears the same control, because it is a
-screen of the bot: a bot's screens do not have two conventions for one press. The control and the
-platform's guard are one move (`up(list)`), so a control that says "Back to <bot>" cannot answer a
-press by leaving the app. It is drawn at the two-pane width too: a reader who wants the list with
-nothing beside it asks for it the same way at every width.
+**The way back is one control in one place, and it says where it goes.** A conversation's bar — a
+chat's, a room's, a run's — leads with it, named `Back to <bot>`, in the place a phone's back stands.
+The drawer's button holds that slot only where nothing leads back — a bot's list, which is the app's
+entry — so no bar draws both, and the corner stays the actions' alone. Routines wears the same control,
+because it is a screen of the bot: a bot's screens do not have two conventions for one press. The
+control and the platform's guard are one move (`up(list)`), so a control that says "Back to <bot>"
+cannot answer a press by leaving the app. It is drawn at the two-pane width too: a reader who wants
+the list with nothing beside it asks for it the same way at every width. A new room's picker wears it
+as well, on the bot the list's New room press named.
 
 **Nothing open beside the list says so.** `/b/<bot>` at the two-pane width draws the list in its lane
 and, beside it, a large chat mark over the words *No chat selected* — one state for "the list is the
@@ -64,7 +70,7 @@ meets, and the request this record answers gives it up.
   the list over the conversation it is trying to leave, and back from that list would return to the
   conversation again.
 - **Two back controls — one at the left for the list, one in the corner for the app.** Two answers to
-  one press, and the left one is the drawer's place.
+  one press, and the left is the one slot a phone has for its way out.
 - **The last conversation remembered per bot, and the pane reopened on it.** What ADR 0136 did, and
   what ADR 0153 deleted: a pane that fills itself with the reader's past answers a question they did
   not ask.
@@ -77,9 +83,13 @@ meets, and the request this record answers gives it up.
   chat picked in the legacy layout's Recents — answers back with whatever opened it, because `up()`
   steps history rather than jumping. Its control names the bot while the press lands one screen up.
   Such a conversation's own guard still steps rather than leaving the app.
-- **A conversation opened cold** answers the corner control and Android's back with the list (the guard
-  replaces the entry at the app's first entry); a *browser's* back at the app's first entry still leaves
-  the site, as it does from any top-level screen.
+- **The bar leads with it.** The first answer stood the control in the bar's right-hand corner; the
+  review of #1078 moved it to the left, where every other screen of the app already leads back, and the
+  drawer's button went with it — a bar that leads back draws none, so on a phone the sidebar is reached
+  by stepping back to the list.
+- **A conversation opened cold** answers the bar's leading control and Android's back with the list (the
+  guard replaces the entry at the app's first entry); a *browser's* back at the app's first entry still
+  leaves the site, as it does from any top-level screen.
 - **The page transition changes for a picked conversation**: it slides in from the right as a pushed
   screen instead of fading into the list's place.
 - **A launch no longer puts a reader back in the conversation they left** after a process death on a
