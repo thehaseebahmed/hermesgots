@@ -271,7 +271,7 @@ function Stats({ message }: { message: Message }) {
  * face with a retry after a read that failed — and only a file the Previewer can't show is a row.
  * A kind the host has no copy of is drawn as nothing at all.
  */
-function SentAttachments({
+export function SentAttachments({
   conversationId,
   attachments,
   dim,

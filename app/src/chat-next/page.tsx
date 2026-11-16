@@ -14,8 +14,11 @@ import { useSearchParams } from "react-router"
 
 import { Refusal } from "@/components/banner"
 import { PointChips } from "@/components/chat/canvas-points"
+import { isPhoto } from "@/lib/attachment-caps"
+import { drawnCell } from "@/lib/media-kind"
 import { Markdown } from "@/components/chat/markdown"
 import { UserBubble } from "@/components/chat/user-bubble"
+import { SentAttachments } from "@/components/chat/message-item"
 import { ThreadRefusal } from "@/components/chat/session-cards"
 import { ReminderRow } from "@/components/chat/reminder-row"
 import { stopSubagents } from "@/lib/agents"
@@ -407,6 +410,8 @@ function ApprovalCard({
 export interface ThreadViewProps {
   server: Connection
   session: string
+  /** The chat this thread is, which is what a row's media is asked for by; none on the dev route. */
+  chatId?: string
   turns: Turn[]
   /** The last turn is still being written, by this device or one the page follows. */
   streaming: boolean
@@ -467,28 +472,35 @@ interface SendOptions extends SendHow {
 }
 
 function HeldRow({
+  chatId,
   marker,
   text,
-  files,
+  attachments,
   points = [],
   children,
 }: {
+  chatId?: string
   marker: "unsent" | "queued"
   text: string
-  files: string[]
+  attachments: Attachment[]
   /** The elements the message points at, read off the marker lines under its words. */
   points?: CanvasPoint[]
   children: ReactNode
 }) {
+  const media = attachments.filter((file) => drawnCell(file.type, file.name) !== "file")
+  const others = attachments.filter((file) => drawnCell(file.type, file.name) === "file")
   return (
     <div
       {...(marker === "unsent" ? { "data-unsent": true } : { "data-queued": true })}
       className="ml-auto w-fit max-w-[85%] space-y-1 text-right"
     >
       <PointChips points={points} />
-      {files.length ? (
+      {media.length && chatId ? (
+        <SentAttachments conversationId={chatId} attachments={media} dim />
+      ) : null}
+      {others.length || (media.length && !chatId) ? (
         <p data-held-files className="text-xs text-muted-foreground">
-          {files.join(", ")}
+          {(chatId ? others : attachments).map((file) => file.name).join(", ")}
         </p>
       ) : null}
       {text ? (
@@ -506,6 +518,7 @@ function HeldRow({
 
 /** chat-next's own markup: the dev route's, and the one its tests read. */
 function PlainView({
+  chatId,
   turns,
   cards,
   goals,
@@ -572,9 +585,10 @@ function PlainView({
         return (
           <HeldRow
             key={row.id}
+            chatId={chatId}
             marker="unsent"
             text={held.text}
-            files={row.attachments.map((file) => file.name)}
+            attachments={row.attachments}
             points={held.points}
           >
             <span data-unsent-state>{NOT_SENT}</span>
@@ -597,9 +611,14 @@ function PlainView({
         return (
           <HeldRow
             key={item.id}
+            chatId={chatId}
             marker="queued"
             text={held.text}
-            files={item.files}
+            attachments={item.files.map((file, at): Attachment => ({
+              id: `queued-${item.id}-${at}`,
+              ...file,
+              image: isPhoto(file.type),
+            }))}
             points={held.points}
           >
             <span data-queued-state>{item.error ?? "Queued"}</span>
@@ -679,6 +698,11 @@ export interface ComposerControls {
 }
 
 interface ThreadOptions {
+  /**
+   * The chat this thread is, where the caller knows it: a row's media is asked for by it. A dev
+   * route drawn by a session alone has none, and its held rows name their files instead.
+   */
+  chatId?: string
   /** Builds a turn as the app sends one; without it, the message is posted as plain text. */
   /** `at` is when the reader sent it, which a thread's first turn is stamped with. */
   prepareTurn?: (text: string, attachments: Attachment[], at?: number) => Promise<PreparedTurn>
@@ -733,6 +757,7 @@ export function ChatNextPage(options: ThreadOptions) {
  * `/v1` or not.
  */
 export function ChatNextThread({
+  chatId,
   pollMs = CHAT_POLL_MS,
   idleMs = CHAT_IDLE_MS,
   stallMs = STALL_MS,
@@ -1845,6 +1870,7 @@ export function ChatNextThread({
       <View
         server={{ server, key }}
         session={session}
+        {...(chatId ? { chatId } : {})}
         turns={turns}
         streaming={doing.running || following}
         cards={cards}

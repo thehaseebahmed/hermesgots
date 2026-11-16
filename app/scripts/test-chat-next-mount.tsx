@@ -28,6 +28,7 @@ import {
   leave,
   missing,
   mount,
+  paste,
   sendPress,
   seedChats,
   settle,
@@ -367,6 +368,20 @@ test("a message sent mid-reply goes to the plugin's queue and runs once the repl
       "both turns are drawn, in order",
     )
     await until(() => find("[data-queued]") === null, "and nothing is left waiting")
+  })
+})
+
+test("a photo queued mid-reply is drawn where it waits, not named", async () => {
+  const { host } = await onChatNext("c-queue-photo", {}, { plugin: true, host: { uploads: true } })
+  await mount(chatScreen("c-queue-photo"), async () => {
+    await midReply(host, "First question")
+    await paste([new File([new Uint8Array(24)], "photo.png", { type: "image/png" })])
+    await sendPress()
+    await until(() => host.queue.length === 1, "the plugin holds the message")
+    await until(
+      () => Boolean(find('[data-queued] button[aria-label="Open photo.png"]')),
+      "the photo is drawn in the message that waits",
+    )
   })
 })
 
