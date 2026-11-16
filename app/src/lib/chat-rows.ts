@@ -5,8 +5,10 @@
  * rule lives here and both ask it (`routes/bot-chats.tsx`, `useBotSummaries` in `threads.ts`).
  *
  * It is also the one place a chat is judged a row at all: a chat nothing has been said in is no row
- * until it holds a word or a draft (`isListed` in `chat-list.ts`, ADR 0158), so the list and the
- * sidebar's preview cannot disagree about which chats a bot has.
+ * until it holds a word or a draft (`isListed` in `chat-list.ts`, ADR 0158), so the list, the
+ * sidebar's preview and the legacy bands cannot disagree about which chats a bot has — the legacy
+ * sidebar runs its own query and hands the records here (`listingChats`), since a rule written twice
+ * is a rule that parts ways.
  *
  * Rooms are not these rows: a room belongs to its Host and lists in every bot its roster seats, so
  * each screen merges the rooms it seats itself (ADR 0115).
@@ -56,24 +58,32 @@ async function spokenChats(ids: readonly string[]): Promise<Set<string>> {
 }
 
 /**
- * The chats this bot's list draws, newest first: every chat it has, less the ones nothing has been said
- * in and no draft is holding (ADR 0158). The rule is asked of each record first, and the rows it would
- * drop are then asked of this device — their drafts in one read and their messages in one more — since
- * a chat this device holds a typed word or a message for has started.
+ * The chats among these that a list draws: the rule asked of each record first, and the rows it would
+ * drop then asked of this device — their drafts in one read and their messages in one more — since a
+ * chat this device holds a typed word or a message for has started (ADR 0158).
  *
- * Both reads are inside the live query's own run, so `db.drafts` (and `db.messages`) are dependencies of
+ * It takes the records a screen has already queried, so a screen with a query of its own — the legacy
+ * sidebar's Recents — applies the same rule and the same two reads instead of growing a copy of them.
+ * Both reads happen in the caller's live query, so `db.drafts` (and `db.messages`) are dependencies of
  * it: a draft landing or being cleared wakes the list, which is what makes the row appear and go.
  */
-export async function readListedChats(profileId: string): Promise<Conversation[]> {
-  const chats = await readBotChats(profileId)
+export async function listingChats(chats: readonly Conversation[]): Promise<Conversation[]> {
   const doubted = chats.filter((chat) => !isListed(chat, false))
-  if (!doubted.length) return chats
+  if (!doubted.length) return [...chats]
   const unsent = await unsentAmong(doubted.map((chat) => draftKey(chat.id)))
   const spoken = await spokenChats(doubted.map((chat) => chat.id))
   const dropped = new Set(doubted.map((chat) => chat.id))
   return chats.filter(
     (chat) => !dropped.has(chat.id) || unsent.has(draftKey(chat.id)) || spoken.has(chat.id),
   )
+}
+
+/**
+ * The chats this bot's list draws, newest first: every chat it has, less the ones nothing has been said
+ * in and no draft is holding (ADR 0158) — `listingChats`' rule, over this bot's own query.
+ */
+export async function readListedChats(profileId: string): Promise<Conversation[]> {
+  return listingChats(await readBotChats(profileId))
 }
 
 /**

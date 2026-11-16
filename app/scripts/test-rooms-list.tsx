@@ -878,6 +878,42 @@ test("Rooms ranks a room by the list's own rule, and offers no order of its own"
   })
 })
 
+test("the Rooms band keeps the list's order with a pin", async () => {
+  // A pinned row's place is when the pin was made, not its own clock: the earliest pin on top and
+  // the last at the bottom of the group, whoever has spoken most recently (G1) — so the band reads
+  // the order the bot's list reads. A pin written before the app kept a clock reads as the earliest
+  // and keeps the top of the group, which is what spares every stored pin a migration.
+  await fresh()
+  const at = (offset: number) => LAST_AT + offset
+  await db.conversations.bulkPut(
+    [
+      { id: "room-early", offset: 5_000, pinned: true },
+      { id: "room-second", offset: 10_000, pinned: true, pinnedAt: at(10) },
+      { id: "room-third", offset: 20_000, pinned: true, pinnedAt: at(20) },
+      { id: "room-open", offset: 40_000 },
+    ].map(({ id, offset, pinned, pinnedAt }) => ({
+      id,
+      profileId: CARRIER,
+      title: id,
+      room: { id, members: [] },
+      createdAt: at(offset - 1_000),
+      updatedAt: at(offset),
+      changedAt: at(offset),
+      ...(pinned ? { pinned: true } : {}),
+      ...(pinnedAt !== undefined ? { pinnedAt } : {}),
+    })),
+  )
+  await settle()
+  await mount(screen("/"), async () => {
+    await until(async () => band("rooms").length === 4, "all four rooms")
+    assert.deepEqual(
+      band("rooms"),
+      ["/c/room-early", "/c/room-second", "/c/room-third", "/c/room-open"],
+      "the pins by the order they were made, and the room nobody pinned under them",
+    )
+  })
+})
+
 /**
  * A room's marks are the reader's, and the Host's room has no field to keep them in (ADR 0121), so
  * they travel as one record of their own in the Host's chat store, under the room's id, and the

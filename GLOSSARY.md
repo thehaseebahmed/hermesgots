@@ -244,6 +244,10 @@ _Avoid_: thread, Main, bot chat, "the bot's screen"
 A chat-next chat with no record yet: the bot's face, an empty thread and the composer, whose first send makes the chat and hands the message to the thread that draws it (ADR 0111). It is the legacy layout's New chat as much as the bot layout's, and its first send makes the chat either way.
 _Avoid_: new chat screen, draft chat, empty chat
 
+**Unstarted chat**:
+A chat's record nothing has been said in: its clock never moved past the one it was made at, and it holds no saved draft, no unsent text and no message. A New chat press mints one, because the screen it opens needs an address. It is no row of any list until it starts — not the bot's, not the sidebar's count, not the legacy bands — and it starts with the first word sent, or with the first draft or half-typed line kept in it. Nothing is deleted and no screen closes while it waits (ADR 0158).
+_Avoid_: empty chat, new chat, phantom chat
+
 **Steer**:
 A message the user sends into a run already under way, drawn where it reached the agent: the user's own bubble, splitting the reply's work at that point, with "Steered" muted under it. The words are the user's, so the bubble is theirs; the caption is the one thing saying they arrived mid-run rather than as a new message.
 _Avoid_: interrupt, injection, mid-run message
@@ -301,8 +305,16 @@ The model a chat keeps, fixed at its first send: the model in effect then — th
 _Avoid_: lock, freeze, sticky model
 
 **Pinned**:
-A session held above the Code list's status groups, in a band of its own: positional and personal, it changes nothing about the session — not its state, not the model it runs, not whether anything sweeps it — and it leaves the group its claim would put it in rather than being drawn twice. It outlives the session changing state, it is ordered by the list's own sort, and a search or a project chip drops the band with the other headers. A project carries the same word in the project list, where it means the same thing — a place above the list rather than a claim about the item — though that list orders its pins by when they were pinned and the Code list orders them by the sort the reader picked. A chat carries the word on its own record, so a pin travels to every device and lifts that chat above the newer ones in its bot's list; a room's pin is the device's alone (ADR 0121).
+A session held above the Code list's status groups, in a band of its own: positional and personal, it changes nothing about the session — not its state, not the model it runs, not whether anything sweeps it — and it leaves the group its claim would put it in rather than being drawn twice. It outlives the session changing state, it is ordered by the list's own sort, and a search or a project chip drops the band with the other headers. A project carries the same word in the project list, where it means the same thing — a place above the list rather than a claim about the item — though that list orders its pins by when they were pinned and the Code list orders them by the sort the reader picked. A chat carries the word on its own record, so a pin travels to every device and lifts that chat above the newer ones in its bot's list, where the pinned group reads the order the pins were made and holds five; a room and a routine's run carry it too, a room's through a record of its own in the bot's chat store (ADR 0157).
 _Avoid_: favourite, star, bookmark, sticky
+
+**Marks**:
+A row's own pin and archive together, as the reader left them, and the clock they were left at — the only two things about a row that are the reader's rather than the conversation's. A chat's and a run's ride their own record, so they sync with it; a room's are posted into the bot's chat store as a record of their own and laid over the room where it is projected, because the Host's room has no field for either (ADR 0157). A mark is a whole answer, so a record always names both: an absent one would read as silence, and an unpin or an unarchive would never travel.
+_Avoid_: flags, state, settings
+
+**Archived**:
+A row the reader has put away: it keeps its record and its words, and it is kept by no pill but **Archived**, which stands straight after Unread in a bot's list. It leaves the search with the other pills, the sidebar's preview and unread count, and the legacy layout's bands, and nothing else changes about it — it is not deleted, nothing is swept early, and a chat that answers while archived says nothing anywhere. Archiving clears a pin in the same write, since a pin behind the pill could not be turned off from any list.
+_Avoid_: hidden, deleted, muted, put away, snoozed
 
 **Model change**:
 The host's record of the models a chat's calls ran on, one row per change. A thread's divider is drawn from these, wherever they name a turn; where they don't — the newest turn, or one still being written — the model this device sent it with stands until the host has recorded the call.
@@ -453,7 +465,7 @@ The bar of floating controls a list keeps at the foot of its scroll, above the s
 _Avoid_: bottom bar, FAB row, dock
 
 **Filter**:
-One of the pills that narrow a list. A bot's chat list wears All, Unread, Chats, Rooms and Routines in the **bar** under its title row — under the search where there is one — and the one pressed is remembered on this device, with All what a device that never chose opens on; Chats is a row that is neither a room nor a routine's run, and Unread is the same mark this device's read dot reads. A bot's **Skills tab** wears All and its **skill categories** instead, drawn in the tab's own flow rather than pinned to a header, forgotten when the tab is left, and each one holding at least one skill by construction — so the tab's only "nothing here" is the search's. Either way a filter only narrows and never re-orders.
+One of the pills that narrow a list. A bot's chat list wears All, Unread, Archived, Chats, Rooms and Routines in the **bar** under its title row — under the search where there is one — and the one pressed is remembered on this device, with All what a device that never chose opens on; Chats is a row that is neither a room nor a routine's run, Unread is the same mark this device's read dot reads, and Archived is the one pill a row the reader put away is kept by, so All's own list is the rows nobody archived. A bot's **Skills tab** wears All and its **skill categories** instead, drawn in the tab's own flow rather than pinned to a header, forgotten when the tab is left, and each one holding at least one skill by construction — so the tab's only "nothing here" is the search's. Either way a filter only narrows and never re-orders.
 _Avoid_: tab, segment, tag
 
 **Tell**:

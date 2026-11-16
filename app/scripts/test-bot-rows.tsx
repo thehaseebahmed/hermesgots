@@ -15,6 +15,7 @@ import {
   find,
   findAll,
   json,
+  missing,
   mount,
   Path,
   path,
@@ -367,5 +368,119 @@ test("a bot turned off in Gots takes its chats out of Recents", async () => {
   await mount(screen("/"), async () => {
     await until(async () => Boolean(find('a[href="/c/kept"]')), "the kept chat's row")
     absent('a[href="/c/off"]', "a turned-off bot's row is not in Recents")
+  })
+})
+
+/** The chats one band of the legacy sidebar drew, by the address each one leads to. */
+const band = (name: string) =>
+  findAll(`[data-band="${name}"] a[href^="/c/"]`).map((row) => row.getAttribute("href"))
+
+/**
+ * The legacy layout over the chats a case wants, written straight to the device: that layout has no
+ * bot list, so every row of it is a chat here. A chat nothing was said in carries one clock at both
+ * its ends, exactly as the New chat press mints one.
+ */
+async function legacyChats(
+  chats: {
+    id: string
+    at: number
+    created?: number
+    archived?: boolean
+    pinned?: boolean
+    pinnedAt?: number
+  }[],
+) {
+  await seedSettings({ developer: true, legacyChat: true, activeProfileId: bot.id })
+  await db.profiles.clear()
+  await db.profiles.put(bot)
+  await db.messages.clear()
+  await db.drafts.clear()
+  await db.conversations.clear()
+  await db.conversations.bulkPut(
+    chats.map(({ id, at, created = at - 1, archived, pinned, pinnedAt }) => ({
+      id,
+      profileId: bot.id,
+      title: id,
+      hermesSessionId: `gots-${id}`,
+      createdAt: created,
+      updatedAt: at,
+      changedAt: at,
+      ...(archived ? { archived: true } : {}),
+      ...(pinned || pinnedAt !== undefined ? { pinned: true } : {}),
+      ...(pinnedAt !== undefined ? { pinnedAt } : {}),
+    })),
+  )
+  globalThis.fetch = async () => json({})
+}
+
+test("an archived chat is in no band, an unstarted one is in no band", async () => {
+  // The Archived pill is the only place an archived row stands (G2), and the legacy bands hold no
+  // pill: a row here would be one nothing could bring back. A chat nothing was said in and no draft
+  // holds is no row of any list (ADR 0158), this one included — the rule and its reads are the bot's
+  // list's, which is why the sidebar asks that reader rather than growing its own.
+  await legacyChats([
+    { id: "said", at: 500 },
+    // A pin an archived row kept through a merge: out of the pinned band too, since it is no band's.
+    { id: "set-aside", at: 900, archived: true, pinnedAt: 800 },
+    { id: "unstarted", at: 1_000, created: 1_000 },
+  ])
+  await mount(screen("/"), async () => {
+    await until(async () => band("recents").includes("/c/said"), "the chat that was spoken in")
+    // The archived pin first, so a red run names the archive rather than only the chat beside it.
+    assert.deepEqual(band("pinned"), [], "an archived pin is no pin in a layout with no pill")
+    assert.deepEqual(
+      band("recents"),
+      ["/c/said"],
+      "and a chat nothing was said in is no band's row",
+    )
+  })
+})
+
+test("an unstarted chat holding a draft is still a row of Recents", async () => {
+  // The rule drops a chat nothing was said in, not one the reader is in the middle of: a saved draft
+  // is what keeps it, and the sidebar reads drafts the same way the bot's list does.
+  await legacyChats([{ id: "typing", at: 1_000, created: 1_000 }])
+  await db.drafts.put({ id: "c:typing", text: "Three words", at: 1_000 })
+  await mount(screen("/"), async () => {
+    await until(
+      async () => band("recents").includes("/c/typing"),
+      "the chat this device is holding words for",
+    )
+  })
+})
+
+test("the pinned band reads the order the pins were made in, not each chat's clock", async () => {
+  // A pin's place is when it was made (G1), so the band above Recents is ranked by that: the earlier
+  // pin on top even though its chat has said less recently, and a pin written before the app kept a
+  // clock reading as the earliest. The unpinned band keeps the list's own rule, newest first.
+  await legacyChats([
+    { id: "pinned-first", at: 500, pinned: true },
+    { id: "pinned-second", at: 900, pinnedAt: 700 },
+    { id: "spoken-latest", at: 1_000 },
+  ])
+  await mount(screen("/"), async () => {
+    await until(async () => band("pinned").length === 2, "both pinned chats")
+    assert.deepEqual(
+      band("pinned"),
+      ["/c/pinned-first", "/c/pinned-second"],
+      "the pins in the order they were made",
+    )
+    assert.deepEqual(
+      band("recents"),
+      ["/c/spoken-latest"],
+      "and the unpinned chat by its own clock",
+    )
+  })
+})
+
+test("the legacy layout's sheet offers no Archive, since no pill here could hold the row", async () => {
+  // Archive is drawn only where the Archived pill is (ADR 0158's sibling rule): on this layout a press
+  // would take the row out of every band with no way back, so the sheet offers the pin and no archive.
+  await legacyChats([{ id: "no-way-back", at: 500 }])
+  await mount(screen("/c/no-way-back"), async () => {
+    await until(async () => Boolean(find("[data-chat-settings-open]")), "the chat's bar")
+    await click(find("[data-chat-settings-open]"))
+    await until(async () => Boolean(find("[data-chat-pin]")), "the sheet")
+    assert.equal(missing("[data-chat-archive]"), true, "no Archive, and so no one-way door")
   })
 })
