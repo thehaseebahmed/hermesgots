@@ -158,9 +158,9 @@ await flow(
     // is not drawn there at all.
     await flip("edit").click()
     await page.waitForURL(new RegExp(`/canvas/${id}/edit$`), { timeout: 20_000 })
-    // The flip stands on the page's own entry rather than pushing a second one: the chat's back
-    // draws the page where it already is, so the one canvas keeps one entry and its head's way back
-    // lands on the list instead of on the screen it is already showing (ADR 0130).
+    // The flip stands on the page's own entry rather than pushing a second one: the page is the
+    // corner's way back, not a step, so the one canvas keeps one entry and the head's way back leaves
+    // for the list instead of landing on the screen the chat was flipped from (ADR 0130).
     assert.equal(
       await page.evaluate(() => window.history.state?.idx ?? 0),
       1,
