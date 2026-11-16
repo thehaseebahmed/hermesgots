@@ -631,6 +631,8 @@ export interface Attachment {
 export interface Steer {
   id: string
   text: string
+  /** The files it was sent with, where it carried any. */
+  files?: Attachment[]
   /** Where in the reply's text it was sent, so it sits there in the thread. */
   contentOffset: number
   /** Calls drawn above it, as a compaction's seam counts them; absent before the app kept one. */
@@ -1021,6 +1023,13 @@ export interface SessionState {
   live?: LiveTurn
   /** What the turns this device watched cost, by the id of the row that opened each. */
   stats?: Record<string, MessageStats>
+  /**
+   * What a run this device followed failed with, by the id of the row that opened the turn: the
+   * host's own account of it — a provider refusing the key, a usage limit reached — which its
+   * transcript notice does not carry. Kept on the device so a thread reopened on this one still
+   * reads why the turn failed.
+   */
+  failures?: Record<string, string>
   /** What the plugin holds for the session, as it last listed it. */
   queue?: { items: Queued[]; paused: boolean }
   /** Messages a send could not get to the host, kept until one is sent again or taken back. */

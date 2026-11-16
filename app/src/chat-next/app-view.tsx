@@ -19,7 +19,7 @@ import { CODE_FACE, CodeFaceProvider } from "@/components/chat/code-face"
 import { EmptyChatState } from "@/components/chat/empty-states"
 import { Markdown } from "@/components/chat/markdown"
 import { PointChips } from "@/components/chat/canvas-points"
-import { MessageItem } from "@/components/chat/message-item"
+import { MessageItem, SentAttachments } from "@/components/chat/message-item"
 import { FollowAfterApproval, FollowOnSend } from "@/components/chat/follow"
 import { useFirstRows } from "@/components/chat/first-rows"
 import { Compacted, ModelChange } from "@/components/chat/model-change"
@@ -39,6 +39,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { AgentsContext, runningAgents, type AgentsSource } from "@/lib/agents"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
+import { isPhoto } from "@/lib/attachment-caps"
 import { chatFlow } from "@/lib/chat-flow"
 import { markRequest } from "@/lib/request-text"
 import { compactionMarks } from "@/lib/compactions"
@@ -348,7 +349,15 @@ export function AppThreadView({
                       >
                         <PointChips points={held.points} />
                         {item.files.length > 0 && (
-                          <p className="text-xs text-muted-foreground">{item.files.join(", ")}</p>
+                          <SentAttachments
+                            conversationId={chatId}
+                            attachments={item.files.map((file, at) => ({
+                              id: `queued-${item.id}-${at}`,
+                              ...file,
+                              image: isPhoto(file.type),
+                            }))}
+                            dim
+                          />
                         )}
                         {held.text && (
                           <div className="max-w-[85%] rounded-3xl bg-muted px-4 py-2.5 whitespace-pre-wrap opacity-60">
@@ -540,7 +549,7 @@ export function AppChatNextThread({
   return (
     <CodeFaceProvider value={code ? CODE_FACE : undefined}>
       <ChatOf.Provider value={chat}>
-        <ChatNextThread {...props} View={AppThreadView} Prompt={AppPrompt} />
+        <ChatNextThread {...props} chatId={chatId} View={AppThreadView} Prompt={AppPrompt} />
       </ChatOf.Provider>
     </CodeFaceProvider>
   )

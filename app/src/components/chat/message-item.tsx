@@ -271,7 +271,7 @@ function Stats({ message }: { message: Message }) {
  * face with a retry after a read that failed — and only a file the Previewer can't show is a row.
  * A kind the host has no copy of is drawn as nothing at all.
  */
-function SentAttachments({
+export function SentAttachments({
   conversationId,
   attachments,
   dim,
@@ -298,6 +298,10 @@ function SentAttachments({
     const one = state(attachment)
     return one?.status === "failed" ? one.note : undefined
   }
+  // A picture the host has not saved yet and this device holds no bytes of — the message that went
+  // before its upload answered — keeps its place with a skeleton, rather than being drawn as nothing.
+  const arriving = (attachment: Attachment) =>
+    !attachment.path && !attachment.blob && Boolean(attachment.image)
   const item = (attachment: Attachment, cell: MediaCell): MediaItem => ({
     key: attachment.id,
     kind: mediaKind(attachment.type, attachment.name),
@@ -307,7 +311,7 @@ function SentAttachments({
     size: attachment.size,
     path: attachment.path,
     src: srcOf(attachment),
-    state: mediaStage(state(attachment)),
+    state: arriving(attachment) ? "reading" : mediaStage(state(attachment)),
     note: note(attachment),
   })
   // A message the host answered nothing for is not drawn; one this device holds the bytes of is,
@@ -316,6 +320,7 @@ function SentAttachments({
     (attachment) =>
       drawnCell(attachment.type, attachment.name) === "file" ||
       attachment.blob !== undefined ||
+      arriving(attachment) ||
       state(attachment)?.status !== "undrawable",
   )
   const download = (one: MediaItem) => {
@@ -339,11 +344,22 @@ function SentAttachments({
 }
 
 /** Something the user steered the reply with, where it reached the agent. */
-function SteerBubble({ text }: { text: string }) {
+function SteerBubble({
+  conversationId,
+  text,
+  attachments,
+}: {
+  conversationId: string
+  text: string
+  attachments?: Attachment[]
+}) {
   const said = steerWords(text)
   return (
     <MessageRow align="end" className={COLUMN}>
       <MessageContent className="items-end gap-1">
+        {attachments?.length ? (
+          <SentAttachments conversationId={conversationId} attachments={attachments} dim />
+        ) : null}
         <UserBubble>{said}</UserBubble>
         <div className="flex items-center gap-1 px-1 text-xs text-muted-foreground">
           <CornerDownRightIcon className="size-3.5" />
@@ -635,7 +651,13 @@ export const MessageItem = memo(function MessageItem({
       offset: steer.contentOffset,
       time: steer.at,
       toolsBefore: steer.toolsBefore,
-      node: <SteerBubble text={steer.text} />,
+      node: (
+        <SteerBubble
+          conversationId={message.conversationId}
+          text={steer.text}
+          attachments={steer.files}
+        />
+      ),
     })
   for (const seam of message.seams ?? []) {
     if (replaced?.has(seam.id)) continue

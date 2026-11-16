@@ -6,6 +6,7 @@ import { Link, Navigate, useLocation, useNavigate, useParams } from "react-route
 import { Bot } from "@/components/bot"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { Chip, ChipRow } from "@/components/chip"
+import { EmptyPane } from "@/components/empty-pane"
 import { ItemRow, pinnedLine } from "@/components/item-list"
 import { SearchField } from "@/components/search-field"
 import { CHATS_SEARCH_FIELD_ID, ListFoot } from "@/components/list-foot"
@@ -61,18 +62,14 @@ export function BotChatsPane({ pane }: { pane: BotPane }) {
 
 /**
  * The item lane with nothing open in it, at the two-pane width: a chat's mark over the words saying
- * so, the two centred on both axes of the lane this fills. The single-pane width has no lane to fill
- * — the list is the screen there — so nothing of this is drawn.
+ * so. The single-pane width has no lane to fill — the list is the screen there — so nothing of this is
+ * drawn.
  */
 function NoChatOpen() {
   return (
-    <div
-      data-slot="bot-chats-empty"
-      className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center"
-    >
-      <MessageCircleIcon aria-hidden className="size-16 text-muted-foreground" />
-      <p className="text-sm text-muted-foreground">No chat selected</p>
-    </div>
+    <EmptyPane icon={MessageCircleIcon} slot="bot-chats-empty">
+      No chat selected
+    </EmptyPane>
   )
 }
 

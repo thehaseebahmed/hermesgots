@@ -11,6 +11,9 @@ its place in the sidebar's Recents across reloads.
 - `chat-drafts` — a composer draft is kept per chat and cleared on send (`drafts`).
 - `chat-failed-send` — a message the host never received stays in the thread marked Failed, to send
   again or drop (`failed-send`).
+- `chat-failed-turn` — a turn the host gave up on reads the run's own reason — a provider's usage
+  limit, a refused key — rather than the one notice it stores in the turn's place for every failure,
+  and the reason survives a reload on the device that watched it (`plain-error`).
 - `chat-reattach` — a reply still streaming when the page reloads picks its run up and finishes
   (`reattach`).
 - `chat-submission` — two sends made at once start one run and get one reply (`submission`).

@@ -1,0 +1,83 @@
+/**
+ * A message sent with a photo: until the host's transcript names the same turn, the row the send drew
+ * is the only copy the thread has, and it must draw the photo as soon as the host has saved it.
+ */
+import assert from "node:assert/strict"
+import test from "node:test"
+import { fakeHost } from "./chat-next-host.ts"
+import {
+  botProfile,
+  chatScreen,
+  composerField,
+  find,
+  mount,
+  seedChats,
+  paste,
+  sendPress,
+  type,
+  until,
+} from "./component-kit.tsx"
+
+const bot = botProfile("hermes")
+const id = "c-sent-photo"
+const pick = { provider: "anthropic", model: "claude-sonnet-5-5" }
+const SOON = 6_000
+
+const cell = () =>
+  find('[data-chat-next] [data-slot="message"] button[aria-label="Open photo.png"]')
+
+const signed = () =>
+  cell()?.querySelector("img")?.getAttribute("src") ?? ""
+
+const pastePhoto = () =>
+  paste([new File([new Uint8Array(24)], "photo.png", { type: "image/png", lastModified: 7 })])
+
+test("a photo the host has not saved yet keeps its place with a skeleton", async () => {
+  await seedChats([{ id, title: "Sky colours" }], {
+    bots: [{ ...bot, baseUrl: `http://${id}.test/v1`, modelChoice: pick }],
+  })
+  const host = fakeHost(`gots-${id}`, { plugin: true, uploads: true })
+  host.hold(0)
+  const upload = host.holdUploads()
+  await mount(chatScreen(id), async () => {
+    await until(async () => Boolean(composerField()), "the app's composer is drawn", SOON)
+    await pastePhoto()
+    await type(composerField(), "what is in this photo?")
+    await sendPress()
+    await until(async () => host.saving.asked > 0, "the host to be asked to save the photo", SOON)
+    assert.ok(
+      find('[data-chat-next] [data-slot="message"] [data-slot="skeleton"]'),
+      "the message keeps the photo's place while the host saves it",
+    )
+    upload.release()
+    await until(async () => cell() !== null, "the photo's cell once the host has it", SOON)
+  })
+})
+
+test("a photo sent with a message draws while the host's transcript is still out", async () => {
+  await seedChats([{ id, title: "Sky colours" }], {
+    bots: [{ ...bot, baseUrl: `http://${id}.test/v1`, modelChoice: pick }],
+  })
+  const host = fakeHost(`gots-${id}`, { plugin: true, uploads: true })
+  const transcript = host.hold(0)
+  await mount(chatScreen(id), async () => {
+    await until(async () => Boolean(composerField()), "the app's composer is drawn", SOON)
+    await pastePhoto()
+    await type(composerField(), "what is in this photo?")
+    await sendPress()
+    await until(async () => host.saved.length > 0, "the host to save the photo", SOON)
+    assert.equal(host.saved[0].name, "photo.png", "the file the message carried")
+    assert.equal(host.saved[0].size, 24, "with the bytes it was sent with")
+    await until(
+      async () => cell() !== null,
+      "the photo's cell on the message, before the host's transcript names the turn",
+      SOON,
+    )
+    const path = host.saved[0].path
+    await until(
+      async () => signed().includes(encodeURIComponent(path)),
+      "the photo's cell to draw from the path the host saved it at",
+      SOON,
+    )
+  })
+})

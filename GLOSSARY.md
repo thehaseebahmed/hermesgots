@@ -793,7 +793,7 @@ The screen a canvas opens on: its page drawn in its frame, and on a wide screen 
 _Avoid_: viewer, canvas view, page mode
 
 **Canvas edit screen**:
-A page of its own that holds a canvas's session and nothing else, opened from the Edit control in a canvas's header and left by its Preview control or by back. A phone has no room for the page and its session together, so that is where they are talked to; on a wide screen the session sits beside the page instead and there is no edit screen.
+A page of its own that holds a canvas's session and nothing else, opened from the Edit control in a canvas's header and left by the head's leading control — a step back to the canvas list where the list opened it, the drawer where the app opened the canvas directly and the sidebar is collapsed behind one, and nothing where the sidebar stands beside it — with a back press making that same move; its Preview control opens the page this chat edits. A phone has no room for the page and its session together, so that is where they are talked to; on a wide screen the session sits beside the page instead and there is no edit screen.
 _Avoid_: edit mode, drawer, sheet, full-screen chat
 
 **Version**:

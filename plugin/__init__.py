@@ -46,6 +46,7 @@ from . import (
     dictations,
     meetings,
     events,
+    failures,
     general,
     github,
     host_model,
@@ -678,6 +679,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "fallbacks",
                     "delegation_model",
                     "queue",
+                    # What a chat's last failed turn ended with, kept for a device that never
+                    # watched the run (failures.py, ADR 0157): the app reads the reason rather than
+                    # the notice the transcript holds.
+                    "failed_turn_reason",
                     # The queue Hermes itself holds for a session, and the turn a restart lost
                     # (pending.py): what waits there is drawn in the chat, and the lost turn is
                     # discarded from it — the TUI's `/discard`, which the app otherwise needs the
@@ -1706,6 +1711,28 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             {"object": "gots.agents_stop", "session_id": session_id, **found}
         )
 
+    async def session_failure(request: "web.Request") -> "web.Response":
+        """What the session's last failed run ended with, for a device that never watched it.
+
+        Hermes writes one notice for every failed turn and keeps the provider's words out, so a chat
+        opened elsewhere — or the next morning — reads the reason from here instead
+        (``failures.py``, ADR 0157). Never a 404 for an unknown session: the app reads a 404 as a
+        plugin that isn't there.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        session_id = request.match_info["session_id"]
+        found = await asyncio.to_thread(failures.read, store_path(), session_id)
+        return web.json_response(
+            {
+                "object": "gots.failure",
+                "session_id": session_id,
+                "text": found["text"] if found else None,
+                "at": found["at"] if found else None,
+            }
+        )
+
     async def session_todos(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -2573,6 +2600,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/context", session_context)
     app.router.add_get(f"{PREFIX}/usage", account_usage)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/todos", session_todos)
+    app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/failure", session_failure)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/agents", session_agents)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/agents/{{agent_id}}/stop", stop_agent)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/agents/stop", stop_agents)
@@ -4018,6 +4046,9 @@ def register(ctx) -> None:
         register_hook("pre_llm_call", sessions.before_llm)
         register_hook("post_llm_call", sessions.after_llm)
         register_hook("on_session_end", sessions.after_run)
+        # What a turn that gave up ended with, kept for every device that opens the chat: the
+        # transcript's notice says nothing of the reason (failures.py, ADR 0157).
+        register_hook("on_session_end", failures.after_run)
         # After the hooks above, so a turn's plan is pending by the time its end is announced.
         register_hook("pre_llm_call", alerts.turn_started)
         register_hook("on_session_end", alerts.turn_finished)

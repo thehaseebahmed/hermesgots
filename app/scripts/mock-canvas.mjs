@@ -576,8 +576,8 @@ export async function handleCanvas(
         opener: prompt,
         at: canvas.at,
       })
-      // The gap is what lets the screen draw version 0 — "your bot is building it" — before the
-      // page lands, with room for a phone to raise its sheet in the meantime.
+      // The gap is what lets a wide screen draw version 0 — the Canvas icon over "Canvas is building…"
+      // — before the page lands, with room for a phone to reach its chat's edit screen in the meantime.
       setTimeout(() => {
         writeVersion(canvas)
         noteEvent("canvas", canvas.session_id)

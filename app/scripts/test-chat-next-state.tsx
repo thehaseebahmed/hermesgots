@@ -1177,3 +1177,32 @@ test("between two questions of one call, the one just answered holds the card's 
   )
   assert.equal(reduce(settled, { type: "between-lapsed" }).between, undefined)
 })
+
+test("a send's saved files land on the message it drew, and on no other", () => {
+  const photo = { name: "photo.png", type: "image/png", size: 24, image: true }
+  const sent = reduce(initial, { type: "sent", user: "look", send: "s1", files: [photo] })
+  const files = (state: ThreadState) => threadTurns(state).at(-1)!.files ?? []
+
+  const saved = reduce(sent, {
+    type: "saved",
+    send: "s1",
+    files: [{ ...photo, path: "/host/photo.png" }],
+  })
+  assert.equal(files(saved)[0].path, "/host/photo.png", "the path the host saved it at")
+
+  assert.equal(
+    reduce(sent, { type: "saved", send: "s2", files: [{ ...photo, path: "/host/other.png" }] }),
+    sent,
+    "another send's files leave this message as it was",
+  )
+  assert.equal(
+    reduce(saved, { type: "saved", send: "s1", files: [{ ...photo, path: "/host/photo.png" }] }),
+    saved,
+    "the same files again write nothing",
+  )
+  assert.equal(
+    reduce(sent, { type: "saved", send: "s1", files: [] }),
+    sent,
+    "an empty list is not the drawn message's to empty",
+  )
+})

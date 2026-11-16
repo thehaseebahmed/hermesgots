@@ -646,6 +646,23 @@ export const composerField = () =>
 export const slashOptions = () => findAll('[role="option"]').map((row) => row.textContent ?? "")
 export const offersCommand = (name: string) => slashOptions().some((row) => row.startsWith(name))
 
+/**
+ * Files pasted into the composer's field, as a reader's clipboard hands them over: the app reads
+ * `clipboardData`'s files and items, so a case gives it both. Nothing is sent.
+ */
+export async function paste(files: File[]) {
+  const field = composerField()
+  assert.ok(field, "the composer's field is on screen")
+  const event = new Event("paste", { bubbles: true, cancelable: true })
+  Object.defineProperty(event, "clipboardData", {
+    value: { files, items: files.map((file) => ({ kind: "file", getAsFile: () => file })) },
+  })
+  await act(async () => {
+    field.dispatchEvent(event)
+  })
+  await settle()
+}
+
 /** One Enter in the composer, answered with its event so a case can read `defaultPrevented`. */
 export async function pressEnter(init: KeyboardEventInit = {}) {
   const event = new KeyboardEvent("keydown", {

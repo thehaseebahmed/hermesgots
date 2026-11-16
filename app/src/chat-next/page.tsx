@@ -10,12 +10,15 @@ import {
   useState,
   useSyncExternalStore,
 } from "react"
-import { useSearchParams } from "react-router"
+import { useLocation, useNavigate, useSearchParams } from "react-router"
 
 import { Refusal } from "@/components/banner"
 import { PointChips } from "@/components/chat/canvas-points"
+import { isPhoto } from "@/lib/attachment-caps"
+import { drawnCell } from "@/lib/media-kind"
 import { Markdown } from "@/components/chat/markdown"
 import { UserBubble } from "@/components/chat/user-bubble"
+import { SentAttachments } from "@/components/chat/message-item"
 import { ThreadRefusal } from "@/components/chat/session-cards"
 import { ReminderRow } from "@/components/chat/reminder-row"
 import { stopSubagents } from "@/lib/agents"
@@ -24,7 +27,7 @@ import type { Attempted } from "@/lib/refusal"
 import { readPace, sendTimeoutMs } from "@/lib/away"
 import type { SummaryRows } from "@/lib/compaction-seam"
 import { connectionKey } from "@/lib/connection"
-import { usePluginFeatureOn } from "@/lib/features"
+import { usePluginFeature, usePluginFeatureOn } from "@/lib/features"
 import { CHAT_IDLE_MS, CHAT_POLL_MS, READ_TIMEOUT_MS, SAFETY_MS } from "@/lib/freshness"
 import { onlineNow } from "@/lib/online"
 import { LOADING_ACTIVITY } from "@/lib/format"
@@ -63,6 +66,7 @@ import {
   readNewest,
   readPage,
   readRun,
+  readSessionFailure,
   readTranscript,
   respond,
   startRun,
@@ -87,6 +91,7 @@ import {
   requestOf,
   sentFileOf,
   type Row,
+  type SentFile,
   type ToolCall,
   type Turn,
 } from "./fold"
@@ -406,6 +411,8 @@ function ApprovalCard({
 export interface ThreadViewProps {
   server: Connection
   session: string
+  /** The chat this thread is, which is what a row's media is asked for by; none on the dev route. */
+  chatId?: string
   turns: Turn[]
   /** The last turn is still being written, by this device or one the page follows. */
   streaming: boolean
@@ -466,28 +473,35 @@ interface SendOptions extends SendHow {
 }
 
 function HeldRow({
+  chatId,
   marker,
   text,
-  files,
+  attachments,
   points = [],
   children,
 }: {
+  chatId?: string
   marker: "unsent" | "queued"
   text: string
-  files: string[]
+  attachments: Attachment[]
   /** The elements the message points at, read off the marker lines under its words. */
   points?: CanvasPoint[]
   children: ReactNode
 }) {
+  const media = attachments.filter((file) => drawnCell(file.type, file.name) !== "file")
+  const others = attachments.filter((file) => drawnCell(file.type, file.name) === "file")
   return (
     <div
       {...(marker === "unsent" ? { "data-unsent": true } : { "data-queued": true })}
       className="ml-auto w-fit max-w-[85%] space-y-1 text-right"
     >
       <PointChips points={points} />
-      {files.length ? (
+      {media.length && chatId ? (
+        <SentAttachments conversationId={chatId} attachments={media} dim />
+      ) : null}
+      {others.length || (media.length && !chatId) ? (
         <p data-held-files className="text-xs text-muted-foreground">
-          {files.join(", ")}
+          {(chatId ? others : attachments).map((file) => file.name).join(", ")}
         </p>
       ) : null}
       {text ? (
@@ -505,6 +519,7 @@ function HeldRow({
 
 /** chat-next's own markup: the dev route's, and the one its tests read. */
 function PlainView({
+  chatId,
   turns,
   cards,
   goals,
@@ -571,9 +586,10 @@ function PlainView({
         return (
           <HeldRow
             key={row.id}
+            chatId={chatId}
             marker="unsent"
             text={held.text}
-            files={row.attachments.map((file) => file.name)}
+            attachments={row.attachments}
             points={held.points}
           >
             <span data-unsent-state>{NOT_SENT}</span>
@@ -596,9 +612,14 @@ function PlainView({
         return (
           <HeldRow
             key={item.id}
+            chatId={chatId}
             marker="queued"
             text={held.text}
-            files={item.files}
+            attachments={item.files.map((file, at): Attachment => ({
+              id: `queued-${item.id}-${at}`,
+              ...file,
+              image: isPhoto(file.type),
+            }))}
             points={held.points}
           >
             <span data-queued-state>{item.error ?? "Queued"}</span>
@@ -677,7 +698,20 @@ export interface ComposerControls {
   runId?: string
 }
 
+/** A message the new chat's surface hands the thread that opens: its words and the files it carried. */
+export interface Handover {
+  /** Its own id, so a thread that mounts twice takes it once. */
+  id: string
+  text: string
+  attachments: Attachment[]
+}
+
 interface ThreadOptions {
+  /**
+   * The chat this thread is, where the caller knows it: a row's media is asked for by it. A dev
+   * route drawn by a session alone has none, and its held rows name their files instead.
+   */
+  chatId?: string
   /** Builds a turn as the app sends one; without it, the message is posted as plain text. */
   /** `at` is when the reader sent it, which a thread's first turn is stamped with. */
   prepareTurn?: (text: string, attachments: Attachment[], at?: number) => Promise<PreparedTurn>
@@ -687,7 +721,10 @@ interface ThreadOptions {
    * Steers the running reply through the plugin's queue; without it, nothing can be steered. Answers
    * whether the reply took it, which is when the thread may draw it.
    */
-  steerTurn?: (text: string, attachments: Attachment[]) => Promise<boolean>
+  steerTurn?: (
+    text: string,
+    attachments: Attachment[],
+  ) => Promise<{ took: boolean; files: SentFile[] }>
   /**
    * Called once the thread has read the host (`opened`), each time a turn has ended (`turn`), and
    * when the page comes back to the foreground and has caught up (`returned`): where the app reads
@@ -732,6 +769,7 @@ export function ChatNextPage(options: ThreadOptions) {
  * `/v1` or not.
  */
 export function ChatNextThread({
+  chatId,
   pollMs = CHAT_POLL_MS,
   idleMs = CHAT_IDLE_MS,
   stallMs = STALL_MS,
@@ -801,10 +839,10 @@ export function ChatNextThread({
   const { turns, origin } = useMemo(() => {
     const next = shared(
       drawn.current.turns,
-      turnsOf(folded, held?.live, doing.waiting, held?.answers),
+      turnsOf(folded, held?.live, doing.waiting, held?.answers, held?.failures),
     )
     return (drawn.current = { turns: next, origin: originOf(drawn.current, next) })
-  }, [folded, held?.live, doing.waiting, held?.answers])
+  }, [folded, held?.live, doing.waiting, held?.answers, held?.failures])
   const offersEarlier = compacted || seamIn(turns)
   const [draft, setDraft] = useState("")
   const [earlier, setEarlier] = useState<"idle" | "reading" | "failed" | "spent">("idle")
@@ -915,6 +953,13 @@ export function ChatNextThread({
    * until the page says otherwise below, once it knows what the thread holds.
    */
   const wants = useRef({ agents: true, queue: true })
+  // Whether this host keeps what its last failed run ended with (failures.py, ADR 0157). Asked until
+  // the host answers "no": a plugin from before the route is what the answer saves a request on, and
+  // the open's own read must not wait for it. Held in a ref, like `wants`: the answer landing must
+  // not rebuild the read that asks, which would restart the page's timer and read the rows again.
+  const keepsFailures = useRef(true)
+  keepsFailures.current =
+    usePluginFeature({ baseUrl: server ?? "", apiKey: key ?? "" }, "failed_turn_reason") !== "no"
   const catchUp = useCallback(
     async function read(final = false, whole = true): Promise<void> {
       if (!server || !key || !session) return
@@ -947,6 +992,13 @@ export function ChatNextThread({
           const holding = askingQueue
             ? readQueue({ server, key }, session, alive.current.signal)
             : undefined
+          // Why the last turn failed, where the host keeps it: a device that never watched the run
+          // — this one opened later, or another — reads the reason rather than the notice the
+          // transcript holds. Asked on the open and again after a turn, which is where one lands.
+          const failing =
+            whole && keepsFailures.current
+              ? readSessionFailure({ server, key }, session, alive.current.signal)
+              : undefined
           // A turn's end reads the whole transcript: rows older than the ones that join what is held
           // can only have changed then, and a read of the newest rows is the cheap one in between.
           const read = final
@@ -975,9 +1027,13 @@ export function ChatNextThread({
             else setOlder("idle")
           }
           firstRows.current?.resolve()
-          const [listed, queued] = await Promise.all([listing, holding])
+          const [listed, queued, failed] = await Promise.all([listing, holding, failing])
           if (asking && !listed) noAgentsUntil.current = Date.now() + AGENTS_COOLDOWN_MS
           if (askingQueue && !queued) noQueueUntil.current = Date.now() + AGENTS_COOLDOWN_MS
+          // What the last failed turn ended with is the host's record of a turn, not this read's
+          // newest page: a read a later one superseded still says it, and the state decides whether
+          // the turn it would explain is that one.
+          if (failed) dispatch({ type: "host-failure", text: failed.text, at: failed.at })
           if (mine === reads.current) {
             if (listed) dispatch({ type: "agents", agents: listed })
             if (queued) dispatch({ type: "queue", ...queued })
@@ -1522,6 +1578,7 @@ export function ChatNextThread({
     streaming.current = true
     const drawn = {
       type: "sent" as const,
+      send: id,
       user: asked.user,
       ...(retry ? { retry: true } : {}),
       ...(asked.points?.length ? { points: asked.points } : {}),
@@ -1533,9 +1590,12 @@ export function ChatNextThread({
     // again leaves it exactly where it was (ADR 0071).
     if (!resend) dispatch(drawn)
     let prepared: PreparedTurn | undefined
+    let saved: SentFile[] = []
     let run: string
     try {
       prepared = prepareTurn ? await prepareTurn(words, attachments, at) : undefined
+      saved = prepared?.sent.map(sentFileOf) ?? []
+      if (!resend && saved.length) dispatch({ type: "saved", send: id, files: saved })
       const posting = {
         signal: alive.current.signal,
         timeoutMs: sendTimeoutMs(away, READ_TIMEOUT_MS),
@@ -1578,7 +1638,12 @@ export function ChatNextThread({
     }
     // The host has taken it: only now does the row leave, and the turn the thread follows draws the
     // message in its place.
-    if (resend) dispatch({ ...drawn, replaces: resend.id })
+    if (resend)
+      dispatch({
+        ...drawn,
+        ...(saved.length ? { files: saved } : {}),
+        replaces: resend.id,
+      })
     prepared?.settled(true)
     void follow(run)
   }
@@ -1588,6 +1653,18 @@ export function ChatNextThread({
     setDraft("")
     await sendTurn(text)
   }
+
+  // A message the new chat's surface handed over: the thread that opens sends it as its first turn,
+  // so the row drawn is this thread's own (ADR 0111). Taken once, and the address forgets it.
+  const navigate = useNavigate()
+  const handed = (useLocation().state as { handover?: Handover } | null)?.handover
+  const takenBy = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (!handed || takenBy.current === handed.id) return
+    takenBy.current = handed.id
+    void sendTurn(handed.text, handed.attachments)
+    navigate(".", { replace: true, state: { quiet: true } })
+  })
 
   function retryUnsent(id: string) {
     const row = store.get().unsent?.find((one) => one.id === id)
@@ -1623,7 +1700,8 @@ export function ChatNextThread({
     if (!steerTurn) throw new Error("This reply can't be steered.")
     // A steer the host took stands in the reply at once: its transcript row lands only when the run
     // reads it. One it refused stays queued, and the queue row is what draws it.
-    if (await steerTurn(text, attachments)) dispatch({ type: "steered", text })
+    const steered = await steerTurn(text, attachments)
+    if (steered.took) dispatch({ type: "steered", text, files: steered.files })
     void catchUp()
   }
 
@@ -1835,6 +1913,7 @@ export function ChatNextThread({
       <View
         server={{ server, key }}
         session={session}
+        {...(chatId ? { chatId } : {})}
         turns={turns}
         streaming={doing.running || following}
         cards={cards}

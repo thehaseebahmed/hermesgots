@@ -63,7 +63,10 @@
 // gives a send a breath rather than a read's fifteen seconds gives up before that answer, and one
 // that sends the same message again under its own idempotency key is given the run it already has.
 // Say "long" for a slow reply, and "fail" for a tool call that fails, or "fail the turn" for a run
-// that ends with an error instead of an answer. Say "tool placement" to replay a real turn whose
+// that ends with an error instead of an answer; "out of usage" is the same ending with a provider's
+// refusal behind it, which the host writes its own notice for in the transcript, so a reader that
+// has only the transcript still sees the turn failed (agent/turn_failure_copy.py). Say "tool
+// placement" to replay a real turn whose
 // tool rows rendered in the wrong place (add "report" for the longer work-log turn):
 // scripts/fixtures/tool-placement.json holds both, with the placement each call really had. Say
 // "marathon" for a turn longer than a transcript page: 40 steps of text and a tool call, quick at
@@ -1610,6 +1613,16 @@ function afkReason(project) {
 }
 
 const RUN_ERROR = "Timed out waiting for https://status.example.com"
+// What Hermes writes in the transcript in place of a turn it gave up on — never the provider's own
+// words, which only the run's ending carries (agent/turn_failure_copy.py's FAILED_TURN_NOTICE).
+// What the host keeps of a chat's last failed run, by session: the plugin's own table
+// (plugin/failures.py), which a device that never watched the run reads instead of the notice.
+const keptFailures = new Map()
+const FAILED_TURN_NOTICE =
+  "Your request was not processed. Send it again if you still want me to carry it out."
+// A provider refusing the turn for a reason of its own: the account's usage window is spent.
+const USAGE_REFUSAL = "You have used up this account's usage for now. It comes back at 14:00 UTC."
+
 
 /** A run as a row of Hermes's cron execution ledger. */
 function ledgerRow(job, run) {
@@ -1975,6 +1988,17 @@ async function lookAtTheDisk(req, out, call) {
 }
 
 /**
+ * A turn the host gave up on before it said anything: the transcript is closed with the host's own
+ * notice — never the provider's words, which ride the run's ending (`said`) alone, as
+ * `agent/turn_failure_copy.py` keeps them apart — so a reader holding only the transcript still sees
+ * the turn failed.
+ */
+function failedTurn(req, said) {
+  record(req, { role: "assistant", content: FAILED_TURN_NOTICE, display_kind: "failed_turn" })
+  return { spoken: "", prompt_tokens: 6000, completion_tokens: 0, failed: said ?? true }
+}
+
+/**
  * The scripted turn behind both endpoints. `out` sends it over the wire: `say` streams a piece of the
  * reply, `status` a status line, `tool` a tool's progress, and `approve` asks and resolves to a choice.
  */
@@ -2112,9 +2136,15 @@ async function playTurn(req, body, last, out) {
   }
 
   // A turn that dies before it says anything, as a host that refuses the call or drops the
-  // connection does: the run ends with an error and the transcript holds no answer.
+  // connection does: the run ends with an error and the transcript holds no answer of its own.
   if (/fail the turn/i.test(last)) {
-    return { spoken: "", prompt_tokens: 6000, completion_tokens: 0, failed: true }
+    return failedTurn(req)
+  }
+
+  // The provider refusing the turn itself — the account's usage is spent — which the host ends as a
+  // failure carrying the provider's words, with its own notice left in the transcript's place.
+  if (/out of usage|usage limit/i.test(last)) {
+    return failedTurn(req, USAGE_REFUSAL)
   }
 
   if (/\bdraw the interface\b/i.test(last)) {
@@ -4006,8 +4036,10 @@ function startRun(req, body, options = {}) {
   }).then(({ spoken, output, prompt_tokens, completion_tokens, failed, wake }) => {
     if (steerPoints.get(run.sessionId)) steerPoints.delete(run.sessionId)
     run.status = run.stopped ? "cancelled" : failed ? "failed" : "completed"
-    if (failed) run.error = "The model provider didn't respond."
+    if (failed) run.error = typeof failed === "string" ? failed : "The model provider didn't respond."
     run.endedAt = Date.now()
+    // The turn's own end keeps what its run failed of, for a device that never watches it.
+    if (failed) keptFailures.set(run.sessionId, { text: run.error, at: Math.floor(run.endedAt / 1000) })
     // A scenario can name the final message alone, as Hermes's `final_response` carries it.
     const final = output ?? spoken
     run.output = final
@@ -4249,6 +4281,9 @@ http
           "delegation_page",
           ...(SKILLS ? ["skills", "skills_write", "skills_remove", "skills_view"] : []),
           "queue",
+          // What a chat's last failed turn ended with, kept for a device that never watched the run
+          // (plugin/failures.py, ADR 0157).
+          "failed_turn_reason",
           // The queue Hermes itself keeps for a session, and the turn a restart lost under it
           // (plugin/pending.py): the card that names it and the one control that clears it.
           "pending",
@@ -5666,6 +5701,17 @@ http
         ? null
         : ([...pool].sort((a, b) => b.used_percent - a.used_percent)[0] ?? null)
       return json(res, 200, { object: "gots.usage", provider, plan: "Pro", windows, deciding })
+    }
+    const sessionFailure = /^\/api\/plugins\/gots\/sessions\/([^/]+)\/failure$/.exec(url.pathname)
+    if (PLUGIN && !profile && req.method === "GET" && sessionFailure) {
+      const id = decodeURIComponent(sessionFailure[1])
+      const kept = keptFailures.get(id)
+      return json(res, 200, {
+        object: "gots.failure",
+        session_id: id,
+        text: kept?.text ?? null,
+        at: kept?.at ?? null,
+      })
     }
     const sessionTodos = /^\/api\/plugins\/gots\/sessions\/([^/]+)\/todos$/.exec(url.pathname)
     if (PLUGIN && !profile && req.method === "GET" && sessionTodos) {
