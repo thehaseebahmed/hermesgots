@@ -53,6 +53,19 @@ export interface ThreadState {
   lastRow?: number
   /** What the turns this device watched cost, by the id of the row that opened each. */
   stats?: Record<string, MessageStats>
+  /**
+   * What a run this device followed failed with, by the id of the row that opened the turn. Hermes
+   * writes one notice for every failed turn and keeps the provider's own words out of the
+   * transcript, so the run's ending is the only place a usage limit or a refused key is said: this
+   * is what draws it in the notice's place, once the row is known.
+   */
+  failures?: Record<string, string>
+  /**
+   * A failure heard before the transcript named the row of its turn, waiting for that row. `watched`
+   * is this page's own run, so the words land on whatever turn the rows end on; without it they came
+   * from the host's record of a failure and explain only a turn the rows already call failed.
+   */
+  pending?: Failure
   /** What the plugin holds for the session, drawn after the thread; none before it has said. */
   queue?: { items: Queued[]; paused: boolean }
   /**
@@ -105,6 +118,18 @@ export interface ThreadState {
    */
   settled?: Settled
   error?: string
+}
+
+/**
+ * What a turn failed of, as this page heard it: the words, and when the host's run ended where it
+ * said. `ThreadState.pending` holds one until the row of its turn is known.
+ */
+export interface Failure {
+  text: string
+  /** When the run ended, in ms, where the host said: a reason older than a turn's own start is another turn's. */
+  at?: number
+  /** This page followed the run, so the words are the turn the stream was writing whatever the rows say. */
+  watched?: boolean
 }
 
 /** The prompt a page has seen settle, with the run that asked it. */
@@ -199,6 +224,11 @@ export type ThreadEvent =
   | { type: "summaries"; summaries?: SummaryRows }
   /** `at` is this device's clock as the event arrived, which a turn it sent is timed by. */
   | { type: "run"; event: RunEvent; at?: number }
+  /**
+   * What the session's last failed run ended with, as the plugin kept it for a device that never
+   * watched it: the reason the transcript's notice does not carry (`failures.py`).
+   */
+  | { type: "host-failure"; text: string; at?: number }
   | { type: "failed"; error: string }
 
 export const initial: ThreadState = {
@@ -427,8 +457,25 @@ export function turnsOf(
   live?: LiveTurn,
   waiting?: Waiting,
   answers?: Record<string, string>,
+  failures?: Record<string, string>,
 ): Turn[] {
-  return withAnswers(drawn(folded, live, waiting), answers)
+  return withFailures(withAnswers(drawn(folded, live, waiting), answers), failures)
+}
+
+/**
+ * The turns with what a run this device followed failed with drawn where the host's notice stands.
+ * Hermes writes one sentence for every failed turn — nothing was processed, try again — and keeps
+ * the provider's own account of it out of the transcript, so a usage limit or a refused key reads
+ * as a turn nobody carried out. Only the turn whose row the failure was heard under takes it, so a
+ * later failure never lends its words to an older turn.
+ */
+function withFailures(turns: Turn[], failures?: Record<string, string>): Turn[] {
+  if (!failures) return turns
+  return turns.map((turn) => {
+    const text = turn.row === undefined ? undefined : failures[turn.row]
+    if (!text || turn.failed?.text === text) return turn
+    return { ...turn, done: true, failed: { text } }
+  })
 }
 
 function drawn(folded: Turn[], live?: LiveTurn, waiting?: Waiting): Turn[] {
@@ -614,6 +661,38 @@ const sameQueue = (a: ThreadState["queue"], b: NonNullable<ThreadState["queue"]>
 const SETTLED = ["approval.settled", "clarify.settled"]
 const ENDINGS = ["run.completed", "run.failed", "run.cancelled", "run.interrupted"]
 
+/**
+ * What a run's failed ending said about itself, or nothing where it said only that it had failed:
+ * Hermes ends a turn as failed with the provider's or the runtime's own words — a usage limit, a
+ * key it refused — and falls back to its own name for the failure where there were none.
+ */
+function failedWith(event: RunEvent): string | undefined {
+  if (event.event !== "run.failed" || typeof event.error !== "string") return undefined
+  const text = event.error.trim()
+  return text && !WORDLESS.has(text.toLowerCase()) ? text : undefined
+}
+
+const WORDLESS = new Set(["agent run failed", "run failed"])
+
+/**
+ * The row a failure goes under, where it is this turn's: the words a page watched are the run that
+ * was writing the turn the stream held, and the host's record explains only a turn the rows already
+ * call failed — and only one that began before that run ended, so an old failure never lands on a
+ * newer turn. The host keeps whole seconds, so a reason stamped in the turn's own second may be the
+ * turn's: only a second strictly before the turn's start rules it out.
+ */
+function landsOn(failure: Failure | undefined, turn: Turn | undefined): number | undefined {
+  if (!failure || !turn || turn.row === undefined) return undefined
+  if (!failure.watched && !turn.failed) return undefined
+  if (
+    failure.at !== undefined &&
+    turn.at !== undefined &&
+    Math.floor(failure.at / 1000) < Math.floor(turn.at / 1000)
+  )
+    return undefined
+  return turn.row
+}
+
 /** The prompt this state is dropping, kept so a status read that still carries it lands nothing. */
 const settledWith = (state: ThreadState): Settled | undefined =>
   state.waiting
@@ -727,6 +806,11 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       if (!rows) return state
       const partial = event.more ?? state.partial
       const last = foldedOf(rows, { ...state, partial }).at(-1)
+      // A failure heard before the transcript named the row of its turn goes under that row now.
+      const pending = state.pending
+      const row = landsOn(pending, last)
+      const failures =
+        pending && row !== undefined ? { ...state.failures, [row]: pending.text } : state.failures
       // A held read takes the rows only when the turn they end on is one the run can be on: a child's
       // delivery or a routine's message landing while it waits is other work, and the streamed turn
       // would be moved onto a turn it never wrote.
@@ -741,6 +825,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         rows.length === state.rows.length &&
         rows.at(-1)?.id === state.rows.at(-1)?.id &&
         live === state.live &&
+        failures === state.failures &&
         (!found || sameQuestions(found, state.questionSet))
       )
         return state
@@ -764,6 +849,8 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         lastRow: last?.row,
         partial: partial ? true : undefined,
         stats,
+        failures,
+        pending: failures === state.failures ? state.pending : undefined,
         running: held && !ended,
         live,
         // A turn that finished waits on nothing. A whole read of a thread whose last turn is still
@@ -803,6 +890,8 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         status: "ready",
         running: true,
         error: undefined,
+        // What the last turn failed of is not this turn's.
+        pending: undefined,
         unsent: kept?.length === state.unsent?.length ? state.unsent : kept,
         live: {
           turn: {
@@ -867,6 +956,8 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         run: event.run,
         running: true,
         waiting,
+        // Nothing was heard of this run's ending yet: the last turn's failure is not its own.
+        pending: undefined,
         questionSet: waiting ? state.questionSet : undefined,
         answeredPrompts: waiting ? state.answeredPrompts : undefined,
         live: last
@@ -976,6 +1067,19 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       const held = state.live
       const turn = held && live(held.turn, event.event, event.at, state.showReminders)
       let moved = held && turn && turn !== held.turn ? { ...held, turn } : held
+      // A run that failed says why in its own ending, and the turn is over: the words go on the turn
+      // now — the only place the host says them — and under its row as soon as the transcript names
+      // one, since the notice it writes in the turn's place carries none of them.
+      const failed = failedWith(event.event)
+      if (failed && moved)
+        moved = {
+          ...moved,
+          turn: { ...moved.turn, done: true, failed: { text: failed } },
+        }
+      const row = failed ? moved?.turn.row : undefined
+      const failures =
+        failed && row !== undefined ? { ...state.failures, [row]: failed } : state.failures
+      const pending = failed && row === undefined ? { text: failed, watched: true } : state.pending
       // The replay is over once it holds what the transcript's copy did, or the run has ended.
       if (moved?.replay) {
         const { calls, chars } = reach(moved.turn)
@@ -991,10 +1095,35 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         sameSettled(settled, state.settled) &&
         questionSet === state.questionSet &&
         answeredPrompts === state.answeredPrompts &&
-        between === state.between
+        between === state.between &&
+        failures === state.failures &&
+        pending === state.pending
       )
         return state
-      return { ...state, waiting, settled, live: moved, questionSet, answeredPrompts, between }
+      return {
+        ...state,
+        waiting,
+        settled,
+        live: moved,
+        questionSet,
+        answeredPrompts,
+        between,
+        failures,
+        pending,
+      }
+    }
+    case "host-failure": {
+      // The host kept what its last failed run ended with. It explains the turn the transcript's
+      // notice stands in, and nothing else: a reason whose own turn isn't the failed one — a later
+      // send that worked, an older failure — is left for a read that finds that turn.
+      const failure: Failure = {
+        text: event.text,
+        ...(event.at !== undefined ? { at: event.at } : {}),
+      }
+      const row = landsOn(failure, foldedOf(state.rows, state).at(-1))
+      if (row === undefined) return { ...state, pending: failure }
+      if (state.failures?.[row] === failure.text) return state
+      return { ...state, pending: undefined, failures: { ...state.failures, [row]: failure.text } }
     }
     case "failed":
       // What this page could not read is not what the host settled.
@@ -1009,4 +1138,4 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
 
 /** The turns a state draws, with the answers the page wrote itself read back on their calls. */
 export const threadTurns = (state: ThreadState) =>
-  turnsOf(foldedOf(state.rows, state), state.live, state.waiting, state.answers)
+  turnsOf(foldedOf(state.rows, state), state.live, state.waiting, state.answers, state.failures)

@@ -1055,6 +1055,66 @@ test("a reply the host wrote with no finish reason is not drawn as still being w
   })
 })
 
+test("a chat opened where the run was never watched reads the reason the host kept", async () => {
+  const { host } = await onChatNext("c-host-failure", {}, { plugin: true })
+  const notice =
+    "Your request was not processed. Send it again if you still want me to carry it out."
+  const said = "You have used up this account's usage for now. It comes back at 14:00 UTC."
+  host.seed([{ user: "Look around", reply: "", failed: notice }])
+  // What the host's own turn end kept of the run, which this device never saw (failures.py).
+  host.keepFailure(said)
+  await mount(chatScreen("c-host-failure"), async () => {
+    await until(() => text().includes(said), "the reason the host kept")
+    assert.ok(!text().includes(notice), "rather than the notice the transcript holds")
+    assert.ok(find("[data-retry]"), "with Retry on the failed turn")
+  })
+  assert.ok(host.asked.failures > 0, "and the host was asked for it")
+})
+
+test("a reason the host kept for another failure leaves a turn that worked alone", async () => {
+  const { host } = await onChatNext("c-stale-failure", {}, { plugin: true })
+  const said = "You have used up this account's usage for now. It comes back at 14:00 UTC."
+  host.seed([{ user: "Look around", reply: "All done.", finished: true }])
+  host.keepFailure(said)
+  await mount(chatScreen("c-stale-failure"), async () => {
+    await until(() => replies().includes("All done."), "the reply is drawn")
+    assert.ok(!text().includes(said), "the reason is not drawn")
+    assert.ok(!find("[role=img][aria-label='Failed']"), "and the turn is not marked failed")
+  })
+})
+
+test("a reason the host stamped in the turn's own second is the turn's", async () => {
+  const { host } = await onChatNext("c-second-failure", {}, { plugin: true })
+  const notice =
+    "Your request was not processed. Send it again if you still want me to carry it out."
+  const said = "You have used up this account's usage for now. It comes back at 14:00 UTC."
+  host.seed([{ user: "Look around", reply: "", failed: notice }])
+  // A request that lands mid-second, as a real one does, and the whole second the host keeps for the
+  // run that failed 446ms later: stamped with that, the reason looks older than the turn it explains
+  // unless the two are compared by the second they fall in.
+  const request = host.rows.find((row) => row.role === "user")!
+  request.timestamp = Math.floor(request.timestamp) + 0.446
+  host.keepFailure(said, Math.floor(request.timestamp))
+  await mount(chatScreen("c-second-failure"), async () => {
+    await until(() => text().includes(said), "the reason of the turn's own second")
+    assert.ok(!text().includes(notice), "rather than the notice")
+  })
+})
+
+test("a reason older than the turn it would explain is left alone", async () => {
+  const { host } = await onChatNext("c-old-failure", {}, { plugin: true })
+  const notice =
+    "Your request was not processed. Send it again if you still want me to carry it out."
+  const said = "You have used up this account's usage for now. It comes back at 14:00 UTC."
+  host.seed([{ user: "Look around", reply: "", failed: notice }])
+  // One second before the request: a failure of something else, which this turn must not wear.
+  host.keepFailure(said, host.rows.find((row) => row.role === "user")!.timestamp - 1)
+  await mount(chatScreen("c-old-failure"), async () => {
+    await until(() => text().includes(notice), "the notice, which is what this turn reads")
+    assert.ok(!text().includes(said), "and never another failure's words")
+  })
+})
+
 test("Retry re-asks the element a failed request pointed at", async () => {
   const { host } = await onChatNext("c-retry-point", {}, { plugin: true })
   const total = { label: "The total", selector: "#total" }
@@ -1086,6 +1146,26 @@ test("a turn the host gave up on is drawn as failed, in the host's words, and no
   await mount(chatScreen("c-failed"), async () => {
     await until(() => text().includes("Your request was not processed."), "the host's words show")
     assert.ok(!writing(text()), "and the turn is at rest")
+  })
+})
+
+test("a provider's refusal reads as itself, not as the notice the host writes in its place", async () => {
+  const { host } = await onChatNext("c-provider")
+  const notice =
+    "Your request was not processed. Send it again if you still want me to carry it out."
+  const said = "You have used up this account's usage for now. It comes back at 14:00 UTC."
+  await mount(chatScreen("c-provider"), async () => {
+    const run = await midReply(host, "Look around")
+    run.fail(notice, said)
+    await until(() => text().includes(said), "the provider's own words, as the run ended with them")
+    assert.ok(!text().includes(notice), "not the host's notice, which says nothing of the reason")
+    assert.ok(find("[data-retry]"), "and the turn offers Retry like any other failure")
+  })
+  // The transcript holds the notice for the turn either way: what the run said is this device's, so
+  // a chat opened again on it reads the reason rather than the notice it was folded under.
+  await mount(chatScreen("c-provider"), async () => {
+    await until(() => text().includes(said), "the reason, on the chat opened again")
+    assert.ok(!text().includes(notice), "still in place of the notice")
   })
 })
 

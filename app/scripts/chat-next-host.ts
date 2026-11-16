@@ -117,8 +117,12 @@ export interface Run {
   say(delta: string): void
   /** The reply ends: its row is written and `run.completed` closes the stream. */
   finish(output: string): void
-  /** The host gives up on the turn, as Hermes does when a provider errors mid-turn. */
-  fail(reason: string): void
+  /**
+   * The host gives up on the turn, as Hermes does when a provider errors mid-turn: `notice` is what
+   * it writes in the turn's place, and `said` — the run's own ending — is where the provider's
+   * words ride, so the two can differ the way Hermes keeps them apart.
+   */
+  fail(notice: string, said?: string): void
 }
 
 /** One open event stream: what it is sent, and the two ways it can end. */
@@ -190,6 +194,7 @@ export function fakeHost(
     withhold = false,
     cooperative = true,
     refuseStops = false,
+    keepsFailures = true,
   }: {
     plugin?: boolean
     uploads?: boolean
@@ -199,6 +204,8 @@ export function fakeHost(
     cooperative?: boolean
     /** Answers every stop with a 500, as a host that cannot carry it out does. */
     refuseStops?: boolean
+    /** Advertises `failed_turn_reason`, and answers what the session's last run failed of. */
+    keepsFailures?: boolean
   } = {},
 ) {
   const rows: Row[] = []
@@ -208,6 +215,13 @@ export function fakeHost(
   let heldRun: Promise<void> | undefined
   const answers: { run: string; prompt_id: string; generation: number; answer: string }[] = []
   const approvals: { run: string; choice: string }[] = []
+  /** What the host kept of the session's last failed run: the plugin's `failure` route answers it. */
+  const keptFailure: { text?: string; at?: number } = {}
+  /** Keeps a failed run's words the way the host's turn end does, under the clock its rows share. */
+  function keepFailure(text: string, at = ++clock) {
+    keptFailure.text = text
+    keptFailure.at = at
+  }
   const asked = {
     transcript: 0,
     archive: 0,
@@ -218,6 +232,7 @@ export function fakeHost(
     agentStops: 0,
     failedTurnClears: 0,
     info: 0,
+    failures: 0,
   }
   /** The offset of each transcript page asked for, in the order the asks came. */
   const offsets: number[] = []
@@ -503,9 +518,11 @@ export function fakeHost(
         push("run.completed", { output, usage: { input_tokens: 1, output_tokens: 1 } })
         end()
       },
-      fail(reason) {
-        write("assistant", reason, { ...reasoning(), ...FAILED_TURN })
-        push("run.failed", { error: reason })
+      fail(notice, said = notice) {
+        write("assistant", notice, { ...reasoning(), ...FAILED_TURN })
+        // The turn's own end keeps what the run failed of, for a device that never watches it.
+        keepFailure(said)
+        push("run.failed", { error: said })
         end()
       },
     }
@@ -693,6 +710,9 @@ export function fakeHost(
           "media",
           "media_url",
           "subagents_stop_all",
+          // What a failed turn ended with, kept by the host for a device that never watched the run
+          // (failures.py): on unless a test says this host is older.
+          ...(keepsFailures ? ["failed_turn_reason"] : []),
           ...(uploads ? ["attachments"] : []),
         ],
       })
@@ -818,6 +838,15 @@ export function fakeHost(
       })
     }
     // The plugin's list of the children a session delegated to.
+    if (plugin && path === `/api/plugins/gots/sessions/${session}/failure`) {
+      asked.failures++
+      return reply({
+        object: "gots.failure",
+        session_id: session,
+        text: keptFailure ? keptFailure.text : null,
+        at: keptFailure ? keptFailure.at : null,
+      })
+    }
     if (plugin && path === `/api/plugins/gots/sessions/${session}/todos`) {
       todos.reads++
       const list = todos.list
@@ -1136,6 +1165,8 @@ export function fakeHost(
     queue,
     workspace,
     todos,
+    keptFailure,
+    keepFailure,
     titled,
     session,
     dropConnections,

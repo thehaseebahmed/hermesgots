@@ -27,7 +27,7 @@ import type { Attempted } from "@/lib/refusal"
 import { readPace, sendTimeoutMs } from "@/lib/away"
 import type { SummaryRows } from "@/lib/compaction-seam"
 import { connectionKey } from "@/lib/connection"
-import { usePluginFeatureOn } from "@/lib/features"
+import { usePluginFeature, usePluginFeatureOn } from "@/lib/features"
 import { CHAT_IDLE_MS, CHAT_POLL_MS, READ_TIMEOUT_MS, SAFETY_MS } from "@/lib/freshness"
 import { onlineNow } from "@/lib/online"
 import { LOADING_ACTIVITY } from "@/lib/format"
@@ -66,6 +66,7 @@ import {
   readNewest,
   readPage,
   readRun,
+  readSessionFailure,
   readTranscript,
   respond,
   startRun,
@@ -838,10 +839,10 @@ export function ChatNextThread({
   const { turns, origin } = useMemo(() => {
     const next = shared(
       drawn.current.turns,
-      turnsOf(folded, held?.live, doing.waiting, held?.answers),
+      turnsOf(folded, held?.live, doing.waiting, held?.answers, held?.failures),
     )
     return (drawn.current = { turns: next, origin: originOf(drawn.current, next) })
-  }, [folded, held?.live, doing.waiting, held?.answers])
+  }, [folded, held?.live, doing.waiting, held?.answers, held?.failures])
   const offersEarlier = compacted || seamIn(turns)
   const [draft, setDraft] = useState("")
   const [earlier, setEarlier] = useState<"idle" | "reading" | "failed" | "spent">("idle")
@@ -952,6 +953,13 @@ export function ChatNextThread({
    * until the page says otherwise below, once it knows what the thread holds.
    */
   const wants = useRef({ agents: true, queue: true })
+  // Whether this host keeps what its last failed run ended with (failures.py, ADR 0157). Asked until
+  // the host answers "no": a plugin from before the route is what the answer saves a request on, and
+  // the open's own read must not wait for it. Held in a ref, like `wants`: the answer landing must
+  // not rebuild the read that asks, which would restart the page's timer and read the rows again.
+  const keepsFailures = useRef(true)
+  keepsFailures.current =
+    usePluginFeature({ baseUrl: server ?? "", apiKey: key ?? "" }, "failed_turn_reason") !== "no"
   const catchUp = useCallback(
     async function read(final = false, whole = true): Promise<void> {
       if (!server || !key || !session) return
@@ -984,6 +992,13 @@ export function ChatNextThread({
           const holding = askingQueue
             ? readQueue({ server, key }, session, alive.current.signal)
             : undefined
+          // Why the last turn failed, where the host keeps it: a device that never watched the run
+          // — this one opened later, or another — reads the reason rather than the notice the
+          // transcript holds. Asked on the open and again after a turn, which is where one lands.
+          const failing =
+            whole && keepsFailures.current
+              ? readSessionFailure({ server, key }, session, alive.current.signal)
+              : undefined
           // A turn's end reads the whole transcript: rows older than the ones that join what is held
           // can only have changed then, and a read of the newest rows is the cheap one in between.
           const read = final
@@ -1012,9 +1027,13 @@ export function ChatNextThread({
             else setOlder("idle")
           }
           firstRows.current?.resolve()
-          const [listed, queued] = await Promise.all([listing, holding])
+          const [listed, queued, failed] = await Promise.all([listing, holding, failing])
           if (asking && !listed) noAgentsUntil.current = Date.now() + AGENTS_COOLDOWN_MS
           if (askingQueue && !queued) noQueueUntil.current = Date.now() + AGENTS_COOLDOWN_MS
+          // What the last failed turn ended with is the host's record of a turn, not this read's
+          // newest page: a read a later one superseded still says it, and the state decides whether
+          // the turn it would explain is that one.
+          if (failed) dispatch({ type: "host-failure", text: failed.text, at: failed.at })
           if (mine === reads.current) {
             if (listed) dispatch({ type: "agents", agents: listed })
             if (queued) dispatch({ type: "queue", ...queued })
