@@ -22,6 +22,15 @@ where the leading control does: back to the list a reader came from, or the app'
 app opened the canvas itself — a sidebar row, a pinned canvas, an address opened cold. The rejected
 alternative below is reversed by this amendment.
 
+**Amended 2026-11-16, on the page that isn't there yet**: a canvas whose bot has not written the
+first version has no page to draw, and the preview says so in an empty state of its own — the frame
+icon the app's Canvas entry wears, at the chat list's own size and tone, centred in the pane over the
+line "Canvas is building…", in the block that pane draws for every line it has to say: reading the
+record, the bot building it, or a bot this device cannot reach. The edit screen says nothing about
+the build. It is the chat, and on a phone it is the only screen a canvas with no version has, so the
+line about the build sat over the only thing that screen draws; a phone therefore never sees the
+empty page, which is what the two addresses already cost.
+
 The edit screen is a phone's. A wide screen already has room for the session in a lane on the left of
 the page — the canvas's header above it in the same column, the page filling the pane to its right —
 so the edit address folds into the canvas's own address there, in place, and no flip is drawn: the

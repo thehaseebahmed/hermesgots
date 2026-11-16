@@ -894,7 +894,7 @@ test(
         () => /isn't on this device, and its bot isn't answering/.test(text()),
         "the away sentence",
       )
-      assert.doesNotMatch(text(), /Your bot is building it…/, "and not the building one")
+      assert.doesNotMatch(text(), /is building/, "and not the building one")
     })
     // Leave the store with a host that answers again, for the rest of the file.
     serveCanvases({ version: 3, undos: 0 })
@@ -919,7 +919,10 @@ test("a canvas with no version opens on Edit and gains Preview when the first ve
         "the canvas to open on its edit address",
       )
       assert.ok(composerField(), "the chat is what that address draws")
-      assert.match(text(), /Your bot is building it…/, "and it says the bot is building it")
+      // The chat says nothing about the build: the empty page is the preview's own to say, and this
+      // screen is where the reader types to the bot (ADR 0130, amended 2026-11-16).
+      assert.doesNotMatch(text(), /is building/, "and says nothing about the build")
+      assert.ok(missing("[data-canvas-empty]"), "no empty page drawn over the chat")
       assert.ok(missing("[data-canvas-flip]"), "with nothing to flip to")
       const drawer = find('[aria-label="Open conversations"]')
       assert.ok(drawer, "the sidebar's button leads the header")
@@ -933,18 +936,54 @@ test("a canvas with no version opens on Edit and gains Preview when the first ve
       host.version = 1
       await act(async () => noteChange(connectionKey(bot), "canvas"))
       await until(() => Boolean(find('[data-canvas-flip="preview"]')), "Preview to appear")
-      assert.doesNotMatch(text(), /Your bot is building it…/)
+      assert.doesNotMatch(text(), /is building/)
     })
   }
   const wide = async () => {
     // A wide screen already has the chat beside the page, so the lane is where a canvas is built:
-    // no address is replaced, and no flip is drawn.
+    // no address is replaced, and no flip is drawn. The page that isn't there yet is the pane's own
+    // empty state — the Canvas entry's icon over the line, as the chat list draws "No chat selected" —
+    // and the edit screen beside it says nothing about the build at all (ADR 0130, amended 2026-11-16).
     serveCanvases({ version: 0, undos: 0, listed: [BUILT] })
     await seedCanvasChat(BUILT)
     await drawCanvas([`/canvas/${BUILT}`], async () => {
       await until(() => Boolean(composerField()), "the lane's chat")
       assert.equal(nav(), `POP:/canvas/${BUILT}`, "a wide screen keeps the canvas's address")
       assert.ok(missing("[data-canvas-flip]"), "and the lane draws no flip")
+      // The chat's own column says nothing about the build: the empty page beside it does.
+      const lane = find("[data-canvas-lane]")!
+      assert.doesNotMatch(
+        lane.textContent ?? "",
+        /is building/,
+        "the chat says nothing about the build",
+      )
+
+      const empty = find("[data-canvas-empty]")
+      assert.ok(empty, "the pane draws its empty state")
+      const icon = empty.querySelector("svg")
+      assert.ok(icon, "with the canvas icon in the middle")
+      assert.match(icon!.getAttribute("class") ?? "", /\bsize-16\b/, "at the chat pane's own size")
+      assert.match(icon!.getAttribute("class") ?? "", /\btext-muted-foreground\b/, "muted")
+      assert.equal(icon!.getAttribute("aria-hidden"), "true", "and read as decoration")
+      assert.match(text(), /Canvas is building…/, "over the words saying what it is doing")
+      assert.ok(
+        icon!.compareDocumentPosition(empty.querySelector("p")!) & Node.DOCUMENT_POSITION_FOLLOWING,
+        "the icon over the line",
+      )
+    })
+
+    // A bot that isn't answering says its own line in that same block, so the pane keeps one shape
+    // whether the build is still out or the host stopped answering. A host that answers nothing at
+    // all is what leaves the canvas's own read unanswered: the preview reads the page, not the list.
+    serveCanvases({ version: 0, undos: 0, failAll: true, listed: [BUILT] })
+    await refreshCanvas(BUILT).catch(() => undefined)
+    await drawCanvas([`/canvas/${BUILT}`], async () => {
+      await until(
+        () => /isn't on this device, and its bot isn't answering/.test(text()),
+        "the away sentence",
+      )
+      assert.ok(find("[data-canvas-empty] svg"), "under the same icon")
+      assert.doesNotMatch(text(), /Canvas is building…/, "and not called a build")
     })
   }
   try {

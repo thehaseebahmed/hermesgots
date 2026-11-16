@@ -49,11 +49,14 @@ await flow(
     // lands on the edit screen, and there is nothing in the header to flip to yet.
     await page.waitForURL(/\/canvas\/c_[^/]+\/edit$/, { timeout: 20_000 })
     const id = new URL(page.url()).pathname.split("/")[2]
-    await page.getByText("Your bot is building it…").waitFor({ timeout: 20_000 })
-    // Both read in one turn of the page, so no later moment can answer for the one it opened at.
+    await page.getByLabel("Message", { exact: true }).waitFor({ timeout: 20_000 })
+    // Both read in one turn of the page, so no later moment can answer for the one it opened at. The
+    // chat is the whole of what this screen draws: the empty page, its icon and its line are the
+    // preview's, and a canvas with no version on a phone has no preview to show them on (ADR 0130).
     const building = await page.evaluate(
       (frame) => ({
-        said: document.body.innerText.includes("Your bot is building it…"),
+        said: document.body.innerText.includes("Canvas is building…"),
+        empty: Boolean(document.querySelector("[data-canvas-empty]")),
         frame: Boolean(document.querySelector(frame)),
         flip: Boolean(document.querySelector('[data-canvas-flip="preview"]')),
       }),
@@ -61,11 +64,11 @@ await flow(
     )
     assert.deepEqual(
       building,
-      { said: true, frame: false, flip: false },
-      "the chat says it is building, with no page and no Preview",
+      { said: false, empty: false, frame: false, flip: false },
+      "the edit screen is the chat alone: nothing about the build, no page and no Preview",
     )
     await shot("edit-building")
-    pass("the edit screen: a canvas made from a prompt lands on its chat, building it")
+    pass("the edit screen: a canvas made from a prompt lands on its chat, with no page and no Preview")
 
     // The first version lands through the live record, so Preview is drawn without a reload, and
     // the flip replaces the chat's entry: the page stands where the chat stood, so the next back
@@ -529,10 +532,63 @@ await flow(
   async ({ page, shot }) => {
     await page.goto(`${app}/canvas`)
     await page.getByRole("textbox", { name: "What the canvas should be" }).fill(PROMPT)
+    // The page that isn't there yet is the pane's own empty state, and it is on screen for one gap
+    // between the start and the first version. A watch takes it at first sight — its words and where
+    // its two parts sit — rather than reading the screen again after the page has landed.
+    await page.evaluate(() => {
+      window.__emptySeen = null
+      const box = (node) => {
+        if (!node) return null
+        const { x, y, width, bottom } = node.getBoundingClientRect()
+        return {
+          x: Math.round(x),
+          y: Math.round(y),
+          width: Math.round(width),
+          bottom: Math.round(bottom),
+          middle: Math.round(x + width / 2),
+        }
+      }
+      const look = () => {
+        const block = document.querySelector("[data-canvas-empty]")
+        const line = block?.querySelector("p")
+        if (!block || !line?.textContent) return
+        window.__emptySeen = {
+          words: line.textContent,
+          icon: box(block.querySelector("svg")),
+          line: box(line),
+          pane: box(document.querySelector("[data-canvas-page]")),
+        }
+        watch.disconnect()
+      }
+      const watch = new MutationObserver(look)
+      watch.observe(document.body, { childList: true, subtree: true })
+      look()
+    })
     await page.getByRole("button", { name: "Make it", exact: true }).click()
     // A wide screen has room for both panes, so a start lands on the canvas's own address and nothing
     // forwards it to the chat's: the lane is already drawn there.
     await page.waitForURL(/\/canvas\/c_[^/]+$/, { timeout: 20_000 })
+    const empty = await (
+      await page.waitForFunction(() => window.__emptySeen, null, { timeout: 20_000 })
+    ).jsonValue()
+    console.log(
+      `wide 1440 — empty page: icon ${empty.icon?.width}px at ${empty.icon?.middle}, ` +
+        `line at ${empty.line?.y} in the pane ${empty.pane?.x}+${empty.pane?.width}`,
+    )
+    assert.equal(empty.words, "Canvas is building…", "an empty page says the canvas is building")
+    assert.equal(empty.icon?.width, 64, "under the Canvas icon, at the chat pane's own size")
+    assert.ok(
+      empty.icon && empty.line && empty.icon.bottom <= empty.line.y,
+      "the icon over the line",
+    )
+    const paneMiddle = empty.pane ? empty.pane.x + empty.pane.width / 2 : null
+    assert.ok(
+      empty.icon && paneMiddle !== null && Math.abs(empty.icon.middle - paneMiddle) <= 2,
+      `both centred in the pane (icon ${empty.icon?.middle} of ${paneMiddle})`,
+    )
+    await shot("wide-building")
+    pass("a wide screen: a canvas with no page says so over its Canvas icon, until the first version lands")
+
     await page.locator(FRAME).waitFor({ timeout: 40_000 })
     await settled(page)
     // One read of the screen, so no two boxes are measured a reflow apart.

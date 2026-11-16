@@ -54,12 +54,25 @@ const MARKED = {
   created_at: 3,
 }
 
+/** A canvas whose bot has not written the first version yet. */
+const BUILDING = {
+  id: "x4",
+  title: "A canvas being built",
+  session_id: "gots-chat-x4",
+  chat_id: "chat-x4",
+  version: 0,
+  pinned: false,
+  archived: false,
+  at: 40,
+  created_at: 4,
+}
+
 function serveCanvases() {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
     if (url.pathname.endsWith("/info")) return json({ version: "0.114.0", features: ["canvas"] })
     if (url.pathname.endsWith("/canvases"))
-      return json({ object: "gots.canvases", canvases: [PICTURED, PLAIN, MARKED] })
+      return json({ object: "gots.canvases", canvases: [PICTURED, PLAIN, MARKED, BUILDING] })
     return json({ error: { message: "no route" } }, 404)
   }) as unknown as typeof fetch
 }
@@ -84,7 +97,7 @@ test("a canvas is a tile, with its picture or its own mark", async () => {
     </MemoryRouter>,
     async () => {
       await until(
-        async () => Boolean(tile("x1") && tile("x2") && tile("x3")),
+        async () => Boolean(tile("x1") && tile("x2") && tile("x3") && tile("x4")),
         "every canvas as a tile",
       )
 
@@ -92,7 +105,7 @@ test("a canvas is a tile, with its picture or its own mark", async () => {
       assert.match(grid.className, /grid-cols-2\b/, "a phone holds two columns")
       assert.equal(
         grid.querySelectorAll(":scope > li a[data-canvas-tile]").length,
-        3,
+        4,
         "each canvas is a tile of the grid",
       )
 
@@ -120,6 +133,20 @@ test("a canvas is a tile, with its picture or its own mark", async () => {
 
       // The line under the name says where the canvas stands.
       assert.match(tile("x1")!.textContent ?? "", /Version 3/)
+
+      // A canvas with no page yet says the one thing every screen says about it, in the same words
+      // the preview's empty page uses; its mark still stands in for the picture it hasn't got.
+      assert.match(
+        tile("x4")!.textContent ?? "",
+        /Canvas is building…/,
+        "a canvas being built says so",
+      )
+      assert.equal(picture("x4")!.dataset.canvasTileImage, "mark", "and keeps its mark")
+      assert.doesNotMatch(
+        find('ul[aria-label="Canvases"]')!.textContent ?? "",
+        /Building it\.\.\./,
+        "no tile says it another way",
+      )
     },
   )
 

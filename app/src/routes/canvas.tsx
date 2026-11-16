@@ -115,7 +115,7 @@ const openedBy = (id: string) => (event: MouseEvent<HTMLAnchorElement>) => {
  * reader chose stands in, which is the same slot the sidebar's row draws it in.
  */
 function CanvasTile({ canvas, now }: { canvas: Canvas; now: number }) {
-  const line = canvas.version > 0 ? `Version ${canvas.version}` : "Building it…"
+  const line = canvas.version > 0 ? `Version ${canvas.version}` : BUILDING_ACTIVITY
   return (
     <Link
       to={`/canvas/${canvas.id}`}
@@ -512,9 +512,19 @@ function CanvasPagePane({
           data-canvas-frame
         />
       ) : (
-        <p className="p-4 text-center text-sm text-muted-foreground">
-          {awayNow && !html ? APART : loaded && !html ? BUILDING_ACTIVITY : READING}
-        </p>
+        /* The page that isn't there yet is this pane's empty state, drawn the way the chat list
+           draws "No chat selected": the Canvas entry's own icon over the line, one block whatever
+           the line says — the bot building it, this screen reading the record, or a bot that isn't
+           answering (ADR 0130). */
+        <div
+          data-canvas-empty
+          className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 px-6 text-center"
+        >
+          <FrameIcon aria-hidden className="size-16 text-muted-foreground" />
+          <p className="text-sm text-muted-foreground">
+            {awayNow && !html ? APART : loaded && !html ? BUILDING_ACTIVITY : READING}
+          </p>
+        </div>
       )}
     </div>
   )
@@ -984,13 +994,12 @@ export function CanvasEdit() {
         <p className="p-4 text-center text-sm text-muted-foreground">{GONE}</p>
       ) : reading ? (
         <p className="p-4 text-center text-sm text-muted-foreground">{READING}</p>
-      ) : loaded && !versioned ? (
-        /* Nothing to preview is said honestly: the page is not drawn yet, in the same words the
-           preview's empty frame uses — and a host that isn't answering is not a bot that is
-           building, so it says which of the two this is (ADR 0130). */
-        <p className="p-4 text-center text-sm text-muted-foreground">
-          {awayNow ? APART : BUILDING_ACTIVITY}
-        </p>
+      ) : loaded && !versioned && awayNow ? (
+        /* A canvas whose bot isn't answering is said honestly rather than left bare, in the same
+           words the preview's empty page uses. The build itself is the preview's to say: this screen
+           is where the reader types to the bot, and a line about the build sat over the chat that is
+           the whole of what it draws (ADR 0130, amended 2026-11-16). */
+        <p className="p-4 text-center text-sm text-muted-foreground">{APART}</p>
       ) : null}
       <CanvasChat
         canvas={canvas}

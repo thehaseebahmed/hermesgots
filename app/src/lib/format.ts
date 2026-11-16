@@ -45,8 +45,9 @@ export const subagentCountLabel = (count: number) =>
 export const THINKING_ACTIVITY = "Thinking…"
 export const WRITING_ACTIVITY = "Writing…"
 
-/** What a canvas's screens say while its bot has not written the first version yet (ADR 0130). */
-export const BUILDING_ACTIVITY = "Your bot is building it…"
+/** What a canvas's preview says, over the Canvas icon, while its bot has not written the first
+ * version yet, and what its tile says in the list (ADR 0130). */
+export const BUILDING_ACTIVITY = "Canvas is building…"
 
 /** What a thread this device holds nothing of says while its first read is out (ADR 0084). */
 export const LOADING_ACTIVITY = "Loading the thread…"
