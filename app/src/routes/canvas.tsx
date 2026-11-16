@@ -10,7 +10,7 @@ import {
 } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { CrosshairIcon, FrameIcon, PencilIcon, Undo2Icon } from "lucide-react"
-import { Link, Navigate, useMatch, useNavigate, useParams, useSearchParams } from "react-router"
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router"
 
 import { ChatBody } from "@/chat-next/chat-body"
 import { BackButton } from "@/components/back-button"
@@ -361,14 +361,13 @@ function useCanvasManagement(id: string, hold: RefusalHold) {
  * The head both canvas screens wear (ADR 0130). A title the record hasn't answered for yet is still
  * "Canvas", since the address may name one this device hasn't read.
  *
- * What leads the row is how the reader arrived, decided here rather than by either screen. At the
- * app's own entry nothing stands behind the screen — an address a browser opened, a sidebar row, a
- * pinned canvas — so the head leads with the drawer the sidebar is collapsed into (the header draws
- * it itself, and a wide screen, where the sidebar stands, leads with nothing), and a device's back
- * press is the app's, which arms its exit. A screen the list opened leads back to it, and that press
- * steps there too. The chat is the one exception, and only once the canvas has a page: its own way
- * back is the Preview corner, which replaces this entry, so an arrow beside it would be a second
- * control for one move (ADR 0130).
+ * What leads the row is how the reader arrived, and that one rule holds on both screens, decided
+ * here rather than by either of them. At the app's own entry nothing stands behind the screen — an
+ * address a browser opened, a sidebar row, a pinned canvas — so the head leads with the drawer the
+ * sidebar is collapsed into (the header draws it itself, and a wide screen, where the sidebar stands,
+ * leads with nothing), and a device's back press is the app's, which arms its exit. A screen the
+ * list opened leads back to it, and that press steps there too. The `Preview` / `Edit` corner is the
+ * way to the canvas's other screen, not the way out of this one, so it never decides the left.
  */
 function CanvasHead({
   canvas,
@@ -389,11 +388,7 @@ function CanvasHead({
   actions: ReactNode
 }) {
   const { up } = useNav()
-  // The chat is the address whose own way back is drawn as its Preview corner (ADR 0130): no arrow
-  // once the canvas has a page, and none while the record is still being read — a canvas that turns
-  // out to have a page must not have been offered an arrow in the frames before it landed.
-  const cornerLeads = Boolean(useMatch("canvas/:id/edit")) && (!canvas || hasVersion(canvas))
-  const leadsBack = depth() > 0 && !cornerLeads
+  const leadsBack = depth() > 0
   return (
     <ChatHeader
       className="relative pb-2"
@@ -892,14 +887,17 @@ export function CanvasView() {
 
 /**
  * A canvas's edit screen, at `/canvas/:id/edit`: its chat, full screen, with the header's Preview and
- * the hardware back both going to the canvas's own address (ADR 0130). A wide screen already has the
- * chat beside the page, so there the address folds into the canvas's own and draws no flip at all.
+ * the hardware back both leading out of it the way the preview is led — back to wherever the reader
+ * came from, which is the list, or the app's own press where the app opened the canvas itself
+ * (ADR 0130). A wide screen already has the chat beside the page, so there the address folds into the
+ * canvas's own and draws no flip at all.
  *
- * The version decides the corners: with one, Preview is the flip and there is no arrow, since the
- * corner already goes to the page; without one there is nothing to preview, so no flip is drawn and
- * a leading arrow is the way back to the list instead (ADR 0130). A record that hasn't landed yet is
- * reading: the same muted line the preview draws, and the way back to the list, never a corner that
- * a record landing a moment later would move under the reader's thumb.
+ * The version decides the corners: with one, Preview is the flip to the page; without one there is
+ * nothing to preview, so no flip is drawn and the head's leading control is the only way out. A
+ * record that hasn't landed yet is reading: the same muted line the preview draws, and the same
+ * leading control, never a corner that a record landing a moment later would move under the reader's
+ * thumb. The head follows the arrival on both screens, so a reader who came from the list is offered
+ * the way back to it whether or not the canvas has a page yet.
  *
  * A canvas with no version opens on this screen on a phone — it is the only screen it has — so this
  * one carries the preview's options menu too, or the canvas could never be archived or deleted.
@@ -915,6 +913,7 @@ export function CanvasView() {
  */
 export function CanvasEdit() {
   const { id = "" } = useParams()
+  const { back } = useNav()
   const navigate = useNavigate()
   // The record alone: this screen draws no page, so what keeps it right is the list's sweep.
   const { canvas, profile, missing, away, loaded } = useCanvasRecord(id)
@@ -947,18 +946,11 @@ export function CanvasEdit() {
   )
   // A record that hasn't landed yet: nothing of the canvas is known, so the body says it is reading.
   const reading = !canvas && !loaded
-  // The guard is per screen and its own: a canvas with a version is answered at its own address, one
-  // without has no page to show and is answered at the list. It navigates rather than stepping back —
-  // the screen behind this one may be the list, and a cold address has nothing behind it at all — and
-  // it takes the press, so the app never leaves on a back the screen could answer (ADR 0130).
-  useEffect(
-    () =>
-      setBackGuard(() => {
-        void navigate(versioned ? `/canvas/${id}` : "/canvas", { replace: true })
-        return true
-      }),
-    [navigate, id, versioned],
-  )
+  // The guard is the preview's, so the press and the head's leading control are one move: back to
+  // wherever the reader came from, and the app's own answer where nothing stands behind this screen
+  // at all — an address opened cold. The Preview corner is the way to the page, never the way out
+  // (ADR 0130).
+  useEffect(() => setBackGuard(back()), [back])
   // A wide screen's lane is the same chat, so this address has nowhere of its own to be: it is the
   // canvas's address in its place, never a step, and back cannot return here.
   if (large) return <Navigate to={`/canvas/${id}`} replace />

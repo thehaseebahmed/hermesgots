@@ -13,6 +13,15 @@ how the reader arrived.**
 round the title's words. The decision above holds: two screens, two addresses, one row. What changed
 is the row.
 
+**Amended 2026-11-16**: that one rule now holds on both screens. The chat was the exception — once a
+canvas had a version its head led with the drawer, and its back press answered with the preview — on
+the reading that the `Preview` corner was already a control for leaving it. The corner is not: it is
+the way to the canvas's other screen, one control to a page beside a chat, so it never decides what
+leads the row. A head follows the arrival, and the screen's guard is the same move, so the press goes
+where the leading control does: back to the list a reader came from, or the app's own press where the
+app opened the canvas itself — a sidebar row, a pinned canvas, an address opened cold. The rejected
+alternative below is reversed by this amendment.
+
 The edit screen is a phone's. A wide screen already has room for the session in a lane on the left of
 the page — the canvas's header above it in the same column, the page filling the pane to its right —
 so the edit address folds into the canvas's own address there, in place, and no flip is drawn: the
@@ -21,15 +30,13 @@ has no version has nothing to preview, so the preview replaces its own address w
 phone — a replacement, never a push. A pushed default would leave the page behind it, and back
 would land on the page and be sent to Edit again.
 
-Back is what the addresses are for, and each screen answers it itself. The preview's guard steps back
-to the list, as a list's own child does. The edit screen's navigates in place instead of stepping
-back: a canvas with a version is drawn at its own address and one without at the list — the same two
-screens its corners name — so the press lands where the address says whatever sat behind it, and a
-cold link with nothing behind it is answered rather than handed to the app. Flipping to the preview
-replaces the edit entry for the same reason: the page stands where the chat stood, so back from
-either screen leaves the canvas for the list rather than ping-ponging between them. The version
-decides when the control is drawn: absent while the bot is building, present from the first version,
-from the same live read the frame is drawn from, so nothing has to be reloaded to see it.
+Back is what the addresses are for, and both screens answer it the same way: each guard steps back to
+whatever opened the screen, as a list's own child does, and a press with nothing behind it is left to
+the app, which arms its exit. Flipping to the preview replaces the edit entry: the page stands where
+the chat stood, so back from either screen leaves the canvas for the list rather than ping-ponging
+between them. The version decides when the `Preview` corner is drawn: absent while the bot is
+building, present from the first version, from the same live read the frame is drawn from, so nothing
+has to be reloaded to see it.
 
 The list's create opens the canvas's own address and lets that one rule decide the screen: a canvas the
 bot has not finished has a session to read and no page to look at, so a phone forwards to the edit
@@ -41,11 +48,11 @@ screen. An address the browser opened, a sidebar row and a pinned canvas are the
 nothing stands behind them, so the head leads with the drawer the sidebar is collapsed into — and on a
 wide screen, where the sidebar stands, with nothing at all — and the back press is the app's, which
 arms its exit. A screen the canvas list opened leads back to that list, and the same press steps
-there. A chat whose canvas has a page is the one head that draws no arrow: its corner control already
-goes to that page. The thumb's 44px is the block's — the title with the line under it — so the line
-sits as tight under the title as in a code session's head, and a press on either line, or beside a
-short title, opens the canvas's options. One component decides both, so the two screens cannot
-disagree about the row they wear.
+there. The `Preview` / `Edit` corner is the way to the canvas's other screen, never a way out of the
+screen the reader is on, so it does not decide the left of the row. The thumb's 44px is the block's —
+the title with the line under it — so the line sits as tight under the title as in a code session's
+head, and a press on either line, or beside a short title, opens the canvas's options. One component
+decides both, so the two screens cannot disagree about the row they wear.
 
 The one thing a phone cannot do on a single screen is tap the page, so pointing is a round trip. The
 edit screen's `+` sends the reader to the page with pointing armed, the page outlines the element
@@ -63,10 +70,12 @@ small hand-over keyed by the canvas and taken once, so a point the reader remove
 - **Making `/canvas/:id` the edit address and `/canvas/:id/preview` the page.** It inverts the default
   that every tile, every sidebar row and the `/c/:id` redirect already point at, and makes a versioned
   canvas's first paint wrong.
-- **A back arrow on the edit screen once the canvas has a version.** The corner control already goes
-  to the preview; two controls for one move is a header with a dead button. A canvas with no version
-  has no corner control, so that case does keep one, to the list — drawn where the list opened it,
-  which on a phone is where the head follows the arrival rather than the width.
+- **A back arrow on the edit screen once the canvas has a version.** Reversed 2026-11-16. The corner
+  control goes to the canvas's other screen, which is a different move from leaving the one the
+  reader is on, and the left of the row is where a reader looks for that move — so the arrow is
+  drawn there, following the arrival as it does on the preview. Counting the two as one control for
+  one move left the chat with the corner as its only way out, and made its back press answer with the
+  preview rather than with the step the corner takes.
 - **Arming the page under the chat.** Keeping the frame behind the edit screen, outlined and tappable,
   would save the trip — and it is the sheet again: a page half-covered by the screen that exists to
   replace it.
