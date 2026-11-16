@@ -1536,10 +1536,6 @@ export function ChatNextThread({
     let run: string
     try {
       prepared = prepareTurn ? await prepareTurn(words, attachments, at) : undefined
-      // The row drawn above is the message until the transcript names the turn, and its files' cells
-      // are minted from the paths the host saved them at — paths the send did not have as it went,
-      // and has once its files are on the host (ADR 0111). A message sent again is drawn once the
-      // host has taken it, below, with those paths already in hand.
       if (!resend && prepared)
         dispatch({ type: "saved", at, files: prepared.sent.map(sentFileOf) })
       const posting = {
@@ -1587,8 +1583,6 @@ export function ChatNextThread({
     if (resend)
       dispatch({
         ...drawn,
-        // A send that carried files keeps the paths the host answered for them; one that carried
-        // none keeps the markers its words name, as `drawn` has them.
         ...(prepared && attachments.length ? { files: prepared.sent.map(sentFileOf) } : {}),
         replaces: resend.id,
       })

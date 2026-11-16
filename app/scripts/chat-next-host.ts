@@ -699,7 +699,6 @@ export function fakeHost(
     // it answers is what the message names it by.
     if (plugin && uploads && path === `/api/plugins/gots/sessions/${session}/attachments` && init?.method === "POST") {
       const name = url.searchParams.get("name") ?? "file"
-      // A route that took a request with no bytes would answer a path for a file that isn't there.
       if (!(init.body instanceof Blob))
         return reply({ error: { message: "an attachment needs its bytes" } }, 400)
       const at = `/host/attachments/${session}/${name}`

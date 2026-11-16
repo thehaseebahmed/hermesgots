@@ -1190,7 +1190,6 @@ test("a send's saved files land on the message it drew, and on no other", () => 
   })
   assert.equal(files(saved)[0].path, "/host/photo.png", "the path the host saved it at")
 
-  // The send's own clock is what says which message the files belong to.
   assert.equal(
     reduce(sent, { type: "saved", at: 1_001, files: [{ ...photo, path: "/host/other.png" }] }),
     sent,
