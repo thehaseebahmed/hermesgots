@@ -128,16 +128,20 @@ export function ChatSettings({
                 checked={Boolean(chat.muted)}
                 onCheckedChange={(checked) => void setThreadMuted(chat.id, checked)}
               />
-              <SwitchRow
-                id="chat-pin"
-                data-chat-pin
-                icon={PinIcon}
-                title="Pin"
-                subtitle={pin.subtitle}
-                checked={pin.checked}
-                disabled={pin.disabled}
-                onCheckedChange={(checked) => void setPinned(chat.id, checked)}
-              />
+              {/* An archived row is drawn by the Archived pill alone and archiving cleared the pin it
+                  had in the same write, so a switch here would write a mark no list could draw. */}
+              {!chat.archived && (
+                <SwitchRow
+                  id="chat-pin"
+                  data-chat-pin
+                  icon={PinIcon}
+                  title="Pin"
+                  subtitle={pin.subtitle}
+                  checked={pin.checked}
+                  disabled={pin.disabled}
+                  onCheckedChange={(checked) => void setPinned(chat.id, checked)}
+                />
+              )}
             </Group>
             <div className="flex flex-col gap-2">
               {archivesHere && (

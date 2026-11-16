@@ -76,6 +76,8 @@ interface Seed {
   mine?: string
   /** The newest reply is still arriving, so the row has a run in flight to draw. */
   streaming?: boolean
+  /** Archived by the reader: the row every pill but Archived leaves out (G2). */
+  archived?: boolean
   /** The run a routine's delivery is: the marker and the line the record itself carries (G4). */
   routine?: { line: string }
   /** The room this row is: the Host's record, with this bot seated in it. */
@@ -111,6 +113,7 @@ async function seed(
       profileId: host.id,
       title: one.title,
       pinned: one.pinned,
+      ...(one.archived ? { archived: true } : {}),
       hermesSessionId: `gots-${one.id}`,
       createdAt: one.at,
       updatedAt: one.at,
@@ -835,8 +838,8 @@ test("the pills narrow the rows to the kind each names, and say what their empti
     const pills = () => findAll('[role="group"][aria-label="Filter chats"] button')
     assert.deepEqual(
       pills().map((one) => (one.textContent ?? "").trim()),
-      ["All", "Unread", "Chats", "Rooms", "Routines"],
-      "the five pills, in the rule's own order",
+      ["All", "Unread", "Archived", "Chats", "Rooms", "Routines"],
+      "the six pills, in the rule's own order, Archived straight after Unread",
     )
     assert.equal(filterPill("All")?.getAttribute("aria-pressed"), "true", "All is what the list opens on")
 
@@ -857,6 +860,91 @@ test("the pills narrow the rows to the kind each names, and say what their empti
     await type(find("#chats-search"), "lisbon")
     assert.deepEqual(rowIds(), [], "the pill keeps the room, and the words find nothing in it")
     assert.ok(findText("p", "No chats match."), "which is the search's sentence")
+  })
+})
+
+test("an archived chat is out of every pill but Archived, and All's search never finds it", async () => {
+  const at = Date.now() - 90_000
+  await seed([
+    { id: "live", title: "Trip to Lisbon", at, said: "Booked the flights" },
+    {
+      id: "packed",
+      title: "Packing list",
+      at: at - 60_000,
+      said: "Two pairs of shoes",
+      archived: true,
+    },
+  ])
+  await mount(screen(), async () => {
+    // The list opens on All, and the archived chat is no row of it.
+    await until(async () => rowIds().length === 1, "the list, less what the reader set aside")
+    assert.deepEqual(rowIds(), ["live"], "All keeps no archived row")
+    await click(filterPill("Unread"))
+    assert.deepEqual(rowIds(), [], "nor does Unread")
+    await click(filterPill("Chats"))
+    assert.deepEqual(rowIds(), ["live"], "nor Chats")
+    await click(filterPill("Archived"))
+    await until(async () => rowIds().length === 1, "the row the pill keeps")
+    assert.deepEqual(rowIds(), ["packed"], "Archived is the one pill that draws it")
+    const words = wordsOf(rowOf("packed"))
+    assert.ok(words.includes("Packing list"), "with the chat's title")
+    assert.ok(words.includes("Two pairs of shoes"), "what was last said in it, read from its tail")
+    assert.ok(words.length > "Packing list Two pairs of shoes".length, "and its age")
+
+    // The search narrows the pill it stands in, so a search over All cannot reach the archived row —
+    // while the pill that holds it still searches its own.
+    await click(filterPill("All"))
+    await click(find("[data-search-toggle]"))
+    await until(async () => Boolean(find("#chats-search")), "the foot's field")
+    await type(find("#chats-search"), "packing")
+    assert.deepEqual(rowIds(), [], "the words name a chat All does not hold")
+    assert.ok(findText("p", "No chats match."), "which is the search's emptiness, not a pill's")
+    await click(filterPill("Archived"))
+    await until(async () => rowIds().length === 1, "the row its own search finds")
+    assert.deepEqual(rowIds(), ["packed"], "and the Archived pill finds it under the same words")
+  })
+})
+
+test("a bot whose every chat is archived says All's own emptiness", async () => {
+  // A pill that keeps nothing says its own sentence; Archived is the pill that holds these, and All
+  // says what it says of any bot with nothing to draw rather than a second emptiness of its own.
+  await seed([{ id: "only", title: "Put away", at: 100, said: "Nothing to show", archived: true }])
+  await mount(screen(), async () => {
+    await until(async () => Boolean(findText("p", "No chats yet.")), "All's own sentence")
+    assert.deepEqual(rowIds(), [], "with no row under it")
+    await click(filterPill("Archived"))
+    await until(async () => rowIds().length === 1, "the row Archived keeps")
+  })
+})
+
+test("an archived chat past the bound still says what was last said in it", async () => {
+  // The pill draws the archived row's line and its age, so its tail is read wherever its clock puts
+  // it: the bound is on what a list costs to draw, and this row is on it.
+  const many: Seed[] = [
+    {
+      id: "archived-old",
+      title: "Set aside",
+      at: 1,
+      said: "The last word in it",
+      archived: true,
+    },
+    ...Array.from({ length: BOT_CHATS + 1 }, (_, index) => ({
+      id: `chat-${index}`,
+      title: `Chat ${index}`,
+      at: 1_000 + index * 10,
+      said: `Said ${index}`,
+    })),
+  ]
+  await seed(many)
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === BOT_CHATS + 1, "every chat nobody archived")
+    assert.ok(!rowIds().includes("archived-old"), "the archived chat is out of All")
+    await click(filterPill("Archived"))
+    await until(async () => rowIds().length === 1, "the Archived pill")
+    assert.ok(
+      wordsOf(rowOf("archived-old")).includes("The last word in it"),
+      "its line is read, though its clock put it past the bound",
+    )
   })
 })
 

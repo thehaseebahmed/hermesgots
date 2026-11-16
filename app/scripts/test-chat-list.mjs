@@ -397,6 +397,32 @@ test("a list's pins are the rows that carry one, and five is the most it holds",
   assert.deepEqual(pinsOf([chatRowOf(chat("only", 1))]), [], "and a list with no pins holds none")
 })
 
+test("a pin on an archived row is no pin the list counts", () => {
+  // Archiving clears the pin in the same write, so this is a row a merge left behind: it is out of
+  // the pinned group every list draws, and a pin the cap counted would be a pin no reader could see.
+  const pins = [1, 2, 3, 4].map((n) =>
+    chatRowOf(chat(`pin-${n}`, 100 + n, { pinned: true, pinnedAt: n })),
+  )
+  const behind = chatRowOf(chat("behind-the-pill", 900, { pinned: true, pinnedAt: 90, archived: true }))
+  assert.deepEqual(
+    pinsOf([...pins, behind]).map((row) => row.id),
+    ["pin-1", "pin-2", "pin-3", "pin-4"],
+    "the pinned rows the list draws are the pins",
+  )
+  const sixth = chatRowOf(chat("sixth", 950))
+  assert.equal(
+    pinSwitchOf(sixth, [...pins, behind]).disabled,
+    false,
+    "four pins and one behind the pill is room for a fifth",
+  )
+  const five = [...pins, chatRowOf(chat("pin-5", 105, { pinned: true, pinnedAt: 5 })), behind]
+  assert.equal(
+    pinSwitchOf(sixth, five).disabled,
+    true,
+    "and five it draws shuts the switch, whatever sits behind the pill",
+  )
+})
+
 test("the sixth pin's switch is off and says why, and a pinned row can always be unpinned", () => {
   const pins = [1, 2, 3, 4, 5].map((n) =>
     chatRowOf(chat(`pin-${n}`, 100 + n, { pinned: true, pinnedAt: n })),
@@ -426,6 +452,19 @@ test("the sixth pin's switch is off and says why, and a pinned row can always be
   assert.equal(room.checked, false)
   assert.equal(room.disabled, false, "below five the switch is offered")
   assert.equal(room.subtitle, "Stays at the top of its list, on every device.")
+})
+
+test("the pills stand in one order, Archived straight after Unread", () => {
+  // The order is the rule's, not the screen's: a pill added to the list stands where this says, and
+  // the row the reader's own hand set aside is one press past the rows that want them.
+  assert.deepEqual(
+    CHAT_FILTERS.map((entry) => entry.key),
+    ["all", "unread", "archived", "chats", "rooms", "routines"],
+    "All, Unread, Archived, then the three kinds",
+  )
+  const archived = CHAT_FILTERS[2]
+  assert.equal(archived.label, "Archived", "wearing the word the row's own sheet uses")
+  assert.equal(archived.empty, "No archived chats.", "and saying its emptiness in the app's voice")
 })
 
 test("the three kinds of row partition the list, and each pill keeps its own", () => {
@@ -466,12 +505,43 @@ test("Unread is the mark a row's dot reads, so a device that has read nothing ha
 
 test("every pill says what it says when it keeps nothing", () => {
   const said = Object.fromEntries(CHAT_FILTERS.map((entry) => [entry.key, entry.empty]))
-  assert.deepEqual(Object.keys(said), ["all", "unread", "chats", "rooms", "routines"])
+  assert.deepEqual(Object.keys(said), ["all", "unread", "archived", "chats", "rooms", "routines"])
   for (const [key, empty] of Object.entries(said)) {
     assert.ok(empty && empty.endsWith("."), `${key} has a sentence of its own`)
   }
-  assert.equal(new Set(Object.values(said)).size, 5, "and no two pills say the same thing")
+  assert.equal(new Set(Object.values(said)).size, 6, "and no two pills say the same thing")
   assert.equal(said.all, "No chats yet.", "All's is the list's own emptiness")
+})
+
+test("an archived row is kept by no pill but Archived, and found by no search but there", () => {
+  // The archive mark is the one thing that takes a row out of every other pill, `all` among them —
+  // which is what keeps it out of a search over any of them, since the pill narrows first. The two
+  // rows below are All's and Unread's by their clocks and this device's marks, and are neither.
+  const rows = [
+    chatRowOf(chat("trip", 300, { title: "Trip to Lisbon" })),
+    chatRowOf(chat("packed", 200, { title: "Trip packing", archived: true })),
+    roomRow("old-room", 100, { title: "Trip room", archived: true }),
+  ]
+  const marks = { trip: 400, packed: 100, "old-room": 50 }
+  const ids = (key, query = "") =>
+    chatList(filterChatRows(rows, key, marks), query).map((row) => row.id)
+
+  assert.deepEqual(ids("archived"), ["packed", "old-room"], "Archived keeps what was set aside")
+  for (const key of ["all", "unread", "chats", "rooms", "routines"]) {
+    assert.deepEqual(
+      ids(key).filter((id) => id === "packed" || id === "old-room"),
+      [],
+      `${key} keeps no archived row`,
+    )
+  }
+  assert.deepEqual(ids("all"), ["trip"], "and All still holds the rows nobody archived")
+  assert.deepEqual(ids("all", "trip"), ["trip"], "a search over All finds the live chat alone")
+  assert.deepEqual(
+    ids("unread", "packing"),
+    [],
+    "the words name the archived chat exactly, and a search over Unread reaches nothing",
+  )
+  assert.deepEqual(ids("archived", "packing"), ["packed"], "the pill's own search still works inside it")
 })
 
 test("a filter narrows before the search, so a search inside a pill finds only that pill's rows", () => {

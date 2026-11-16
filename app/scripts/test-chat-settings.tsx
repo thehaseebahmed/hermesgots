@@ -240,6 +240,34 @@ test("Archive takes the pin with it, and Unarchive clears the archive", async ()
   })
 })
 
+/**
+ * A pin on an archived row could never be drawn — the row is out of the pinned group every list
+ * draws, and archiving already cleared the pin it had — so the sheet offers no switch for it. What
+ * it keeps is its name, its mute, the way back and the delete.
+ */
+test("an archived chat's sheet draws no Pin, only its name, its mute and Unarchive", async () => {
+  await seed({ archived: true })
+  globalThis.fetch = async () => json({})
+  await mount(screen(), async () => {
+    await until(async () => Boolean(titlePress()), "the chat's bar")
+    await click(titlePress())
+    await until(async () => Boolean(sheet()), "the chat's settings")
+    await until(async () => Boolean(archiveButton()), "the way back")
+    assert.equal(archiveButton()?.textContent, "Unarchive", "drawn, naming what the press does")
+    assert.equal(
+      findAll('[role="switch"]').length,
+      1,
+      "one switch: the mute, and no pin beside it",
+    )
+    assert.equal(
+      missing("[data-chat-pin]"),
+      true,
+      "no pin: a mark on a row out of every list is a mark nothing could draw",
+    )
+    assert.ok(findText("button", "Delete chat"), "and the one control that ends it")
+  })
+})
+
 test("a sixth pin reads off, with the line saying what has to happen first", async () => {
   await seedPins(5)
   globalThis.fetch = async () => json({})

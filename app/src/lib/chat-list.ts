@@ -213,9 +213,14 @@ export function chatList(rows: readonly ChatListRow[], query: string): ChatListR
  */
 export const PIN_LIMIT = 5
 
-/** The list's pins, in the order they were handed over — what the cap is counted from. */
+/**
+ * The list's pins, in the order they were handed over — what the cap is counted from. A pinned row
+ * the reader archived is no pin: archiving clears the pin in the same write, and a pin that
+ * answered a merge from a device that had not archived yet sits behind the Archived pill, out of the
+ * pinned group every list draws — so counting it would spend one of the five on a pin no reader sees.
+ */
 export function pinsOf(rows: readonly ChatListRow[]): ChatListRow[] {
-  return rows.filter((row) => row.pinned)
+  return rows.filter((row) => row.pinned && !row.archived)
 }
 
 /** What the Edit sheet's Pin switch says: whether this row is pinned, whether it may be turned, and
@@ -249,19 +254,23 @@ export function pinSwitchOf(
 
 /**
  * The pills a bot's list narrows its rows by, in the order they stand. A filter only narrows: the one
- * pressed keeps the rows it names and the list's own order decides where they sit.
+ * pressed keeps the rows it names and the list's own order decides where they sit. Archived stands
+ * straight after Unread because it is the one pill a reader reaches for after the rows that want
+ * them: what they set aside is one press further on, and nowhere else.
  */
-export type ChatFilter = "all" | "unread" | "chats" | "rooms" | "routines"
+export type ChatFilter = "all" | "unread" | "archived" | "chats" | "rooms" | "routines"
 
 /**
  * The pills, each with the words it wears and the sentence it says when it keeps nothing. The sentence
  * lives here rather than on the screen so a pill and its emptiness cannot be worded apart, the way the
  * search's own emptiness is `chatList`'s to keep. All's sentence is the list's emptiness with nothing
- * narrowing it, so an empty bot says "No chats yet." and a pill holding nothing says its own.
+ * narrowing it, so an empty bot says "No chats yet." — and so does one whose every chat is archived —
+ * while a pill holding nothing says its own.
  */
 export const CHAT_FILTERS: readonly { key: ChatFilter; label: string; empty: string }[] = [
   { key: "all", label: "All", empty: "No chats yet." },
   { key: "unread", label: "Unread", empty: "No unread chats." },
+  { key: "archived", label: "Archived", empty: "No archived chats." },
   { key: "chats", label: "Chats", empty: "No chats." },
   { key: "rooms", label: "Rooms", empty: "No rooms." },
   { key: "routines", label: "Routines", empty: "No routines." },
@@ -271,16 +280,20 @@ export const CHAT_FILTERS: readonly { key: ChatFilter; label: string; empty: str
 export type ReadMarks = Record<string, number>
 
 /**
- * What each pill keeps. Unread is the row's own dot (`isUnread`, with the same mark), Chats is a row
- * that is neither a room nor a routine's run, and a room's and a run's are the row's own markers — so
- * the three kinds partition the list and the pill, its dot and its sentence cannot disagree.
+ * What each pill keeps. The archive mark takes a row out of every pill but Archived — `all` included,
+ * which is what keeps an archived row out of a search over any other pill, since the pill narrows
+ * first and the search narrows what the pill kept. Unread is the row's own dot (`isUnread`, with the
+ * same mark), Chats is a row that is neither a room nor a routine's run, and a room's and a run's are
+ * the row's own markers — so the three kinds partition the rows nobody archived, and the pill, its
+ * dot and its sentence cannot disagree.
  */
 const KEEPS: Record<ChatFilter, (row: ChatListRow, marks: ReadMarks) => boolean> = {
-  all: () => true,
-  unread: (row, marks) => isUnread(row.at, marks[row.id]),
-  chats: (row) => !row.room && !row.routine,
-  rooms: (row) => Boolean(row.room),
-  routines: (row) => Boolean(row.routine),
+  all: (row) => !row.archived,
+  unread: (row, marks) => !row.archived && isUnread(row.at, marks[row.id]),
+  archived: (row) => Boolean(row.archived),
+  chats: (row) => !row.archived && !row.room && !row.routine,
+  rooms: (row) => !row.archived && Boolean(row.room),
+  routines: (row) => !row.archived && Boolean(row.routine),
 }
 
 /** The rows one pill keeps, in the order they were handed over. A filter never re-orders the list. */

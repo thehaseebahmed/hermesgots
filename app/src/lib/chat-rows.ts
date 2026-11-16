@@ -30,13 +30,16 @@ export function readBotChats(profileId: string): Promise<Conversation[]> {
 }
 
 /**
- * The chats whose newest message is read: the newest `BOT_CHATS`, and every pinned one — a pin is the
- * reader's own word that the chat matters, wherever its clock puts it. A row past this bound draws its
- * title and age from the record alone.
+ * The chats whose newest message is read: the newest `BOT_CHATS`, every pinned one — a pin is the
+ * reader's own word that the chat matters, wherever its clock puts it — and every archived one, since
+ * the Archived pill draws those rows' lines and ages and no other pill draws them at all. A row past
+ * this bound draws its title and age from the record alone.
  */
 export function tailedIds(chats: readonly ChatRecord[]): Set<string> {
   return new Set(
-    [...chats.slice(0, BOT_CHATS), ...chats.filter((chat) => chat.pinned)].map((chat) => chat.id),
+    [...chats.slice(0, BOT_CHATS), ...chats.filter((chat) => chat.pinned || chat.archived)].map(
+      (chat) => chat.id,
+    ),
   )
 }
 
