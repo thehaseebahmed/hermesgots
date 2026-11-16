@@ -4,12 +4,16 @@
  * count — and only one copy knew that a pinned chat's tail is read wherever its clock puts it, so the
  * rule lives here and both ask it (`routes/bot-chats.tsx`, `useBotSummaries` in `threads.ts`).
  *
+ * It is also the one place a chat is judged a row at all: a chat nothing has been said in is no row
+ * until it holds a word or a draft (`isListed` in `chat-list.ts`, ADR 0158), so the list and the
+ * sidebar's preview cannot disagree about which chats a bot has.
+ *
  * Rooms are not these rows: a room belongs to its Host and lists in every bot its roster seats, so
  * each screen merges the rooms it seats itself (ADR 0115).
  */
 import { useLiveQuery } from "dexie-react-hooks"
 
-import { BOT_CHATS, chatRowOf, type ChatListRow, type ChatRecord } from "@/lib/chat-list"
+import { BOT_CHATS, chatRowOf, isListed, type ChatListRow, type ChatRecord } from "@/lib/chat-list"
 import {
   conversationsOf,
   db,
@@ -18,6 +22,7 @@ import {
   type Conversation,
   type Profile,
 } from "@/lib/db"
+import { draftKey, unsentAmong } from "@/lib/drafts"
 import { listsAsChat } from "@/lib/lists-as-chat"
 
 /**
@@ -27,6 +32,48 @@ import { listsAsChat } from "@/lib/lists-as-chat"
  */
 export function readBotChats(profileId: string): Promise<Conversation[]> {
   return conversationsOf(profileId).reverse().filter(listsAsChat).toArray()
+}
+
+/**
+ * The chats among these this device holds a message for. A record whose clock never moved is no proof
+ * that nothing was said in it — a sync, an import or a host that answers without moving the record can
+ * leave a chat's own words here while its record still reads as new — so a row with a message in it is
+ * started, whatever its two clocks say.
+ *
+ * One read for every row the rule would drop, and only those rows are read: a chat in the set looks
+ * unstarted, so in normal use it holds no message and the walk is empty.
+ */
+async function spokenChats(ids: readonly string[]): Promise<Set<string>> {
+  const spoken = new Set<string>()
+  if (!ids.length) return spoken
+  await db.messages
+    .where("conversationId")
+    .anyOf([...ids])
+    .each((message) => {
+      spoken.add(message.conversationId)
+    })
+  return spoken
+}
+
+/**
+ * The chats this bot's list draws, newest first: every chat it has, less the ones nothing has been said
+ * in and no draft is holding (ADR 0158). The rule is asked of each record first, and the rows it would
+ * drop are then asked of this device — their drafts in one read and their messages in one more — since
+ * a chat this device holds a typed word or a message for has started.
+ *
+ * Both reads are inside the live query's own run, so `db.drafts` (and `db.messages`) are dependencies of
+ * it: a draft landing or being cleared wakes the list, which is what makes the row appear and go.
+ */
+export async function readListedChats(profileId: string): Promise<Conversation[]> {
+  const chats = await readBotChats(profileId)
+  const doubted = chats.filter((chat) => !isListed(chat, false))
+  if (!doubted.length) return chats
+  const unsent = await unsentAmong(doubted.map((chat) => draftKey(chat.id)))
+  const spoken = await spokenChats(doubted.map((chat) => chat.id))
+  const dropped = new Set(doubted.map((chat) => chat.id))
+  return chats.filter(
+    (chat) => !dropped.has(chat.id) || unsent.has(draftKey(chat.id)) || spoken.has(chat.id),
+  )
 }
 
 /**
@@ -83,7 +130,9 @@ export function useBotChats(profileId: string): BotChats | undefined {
   return useLiveQuery(async (): Promise<BotChats> => {
     const bot = (await db.profiles.get(profileId)) ?? null
     if (!bot) return { profileId, bot, rows: [] }
-    const chats = await readBotChats(profileId)
+    // The chats its list draws — a chat nothing has been said in and no draft is holding is no row
+    // (ADR 0158) — so a row left behind by a chat that never started is never drawn.
+    const chats = await readListedChats(profileId)
     const tailed = tailedIds(chats)
     const rows = await Promise.all(chats.map((chat) => rowOfChat(chat, tailed)))
     return { profileId, bot, rows }

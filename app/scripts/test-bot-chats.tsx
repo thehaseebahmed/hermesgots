@@ -10,12 +10,13 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { act } from "react"
-import { MemoryRouter, Route, Routes, type InitialEntry } from "react-router"
+import { MemoryRouter, Route, Routes, useNavigate, type InitialEntry } from "react-router"
 
 import { Home } from "@/App"
 import { BotChatsPage, BotChatsPane } from "@/routes/bot-chats"
 import { BOT_CHATS } from "@/lib/chat-list"
 import { db, deleteConversation, getSettings, saveChatFilter, saveSettings, type Message } from "@/lib/db"
+import { draftKey, flushDrafts, saveDraft } from "@/lib/drafts"
 import { pressBack } from "@/lib/native"
 import { markRead } from "@/lib/read-marks"
 import {
@@ -82,6 +83,8 @@ interface Seed {
   routine?: { line: string }
   /** The room this row is: the Host's record, with this bot seated in it. */
   room?: boolean
+  /** The bot's own Main thread, which is never hidden however little has been said in it (G4). */
+  main?: boolean
 }
 
 function message(chat: string, content: string, at: number, patch: Partial<Message> = {}): Message {
@@ -119,6 +122,7 @@ async function seed(
       updatedAt: one.at,
       changedAt: one.at,
       ...(one.routine ? { routine: true, line: one.routine.line } : {}),
+      ...(one.main ? { main: true } : {}),
       ...(one.room
         ? { room: { id: `room-${one.id}`, members: [{ profile: "default", displayName: "Mainly" }] } }
         : {}),
@@ -191,6 +195,32 @@ const screen = (entry: InitialEntry = `/b/${bot.id}`) => (
   </MemoryRouter>
 )
 
+/**
+ * The same addresses with one step back on the page: a chat stands above the list, and the step behind
+ * it draws that list again — the move a reader makes when they open a chat and leave it without a word.
+ */
+const steppedScreen = () => (
+  <MemoryRouter initialEntries={[`/b/${bot.id}`]}>
+    <Path />
+    <Nav />
+    <StepBack />
+    <Routes>
+      <Route path="b/:profileId" element={<BotChatsPage />} />
+      <Route path="c/:id" element={<p data-chat />} />
+    </Routes>
+  </MemoryRouter>
+)
+
+/** One step back through the entries a screen pushed, which is what "the list behind it" means. */
+function StepBack() {
+  const navigate = useNavigate()
+  return (
+    <button type="button" data-step-back onClick={() => navigate(-1)}>
+      back
+    </button>
+  )
+}
+
 test("Home is the active bot's screen: `/` sends the reader to its list", async () => {
   // A bot with nothing to open, so the address `/` lands on is the list itself: the door, seen without
   // another screen answering for it.
@@ -218,11 +248,13 @@ test("Home is the active bot's screen: `/` sends the reader to its list", async 
 })
 
 test("a bot's screen lists the chats it holds, its pinned one first and then by what was last said", async () => {
+  // Every one of them has been said in: a chat nothing was said in is no row of the list at all
+  // (ADR 0158), which is the case after this one.
   await seed([
-    { id: "quiet", title: "An old chat", at: 100 },
-    { id: "busy", title: "The newest chat", at: 300 },
-    { id: "pinned", title: "Held on top", at: 50, pinned: true },
-    { id: "middle", title: "In between", at: 200 },
+    { id: "quiet", title: "An old chat", at: 100, said: "The first word" },
+    { id: "busy", title: "The newest chat", at: 300, said: "The last word" },
+    { id: "pinned", title: "Held on top", at: 50, pinned: true, said: "Held here" },
+    { id: "middle", title: "In between", at: 200, said: "In the middle" },
   ])
   await mount(screen(), async () => {
     await until(async () => rowIds().length === 4, "the bot's chats")
@@ -419,7 +451,7 @@ test("a routine's delivery is a row of its own, with the routine's icon and the 
 })
 
 test("the list answers the press with the step behind it, and leaves the app its own", async () => {
-  await seed([{ id: "quiet", title: "An old chat", at: 100 }])
+  await seed([{ id: "quiet", title: "An old chat", at: 100, said: "Something said" }])
   const stepped = atDepth(1)
   try {
     await mount(screen(), async () => {
@@ -727,6 +759,36 @@ test("a pick in a bot's list opens its chat above the list", async () => {
     await click(newRow("New chat"))
     await until(async () => path() !== `/b/${bot.id}`, "the chat it made")
     assert.ok(nav().startsWith("PUSH:/c/"), "and the foot's New chat takes the same move")
+  })
+})
+
+test("a chat opened and left behind is no row of the list it steps back to, and one holding a draft is", async () => {
+  // F3 (ADR 0158). The New chat press mints a record whose two clocks are level, and nothing is said in
+  // it: the list the reader steps back to draws no row for it. Main is never hidden, empty or not, and
+  // a chat holding words typed and not sent is a row until the words go.
+  await seed([
+    { id: "main", title: "Main", at: 100, main: true },
+    { id: "said", title: "A chat", at: 300, said: "Hello" },
+  ])
+  await mount(steppedScreen(), async () => {
+    await until(async () => rowIds().length === 2, "the bot's chats")
+    assert.deepEqual(rowIds(), ["said", "main"], "Main is a row though nothing has been said in it")
+
+    await click(find("[data-new-menu]"))
+    await until(async () => picksOpen(), "the picks")
+    await click(newRow("New chat"))
+    await until(async () => path() !== `/b/${bot.id}`, "the chat it made")
+    const made = path().slice(3)
+    await click(find("[data-step-back]"))
+    await until(async () => path() === `/b/${bot.id}`, "the list it steps back to")
+    await until(async () => rowIds().length === 2, "the list as the reader left it")
+    assert.deepEqual(rowIds(), ["said", "main"], "a chat left without a word is no row of it")
+
+    // Three words typed in it and not sent make it one, and the list is woken by the draft landing: the
+    // read that draws the list is over `db.drafts`, so no screen has to be opened again for the row.
+    saveDraft(draftKey(made), "three words")
+    await flushDrafts()
+    await until(async () => rowIds().includes(made), "the row its draft brings back")
   })
 })
 
@@ -1045,8 +1107,9 @@ test("a pill pressed on one bot leaves every other bot's list on its own", async
       id: "other-chat",
       profileId: other.id,
       title: "Other chat",
+      // Said in, so it is a row of that bot's list: a chat nothing was said in is no row (ADR 0158).
       createdAt: 200,
-      updatedAt: 200,
+      updatedAt: 210,
       changedAt: 200,
     },
     {

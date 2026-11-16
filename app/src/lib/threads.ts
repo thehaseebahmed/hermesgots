@@ -9,7 +9,7 @@ import {
   type Profile,
 } from "@/lib/db"
 import { labelOf } from "@/lib/bot-name"
-import { newestReplyOf, readBotChats } from "@/lib/chat-rows"
+import { newestReplyOf, readListedChats } from "@/lib/chat-rows"
 import { byName } from "@/lib/compare"
 import { useRoomNeeds } from "@/lib/room"
 import { withDir, type Sort, type SortKey } from "@/lib/sort"
@@ -92,6 +92,10 @@ export function sortBots(bots: BotSummary[], sort: Sort<BotSort>): BotSummary[] 
  * for the sidebar, in the order linked. Its count reads the same conversations that list draws, never
  * a coding session's: a row that leads to the bot's screen must not say its news is in a screen it
  * cannot reach. The row's words are `stateLine`'s, and this is only what they count (ADR 0151).
+ *
+ * `latest`, `waiting` and `unread` are all read over the chats the bot's list draws — the same reader,
+ * so a chat nothing has been said in, which the list hides, is no age and no count here either
+ * (ADR 0158). A bot whose only chats are unstarted says nothing of one and counts none of them.
  */
 export function useBotSummaries(): BotSummary[] | undefined {
   const live = useWaiting()
@@ -103,9 +107,9 @@ export function useBotSummaries(): BotSummary[] | undefined {
     const bots = await listEnabledProfiles()
     return Promise.all(
       bots.map(async (bot) => {
-        // Every chat the bot has, newest first: a chat older than a read bound is still a row of its
-        // list, so it still counts (ADR 0136).
-        const chats = await readBotChats(bot.id)
+        // Every chat the bot's list draws, newest first: a chat older than a read bound is still one
+        // (ADR 0136), and one nothing has been said in is the list's to hide and so this row's too.
+        const chats = await readListedChats(bot.id)
         // Only a chat's newest reply can wait on the user, and a reply's read is what a row costs, so
         // only the newest `BOT_CHATS` are read — a bound on the reads, never on what the row counts.
         // The list's own bound widens by a pinned chat; this count's is the newest alone, as it has

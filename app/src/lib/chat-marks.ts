@@ -13,7 +13,7 @@
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { chatRowOf, pinsOf, type ChatListRow } from "./chat-list"
-import { readBotChats } from "./chat-rows"
+import { readListedChats } from "./chat-rows"
 import { db, updateConversation, type Conversation } from "./db"
 import { useRoomNeeds } from "./room"
 import { roomAnswerers, roomRowOf } from "./rooms"
@@ -88,7 +88,7 @@ async function markRoom(
 export function usePinsInList(profileId: string): ChatListRow[] | undefined {
   const rooms = useRoomNeeds()
   const chats = useLiveQuery(async () => {
-    const held = await readBotChats(profileId)
+    const held = await readListedChats(profileId)
     // The record alone is enough: a row's marks are on it, and no tail is read for a count.
     return held.map((chat) => chatRowOf(chat))
   }, [profileId])

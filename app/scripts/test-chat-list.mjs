@@ -12,6 +12,7 @@ import {
   chatRowOf,
   CHAT_FILTERS,
   filterChatRows,
+  isListed,
   orderChatRows,
   PIN_LIMIT,
   pinsOf,
@@ -101,6 +102,50 @@ test("a chat nothing has been said in says so, and keeps its own clock", () => {
   const row = chatRowOf(chat("a", 100))
   assert.equal(row.line, "No messages yet", "nothing said yet, and the row says it rather than nothing")
   assert.equal(row.at, 100, "so the row is placed by when the chat was made")
+})
+
+/** A record, as the listing rule reads one: its two clocks, and whatever mark or kind it carries. */
+const standing = (patch = {}) => ({ createdAt: 1_000, updatedAt: 1_000, ...patch })
+
+test("a chat nothing was said in is no row, and a word or a draft makes it one", () => {
+  // The record a New chat press mints has its two clocks level, and they stay level until something is
+  // sent in it — so stepping back from a chat the reader opened and left without a word leaves no row
+  // behind (ADR 0158). This is a listing rule alone: the chat is still there to open, and the row comes
+  // back the moment it has something to say.
+  assert.equal(isListed(standing(), false), false, "a chat whose clock never moved has said nothing")
+  assert.equal(
+    isListed(standing({ updatedAt: 1_001 }), false),
+    true,
+    "a word sent in it moves the clock past its making, which is what a started chat is",
+  )
+  assert.equal(
+    isListed(standing({ draftAt: 1_500 }), false),
+    true,
+    "a saved draft is a word waiting to be sent, and every device sees it",
+  )
+  assert.equal(
+    isListed(standing(), true),
+    true,
+    "and unsent words this device is still holding count too, though the record knows nothing of them",
+  )
+})
+
+test("Main, a room and a run are never judged by it", () => {
+  // Three kinds a rule about chats has no business hiding. Main is the bot's permanent chat, and a bot
+  // that had not yet said anything in it would otherwise open on a list with no way in; a room's record
+  // is the Host's and arrives with its own clock; and a run's line and time are written onto the record
+  // by the delivery, whose session this device holds no message of.
+  assert.equal(isListed(standing({ main: true }), false), true, "a bot's Main is a row though it is empty")
+  assert.equal(
+    isListed(standing({ room: { id: "room-1", members: [] } }), false),
+    true,
+    "a room is nobody's chat, and never judged by a chat's rule",
+  )
+  assert.equal(
+    isListed(standing({ routine: true, line: "The tide turns at 06:40" }), false),
+    true,
+    "and a routine's run is a row from the moment the delivery writes it",
+  )
 })
 
 test("a reply that waits on the reader says why, in Code's words", () => {

@@ -27,6 +27,48 @@ import type { Conversation, Message } from "./db.ts"
 export const BOT_CHATS = 50
 
 /**
+ * The fields a chat's record is judged by before it is drawn as a row: the three kinds the rule never
+ * touches, the two clocks it compares, and the mark a saved draft leaves.
+ */
+export interface ChatStanding {
+  /** The bot's own Main thread, which is permanent and never hidden. */
+  main?: boolean
+  /** A room: nobody's chat, and a row of its own kind (ADR 0115). */
+  room?: unknown
+  /** A routine's run, whose line and time are written onto the record by the delivery. */
+  routine?: boolean
+  createdAt: number
+  updatedAt: number
+  /** When the reader saved a draft in it — the mark, and the text, every device sees (`draftAt`). */
+  draftAt?: number
+}
+
+/**
+ * Whether a chat is a row of a list at all (ADR 0158).
+ *
+ * A chat nothing has been said in is no row. The record a New chat press mints has `updatedAt` level
+ * with its `createdAt`, and the pair stays level until something is sent in it — so a reader who opens
+ * a chat, says nothing and steps back must find the list they left, not a row for a chat that never
+ * started. It is a row the moment it holds something: a word sent in it (the clocks part), a saved
+ * draft the record carries (`draftAt`, which syncs), or unsent text this device is holding for it —
+ * `hasDraft`, which the caller asks of `drafts.ts`'s `unsentAmong` over the queue as well as the kept
+ * drafts, since a keystroke not yet flushed has still started the chat.
+ *
+ * Three kinds are never judged by it. A bot's **Main** thread is permanent, and a bot that had not yet
+ * said anything in it would otherwise open on a list with no way in. A **room** and a **run** are not
+ * chats at all: a room's record is the Host's and arrives with its own clock, and a run's line and
+ * time are the delivery's, its words living in the run's own session rather than here.
+ *
+ * This is a listing rule and nothing more. Nothing is deleted and no screen closes: a chat already
+ * open keeps drawing from its record by id, and its row comes back on the first message or the first
+ * draft kept.
+ */
+export function isListed(chat: ChatStanding, hasDraft: boolean): boolean {
+  if (chat.main || chat.room || chat.routine) return true
+  return chat.updatedAt > chat.createdAt || chat.draftAt !== undefined || hasDraft
+}
+
+/**
  * The marks a reader leaves on a row, as the record carries them: when it was pinned — which is what
  * orders the pinned group — and whether they archived it out of every list but the Archived pill. A
  * record written before a mark existed carries neither, and is read rather than migrated.

@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router"
 import { ConversationList } from "@/components/conversation-list"
 import { db, type Profile } from "@/lib/db"
 import { markRead, readMark } from "@/lib/read-marks"
+import { formatRelative } from "@/lib/relative"
 import { ChatPage } from "@/routes/chat"
 import {
   absent,
@@ -131,6 +132,38 @@ test("a bot with something newer than this device's mark says how many, and dots
       find("[data-unread]")?.getAttribute("aria-hidden"),
       "true",
       "and the mark is the dot, so the words carry the state",
+    )
+  })
+})
+
+test("the sidebar's preview and count skip an unstarted chat", async () => {
+  // A chat nothing has been said in is no row of the bot's list (ADR 0158), and the sidebar's line about
+  // the bot is read off that list: its age is the newest chat the list draws, and its count is what this
+  // device has not read of them. A record the New chat press minted — newer than everything, and empty —
+  // is neither, or a bot would say "now" and count a chat nobody has opened.
+  const DAY = 86_400_000
+  const at = Date.now() - 40 * DAY
+  await seed({ id: "said-thread", at })
+  const minted = Date.now()
+  await db.conversations.put({
+    id: "unstarted",
+    profileId: bot.id,
+    title: "New chat",
+    hermesSessionId: "gots-unstarted",
+    createdAt: minted,
+    updatedAt: minted,
+    changedAt: minted,
+  })
+  markRead("said-thread", at - 1)
+  markRead("unstarted", 1)
+  await mount(screen("/"), async () => {
+    await until(
+      async () => stateOf(botRow()) === "1 unread",
+      "the row to count the chat that was spoken in, and only it",
+    )
+    assert.ok(
+      wordsOf(botRow()).includes(formatRelative(at, Date.now())),
+      "and to be aged by that chat, not by the empty record newer than it",
     )
   })
 })
