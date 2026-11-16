@@ -24,6 +24,7 @@ import {
   json,
   missing,
   mount,
+  paste,
   settle,
   until,
   wordsOf,
@@ -73,19 +74,6 @@ const tileNames = () =>
   findAll("[aria-label^='Remove ']").map((button) =>
     button.getAttribute("aria-label")!.replace("Remove ", ""),
   )
-
-async function paste(files: File[]) {
-  const field = document.querySelector("textarea")
-  assert.ok(field, "the composer's field is on screen")
-  const event = new Event("paste", { bubbles: true, cancelable: true })
-  Object.defineProperty(event, "clipboardData", {
-    value: { files, items: files.map((file) => ({ kind: "file", getAsFile: () => file })) },
-  })
-  await act(async () => {
-    field.dispatchEvent(event)
-  })
-  await settle()
-}
 
 async function drop(files: File[]) {
   const form = document.querySelector("form")

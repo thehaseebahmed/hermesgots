@@ -10,12 +10,15 @@ import {
   useState,
   useSyncExternalStore,
 } from "react"
-import { useSearchParams } from "react-router"
+import { useLocation, useNavigate, useSearchParams } from "react-router"
 
 import { Refusal } from "@/components/banner"
 import { PointChips } from "@/components/chat/canvas-points"
+import { isPhoto } from "@/lib/attachment-caps"
+import { drawnCell } from "@/lib/media-kind"
 import { Markdown } from "@/components/chat/markdown"
 import { UserBubble } from "@/components/chat/user-bubble"
+import { SentAttachments } from "@/components/chat/message-item"
 import { ThreadRefusal } from "@/components/chat/session-cards"
 import { ReminderRow } from "@/components/chat/reminder-row"
 import { stopSubagents } from "@/lib/agents"
@@ -87,6 +90,7 @@ import {
   requestOf,
   sentFileOf,
   type Row,
+  type SentFile,
   type ToolCall,
   type Turn,
 } from "./fold"
@@ -406,6 +410,8 @@ function ApprovalCard({
 export interface ThreadViewProps {
   server: Connection
   session: string
+  /** The chat this thread is, which is what a row's media is asked for by; none on the dev route. */
+  chatId?: string
   turns: Turn[]
   /** The last turn is still being written, by this device or one the page follows. */
   streaming: boolean
@@ -466,28 +472,35 @@ interface SendOptions extends SendHow {
 }
 
 function HeldRow({
+  chatId,
   marker,
   text,
-  files,
+  attachments,
   points = [],
   children,
 }: {
+  chatId?: string
   marker: "unsent" | "queued"
   text: string
-  files: string[]
+  attachments: Attachment[]
   /** The elements the message points at, read off the marker lines under its words. */
   points?: CanvasPoint[]
   children: ReactNode
 }) {
+  const media = attachments.filter((file) => drawnCell(file.type, file.name) !== "file")
+  const others = attachments.filter((file) => drawnCell(file.type, file.name) === "file")
   return (
     <div
       {...(marker === "unsent" ? { "data-unsent": true } : { "data-queued": true })}
       className="ml-auto w-fit max-w-[85%] space-y-1 text-right"
     >
       <PointChips points={points} />
-      {files.length ? (
+      {media.length && chatId ? (
+        <SentAttachments conversationId={chatId} attachments={media} dim />
+      ) : null}
+      {others.length || (media.length && !chatId) ? (
         <p data-held-files className="text-xs text-muted-foreground">
-          {files.join(", ")}
+          {(chatId ? others : attachments).map((file) => file.name).join(", ")}
         </p>
       ) : null}
       {text ? (
@@ -505,6 +518,7 @@ function HeldRow({
 
 /** chat-next's own markup: the dev route's, and the one its tests read. */
 function PlainView({
+  chatId,
   turns,
   cards,
   goals,
@@ -571,9 +585,10 @@ function PlainView({
         return (
           <HeldRow
             key={row.id}
+            chatId={chatId}
             marker="unsent"
             text={held.text}
-            files={row.attachments.map((file) => file.name)}
+            attachments={row.attachments}
             points={held.points}
           >
             <span data-unsent-state>{NOT_SENT}</span>
@@ -596,9 +611,14 @@ function PlainView({
         return (
           <HeldRow
             key={item.id}
+            chatId={chatId}
             marker="queued"
             text={held.text}
-            files={item.files}
+            attachments={item.files.map((file, at): Attachment => ({
+              id: `queued-${item.id}-${at}`,
+              ...file,
+              image: isPhoto(file.type),
+            }))}
             points={held.points}
           >
             <span data-queued-state>{item.error ?? "Queued"}</span>
@@ -677,7 +697,20 @@ export interface ComposerControls {
   runId?: string
 }
 
+/** A message the new chat's surface hands the thread that opens: its words and the files it carried. */
+export interface Handover {
+  /** Its own id, so a thread that mounts twice takes it once. */
+  id: string
+  text: string
+  attachments: Attachment[]
+}
+
 interface ThreadOptions {
+  /**
+   * The chat this thread is, where the caller knows it: a row's media is asked for by it. A dev
+   * route drawn by a session alone has none, and its held rows name their files instead.
+   */
+  chatId?: string
   /** Builds a turn as the app sends one; without it, the message is posted as plain text. */
   /** `at` is when the reader sent it, which a thread's first turn is stamped with. */
   prepareTurn?: (text: string, attachments: Attachment[], at?: number) => Promise<PreparedTurn>
@@ -687,7 +720,10 @@ interface ThreadOptions {
    * Steers the running reply through the plugin's queue; without it, nothing can be steered. Answers
    * whether the reply took it, which is when the thread may draw it.
    */
-  steerTurn?: (text: string, attachments: Attachment[]) => Promise<boolean>
+  steerTurn?: (
+    text: string,
+    attachments: Attachment[],
+  ) => Promise<{ took: boolean; files: SentFile[] }>
   /**
    * Called once the thread has read the host (`opened`), each time a turn has ended (`turn`), and
    * when the page comes back to the foreground and has caught up (`returned`): where the app reads
@@ -732,6 +768,7 @@ export function ChatNextPage(options: ThreadOptions) {
  * `/v1` or not.
  */
 export function ChatNextThread({
+  chatId,
   pollMs = CHAT_POLL_MS,
   idleMs = CHAT_IDLE_MS,
   stallMs = STALL_MS,
@@ -1522,6 +1559,7 @@ export function ChatNextThread({
     streaming.current = true
     const drawn = {
       type: "sent" as const,
+      send: id,
       user: asked.user,
       ...(retry ? { retry: true } : {}),
       ...(asked.points?.length ? { points: asked.points } : {}),
@@ -1533,9 +1571,12 @@ export function ChatNextThread({
     // again leaves it exactly where it was (ADR 0071).
     if (!resend) dispatch(drawn)
     let prepared: PreparedTurn | undefined
+    let saved: SentFile[] = []
     let run: string
     try {
       prepared = prepareTurn ? await prepareTurn(words, attachments, at) : undefined
+      saved = prepared?.sent.map(sentFileOf) ?? []
+      if (!resend && saved.length) dispatch({ type: "saved", send: id, files: saved })
       const posting = {
         signal: alive.current.signal,
         timeoutMs: sendTimeoutMs(away, READ_TIMEOUT_MS),
@@ -1578,7 +1619,12 @@ export function ChatNextThread({
     }
     // The host has taken it: only now does the row leave, and the turn the thread follows draws the
     // message in its place.
-    if (resend) dispatch({ ...drawn, replaces: resend.id })
+    if (resend)
+      dispatch({
+        ...drawn,
+        ...(saved.length ? { files: saved } : {}),
+        replaces: resend.id,
+      })
     prepared?.settled(true)
     void follow(run)
   }
@@ -1588,6 +1634,18 @@ export function ChatNextThread({
     setDraft("")
     await sendTurn(text)
   }
+
+  // A message the new chat's surface handed over: the thread that opens sends it as its first turn,
+  // so the row drawn is this thread's own (ADR 0111). Taken once, and the address forgets it.
+  const navigate = useNavigate()
+  const handed = (useLocation().state as { handover?: Handover } | null)?.handover
+  const takenBy = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (!handed || takenBy.current === handed.id) return
+    takenBy.current = handed.id
+    void sendTurn(handed.text, handed.attachments)
+    navigate(".", { replace: true, state: { quiet: true } })
+  })
 
   function retryUnsent(id: string) {
     const row = store.get().unsent?.find((one) => one.id === id)
@@ -1623,7 +1681,8 @@ export function ChatNextThread({
     if (!steerTurn) throw new Error("This reply can't be steered.")
     // A steer the host took stands in the reply at once: its transcript row lands only when the run
     // reads it. One it refused stays queued, and the queue row is what draws it.
-    if (await steerTurn(text, attachments)) dispatch({ type: "steered", text })
+    const steered = await steerTurn(text, attachments)
+    if (steered.took) dispatch({ type: "steered", text, files: steered.files })
     void catchUp()
   }
 
@@ -1835,6 +1894,7 @@ export function ChatNextThread({
       <View
         server={{ server, key }}
         session={session}
+        {...(chatId ? { chatId } : {})}
         turns={turns}
         streaming={doing.running || following}
         cards={cards}

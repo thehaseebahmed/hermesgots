@@ -28,6 +28,7 @@ import {
   leave,
   missing,
   mount,
+  paste,
   sendPress,
   seedChats,
   settle,
@@ -370,6 +371,20 @@ test("a message sent mid-reply goes to the plugin's queue and runs once the repl
   })
 })
 
+test("a photo queued mid-reply is drawn where it waits, not named", async () => {
+  const { host } = await onChatNext("c-queue-photo", {}, { plugin: true, host: { uploads: true } })
+  await mount(chatScreen("c-queue-photo"), async () => {
+    await midReply(host, "First question")
+    await paste([new File([new Uint8Array(24)], "photo.png", { type: "image/png" })])
+    await sendPress()
+    await until(() => host.queue.length === 1, "the plugin holds the message")
+    await until(
+      () => Boolean(find('[data-queued] button[aria-label="Open photo.png"]')),
+      "the photo is drawn in the message that waits",
+    )
+  })
+})
+
 test("Remove takes a queued message back off the plugin", async () => {
   const { host } = await onChatNext("c-unqueue", {}, { plugin: true })
   await mount(chatScreen("c-unqueue"), async () => {
@@ -407,6 +422,29 @@ test("with Steer by default, a message sent mid-reply steers it and is drawn in 
       "the steer is drawn inside the reply it steered",
     )
     assert.deepEqual(requests(), ["Write a poem"], "and opens no turn of its own")
+  })
+})
+
+test("a file steered into a reply is drawn where the steer stands", async () => {
+  const { host } = await onChatNext(
+    "c-steer-file",
+    {},
+    { plugin: true, settings: { steerByDefault: true }, host: { uploads: true } },
+  )
+  await mount(chatScreen("c-steer-file"), async () => {
+    const run = await midReply(host, "Write a poem")
+    await paste([new File(["notes"], "notes.txt", { type: "text/plain" })])
+    await type(composerField(), "Make it rhyme")
+    await sendPress()
+    await until(
+      () => host.rows.some((row) => row.display_kind === "steer"),
+      "the plugin steered the running reply",
+    )
+    await until(
+      () => Boolean(find('[data-chat-next] [data-message-id$="-a"] [aria-label="Download notes.txt"]')),
+      "the file is drawn in the reply the steer stands in",
+    )
+    run.finish("Roses are red.")
   })
 })
 

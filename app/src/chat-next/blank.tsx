@@ -13,8 +13,8 @@ import { ChatComposer } from "@/components/chat/chat-composer"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { EmptyChatState } from "@/components/chat/empty-states"
 import { hold, type HoldSlot } from "@/lib/chat-hold"
-import { sendMessage } from "@/lib/chat"
 import { db, type Attachment, type ModelChoice } from "@/lib/db"
+import { randomId } from "@/lib/utils"
 import { dictationHint } from "@/lib/dictation-hint"
 import { draftKey } from "@/lib/drafts"
 import { COLUMN_BOX, COMPOSER_SLOT } from "@/lib/layout"
@@ -45,9 +45,13 @@ export function ChatNextBlank({ botId, slot }: { botId: string; slot: HoldSlot }
     starting.current = true
     try {
       const chat = await beginChat(bot.id, { modelChoice: chosenOf(modelPick) })
-      if (text.trim() || attachments.length)
-        await sendMessage(chat.id, text, { attachments })
-      navigate(`/c/${chat.id}`, { replace: true, state: { quiet: true } })
+      // The chat's own screen sends the message: it is the thread that draws it, and the row it
+      // draws is the one its files are named on (ADR 0111). Handed over as the surface leaves.
+      const handover =
+        text.trim() || attachments.length
+          ? { quiet: true, handover: { id: randomId(), text, attachments } }
+          : { quiet: true }
+      navigate(`/c/${chat.id}`, { replace: true, state: handover })
     } catch (error) {
       starting.current = false
       tell.error(error instanceof Error ? error.message : "Couldn't start the chat.")

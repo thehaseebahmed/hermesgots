@@ -21,6 +21,7 @@ import {
   findText,
   json,
   mount,
+  paste as kitPaste,
   seedChat,
   sendPress,
   settle,
@@ -78,18 +79,9 @@ function composer({ canSteer = true, sent }: { canSteer?: boolean; sent: Sent })
 const field = () => find('textarea[aria-label="Message"]')
 const placeholder = () => field()?.getAttribute("placeholder")
 
-async function paste(name: string, type: string) {
-  const file = new File(["hello"], name, { type, lastModified: 1_700_000_000_000 })
-  const event = new Event("paste", { bubbles: true, cancelable: true })
-  Object.defineProperty(event, "clipboardData", {
-    value: { files: [file], items: [{ kind: "file", getAsFile: () => file }] },
-  })
-  await act(async () => {
-    assert.ok(field(), "the field is on screen")
-    field()!.dispatchEvent(event)
-  })
-  await settle()
-}
+/** A file pasted into the field, the way the clipboard hands one over. */
+const paste = (name: string, type: string) =>
+  kitPaste([new File(["hello"], name, { type, lastModified: 1_700_000_000_000 })])
 
 const tiles = () => findAll("[aria-label^='Remove ']").map((one) => one.getAttribute("aria-label"))
 
