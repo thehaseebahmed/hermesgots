@@ -1,7 +1,8 @@
 /**
- * A bot's chat list as a rule: what one row says, the order the rows are drawn in, and what a search
- * keeps. The screen draws exactly this (`routes/bot-chats.tsx`), and the sidebar's bot rows and this
- * list read one bot's chats, so the row's shape lives here rather than in either of them.
+ * A bot's chat list as a rule: what one row says, the order the rows are drawn in, what a search keeps
+ * and how many pins the list holds. The screen draws exactly this (`routes/bot-chats.tsx`), and the
+ * sidebar's bot rows and this list read one bot's chats, so the row's shape lives here rather than in
+ * either of them.
  *
  * A row's line is the last thing the reader was told: the bot's newest words, and the reader's own only
  * while the bot has not answered them yet, because what they typed is not news to them. Its time is that
@@ -25,10 +26,21 @@ import type { Conversation, Message } from "./db.ts"
  */
 export const BOT_CHATS = 50
 
+/**
+ * The marks a reader leaves on a row, as the record carries them: when it was pinned — which is what
+ * orders the pinned group — and whether they archived it out of every list but the Archived pill. A
+ * record written before a mark existed carries neither, and is read rather than migrated.
+ */
+export interface ChatMarks {
+  pinnedAt?: number
+  archived?: boolean
+}
+
 export type ChatRecord = Pick<
   Conversation,
   "id" | "title" | "pinned" | "updatedAt" | "routine" | "line" | "hermesSessionId"
->
+> &
+  ChatMarks
 
 export type ChatTail = Pick<Message, "content" | "createdAt" | "clarify" | "approval" | "status">
 
@@ -43,6 +55,17 @@ export interface ChatListRow {
   line?: string
   at: number
   pinned: boolean
+  /**
+   * When the reader pinned it, so the pinned group reads the order the pins were made: the earliest on
+   * top, the last pin at its bottom. Absent for a pin written before the app kept a clock, which reads
+   * as the earliest and so keeps the top of the group — no stored pin is migrated to gain one.
+   */
+  pinnedAt?: number
+  /**
+   * Archived by the reader: the mark a list leaves the row out of every other pill by. Carried off the
+   * record beside `pinned`, since a row is drawn from its record and from nothing else.
+   */
+  archived?: boolean
   /**
    * The run a routine's delivery is: its row wears the routine's icon rather than a chat's, and its
    * line and time are the record's, since the run's words are in the run's own session and this chat
@@ -92,6 +115,17 @@ export function waitsOnUser(newest: ChatTail | undefined): boolean {
 }
 
 /**
+ * The marks a row carries from its record, so a row built by any list carries them the same way: each
+ * is left off where the record says nothing, so a row states only the marks it really has.
+ */
+export function rowMarksOf(record: ChatMarks): ChatMarks {
+  return {
+    ...(record.pinnedAt !== undefined ? { pinnedAt: record.pinnedAt } : {}),
+    ...(record.archived ? { archived: true } : {}),
+  }
+}
+
+/**
  * One chat's row, from its record, the newest message this device holds for it and the newest *reply*
  * it holds. The line is the reply's words — the last thing the reader was told — and the reader's own
  * message stands in for it only while the bot has not answered them; `at` is that reply's, so the list
@@ -115,6 +149,7 @@ export function chatRowOf(
       line: chat.line,
       at: chat.updatedAt,
       pinned: Boolean(chat.pinned),
+      ...rowMarksOf(chat),
       routine: true,
     }
   const reason = reply ? waitReasonOf(reply) : undefined
@@ -124,6 +159,7 @@ export function chatRowOf(
     line: plainLine((reply ?? newest)?.content ?? "") ?? NO_MESSAGES,
     at: reply?.createdAt ?? chat.updatedAt,
     pinned: Boolean(chat.pinned),
+    ...rowMarksOf(chat),
     ...(chat.hermesSessionId ? { session: chat.hermesSessionId } : {}),
     // Nothing settled in a chat whose newest reply is still being written.
     ...(newest?.status === "streaming" ? { streaming: true } : {}),
@@ -132,15 +168,26 @@ export function chatRowOf(
 }
 
 /**
- * A row's place in the list's one order: a pinned row first, then by what was last said in it, newest
+ * A row's place in the list's one order: a pinned row first, then the pins in the order they were made
+ * — `pinnedAt` ascending, so the earliest pin is on top and the last pin at the bottom of the group,
+ * with a pin that carries no clock reading as the earliest. Pins made at one moment fall back to the
+ * list's own rule, as does the whole unpinned band under them: what was last said in the row, newest
  * on top, ties by id so every device draws them alike. Named on its own so a list that draws the same
  * rows for another screen — the legacy layout's Rooms section — ranks them by the same rule.
  */
 export function compareChatOrder(
-  a: Pick<ChatListRow, "id" | "at" | "pinned">,
-  b: Pick<ChatListRow, "id" | "at" | "pinned">,
+  a: Pick<ChatListRow, "id" | "at" | "pinned" | "pinnedAt">,
+  b: Pick<ChatListRow, "id" | "at" | "pinned" | "pinnedAt">,
 ): number {
-  return Number(b.pinned) - Number(a.pinned) || b.at - a.at || (a.id < b.id ? -1 : 1)
+  const band = Number(b.pinned) - Number(a.pinned)
+  if (band) return band
+  // Inside the pinned group: the moment the pin was made, and only the pins are ordered by it — an
+  // unpinned row carries no clock, and one left behind by a record mid-merge cannot reorder its band.
+  if (a.pinned) {
+    const pin = (a.pinnedAt ?? 0) - (b.pinnedAt ?? 0)
+    if (pin) return pin
+  }
+  return b.at - a.at || (a.id < b.id ? -1 : 1)
 }
 
 /**
@@ -158,6 +205,46 @@ export function orderChatRows(rows: readonly ChatListRow[]): ChatListRow[] {
  */
 export function chatList(rows: readonly ChatListRow[], query: string): ChatListRow[] {
   return filterByFuzzy(orderChatRows(rows), query, (row) => [row.title, row.line])
+}
+
+/**
+ * How many rows one bot's list may pin: the pinned group is read as one glance, so it is bounded —
+ * and it is bounded per list, over the chats, rooms and runs drawn in it alike.
+ */
+export const PIN_LIMIT = 5
+
+/** The list's pins, in the order they were handed over — what the cap is counted from. */
+export function pinsOf(rows: readonly ChatListRow[]): ChatListRow[] {
+  return rows.filter((row) => row.pinned)
+}
+
+/** What the Edit sheet's Pin switch says: whether this row is pinned, whether it may be turned, and
+ * the line under it. */
+export interface PinSwitch {
+  checked: boolean
+  disabled: boolean
+  /** What the switch does while it may be turned, or what has to happen first while it may not. */
+  subtitle: string
+}
+
+/** The line a switch wears while it is offered: what turning it on does. */
+const PIN_SUBTITLE = "Stays at the top of its list, on every device."
+
+/** The line a switch wears when the list holds its five, saying what has to happen first. */
+const PIN_FULL_SUBTITLE = `Five pins is the most one list holds. Unpin one to make room.`
+
+/**
+ * The Pin switch on one row, read against the list it is drawn in: a pinned row is always turnable —
+ * unpinning is what makes room — and an unpinned one is shut once the list holds `PIN_LIMIT` pins,
+ * with the line under it saying so rather than leaving a reader to guess why.
+ */
+export function pinSwitchOf(
+  row: Pick<ChatListRow, "pinned">,
+  rows: readonly ChatListRow[],
+): PinSwitch {
+  const checked = Boolean(row.pinned)
+  const full = !checked && pinsOf(rows).length >= PIN_LIMIT
+  return { checked, disabled: full, subtitle: full ? PIN_FULL_SUBTITLE : PIN_SUBTITLE }
 }
 
 /**

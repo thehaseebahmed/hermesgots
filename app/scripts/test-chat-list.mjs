@@ -13,7 +13,11 @@ import {
   CHAT_FILTERS,
   filterChatRows,
   orderChatRows,
+  PIN_LIMIT,
+  pinsOf,
+  pinSwitchOf,
 } from "../src/lib/chat-list.ts"
+import { roomRowOf } from "../src/lib/rooms.ts"
 
 const HOUR = 3_600_000
 const DAY = 86_400_000
@@ -186,6 +190,71 @@ test("two chats last spoken in at one moment keep one order, whatever the reader
   )
 })
 
+test("the pinned group keeps the order its pins were made, so the last pin sits at the bottom", () => {
+  // A pin's place among the pins is the moment it was made, not what was last said in it: the row
+  // pinned first stays on top even where another pinned row has been spoken in far more recently.
+  const rows = [
+    chatRowOf(chat("pinned-last", 900, { pinned: true, pinnedAt: 300 })),
+    chatRowOf(chat("pinned-first", 100, { pinned: true, pinnedAt: 100 })),
+    chatRowOf(chat("pinned-second", 700, { pinned: true, pinnedAt: 200 })),
+    chatRowOf(chat("unpinned", 800)),
+  ]
+  assert.deepEqual(
+    orderChatRows(rows).map((row) => row.id),
+    ["pinned-first", "pinned-second", "pinned-last", "unpinned"],
+    "the earliest pin is on top and the last pin is at the bottom of the pinned group",
+  )
+})
+
+test("a row with no `pinnedAt` stands above one pinned later", () => {
+  // Every pin written before the app kept the clock carries none, and must keep the top of the group
+  // as the earliest rather than falling under every pin made since — which is what asks no migration.
+  const rows = [
+    chatRowOf(chat("pinned-yesterday", 900, { pinned: true, pinnedAt: 500 })),
+    chatRowOf(chat("pinned-before-the-clock", 100, { pinned: true })),
+  ]
+  assert.deepEqual(
+    orderChatRows(rows).map((row) => row.id),
+    ["pinned-before-the-clock", "pinned-yesterday"],
+    "a pin with no clock reads as the earliest, so it keeps the top of the group",
+  )
+})
+
+test("two pins made at one moment fall back to the list's own order", () => {
+  const tied = [
+    chatRowOf(chat("quiet", 200, { pinned: true, pinnedAt: 500 })),
+    chatRowOf(chat("busy", 300, { pinned: true, pinnedAt: 500 })),
+  ]
+  assert.deepEqual(
+    orderChatRows(tied).map((row) => row.id),
+    ["busy", "quiet"],
+    "a tie on the moment falls back to the newest word said in them",
+  )
+  const same = [
+    chatRowOf(chat("b", 200, { pinned: true, pinnedAt: 500 })),
+    chatRowOf(chat("a", 200, { pinned: true, pinnedAt: 500 })),
+  ]
+  assert.deepEqual(
+    orderChatRows(same).map((row) => row.id),
+    ["a", "b"],
+    "and one tied on both falls back to the id, so two devices draw one order",
+  )
+})
+
+test("the unpinned band under the pins still reads newest first", () => {
+  const rows = [
+    chatRowOf(chat("unpinned-oldest", 100)),
+    chatRowOf(chat("pin", 50, { pinned: true, pinnedAt: 10 })),
+    chatRowOf(chat("unpinned-newest", 300)),
+    chatRowOf(chat("unpinned-middle", 200)),
+  ]
+  assert.deepEqual(
+    orderChatRows(rows).map((row) => row.id),
+    ["pin", "unpinned-newest", "unpinned-middle", "unpinned-oldest"],
+    "a pin's clock orders it among the pins only; the rows under them are still by their last word",
+  )
+})
+
 test("a routine's row reads its line and its time from its record, not from a message", () => {
   // A delivery's words are in the run's own session, so this device holds no message for the row at
   // all: the plugin writes the first line onto the record, and the row draws that (G4).
@@ -288,6 +357,75 @@ const roomRow = (id, at, patch = {}) => ({
   pinned: false,
   room: { shown: ["a", "b"], more: 0 },
   ...patch,
+})
+
+test("a row carries its pin's clock and the archive mark from its record", () => {
+  const row = chatRowOf(chat("a", 100, { pinned: true, pinnedAt: 700, archived: true }))
+  assert.equal(row.pinnedAt, 700, "the row knows when it was pinned, which is what orders the pins")
+  assert.equal(row.archived, true, "and whether it is archived, which is what the pill reads")
+  assert.equal(chatRowOf(chat("b", 100)).archived, undefined, "a chat nobody archived carries nothing")
+  assert.equal(chatRowOf(chat("c", 100)).pinnedAt, undefined, "and one nobody pinned no clock")
+
+  // A run's row is the record's, mark and clock and all — the delivery is no different a row.
+  const run = chatRowOf(
+    chat("run", 300, { routine: true, line: "A delivery", pinned: true, pinnedAt: 20, archived: true }),
+  )
+  assert.equal(run.archived, true, "a routine's row carries the archive mark too")
+  assert.equal(run.pinnedAt, 20, "and its pin's clock")
+
+  const room = roomRowOf(
+    { id: "r", title: "A room", updatedAt: 5, pinned: true, pinnedAt: 40, archived: true },
+    { shown: [], more: 0 },
+  )
+  assert.equal(room.archived, true, "and so does a room's, off the record's own fields")
+  assert.equal(room.pinnedAt, 40)
+})
+
+test("a list's pins are the rows that carry one, and five is the most it holds", () => {
+  const rows = [
+    chatRowOf(chat("pin-a", 100, { pinned: true, pinnedAt: 10 })),
+    chatRowOf(chat("plain", 200)),
+    roomRow("pin-room", 400, { pinned: true, pinnedAt: 20 }),
+    chatRowOf(chat("pin-b", 300, { pinned: true })),
+  ]
+  assert.equal(PIN_LIMIT, 5, "five pins in one bot's list")
+  assert.deepEqual(
+    pinsOf(rows).map((row) => row.id),
+    ["pin-a", "pin-room", "pin-b"],
+    "a room's pin counts with the chats' pins, and the rows keep the order they came in",
+  )
+  assert.deepEqual(pinsOf([chatRowOf(chat("only", 1))]), [], "and a list with no pins holds none")
+})
+
+test("the sixth pin's switch is off and says why, and a pinned row can always be unpinned", () => {
+  const pins = [1, 2, 3, 4, 5].map((n) =>
+    chatRowOf(chat(`pin-${n}`, 100 + n, { pinned: true, pinnedAt: n })),
+  )
+  const sixth = chatRowOf(chat("sixth", 900))
+  const rows = [...pins, sixth]
+
+  const off = pinSwitchOf(sixth, rows)
+  assert.equal(off.checked, false, "a row nobody pinned reads off")
+  assert.equal(off.disabled, true, "and at five the switch will not be turned")
+  assert.equal(
+    off.subtitle,
+    "Five pins is the most one list holds. Unpin one to make room.",
+    "the line says the list holds five, and that one has to be unpinned first",
+  )
+
+  const on = pinSwitchOf(pins[0], rows)
+  assert.equal(on.checked, true, "a pinned row reads on")
+  assert.equal(on.disabled, false, "and can always be turned off, even at five")
+  assert.equal(
+    on.subtitle,
+    "Stays at the top of its list, on every device.",
+    "the line says what the switch does",
+  )
+
+  const room = pinSwitchOf(sixth, rows.slice(0, 4))
+  assert.equal(room.checked, false)
+  assert.equal(room.disabled, false, "below five the switch is offered")
+  assert.equal(room.subtitle, "Stays at the top of its list, on every device.")
 })
 
 test("the three kinds of row partition the list, and each pill keeps its own", () => {
