@@ -1309,6 +1309,36 @@ export async function setSttSetting(
 }
 
 /**
+ * Writes one speech provider's API key on the bot's host and answers the fresh `stt` block, where
+ * that provider's `key_set` is true. The key rides the request body and nothing else: it is never
+ * logged, and the answer carries no trace of it. The host refuses a mask or an empty key in its own
+ * words.
+ */
+export async function setSttKey(
+  config: HermesConfig,
+  provider: string,
+  key: string,
+  signal?: AbortSignal,
+) {
+  const response = await request(`${pluginRoot(config.baseUrl)}/stt/key`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ provider, key }),
+    signal,
+  })
+  return readStt(((await response.json())?.stt ?? null) as unknown)
+}
+
+/** Removes one speech provider's API key: the name rides the address, since there is no key to send. */
+export async function removeSttKey(config: HermesConfig, provider: string, signal?: AbortSignal) {
+  const response = await request(
+    `${pluginRoot(config.baseUrl)}/stt/key/${encodeURIComponent(provider)}`,
+    { method: "DELETE", headers: headers(config), signal },
+  )
+  return readStt(((await response.json())?.stt ?? null) as unknown)
+}
+
+/**
  * The API-key providers and custom endpoints this bot's Hermes holds, each key as the host masked
  * it (`llm_providers.py`): one read for the page, and every write answers this same block again.
  * Nothing here asks for a key, and nothing builds a mask — the string drawn is the host's own.
