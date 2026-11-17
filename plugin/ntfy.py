@@ -39,6 +39,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from . import link
+from .notice import UNTITLED, WORDS, Notice
 from .store import connect, home_of
 
 logger = logging.getLogger(__name__)
@@ -57,43 +58,6 @@ TOPIC = re.compile(r"^[-_A-Za-z0-9]{1,64}$")
 TOKEN = re.compile(r"^[\x21-\x7e]{1,512}$")
 DEVICE = re.compile(r"^[A-Za-z0-9-]{1,64}$")
 DEFAULT_PRIORITY = 3
-
-# What happened, under the title of what it happened in. `app/netlify/lib/fcm.ts` and
-# `app/public/push-sw.js` say the same; `tests/test_ntfy.py` fails when these drift from them.
-WORDS = {
-    "approval": "Waiting for your approval",
-    "question": "You have a question waiting",
-    "plan": "The plan is ready for your review",
-    "run_done": "You have a new reply",
-    "run_failed": "The run stopped with an error",
-    "pr_checks": "Checks are failing on the pull request",
-    "pr_merged": "Your pull request was merged",
-    "clone_failed": "This project couldn't be set up",
-    "routine_failed": "The last run failed",
-    "research_brief": "The brief is ready for your review",
-    "research_scope": "The scope is ready for your approval",
-    "research_done": "Your research is ready",
-    "research_failed": "The mission stopped with an error",
-    "afk_pr": "A task's pull request is ready to review",
-    "routine_message": "A bot has a message",
-    "meeting_done": "Your meeting notes are ready",
-    "meeting_failed": "Meeting notes failed",
-    "room_input": "A room is waiting on you",
-}
-
-# When nothing names what the news is about.
-UNTITLED = {
-    "routine_failed": "A routine",
-    "routine_message": "A bot",
-    "clone_failed": "A project",
-    "research_brief": "A research mission",
-    "research_scope": "A research mission",
-    "research_done": "A research mission",
-    "research_failed": "A research mission",
-    "meeting_done": "A meeting",
-    "meeting_failed": "A meeting",
-    "room_input": "A room",
-}
 
 
 def _error(message: str) -> Exception:
@@ -318,10 +282,10 @@ def click(kind: str, session_id: str) -> str:
 
 
 def message(
-    held: Dict[str, Any], kind: str, category: str, session_id: str, extra: Optional[Dict[str, str]] = None
+    held: Dict[str, Any], kind: str, category: str, session_id: str, notice: Optional[Notice] = None
 ) -> Dict[str, Any]:
     """The JSON a publish posts to the server's root."""
-    title = ((extra or {}).get("title") or "").strip() or UNTITLED.get(kind) or "Gots"
+    title = ((notice or {}).get("title") or "").strip() or UNTITLED.get(kind) or "Gots"
     priorities = held.get("priorities") if isinstance(held.get("priorities"), dict) else {}
     sequence = hashlib.sha256(f"{category}:{session_id}".encode()).digest()[:18]
     return {
@@ -368,7 +332,7 @@ def deliver(
     kind: str,
     category: str,
     session_id: str,
-    extra: Optional[Dict[str, str]] = None,
+    notice: Optional[Notice] = None,
     on_screen: Optional[List[str]] = None,
 ) -> Optional[int]:
     """Publishes the news if this profile has a target that asked for its category. A topic reaches
@@ -380,7 +344,7 @@ def deliver(
     chosen = [d for d in held.get("devices") or [] if isinstance(d, str)]
     if chosen and all(device in (on_screen or []) for device in chosen):
         return None
-    status = publish(held, message(held, kind, category, session_id, extra))
+    status = publish(held, message(held, kind, category, session_id, notice))
     if status is None or status >= 300:
         # 401 and 403 are the token; the app's own switch is where it is put right.
         logger.warning("gots: ntfy at %s answered %s", urllib.parse.urlsplit(held["server"]).netloc, status)

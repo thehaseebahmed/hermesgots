@@ -47,6 +47,15 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from . import link, ntfy
+from .notice import (
+    CATEGORIES,
+    INPUT_KINDS,
+    KINDS,
+    LEGACY_CATEGORIES,
+    SESSION_KINDS,
+    Notice,
+    category_of,
+)
 from .store import connect, current_path, home_of
 
 logger = logging.getLogger(__name__)
@@ -63,84 +72,6 @@ TITLE_MAX = 80
 # The push services accept 4096 bytes; ours are far smaller.
 RECORD_SIZE = 4096
 MAX_SUBSCRIPTIONS = 20
-# What a push is about. `approval`, `question`, `plan` and `room_input` wait on the user; the rest
-# are news. The registry (`app/netlify/lib/fcm.ts`) and the app (`app/src/lib/push-kinds.ts`) keep
-# the same lists.
-KINDS = (
-    "approval",
-    "question",
-    "plan",
-    "run_done",
-    "run_failed",
-    "pr_checks",
-    "pr_merged",
-    "clone_failed",
-    "routine_failed",
-    "research_brief",
-    "research_scope",
-    "research_done",
-    "research_failed",
-    "afk_pr",
-    "routine_message",
-    "meeting_done",
-    "meeting_failed",
-    # A room of this Host's bots waits on the user, and it is its own kind because a room is
-    # nobody's chat: a push about one names the room, not a session.
-    "room_input",
-)
-# What a device switches: a kind within a feature (chats, code, routines, research). A session's
-# kinds belong to Code when it is a project session, else to Chats; a room's is the room's own,
-# whichever feature its session would have been in.
-CATEGORIES = (
-    "chat_input",
-    "chat_run_failed",
-    "chat_run_done",
-    "room_input",
-    "code_input",
-    "code_run_failed",
-    "code_run_done",
-    "code_pr_checks",
-    "code_pr_merged",
-    "code_afk_pr",
-    "code_setup_failed",
-    "routine_failed",
-    "routine_message",
-    "research_input",
-    "research_done",
-    "research_failed",
-    "meeting_done",
-    "meeting_failed",
-)
-# What a device that never said which it wants gets: what pushed before there were more.
-LEGACY_CATEGORIES = ("chat_input", "code_input")
-# Kinds that are about a chat's session, so that chat can be muted.
-SESSION_KINDS = (
-    "approval", "question", "plan", "run_done", "run_failed", "pr_checks", "pr_merged", "afk_pr",
-    # A routine's answer lands in a chat's own session, so that chat's mute silences it too.
-    "routine_message",
-)
-INPUT_KINDS = ("approval", "question", "plan")
-
-
-def category_of(kind: str, project: bool = False) -> str:
-    if kind == "routine_failed":
-        return "routine_failed"
-    if kind == "routine_message":
-        return "routine_message"
-    # A room is nobody's chat, so which feature a session is in says nothing about it.
-    if kind == "room_input":
-        return "room_input"
-    if kind == "clone_failed":
-        return "code_setup_failed"
-    if kind in ("research_brief", "research_scope"):
-        return "research_input"
-    if kind.startswith(("research_", "meeting_")):
-        return kind
-    if kind in ("pr_checks", "pr_merged", "afk_pr"):
-        return f"code_{kind}"
-    feature = "code" if project or kind == "plan" else "chat"
-    return f"{feature}_{'input' if kind in INPUT_KINDS else kind}"
-
 
 _lock = threading.Lock()
 _last: Dict[Tuple[str, str, str], float] = {}
@@ -370,7 +301,7 @@ def _on_screen_devices(path: Path) -> List[str]:
         return [device for (db, device) in _open if db == str(path)]
 
 
-def _relay(path: Path, kind: str, category: str, session_id: str, extra: Dict[str, str]) -> None:
+def _relay(path: Path, kind: str, category: str, session_id: str, notice: Notice) -> None:
     """Asks the registry to push to the account's Android installs, if this profile is linked."""
     home = home_of(path)
     state = link.load_state(home)
@@ -391,7 +322,7 @@ def _relay(path: Path, kind: str, category: str, session_id: str, extra: Dict[st
                     # A device that chose ntfy is told there, so a token it left on file stays quiet.
                     "skip": list(dict.fromkeys(_on_screen_devices(path) + ntfy.devices(path)))[:50],
                     # Android shows no bot picture, so the registry isn't told which bot it is.
-                    **{k: v for k, v in extra.items() if k != "bot"},
+                    **{k: v for k, v in notice.items() if k != "bot"},
                 },
             )
             break
@@ -418,11 +349,11 @@ def _linked(path: Path) -> bool:
     return bool(state.get("token") and not state.get("revoked") and state.get("site"))
 
 
-def _deliver(path: Path, kind: str, category: str, session_id: str, extra: Optional[Dict[str, str]] = None) -> None:
-    extra = extra or {}
+def _deliver(path: Path, kind: str, category: str, session_id: str, notice: Optional[Notice] = None) -> None:
+    notice = notice or Notice()
     # At most 32 characters of base64url, and distinct per session however long its id is.
     topic = _b64(hashlib.sha256(f"{kind}:{session_id}".encode()).digest()[:18])
-    payload = {"kind": kind, "session_id": session_id, **extra}
+    payload = {"kind": kind, "session_id": session_id, **notice}
     for row in _rows(path):
         if _on_screen(path, row["device"]) or not wants(row, category):
             continue
@@ -433,10 +364,10 @@ def _deliver(path: Path, kind: str, category: str, session_id: str, extra: Optio
         elif status is None or status >= 300:
             logger.debug("gots: push to %s answered %s", urllib.parse.urlsplit(row["endpoint"]).netloc, status)
     try:
-        ntfy.deliver(path, kind, category, session_id, extra, _on_screen_devices(path))
+        ntfy.deliver(path, kind, category, session_id, notice, _on_screen_devices(path))
     except Exception:
         logger.debug("gots: an ntfy publish failed", exc_info=True)
-    _relay(path, kind, category, session_id, extra)
+    _relay(path, kind, category, session_id, notice)
 
 
 SEEN_KEEP_MS = 30 * 24 * 3600 * 1000
@@ -656,7 +587,7 @@ def _run(path: Path, kind: str, session_id: str, title: Optional[str] = None) ->
         project = kind in SESSION_KINDS and _project_session(path, session_id)
         if kind in SESSION_KINDS and not title:
             title = session_title(path, session_id)
-        message = {"title": _short(title), "bot": bot(path)}
-        _deliver(path, kind, category_of(kind, project), session_id, {k: v for k, v in message.items() if v})
+        notice = Notice(title=_short(title), bot=bot(path))
+        _deliver(path, kind, category_of(kind, project), session_id, notice)
     except Exception:
         logger.debug("gots: a push failed", exc_info=True)
