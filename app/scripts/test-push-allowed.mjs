@@ -19,7 +19,7 @@ import { body, read } from "./push-source.mjs"
 const ids = (categories) => categories.map((category) => category.id)
 /** Every id, in the order the list keeps: what a phone that can reach everything is told. */
 const all = ids(reachableCategories(true))
-/** The thirteen a phone without the Meetings experiment can reach. */
+/** The same ids on a phone that can't reach the Meetings experiment. */
 const withoutMeetings = ids(reachableCategories(false))
 /** A phone that has made every channel and left it alone: Android's importance 2, 3 or 4. */
 const healthy = PUSH_CATEGORIES.map(({ id, importance }) => ({ id, importance }))

@@ -288,8 +288,8 @@ def message(
     """The JSON a publish posts to the server's root: the notice's title over its body, with the
     kind's own line standing in where the notice names no words.
 
-    Only words ride here. An approval's buttons are a header (``headers``), since a button is not a
-    sentence, and neither is a word Gots would have to say twice.
+    Only words ride here: an approval's buttons are a header (``headers``), since a button is not a
+    sentence.
     """
     title = ((notice or {}).get("title") or "").strip() or UNTITLED.get(kind) or "Gots"
     words = ((notice or {}).get("body") or "").strip() or WORDS.get(kind, "Waiting for you")
@@ -355,9 +355,8 @@ def headers(
 ) -> Dict[str, str]:
     """What a publish carries beside its words: the picture and the buttons, both the app's own.
 
-    A profile that has never heard where its app lives and which bot it is says neither — the message
-    is then the title and one sentence, as it was before either existed — since a button drawn under
-    no picture is a notice that doesn't look like this bot's at all.
+    A profile that has never heard where its app lives and which bot it is says neither, since a
+    button drawn under no picture is a notice that doesn't look like this bot's at all.
     """
     picture = icon(origin, bot)
     if not picture:

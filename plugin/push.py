@@ -579,7 +579,6 @@ def session_title(path: Path, session_id: str) -> Optional[str]:
 
 
 def _short(text: Optional[str]) -> Optional[str]:
-    """A title at a tray's bound, and nothing at all for no words."""
     if not isinstance(text, str):
         return None
     return flatten(text, TITLE_MAX) or None

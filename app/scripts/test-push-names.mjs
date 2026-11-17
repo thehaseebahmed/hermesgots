@@ -68,7 +68,7 @@ test("the renamed type is the only wording that changed", () => {
     research_input: "Brief or scope to review",
   }
   for (const [id, title] of Object.entries(renamed)) assert.equal(byId(id).title, title)
-  // The other fourteen keep the wording they shipped with, as this table has it.
+  // Every other type keeps the wording it shipped with, as this table has it.
   assert.deepEqual(
     PUSH_CATEGORIES.filter((c) => !(c.id in renamed)).map((c) => c.title),
     NAMED.filter(([id]) => !(id in renamed)).map(([, title]) => title),

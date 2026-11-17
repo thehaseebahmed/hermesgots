@@ -148,7 +148,6 @@ def tell_finished(path: Path, home: Path) -> int:
     """
     with _lock:
         held = list(_held)
-    # One read of what the host is still working on answers every hold, not two per hold.
     busy = _busy(home)
     told = 0
     for session_id in held:

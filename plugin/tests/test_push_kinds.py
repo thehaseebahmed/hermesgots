@@ -700,8 +700,8 @@ class OnScreen(unittest.TestCase):
             )
 
     def test_the_relay_tells_the_registry_which_bot_and_picture_it_is(self):
-        # A phone draws the notice now (a notification payload can carry no button), so it is told
-        # the bot whose picture to wear, where that picture is, and the buttons to draw.
+        # A phone draws the notice itself — a notification payload can carry no button — so it is
+        # told the bot whose picture to wear, where that picture is, and the buttons to draw.
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "gots.db"
             bodies = []

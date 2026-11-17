@@ -145,8 +145,8 @@ export function pushText(kind: PushKind, detail: PushDetail = {}) {
 }
 
 /**
- * A picture a phone can fetch: an http(s) address, and nothing else, since what it is handed comes
- * from a plugin and a phone will open whatever it is told to.
+ * An http(s) address, and nothing else: what it is handed comes from a plugin, and a phone will
+ * open whatever it is told to — a notice's picture, or a button's link (`actionsOf`).
  */
 export function pictureOf(value: unknown) {
   const one = typeof value === "string" ? value.trim() : ""

@@ -5,8 +5,8 @@ A notice is what happened and what it happened in — its title (the chat's, the
 project's name), its body, the bot whose picture it wears, and the buttons a press may post — so a
 push and an ntfy publish both carry one value, and neither words anything of its own.
 
-The kinds are one table here, where the plugin kept them in pieces: what a kind is about, the switch
-that silences it, the sentence it says and what a title falls back to when nothing named it.
+The kinds are one table: what a kind is about, the switch that silences it, the sentence it says and
+what a title falls back to when nothing named it.
 """
 
 from __future__ import annotations
@@ -154,19 +154,16 @@ class Kind(NamedTuple):
     category: str
     # The category when that session is a project's, where it differs from the chat's.
     code: Optional[str]
-    # What happened.
     words: str
     # What it is about, when nothing named it.
     untitled: Optional[str] = None
     # About a chat's session, so that chat's mute silences it too.
     session: bool = False
-    # It waits on the user.
     waits: bool = False
 
 
-# What a push is about. `approval`, `question`, `plan` and `room_input` wait on the user; the rest
-# are news. The registry (`app/netlify/lib/fcm.ts`) and the app (`app/src/lib/push-kinds.ts`) keep
-# the same lists.
+# What a push is about. The registry (`app/netlify/lib/fcm.ts`) and the app
+# (`app/src/lib/push-kinds.ts`) keep the same lists.
 KINDS_TABLE: Tuple[Kind, ...] = (
     Kind("approval", "chat_input", "code_input", "Waiting for your approval", session=True, waits=True),
     Kind("question", "chat_input", "code_input", "You have a question waiting", session=True, waits=True),

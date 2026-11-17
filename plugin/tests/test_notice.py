@@ -43,7 +43,7 @@ class NoPullRequestNews(unittest.TestCase):
 
 
 class MergedPullRequest(unittest.TestCase):
-    """A merge still resolves its session; it just doesn't say so any more."""
+    """A merge resolves its session on every device, and tells no device."""
 
     def merged(self, pushed):
         """A project session whose pull request GitHub answers as merged, and what it told."""

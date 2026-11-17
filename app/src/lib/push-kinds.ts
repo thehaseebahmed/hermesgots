@@ -112,7 +112,7 @@ export function wantedCategories(prefs: PushPrefs | undefined) {
 
 /**
  * The categories this device can reach, and so the channels it gets: Meetings' two exist only once
- * that experiment is on, the other thirteen always.
+ * that experiment is on, and every other one always.
  */
 export function reachableCategories(meetings?: boolean) {
   return PUSH_CATEGORIES.filter((category) => category.feature !== "meetings" || Boolean(meetings))

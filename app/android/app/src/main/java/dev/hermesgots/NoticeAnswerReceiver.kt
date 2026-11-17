@@ -60,7 +60,8 @@ class NoticeAnswerReceiver : BroadcastReceiver() {
             connection.connectTimeout = ANSWER_MS
             connection.readTimeout = ANSWER_MS
             connection.doOutput = true
-            // The route takes no body and answers 204; a length of zero says so without a stream.
+            // The route takes no body: the length is declared zero, so the request is a fixed one
+            // rather than a chunked one.
             connection.setFixedLengthStreamingMode(0)
             connection.outputStream.use { }
             // Read the answer, so the host's refusal is read as one and the exchange is closed cleanly.
