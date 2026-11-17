@@ -124,7 +124,7 @@ test("a bot's own chat is never what its address opens on", async () => {
   })
 })
 
-test("a routine's run is a row of the list, never what the address opens", async () => {
+test("a routine's run is no row of the list, and never what the address opens", async () => {
   await seed([
     { id: "chat", at: 100 },
     { id: "run", at: 300, routine: true },
@@ -132,7 +132,8 @@ test("a routine's run is a row of the list, never what the address opens", async
   remember(bot.id, "run")
   await mount(screen(), async () => {
     await click(theBot())
-    await until(async () => rowIds().length === 2, "the bot's chat and its run")
+    await until(async () => rowIds().length === 1, "the bot's chat alone")
+    assert.deepEqual(rowIds(), ["chat"], "its run is a marker in Main, not a row")
     assert.equal(path(), `/b/${bot.id}`, "the list, not the run the memory named")
   })
 })

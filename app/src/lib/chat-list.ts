@@ -85,10 +85,10 @@ export function hasStarted(chat: Pick<ChatStanding, "createdAt" | "updatedAt">):
  * still in the queue, or a message a sync left behind a record that never moved, are `chat-rows.ts`'s
  * `listingChats`, which ORs its two device reads onto this answer.
  *
- * Three kinds are never judged by it. A bot's **Main** thread is permanent, and a bot that had not yet
- * said anything in it would otherwise open on a list with no way in. A **room** and a **run** are not
- * chats at all: a room's record is the Host's and arrives with its own clock, and a run's line and
- * time are the delivery's, its words living in the run's own session rather than here.
+ * Two kinds are never judged by it. A bot's **Main** thread is permanent, and a bot that had not yet
+ * said anything in it would otherwise open on a list with no way in. A **room** is not a chat at all:
+ * its record is the Host's and arrives with its own clock. A routine's **run** is never listed: its
+ * record is the marker its bot's Main draws, and its words live in the run's own session.
  *
  * A fourth exemption is the archive mark's own: archiving is an act the reader took, and the Archived
  * pill is the only way back to what it kept. A chat the New chat press minted and the reader
@@ -99,7 +99,9 @@ export function hasStarted(chat: Pick<ChatStanding, "createdAt" | "updatedAt">):
  * draft kept.
  */
 export function isListed(chat: ChatStanding): boolean {
-  if (chat.main || chat.room || chat.routine || chat.archived) return true
+  // A routine's record is the marker its bot's Main draws, never a row of any list.
+  if (chat.routine) return false
+  if (chat.main || chat.room || chat.archived) return true
   return hasStarted(chat) || chat.draftAt !== undefined
 }
 
@@ -450,7 +452,7 @@ export function pinSwitchOf(
  * straight after Unread because it is the one pill a reader reaches for after the rows that want
  * them: what they set aside is one press further on, and nowhere else.
  */
-export type ChatFilter = "all" | "unread" | "archived" | "chats" | "rooms" | "routines"
+export type ChatFilter = "all" | "unread" | "archived" | "chats" | "rooms"
 
 /**
  * The pills, each with the words it wears and the sentence it says when it keeps nothing. The sentence
@@ -465,7 +467,6 @@ export const CHAT_FILTERS: readonly { key: ChatFilter; label: string; empty: str
   { key: "archived", label: "Archived", empty: "No archived chats." },
   { key: "chats", label: "Chats", empty: "No chats." },
   { key: "rooms", label: "Rooms", empty: "No rooms." },
-  { key: "routines", label: "Routines", empty: "No routines." },
 ]
 
 /** This device's read marks, as the rows' dots and the Unread pill both read them. */
@@ -492,9 +493,8 @@ const KEEPS: Record<ChatFilter, (row: ChatListRow, marks: ReadMarks) => boolean>
   all: () => true,
   unread: (row, marks) => isUnread(row.at, marks[row.id]),
   archived: () => true,
-  chats: (row) => !row.room && !row.routine,
+  chats: (row) => !row.room,
   rooms: (row) => Boolean(row.room),
-  routines: (row) => Boolean(row.routine),
 }
 
 /** The rows one pill keeps, in the order they were handed over. A filter never re-orders the list. */

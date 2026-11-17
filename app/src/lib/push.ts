@@ -6,6 +6,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 
 import {
   chatIdForSession,
+  routineBotForSession,
   db,
   getSettings,
   listEnabledProfiles,
@@ -465,7 +466,10 @@ async function openPush(path: string) {
   const chat = session
     ? await chatIdForSession(session).catch(quietly("Reading a tapped session's chat"))
     : undefined
-  const target = pushTarget(session, chat) ?? path
+  const routineBot = session
+    ? await routineBotForSession(session).catch(quietly("Reading a tapped session's routine"))
+    : undefined
+  const target = pushTarget(session, chat, routineBot) ?? path
   if (openers.size) openers.forEach((open) => open(target))
   else pendingOpen = target
 }

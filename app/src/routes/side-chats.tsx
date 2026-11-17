@@ -52,7 +52,7 @@ import { ChatPage } from "@/routes/chat"
  * The pills this list holds, in the order they stand: the flat list's, less Routines. No run is a side
  * chat, so a pill that keeps one would be a pill that draws what the screen has already left out.
  */
-const PILLS = CHAT_FILTERS.filter((pill) => pill.key !== "routines")
+const PILLS = CHAT_FILTERS
 
 /** The bot's Side Chat List, at its own address. */
 export function SideChatsPage() {

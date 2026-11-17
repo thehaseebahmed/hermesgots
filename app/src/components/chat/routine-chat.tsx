@@ -28,6 +28,7 @@ import { hold, type HoldSlot } from "@/lib/chat-hold"
 import { hasServer, serverConfig } from "@/lib/connection"
 import { db, type Message } from "@/lib/db"
 import { COMPOSER_SLOT } from "@/lib/layout"
+import { botMainPath } from "@/lib/bot-tabs"
 import { useChatLead } from "@/lib/chat-lead"
 import { useNav } from "@/lib/nav"
 import { useDraws } from "@/lib/openui-draws"
@@ -59,9 +60,12 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
   )
   const ready = Boolean(chat && bot && chat.id === id)
   const { root } = useNav()
-  // The list this run was opened from is the bot's, never the chat a delivery arrived in: a routine's
-  // row is the bot's own, so its bar's leading control steps back to where its row stands.
-  const lead = useChatLead({ bot: chat?.profileId })
+  // A run is opened from the marker its delivery left in its bot's Main, so its bar's leading control
+  // steps back there.
+  const lead = useChatLead({
+    bot: chat?.profileId,
+    lands: chat?.profileId ? botMainPath(chat.profileId) : undefined,
+  })
   useLayoutEffect(() => {
     if (ready) hold(slot, id)
   }, [ready, slot, id])

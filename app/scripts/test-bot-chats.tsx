@@ -450,9 +450,7 @@ test("the dot is this device's read mark, not the host's word", async () => {
   })
 })
 
-test("a routine's delivery is a row of its own, with the routine's icon and the record's line", async () => {
-  // A run has no message on this device at all: the row's line and time are the record's, which is why
-  // a device that never opened the run still draws it.
+test("a routine's delivery is no row of the list: it is the marker its bot's Main draws", async () => {
   const at = Date.now() - 120_000
   await seed([
     {
@@ -464,30 +462,8 @@ test("a routine's delivery is a row of its own, with the routine's icon and the 
     { id: "chat", title: "A chat", at: at + 1_000, said: "Nothing else came in" },
   ])
   await mount(screen(), async () => {
-    await until(async () => rowIds().length === 2, "the bot's chats")
-    const words = wordsOf(rowOf("routine-job-1-cron_9"))
-    assert.ok(words.includes("Morning watch"), "the row names the routine")
-    assert.ok(
-      words.includes("The tide turns at 06:40"),
-      "its line is the delivery's first words, read from the record",
-    )
-    assert.ok(
-      words.length > "Morning watch The tide turns at 06:40".length,
-      "and its age comes from the record's own clock",
-    )
-    assert.ok(
-      iconOf("routine-job-1-cron_9")?.classList.contains("lucide-rotate-ccw-clock"),
-      "the row wears the routine's icon",
-    )
-    assert.ok(
-      iconOf("chat")?.classList.contains("lucide-message-circle"),
-      "while a chat's row keeps the chat's",
-    )
-    assert.equal(
-      rowOf("routine-job-1-cron_9")?.querySelector("[data-waiting]"),
-      null,
-      "a run waits on nobody: nothing can be answered in it",
-    )
+    await until(async () => rowIds().length === 1, "the bot's chats")
+    assert.deepEqual(rowIds(), ["chat"], "the run's record draws no row")
   })
 })
 
@@ -546,7 +522,7 @@ test("the list holds every chat the bot has, so a pin and a chat past the bound 
   })
 })
 
-test("a row deleted here is not resurrected by a record written ahead of this device's clock", async () => {
+test("a record deleted here is not resurrected by one written ahead of this device's clock", async () => {
   // A delivery's record is stamped by the host's clock, which can run ahead of this device's. The
   // merge keeps only the strictly newer record, so a tombstone stamped from the device's own clock
   // would lose to the row it kills and the row would come back on the next merge.
@@ -559,9 +535,6 @@ test("a row deleted here is not resurrected by a record written ahead of this de
       routine: { line: "The tide turns at 06:40." },
     },
   ])
-  await mount(screen(), async () => {
-    await until(async () => Boolean(rowOf("routine-job-1-cron_9")), "the run's row")
-  })
   await deleteConversation("routine-job-1-cron_9")
   const tombstone = await db.tombstones.get("chat:routine-job-1-cron_9")
   assert.ok(tombstone, "its deletion is named for the other devices")
@@ -941,8 +914,8 @@ test("the pills narrow the rows to the kind each names, and say what their empti
     const pills = () => findAll('[role="group"][aria-label="Filter chats"] button')
     assert.deepEqual(
       pills().map((one) => (one.textContent ?? "").trim()),
-      ["All", "Unread", "Archived", "Chats", "Rooms", "Routines"],
-      "the six pills, in the rule's own order, Archived straight after Unread",
+      ["All", "Unread", "Archived", "Chats", "Rooms"],
+      "the five pills, in the rule's own order, Archived straight after Unread",
     )
     assert.equal(
       filterPill("All")?.getAttribute("aria-pressed"),
@@ -956,14 +929,14 @@ test("the pills narrow the rows to the kind each names, and say what their empti
     assert.deepEqual(
       rowIds(),
       ["trip", "dinner"],
-      "Chats is a row that is neither a room nor a run",
+      "Chats is a row that is not a room",
     )
     await click(filterPill("Rooms"))
     assert.deepEqual(rowIds(), ["planning"], "Rooms is the room's own row")
-    await click(filterPill("Routines"))
-    assert.deepEqual(rowIds(), [], "no routine has delivered here")
+    await click(filterPill("Archived"))
+    assert.deepEqual(rowIds(), [], "nothing here has been put away")
     assert.ok(
-      findText("p", "No routines."),
+      findText("p", "No archived chats."),
       "so the pill says what its emptiness is, in its own words",
     )
 

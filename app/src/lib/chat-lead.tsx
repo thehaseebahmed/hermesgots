@@ -41,6 +41,7 @@ export function useChatLead({
   beside,
   underCode = false,
   leave,
+  lands,
 }: {
   /** The bot whose list this screen's row stands in, where one holds it. */
   bot: string | undefined
@@ -51,6 +52,11 @@ export function useChatLead({
   main?: boolean
   /** Whether that list is on screen beside this one; the split width's answer by default. */
   beside?: boolean
+  /**
+   * Where this screen leads back to, where it is no row of a list: a routine's run is opened from the
+   * marker in its bot's Main, so it lands there.
+   */
+  lands?: string
   /** A project session under Code leads back to Code rather than to any list. */
   underCode?: boolean
   /** Where that control goes; the session's own way out of Code. */
@@ -69,7 +75,7 @@ export function useChatLead({
   // bot's own address and the new UX's has one of its own, so a chat's way back is the list its layout
   // draws; a device whose settings have not answered draws the control once they do.
   const onMain = drawsMain(layout, main)
-  const list = bot && !onMain && layout ? listPathOf(layout, bot) : undefined
+  const list = lands ?? (bot && !onMain && layout ? listPathOf(layout, bot) : undefined)
   const besideList = (beside ?? split) && Boolean(list)
   const ontoList = useCallback(() => {
     if (list) up(list)

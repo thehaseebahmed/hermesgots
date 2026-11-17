@@ -260,10 +260,16 @@ export function pushedSession(path: string) {
 
 /**
  * Where a tap lands once the caller has looked the session up on this device: this device's chat for
- * it (`/c/<id>`), else nothing — the caller keeps the path it had, which is the session route that
+ * it (`/c/<id>`), the bot's Main for a routine's run, else nothing — the caller keeps the path it had, which is the session route that
  * syncs for a chat this device doesn't hold.
  */
-export function pushTarget(session: string | undefined, chatId: string | undefined) {
+export function pushTarget(
+  session: string | undefined,
+  chatId: string | undefined,
+  routineBot?: string,
+) {
+  // A routine's delivery is a marker in its bot's Main, so its alert opens that Main (`/b/<bot>`).
+  if (session && routineBot) return `/b/${encodeURIComponent(routineBot)}`
   return session && chatId ? `/c/${encodeURIComponent(chatId)}` : undefined
 }
 

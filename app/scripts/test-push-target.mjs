@@ -50,3 +50,8 @@ test("the tap reads this device's chat before it names a path", () => {
     "openPush looks the session up before it builds the path",
   )
 })
+
+test("a routine's alert opens its bot's Main, not the run's row", () => {
+  assert.equal(pushTarget("run-1", "routine-job-run-1", "bot a"), "/b/bot%20a")
+  assert.equal(pushTarget(undefined, "chat-1", "bot-a"), undefined, "with no session there is no target")
+})

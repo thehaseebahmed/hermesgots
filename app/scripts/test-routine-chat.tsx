@@ -119,8 +119,8 @@ const screen = (entry = `/c/${rowOf()}`) => (
     <Path />
     <Routes>
       <Route path="c/:id" element={<ChatPage slot="route" />} />
-      {/* A run's way back is its bot's list, which has an address of its own. */}
-      <Route path="b/:profileId/sidechats" element={<p data-list />} />
+      {/* A run's way back is its bot's Main, where the marker that opened it stands. */}
+      <Route path="b/:profileId" element={<p data-list />} />
     </Routes>
   </MemoryRouter>
 )
@@ -172,7 +172,7 @@ test("a routine's row opens its run read-only, under the header naming it", asyn
   })
 })
 
-test("the run's bar keeps the ring and draws no options button, and its title opens the sheet with its name, its mute, its pin, its archive and its delete", async () => {
+test("the run's bar keeps the ring and draws no options button, and its title opens the sheet with its name, its mute, its pin and its delete", async () => {
   ownRun("bar")
   host()
   await seed()
@@ -201,12 +201,12 @@ test("the run's bar keeps the ring and draws no options button, and its title op
       "its mute and its pin, as the switches of one card",
     )
     await until(async () => Boolean(find("[data-chat-pin]")), "its pin")
-    await until(async () => Boolean(find("[data-chat-archive]")), "its archive")
+    assert.equal(missing("[data-chat-archive]"), true, "and no archive: a run is no row of any list")
     assert.ok(findText("button", "Delete chat"), "and the one control that ends it")
   })
 })
 
-test("the way back is the bot's list, not the chat the run was opened from", async () => {
+test("the way back is the bot's Main, where the marker that opened the run stands", async () => {
   ownRun("back")
   host()
   await seed()
@@ -222,7 +222,7 @@ test("the way back is the bot's list, not the chat the run was opened from", asy
     )
     assert.equal(missing('[aria-label="Open conversations"]'), true, "with no drawer beside it")
     await click(back)
-    await until(async () => path() === `/b/${bot.id}/sidechats`, "the bot's list")
+    await until(async () => path() === `/b/${bot.id}`, "the bot's Main")
     absent("[data-slot=routine-note]", "and the run's screen is what was left")
   })
 })

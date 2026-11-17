@@ -142,8 +142,13 @@ test("Main, a room and a run are never judged by it", () => {
   )
   assert.equal(
     isListed(standing({ routine: true, line: "The tide turns at 06:40" })),
-    true,
-    "and a routine's run is a row from the moment the delivery writes it",
+    false,
+    "while a routine's run is never a row: it is the marker its bot's Main draws",
+  )
+  assert.equal(
+    isListed(standing({ routine: true, archived: true })),
+    false,
+    "and archiving it does not bring it back",
   )
 })
 
@@ -179,7 +184,6 @@ test("a chat nothing was said in is offered no way to put it away", () => {
     true,
     "a room may, whatever its clocks say",
   )
-  assert.equal(mayArchive(standing({ routine: true })), true, "and so may a routine's run")
   assert.equal(
     mayArchive(standing({ archived: true })),
     true,
@@ -565,29 +569,24 @@ test("the pills stand in one order, Archived straight after Unread", () => {
   // the row the reader's own hand set aside is one press past the rows that want them.
   assert.deepEqual(
     CHAT_FILTERS.map((entry) => entry.key),
-    ["all", "unread", "archived", "chats", "rooms", "routines"],
-    "All, Unread, Archived, then the three kinds",
+    ["all", "unread", "archived", "chats", "rooms"],
+    "All, Unread, Archived, then the two kinds",
   )
   const archived = CHAT_FILTERS[2]
   assert.equal(archived.label, "Archived", "wearing the word the row's own sheet uses")
   assert.equal(archived.empty, "No archived chats.", "and saying its emptiness in the app's voice")
 })
 
-test("the three kinds of row partition the list, and each pill keeps its own", () => {
-  const rows = [
-    chatRowOf(chat("chat", 300)),
-    roomRow("room", 200),
-    chatRowOf(chat("run", 100, { routine: true })),
-  ]
+test("the two kinds of row partition the list, and each pill keeps its own", () => {
+  const rows = [chatRowOf(chat("chat", 300)), roomRow("room", 200)]
   const ids = (key) => filterChatRows(rows, key, {}).map((row) => row.id)
-  assert.deepEqual(ids("all"), ["chat", "room", "run"], "All keeps the list as it stands")
-  assert.deepEqual(ids("chats"), ["chat"], "a chat is neither a room nor a run")
+  assert.deepEqual(ids("all"), ["chat", "room"], "All keeps the list as it stands")
+  assert.deepEqual(ids("chats"), ["chat"], "a chat is not a room")
   assert.deepEqual(ids("rooms"), ["room"])
-  assert.deepEqual(ids("routines"), ["run"])
   assert.equal(
-    ["chats", "rooms", "routines"].reduce((count, key) => count + ids(key).length, 0),
+    ["chats", "rooms"].reduce((count, key) => count + ids(key).length, 0),
     rows.length,
-    "and every row is exactly one of the three",
+    "and every row is exactly one of the two",
   )
 })
 
@@ -611,11 +610,11 @@ test("Unread is the mark a row's dot reads, so a device that has read nothing ha
 
 test("every pill says what it says when it keeps nothing", () => {
   const said = Object.fromEntries(CHAT_FILTERS.map((entry) => [entry.key, entry.empty]))
-  assert.deepEqual(Object.keys(said), ["all", "unread", "archived", "chats", "rooms", "routines"])
+  assert.deepEqual(Object.keys(said), ["all", "unread", "archived", "chats", "rooms"])
   for (const [key, empty] of Object.entries(said)) {
     assert.ok(empty && empty.endsWith("."), `${key} has a sentence of its own`)
   }
-  assert.equal(new Set(Object.values(said)).size, 6, "and no two pills say the same thing")
+  assert.equal(new Set(Object.values(said)).size, 5, "and no two pills say the same thing")
   assert.equal(said.all, "No chats yet.", "All's is the list's own emptiness")
 })
 
@@ -633,7 +632,7 @@ test("an archived row is kept by no pill but Archived, and found by no search bu
     chatList(filterChatRows(rows, key, marks), query).map((row) => row.id)
 
   assert.deepEqual(ids("archived"), ["packed", "old-room"], "Archived keeps what was set aside")
-  for (const key of ["all", "unread", "chats", "rooms", "routines"]) {
+  for (const key of ["all", "unread", "chats", "rooms"]) {
     assert.deepEqual(
       ids(key).filter((id) => id === "packed" || id === "old-room"),
       [],

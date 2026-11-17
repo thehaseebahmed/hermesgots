@@ -283,12 +283,12 @@ test("the switch turns on today's flat list, at the bot's own address", async ()
       findAll('[role="group"][aria-label="Filter chats"] button')
         .map((one) => (one.textContent ?? "").trim())
         .join(" "),
-      "All Unread Archived Chats Rooms Routines",
-      "the six pills of that list, the routines' one among them",
+      "All Unread Archived Chats Rooms",
+      "the five pills of that list",
     )
     assert.ok(
-      rowIds().includes(`/c/${run.id}`),
-      "and its routines' deliveries are rows of it, which the new UX's list leaves to the page",
+      !rowIds().includes(`/c/${run.id}`),
+      "and its routines' deliveries are no rows of it: they are markers in Main",
     )
     assert.ok(
       rowIds().includes(`/c/${SIDE}`),

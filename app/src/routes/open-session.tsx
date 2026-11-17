@@ -3,7 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { Navigate, useNavigate, useParams } from "react-router"
 
 import { Spinner } from "@/components/ui/spinner"
-import { chatIdForSession, listReachableProfiles } from "@/lib/db"
+import { chatIdForSession, listReachableProfiles, routineBotForSession } from "@/lib/db"
 import { onOpenPush } from "@/lib/push"
 import { quietly } from "@/lib/report"
 import { syncChatsOf } from "@/lib/sync"
@@ -26,15 +26,21 @@ export function OpenSessionPage() {
   const session = sessionId ?? ""
   const navigate = useNavigate()
   const answer = useLiveQuery(
-    async () => ({ session, chat: (await chatIdForSession(session)) ?? null }),
+    async () => ({
+      session,
+      chat: (await chatIdForSession(session)) ?? null,
+      routineBot: (await routineBotForSession(session)) ?? null,
+    }),
     [session],
   )
   // `undefined` until the query answers for this session; `null` once it says this device has none.
   const chat = answer?.session === session ? answer.chat : undefined
+  const routineBot = answer?.session === session ? answer.routineBot : null
 
   useEffect(() => {
-    if (chat) navigate(`/c/${chat}`, { replace: true })
-  }, [chat, navigate])
+    // A routine's run is a marker in its bot's Main, so its alert opens that Main.
+    if (chat) navigate(routineBot ? `/b/${routineBot}` : `/c/${chat}`, { replace: true })
+  }, [chat, routineBot, navigate])
 
   useEffect(() => {
     // Nothing to look for until the device has answered that it holds no such chat.
