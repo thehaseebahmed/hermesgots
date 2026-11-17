@@ -4,6 +4,11 @@
  * the sidebar's row land a reader in a conversation rather than on a list to choose from. The list
  * keeps an address of its own (`/b/<bot>/sidechats`), which is what a chat of the bot's leads back to,
  * and a bot this device holds no Main for yet draws that list where its address stands.
+ *
+ * Main is not a chat like the others, so its bar is not either (G3, G13): the context ring stands down
+ * in favour of the one control that opens the Side Chat List, badged when a side chat is unread and
+ * gone where that list is already beside the chat, and the title leads to the bot's settings page
+ * rather than opening an Edit sheet. The last cases hold that.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -12,6 +17,7 @@ import { MemoryRouter } from "react-router"
 import { AppRoutes } from "@/App"
 import { ConversationList } from "@/components/conversation-list"
 import { db } from "@/lib/db"
+import { markRead } from "@/lib/read-marks"
 
 import {
   Nav,
@@ -24,6 +30,7 @@ import {
   findAll,
   findText,
   json,
+  laptop,
   missing,
   mount,
   nav,
@@ -304,4 +311,146 @@ test("the sidebar marks the lab features with the pill, and its own screens with
       }
     },
   )
+})
+
+/**
+ * A word the bot said in a chat at `at`: what the row's own clock — the one the unread rule measures
+ * — is read from, and the only thing that can light Main's control.
+ */
+const saidIn = (id: string, at: number) =>
+  db.messages.put({
+    id: `${id}-said`,
+    conversationId: id,
+    role: "assistant",
+    content: "Said in it",
+    status: "done",
+    createdAt: at,
+  })
+
+/** Main's control in the bar's actions — the place every other chat keeps its context ring in. */
+const listButton = () => find('[data-slot="header-actions"] [data-slot="side-chats-button"]')
+/** The dot that control wears for a side chat this device has not read. */
+const badge = () => find('[data-slot="side-chats-button"] [data-unread]')
+
+test("Main's bar carries the list control in the ring's place, and no context readout", async () => {
+  await seed([mainRow(), sideRow()])
+  globalThis.fetch = async () => json({})
+  await mount(app(`/c/${MAIN}`), async () => {
+    await until(async () => Boolean(listButton()), "the control that opens the bot's list")
+    assert.equal(
+      listButton()?.getAttribute("href"),
+      `/b/${bot.id}/sidechats`,
+      "one press onto the Side Chat List",
+    )
+    assert.equal(
+      findAll('[data-slot="header-actions"] [aria-label^="Context"]').length,
+      0,
+      "and no ring, where every other chat keeps one",
+    )
+    // The ring was the usage sheet's only door, and Main mounts none to be opened.
+    assert.ok(missing('[role="dialog"]'), "nothing opens from Main's bar")
+    await click(listButton())
+    await until(async () => path() === `/b/${bot.id}/sidechats`, "the list the control opens")
+  })
+})
+
+test("a Main on the current screen draws the same bar: the list in the ring's place", async () => {
+  // A bot with an address but no key cannot be called, so its chats open on the current screen rather
+  // than chat-next — and that bar must say the same thing about Main as the other one does.
+  await seedSettings({ activeProfileId: bot.id })
+  await db.profiles.clear()
+  await db.profiles.put({ ...bot, apiKey: undefined })
+  await db.messages.clear()
+  await db.conversations.clear()
+  await db.conversations.bulkPut([mainRow(), sideRow()])
+  globalThis.fetch = async () => json({})
+  await mount(app(`/c/${MAIN}`), async () => {
+    await until(async () => Boolean(find('header')), "the chat's bar")
+    await until(async () => Boolean(listButton()), "the control that opens the bot's list")
+    assert.equal(
+      listButton()?.getAttribute("href"),
+      `/b/${bot.id}/sidechats`,
+      "the same press, on the screen this chat opens on",
+    )
+    assert.equal(
+      findAll('[data-slot="header-actions"] [aria-label^="Context"]').length,
+      0,
+      "and no ring, as on Main's other bar",
+    )
+    assert.equal(
+      find('[data-slot="header-title"] a')?.getAttribute("href"),
+      `/settings/bots/${bot.id}`,
+      "with the title leading to the bot's settings page here too",
+    )
+  })
+})
+
+test("Main's control is badged for an unread side chat, and not for a word in Main", async () => {
+  const at = Date.now() - 60_000
+  await seed([mainRow(), sideRow()])
+  // The side chat said something at `at`, and this device had read it before that: one unread side
+  // chat, which is what the Side Chat List's own Unread pill would keep.
+  await saidIn(SIDE, at)
+  markRead(SIDE, at - 1_000)
+  globalThis.fetch = async () => json({})
+  await mount(app(`/c/${MAIN}`), async () => {
+    await until(async () => Boolean(badge()), "the dot for the side chat's word")
+    assert.equal(
+      find('[data-slot="side-chats-button"]')?.textContent?.includes("Unread side chats"),
+      true,
+      "and it says so to a reader who cannot see a dot",
+    )
+  })
+
+  // Main is the bot's own conversation, not a side chat: a word in it is never news this control
+  // carries, however little of it this device has read.
+  await seed([mainRow()])
+  await saidIn(MAIN, Date.now() - 1_000)
+  await mount(app(`/c/${MAIN}`), async () => {
+    await until(async () => Boolean(listButton()), "Main's control")
+    assert.ok(missing('[data-slot="side-chats-button"] [data-unread]'), "no dot for a word in Main")
+  })
+})
+
+test(
+  "at the split width the control is gone: the list already stands beside Main",
+  laptop(async () => {
+    await seed([mainRow(), sideRow()])
+    globalThis.fetch = async () => json({})
+    await mount(app(`/c/${MAIN}`), async () => {
+      await until(async () => Boolean(find('[data-slot="header-actions"]')), "Main's bar")
+      assert.ok(
+        missing('[data-slot="side-chats-button"]'),
+        "nothing for a control to reveal, so nothing to draw",
+      )
+      assert.equal(
+        findAll('[data-slot="header-actions"] [aria-label^="Context"]').length,
+        0,
+        "and Main reads no context at this width either",
+      )
+    })
+  }),
+)
+
+test("Main's title opens the bot's settings page, and no Edit sheet", async () => {
+  await seed([mainRow(), sideRow()])
+  globalThis.fetch = async () => json({})
+  await mount(app(`/c/${MAIN}`), async () => {
+    const title = () => find('[data-slot="header-title"] a')
+    await until(async () => Boolean(title()), "Main's title")
+    assert.equal(
+      title()?.getAttribute("href"),
+      `/settings/bots/${bot.id}`,
+      "the bot's own page, the way the sidebar's Settings row opens it",
+    )
+    assert.equal(
+      (title()?.textContent ?? "").trim(),
+      "Main",
+      "over the app's own word for it, never the host's title",
+    )
+    assert.ok(missing("[data-chat-settings-open]"), "and no press that opens an Edit sheet")
+    await click(title())
+    await until(async () => path() === `/settings/bots/${bot.id}`, "the settings page")
+    assert.ok(missing("[data-chat-name]"), "no sheet came with it")
+  })
 })
