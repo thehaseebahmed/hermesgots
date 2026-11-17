@@ -11,9 +11,11 @@
  * the mode's cannot drift apart: one label, one pill, one mark. A resting row wraps it in the link
  * that makes it a destination; the mode wraps it in a row that goes nowhere.
  */
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   AudioLinesIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
   CodeXmlIcon,
   FolderKanbanIcon,
   FrameIcon,
@@ -25,6 +27,7 @@ import { LabLabel } from "@/components/lab-badge"
 import type {
   SidebarFeatureId,
   SidebarLayoutRow,
+  SidebarMove,
   SidebarPin,
   SidebarPlacedRow,
 } from "@/lib/sidebar-layout"
@@ -41,6 +44,16 @@ const FEATURE_ICONS: Record<SidebarFeatureId, typeof FolderKanbanIcon> = {
   research: TelescopeIcon,
   meetings: AudioLinesIcon,
 }
+
+/**
+ * A row's move control: the 44px box a press needs, quiet until the row is the reader's to move, and
+ * dimmed rather than gone at either end of the list.
+ */
+const MOVE_CONTROL = cn(
+  "flex size-11 shrink-0 items-center justify-center rounded-2xl",
+  "text-muted-foreground hover:bg-muted hover:text-foreground",
+  "disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
+)
 
 /** A row's mark and name: a feature's icon and its label, or a canvas's own mark and title. */
 export function SidebarRowBody<Pin extends SidebarPin & { mark?: string }>({
@@ -75,29 +88,55 @@ export function SidebarRowBody<Pin extends SidebarPin & { mark?: string }>({
  * boundary in the order the sidebar would draw them. A row is a name and a mark, never a destination —
  * a press that navigated while a reader is arranging is how they lose their place.
  *
- * Each feature row carries the control that puts it away or brings it back, named for the row and what
- * the press does. A row already put away stays here, in its place and muted, so one list keeps one
- * order and a hidden row is one press from coming back. A pin carries no such control: it left the
- * sidebar because the host pinned it, and only Unpin may end it.
+ * Each row carries the two controls that move it a place up or down, and each feature row the control
+ * that puts it away or brings it back, all named for the row and what the press does. A row already
+ * put away stays here, in its place and muted, so one list keeps one order and a hidden row is one
+ * press from coming back — and still takes part in the order, since a move is a move of the whole
+ * list. A pin carries no hide: it left the sidebar because the host pinned it, and only Unpin may end
+ * it.
+ *
+ * A reorder is silent to a reader who cannot see it, so one polite line inside the group says where
+ * the row went, and the control that was pressed keeps the focus, so the next press is the next place.
  */
 export function SidebarEdit<Pin extends SidebarPin & { mark?: string }>({
   rows,
   onLeave,
   onSetHidden,
+  onMove,
 }: {
   rows: readonly SidebarPlacedRow<Pin>[]
   /** Leaves the mode, and is the one way out a reader can take from inside it. */
   onLeave: () => void
-  /** Puts one row away, or brings it back: the mode's one write, carried by the account. */
+  /** Puts one row away, or brings it back: the mode's one write for a hidden row, carried by the account. */
   onSetHidden: (id: string, hidden: boolean) => void
+  /** Moves one row a place up or down, over the whole list: the order is the account's. */
+  onMove: (id: string, direction: SidebarMove) => void
 }) {
   const group = useRef<HTMLDivElement>(null)
+  const [said, setSaid] = useState("")
+  /**
+   * The control a press left the focus on, and the place its row stood when it was pressed. The row
+   * reaching another place is the render that hands the focus back, since a browser blurs a node
+   * moved under the focus it holds.
+   */
+  const handBack = useRef<{ control: string; id: string; from: number } | null>(null)
+  const controls = useRef(new Map<string, HTMLButtonElement>())
 
   // The mode takes the focus it was opened with, so the next key a reader presses lands in it rather
   // than where the switch left them.
   useEffect(() => {
     group.current?.focus()
   }, [])
+
+  // A move re-renders the list with the row in another place: the control that was pressed takes the
+  // focus back once its row has landed, so the next press is the next place.
+  useEffect(() => {
+    const wait = handBack.current
+    if (!wait) return
+    if (rows.findIndex(({ row }) => row.id === wait.id) === wait.from) return
+    handBack.current = null
+    controls.current.get(wait.control)?.focus()
+  })
 
   // Escape is a way out that needs no pointer. It is answered on the document because the mode is a
   // state of the whole sidebar rather than a control's pop-up: whichever part of the list holds the
@@ -110,6 +149,23 @@ export function SidebarEdit<Pin extends SidebarPin & { mark?: string }>({
     return () => document.removeEventListener("keydown", onKey)
   }, [onLeave])
 
+  /** Keeps a row's control by the row and the way it moves, so the focus can be handed back to it. */
+  const keepControl = (control: string) => (node: HTMLButtonElement | null) => {
+    if (node) controls.current.set(control, node)
+    else controls.current.delete(control)
+  }
+
+  const moveRow = (row: SidebarLayoutRow<Pin>, direction: SidebarMove) => {
+    const from = rows.findIndex((placed) => placed.row.id === row.id)
+    const to = from + direction
+    // The ends hold their control, so a press here always has a place to go.
+    if (to < 0 || to >= rows.length) return
+    handBack.current = { control: `${row.id}:${direction}`, id: row.id, from }
+    onMove(row.id, direction)
+    // Said in the count the reader sees: the rows the mode draws, which is the list they are arranging.
+    setSaid(`${row.label} moved to ${to + 1} of ${rows.length}`)
+  }
+
   return (
     <div
       ref={group}
@@ -118,7 +174,7 @@ export function SidebarEdit<Pin extends SidebarPin & { mark?: string }>({
       tabIndex={-1}
       className="flex flex-col gap-0.5"
     >
-      {rows.map(({ row, hidden }) => (
+      {rows.map(({ row, hidden }, index) => (
         <div
           key={row.id}
           data-sidebar-row={row.id}
@@ -132,6 +188,32 @@ export function SidebarEdit<Pin extends SidebarPin & { mark?: string }>({
           <SidebarRowBody row={row} />
           {/* The eye reads the muted row; a reader who hears the list needs the word. */}
           {hidden && <span className="sr-only">Hidden</span>}
+          <div className="ml-auto flex shrink-0 items-center gap-0.5">
+            <button
+              type="button"
+              ref={keepControl(`${row.id}:-1`)}
+              // Named for its row and the place it goes, since "Move up" alone says nothing about
+              // which of the list's rows it moves.
+              aria-label={`Move ${row.label} up`}
+              // Held rather than absent at the ends, so a row's controls never come and go under the
+              // reader as the list changes.
+              disabled={index === 0}
+              onClick={() => moveRow(row, -1)}
+              className={MOVE_CONTROL}
+            >
+              <ChevronUpIcon className="size-4" />
+            </button>
+            <button
+              type="button"
+              ref={keepControl(`${row.id}:1`)}
+              aria-label={`Move ${row.label} down`}
+              disabled={index === rows.length - 1}
+              onClick={() => moveRow(row, 1)}
+              className={MOVE_CONTROL}
+            >
+              <ChevronDownIcon className="size-4" />
+            </button>
+          </div>
           {row.kind === "feature" && (
             <button
               type="button"
@@ -140,7 +222,7 @@ export function SidebarEdit<Pin extends SidebarPin & { mark?: string }>({
               aria-label={`${hidden ? "Show" : "Hide"} ${row.label}`}
               onClick={() => onSetHidden(row.id, !hidden)}
               className={cn(
-                "ml-auto flex h-11 shrink-0 items-center rounded-2xl px-3 text-xs font-medium",
+                "flex h-11 shrink-0 items-center rounded-2xl px-3 text-xs font-medium",
                 "text-muted-foreground hover:bg-muted hover:text-foreground",
               )}
             >
@@ -149,6 +231,10 @@ export function SidebarEdit<Pin extends SidebarPin & { mark?: string }>({
           )}
         </div>
       ))}
+      {/* A reorder is silent to a reader who cannot see the rows move: one polite line says it. */}
+      <p role="status" aria-live="polite" className="sr-only">
+        {said}
+      </p>
     </div>
   )
 }

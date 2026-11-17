@@ -8,6 +8,7 @@ import test from "node:test"
 
 import {
   DEFAULT_SIDEBAR_LAYOUT,
+  move,
   restingSidebarRows,
   sidebarModeRows,
   sidebarRows,
@@ -176,4 +177,73 @@ test("a pin the reader hides is a hidden row like any other", () => {
   const record = { version: 1, order: todayWithPin, hidden: ["canvas:p1"] }
   assert.deepEqual(resting(record, [PIN]), TODAY, "the pin leaves the resting list")
   assert.deepEqual(modeIds(record, [PIN]), todayWithPin, "and stands in the mode's, in its place")
+})
+
+test("moving the first row up and the last row down changes nothing", () => {
+  const record = {
+    version: 1,
+    order: ["meetings", "projects", "code", "canvas", "research"],
+    hidden: ["research"],
+  }
+  assert.deepEqual(
+    move("meetings", -1, record, sidebarRows([])),
+    record,
+    "the first row has nowhere up to go, and the record it answers is the one it was given",
+  )
+  assert.deepEqual(
+    move("research", 1, record, sidebarRows([])),
+    record,
+    "nor has the last row anywhere down — hidden or not, it is the last of the list",
+  )
+})
+
+test("a move names every row the catalogue knows and drops one it does not", () => {
+  // A record another build left: an id this one has no row for. The move still lands, and the record
+  // it writes is the whole list — the retired id gone, every known row named once.
+  const record = {
+    version: 1,
+    order: ["meetings", "retired", "projects", "code", "canvas", "research"],
+    hidden: ["canvas"],
+  }
+  assert.deepEqual(
+    move("projects", -1, record, sidebarRows([])),
+    {
+      version: 1,
+      order: ["projects", "meetings", "code", "canvas", "research"],
+      hidden: ["canvas"],
+    },
+    "the whole order after the move, and the hidden list untouched",
+  )
+})
+
+test("a first move on an empty record starts from today's order", () => {
+  // Nothing written yet, so the list a move starts from is the one the sidebar draws — the row moves
+  // one place in today's order, and the record written names the whole of it.
+  assert.deepEqual(
+    move("meetings", -1, undefined, sidebarRows([])),
+    {
+      version: 1,
+      order: ["projects", "code", "canvas", "meetings", "research"],
+      hidden: [],
+    },
+    "today's list materialised, the row one place up",
+  )
+  assert.deepEqual(
+    move("projects", 1, DEFAULT_SIDEBAR_LAYOUT, sidebarRows([])).order,
+    ["code", "projects", "canvas", "research", "meetings"],
+    "the default record no different from none",
+  )
+})
+
+test("a move carries the pins with the features", () => {
+  const record = { version: 1, order: todayWithPin, hidden: [] }
+  assert.deepEqual(
+    move("canvas:p1", -1, record, sidebarRows([PIN])),
+    {
+      version: 1,
+      order: ["projects", "code", "canvas", "research", "canvas:p1", "meetings"],
+      hidden: [],
+    },
+    "a pin is a row of the one list, so it moves past the feature it follows like any other",
+  )
 })

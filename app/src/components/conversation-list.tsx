@@ -28,6 +28,7 @@ import { formatRelative } from "@/lib/format"
 import { useMeetingsEnabled } from "@/lib/meetings"
 import { plainPress, pressOpeningRoot, useNav } from "@/lib/nav"
 import {
+  move,
   restingSidebarRows,
   sidebarModeRows,
   sidebarRows,
@@ -466,6 +467,9 @@ export function ConversationList({
               rows={editRows}
               onLeave={leaveEdit}
               onSetHidden={(id, hidden) => saveLayout(withHidden(known, layout, id, hidden))}
+              // One write per press, through the appearance clock, so the account and a second device
+              // arrive at the same order this one draws.
+              onMove={(id, direction) => saveLayout(move(id, direction, layout, known))}
             />
           ) : (
             rows.map((row) => (

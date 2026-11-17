@@ -1,8 +1,8 @@
 /**
- * The sidebar's edit mode as a reader opens and leaves it: the header's button is the switch, a row
- * in the mode is no link, and Escape gives the button and the links back. Nothing here arranges
- * anything yet — the mode of this step is the state that takes the rows above the boundary out of
- * the link role and holds the focus, and its controls arrive in the steps after it.
+ * The sidebar's edit mode as a reader opens and leaves it, and as they arrange it: the header's
+ * button is the switch, Escape gives the button and the links back, a row in the mode is no link, a
+ * row can be put away and brought back, and a row can be moved by its own controls — each press
+ * writing the account's record and saying what it did.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -83,6 +83,11 @@ const doneButton = () => find('button[aria-label="Done editing sidebar"]')
 const group = () => find('[role="group"][aria-label="Sidebar layout"]')
 /** A row's own words, before the control the mode puts beside them. */
 const labelOf = (row: Element | null) => wordsOf(row).replace(/(?:Hide|Show)$/, "")
+/** A row's move control, named for the row it moves and the place it goes. */
+const moveControl = (label: string, direction: "up" | "down") =>
+  find(`button[aria-label="Move ${label} ${direction}"]`)
+/** The mode's live region: what a reorder says to a reader who cannot see the rows move. */
+const liveRegion = () => group()?.querySelector('[role="status"]')
 
 /** Escape, pressed where the reader's focus already is. */
 async function pressEscape() {
@@ -296,6 +301,85 @@ test("a hidden row leaves the sidebar and stays in the mode, muted", async () =>
       ["/projects", "/canvas", "/research", "/meetings", "/canvas/p1"],
       "a second mount over the same device draws the same sidebar",
     )
+  })
+})
+
+test("a row moves by its own controls, and the order is the account's", async () => {
+  await seed()
+  await mount(sidebar(), async () => {
+    await until(async () => Boolean(find('a[href="/meetings"]')), "the nav")
+    await click(editButton())
+    await until(async () => Boolean(group()), "the mode")
+
+    // Every row carries both controls, named for the row, and each is the 44px box a press needs.
+    assert.equal(
+      moveControl("Projects", "up")?.hasAttribute("disabled"),
+      true,
+      "the first row has nowhere up to go",
+    )
+    assert.equal(
+      moveControl("Projects", "down")?.hasAttribute("disabled"),
+      false,
+      "and one place down to go",
+    )
+    assert.equal(
+      moveControl("A pinned timetable", "down")?.hasAttribute("disabled"),
+      true,
+      "the last row has nowhere down to go",
+    )
+    assert.equal(
+      moveControl("Meetings", "up")?.classList.contains("size-11"),
+      true,
+      "the control is 44px tall, the box a thumb gets",
+    )
+
+    await click(moveControl("Meetings", "up"))
+    await until(
+      async () => wordsOf(liveRegion()) === "Meetings moved to 4 of 6",
+      "the live region saying where the row went",
+    )
+    assert.equal(
+      liveRegion()?.getAttribute("aria-live"),
+      "polite",
+      "politely, so it waits for the reader rather than interrupting them",
+    )
+    assert.equal(
+      document.activeElement?.getAttribute("aria-label"),
+      "Move Meetings up",
+      "and the focus still on the control that moved one, so the next press is the next place",
+    )
+
+    // The same control, pressed again, moves it once more: the place the last press left it is where
+    // this press starts from.
+    await click(moveControl("Meetings", "up"))
+    await until(
+      async () => wordsOf(liveRegion()) === "Meetings moved to 3 of 6",
+      "the second press's words",
+    )
+    assert.deepEqual(
+      findAll("[data-sidebar-row]").map((row) => row.getAttribute("data-sidebar-row")),
+      ["projects", "code", "meetings", "canvas", "research", "canvas:p1"],
+      "the mode draws the order the presses made",
+    )
+
+    await click(doneButton())
+    await until(async () => Boolean(editButton()), "the switch at rest")
+    assert.deepEqual(
+      addresses(),
+      ["/projects", "/code", "/meetings", "/canvas", "/research", "/canvas/p1"],
+      "the nav's addresses swapped with the rows",
+    )
+    const stored = await db.settings.get("settings")
+    assert.deepEqual(
+      stored?.sidebarLayout,
+      {
+        version: 1,
+        order: ["projects", "code", "meetings", "canvas", "research", "canvas:p1"],
+        hidden: [],
+      },
+      "and the account's record holds the order the presses made",
+    )
+    assert.ok((stored?.appearanceAt ?? 0) > 0, "written through the appearance clock")
   })
 })
 
