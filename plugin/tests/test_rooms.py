@@ -2432,6 +2432,43 @@ class RoomPushes(unittest.TestCase):
         self.assertEqual(self.check(host), 1)
         self.assertEqual(self.told, [("room_input", "room-1", "Planning")])
 
+    def test_two_new_waits_are_two_notices_each_naming_its_own(self):
+        """A room that starts waiting on two things is told twice, once per wait.
+
+        The notice is built from the first wait the room has not announced — not from the first
+        wait it holds — and what a notice names is what is marked told, so the second wait is still
+        news the next pass can announce in its own words. Marking every wait because one notice
+        named one of them would silence the other for as long as the room waits.
+        """
+        host = self.host(waiting=True)
+        # Both waits arrive before a pass: the approval, then a member's question.
+        rooms.hold_question("room-1", "m2", "srq-1", [QUESTION])
+        self.assertEqual(self.check(host), 1, "one notice says one wait")
+        self.assertEqual(
+            self.bodies,
+            ["Clear the build\n\nrm -rf build"],
+            "the approval, which is the first wait the room holds",
+        )
+        self.assertEqual(self.check(host), 1, "the other wait is still one the user hasn't heard")
+        self.assertEqual(
+            self.bodies[1],
+            "Which database?",
+            "and it is said in its own words, not the approval's again",
+        )
+        self.assertIsNone(self.answers[-1], "a question carries no button")
+        self.assertEqual(self.check(host), 0, "both waits are announced, so the room is quiet")
+
+    def test_a_second_wait_is_announced_in_its_own_words(self):
+        host = self.host(waiting=True)
+        self.assertEqual(self.check(host), 1, "the approval")
+        rooms.hold_question("room-1", "m2", "srq-1", [QUESTION])
+        self.assertEqual(self.check(host), 1, "a wait the room has never announced is news")
+        self.assertEqual(
+            self.bodies,
+            ["Clear the build\n\nrm -rf build", "Which database?"],
+            "the notice names the new wait, not the one it already told",
+        )
+
     def test_a_rooms_body_is_the_waits_own_words(self):
         host = self.host(waiting=True)
         self.assertEqual(self.check(host), 1)

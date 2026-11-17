@@ -1738,8 +1738,13 @@ def check(hermes_home: Path) -> int:
         key = (str(hermes_home), room_id)
         with _waiting_lock:
             told = set(_waiting_rooms.get(key, ()))
+        # The waits this room holds that the user hasn't been told about, in the order `waiting`
+        # lists them: a notice says the first of those, never one it has already announced.
+        fresh = [one for one in waits if one["id"] not in told]
         ids = {one["id"] for one in waits}
-        if ids - told:
+        named = None
+        if fresh:
+            named = fresh[0]
             name = room.get("name") if isinstance(room.get("name"), str) else None
             # A push the throttle or a quiet Host dropped is one the user hasn't heard: the waits stay
             # unannounced, and the next pass is still the transition it pushes. The wait it names is
@@ -1749,14 +1754,16 @@ def check(hermes_home: Path) -> int:
                 room_id,
                 path=path,
                 title=name,
-                body=_wait_body(waits[0]),
-                answer=answers.room_target(room_id, waits[0]),
+                body=_wait_body(named),
+                answer=answers.room_target(room_id, named),
             ):
                 return
             pushed += 1
         with _waiting_lock:
             if ids:
-                _waiting_rooms[key] = told | ids
+                # Only what the notice named is marked told, so a wait it did not say — another one
+                # the same pass found — is still news the next pass can announce in its own words.
+                _waiting_rooms[key] = told | ({named["id"]} if named else set())
             else:
                 _waiting_rooms.pop(key, None)
 
