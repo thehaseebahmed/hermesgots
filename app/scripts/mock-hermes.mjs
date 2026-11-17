@@ -118,7 +118,8 @@
 // holds that wake back so a flow can watch the window. …/sessions/{id}/queue holds what
 // the app queued and starts it when the session's run ends, like plugin/outbox.py. The agent asks the user questions
 // with Hermes's clarify tool, which the plugin serves on runs: say "ask" for one, "ask five" for
-// five (plan mode asks before planning), or "ask a lot" for one question with more choices than a
+// five (plan mode asks before planning), "ask twice" for a call of two answered and then a second
+// call of one, or "ask a lot" for one question with more choices than a
 // phone's screen holds, the run carries
 // `clarify.request` and waits, and POST /api/plugins/gots/runs/{id}/clarify answers it. The same
 // event carries the prompt Hermes 0.22.5's own route answers, one question at a time (a `prompt_id`,
@@ -2825,6 +2826,33 @@ async function playTurn(req, body, last, out) {
         ? `Got it, I'll count "${answers.q0}" as old.`
         : "No answer came, so I'll count anything older than 90 days.",
     )
+  } else if (/ask twice/i.test(last)) {
+    // A run that asks, is answered, carries on, and asks again: the second call is its own card, and
+    // nothing of the first call's form answers it.
+    const first = await ask([
+      {
+        question: "Which environment should this run against?",
+        choices: ["staging", "production"],
+      },
+      { question: "Which services are in scope?", choices: ["api", "worker"], multi_select: true },
+    ])
+    const given = Object.values(first.answers).filter(Boolean).length
+    await say(
+      first.outcome === "submitted"
+        ? `First call: ${given} of 2 answers.`
+        : "First call: no answers came.",
+    )
+    const second = await ask([
+      {
+        question: "Who should review it?",
+        choices: ["Platform", "Product"],
+      },
+    ])
+    await say(
+      second.outcome === "submitted" && second.answers.q0
+        ? `Second call: reviewed by ${second.answers.q0}.`
+        : "Second call: no answer came.",
+    )
   } else if (/ask five/i.test(last)) {
     const { answers, outcome } = await ask([
       {
@@ -3195,6 +3223,14 @@ const LIVE_CLARIFY = process.env.MOCK_LIVE_CLARIFY === "1"
 // question on the run's stream before the answer's own response is written. Both are this mode's.
 const SKIP_HINT = '\nReply "skip" to skip this question.'
 const CLARIFY_REPLY_MS = 100
+// How long a host takes between settling one question of a call and raising its next — the model
+// loop it runs in between. Hermes asks the next one in a second or two; a phone that has to come back
+// to the form reads whichever of the two questions is up when it arrives.
+const CLARIFY_GAP_MS = Number(process.env.MOCK_CLARIFY_GAP_MS ?? 0)
+// How long the turn works before it asks a call's first question — the tools a real one runs before it
+// needs to know anything. A chat left as the turn starts has the question raised with nobody there.
+// Paid once per call, so a turn that asks twice works twice as long before its first ask.
+const CLARIFY_LEAD_MS = Number(process.env.MOCK_CLARIFY_LEAD_MS ?? 0)
 
 /** A multi-select answer as Hermes reads one: a JSON list, else the one typed answer. */
 function listOf(said) {
@@ -3970,6 +4006,8 @@ function startRun(req, body, options = {}) {
     },
     async ask(questions) {
       const clarify_id = randomUUID().replace(/-/g, "").slice(0, 12)
+      // The work a host does before it needs to ask anything.
+      if (CLARIFY_LEAD_MS) await sleep(CLARIFY_LEAD_MS)
       run.status = "waiting_for_approval"
       // The plugin notes a `runs` change for a question as it does for an approval (`clarify.py`).
       noteEvent("runs", run.sessionId)
@@ -4025,6 +4063,9 @@ function startRun(req, body, options = {}) {
               ? listOf(said)
               : said
         push("clarify.settled", { prompt_id: run.clarify.prompt_id, execution_generation: 0 })
+        // The host's own model loop between two of a call's questions — never after the last, which
+        // is what carries on to the rest of the turn.
+        if (CLARIFY_GAP_MS && at < questions.length - 1) await sleep(CLARIFY_GAP_MS)
       }
       pendingClarifies.delete(id)
       run.status = "running"

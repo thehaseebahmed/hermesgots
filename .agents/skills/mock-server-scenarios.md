@@ -74,6 +74,7 @@ Send these phrases in a chat message to trigger specific mock behaviors:
 | `out of usage` | The provider refuses the turn — the account's usage is spent — so the run ends as failed with the provider's words, and the transcript's notice stands in the turn's place as it does on a real host; `GET /api/plugins/gots/sessions/{id}/failure` then answers those words, as the plugin's own table does |
 | `ask` | Single clarify question: "Which logs should I count as old?" |
 | `ask five` | Five clarify questions (env, services, name, data handling, reviewers) |
+| `ask twice` | Two clarify calls in one run: two questions, answered, then a second call of one — the second card is its own, and nothing of the first form answers it |
 | `commit` (in project session) | Prevents workspace removal on `workspace/remove` (simulates unpushed work) |
 | `merge` / `close` / `draft` (in project session) | Sets PR state to merged/closed/draft |
 | `break` (in project session) | Fails PR checks |

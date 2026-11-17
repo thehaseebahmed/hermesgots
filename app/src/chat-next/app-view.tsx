@@ -464,7 +464,7 @@ const drawnFor = (waiting: QuestionWait, questions?: ClarifyQuestion[]): Clarify
  * Other. The cards read a message, so the wait is dressed as the reply it interrupts, and an answer
  * goes where chat-next sends it rather than through the old engine.
  */
-export function AppPrompt({ waiting, questions: read, answer, asker, held }: PromptProps) {
+export function AppPrompt({ waiting, questions: read, answer, asker, held, taken, onTaken }: PromptProps) {
   const message = useMemo((): Message => {
     const base = {
       id: `prompt-${waiting.promptId}`,
@@ -517,6 +517,8 @@ export function AppPrompt({ waiting, questions: read, answer, asker, held }: Pro
       message={message}
       askedId={askedId}
       held={held}
+      taken={taken}
+      onTaken={onTaken}
       onAnswer={(answers) => answer(clarifyWire(answers[askedId] ?? null))}
     />
   )
