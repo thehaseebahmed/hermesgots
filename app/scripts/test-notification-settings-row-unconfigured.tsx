@@ -118,6 +118,13 @@ test("a second phone finds the target on the host and joins it with no token typ
       )
       await click(find("#notifications"))
       await until(async () => Boolean(find("[data-notification-types]")), "the inline list")
+      // The list is the switch's own state; the join is a request of its own, handed over off the
+      // tap. Waiting for the list alone let a slower machine read the posts before the request had
+      // been made, so the test waits for the request rather than for the screen.
+      await until(
+        async () => fake.posts.some((post) => post.path.endsWith("/push/ntfy")),
+        "this phone joining the target",
+      )
       const joins = fake.posts.filter((post) => post.path.endsWith("/push/ntfy"))
       assert.equal(joins.length, 1)
       assert.equal(

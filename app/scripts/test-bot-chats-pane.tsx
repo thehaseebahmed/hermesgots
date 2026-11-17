@@ -164,11 +164,10 @@ const DRAWER = 'button[aria-label="Open conversations"]'
 const OPEN_ROW = '[data-slot="list-lane"] ul a[aria-current="page"]'
 /** Main's own row in the Side Chat List, above the side chats at the split width. */
 const MAIN_ROW = '[data-slot="main-row"] a[href^="/c/"]'
-/** The side chats the list draws, in the order it draws them. */
+/** The side chats the list draws, in the order it draws them — read off the rows, since the heading
+ * that names them draws only where Main's row stands above them (`main-row` is Main's own list). */
 const sideRows = () =>
-  findAll('section[aria-label="Side Chats"] ul a[href^="/c/"]').map(
-    (row) => row.getAttribute("href") ?? "",
-  )
+  findAll('[data-slot="chat-rows"] a[href^="/c/"]').map((row) => row.getAttribute("href") ?? "")
 
 test(
   "a chat opened cold draws the Side Chat List beside it, in its 412px lane",

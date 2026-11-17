@@ -7,8 +7,9 @@
  * and how many side chats it has, the routines control trailing, and five pills — All, Unread,
  * Archived, Chats and Rooms — because a routine's run is the routines page's row, not a conversation
  * of the bot's (G11). At the split width the bot's **Main** stands above the rows with a Home glyph,
- * since Main is the chat drawn beside this list; at one pane there is no row for it, because this
- * screen is what Main is not.
+ * since Main is the chat drawn beside this list, and the rows under it wear the "Side Chats" heading
+ * that names the divider between them; at one pane there is no row for Main and no heading either,
+ * because this screen is what Main is not — a list of side chats, named by its own bar.
  *
  * A bot whose Main was never minted opens here — the bot's address, where this list is the app's
  * first entry — and the bar leads with the app's own drawer instead of a step back to a chat that is
@@ -130,7 +131,9 @@ function SideChatsList({
           <MainRow row={main} now={now} bot={bot} replace={Boolean(beside)} selected={selected} />
         ) : undefined
       }
-      group="Side Chats"
+      // The heading names the divider between Main and its chats, so it draws only where Main's row
+      // does: over a list of nothing but side chats there is nothing to divide.
+      group={split && main ? "Side Chats" : undefined}
       clock="latest"
       rows={sides}
       selected={selected}
