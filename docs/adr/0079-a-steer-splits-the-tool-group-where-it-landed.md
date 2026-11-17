@@ -1,5 +1,9 @@
 # A steer splits the tool group where it landed
 
+**Amended by [ADR 0163](0163-a-steer-draws-when-it-is-sent-and-carries-no-caption.md)**, which moves
+when the steer is drawn: the optimistic part it names below is appended at the press rather than
+when the host takes the steer. Where it lands is unchanged.
+
 **Amends [ADR 0054](0054-a-tool-row-never-lands-between-two-thought-rows.md)**, which rejected
 splitting a tool group where something fell between its calls. That rejection stands for what 0054
 was deciding: a stretch of thinking is the reply's own work, it draws above the group, and a group
