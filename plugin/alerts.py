@@ -65,11 +65,13 @@ def turn_started(**kwargs: Any) -> None:
 
 
 def after_llm(**kwargs: Any) -> None:
-    """``post_llm_call``: keeps the reply the run gave, so its notice can say what it said.
+    """``post_llm_call``: keeps the paragraph the run's notice will say, so its end has it.
 
-    The text is the answer the user was shown, kept per session and overwritten by each model call
-    of the turn, so the run's own end reads the last one. ``turn_finished`` takes it: a run told at
-    once carries it into the notice, a run held over its subagents carries it with the hold.
+    The words are the answer the user was shown, overwritten by each model call of the turn, so the
+    run's own end reads the last one. They are kept as the notice carries them — the reply's last
+    paragraph, on one line, cut at the body's bound — so a host that has run hundreds of turns holds
+    a few kilobytes rather than every reply it ever gave. ``turn_finished`` takes them: a run told at
+    once carries them into the notice, a run held over its subagents carries them with the hold.
     Nothing is read back from the transcript afterwards, which a compressed or restarted session
     would have moved on from.
     """
@@ -78,10 +80,13 @@ def after_llm(**kwargs: Any) -> None:
         said = kwargs.get("assistant_response")
         if not session_id or not isinstance(said, str) or not said.strip():
             return
+        words = notice.paragraph_of(said)
+        if not words:
+            return
         with _lock:
             if len(_replies) > 512:
                 _replies.clear()
-            _replies[session_id] = said
+            _replies[session_id] = words
     except Exception:
         logger.debug("gots: couldn't keep a reply", exc_info=True)
 
@@ -169,7 +174,7 @@ def turn_finished(**kwargs: Any) -> None:
             started = _started.pop(session_id, None)
             # Released here whichever way the turn went: a reply is only ever news of the run it
             # was said in, and one kept past its own end would be the next turn's lie.
-            said = _replies.pop(session_id, None)
+            words = _replies.pop(session_id, None)
         stopped = sessions.outcome(**kwargs)
         path, home = sessions._paths()
         record = sessions.record_for(path, home, session_id) if path.exists() else None
@@ -192,11 +197,10 @@ def turn_finished(**kwargs: Any) -> None:
             # on, and the run finishes only when they are gone. Their absence is what the news
             # waits for, so it goes then rather than now — with the words this turn ended on, kept
             # beside it, since nothing reads a reply back once the turn is over.
-            body = notice.paragraph_of(said)
             if _working(home, session_id):
-                _hold(session_id, body)
+                _hold(session_id, words)
             else:
-                push.notify("run_done", session_id, path, body=body)
+                push.notify("run_done", session_id, path, body=words)
     except Exception:
         logger.debug("gots: couldn't tell a turn's end", exc_info=True)
 
