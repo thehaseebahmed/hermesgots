@@ -637,15 +637,15 @@ _FORWARDED = ("X-Forwarded-Proto", "X-Forwarded-Host")
 
 
 def _header(request: Any, name: str) -> Optional[str]:
-    """One request header by name, whatever case the server kept it in, first value only.
+    """One request header by name, first value only.
 
-    A proxy appends what it forwarded to a list, and the first is the client's own.
+    The server's own mapping already answers whatever case a client sent it in, so the name is asked
+    for once. A proxy appends what it forwarded to a list, and the first is the client's own.
     """
     headers = getattr(request, "headers", None) or {}
-    for key in (name, name.lower(), name.upper()):
-        value = headers.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.split(",")[0].strip()
+    value = headers.get(name)
+    if isinstance(value, str) and value.strip():
+        return value.split(",")[0].strip()
     return None
 
 
