@@ -27,7 +27,7 @@ export function BotChatsPage() {
   const { profileId } = useParams()
   const layout = useChatLayout()
   const enabled = layout === "flat"
-  const pane = useBotChatsPane(enabled)
+  const pane = useBotChatsPane()
   // Nothing is drawn before the layout answers, and a device on the legacy layout — where a bot has
   // no screen — lands home rather than on a list it cannot fill.
   if (layout === undefined) return null

@@ -15,6 +15,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
 
+import { AppShell } from "@/components/app-shell"
 import { db, saveChatFilter } from "@/lib/db"
 import { SideChatsPage } from "@/routes/side-chats"
 
@@ -101,6 +102,23 @@ const screen = () => (
     <Routes>
       <Route path="b/:profileId/sidechats" element={<SideChatsPage />} />
       <Route path="c/:id" element={<p data-chat />} />
+    </Routes>
+  </MemoryRouter>
+)
+
+/**
+ * The same address as the app draws it: the list in the shell's lane and the chat it stands beside in
+ * the item lane. At the split width that chat is the bot's Main, so the row for it is drawn here — the
+ * list itself is the lane's, and the address is what puts Main beside it.
+ */
+const pair = () => (
+  <MemoryRouter initialEntries={[`/b/${bot.id}/sidechats`]}>
+    <Path />
+    <Routes>
+      <Route element={<AppShell />}>
+        <Route path="b/:profileId/sidechats" element={<SideChatsPage />} />
+        <Route path="c/:id" element={<p data-chat />} />
+      </Route>
     </Routes>
   </MemoryRouter>
 )
@@ -211,7 +229,7 @@ test(
       { id: MAIN, title: "Bot Chat", main: true, at: 10, said: [{ content: "Morning", at: 10 }] },
       { id: "trip", title: "Trip to Lisbon", at: 300, said: [{ content: "Booked", at: 300 }] },
     ])
-    await mount(screen(), async () => {
+    await mount(pair(), async () => {
       await until(async () => Boolean(mainRow()), "Main's row")
       assert.equal(wordsOf(mainRow()).includes("Main"), true, "drawn at the app's own word")
       assert.ok(

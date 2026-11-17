@@ -19,6 +19,7 @@ import {
   conversationsOf,
   db,
   isReply,
+  mainChatOf,
   newestMessage,
   type Conversation,
   type Profile,
@@ -155,10 +156,7 @@ export function seatedRoomRows(rooms: readonly RoomNeedsRow[], profileId: string
 export function useBotMain(profileId: string): string | null | undefined {
   return useLiveQuery(async () => {
     if (!profileId) return null
-    const main = await conversationsOf(profileId)
-      .filter((chat) => Boolean(chat.main))
-      .first()
-    return main?.id ?? null
+    return (await mainChatOf(profileId))?.id ?? null
   }, [profileId])
 }
 

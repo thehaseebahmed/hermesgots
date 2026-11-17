@@ -2181,6 +2181,19 @@ export function conversationsOf(profileId: string) {
 }
 
 /**
+ * The record one bot's list draws as its **Main**: the chat the plugin flags, read off the bot's own
+ * chats. Nothing where the bot has none, which is a device that has never met a plugin publishing one —
+ * so no screen mints one here. Asked by everything that has to draw the chat a bot's list stands
+ * beside: Main's own address, the pane that keeps that list on screen, and the read a badge counts
+ * from (`mainChatOf` is the one query under `useBotMain`).
+ */
+export function mainChatOf(profileId: string) {
+  return conversationsOf(profileId)
+    .filter((chat) => Boolean(chat.main))
+    .first()
+}
+
+/**
  * The title a chat wears until something is said in it: what a new one is made with, and what a
  * list that names one reads as "nothing said here yet" — so a menu offering sessions to tag leaves
  * these out rather than listing three rows all called the same thing.

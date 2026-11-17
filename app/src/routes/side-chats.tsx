@@ -9,6 +9,11 @@
  * the bot's **Main** stands above the rows with a Home glyph, since Main is the chat drawn beside
  * this list; at one pane there is no row for it, because this screen is what Main is not.
  *
+ * At the split width the list is the lane and this address draws Main in the item lane beside it — the
+ * two panes hold one pair of screens, the same pair a picked side chat opens beside (`useBotChatsPane`
+ * names the bot's one screen for all three addresses, so moving between them replays no transition).
+ * A bot whose Main this device does not hold keeps the list standing whole rather than beside a blank.
+ *
  * The rows, the subtitle's count and Main's badge all read `sideChats(rows)`, less the archived ones
  * (`sideChats`), so the three cannot disagree about what a side chat is — and the rows are ordered by
  * when each chat last moved at all (`latest`), since a chat the reader has just written in is the one
@@ -36,11 +41,12 @@ import {
 } from "@/lib/chat-list"
 import { chatFilterOf, saveChatFilter, type Profile } from "@/lib/db"
 import { HEADER_BUTTON } from "@/lib/layout"
-import { useSplit } from "@/lib/pane"
+import { useBotChatsPane, useSplit, type BotPane } from "@/lib/pane"
 import { quietly } from "@/lib/report"
 import { useNow } from "@/lib/threads"
 import { useBotLabels } from "@/lib/use-bot-labels"
 import { cn } from "@/lib/utils"
+import { ChatPage } from "@/routes/chat"
 
 /**
  * The pills this list holds, in the order they stand: the flat list's, less Routines. No run is a side
@@ -51,8 +57,21 @@ const PILLS = CHAT_FILTERS.filter((pill) => pill.key !== "routines")
 /** The bot's Side Chat List, at its own address. */
 export function SideChatsPage() {
   const { profileId } = useParams()
+  // What the shell has beside this list, where it has room for a second pane: at the split width that
+  // is the bot's **Main**, which is the chat this address draws — the list stands in the lane — so the
+  // pair hold the same screen whether the reader is on Main, on this list or on a side chat of it.
+  const pane = useBotChatsPane()
   if (!profileId) return <Navigate to="/" replace />
+  if (pane?.open && pane.selected) return <ChatPage slot="main" id={pane.selected} />
   return <SideChatsList profileId={profileId} />
+}
+
+/**
+ * This bot's Side Chat List as the lane beside the chat it opened: the same screen the address draws
+ * where there is no room for a second pane, with the row the pane holds marked.
+ */
+export function SideChatsPane({ pane }: { pane: BotPane }) {
+  return <SideChatsList profileId={pane.profileId} selected={pane.selected} beside />
 }
 
 /**
@@ -60,7 +79,17 @@ export function SideChatsPage() {
  * `selected` is the chat the pane holds beside this list, which is what marks Main's row when Main is
  * the one open there.
  */
-function SideChatsList({ profileId, selected }: { profileId: string; selected?: string }) {
+function SideChatsList({
+  profileId,
+  selected,
+  beside,
+}: {
+  profileId: string
+  /** The chat the pane holds beside this list, which is what marks its row. */
+  selected?: string
+  /** Whether this list stands beside the chat it opened, which is what its rows' presses turn on. */
+  beside?: boolean
+}) {
   // The pill this bot's list keeps on this device, read as the key itself rather than the settings
   // row, for the reason the flat list reads it that way: a live query answering a fresh object would
   // re-render on every sync write. The key is the bot's own and shared with that list, so a stored
@@ -112,6 +141,7 @@ function SideChatsList({ profileId, selected }: { profileId: string; selected?: 
       clock="latest"
       rows={sides}
       selected={selected}
+      beside={beside}
     />
   )
 }

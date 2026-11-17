@@ -31,7 +31,6 @@ import {
 } from "@/lib/pane"
 import { setMenuOpener } from "@/lib/native"
 import { useSidebarCollapsed } from "@/lib/sidebar"
-import { useChatLayout } from "@/lib/chat-layout"
 import { cn } from "@/lib/utils"
 import { onChatSwap, type HoldSlot } from "@/lib/chat-hold"
 import { PaneTransition } from "@/components/pane-transition"
@@ -71,8 +70,8 @@ const CodePane = lazy(() => import("@/routes/code").then((m) => ({ default: m.Co
 const ProjectsPane = lazy(() =>
   import("@/routes/projects").then((m) => ({ default: m.ProjectsPane })),
 )
-const BotChatsPane = lazy(() =>
-  import("@/routes/bot-chats").then((m) => ({ default: m.BotChatsPane })),
+const SideChatsPane = lazy(() =>
+  import("@/routes/side-chats").then((m) => ({ default: m.SideChatsPane })),
 )
 
 function chatOf(screen: string) {
@@ -208,7 +207,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
   // Code is asked first: a session's address is a chat's too, and the pane it belongs to is Code's
   // list, never the list of the bot that happens to hold its record (ADR 0115).
   const code = useCodePane()
-  const bot = useBotChatsPane(useChatLayout() === "flat")
+  const bot = useBotChatsPane()
   const projects = useProjectsPane()
   const meetings = useMeetingsPane()
   const research = useResearchPane()
@@ -224,7 +223,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
           screen: botChatsPath(bot.profileId),
           open: bot.open,
           itemKey: bot.selected,
-          node: <BotChatsPane pane={bot} />,
+          node: <SideChatsPane pane={bot} />,
         }
       : projects
         ? {

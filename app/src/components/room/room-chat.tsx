@@ -26,7 +26,6 @@ import { ROOM_MAX_ATTACHMENTS } from "@/lib/attachment-caps"
 import { chatOwner } from "@/lib/chat-owner"
 import { serverConfig } from "@/lib/connection"
 import { usePluginFeatureOn } from "@/lib/features"
-import { useChatLayout } from "@/lib/chat-layout"
 import { useChatLead } from "@/lib/chat-lead"
 import { useNav } from "@/lib/nav"
 import { useBotChatsPane } from "@/lib/pane"
@@ -75,15 +74,14 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
   const { root } = useNav()
   const location = useLocation()
   const navigate = useNavigate()
-  const layout = useChatLayout()
   // The bot's list this room is a row of: the one the row was opened from, as its link says in the
   // address's state, else the bot that carries the room onto this device. A room is no bot's chat
-  // (`listsAsChat`), so the shell seats its pane from that state alone — and the legacy layout, where
-  // no bot has a list, is asked too, so a room is never drawn beside a list that isn't there.
+  // (`listsAsChat`), so the shell seats its pane from that state alone; whether a bot has a list at
+  // all is the lead's to say, since that is the layout's answer rather than the address's.
   const carrier = (location.state as { bot?: string } | null)?.bot ?? chat?.profileId
   const lead = useChatLead({
     bot: carrier,
-    beside: Boolean(useBotChatsPane(layout === "flat")),
+    beside: Boolean(useBotChatsPane()),
   })
   // A room's row going while the room is open — a disband on another device, or a merge landing
   // first — leaves to the list: the chat screen's own "gone" state would draw an empty chat for a

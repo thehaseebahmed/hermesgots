@@ -276,6 +276,12 @@ const RoutineChat = lazy(() => loadRoutineChat().then((m) => ({ default: m.Routi
 
 interface ChatPageProps {
   slot: HoldSlot
+  /**
+   * The chat to draw where the address names none: a bot's list address holds its **Main**, which is
+   * a chat with an id of its own that no rung of the address spells out. The route's own `:id` is what
+   * every other screen of a chat draws.
+   */
+  id?: string
 }
 
 /**
@@ -294,7 +300,7 @@ const roomsDrawn = new Set<string>()
 
 export function ChatPage(props: ChatPageProps) {
   const params = useParams()
-  const id = params.id
+  const id = props.id ?? params.id
   // The push that named this chat leaves the tray now that its screen is open (ADR 0132).
   useDismissChatPushes(id)
   const verdict = useLiveQuery(async () => {
@@ -576,11 +582,11 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
  * in the order the current screen draws them — closed, blocked, then a plan waiting to be approved —
  * and a chat this device holds nothing of draws none of it.
  */
-function CurrentChatPage({ slot }: ChatPageProps) {
+function CurrentChatPage({ slot, id: named }: ChatPageProps) {
   const labels = useBotLabels()
   const params = useParams()
   const { state: address } = useLocation()
-  const id = params.id
+  const id = named ?? params.id
   // The chat's own refusal: what the host said about a write made from this thread, drawn above the
   // composer for a send and where a card or a row asked for the rest. Keyed by the chat, since a
   // screen can turn from one chat to the next and nothing said about the first is about the second.

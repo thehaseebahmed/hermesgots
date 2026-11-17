@@ -106,7 +106,11 @@ test(
         const spy = spyAnimate()
         try {
           await click(findText("a", "Otherly"))
-          await until(async () => find("h1")?.textContent === "Otherly", "the bot asked for")
+          // The bot's screen names it once, in the list's line: the lane is that bot's Side Chat List.
+          await until(
+            async () => (find('[data-slot="header-line"]')?.textContent ?? "").includes("Otherly"),
+            "the bot asked for",
+          )
           await settle()
         } finally {
           spy.restore()
