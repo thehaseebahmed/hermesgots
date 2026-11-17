@@ -349,7 +349,6 @@ export function useSpeech(profile?: Server | null) {
     chooseLevel: (level: CleanupLevel) => write({ cleanup_level: level }),
     setHearing: (sent: boolean) => write({ hearing_prompt: sent }),
     writeStt,
-    /** Whether the host takes a provider's API key from this page. */
     keys: supported && sttSupport && keysSupport,
     writeKey,
   }

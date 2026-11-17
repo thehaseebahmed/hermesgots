@@ -366,6 +366,7 @@ def keys_available() -> bool:
         return False
     try:
         from hermes_cli import credential_lifecycle
+        from hermes_cli.web_routers import _common  # noqa: F401  (the mask rule write_key asks)
 
         return callable(getattr(credential_lifecycle, "save_provider_env_credential", None))
     except Exception:
@@ -550,9 +551,12 @@ def write_key(config_path: Path, provider: Any, key: Any) -> Dict[str, Any]:
 
     variable = _key_variable(provider)
     typed = llm_providers._typed_key(key)
-    llm_providers._refuse_preview(typed)
     if not typed:
         raise ValueError("A key can't be empty.")
+    # A line break would start a second `.env` entry, so a key holding one is no key.
+    if any(char in typed for char in "\r\n\0"):
+        raise ValueError("A key is one line.")
+    llm_providers._refuse_preview(typed)
     from hermes_cli.credential_lifecycle import save_provider_env_credential
 
     save_provider_env_credential(variable, typed)

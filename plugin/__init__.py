@@ -3166,8 +3166,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 return _error(web, str(error), 400)
             except ImportError:
                 return _error(web, unavailable, 501)
-            except Exception:
-                logger.warning(logged, exc_info=True)
+            except Exception as error:
+                # The type alone: a traceback's message could carry the key.
+                logger.warning("%s (%s)", logged, type(error).__name__)
                 return _error(web, failed, 502)
             return web.json_response({"object": "gots.stt", "stt": payload})
 

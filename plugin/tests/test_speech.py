@@ -755,12 +755,6 @@ class SttWriteTest(TempStore):
                     speech.set_stt_value(self.config, "stt.local.model", "small")
         self.assertEqual(section["local"]["model"], "base")
 
-
-if __name__ == "__main__":
-    unittest.main()
-
-
-
 class SttKeyTest(TempStore):
     """A provider's API key, written and removed through Hermes's own credential lifecycle."""
 
@@ -819,6 +813,13 @@ class SttKeyTest(TempStore):
                 speech.remove_key(self.config, "mine")
         self.assertEqual((saved, removed), ([], []))
 
+    def test_a_line_break_is_refused_before_anything_is_asked_of_the_host(self) -> None:
+        with SttHost({}) as host:
+            saved, _ = self._lifecycle(host)
+            with self.assertRaises(ValueError):
+                speech.write_key(self.config, "groq", "a\nB=1")
+        self.assertEqual(saved, [])
+
     def test_a_host_without_the_lifecycle_is_an_import_error(self) -> None:
         with SttHost({}):
             with mock.patch.dict(sys.modules, {"hermes_cli.credential_lifecycle": None}):
@@ -831,8 +832,19 @@ class SttKeysAvailableTest(TempStore):
         module = types.ModuleType("hermes_cli.credential_lifecycle")
         module.save_provider_env_credential = lambda variable, value: {}
         with SttHost({}):
-            with mock.patch.dict(sys.modules, {"hermes_cli.credential_lifecycle": module}):
+            mask = types.ModuleType("hermes_cli.web_routers._common")
+            planted = {
+                "hermes_cli.credential_lifecycle": module,
+                "hermes_cli.web_routers": types.ModuleType("hermes_cli.web_routers"),
+                "hermes_cli.web_routers._common": mask,
+            }
+            with mock.patch.dict(sys.modules, planted):
                 self.assertTrue(speech.keys_available())
             with mock.patch.dict(sys.modules, {"hermes_cli.credential_lifecycle": None}):
                 self.assertFalse(speech.keys_available())
         self.assertFalse(speech.keys_available(), "no settings, no key row")
+
+
+if __name__ == "__main__":
+    unittest.main()
+
