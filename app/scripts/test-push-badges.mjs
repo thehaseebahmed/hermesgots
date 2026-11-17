@@ -31,6 +31,14 @@ import { decode } from "./lib/png.mjs"
 /** Where the icon's top-left lands in the badge: its size and its margin taken off the edge. */
 const MARK_AT = SIZE - MARK - INSET
 
+/**
+ * The bots the tree carries, and so the badges it must have cut. A pinned number rather than "one or
+ * more", which a tree holding a single bot — or a `botIds()` that stopped walking the directory —
+ * would have satisfied while every other bot's badge went missing. Adding a bot means adding its
+ * photo to `public/bots/<id>/` and cutting its badge, which is this number moving with it.
+ */
+const BOTS = 9
+
 const icon = decode(readFileSync(ICON))
 const photo = (id) => decode(readFileSync(photoPath(id)))
 
@@ -57,7 +65,7 @@ function isScaled(badge, image, x, y) {
 
 test("every bot is given a badge that is 192 square and RGBA", () => {
   const ids = botIds()
-  assert.ok(ids.length > 0, "the tree carries a bot to badge")
+  assert.equal(ids.length, BOTS, "every bot the tree carries is one of these, and each has a badge")
   for (const id of ids) {
     const bytes = readFileSync(badgePath(id))
     const badge = decode(bytes)
