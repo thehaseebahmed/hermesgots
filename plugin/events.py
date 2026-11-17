@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from . import push
+from . import notice, push
 from .store import connect, current_path
 
 logger = logging.getLogger(__name__)
@@ -212,13 +212,21 @@ def on_approval(**kwargs: Any) -> None:
 
 
 def on_approval_request(**kwargs: Any) -> None:
-    """``pre_approval_request``: as ``on_approval``, and the user's other devices hear of it."""
+    """``pre_approval_request``: as ``on_approval``, and the user's other devices hear of it.
+
+    What they hear is the card's own body — the description and the command that waits to be run —
+    built here, where the payload is, rather than read back from a screen the user hasn't opened.
+    """
     if _is_guardian_pass(kwargs):
         return
     _record_wait(kwargs)
     session_id = _text(kwargs.get("session_id"))
     if _is_api_session(session_id):
-        push.notify("approval", session_id)
+        push.notify(
+            "approval",
+            session_id,
+            body=notice.approval_body(kwargs.get("description"), kwargs.get("command")),
+        )
 
 
 def _record_wait(kwargs: Dict[str, Any]) -> None:

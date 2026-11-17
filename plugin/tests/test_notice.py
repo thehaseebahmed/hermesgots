@@ -12,9 +12,10 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest import mock
 
-from plugin import alerts, chats, delegation, failures, merges, notice, push
+from plugin import alerts, chats, clarify, delegation, failures, merges, notice, push
 from plugin.store import connect, db_path
 
 
@@ -111,6 +112,80 @@ class Paragraph(unittest.TestCase):
     def test_no_words_say_nothing(self):
         for text in (None, "", "  \n\n\t\n \n"):
             self.assertIsNone(notice.paragraph_of(text), "so the kind keeps its own line")
+
+
+class AnApprovalsBody(unittest.TestCase):
+    """G5: an approval's body is the card's own — its description, then the command it asks about."""
+
+    def test_an_approvals_body_is_its_description_over_its_command(self):
+        self.assertEqual(
+            notice.approval_body("Clear the build", "rm -rf build"),
+            "Clear the build\n\nrm -rf build",
+            "what the card says, with the command standing under the description",
+        )
+
+    def test_a_multi_line_command_keeps_its_lines(self):
+        command = "python3 - <<'PY'\n  print('one')   \n\n\n\n  print('two')\nPY\n"
+        self.assertEqual(
+            notice.approval_body(None, command),
+            "python3 - <<'PY'\n  print('one')\n\n  print('two')\nPY",
+            "a heredoc stays readable: each line as it was, its trailing spaces gone, its blanks one",
+        )
+
+    def test_an_approval_with_a_description_and_no_command_says_the_description(self):
+        self.assertEqual(
+            notice.approval_body("Clear the build", None),
+            "Clear the build",
+            "a card with no command to show still says what it asks",
+        )
+
+    def test_a_command_longer_than_the_bound_is_cut_with_an_ellipsis(self):
+        body = notice.approval_body(None, "echo " + "word " * 200)
+        self.assertEqual(len(body), notice.BODY_MAX, "a body is exactly as long as the bound says")
+        self.assertTrue(body.endswith("…"), "and says it was cut")
+
+    def test_an_approval_that_says_nothing_answers_nothing(self):
+        for description, command in ((None, None), ("  \n", "\n \n"), ("", "")):
+            self.assertIsNone(notice.approval_body(description, command), "so the kind keeps its line")
+
+
+class AQuestion(unittest.TestCase):
+    """G6: a question's notification is the question, and nothing else rides it.
+
+    Driven through the agent's own ``clarify`` callback over a stub run, with the wait itself stubbed:
+    what the notification says is decided before it waits, and is the only thing this reads.
+    """
+
+    def setUp(self) -> None:
+        self.told: list = []
+        self.agent = SimpleNamespace(session_id="gots-1")
+        for patcher in (
+            mock.patch.object(clarify, "_run_id", lambda adapter, agent: "run-1"),
+            mock.patch.object(clarify, "_run_status", lambda adapter, run_id: "running"),
+            mock.patch.object(clarify, "_set_status", lambda *args, **kwargs: None),
+            mock.patch.object(clarify, "_wait", lambda pending, agent, adapter: "timed_out"),
+            mock.patch.object(
+                clarify.push,
+                "notify",
+                lambda kind, session_id, **kw: self.told.append((kind, session_id, kw)),
+            ),
+        ):
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def test_a_questions_body_is_the_question_and_it_carries_no_action(self):
+        asker = clarify.Asker(SimpleNamespace(_run_streams={}), self.agent, loop=None)
+        asker.ask(
+            [
+                {"qid": "q0", "question": "Which database?", "choices_offered": ["Postgres", "SQLite"]},
+                {"qid": "q1", "question": "And which region?"},
+            ]
+        )
+        self.assertEqual(
+            self.told,
+            [("question", "gots-1", {"body": "Which database?"})],
+            "the question alone: not the choices, not the second one, and no button to press",
+        )
 
 
 class TheRegistrysBound(unittest.TestCase):

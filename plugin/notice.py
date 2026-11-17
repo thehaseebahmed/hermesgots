@@ -62,12 +62,51 @@ class Notice(dict):
 BODY_MAX = 200
 
 
+def _cut(text: str) -> str:
+    """Text at a body's bound, saying it was cut with the same ellipsis a paragraph ends on."""
+    return text[: BODY_MAX - 1].rstrip() + "…" if len(text) > BODY_MAX else text
+
+
 def flatten(text: str) -> str:
     """Text as a body carries it: its runs of whitespace made one space, then cut at ``BODY_MAX``."""
-    line = " ".join(text.split())
-    if len(line) > BODY_MAX:
-        line = line[: BODY_MAX - 1].rstrip() + "…"
-    return line
+    return _cut(" ".join(text.split()))
+
+
+# A run of blank lines in a command: two or more blank lines are one, since a tray has no room for
+# air and a heredoc's own shape is what the lines say.
+_BLANKS = re.compile(r"\n(?:[ \t]*\n){2,}")
+
+
+def _command_lines(command: str) -> Optional[str]:
+    """A command as a body carries it: every line as it was run, its trailing spaces gone and its
+    blank lines one apiece. Never flattened, since a script or a heredoc has to stay readable."""
+    lines = [
+        line.rstrip() for line in command.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    ]
+    return _BLANKS.sub("\n\n", "\n".join(lines)).strip("\n") or None
+
+
+def approval_body(description: Optional[str], command: Optional[str]) -> Optional[str]:
+    """An approval's body, in the shape its card draws it: the description's sentence, then the
+    command underneath on its own lines.
+
+    The command stands unlabelled — the hook names no tool, so there is nothing true to label it
+    with — with no backticks and no fence, since a tray shows plain text. Nothing said answers
+    None, which leaves the kind its own line.
+    """
+    said = flatten(description) if isinstance(description, str) and description.strip() else None
+    script = _command_lines(command) if isinstance(command, str) else None
+    parts = [part for part in (said, script) if part]
+    return _cut("\n\n".join(parts)) if parts else None
+
+
+def question_body(question: Optional[str]) -> Optional[str]:
+    """A question's body: the question's own words, and only them.
+
+    Not the choices it offers and no button — a question is answered by opening the app, and a
+    button is an approval's. A run that asked several says the first, since a tray says one thing.
+    """
+    return flatten(question) if isinstance(question, str) and question.strip() else None
 
 
 def paragraph_of(text: Optional[str]) -> Optional[str]:

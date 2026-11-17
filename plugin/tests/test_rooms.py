@@ -2267,16 +2267,16 @@ class RoomPushes(unittest.TestCase):
         rooms._cursors.clear()
         rooms._noted.clear()
         self.told = []
+        self.bodies = []
+
+        def note(kind, session_id, path=None, title=None, body=None):
+            self.told.append((kind, session_id, title))
+            self.bodies.append(body)
+            return True
+
         patches = [
             mock.patch.object(push, "reachable", lambda path: True),
-            mock.patch.object(
-                push,
-                "notify",
-                lambda kind, session_id, path=None, title=None: self.told.append(
-                    (kind, session_id, title)
-                )
-                or True,
-            ),
+            mock.patch.object(push, "notify", note),
         ]
         for one in patches:
             one.start()
@@ -2402,6 +2402,30 @@ class RoomPushes(unittest.TestCase):
         rooms.hold_question("room-1", "m2", "srq-1", [QUESTION])
         self.assertEqual(self.check(host), 1)
         self.assertEqual(self.told, [("room_input", "room-1", "Planning")])
+
+    def test_a_rooms_body_is_the_waits_own_words(self):
+        host = self.host(waiting=True)
+        self.assertEqual(self.check(host), 1)
+        self.assertEqual(
+            self.bodies,
+            ["Clear the build\n\nrm -rf build"],
+            "the words the room's own card draws, under the room's name",
+        )
+
+    def test_a_question_and_a_mention_are_worded_by_their_own_words(self):
+        self.assertEqual(
+            rooms._wait_body({"kind": "question", "questions": [QUESTION]}),
+            "Which database?",
+            "a room's question is the question alone, as a chat's is",
+        )
+        self.assertEqual(
+            rooms._wait_body({"kind": "ask", "text": "That one is  yours,\n@user."}),
+            "That one is yours, @user.",
+            "and a member's words addressed to the user are the sentence they answer",
+        )
+        self.assertIsNone(
+            rooms._wait_body({"kind": "question", "questions": []}), "a wait with no words says nothing"
+        )
 
     def test_the_answer_arms_the_room_for_the_next_wait(self):
         host = self.host()
