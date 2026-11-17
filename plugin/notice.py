@@ -221,14 +221,11 @@ LEGACY_CATEGORIES: Tuple[str, ...] = ("chat_input", "code_input")
 # What happened, under the title of what it happened in. `app/netlify/lib/fcm.ts` and
 # `app/public/push-sw.js` say the same; `tests/test_ntfy.py` fails when these drift from them.
 WORDS: Dict[str, str] = {kind.name: kind.words for kind in KINDS_TABLE}
-# When nothing names what the news is about, in the order the registry lists them (`UNTITLED` in
-# `app/netlify/lib/fcm.ts`), which groups them by feature rather than by kind.
-UNTITLED: Dict[str, Optional[str]] = {
-    name: KINDS_BY_NAME[name].untitled
-    for name in (
-        "routine_failed", "routine_message", "clone_failed", "research_brief", "research_scope",
-        "research_done", "research_failed", "meeting_done", "meeting_failed", "room_input",
-    )
+# When nothing names what the news is about: the kinds that have a name of their own to fall back to.
+# The registry spells the same list in its own order, by feature rather than by kind (`UNTITLED` in
+# `app/netlify/lib/fcm.ts`); a kind that gains one here is in it without a second list to edit.
+UNTITLED: Dict[str, str] = {
+    kind.name: kind.untitled for kind in KINDS_TABLE if kind.untitled
 }
 
 
