@@ -150,7 +150,7 @@ function card(f: Feature, o: RenderOptions) {
         <button type="button" class="link danger" data-remove="${escape(f.id)}">Remove</button>
       </div>`
     : ""
-  return `<li class="row road-row${o.admin ? " has-tools" : ""}">${vote}${link}${tools}</li>`
+  return `<li class="road-card${o.admin ? " has-tools" : ""}">${vote}${link}${tools}</li>`
 }
 
 /**
@@ -159,11 +159,8 @@ function card(f: Feature, o: RenderOptions) {
  */
 export const ranked = (features: Feature[]) => [...features].sort((a, b) => b.votes - a.votes)
 
-/** Every feature on one panel, in the board's rank order (most votes first). */
+/** Every feature on a card of its own, in the board's rank order (most votes first). */
 export function roadmapHtml(features: Feature[], o: RenderOptions) {
   if (!features.length) return '<p class="empty">Nothing on the roadmap yet.</p>'
-  return `<section class="board road-board">
-      <h2>Features <small>${features.length}</small></h2>
-      <ol class="rows">${ranked(features).map((f) => card(f, o)).join("")}</ol>
-    </section>`
+  return `<ol class="road-cards">${ranked(features).map((f) => card(f, o)).join("")}</ol>`
 }
