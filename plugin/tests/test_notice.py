@@ -42,6 +42,36 @@ class NoPullRequestNews(unittest.TestCase):
         )
 
 
+class TheRecord(unittest.TestCase):
+    """The repo's own record says what the plugin does: G1 cut the pull-request news from it too.
+
+    AGENTS.md and `plugin/README.md` are where a reader learns the push table, and they outlived
+    three kinds and three categories that went with the pull-request news: a reader found switches
+    no device has, and a body described as one sentence per kind when a notice carries its own.
+    """
+
+    DOCS = ("AGENTS.md", "plugin/README.md")
+    GONE = ("pr_checks", "pr_merged", "afk_pr", "code_pr_checks", "code_pr_merged", "code_afk_pr")
+
+    def read(self, name: str) -> str:
+        return (Path(__file__).resolve().parents[2] / name).read_text(encoding="utf-8")
+
+    def test_no_doc_names_a_pull_request_notification(self) -> None:
+        for name in self.DOCS:
+            said = self.read(name)
+            for gone in self.GONE:
+                # A word of its own, since `afk_prompt` and `afk_picks` are not `afk_pr`.
+                self.assertIsNone(
+                    re.search(rf"(?<![a-z_]){re.escape(gone)}(?![a-z_])", said),
+                    f"{name} still names {gone}, which nothing sends",
+                )
+
+    def test_the_record_names_every_category_the_plugin_has(self) -> None:
+        agents = self.read("AGENTS.md")
+        for category in notice.CATEGORIES:
+            self.assertIn(f"`{category}`", agents, f"AGENTS.md names the category {category}")
+
+
 class MergedPullRequest(unittest.TestCase):
     """A merge resolves its session on every device, and tells no device."""
 
