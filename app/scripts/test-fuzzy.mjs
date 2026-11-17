@@ -46,3 +46,16 @@ test("the ranks a row can answer with", () => {
   assert.equal(matchRank("login", ["Auth refactor"]), 0, "one of the words is not there")
   assert.equal(matchRank("", ["anything"]), 2, "no query, everything matches at the top")
 })
+
+test("a query in another script answers the rows written in it, not the whole list", () => {
+  const scripts = [
+    { id: "latin", words: ["deploy"] },
+    { id: "cyrillic", words: ["Настройки"] },
+    { id: "accented", words: ["Café", "Cafe"] },
+  ]
+  const found = (query) => filterByFuzzy(scripts, query, (row) => row.words).map((row) => row.id)
+  assert.deepEqual(found("Настройки"), ["cyrillic"], "a cyrillic query keeps the cyrillic row")
+  assert.deepEqual(found("設定"), [], "a query no row answers keeps nothing")
+  assert.deepEqual(found("cafe"), ["accented"], "the plain spelling finds the accented name")
+  assert.deepEqual(found("ubersicht"), [], "an accent dropped from the row's words still answers nothing here")
+})
