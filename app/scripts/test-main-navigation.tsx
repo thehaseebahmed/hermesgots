@@ -13,6 +13,10 @@
  * The Developer switch turns the app back onto the flat list (ADR 0162): the bot's own address draws
  * every chat of it, a routine's delivery included, and the side-chat address lands there rather than
  * on a list the layout has not got. The case before the sidebar's holds that.
+ *
+ * The sidebar's rows are one table (`lib/sidebar-layout.ts`): the features, then the canvases the
+ * reader pinned. The two cases before it hold which of them a lab switch draws and which wear the
+ * pill; the last holds all of them at once, in their order — the one thing those never pinned.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -392,6 +396,96 @@ test("the sidebar marks the lab features with the pill, and its own screens with
         assert.ok(own, `${href} is drawn`)
         assert.equal(own.textContent?.includes("Labs"), false, `${href} is no lab feature`)
       }
+    },
+  )
+})
+
+/**
+ * The canvas the reader pinned to the sidebar, as the bot's plugin lists it: the row's mark, its
+ * title, and the record's clock — no page, since a pin is a row and not an open.
+ */
+const PINNED = {
+  id: "p1",
+  title: "A pinned timetable",
+  session_id: "gots-chat-p1",
+  chat_id: "chat-p1",
+  version: 2,
+  pinned: true,
+  archived: false,
+  at: 20,
+  created_at: 1,
+  tools: [],
+}
+
+/** The bot's plugin, as far as the sidebar's pins are read: its features, and the list it holds. */
+function servePinned() {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input instanceof Request ? input.url : input))
+    if (url.pathname.endsWith("/info")) return json({ version: "0.114.0", features: ["canvas"] })
+    if (url.pathname.endsWith("/canvases"))
+      return json({ object: "gots.canvases", canvases: [PINNED] })
+    return json({ error: { message: "no route" } }, 404)
+  }) as unknown as typeof fetch
+}
+
+/** The sidebar's rows, in the order it draws them. */
+const mainRows = () => findAll('nav[aria-label="Main"] a')
+
+/** The pinned canvas's row, which is drawn last. */
+const pinnedRow = () => find('nav[aria-label="Main"] a[data-canvas-pinned]')
+
+/** A row's name: its words without the pill a lab feature wears beside them. */
+const rowName = (row: Element) => (row.textContent ?? "").replace("Labs", "").trim()
+
+test("the sidebar draws today's rows, in today's order, with today's labels", async () => {
+  await seed([], { meetings: true })
+  servePinned()
+  await mount(
+    <MemoryRouter initialEntries={["/"]}>
+      <ConversationList />
+    </MemoryRouter>,
+    async () => {
+      await until(async () => Boolean(pinnedRow()), "the pinned canvas's row")
+      assert.deepEqual(
+        mainRows().map((row) => row.getAttribute("href")),
+        ["/projects", "/code", "/canvas", "/research", "/meetings", "/canvas/p1"],
+        "today's rows, in today's order: the features, then the pin the reader keeps at their foot",
+      )
+      assert.deepEqual(
+        mainRows()
+          .filter((row) => row.textContent?.includes("Labs"))
+          .map((row) => row.getAttribute("href")),
+        ["/canvas", "/meetings"],
+        "the pill on the lab features, and on no other row",
+      )
+      assert.deepEqual(
+        mainRows().map(rowName),
+        ["Projects", "Code", "Canvas", "Research", "Meetings", "A pinned timetable"],
+        "and today's labels, the pin wearing the canvas's own title",
+      )
+      assert.ok(
+        mainRows().every((row) => row.classList.contains("min-h-11")),
+        "each one the 44px row",
+      )
+    },
+  )
+  // The same rows collapsed to the icon rail: no name drawn, so each row carries its own for a
+  // reader who hears the list rather than sees it.
+  await mount(
+    <MemoryRouter initialEntries={["/"]}>
+      <ConversationList collapsed />
+    </MemoryRouter>,
+    async () => {
+      await until(async () => Boolean(pinnedRow()), "the pinned canvas's row")
+      assert.deepEqual(
+        mainRows().map((row) => row.getAttribute("aria-label")),
+        ["Projects", "Code", "Canvas", "Research", "Meetings", "A pinned timetable"],
+        "the rail's labels, in the same order",
+      )
+      assert.ok(
+        mainRows().every((row) => row.classList.contains("size-11")),
+        "each one the 44px rail row",
+      )
     },
   )
 })

@@ -32,6 +32,12 @@ import { db } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useMeetingsEnabled } from "@/lib/meetings"
 import { plainPress, pressOpeningRoot, useNav } from "@/lib/nav"
+import {
+  sidebarRows,
+  type SidebarFeatureId,
+  type SidebarLayoutRow,
+  type SidebarLab,
+} from "@/lib/sidebar-layout"
 import { useSyncState } from "@/lib/sync"
 import { BOT_SORTS, sortBots, useBotSort, useBotSummaries, useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
@@ -77,21 +83,47 @@ function RowAge({ at, now }: { at: number; now: number }) {
   )
 }
 
-function PinnedCanvases({
-  onNavigate,
+/**
+ * Each feature's mark, by the id the table files it under. Typed by those ids, so a feature added to
+ * the table without an icon here fails `pnpm typecheck` rather than drawing a row with no mark.
+ */
+const FEATURE_ICONS: Record<SidebarFeatureId, typeof FolderKanbanIcon> = {
+  projects: FolderKanbanIcon,
+  code: CodeXmlIcon,
+  canvas: FrameIcon,
+  research: TelescopeIcon,
+  meetings: AudioLinesIcon,
+}
+
+/**
+ * One row of the sidebar's list, drawn from the table (`lib/sidebar-layout.ts`) — a feature's screen,
+ * or the canvas the reader pinned. A pin's own body is `CanvasRow`, since a pin is marked by the tab
+ * that opened it and not by its address, and the table's row is all either kind has in common.
+ */
+function SidebarRow({
+  row,
   collapsed,
+  onNavigate,
 }: {
-  onNavigate?: () => void
+  row: SidebarLayoutRow<Canvas>
   collapsed: boolean
+  onNavigate?: () => void
 }) {
-  const pinned = usePinnedCanvases()
-  if (pinned.length === 0) return null
+  if (row.kind === "pin")
+    return <CanvasRow canvas={row.pin} collapsed={collapsed} onNavigate={onNavigate} />
+  const Icon = FEATURE_ICONS[row.id]
   return (
-    <>
-      {pinned.map((canvas) => (
-        <CanvasRow key={canvas.id} canvas={canvas} collapsed={collapsed} onNavigate={onNavigate} />
-      ))}
-    </>
+    <RootLink
+      to={row.address}
+      end={row.end}
+      onClick={onNavigate}
+      aria-label={collapsed ? row.label : undefined}
+      className={collapsed ? railClass : rowClass}
+    >
+      <Icon className="size-5 text-muted-foreground" />
+      {/* The pill says what the row's `lab` reports: the rows a switch can take away are the lab's. */}
+      {!collapsed && (row.lab ? <LabLabel fill>{row.label}</LabLabel> : row.label)}
+    </RootLink>
   )
 }
 
@@ -371,6 +403,15 @@ export function ConversationList({
 }) {
   const meetings = useMeetingsEnabled()
   const canvas = useCanvasEnabled()
+  // A switch this device has not answered yet draws no row: `undefined` is no yes.
+  const gates: Record<SidebarLab, boolean> = {
+    canvas: canvas === true,
+    meetings: meetings === true,
+  }
+  // The pins are read only under Canvas's switch, so a build with Canvas off refreshes nothing; which
+  // rows are drawn is the table's gate below, one decision for every row alike.
+  const pinned = usePinnedCanvases(gates.canvas)
+  const rows = sidebarRows(pinned).filter((row) => row.lab === null || gates[row.lab])
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -407,57 +448,9 @@ export function ConversationList({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         <nav className={cn("flex flex-col gap-0.5", collapsed && "items-center")} aria-label="Main">
-          <RootLink
-            to="/projects"
-            onClick={onNavigate}
-            aria-label={collapsed ? "Projects" : undefined}
-            className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
-          >
-            <FolderKanbanIcon className="size-5 text-muted-foreground" />
-            {!collapsed && "Projects"}
-          </RootLink>
-          <RootLink
-            to="/code"
-            onClick={onNavigate}
-            aria-label={collapsed ? "Code" : undefined}
-            className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
-          >
-            <CodeXmlIcon className="size-5 text-muted-foreground" />
-            {!collapsed && "Code"}
-          </RootLink>
-          {canvas && (
-            <RootLink
-              to="/canvas"
-              end
-              onClick={onNavigate}
-              aria-label={collapsed ? "Canvas" : undefined}
-              className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
-            >
-              <FrameIcon className="size-5 text-muted-foreground" />
-              {!collapsed && <LabLabel fill>Canvas</LabLabel>}
-            </RootLink>
-          )}
-          <RootLink
-            to="/research"
-            onClick={onNavigate}
-            aria-label={collapsed ? "Research" : undefined}
-            className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
-          >
-            <TelescopeIcon className="size-5 text-muted-foreground" />
-            {!collapsed && "Research"}
-          </RootLink>
-          {meetings && (
-            <RootLink
-              to="/meetings"
-              onClick={onNavigate}
-              aria-label={collapsed ? "Meetings" : undefined}
-              className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
-            >
-              <AudioLinesIcon className="size-5 text-muted-foreground" />
-              {!collapsed && <LabLabel fill>Meetings</LabLabel>}
-            </RootLink>
-          )}
-          {canvas && <PinnedCanvases onNavigate={onNavigate} collapsed={collapsed} />}
+          {rows.map((row) => (
+            <SidebarRow key={row.id} row={row} collapsed={collapsed} onNavigate={onNavigate} />
+          ))}
         </nav>
         <Separator className="mx-1 my-3 data-horizontal:w-auto" />
         <Waiting onNavigate={onNavigate} collapsed={collapsed} />

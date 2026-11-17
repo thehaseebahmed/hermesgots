@@ -783,19 +783,20 @@ export function useCanvases() {
 
 /**
  * The pinned canvases, for a screen that isn't Canvas — the sidebar, on every route. It reads the
- * store, asks for a sweep when it opens and when a canvas changes, and keeps no timer of its own: a
- * nav mounted beside `/canvas` must not double that screen's poll, and the rows it draws are a
- * convenience that a change keeps right.
+ * store, asks for a sweep when it opens and when a canvas changes while `enabled`, and keeps no timer
+ * of its own: a nav mounted beside `/canvas` must not double that screen's poll, and the rows it
+ * draws are a convenience that a change keeps right. With the Canvas switch off there is no pin to
+ * draw, so it asks for nothing; which rows are drawn is the caller's gate.
  */
-export function usePinnedCanvases() {
+export function usePinnedCanvases(enabled: boolean) {
   const { pinned } = useCanvasStore()
   const changes = useAnyChange("canvas")
   useEffect(() => {
-    void refreshCanvases().catch(quietly("Reading canvases"))
-  }, [])
+    if (enabled) void refreshCanvases().catch(quietly("Reading canvases"))
+  }, [enabled])
   useEffect(() => {
-    if (changes) void refreshCanvases().catch(quietly("Reading canvases"))
-  }, [changes])
+    if (enabled && changes) void refreshCanvases().catch(quietly("Reading canvases"))
+  }, [changes, enabled])
   return pinned
 }
 
