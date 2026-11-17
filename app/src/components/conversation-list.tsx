@@ -485,8 +485,9 @@ export function ConversationList({
               }}
               // A pin is the host's record, not the account's arrangement: the write goes to the
               // canvas's own bot, and its answer folds into the store the sidebar's pins are read from.
-              // The layout record is not touched either way.
-              onUnpin={(canvasId) => updateCanvas(canvasId, { pinned: false })}
+              // The layout record is not touched either way. `quiet`, since the row draws the refusal
+              // itself: the same sentence in a toast is gone before the reader finds it there.
+              onUnpin={(canvasId) => updateCanvas(canvasId, { pinned: false }, { quiet: true })}
             />
           ) : (
             rows.map((row) => (

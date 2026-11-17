@@ -640,38 +640,44 @@ test("an unpin the host refuses keeps the row, in the host's words", async () =>
   })
 
   // A host that never answers: the client gives up its own way, and that refusal is the row's too —
-  // at once here, since a `TimeoutError` is what fifteen seconds of silence would end in.
+  // at once here, since a `TimeoutError` is what fifteen seconds of silence would end in. The row
+  // draws the words itself, so the reader who looks where they pressed finds them there: the same
+  // sentence in a toast is gone before they do, and a case can hear the toaster to prove it stays
+  // silent.
   await seed()
   const silent = serveUnpin("silent")
   await mount(sidebarAndStore(), async () => {
     await openMode()
     await until(async () => Boolean(pinRow()), "the pin's row")
     const before = rowIds()
-    await click(unpinControl())
-    await until(
-      async () => wordsOf(refusalInRow()) === CANVAS_UNREACHABLE,
-      "the client's own unreachable refusal",
-    )
-    assert.equal(
-      wordsOf(refusalInRow()),
-      CANVAS_UNREACHABLE,
-      "the client's words, since the host sent none",
-    )
-    assert.equal(
-      refusalInRow()?.closest("[data-sidebar-row]")?.getAttribute("data-sidebar-row"),
-      "canvas:p1",
-      "under the row, where the press was made",
-    )
-    assert.equal(wordsOf(unpinControl()), "Try again", "and no spinner left where the answer is")
-    assert.equal(
-      pinRow()?.querySelector('[data-slot="spinner"], [role="progressbar"], [role="status"]'),
-      null,
-      "nothing of it spinning still",
-    )
-    assert.deepEqual(rowIds(), before, "the row in its place")
-    assert.deepEqual(silent[0]?.body, { pinned: false }, "the write was the unpin, asked once")
-    const stored = await db.settings.get("settings")
-    assert.deepEqual(stored?.sidebarLayout, DEFAULT_SIDEBAR_LAYOUT, "and no layout write")
+    await withToasts(async (said) => {
+      await click(unpinControl())
+      await until(
+        async () => wordsOf(refusalInRow()) === CANVAS_UNREACHABLE,
+        "the client's own unreachable refusal",
+      )
+      assert.equal(
+        wordsOf(refusalInRow()),
+        CANVAS_UNREACHABLE,
+        "the client's words, since the host sent none",
+      )
+      assert.equal(
+        refusalInRow()?.closest("[data-sidebar-row]")?.getAttribute("data-sidebar-row"),
+        "canvas:p1",
+        "under the row, where the press was made",
+      )
+      assert.equal(wordsOf(unpinControl()), "Try again", "and no spinner left where the answer is")
+      assert.equal(
+        pinRow()?.querySelector('[data-slot="spinner"], [role="progressbar"], [role="status"]'),
+        null,
+        "nothing of it spinning still",
+      )
+      assert.deepEqual(rowIds(), before, "the row in its place")
+      assert.deepEqual(silent[0]?.body, { pinned: false }, "the write was the unpin, asked once")
+      assert.deepEqual(said, [], "and nothing said in passing: the row's words are drawn where it was")
+      const stored = await db.settings.get("settings")
+      assert.deepEqual(stored?.sidebarLayout, DEFAULT_SIDEBAR_LAYOUT, "and no layout write")
+    })
   })
 
   // A host that answers the record: the row leaves the sidebar because the store's pinned list is

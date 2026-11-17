@@ -236,9 +236,14 @@ export const CANVAS_UNREACHABLE = "This canvas can't reach its bot right now."
 /**
  * The one way a page's promise hears that the host couldn't be reached: the reader is told in the
  * same words the page gets, and the failure rides along as the cause.
+ *
+ * `quiet` is for a caller that draws those words itself, beside the control the reader pressed: the
+ * refusal is still thrown, so the caller's own state answers it, and it is not also toasted — a
+ * sentence said in passing is gone before the reader looking at the press finds it
+ * (`confirm-destructive.tsx`'s reason).
  */
-function refuse(message: string, cause?: unknown): never {
-  tell.error(message)
+function refuse(message: string, { cause, quiet }: { cause?: unknown; quiet?: boolean } = {}): never {
+  if (!quiet) tell.error(message)
   throw new Error(message, { cause })
 }
 
@@ -589,12 +594,21 @@ export async function undoCanvas(id: string) {
  * archived out of the list. Kept on the host, so the shape of every device's list is the same one, and
  * the record the host answers is folded over the copy this device already draws — the host answers
  * the record and not the page, so the document on screen stays the one it had.
+ *
+ * `quiet` is the caller's: a caller that draws a refusal itself — the sidebar's mode beside the row
+ * the press was made in — asks for it, and the host's words are thrown there rather than toasted as
+ * well. Every other caller keeps today's toast.
  */
-export async function updateCanvas(id: string, changes: CanvasChanges) {
+export async function updateCanvas(
+  id: string,
+  changes: CanvasChanges,
+  { quiet = false }: { quiet?: boolean } = {},
+) {
   const { profile, value } = await withHost(
     id,
     (bot) => updateCanvasOnHost(bot, id, changes),
     CANVAS_UNREACHABLE,
+    { quiet },
   )
   if (!value) throw new Error("The host answered a change the app couldn't read.")
   const held = store.get().details[id]
@@ -911,20 +925,24 @@ async function hosting(id: string) {
  * being away. `hostVerdict` is the judgement: only `away` is no answer, so a read answered with a
  * 5xx still says what the host said rather than calling the bot gone. The bot comes back with the
  * answer because some answers are kept against it: a write leaves a copy to keep, a grant a row.
+ *
+ * `quiet` is the caller's, and only a caller that draws the refusal itself asks for it: the away
+ * branch throws the same words either way, and only the toast is left off.
  */
 async function withHost<T>(
   id: string,
   task: (profile: Profile) => Promise<T>,
   refusal: string,
+  { quiet = false }: { quiet?: boolean } = {},
 ): Promise<{ profile: Profile; value: T }> {
-  if (!onlineNow()) refuse(refusal)
+  if (!onlineNow()) refuse(refusal, { quiet })
   const profile = await hosting(id)
   try {
     return { profile, value: await task(profile) }
   } catch (failure) {
     if (hostVerdict(failure) !== "away") throw failure
     markAway(id)
-    refuse(refusal, failure)
+    refuse(refusal, { cause: failure, quiet })
   }
 }
 
