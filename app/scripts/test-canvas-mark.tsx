@@ -100,8 +100,9 @@ const CANVAS = {
 }
 
 const row = (id: string) => find(`a[data-canvas-pinned][href="/canvas/${id}"]`)
-/** The row's head: the one slot the mark draws in. */
-const head = (id: string) => row(id)?.firstElementChild ?? null
+/** The row's head: the one slot the mark draws in, after the 44px slot every row reserves for a grip. */
+const head = (id: string) =>
+  row(id)?.querySelector("[data-sidebar-gutter]")?.nextElementSibling ?? null
 const classes = (id: string) => head(id)?.getAttribute("class") ?? ""
 
 test("a pinned canvas draws the mark its user chose", async () => {
@@ -130,11 +131,12 @@ test("a pinned canvas draws the mark its user chose", async () => {
       assert.match(emoji?.getAttribute("class") ?? "", /\bsize-5\b/, "in the same 20px slot")
 
       // A canvas nobody marked is drawn exactly as it was before a mark existed: one svg and the
-      // name, the frame's own mark, and no wrapper the mark's arrival added.
-      assert.equal(row("m3")?.children.length, 2, "the head and the name, as before")
+      // name, after the 44px slot every row reserves for a grip, and no wrapper the mark's arrival
+      // added.
+      assert.equal(row("m3")?.children.length, 3, "the slot, the head and the name")
       assert.equal(head("m3")?.tagName.toLowerCase(), "svg")
       assert.equal(classes("m3"), "lucide lucide-frame size-5 text-muted-foreground")
-      assert.equal(row("m3")?.children[1]?.textContent, PLAIN.title)
+      assert.equal(row("m3")?.children[2]?.textContent, PLAIN.title)
     },
   )
 })

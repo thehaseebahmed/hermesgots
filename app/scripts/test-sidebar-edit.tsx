@@ -1,8 +1,10 @@
 /**
  * The sidebar's edit mode as a reader opens and leaves it, and as they arrange it: the header's
  * button is the switch, Escape gives the button and the links back, a row in the mode is no link, a
- * row can be put away and brought back, and a row can be moved by its own controls — each press
- * writing the account's record and saying what it did. The last case is the same sidebar in a
+ * row can be put away by its eye and brought back by the same press, and a row moves by the arrows on
+ * its grip — each press writing the account's record and saying what it did, with the focus left on
+ * the control that moved the row. Every row above the boundary reserves the grip's 44px slot in both
+ * states, so opening the mode moves nothing but the controls. The last case is the same sidebar in a
  * phone's drawer, where Escape is the mode's first and the sheet's only after it.
  */
 import assert from "node:assert/strict"
@@ -62,8 +64,10 @@ const group = () => find('[role="group"][aria-label="Sidebar layout"]')
 /** A row's own words, before the control the mode puts beside them. */
 const labelOf = (row: Element | null) =>
   wordsOf(row).replace(/(?:Hide|Show|Unpin|Unpinning|Try again)$/, "")
-const moveControl = (label: string, direction: "up" | "down") =>
-  find(`button[aria-label="Move ${label} ${direction}"]`)
+/** The mode's row, by the id the account's record files it under. */
+const modeRow = (id: string) => find(`[data-sidebar-row="${id}"]`)
+/** A row's grip: the 44px slot's control, which both the pointer's drag and the keys work. */
+const gripOf = (id: string) => find(`[data-sidebar-row="${id}"] [data-sidebar-grip]`)
 /** The mode's live region: what a reorder says to a reader who cannot see the rows move. */
 const liveRegion = () => group()?.querySelector('[role="status"]')
 
@@ -73,6 +77,23 @@ async function pressEscape() {
     document.activeElement?.dispatchEvent(
       new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
     )
+  })
+  await settle()
+}
+
+/** Puts the focus on a control, so the key sent next lands in it. */
+async function focusOn(element: Element | null) {
+  assert.ok(element, "the control that takes the focus")
+  await act(async () => element.focus())
+  await settle()
+}
+
+/** One arrow, at the control holding the focus, sent the way a keyboard sends it. */
+async function pressKey(key: "ArrowUp" | "ArrowDown") {
+  const held = document.activeElement
+  assert.ok(held, "a control holding the focus")
+  await act(async () => {
+    held.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true }))
   })
   await settle()
 }
@@ -226,10 +247,40 @@ test("a hidden row leaves the sidebar and stays in the mode, muted", async () =>
     await click(editButton())
     await until(async () => Boolean(group()), "the mode")
 
-    await click(find('button[aria-label="Hide Code"]'))
-    const row = () => find('[data-sidebar-row="code"]')
+    // The eye on a row that stands: struck through, since the press is the one that puts it away, and
+    // no word beside it — the glyph is the control and the name is what a reader hears.
+    const hide = find('button[aria-label="Hide Code"]')
+    assert.equal(
+      hide?.querySelector("svg")?.classList.contains("lucide-eye-off"),
+      true,
+      "the struck-through eye, on the row that stands",
+    )
+    assert.equal(wordsOf(hide), "", "and no visible word beside it")
+    assert.equal(hide?.classList.contains("size-11"), true, "in the 44px box a thumb gets")
+
+    await click(hide)
     await until(async () => Boolean(find('button[aria-label="Show Code"]')), "the row put away")
-    assert.equal(row()?.hasAttribute("data-hidden"), true, "the row in the mode says it is hidden")
+    const row = () => find('[data-sidebar-row="code"]')
+    // The press's name is the state, and the glyph draws it too: a struck-through eye on a row that
+    // stands, a plain one on a row that is put away.
+    const eye = find('button[aria-label="Show Code"]')
+    assert.equal(
+      eye?.querySelector("svg")?.classList.contains("lucide-eye"),
+      true,
+      "the eye that shows, where the row is put away",
+    )
+    assert.equal(
+      eye?.querySelector("svg")?.classList.contains("lucide-eye-off"),
+      false,
+      "not the eye that hides",
+    )
+    assert.equal(wordsOf(eye), "", "and no visible word: the icon is the whole of it")
+    assert.equal(eye?.classList.contains("size-11"), true, "in the 44px box a thumb gets")
+    assert.equal(
+      row()?.hasAttribute("data-hidden"),
+      true,
+      "the row in the mode says it is hidden",
+    )
     assert.equal(
       row()?.classList.contains("text-muted-foreground"),
       true,
@@ -282,36 +333,26 @@ test("a hidden row leaves the sidebar and stays in the mode, muted", async () =>
   })
 })
 
-test("a row moves by its own controls, and the order is the account's", async () => {
+test("a row moves by its grip's keys, and the order is the account's", async () => {
   await seed()
   await mount(sidebar(), async () => {
     await until(async () => Boolean(find('a[href="/meetings"]')), "the nav")
     await click(editButton())
     await until(async () => Boolean(group()), "the mode")
 
-    // Every row carries both controls, named for the row, and each is the 44px box a press needs.
-    assert.equal(
-      moveControl("Projects", "up")?.hasAttribute("disabled"),
-      true,
-      "the first row has nowhere up to go",
-    )
-    assert.equal(
-      moveControl("Projects", "down")?.hasAttribute("disabled"),
-      false,
-      "and one place down to go",
-    )
-    assert.equal(
-      moveControl("A pinned timetable", "down")?.hasAttribute("disabled"),
-      true,
-      "the last row has nowhere down to go",
-    )
-    assert.equal(
-      moveControl("Meetings", "up")?.classList.contains("size-11"),
-      true,
-      "the control is 44px tall, the box a thumb gets",
-    )
+    // Every row's order is reached through its own grip: one 44px box, in the slot the resting row
+    // leaves empty, named for the row it moves and a tab stop rather than a mouse's secret.
+    const grip = gripOf("meetings")
+    assert.ok(grip, "Meetings' own grip")
+    assert.equal(grip.getAttribute("aria-label"), "Reorder Meetings", "named for the row it moves")
+    assert.equal(grip.classList.contains("size-11"), true, "the 44px box a thumb gets")
+    assert.equal(grip.hasAttribute("aria-hidden"), false, "a control a screen reader must hear")
+    assert.equal(grip.getAttribute("tabindex"), null, "and a tab stop, which is how a key reaches it")
 
-    await click(moveControl("Meetings", "up"))
+    // One arrow, one place up — said in the live region, and the grip keeps the focus so the next
+    // press is the next place.
+    await focusOn(gripOf("meetings"))
+    await pressKey("ArrowUp")
     await until(
       async () => wordsOf(liveRegion()) === "Meetings moved to 4 of 6",
       "the live region saying where the row went",
@@ -323,22 +364,37 @@ test("a row moves by its own controls, and the order is the account's", async ()
     )
     assert.equal(
       document.activeElement?.getAttribute("aria-label"),
-      "Move Meetings up",
-      "and the focus still on the control that moved one, so the next press is the next place",
+      "Reorder Meetings",
+      "and the focus still on the grip that moved it, so the next press is the next place",
+    )
+    assert.deepEqual(
+      rowIds(),
+      ["projects", "code", "canvas", "meetings", "research", "canvas:p1"],
+      "the row one place up, the rest where they stood",
     )
 
-    // The same control, pressed again, moves it once more: the place the last press left it is where
+    // The same grip, pressed again, moves it once more: the place the last press left it is where
     // this press starts from.
-    await click(moveControl("Meetings", "up"))
+    await pressKey("ArrowUp")
     await until(
       async () => wordsOf(liveRegion()) === "Meetings moved to 3 of 6",
       "the second press's words",
     )
     assert.deepEqual(
-      findAll("[data-sidebar-row]").map((row) => row.getAttribute("data-sidebar-row")),
+      rowIds(),
       ["projects", "code", "meetings", "canvas", "research", "canvas:p1"],
       "the mode draws the order the presses made",
     )
+
+    // The first row has nowhere up to go, and a press there writes nothing and says nothing.
+    await focusOn(gripOf("projects"))
+    await pressKey("ArrowUp")
+    assert.deepEqual(
+      rowIds(),
+      ["projects", "code", "meetings", "canvas", "research", "canvas:p1"],
+      "the first row stays where it stands",
+    )
+    assert.equal(wordsOf(liveRegion()), "Meetings moved to 3 of 6", "and nothing is announced")
 
     await click(doneButton())
     await until(async () => Boolean(editButton()), "the switch at rest")
@@ -377,15 +433,91 @@ test("a row's grip is the mode's alone, and it is the 44px box a thumb gets", as
     assert.equal(
       grip.classList.contains("size-11"),
       true,
-      "and is the 44px box a thumb gets, the same box the move controls take",
+      "and is the 44px box a thumb gets, the box the row reserves in either state",
     )
     // The gesture belongs to the grip alone: the list still scrolls and the drawer still swipes
     // everywhere else, which is what `touch-action` on this one control is for.
     assert.equal(grip.classList.contains("touch-none"), true, "the grip keeps the touch for itself")
+    // And it is the keyboard's way in too, so it is a tab stop a name reaches rather than a mouse's
+    // secret: the mode's rows carry no second control that moves them.
+    assert.equal(grip.getAttribute("tabindex"), null, "no `tabindex`: a tab stop like any other control")
+    assert.equal(grip.getAttribute("aria-hidden"), null, "nothing hides it from a screen reader")
+    assert.equal(grip.getAttribute("aria-label"), "Reorder Projects", "and it is named for its row")
     assert.equal(
-      grip.getAttribute("tabindex"),
-      "-1",
-      "and stays out of the tab order, since a drag is no key press — the move controls are that path",
+      findAll('[aria-label^="Move "]').length,
+      0,
+      "no Move up or Move down beside any row: the grip is the one way to the order",
+    )
+  })
+})
+
+/**
+ * The slot the grip stands in, in both states: every row above the boundary starts with the same 44px
+ * of air, empty at rest and holding the grip in the mode, so opening and closing the mode moves
+ * nothing — the mark, the name and the row's height stand where they stood either way.
+ *
+ * A DOM without layout cannot measure the pixels, so this holds the arithmetic's parts: one slot, the
+ * row's first child, 44px wide and shrinking for nothing, with the row's own 12px padding and 12px gap
+ * around it in both states. The sweep measures the boxes (ADR 0019), and does, at 1024px.
+ */
+test("a row above the boundary keeps the grip's slot whether the mode is open or shut", async () => {
+  await seed()
+  await mount(sidebar(), async () => {
+    await until(async () => Boolean(find('a[href="/projects"]')), "the nav")
+    const resting = find('nav[aria-label="Main"] [data-sidebar-row="projects"]')
+    const restingSlot = resting?.querySelector("[data-sidebar-gutter]")
+    assert.ok(restingSlot, "the resting row reserves the slot")
+    assert.equal(restingSlot.classList.contains("size-11"), true, "44px of it")
+    assert.equal(restingSlot.classList.contains("shrink-0"), true, "which no name squeezes")
+    assert.equal(restingSlot.getAttribute("aria-hidden"), "true", "hidden, standing empty")
+    assert.equal(restingSlot.firstElementChild, null, "and empty: nothing is drawn in it at rest")
+    assert.equal(resting?.firstElementChild, restingSlot, "the row starts with it")
+    assert.equal(
+      resting?.classList.contains("gap-3"),
+      true,
+      "beside 12px of padding and a 12px gap — the arithmetic the mark stands on",
+    )
+    assert.equal(
+      restingSlot.nextElementSibling?.tagName.toLowerCase(),
+      "svg",
+      "and the row's mark is the next thing in it",
+    )
+    assert.equal(
+      findAll("[data-sidebar-gutter]").length,
+      6,
+      "every row above the boundary reserves one, the pin included",
+    )
+
+    await click(editButton())
+    await until(async () => Boolean(group()), "the mode")
+    const mode = modeRow("projects")
+    const modeSlot = mode?.querySelector("[data-sidebar-gutter]")
+    assert.ok(modeSlot, "the mode's row reserves the same slot")
+    assert.equal(modeSlot.classList.contains("size-11"), true, "the same 44px")
+    assert.equal(modeSlot.classList.contains("shrink-0"), true, "and the same refusal to shrink")
+    assert.equal(
+      modeSlot.firstElementChild?.hasAttribute("data-sidebar-grip"),
+      true,
+      "with the grip standing in it",
+    )
+    assert.equal(
+      modeSlot.getAttribute("aria-hidden"),
+      null,
+      "audible in the mode, since the grip it holds is a control a reader reaches",
+    )
+    assert.equal(mode?.firstElementChild?.firstElementChild, modeSlot, "the row starts with it here too")
+    assert.equal(
+      mode?.firstElementChild?.classList.contains("gap-3"),
+      true,
+      "beside the same 12px gap, so the mark stands where it stands at rest",
+    )
+    assert.equal(findAll("[data-sidebar-gutter]").length, 6, "every row above the boundary, again")
+    // No trailing reservation: the eye stands at the row's end in the mode alone, so a long name
+    // truncates there rather than the row's end moving on the press that opened the mode.
+    assert.equal(
+      resting?.querySelectorAll("[data-sidebar-gutter] [data-sidebar-grip]").length,
+      0,
+      "the resting slot holds nothing",
     )
   })
 })
@@ -440,7 +572,7 @@ const CANVAS_GAP = {
   hidden: [],
 }
 
-test("a Move press beside a row the switch takes away moves the row the reader sees", async () => {
+test("a grip's arrow beside a row the switch takes away moves the row the reader sees", async () => {
   await seed()
   // Canvas's switch off, so its row is no row of the mode's list — though the record still names it.
   await seedSettings({
@@ -458,14 +590,15 @@ test("a Move press beside a row the switch takes away moves the row the reader s
       "the rows the switch lets through",
     )
     assert.equal(
-      moveControl("Meetings", "down")?.hasAttribute("disabled"),
+      missing('[data-sidebar-row="canvas"]'),
       true,
-      "the last drawn row holds its control at the drawn list's end",
+      "and Canvas is no row of the list a press moves among",
     )
 
     // Code one place down: past Research, the next row the reader can see — not past the Canvas the
     // record holds between them, which would leave the drawn list exactly as it was.
-    await click(moveControl("Code", "down"))
+    await focusOn(gripOf("code"))
+    await pressKey("ArrowDown")
     await until(
       async () => wordsOf(liveRegion()) === "Code moved to 3 of 4",
       "the drawn count, not the record's",
@@ -477,8 +610,8 @@ test("a Move press beside a row the switch takes away moves the row the reader s
     )
     assert.equal(
       document.activeElement?.getAttribute("aria-label"),
-      "Move Code down",
-      "and the focus still on the control that moved it",
+      "Reorder Code",
+      "and the focus still on the grip that moved it",
     )
     assert.deepEqual(
       ((await db.settings.get("settings"))?.sidebarLayout?.order ?? []).filter(
@@ -489,7 +622,7 @@ test("a Move press beside a row the switch takes away moves the row the reader s
     )
 
     // And back up over the same gap: the row the reader sees is the one press away.
-    await click(moveControl("Code", "up"))
+    await pressKey("ArrowUp")
     await until(async () => wordsOf(liveRegion()) === "Code moved to 2 of 4", "the way back")
     assert.deepEqual(
       ((await db.settings.get("settings"))?.sidebarLayout?.order ?? []).filter(
@@ -498,6 +631,16 @@ test("a Move press beside a row the switch takes away moves the row the reader s
       ["projects", "canvas", "code", "research", "meetings"],
       "the order the presses started from",
     )
+
+    // Meetings is the last row the mode draws: an arrow there has nowhere to go, and writes nothing.
+    await focusOn(gripOf("meetings"))
+    await pressKey("ArrowDown")
+    assert.deepEqual(
+      rowIds(),
+      ["projects", "code", "research", "meetings"],
+      "the last drawn row stays where it stands",
+    )
+    assert.equal(wordsOf(liveRegion()), "Code moved to 2 of 4", "and nothing is announced")
   })
 })
 
@@ -943,9 +1086,9 @@ test("a layout the device refuses is said under the row the press was made in", 
           "the row not put away",
         )
         assert.equal(
-          wordsOf(find('button[aria-label="Hide Code"]')),
-          "Hide",
-          "the control still reading what its press does",
+          find('button[aria-label="Hide Code"]')?.hasAttribute("disabled"),
+          false,
+          "the eye that was pressed, still named for the press that writes nothing here and still pressable",
         )
         assert.deepEqual(rowIds(), before, "every row exactly where it stood")
         assert.deepEqual(
@@ -962,7 +1105,8 @@ test("a layout the device refuses is said under the row the press was made in", 
         )
 
         // Move: the same, and a move that never landed is never announced.
-        await click(moveControl("Code", "down"))
+        await focusOn(gripOf("code"))
+        await pressKey("ArrowDown")
         await until(
           async () => wordsOf(refusalIn("code")) === NO_ROOM,
           "the refusal, the second press",
@@ -970,9 +1114,14 @@ test("a layout the device refuses is said under the row the press was made in", 
         assert.deepEqual(rowIds(), before, "the rows as they stood")
         assert.equal(wordsOf(liveRegion()), "", "and nothing announced, since nothing moved")
         assert.equal(
-          moveControl("Code", "down")?.hasAttribute("disabled"),
-          false,
-          "the control that was pressed, still in its row and still pressable",
+          gripOf("code")?.getAttribute("aria-label"),
+          "Reorder Code",
+          "the grip that was pressed, still in its row and still the way to the order",
+        )
+        assert.equal(
+          document.activeElement?.getAttribute("aria-label"),
+          "Reorder Code",
+          "still holding the focus, since nothing moved to move it",
         )
       })
     })
@@ -1021,10 +1170,41 @@ test("Reset asks first and leaves every pin alone", async () => {
       "the record's arrangement, the pin after the row it follows",
     )
 
-    // The mode's foot: below every row, under the rule that divides the list from what comes after.
+    // The mode's foot: below every row, under the rule that divides the list from what comes after,
+    // and one press about the whole list rather than about a row — the app's own button, as tall and
+    // as round as the delete control a canvas's screen carries, with a reset's icon inline-start and
+    // its words beside it, in the neutral colour rather than the destructive one.
     const reset = resetControl()
     assert.ok(reset, "the mode's own Reset to default")
+    assert.equal(reset.getAttribute("data-slot"), "button", "the app's own button, not a bare press")
     assert.equal(wordsOf(reset), "Reset to default", "worded for what it does")
+    assert.equal(
+      reset.querySelector("svg")?.classList.contains("lucide-rotate-ccw"),
+      true,
+      "carrying the reset's icon inline-start",
+    )
+    assert.equal(
+      reset.querySelector("svg")?.getAttribute("data-icon"),
+      "inline-start",
+      "marked as the icon before the words",
+    )
+    assert.equal(reset.classList.contains("h-11"), true, "44px tall, the delete control's height")
+    assert.equal(reset.classList.contains("rounded-full"), true, "and the delete control's radius")
+    assert.equal(
+      reset.classList.contains("mx-auto"),
+      true,
+      "centred in the mode's width, so it stands under the middle of the list",
+    )
+    assert.equal(
+      reset.className.includes("bg-secondary"),
+      true,
+      "in the neutral colour a secondary action wears",
+    )
+    assert.equal(
+      reset.className.includes("bg-destructive"),
+      false,
+      "not the destructive plate the delete control wears",
+    )
     assert.equal(
       reset.previousElementSibling?.getAttribute("data-slot"),
       "separator",
@@ -1206,14 +1386,19 @@ test(
           "the grip is 44px",
         )
         assert.equal(
-          moveControl("Projects", "down")?.classList.contains("size-11"),
-          true,
-          "the move control is 44px",
+          findAll("[data-sidebar-gutter]").length,
+          6,
+          "the grip's slot, kept in both states, on every row the drawer arranges",
         )
         assert.equal(
-          find('button[aria-label="Hide Projects"]')?.classList.contains("h-11"),
+          find('button[aria-label="Hide Projects"]')?.classList.contains("size-11"),
           true,
-          "and the word control 44px",
+          "and the eye 44px, the only control at the row's other end",
+        )
+        assert.equal(
+          wordsOf(find('button[aria-label="Hide Projects"]')),
+          "",
+          "with no word in it: the glyph says which way the press goes",
         )
         assert.equal(
           row?.querySelector(".truncate")?.classList.contains("min-w-0"),
@@ -1222,7 +1407,7 @@ test(
         )
         // A name cut on screen is still whole to a reader who hears the list.
         assert.equal(
-          missing('button[aria-label="Move A pinned timetable up"]'),
+          missing('button[aria-label="Reorder A pinned timetable"]'),
           false,
           "a control is named for its whole row, however the row is cut",
         )

@@ -2,7 +2,9 @@
 // and dropped — sent as real pointer events, so the gesture's capture and the grip's `touch-action`
 // decide what happens, not a handler's own idea of it — the order read back off the nav, a reload
 // reading the same order again, and the same drag with a finger in the phone's drawer, where Escape
-// is the mode's one press and the sheet's the next.
+// is the mode's one press and the sheet's the next. And the slot the grip stands in, kept in both
+// states: the row's mark and its height the same before and after the mode opens, which only a
+// laid-out page can say.
 import { app, assert, flow, pass, settled, swipeBy } from "./lib.mjs"
 
 /** A box's middle in the page's own px, and the height a drag has to cross to take a row's place. */
@@ -28,8 +30,24 @@ const navRows = (page) =>
     .locator('nav[aria-label="Main"] a')
     .evaluateAll((rows) => rows.map((row) => row.getAttribute("href")))
 
-/** One row's grip — the pointer's way into the order. */
+/** One row's grip — the pointer's way into the order, and the keys' way too. */
 const gripOf = (page, id) => page.locator(`[data-sidebar-row="${id}"] [data-sidebar-grip]`)
+
+/**
+ * Where a row's content starts and how tall the row is: the mark's left edge, and the row's own box.
+ * Read in both states, since the 44px slot a resting row reserves is what keeps both answers the
+ * same when the mode opens — the one thing about the gutter only a laid-out page can measure. The
+ * mark is the thing after the slot, never the grip's own glyph inside it.
+ */
+const leadingOf = (row) =>
+  row.evaluate((el) => {
+    const mark = el.querySelector("[data-sidebar-gutter]")?.nextElementSibling
+    const box = el.getBoundingClientRect()
+    return {
+      markX: Math.round(mark.getBoundingClientRect().left),
+      height: Math.round(box.height),
+    }
+  })
 
 /** Opens the mode and answers the rows it drew, so the drag's before and after can be compared. */
 async function openMode(page) {
@@ -58,9 +76,33 @@ await flow(
       0,
       "a sidebar at rest draws no grip",
     )
+    // The grip's slot is reserved in both states: at rest it is empty, and 44px of a row that
+    // would otherwise start its mark where a name wanted it.
+    assert.equal(
+      await page.locator('[data-sidebar-row="projects"] [data-sidebar-gutter]').count(),
+      1,
+      "though the slot the grip stands in is kept, empty, at rest",
+    )
+    const leading = await leadingOf(page.locator('[data-sidebar-row="projects"]'))
 
     const before = await openMode(page)
     await shot("editing")
+    await settled(page)
+    assert.deepEqual(
+      await leadingOf(page.locator('[data-sidebar-row="projects"]')),
+      leading,
+      "the mode opens into the slot the resting row kept: the same mark, at the same x, in a row of the same height",
+    )
+    assert.equal(
+      await page.locator('[data-sidebar-row="projects"] [data-sidebar-gutter] [data-sidebar-grip]').count(),
+      1,
+      "with the grip standing where the resting row's empty slot was",
+    )
+    assert.equal(
+      await page.locator('[data-sidebar-row="projects"] [data-sidebar-gutter]').getAttribute("aria-hidden"),
+      null,
+      "and the slot audible, since the grip it holds is a control a keyboard reaches",
+    )
 
     // The gesture: press the grip, carry the row over its neighbour, and let go. The row is lifted
     // and the place it would land is marked while the button is still down.
@@ -183,9 +225,19 @@ await flow(
       0,
       "the drawer at rest draws no grip either",
     )
+    // The slot is the sheet's too, but only once the sheet has finished sliding in: a box measured
+    // mid-animation is the animation's, not the row's.
+    await settled(page)
+    const leading = await leadingOf(page.locator('[data-sidebar-row="projects"]'))
 
     const before = await openMode(page)
     await shot("editing")
+    await settled(page)
+    assert.deepEqual(
+      await leadingOf(page.locator('[data-sidebar-row="projects"]')),
+      leading,
+      "and the drawer's rows keep their slot too: the same mark, at the same x, at 390px",
+    )
 
     // A finger, through the browser's own input pipeline: the grip keeps the touch, so the list does
     // not scroll under the drag and the sheet does not go with it — everywhere else on the list

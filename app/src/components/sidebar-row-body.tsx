@@ -6,6 +6,7 @@
  * Its own file because both draw it: held in the mode's file, the resting sidebar's rows changed
  * whenever the mode did.
  */
+import type { ReactNode } from "react"
 import {
   AudioLinesIcon,
   CodeXmlIcon,
@@ -31,12 +32,34 @@ const FEATURE_ICONS: Record<SidebarFeatureId, typeof FolderKanbanIcon> = {
 }
 
 /**
+ * The 44px slot a row above the boundary starts with, in either state: empty and hidden from a screen
+ * reader at rest, holding the mode's grip while the reader is arranging.
+ *
+ * Reserved in both states, so opening and closing the mode moves nothing — the mark, the name and the
+ * row's own height stand where they stood either way. The icon rail draws none (its row is a 44px box
+ * whose mark is the row), and nothing below the boundary is arranged, so nothing below it reserves one.
+ */
+export function RowGutter({ children }: { children?: ReactNode }) {
+  return (
+    <span
+      data-sidebar-gutter=""
+      // Hidden while it stands empty; in the mode it is the grip's own box, and a focusable control
+      // inside a hidden element is a control no one can hear.
+      aria-hidden={children ? undefined : true}
+      className="flex size-11 shrink-0 items-center justify-center"
+    >
+      {children}
+    </span>
+  )
+}
+
+/**
  * A row's mark and name: a feature's icon and its label, or a canvas's own mark and title.
  *
  * A lab feature's name wears the pill that says a switch can take the row away — except in the mode,
- * whose row carries a 44px grip and three 44px controls: on a docked sidebar's 303px the pill leaves
- * the name no width at all, and a name is what a reader arranging the list reads. The word stays in
- * the row for a reader who hears the list, and the resting row still draws the pill.
+ * whose row carries a 44px grip and the eye beside it: on a docked sidebar's 303px the pill leaves the
+ * name no width at all, and a name is what a reader arranging the list reads. The word stays in the
+ * row for a reader who hears the list, and the resting row still draws the pill.
  */
 export function SidebarRowBody<Pin extends SidebarPin>({
   row,

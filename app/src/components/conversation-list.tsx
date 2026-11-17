@@ -15,7 +15,7 @@ import {
 
 import { Bot } from "@/components/bot"
 import { SidebarEdit } from "@/components/sidebar-edit"
-import { SidebarRowBody } from "@/components/sidebar-row-body"
+import { RowGutter, SidebarRowBody } from "@/components/sidebar-row-body"
 import { SortMenu } from "@/components/sort-menu"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -112,6 +112,7 @@ function SidebarRow({
       data-sidebar-row={row.id}
       className={collapsed ? railClass : rowClass}
     >
+      {!collapsed && <RowGutter />}
       <SidebarRowBody row={row} collapsed={collapsed} />
     </RootLink>
   )
@@ -148,6 +149,7 @@ function CanvasRow({
       data-sidebar-row={row.id}
       className={(collapsed ? railClass : rowClass)({ isActive: opened })}
     >
+      {!collapsed && <RowGutter />}
       <SidebarRowBody row={row} collapsed={collapsed} />
     </Link>
   )
