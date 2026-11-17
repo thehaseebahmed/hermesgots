@@ -35,6 +35,7 @@ export const KINDS = [
   "closes",
   "canvas",
   "room",
+  "settings",
 ] as const
 export type Kind = (typeof KINDS)[number]
 
