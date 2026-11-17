@@ -176,21 +176,16 @@ def redeem(path: Path, token: Any) -> Claim:
 def answer_run(run_id: str, choice: str) -> int:
     """Settles a run's approval: Hermes's queue resolved, and the run's clients told.
 
-    The pair ``sessions.answer_waiting`` answers an Auto session with — Hermes's own route is what
-    normally tells a run its approval was answered, and this answer never went through it, so it has
-    to be told itself. Runs on the API server's loop, where the run's status and stream live. Answers
-    how many requests were resolved: none means the wait the button was minted for is over.
+    ``approvals.resolve`` is the pair ``sessions.answer_waiting`` answers an Auto session with. Runs
+    on the API server's loop, where the run's status and stream live. Answers how many requests were
+    resolved: none means the wait the button was minted for is over.
     """
     from . import approvals
 
     try:
-        from tools.approval import resolve_gateway_approval
+        return approvals.resolve(run_id, choice)
     except ImportError as missing:
         raise AnswerError("This Hermes version can't answer an approval from here.", 501) from missing
-    count = resolve_gateway_approval(run_id, choice, resolve_all=True)
-    if count:
-        approvals.announce(run_id, choice)
-    return count
 
 
 def answer_room(target: Dict[str, Any], choice: str, home: Any = None) -> Dict[str, Any]:
