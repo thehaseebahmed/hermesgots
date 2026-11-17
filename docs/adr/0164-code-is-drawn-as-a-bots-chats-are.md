@@ -13,7 +13,7 @@ are the chat's sheet.**
   and in the foot below it, and the foot's round `+` starts a session (`ListFoot`'s `onNew`, which opens
   no picks since Code has one thing to start).
 - A session's header keeps its centred arrangement and its subtitle, without the `…`. Pressing it opens
-  `ChatSettings`, which for a session also holds every repository it works in (under a Context caption, laid out as
+  `ChatSettings`, which for a session also holds every repository it works in (under a Repositories caption, laid out as
   Edit Project's, without Add or Remove), its pin and its Resolve/Reopen, Discard and Delete. Its context
   stays in the header's ring at every width, never in the sheet. The subtitle names the first repository and counts the rest
   (`Gots · hermesgots +2 more`), at every width.

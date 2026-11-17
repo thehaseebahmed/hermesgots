@@ -57,8 +57,8 @@ export function ChatTitlePress({
       data-chat-settings-open
       className={
         centered
-          ? "flex min-h-11 w-full min-w-0 items-center justify-center outline-none"
-          : "flex min-h-11 w-full min-w-0 items-center text-left outline-none"
+          ? "flex w-full min-w-0 items-center justify-center outline-none"
+          : "flex w-full min-w-0 items-center text-left outline-none"
       }
     >
       <span className="min-w-0 truncate">{title}</span>
@@ -277,7 +277,9 @@ export function ChatSettings({
             )}
             {code && code.repos.length > 0 && (
               <section data-session-repos className="flex flex-col gap-2">
-                <h3 className="px-1 text-sm font-medium">Context</h3>
+                <h3 className="px-1 text-sm font-medium">
+                  {code.repos.length === 1 ? "Repository" : "Repositories"}
+                </h3>
                 <Group>
                   {code.repos.map((name) => (
                     <div key={name} className="flex min-h-14 items-center gap-4 bg-muted px-5 py-3">
