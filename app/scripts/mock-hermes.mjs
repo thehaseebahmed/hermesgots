@@ -1739,6 +1739,8 @@ function recordRoutine(req, body) {
         createdAt: now,
         updatedAt: now,
         routine: true,
+        // What the plugin reads off the execution ledger: the marker says how long the run took.
+        durationMs: 125_000,
         line: answer,
       },
     })

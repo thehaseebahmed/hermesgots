@@ -1,27 +1,21 @@
-// A routine's delivery is a row of the bot's own list (G4): the host publishes one record per run,
-// the list draws it wearing the routine's icon and the delivery's first line, and opening it draws
-// the run's transcript read-only — no composer, and the sentence saying why — at 390 and 1024px in
-// both themes.
-//
-// This flow used to assert the other premise: a delivery written into the chat that asked for it as an
-// assistant row of the bot's own, opening as an aside, with a chip above it that opened the run in a
-// sheet. The chip and the sheet are gone and a delivery no longer lands in a chat at all, so what the
-// browser's own width is needed for survives: the record the host publishes reaching the device's
-// list, and the run's own screen reading the session it names.
+// A routine's delivery is a marker in its bot's Main: the host publishes one record per run, Main draws
+// it as one line saying what ran and for how long, and opening it draws the run's transcript read-only
+// — no composer, and the sentence saying why — at 390 and 1024px in both themes. The way back is Main.
 import { app, assert, flow, pass } from "./lib.mjs"
 
-const ROW = 'a[href^="/c/routine-"]'
+const MARKER = "[data-slot=routine-marker]"
+const LINK = "[data-slot=routine-marker-link]"
 const SCREEN = "[data-routine-chat]"
 const NOTE = "[data-slot=routine-note]"
-const TITLE = "Morning watch"
 const SAID = "The tide turns at 06:40"
 /** The run's own prompt: the transcript on its screen is its session, read whole. */
 const ASKED = "Watch the tide and tell me in a chat when it turns."
+const MAIN = "e2e-main"
 
-/** The same claims at every look: the list's row, then the run read-only where the row leads. */
-async function drive({ page, profileId, send, newChat, lastReply, until, shot }) {
-  // The routine is asked for in a chat of its own; its delivery is a row of the bot's list, not
-  // something said in this thread.
+/** The same claims at every look: the marker in Main, then the run read-only where it leads. */
+async function drive({ page, profileId, seed, send, newChat, lastReply, until, shot }) {
+  // The routine is asked for in a chat of its own; its delivery is a marker in Main, not a row of a
+  // list and not something said in this thread.
   const chatId = await newChat({ title: "Watching the tide" })
   await send("routine message")
   await page
@@ -36,29 +30,30 @@ async function drive({ page, profileId, send, newChat, lastReply, until, shot })
     20_000,
     "the reply to finish",
   )
-  // The row is the host's record, and this device reads its chats when the app starts: the list is
-  // reached by its own address, the way a reader finds it after closing the app. It is the flat list,
-  // which draws a routine's delivery among its rows — the side-chat list leaves runs to the routines
-  // page (ADR 0161) — so the Developer switch is turned on first (ADR 0162).
-  await page.evaluate(async () => {
-    const { saveSettings } = await import("/src/lib/db.ts")
-    await saveSettings({ legacyChat: true })
-  })
+  // Main is the host's record, written to the device the way the plugin's list answer leaves it.
+  await seed([{ id: MAIN, title: "Bot Chat", main: true, createdAt: 1, updatedAt: 2 }])
   await page.goto(`${app}/b/${profileId}`)
-  await until(async () => (await page.locator(ROW).count()) > 0, 30_000, "the routine's row")
-  const row = page.locator(ROW).first()
-  const words = await row.innerText()
-  assert.match(words, new RegExp(TITLE), "the row names the routine")
-  assert.match(words, new RegExp(SAID), "and carries the delivery's first line")
+  await until(async () => (await page.locator(MARKER).count()) > 0, 30_000, "the routine's marker")
+  const marker = page.locator(MARKER).first()
   assert.equal(
-    await row.locator("svg.lucide-rotate-ccw-clock").count(),
-    1,
-    "the row wears the routine's icon rather than a chat's",
+    (await marker.innerText()).trim(),
+    'Routine "Morning watch" ran for 2 min 5 secs',
+    "Main says what ran and for how long",
   )
-  assert.equal(await row.locator("svg.lucide-message-circle").count(), 0, "no chat's icon on it")
-  await shot("list")
+  // The mock keeps every delivery of the flows before this one, so a marker is one per run, not one.
+  assert.equal(
+    await page.locator(MARKER).locator(LINK).count(),
+    await page.locator(MARKER).count(),
+    "and each marker is its own press",
+  )
+  assert.equal(
+    await page.locator('a[href^="/c/routine-"]:not([data-slot=routine-marker-link])').count(),
+    0,
+    "while no list draws a row for a run",
+  )
+  await shot("main")
 
-  await row.click()
+  await page.locator(LINK).first().click()
   await until(async () => (await page.locator(SCREEN).count()) === 1, 20_000, "the run's screen")
   const screen = page.locator(SCREEN)
   await screen.getByText(SAID).first().waitFor({ timeout: 20_000 })
@@ -74,21 +69,15 @@ async function drive({ page, profileId, send, newChat, lastReply, until, shot })
   )
   await shot("run")
 
-  // The way back is the bot's list, where this screen is the one the list pushed; where the list keeps
-  // its lane beside the run, there is nothing to lead back to and the row stays on screen.
-  const back = page.getByRole("button", { name: /^Back to / })
-  if (await back.count()) {
-    await back.click()
-    await until(
-      async () => new URL(page.url()).pathname === `/b/${profileId}`,
-      10_000,
-      "the bot's list",
-    )
-    assert.equal(await page.locator(SCREEN).count(), 0, "and the run's screen is what was left")
-    await shot("back")
-  } else {
-    assert.ok(await page.locator(ROW).first().isVisible(), "the list stays beside the run")
-  }
+  // The way back is Main, where the marker that opened the run stands.
+  await page.getByRole("button", { name: /^Back to / }).click()
+  await until(
+    async () => (await page.locator(MARKER).count()) > 0,
+    10_000,
+    `the bot's Main (at ${page.url()})`,
+  )
+  assert.equal(await page.locator(SCREEN).count(), 0, "and the run's screen is what was left")
+  await shot("back")
 }
 
 for (const { width, dark } of [
@@ -103,4 +92,4 @@ for (const { width, dark } of [
   })
 }
 
-pass("a routine's delivery listed as its own row, and its run opened read-only with no composer")
+pass("a routine's delivery drawn as a marker in Main, and its run opened read-only with no composer")
