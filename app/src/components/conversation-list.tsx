@@ -1,25 +1,20 @@
 import { useLiveQuery } from "dexie-react-hooks"
+import { useRef, useState } from "react"
 import { Link, matchPath, NavLink, useLocation, type NavLinkProps } from "react-router"
 import {
-  AudioLinesIcon,
   BellOffIcon,
-  CodeXmlIcon,
-  FolderKanbanIcon,
   ListChecksIcon,
-  FrameIcon,
   MessageCircleQuestionMarkIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
-  SearchIcon,
   ShieldAlertIcon,
-  TelescopeIcon,
+  SlidersHorizontalIcon,
   TriangleAlertIcon,
   UserIcon,
 } from "lucide-react"
 
 import { Bot } from "@/components/bot"
-import { CanvasMark } from "@/components/canvas-mark"
-import { LabLabel } from "@/components/lab-badge"
+import { SidebarEdit, SidebarRowBody } from "@/components/sidebar-edit"
 import { SortMenu } from "@/components/sort-menu"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -32,12 +27,7 @@ import { db } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useMeetingsEnabled } from "@/lib/meetings"
 import { plainPress, pressOpeningRoot, useNav } from "@/lib/nav"
-import {
-  sidebarRows,
-  type SidebarFeatureId,
-  type SidebarLayoutRow,
-  type SidebarLab,
-} from "@/lib/sidebar-layout"
+import { sidebarRows, type SidebarLab, type SidebarLayoutRow } from "@/lib/sidebar-layout"
 import { useSyncState } from "@/lib/sync"
 import { BOT_SORTS, sortBots, useBotSort, useBotSummaries, useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
@@ -54,6 +44,9 @@ const railClass = ({ isActive }: { isActive: boolean }) =>
     "flex size-11 shrink-0 items-center justify-center rounded-2xl transition-colors hover:bg-muted",
     isActive && "bg-muted font-medium",
   )
+
+/** A pinned canvas's row, as the table files it: the one row whose mark is the canvas's own. */
+type PinRow = Extract<SidebarLayoutRow<Canvas>, { kind: "pin" }>
 
 /**
  * A sidebar destination: top-level, so it opens as the only entry and back leaves the app.
@@ -84,18 +77,6 @@ function RowAge({ at, now }: { at: number; now: number }) {
 }
 
 /**
- * Each feature's mark, by the id the table files it under. Typed by those ids, so a feature added to
- * the table without an icon here fails `pnpm typecheck` rather than drawing a row with no mark.
- */
-const FEATURE_ICONS: Record<SidebarFeatureId, typeof FolderKanbanIcon> = {
-  projects: FolderKanbanIcon,
-  code: CodeXmlIcon,
-  canvas: FrameIcon,
-  research: TelescopeIcon,
-  meetings: AudioLinesIcon,
-}
-
-/**
  * One row of the sidebar's list, drawn from the table (`lib/sidebar-layout.ts`) — a feature's screen,
  * or the canvas the reader pinned. A pin's own body is `CanvasRow`, since a pin is marked by the tab
  * that opened it and not by its address, and the table's row is all either kind has in common.
@@ -110,8 +91,7 @@ function SidebarRow({
   onNavigate?: () => void
 }) {
   if (row.kind === "pin")
-    return <CanvasRow canvas={row.pin} collapsed={collapsed} onNavigate={onNavigate} />
-  const Icon = FEATURE_ICONS[row.id]
+    return <CanvasRow row={row} collapsed={collapsed} onNavigate={onNavigate} />
   return (
     <RootLink
       to={row.address}
@@ -120,9 +100,7 @@ function SidebarRow({
       aria-label={collapsed ? row.label : undefined}
       className={collapsed ? railClass : rowClass}
     >
-      <Icon className="size-5 text-muted-foreground" />
-      {/* The pill says what the row's `lab` reports: the rows a switch can take away are the lab's. */}
-      {!collapsed && (row.lab ? <LabLabel fill>{row.label}</LabLabel> : row.label)}
+      <SidebarRowBody row={row} collapsed={collapsed} />
     </RootLink>
   )
 }
@@ -132,34 +110,32 @@ function SidebarRow({
  * (`lib/canvas-open.ts`, ADR 0151).
  */
 function CanvasRow({
-  canvas,
+  row,
   collapsed,
   onNavigate,
 }: {
-  canvas: Canvas
+  row: PinRow
   collapsed: boolean
   onNavigate?: () => void
 }) {
   const { root } = useNav()
-  const to = `/canvas/${canvas.id}`
-  const opened = useCanvasOpened(canvas.id)
+  const opened = useCanvasOpened(row.pin.id)
   return (
     <Link
-      to={to}
+      to={row.address}
       replace
-      onClick={pressOpeningRoot(root, to, (event) => {
+      onClick={pressOpeningRoot(root, row.address, (event) => {
         onNavigate?.()
         // A row's press is a way onto the canvas like any other and no open, so the mark the flow
         // wrote goes with it (ADR 0151) — a press meant for a new tab leaves this tab as it was.
         if (plainPress(event)) closeCanvas()
       })}
-      aria-label={collapsed ? canvas.title : undefined}
+      aria-label={collapsed ? row.label : undefined}
       aria-current={opened ? "page" : undefined}
       data-canvas-pinned=""
       className={(collapsed ? railClass : rowClass)({ isActive: opened })}
     >
-      <CanvasMark mark={canvas.mark} />
-      {!collapsed && <span className="min-w-0 truncate">{canvas.title}</span>}
+      <SidebarRowBody row={row} collapsed={collapsed} />
     </Link>
   )
 }
@@ -413,6 +389,16 @@ export function ConversationList({
   const pinned = usePinnedCanvases(gates.canvas)
   const rows = sidebarRows(pinned).filter((row) => row.lab === null || gates[row.lab])
 
+  // The mode is this component's own state and never a stored setting: a reload must not land a
+  // reader in a mode where a row press navigates nowhere. The switch's ref is what the mode gives the
+  // focus back to.
+  const [editing, setEditing] = useState(false)
+  const editButton = useRef<HTMLButtonElement>(null)
+  const leaveEdit = () => {
+    setEditing(false)
+    editButton.current?.focus()
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div
@@ -431,26 +417,41 @@ export function ConversationList({
             className={cn("size-11 rounded-full", collapsed && "text-muted-foreground")}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-expanded={!collapsed}
-            onClick={onToggleCollapsed}
+            // Collapsing leaves the mode before it collapses (a Decision): the rail has no switch to
+            // come back through, so the control that took the reader there keeps the focus.
+            onClick={() => {
+              setEditing(false)
+              onToggleCollapsed()
+            }}
           >
             {collapsed ? <PanelLeftOpenIcon className="size-5" /> : <PanelLeftCloseIcon />}
           </Button>
         )}
-        <Button
-          variant="ghost"
-          size="icon-lg"
-          className={cn("size-11 rounded-full", collapsed && "text-muted-foreground")}
-          aria-label="Search"
-        >
-          <SearchIcon className={collapsed ? "size-5" : undefined} />
-        </Button>
+        {/* The rail keeps no edit button, so a collapsed sidebar draws none at all. */}
+        {!collapsed && (
+          <Button
+            ref={editButton}
+            variant="ghost"
+            size="icon-lg"
+            className="size-11 rounded-full aria-pressed:bg-muted aria-pressed:text-foreground"
+            aria-label={editing ? "Done editing sidebar" : "Edit sidebar"}
+            aria-pressed={editing}
+            onClick={() => setEditing((open) => !open)}
+          >
+            <SlidersHorizontalIcon className="size-5" />
+          </Button>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         <nav className={cn("flex flex-col gap-0.5", collapsed && "items-center")} aria-label="Main">
-          {rows.map((row) => (
-            <SidebarRow key={row.id} row={row} collapsed={collapsed} onNavigate={onNavigate} />
-          ))}
+          {editing ? (
+            <SidebarEdit rows={rows} onLeave={leaveEdit} />
+          ) : (
+            rows.map((row) => (
+              <SidebarRow key={row.id} row={row} collapsed={collapsed} onNavigate={onNavigate} />
+            ))
+          )}
         </nav>
         <Separator className="mx-1 my-3 data-horizontal:w-auto" />
         <Waiting onNavigate={onNavigate} collapsed={collapsed} />
