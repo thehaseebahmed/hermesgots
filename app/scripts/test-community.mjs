@@ -23,16 +23,47 @@ function setup() {
   return { store, registry }
 }
 
-async function call(env, caller, method, route, body, github = async () => "octocat") {
+/** GitHub's device flow, answering for whichever account approves the code (`login`). */
+function device(login = "octocat", { pending = 0 } = {}) {
+  const started = []
+  let waits = pending
+  return {
+    started,
+    async start() {
+      started.push(1)
+      return {
+        deviceCode: "dc_secret",
+        userCode: "WDJB-MJHT",
+        verificationUri: "https://github.com/login/device",
+        expiresIn: 900,
+        interval: 5,
+      }
+    },
+    async poll(code) {
+      assert.equal(code, "dc_secret")
+      if (waits-- > 0) return { kind: "pending" }
+      return typeof login === "string" ? { kind: "user", login } : login
+    },
+  }
+}
+
+async function call(env, caller, method, route, body, github = device(), now = NOW) {
   const req = new Request(`https://x.test/api?route=${route}`, {
     method,
     body: body ? JSON.stringify(body) : undefined,
   })
-  const res = await handleCommunity(req, { ...env, caller, github, now: NOW })
+  const res = await handleCommunity(req, { ...env, caller, github, now })
   return { status: res.status, body: await res.json() }
 }
 
-const user = { kind: "user", userId: "u1", pictureUrl: "https://avatars.githubusercontent.com/u/583231?v=4" }
+const user = { kind: "user", userId: "u1" }
+
+/** Join through the device flow: open it, then poll once GitHub's interval has passed. */
+async function join(env, caller, github = device()) {
+  const opened = await call(env, caller, "POST", "join", null, github)
+  if (opened.status !== 200 || !opened.body.verify) return opened
+  return call(env, caller, "POST", "join-poll", null, github, NOW + 5_000)
+}
 
 async function hostToken(env) {
   const token = "mh_abc"
@@ -75,12 +106,19 @@ test("join derives the username, report needs a join, leave erases everything", 
     403,
   )
 
-  const joined = await call(env, user, "POST", "join")
-  assert.deepEqual(joined.body, { joined: true, login: "octocat", totals: { today: 0, week: 0, month: 0 } })
+  const joined = await join(env, user)
+  assert.deepEqual(joined.body, {
+    joined: true,
+    verified: true,
+    login: "octocat",
+    totals: { today: 0, week: 0, month: 0 },
+  })
   assert.equal((await call(env, host, "GET", "community")).body.enabled, true)
 
   const report = await call(env, host, "POST", "report", {
-    days: { "2026-10-15": { "Anthropic/Claude-Opus-5-5": { plan: counts(100), auto: counts(300) } } },
+    days: {
+      "2026-10-15": { "Anthropic/Claude-Opus-5-5": { plan: counts(100), auto: counts(300) } },
+    },
     providers: { "2026-10-15": { openrouter: { "Anthropic/Claude-Opus-5-5": 800 } } },
   })
   assert.equal(report.status, 200)
@@ -113,7 +151,7 @@ test("join derives the username, report needs a join, leave erases everything", 
 test("a stored report row inside the half minute is the whole gap", async () => {
   const env = setup()
   const host = await hostToken(env)
-  await call(env, user, "POST", "join")
+  await join(env, user)
   // A host that reported ten seconds ago, and no key of its own to agree with it.
   env.registry.data.set("community/reports/u1/h1", { days: {}, at: NOW - 10_000 })
 
@@ -129,7 +167,7 @@ test("a stored report row inside the half minute is the whole gap", async () => 
 test("a report the rules refuse costs no gap", async () => {
   const env = setup()
   const host = await hostToken(env)
-  await call(env, user, "POST", "join")
+  await join(env, user)
 
   const bad = await call(env, host, "POST", "report", { days: "nope" })
   assert.equal(bad.status, 400)
@@ -141,17 +179,142 @@ test("a report the rules refuse costs no gap", async () => {
 
 test("a GitHub account can't be claimed by a second sign-in; failures are reported", async () => {
   const env = setup()
-  await call(env, user, "POST", "join")
-  const other = { ...user, userId: "u2" }
-  assert.equal((await call(env, other, "POST", "join")).status, 409)
-  assert.equal(
-    (await call(env, { ...user, userId: "u3", pictureUrl: "https://x/y.png" }, "POST", "join")).status,
-    422,
-  )
-  const failing = async () => {
-    throw new Error("down")
+  await join(env, user)
+  assert.equal((await join(env, { ...user, userId: "u2" })).status, 409)
+  const failing = {
+    async start() {
+      throw new Error("down")
+    },
   }
-  assert.equal((await call(env, { ...user, userId: "u4" }, "POST", "join", null, failing)).status, 502)
+  assert.equal(
+    (await call(env, { ...user, userId: "u4" }, "POST", "join", null, failing)).status,
+    502,
+  )
+  const unset = { start: async () => null }
+  assert.equal(
+    (await call(env, { ...user, userId: "u5" }, "POST", "join", null, unset)).status,
+    503,
+  )
+})
+
+test("the username is the one GitHub answers for, whatever the sign-in's avatar says", async () => {
+  const env = setup()
+  // The caller dressed their Identity avatar as octocat's (`PUT /user` lets anyone write their own
+  // user_metadata). The handler is never handed it; GitHub answers for whoever approved the code.
+  const dressed = {
+    kind: "user",
+    userId: "u9",
+    pictureUrl: "https://avatars.githubusercontent.com/u/583231?v=4",
+  }
+  const out = await join(env, dressed, device("mallory"))
+  assert.equal(out.body.login, "mallory")
+  assert.equal(env.registry.data.has("community/owners/octocat"), false)
+  assert.equal(env.registry.data.get("community/owners/mallory").userId, "u9")
+})
+
+test("joining is a device flow: the code is shown, the device code stays on the server", async () => {
+  const env = setup()
+  const github = device("octocat", { pending: 1 })
+  const opened = await call(env, user, "POST", "join", null, github)
+  assert.deepEqual(opened.body, {
+    joined: false,
+    verify: {
+      userCode: "WDJB-MJHT",
+      verificationUri: "https://github.com/login/device",
+      expiresIn: 900,
+      interval: 5,
+    },
+  })
+  assert.ok(!JSON.stringify(opened.body).includes("dc_secret"))
+  // A second tap hands back the same flow rather than spending another code.
+  await call(env, user, "POST", "join", null, github, NOW + 1_000)
+  assert.equal(github.started.length, 1)
+
+  // Asked before GitHub's interval: answered pending without asking GitHub.
+  const early = await call(env, user, "POST", "join-poll", null, github, NOW + 1_000)
+  assert.equal(early.body.status, "pending")
+  const waiting = await call(env, user, "POST", "join-poll", null, github, NOW + 5_000)
+  assert.equal(waiting.body.status, "pending")
+  const done = await call(env, user, "POST", "join-poll", null, github, NOW + 10_000)
+  assert.equal(done.body.verified, true)
+  assert.equal(env.registry.data.has("community/verify/u1"), false)
+
+  // Another account can't redeem a flow it didn't open.
+  const stranger = await call(env, { ...user, userId: "u2" }, "POST", "join-poll", null, github)
+  assert.deepEqual(stranger.body, { joined: false, status: "expired" })
+})
+
+test("a denied or expired flow joins nobody", async () => {
+  const env = setup()
+  await call(env, user, "POST", "join", null, device({ kind: "denied" }))
+  const denied = await call(
+    env,
+    user,
+    "POST",
+    "join-poll",
+    null,
+    device({ kind: "denied" }),
+    NOW + 5_000,
+  )
+  assert.deepEqual(denied.body, { joined: false, status: "denied" })
+  await call(env, user, "POST", "join")
+  const late = await call(env, user, "POST", "join-poll", null, device(), NOW + 901_000)
+  assert.deepEqual(late.body, { joined: false, status: "expired" })
+  assert.equal(env.registry.data.has("users/u1/community"), false)
+})
+
+test("an avatar's join stays private until it verifies, and a verified claim takes it back", async () => {
+  const env = setup()
+  const host = await hostToken(env)
+  // u1 joined before the device flow, under the login its avatar named: octocat's.
+  env.registry.data.set("users/u1/community", { login: "octocat", joinedAt: NOW - 86_400_000 })
+  env.registry.data.set("community/owners/octocat", { userId: "u1" })
+  env.store.data.set("users/octocat", {
+    login: "octocat",
+    days: { "2026-10-15": { "claude-x": { auto: counts(10) } } },
+    updatedAt: NOW - 60_000,
+  })
+
+  // Its hosts keep reporting, but nothing of it is public.
+  assert.equal((await call(env, host, "GET", "community")).body.enabled, true)
+  const report = await call(env, host, "POST", "report", {
+    days: { "2026-10-15": { "claude-x": { auto: counts(50) } } },
+  })
+  assert.equal(report.status, 200)
+  const board = await call(env, null, "GET", "board")
+  assert.equal(board.body.periods.today.tokens.length, 0)
+  assert.equal(env.store.data.has("users/octocat"), false)
+  assert.deepEqual((await call(env, user, "GET", "me")).body, {
+    joined: true,
+    verified: false,
+    login: "octocat",
+    totals: { today: 0, week: 0, month: 0 },
+  })
+
+  // The real octocat verifies from another sign-in: the avatar's claim gives way, its reports go.
+  const real = { kind: "user", userId: "u7" }
+  const out = await join(env, real, device("octocat"))
+  assert.equal(out.body.verified, true)
+  assert.equal(env.registry.data.get("community/owners/octocat").userId, "u7")
+  assert.equal(env.registry.data.has("users/u1/community"), false)
+  assert.equal(env.registry.data.has("community/reports/u1/h1"), false)
+  assert.equal((await call(env, host, "GET", "community")).body.enabled, false)
+})
+
+test("an avatar's join that verifies keeps its counts, under the username GitHub names", async () => {
+  const env = setup()
+  const host = await hostToken(env)
+  env.registry.data.set("users/u1/community", { login: "someone-else", joinedAt: NOW - 1 })
+  env.registry.data.set("community/owners/someone-else", { userId: "u1" })
+  await call(env, host, "POST", "report", {
+    days: { "2026-10-15": { "claude-x": { auto: counts(50) } } },
+  })
+  const out = await join(env, user, device("octocat"))
+  assert.equal(out.body.login, "octocat")
+  assert.equal(out.body.totals.today, 100)
+  assert.equal(env.registry.data.has("community/owners/someone-else"), false)
+  const board = await call(env, null, "GET", "board")
+  assert.equal(board.body.periods.today.tokens[0].login, "octocat")
 })
 
 test("buildBoard ranks by total", () => {
@@ -372,6 +535,7 @@ test("a cached board asks the catalogue nothing", async () => {
   const env = { ...setup(), catalog: async () => LISTED }
   env.store.data.set("users/octocat", {
     login: "octocat",
+    verified: true,
     days: { "2026-10-15": { "claude-opus-5-5": { chat: counts(1) } } },
     updatedAt: NOW,
   })
@@ -396,7 +560,7 @@ const LISTED = {
 test("a report's unlisted models and custom providers are not stored", async () => {
   const env = { ...setup(), catalog: async () => LISTED }
   const host = await hostToken(env)
-  await call(env, user, "POST", "join")
+  await join(env, user)
   const report = await call(env, host, "POST", "report", {
     days: {
       "2026-10-15": {
@@ -431,6 +595,7 @@ test("a member stored before the rules serves no custom provider or unlisted mod
   // sits under a real provider too, so every panel has to know what the catalogue lists.
   env.store.data.set("users/octocat", {
     login: "octocat",
+    verified: true,
     days: {
       "2026-10-15": {
         "claude-opus-5-5": { chat: counts(100) },
@@ -446,8 +611,9 @@ test("a member stored before the rules serves no custom provider or unlisted mod
     },
     updatedAt: NOW,
   })
-  // The account is on the leaderboard; only its record is older than the rules.
-  await call(env, user, "POST", "join")
+  // The account is on the leaderboard, verified; only its record is older than the rules.
+  env.registry.data.set("users/u1/community", { login: "octocat", joinedAt: NOW, verifiedAt: NOW })
+  env.registry.data.set("community/owners/octocat", { userId: "u1", verified: true })
   const board = await call(env, null, "GET", "board")
   const today = board.body.periods.today
   assert.deepEqual(today.models.map((row) => row.model), ["claude-opus-5-5"])

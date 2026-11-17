@@ -7,13 +7,13 @@ import { RecoveryCode, UnlockSync } from "@/components/account-settings"
 import { Refusal } from "@/components/banner"
 import { useCopiedCode } from "@/components/copied-code"
 import { Bot } from "@/components/bot"
-import { SharingNotes } from "@/components/community-settings"
+import { GitHubCode, SharingNotes } from "@/components/community-settings"
 import { LinkBots } from "@/components/link-bots"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { signIn } from "@/lib/account"
-import { joinCommunity, leaveCommunity, useCommunity } from "@/lib/community"
+import { leaveCommunity, onBoard, useCommunity, useJoin } from "@/lib/community"
 import { db, getActiveProfile, getSettings, saveSettings } from "@/lib/db"
 import {
   needsBotSetup,
@@ -250,23 +250,29 @@ function SetupPage({
  *
  * The write is the page's, through the hold the page draws: a host that refused said so above the
  * steps, and the step stays where it is rather than advancing over a choice that was never saved.
+ * Joining shows GitHub's code until it is approved, and the step moves on once it is; Skip leaves
+ * the step without joining.
  */
 function CommunityStep({ hold, onDone }: { hold: RefusalHold; onDone: () => void }) {
   const { me, setMe } = useCommunity()
   const [on, setOn] = useState(true)
   const [busy, setBusy] = useState(false)
+  const { verify, start, cancel } = useJoin(setMe, onDone)
   const joined = me?.joined === true
+  const shown = onBoard(me)
+  const waiting = verify !== null
 
   const next = async () => {
     setBusy(true)
+    let opened = false
     const landed = await hold.write("change the leaderboard", async () => {
       // A read that failed leaves nothing to compare, so the choice is sent as it stands.
-      if (me !== undefined && on !== joined) {
-        setMe(on ? await joinCommunity() : await leaveCommunity())
-      }
+      if (me === undefined) return
+      if (on && !shown) opened = (await start()).verify !== undefined
+      else if (!on && joined) setMe(await leaveCommunity())
     })
     setBusy(false)
-    if (landed) onDone()
+    if (landed && !opened) onDone()
   }
 
   return (
@@ -281,21 +287,40 @@ function CommunityStep({ hold, onDone }: { hold: RefusalHold; onDone: () => void
         <TrophyIcon className="size-5 shrink-0 text-muted-foreground" />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-base">Join the leaderboard</span>
-          {joined && me.login && (
+          {shown && me.login && (
             <span className="truncate text-sm text-muted-foreground">Shown as @{me.login}</span>
           )}
         </span>
         <Switch
           id="community-setup"
           checked={on}
-          disabled={busy}
+          disabled={busy || waiting}
           onCheckedChange={(checked) => setOn(checked)}
         />
       </label>
-      <SharingNotes />
-      <Button size="lg" className="h-11" disabled={busy} onClick={next}>
-        Continue
-      </Button>
+      {waiting ? (
+        <>
+          <GitHubCode verify={verify} onCancel={cancel} />
+          <Button
+            variant="outline"
+            size="lg"
+            className="h-11"
+            onClick={() => {
+              cancel()
+              onDone()
+            }}
+          >
+            Skip
+          </Button>
+        </>
+      ) : (
+        <>
+          <SharingNotes />
+          <Button size="lg" className="h-11" disabled={busy} onClick={next}>
+            Continue
+          </Button>
+        </>
+      )}
     </Section>
   )
 }

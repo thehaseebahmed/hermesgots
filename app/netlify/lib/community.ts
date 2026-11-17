@@ -2,9 +2,11 @@
  * The community leaderboard: who spent the most tokens, and which models people run, by day.
  *
  * Only a GitHub username is ever kept about a person. A signed-in user joins with `POST join`, which
- * reads their GitHub account id from the avatar GitHub gave Netlify Identity and asks GitHub for the
- * username, so nobody types one in and nobody can claim another's. Their hosts (the Gots plugin)
- * then report counts: tokens by day, model and permission mode, never a prompt, a repo or a path.
+ * starts GitHub's device flow, and `POST join-poll`, which finishes it: the username is the one
+ * GitHub answers for the account that approved the code, so nobody types one in and nobody can claim
+ * another's. Netlify Identity can't say it: everything it keeps from the GitHub sign-in sits in
+ * `user_metadata`, which the user can rewrite (docs/adr/0165). Their hosts (the Gots plugin) then
+ * report counts: tokens by day, model and permission mode, never a prompt, a repo or a path.
  *
  * Two stores keep it apart. The registry store holds what must stay private (which account joined,
  * and each host's own report); the community store holds the public aggregate, one record per
@@ -45,12 +47,14 @@ export interface Member {
   /** Absent on a record from before providers were counted, and for a host on an older plugin. */
   providers?: ProviderDays
   updatedAt: number
+  /**
+   * Written by a member whose username GitHub vouched for. A record without it is from before the
+   * device flow, when the username was read off a self-written avatar, and the board drops it.
+   */
+  verified?: true
 }
 
-export type Caller =
-  | { kind: "user"; userId: string; pictureUrl?: string }
-  | { kind: "host"; token: string }
-  | null
+export type Caller = { kind: "user"; userId: string } | { kind: "host"; token: string } | null
 
 export interface CommunityContext {
   /** Public aggregates: `users/<login>` and the cached `board`. */
@@ -58,8 +62,8 @@ export interface CommunityContext {
   /** The registry's store: host tokens, and what stays private about who joined. */
   registry: RegistryStore
   caller: Caller
-  /** The username behind a GitHub account id; null when GitHub doesn't know it. */
-  github: (id: string) => Promise<string | null>
+  /** GitHub's device flow, which is what proves a username is the caller's. */
+  github: GitHubDevice
   /**
    * The model ids models.dev lists, or null when the catalogue couldn't be read — in which case
    * nothing is filtered and a report is taken as it always was. Absent in a caller with no
@@ -67,6 +71,31 @@ export interface CommunityContext {
    */
   catalog?: () => Promise<Catalog | null>
   now?: number
+}
+
+/** A device flow GitHub opened: the code the user types, and the one only the server holds. */
+export interface DeviceStart {
+  deviceCode: string
+  userCode: string
+  verificationUri: string
+  /** Seconds. */
+  expiresIn: number
+  /** Seconds GitHub asks between two polls. */
+  interval: number
+}
+
+export type DevicePoll =
+  | { kind: "pending"; interval?: number }
+  | { kind: "expired" }
+  | { kind: "denied" }
+  /** The account that approved the code, as GitHub's own `GET /user` answers it. */
+  | { kind: "user"; login: string }
+
+export interface GitHubDevice {
+  /** Null when the site has no OAuth app to ask with; throws when GitHub didn't answer. */
+  start: () => Promise<DeviceStart | null>
+  /** Throws when GitHub didn't answer, or answered something the flow has no word for. */
+  poll: (deviceCode: string) => Promise<DevicePoll>
 }
 
 /** One person's tokens, split by the period's top models (`topModels`) and the rest. */
@@ -123,13 +152,35 @@ const MAX_MODELS_PER_DAY = 24
 const MAX_DAY_TOKENS = 5_000_000_000
 const MAX_DAY_CALLS = 2_000_000
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/
-const AVATAR_ID = /^https:\/\/avatars\.githubusercontent\.com\/u\/(\d{1,12})(?:[?/]|$)/
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 const MODEL = /^[a-z0-9][a-z0-9._:+-]{0,63}$/
 
 interface Account {
   login: string
   joinedAt: number
+  /**
+   * When GitHub vouched for `login`. Absent on an account that joined before the device flow: its
+   * login is what its avatar said, so its hosts still report but nothing of it is public until it
+   * verifies.
+   */
+  verifiedAt?: number
+}
+
+/** Who holds a username. `verified` is absent on a claim an avatar made, which a verified one beats. */
+interface Owner {
+  userId: string
+  verified?: true
+}
+
+/** A device flow in progress, private to the account that started it. */
+interface Pending {
+  deviceCode: string
+  userCode: string
+  verificationUri: string
+  expiresAt: number
+  interval: number
+  /** The earliest GitHub may be asked again, so a client polling fast can't earn a `slow_down`. */
+  nextAt: number
 }
 
 interface Report {
@@ -497,6 +548,7 @@ const accountKey = (userId: string) => `users/${userId}/community`
 const ownerKey = (login: string) => `community/owners/${login.toLowerCase()}`
 const reportKey = (userId: string, hostId: string) => `community/reports/${userId}/${hostId}`
 const memberKey = (login: string) => `users/${login.toLowerCase()}`
+const pendingKey = (userId: string) => `community/verify/${userId}`
 
 async function recompute(
   ctx: CommunityContext,
@@ -529,6 +581,7 @@ async function recompute(
     days: mergeReports(reports, now),
     providers: mergeProviders(providers, now),
     updatedAt: now,
+    verified: true,
   }
   await ctx.store.setJSON(memberKey(login), member)
 }
@@ -545,6 +598,12 @@ async function board(ctx: CommunityContext, now: number): Promise<Board> {
   for (const { key } of (await ctx.store.list({ prefix: "users/" })).blobs) {
     const member = await read<Member>(ctx.store, key)
     if (!member) continue
+    // A username an avatar claimed may be someone else's: off the board, and out of the public
+    // store, until its account verifies — the counts stay private and come back then.
+    if (member.verified !== true) {
+      await ctx.store.delete(key)
+      continue
+    }
     const live = Object.keys(member.days).some((date) => date >= oldest)
     if (live) members.push(member)
     // Nothing in the window: the host stopped reporting, so the record is only weight.
@@ -576,6 +635,21 @@ function standing(member: Member | null, now: number, catalog?: Catalog | null) 
     out[period] = total
   }
   return out
+}
+
+async function removeReports(ctx: CommunityContext, userId: string) {
+  const prefix = `community/reports/${userId}/`
+  for (const { key } of (await ctx.registry.list({ prefix })).blobs) await ctx.registry.delete(key)
+}
+
+/** What the app is shown of a flow: never the device code, which only the server redeems. */
+function verifyOf(pending: Pending, now: number) {
+  return {
+    userCode: pending.userCode,
+    verificationUri: pending.verificationUri,
+    expiresIn: Math.max(0, Math.round((pending.expiresAt - now) / 1000)),
+    interval: pending.interval,
+  }
 }
 
 export async function handleCommunity(req: Request, ctx: CommunityContext) {
@@ -619,7 +693,7 @@ export async function handleCommunity(req: Request, ctx: CommunityContext) {
         providers: cleanProviders(input.providers, now, catalog),
         at: now,
       } satisfies Report)
-      await recompute(ctx, userId, account.login, now, catalog)
+      if (account.verifiedAt) await recompute(ctx, userId, account.login, now, catalog)
       return json({ ok: true, heldBack: cleaned.heldBack })
     }
 
@@ -630,48 +704,122 @@ export async function handleCommunity(req: Request, ctx: CommunityContext) {
   const { userId } = caller
   const account = await read<Account>(ctx.registry, accountKey(userId))
 
-  const joined = async (login: string) => {
-    const member = await read<Member>(ctx.store, memberKey(login))
-    return json({ joined: true, login, totals: standing(member, now, await catalogOf(ctx)) })
+  const me = async (current: Account | null) => {
+    if (!current) return { joined: false as const }
+    // An account an avatar joined has no public record to stand on until it verifies.
+    if (!current.verifiedAt) {
+      return {
+        joined: true as const,
+        verified: false,
+        login: current.login,
+        totals: standing(null, now),
+      }
+    }
+    const member = await read<Member>(ctx.store, memberKey(current.login))
+    return {
+      joined: true as const,
+      verified: true,
+      login: current.login,
+      totals: standing(member, now, await catalogOf(ctx)),
+    }
   }
 
-  if (op === "GET me") {
-    if (!account) return json({ joined: false })
-    return joined(account.login)
-  }
+  if (op === "GET me") return json(await me(account))
 
   if (op === "POST join") {
-    if (account) return joined(account.login)
-    const id = AVATAR_ID.exec(caller.pictureUrl ?? "")?.[1]
-    if (!id) return error("Couldn't read your GitHub account from your sign-in.", 422)
-    let login: string | null
+    if (account?.verifiedAt) return json(await me(account))
+    // A flow already open is handed back rather than opened again: GitHub counts every code.
+    let pending = await read<Pending>(ctx.registry, pendingKey(userId))
+    if (!pending || pending.expiresAt <= now) {
+      let started: DeviceStart | null
+      try {
+        started = await ctx.github.start()
+      } catch {
+        return error("GitHub didn't answer. Try again in a minute.", 502)
+      }
+      if (!started) return error("Joining the leaderboard isn't set up on this site.", 503)
+      pending = {
+        deviceCode: started.deviceCode,
+        userCode: started.userCode,
+        verificationUri: started.verificationUri,
+        expiresAt: now + started.expiresIn * 1000,
+        interval: started.interval,
+        nextAt: now + started.interval * 1000,
+      }
+      await ctx.registry.setJSON(pendingKey(userId), pending)
+    }
+    return json({ ...(await me(account)), verify: verifyOf(pending, now) })
+  }
+
+  if (op === "POST join-poll") {
+    if (account?.verifiedAt) return json(await me(account))
+    const pending = await read<Pending>(ctx.registry, pendingKey(userId))
+    if (!pending || pending.expiresAt <= now) {
+      if (pending) await ctx.registry.delete(pendingKey(userId))
+      return json({ ...(await me(account)), status: "expired" })
+    }
+    if (now < pending.nextAt) return json({ ...(await me(account)), status: "pending" })
+    let answer: DevicePoll
     try {
-      login = await ctx.github(id)
+      answer = await ctx.github.poll(pending.deviceCode)
     } catch {
       return error("GitHub didn't answer. Try again in a minute.", 502)
     }
-    if (!login || !LOGIN.test(login)) return error("Couldn't read your GitHub username.", 502)
-    // One GitHub account, one place on the board, however many Netlify sign-ins it has.
-    const owner = await read<{ userId: string }>(ctx.registry, ownerKey(login))
-    if (owner && owner.userId !== userId) {
-      return error("This GitHub account is already on the leaderboard from another sign-in.", 409)
+    if (answer.kind === "pending") {
+      const interval = answer.interval ?? pending.interval
+      await ctx.registry.setJSON(pendingKey(userId), {
+        ...pending,
+        interval,
+        nextAt: now + interval * 1000,
+      } satisfies Pending)
+      return json({ ...(await me(account)), status: "pending" })
     }
-    await ctx.registry.setJSON(ownerKey(login), { userId })
-    await ctx.registry.setJSON(accountKey(userId), { login, joinedAt: now } satisfies Account)
-    return joined(login)
+    await ctx.registry.delete(pendingKey(userId))
+    if (answer.kind !== "user") return json({ ...(await me(account)), status: answer.kind })
+    const { login } = answer
+    if (!LOGIN.test(login)) return error("Couldn't read your GitHub username.", 502)
+
+    // One GitHub account, one place on the board, however many Netlify sign-ins it has. A claim an
+    // avatar made gives way: it was never proof, and may have been someone wearing this one's face.
+    const owner = await read<Owner>(ctx.registry, ownerKey(login))
+    if (owner && owner.userId !== userId) {
+      if (owner.verified) {
+        return error("This GitHub account is already on the leaderboard from another sign-in.", 409)
+      }
+      const evicted = await read<Account>(ctx.registry, accountKey(owner.userId))
+      if (evicted && evicted.login.toLowerCase() === login.toLowerCase()) {
+        // Out of the leaderboard as Leave would take it: its hosts are told to stop on their next
+        // check-in, and what they sent goes with it.
+        await removeReports(ctx, owner.userId)
+        await ctx.registry.delete(pendingKey(owner.userId))
+        await ctx.registry.delete(accountKey(owner.userId))
+      }
+    }
+    // An avatar may have named another username for this account: that claim goes with it.
+    if (account && account.login.toLowerCase() !== login.toLowerCase()) {
+      const held = await read<Owner>(ctx.registry, ownerKey(account.login))
+      if (held?.userId === userId) await ctx.registry.delete(ownerKey(account.login))
+      await ctx.store.delete(memberKey(account.login))
+    }
+    await ctx.registry.setJSON(ownerKey(login), { userId, verified: true } satisfies Owner)
+    const verified: Account = { login, joinedAt: account?.joinedAt ?? now, verifiedAt: now }
+    await ctx.registry.setJSON(accountKey(userId), verified)
+    // The record under this username was the avatar's claim; this account's own reports replace it.
+    await recompute(ctx, userId, login, now, await catalogOf(ctx))
+    await ctx.store.delete("board")
+    return json(await me(verified))
   }
 
   if (op === "POST leave") {
     if (account) {
       await ctx.store.delete(memberKey(account.login))
       await ctx.store.delete("board")
-      const prefix = `community/reports/${userId}/`
-      for (const { key } of (await ctx.registry.list({ prefix })).blobs) {
-        await ctx.registry.delete(key)
-      }
-      await ctx.registry.delete(ownerKey(account.login))
+      await removeReports(ctx, userId)
+      const owner = await read<Owner>(ctx.registry, ownerKey(account.login))
+      if (owner?.userId === userId) await ctx.registry.delete(ownerKey(account.login))
       await ctx.registry.delete(accountKey(userId))
     }
+    await ctx.registry.delete(pendingKey(userId))
     return json({ joined: false })
   }
 

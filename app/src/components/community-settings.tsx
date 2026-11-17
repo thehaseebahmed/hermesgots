@@ -1,11 +1,20 @@
 import { useState } from "react"
-import { ExternalLinkIcon, TrophyIcon } from "lucide-react"
+import { CheckIcon, CopyIcon, ExternalLinkIcon, TrophyIcon } from "lucide-react"
 
 import { Banner } from "@/components/banner"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
-import { LEADERBOARD_URL, joinCommunity, leaveCommunity, useCommunity } from "@/lib/community"
+import {
+  LEADERBOARD_URL,
+  leaveCommunity,
+  onBoard,
+  useCommunity,
+  useJoin,
+  type Verify,
+} from "@/lib/community"
+import { copyText, useCopied } from "@/lib/copied"
+import { openExternal } from "@/lib/native"
 import { tell } from "@/lib/tell"
 
 const SHARED = [
@@ -33,22 +42,71 @@ export function SharingNotes() {
   )
 }
 
+const messageOf = (error: unknown, fallback: string) =>
+  error instanceof Error && error.message ? error.message : fallback
+
+/** The code GitHub's device flow asks for, with the way to GitHub and the way out. */
+export function GitHubCode({ verify, onCancel }: { verify: Verify; onCancel: () => void }) {
+  const { copied, noteCopied } = useCopied()
+  return (
+    <div className="flex flex-col gap-4 rounded-3xl bg-card p-5 text-card-foreground ring-1 ring-foreground/10">
+      <span className="text-sm text-muted-foreground">Enter this code on GitHub</span>
+      <div className="flex items-center gap-2">
+        <output
+          aria-live="polite"
+          className="min-w-0 flex-1 font-mono text-2xl font-medium tracking-widest select-all"
+        >
+          {verify.userCode}
+        </output>
+        <Button
+          variant="ghost"
+          size="icon-lg"
+          className="size-11 shrink-0"
+          aria-label="Copy the code"
+          onClick={() => void copyText(verify.userCode, noteCopied)}
+        >
+          {copied ? <CheckIcon /> : <CopyIcon />}
+        </Button>
+      </div>
+      <Button
+        size="lg"
+        className="h-11 rounded-full"
+        onClick={() => openExternal(verify.verificationUri)}
+      >
+        Open GitHub <ExternalLinkIcon />
+      </Button>
+      <Button variant="ghost" size="lg" className="h-11 rounded-full" onClick={onCancel}>
+        Cancel
+      </Button>
+    </div>
+  )
+}
+
 /** Settings > Community: the leaderboard switch, on by default from setup and off here. */
 export function CommunitySettings() {
   const { me, setMe } = useCommunity()
   const [busy, setBusy] = useState(false)
+  const { verify, start, cancel } = useJoin(setMe)
   const joined = me?.joined === true
+  const shown = onBoard(me)
 
-  const change = async (join: boolean) => {
+  const run = async (write: () => Promise<unknown>) => {
     setBusy(true)
     try {
-      setMe(join ? await joinCommunity() : await leaveCommunity())
+      await write()
     } catch (error) {
-      tell.error(error instanceof Error && error.message ? error.message : "Couldn't change that")
+      tell.error(messageOf(error, "Couldn't change that"))
     } finally {
       setBusy(false)
     }
   }
+
+  const change = (join: boolean) =>
+    run(async () => {
+      if (join) return start()
+      cancel()
+      setMe(await leaveCommunity())
+    })
 
   if (me === undefined) return <Skeleton className="h-14 rounded-3xl" />
 
@@ -62,18 +120,32 @@ export function CommunitySettings() {
         <TrophyIcon className="size-5 shrink-0 text-muted-foreground" />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-base">Join the leaderboard</span>
-          {joined && (
+          {shown && (
             <span className="truncate text-sm text-muted-foreground">Shown as @{me.login}</span>
+          )}
+          {joined && !shown && (
+            <span className="truncate text-sm text-muted-foreground">Not on the board yet</span>
           )}
         </span>
         <Switch
           id="community"
-          checked={joined}
+          checked={joined || verify !== null}
           disabled={busy || me === null}
           onCheckedChange={(checked) => void change(checked)}
         />
       </label>
-      {joined ? (
+      {verify ? (
+        <GitHubCode verify={verify} onCancel={cancel} />
+      ) : joined && !shown ? (
+        <Button
+          size="lg"
+          className="h-11 rounded-full"
+          disabled={busy}
+          onClick={() => void run(start)}
+        >
+          Confirm your GitHub username
+        </Button>
+      ) : onBoard(me) ? (
         <>
           <dl className="grid grid-cols-3 gap-px overflow-hidden rounded-3xl bg-border ring-1 ring-foreground/10">
             {(

@@ -63,7 +63,7 @@
     },
     {
       "file": "components/community-settings.tsx",
-      "function": "change",
+      "function": "run",
       "reason": "not-yet-converted"
     },
     {

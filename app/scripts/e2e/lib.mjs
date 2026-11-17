@@ -525,13 +525,30 @@ export async function signIn(context, { vault = "exists" } = {}) {
     return route.fulfill({ status: 404, json: { error: "missing" } })
   })
 
+  // Joining is GitHub's device flow: `join` opens it with a code, and the first `join-poll` after it
+  // answers as approved.
   const joins = []
+  const verified = {
+    joined: true,
+    verified: true,
+    login: "tester",
+    totals: { today: 0, week: 0, month: 0 },
+  }
   await context.route("**/.netlify/functions/community?**", async (route) => {
-    const url = new URL(route.request().url())
-    if (url.searchParams.get("route") !== "join") return route.fulfill({ json: { joined: false } })
+    const step = new URL(route.request().url()).searchParams.get("route")
+    if (step === "join-poll") return route.fulfill({ json: verified })
+    if (step !== "join") return route.fulfill({ json: { joined: false } })
     joins.push(route.request().method())
     return route.fulfill({
-      json: { joined: true, login: "tester", totals: { today: 0, week: 0, month: 0 } },
+      json: {
+        joined: false,
+        verify: {
+          userCode: "WDJB-MJHT",
+          verificationUri: "https://github.com/login/device",
+          expiresIn: 900,
+          interval: 1,
+        },
+      },
     })
   })
 
