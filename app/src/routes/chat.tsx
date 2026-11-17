@@ -1155,6 +1155,8 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
                       return (
                         <Compacted key={`compaction-${entry.at}`} compaction={entry.compaction} />
                       )
+                    // This screen is never a Main's, so it is handed no routine marker to draw.
+                    if (entry.kind === "routine") return null
                     const message = entry.message
                     // A model change is a project session's mark; a chat draws none (ADR 0087).
                     const change = session ? changes.get(message.id) : undefined

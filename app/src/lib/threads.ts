@@ -14,6 +14,7 @@ import { byName } from "@/lib/compare"
 import { useRoomNeeds } from "@/lib/room"
 import { withDir, type Sort, type SortKey } from "@/lib/sort"
 import { useStoredSort } from "@/lib/use-sort"
+import { newestMarkerAt } from "@/lib/routine-markers"
 import { isUnread } from "@/lib/session-work"
 import { useReadMarks } from "@/lib/read-marks"
 import { useBotLabels } from "@/lib/use-bot-labels"
@@ -113,18 +114,20 @@ export function useBotSummaries(): BotSummary[] | undefined {
         // Archived pill's alone, so this row has nothing to say about it. The mark is filtered here
         // and not in the reader, since the bot's own list still needs those rows for its pill.
         const chats = (await readListedChats(bot.id)).filter((chat) => !chat.archived)
+        // A routine that came back is news in Main, which no list draws a row for.
+        const markerAt = await newestMarkerAt(bot.id)
         // Only a chat's newest reply can wait on the user, and a reply's read is what a row costs, so
         // only the newest `BOT_CHATS` are read — a bound on the reads, never on what the row counts.
         // The list's own bound widens by a pinned chat; this count's is the newest alone, as it has
         // always been.
         const newest = await Promise.all(chats.slice(0, BOT_CHATS).map((c) => newestReplyOf(c.id)))
         const local = new Set(newest.filter((m) => waitsOnUser(m)).map((m) => m!.conversationId))
-        return { bot, chats, local }
+        return { bot, chats, local, markerAt }
       }),
     )
   }, [])
   const labels = useBotLabels()
-  return rows?.map(({ bot, chats, local }) => ({
+  return rows?.map(({ bot, chats, local, markerAt }) => ({
     bot,
     label: labelOf(labels, bot),
     latest: chats[0],
@@ -134,7 +137,9 @@ export function useBotSummaries(): BotSummary[] | undefined {
     // is the rule its row draws too (ADR 0115) — and one the reader archived counts for nothing, since
     // no list this row leads to draws it.
     unread:
-      chats.filter((chat) => isUnread(chat.updatedAt, marks[chat.id])).length +
+      chats.filter((chat) =>
+        isUnread(chat.main ? Math.max(chat.updatedAt, markerAt) : chat.updatedAt, marks[chat.id]),
+      ).length +
       (rooms ?? []).filter(
         (room) =>
           room.seated.includes(bot.id) &&

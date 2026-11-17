@@ -311,6 +311,11 @@ export interface Conversation {
    * run's session and not in this chat. Synced with the record, like `afk`.
    */
   line?: string
+  /**
+   * How long a routine's run took, in ms: what the marker in Main says the run ran for. Written onto the
+   * record by the delivery, and absent where the host's ledger couldn't say.
+   */
+  durationMs?: number
   /** When the user saved the session as a draft. Synced, so the plugin's cleanup spares it. */
   draftAt?: number
   /**
@@ -1953,6 +1958,16 @@ db.on("populate", (tx) => seedProfile(tx))
 export async function chatIdForSession(sessionId: string) {
   const [id] = await db.conversations.where("hermesSessionId").equals(sessionId).primaryKeys()
   return id
+}
+
+/**
+ * The bot a routine's delivery belongs to, when the session is a routine's run: its record is the marker
+ * the bot's Main draws and has no screen of its own to open from a notification, so a tap on the
+ * delivery's alert opens that Main instead. Undefined for every other session.
+ */
+export async function routineBotForSession(sessionId: string) {
+  const chat = await db.conversations.where("hermesSessionId").equals(sessionId).first()
+  return chat?.routine ? chat.profileId : undefined
 }
 
 export async function getSettings(): Promise<Settings> {

@@ -103,6 +103,7 @@ const CHAT_FIELDS = [
   // are in the run's session and not in a chat of the app's making.
   "routine",
   "line",
+  "durationMs",
   "resolvedAt",
   "discardedAt",
   "draftAt",

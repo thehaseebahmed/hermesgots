@@ -77,3 +77,25 @@ test("no entry is a card, a day heading or a moved marker: a chat draws messages
     "one entry per message, plus the one divider: nothing is placed among them",
   )
 })
+
+const marker = (id, at) => ({ id, at, text: `Routine "${id}" ran` })
+const order = (entries) =>
+  entries.map((entry) =>
+    entry.kind === "message" ? entry.message.id : entry.kind === "routine" ? `~${entry.marker.id}` : "|",
+  )
+
+test("a routine's marker stands among Main's messages by time, and is no message", () => {
+  const thread = [message("m1", 10), message("m2", 30)]
+  const entries = chatFlow({ thread, routines: [marker("r1", 20), marker("r2", 40)] })
+  assert.deepEqual(order(entries), ["m1", "~r1", "m2", "~r2"])
+  assert.deepEqual(
+    thread.map((m) => m.id),
+    ["m1", "m2"],
+    "the thread itself holds no marker",
+  )
+})
+
+test("a marker older than every message opens the flow, and a Main with no messages holds its markers", () => {
+  assert.deepEqual(order(chatFlow({ thread: [message("m1", 50)], routines: [marker("r1", 5)] })), ["~r1", "m1"])
+  assert.deepEqual(order(chatFlow({ routines: [marker("r1", 5), marker("r2", 6)] })), ["~r1", "~r2"])
+})

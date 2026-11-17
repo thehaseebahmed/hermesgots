@@ -23,6 +23,7 @@ import { MessageItem, SentAttachments } from "@/components/chat/message-item"
 import { FollowAfterApproval, FollowOnSend } from "@/components/chat/follow"
 import { useFirstRows } from "@/components/chat/first-rows"
 import { Compacted, ModelChange } from "@/components/chat/model-change"
+import { RoutineMarkerRow } from "@/components/chat/routine-marker"
 import { QuestionCard } from "@/components/chat/question-card"
 import { AskAgainContext } from "@/components/chat/session-cards"
 import { LineRow } from "@/components/chat/status-line"
@@ -41,6 +42,7 @@ import { AgentsContext, runningAgents, type AgentsSource } from "@/lib/agents"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { isPhoto } from "@/lib/attachment-caps"
 import { chatFlow } from "@/lib/chat-flow"
+import { useRoutineMarkers } from "@/lib/routine-markers"
 import { markRequest } from "@/lib/request-text"
 import { compactionMarks } from "@/lib/compactions"
 import { clarifyWire, questionAt, questionsIn } from "@/lib/clarify"
@@ -196,9 +198,15 @@ export function AppThreadView({
     () => compactionMarks(messages, record.compactions),
     [messages, record.compactions],
   )
-  // What the chat draws: its messages, with a compaction's divider above the message it sits over,
-  // and nothing else — a Main is drawn like any other chat.
-  const flow = useMemo(() => chatFlow({ thread: messages, compacted }), [messages, compacted])
+  // A bot's Main is where its routines are delivered: each run that came back stands among the
+  // messages as a marker. It is no message, so nothing here reaches the transcript or the bot.
+  const routines = useRoutineMarkers(profileId, Boolean(chat?.main))
+  // What the chat draws: its messages, with a compaction's divider above the message it sits over and,
+  // in a Main, the routine markers by time.
+  const flow = useMemo(
+    () => chatFlow({ thread: messages, compacted, routines }),
+    [messages, compacted, routines],
+  )
   const { drawn, cut } = useFirstRows(chatId, flow, flow.length > 0)
   // A chat with nothing said, and nothing held for it — no message that didn't go, nothing queued, no
   // archive to offer — and whose read has answered, is offered its bot's greeting. One still being
@@ -284,6 +292,8 @@ export function AppThreadView({
                         return (
                           <Compacted key={`compaction-${entry.at}`} compaction={entry.compaction} />
                         )
+                      if (entry.kind === "routine")
+                        return <RoutineMarkerRow key={entry.marker.id} marker={entry.marker} />
                       const message = entry.message
                       // A model change is a project session's mark; a chat draws none (ADR 0087).
                       const change = code ? changes.get(message.id) : undefined
@@ -464,7 +474,15 @@ const drawnFor = (waiting: QuestionWait, questions?: ClarifyQuestion[]): Clarify
  * Other. The cards read a message, so the wait is dressed as the reply it interrupts, and an answer
  * goes where chat-next sends it rather than through the old engine.
  */
-export function AppPrompt({ waiting, questions: read, answer, asker, held, taken, onTaken }: PromptProps) {
+export function AppPrompt({
+  waiting,
+  questions: read,
+  answer,
+  asker,
+  held,
+  taken,
+  onTaken,
+}: PromptProps) {
   const message = useMemo((): Message => {
     const base = {
       id: `prompt-${waiting.promptId}`,

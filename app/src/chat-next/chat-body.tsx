@@ -49,6 +49,7 @@ import { chosenOf, samePick, storedPick } from "@/lib/model-pick"
 import { quietly } from "@/lib/report"
 import { useProjects } from "@/lib/projects"
 import { markRead } from "@/lib/read-marks"
+import { useRoutineMarkers } from "@/lib/routine-markers"
 import { lastActivityAt, runFinished } from "@/lib/session-work"
 import { tell } from "@/lib/tell"
 import { useLiveSubagents } from "@/lib/waiting"
@@ -210,7 +211,14 @@ function NextPills({ chatId, botId, busy }: { chatId: string; botId: string; bus
   // bot's own threads (ADR 0110). A session's moment is its last activity, which a pull request or
   // a close moves too; a thread's is its last turn.
   const threadId = chat?.id
-  const activity = chat ? (session ? lastActivityAt(chat) : chat.updatedAt) : 0
+  // A bot's Main also carries what its routines delivered, which has no message of its own to move
+  // the record's clock.
+  const markers = useRoutineMarkers(chat?.profileId, Boolean(chat?.main))
+  const activity = chat
+    ? session
+      ? lastActivityAt(chat)
+      : Math.max(chat.updatedAt, markers.at(-1)?.at ?? 0)
+    : 0
   useEffect(() => {
     if (threadId && activity > 0) markRead(threadId, activity)
   }, [threadId, activity])
