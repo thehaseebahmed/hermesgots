@@ -1085,9 +1085,12 @@ def is_chat(home: Path, session_id: str) -> bool:
     Main is the profile's canonical Bot Chat (``bot_chat``), which Hermes made and so carries no
     prefix of the app's: a turn there is the bot's own news like any other chat's (G2), and a
     compaction of it or a subagent forked off it reaches it on the same ancestry this already walks.
-    That comparison is asked only after the prefix search came up empty, on the connection the walk
-    already holds — so the fast path pays nothing for it — and an archived Bot Chat, a retired Main,
-    answers false, exactly as it is no Main to draw.
+    That question is asked only after the prefix search came up empty, of ``_bot_chat_row`` — the one
+    rule ``bot_chat`` itself answers with — over the rows of that ancestry, so no predicate is written
+    out again here and a store from before a column (`archived` came after the Bot Chat did) answers
+    Main rather than raising: as a bare ``archived = 0`` it failed closed, and every turn in Main went
+    unpushed. An archived Bot Chat, a retired Main, is no Bot Chat there, exactly as it is no Main to
+    draw.
 
     One read-only query over the whole ancestry, bounded by ``COMPRESSION_DEPTH``, on a connection
     that waits no longer than ``LINEAGE_TIMEOUT_S``: this is asked inside Hermes's hooks, on a
@@ -1123,19 +1126,22 @@ def is_chat(home: Path, session_id: str) -> bool:
                 return True
             if not ids:
                 return False
-            # Main is asked of the ancestry the walk already holds, in one query over its ids and the
-            # predicate ``list_state`` reads: no second scan of the store, no schema read of its own,
-            # and no id list compared here. A compaction of the Bot Chat is on this ancestry, so it is
-            # Main's too.
-            main = conn.execute(
-                "SELECT 1 FROM sessions WHERE id IN (%s) AND title = ? AND archived = 0 LIMIT 1"
-                % ", ".join("?" * len(ids)),
-                (*ids, chats.BOT_CHAT_TITLE),
-            ).fetchone()
+            # Which columns this store has, asked of the statement it compiles: one prepared
+            # statement, no row read, and the same read `list_state` makes of its own store.
+            columns = {held[0] for held in conn.execute("SELECT * FROM sessions LIMIT 0").description}
+            asked = [name for name in _LIST_COLUMNS if name in columns]
+            walked = conn.execute(
+                "SELECT %s FROM sessions WHERE id IN (%s)"
+                % (", ".join(asked), ", ".join("?" * len(ids))),
+                ids,
+            ).fetchall()
     except sqlite3.Error:
         logger.debug("gots: couldn't read a session's ancestry", exc_info=True)
         return False
-    return main is not None
+    # Main's rule, not a copy of it: `bot_chat` answers off this very function, so a column the store
+    # lacks is one both readings skip together, and a Bot Chat an ancestry holds is Main however the
+    # store spells its archive.
+    return _bot_chat_row(walked, columns) is not None
 
 
 def live_runs(

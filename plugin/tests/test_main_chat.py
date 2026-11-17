@@ -36,6 +36,11 @@ from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home
 
 BOT_CHAT = "Bot Chat"
 MAIN = "main"
+# The bot an answer is for, as a chat id may carry it: a minted Main's id names the bot as well as the
+# session, so two bots never key one record. A throwaway home is the default profile
+# (`link.profile_name`), which is what the routes answer with.
+BOT = "default"
+MAIN_ID = f"main-{BOT}-bot-1"
 LIST = plugin.PREFIX + "/chats"
 ARCHIVE_PATH = plugin.PREFIX + "/chats/{chat_id}/archived"
 
@@ -348,6 +353,23 @@ class TheChatsAncestry(unittest.TestCase):
         )
         self.assertFalse(sessions.is_chat(home, "sess_9f2c41"), "and a session off the store is nobody's")
 
+    def test_a_store_from_before_the_archive_column_still_reads_main(self) -> None:
+        # `archived` came to `sessions` after the Bot Chat did, and Main's check was written as
+        # `archived = 0`: on a store without the column that statement raises, the walk answers
+        # `False`, and every turn in Main went unpushed. The check is `bot_chat`'s own rule, which
+        # reads the columns the store has — the same rule `list_state` answers with.
+        home = temp_hermes_home(self)
+        store(
+            home,
+            [{"id": "bot-1", "title": BOT_CHAT, "started_at": 1_700_000_000.0}],
+            archived=False,
+            hidden=False,
+        )
+        self.assertTrue(sessions.is_chat(home, "bot-1"), "Main is Main on the older store too")
+        self.assertFalse(
+            sessions.is_chat(home, "sess_9f2c41"), "and the walk still fails closed on a stranger"
+        )
+
 
 class Minting(TempHome):
     """`sessions.mint_bot_chat`: the gateway's own creation, asked and never written here."""
@@ -399,7 +421,7 @@ class CarryingMain(unittest.TestCase):
 
     def test_a_record_already_bound_to_the_session_is_the_one_flagged(self) -> None:
         records = {"device-chat": record(hermesSessionId="bot-1", title="My chat", createdAt=1)}
-        laid = chats.carrying_main(records, self.session())
+        laid = chats.carrying_main(records, self.session(), BOT)
         self.assertEqual(
             laid["device-chat"]["value"],
             {"hermesSessionId": "bot-1", "title": "My chat", "createdAt": 1, MAIN: True},
@@ -407,10 +429,10 @@ class CarryingMain(unittest.TestCase):
         )
         self.assertNotIn("bot-1", laid, "and no second record is minted for the same session")
 
-    def test_a_session_with_no_record_is_minted_under_its_own_id(self) -> None:
-        laid = chats.carrying_main({"a": record(title="A")}, self.session())
+    def test_a_session_with_no_record_is_minted_under_an_id_naming_bot_and_session(self) -> None:
+        laid = chats.carrying_main({"a": record(title="A")}, self.session(), BOT)
         self.assertEqual(
-            laid["bot-1"],
+            laid[MAIN_ID],
             {
                 "at": 1_700_000_000_000,
                 "value": {
@@ -424,9 +446,24 @@ class CarryingMain(unittest.TestCase):
         )
         self.assertEqual(laid["a"], record(title="A"), "every other record stands as it was")
 
+    def test_two_bots_over_one_profile_key_their_own_mains(self) -> None:
+        # The app keeps a chat with the bot that holds it, so a record keyed by the session alone
+        # reached the first bot whose store answered it and the second bot's address drew its list for
+        # ever. One record per bot, and each answer still carries exactly one Main.
+        one = chats.carrying_main({}, self.session(), "a-bot")
+        two = chats.carrying_main({}, self.session(), "another-bot")
+        self.assertEqual(list(one), ["main-a-bot-bot-1"])
+        self.assertEqual(list(two), ["main-another-bot-bot-1"], "the second bot's own record")
+        self.assertEqual(
+            [chat_id for chat_id, held in one.items() if held["value"].get(MAIN)],
+            ["main-a-bot-bot-1"],
+            "exactly one flagged record per bot",
+        )
+        self.assertNotIn("/", list(one)[0], "and an id a screen can open as an address")
+
     def test_a_second_answer_mints_the_very_same_record(self) -> None:
-        once = chats.carrying_main({"a": record(title="A")}, self.session())
-        twice = chats.carrying_main({"a": record(title="A")}, self.session())
+        once = chats.carrying_main({"a": record(title="A")}, self.session(), BOT)
+        twice = chats.carrying_main({"a": record(title="A")}, self.session(), BOT)
         self.assertEqual(once, twice, "a projection, so asking again mints the same one")
 
     def test_every_other_record_carrying_the_flag_loses_it_and_keeps_the_rest(self) -> None:
@@ -434,7 +471,7 @@ class CarryingMain(unittest.TestCase):
             "bot-1": record(hermesSessionId="bot-1", title="Bot Chat"),
             "main-old": record(hermesSessionId="memento-main-x", title="Main", pinned=True, createdAt=9),
         }
-        laid = chats.carrying_main(records, self.session())
+        laid = chats.carrying_main(records, self.session(), BOT)
         self.assertNotIn(MAIN, laid["main-old"]["value"])
         self.assertEqual(
             laid["main-old"]["value"],
@@ -449,16 +486,37 @@ class CarryingMain(unittest.TestCase):
         # A Bot Chat archived on the Dashboard is a retired Main: G2 forbids an archived Main, and
         # the app reads one flag, so the archive is dropped from the record Main is.
         records = {"bot-1": record(hermesSessionId="bot-1", title=BOT_CHAT, archived=True, pinnedAt=2)}
-        laid = chats.carrying_main(records, self.session())
+        laid = chats.carrying_main(records, self.session(), BOT)
         self.assertEqual(laid["bot-1"]["value"], {"hermesSessionId": "bot-1", "title": BOT_CHAT, "pinnedAt": 2, MAIN: True})
+
+    def test_an_adopted_main_is_dated_past_the_record_it_flags(self) -> None:
+        # The gateway retitles an existing Gots session `Bot Chat`: the record is already on every
+        # device, dated later than the session began, and the app applies a remote record only when
+        # its clock is strictly newer (theirs.at > mine.at) — so a flag at the record's own clock
+        # never reached one, and no device ever learned Main.
+        records = {"device-chat": {"at": 9_000, "value": {"title": "A chat", "hermesSessionId": "bot-1"}}}
+        laid = chats.carrying_main(records, self.session(), BOT)
+        self.assertTrue(laid["device-chat"]["value"][MAIN], "the record bound to the session is Main")
+        self.assertGreater(laid["device-chat"]["at"], 9_000, "and dated past the record it flags")
+
+        # A record that already carries the flag is no news: its clock stays the store's, so an answer
+        # after the first one writes nothing new on any device.
+        held = {"at": 9_000, "value": {"title": "A chat", "hermesSessionId": "bot-1", MAIN: True}}
+        self.assertEqual(
+            chats.carrying_main({"device-chat": held}, self.session(), BOT)["device-chat"]["at"],
+            9_000,
+            "a flag the store already holds is laid at its own clock",
+        )
 
     def test_a_room_and_a_tombstone_are_left_alone(self) -> None:
         records = {
             "room-1": record(**{chats.ROOM_MARKS: {"pinned": False}}),
             "gone": {"at": 5, "deleted": True},
         }
-        self.assertEqual(chats.carrying_main(records, self.session())["room-1"], records["room-1"])
-        self.assertEqual(chats.carrying_main(records, self.session())["gone"], records["gone"])
+        self.assertEqual(
+            chats.carrying_main(records, self.session(), BOT)["room-1"], records["room-1"]
+        )
+        self.assertEqual(chats.carrying_main(records, self.session(), BOT)["gone"], records["gone"])
 
     def test_a_retired_main_is_retracted_on_a_clock_the_merge_takes(self) -> None:
         # The flag is a projection, so stripping it changes only the value, and the app applies a
@@ -469,7 +527,7 @@ class CarryingMain(unittest.TestCase):
             "bot-b": record(hermesSessionId="bot-b", title=BOT_CHAT),
         }
         held_at = records["main-a"]["at"]
-        laid = chats.carrying_main(records, self.session("bot-b"))
+        laid = chats.carrying_main(records, self.session("bot-b"), BOT)
         self.assertNotIn(MAIN, laid["main-a"]["value"])
         self.assertGreater(laid["main-a"]["at"], held_at, "dated past the record it rewrites")
         self.assertEqual(
@@ -481,7 +539,7 @@ class CarryingMain(unittest.TestCase):
     def test_no_session_lays_nothing(self) -> None:
         records = {"main-old": record(title="Main", **{MAIN: True})}
         self.assertEqual(
-            chats.carrying_main(records, None),
+            chats.carrying_main(records, None, BOT),
             records,
             "with no session to bind there is no Main to publish, and no flag is taken away",
         )
@@ -496,25 +554,26 @@ class TheBotsOwnMain(unittest.TestCase):
         self.path = db_path(Path(self.tmp.name))
 
     def test_it_mints_a_record_the_store_keeps(self) -> None:
-        made = chats.own_main({}, self.path, 1_700_000_000_000)
+        made = chats.own_main({}, self.path, 1_700_000_000_000, BOT)
         self.assertTrue(made["id"].startswith("gots-"), "a Gots session, which every reader knows")
         self.assertEqual(made["at"], 1_700_000_000_000, "minted at the clock it was asked for")
+        key = chats.main_id(BOT, made["id"])
         held = chats.read(self.path)
-        self.assertEqual(list(held), [made["id"]], "and it is this store's record")
-        self.assertEqual(held[made["id"]]["value"][MAIN], True)
-        self.assertEqual(held[made["id"]]["value"]["hermesSessionId"], made["id"])
-        self.assertEqual(held[made["id"]]["at"], made["at"])
+        self.assertEqual(list(held), [key], "and it is this store's record, keyed by the bot")
+        self.assertEqual(held[key]["value"][MAIN], True)
+        self.assertEqual(held[key]["value"]["hermesSessionId"], made["id"], "about that session")
+        self.assertEqual(held[key]["at"], made["at"])
 
     def test_a_second_answer_finds_it_and_writes_nothing(self) -> None:
-        made = chats.own_main({}, self.path, 1_700_000_000_000)
+        made = chats.own_main({}, self.path, 1_700_000_000_000, BOT)
         before = chats.read(self.path)
-        again = chats.own_main(before, self.path, 1_800_000_000_000)
+        again = chats.own_main(before, self.path, 1_800_000_000_000, BOT)
         self.assertEqual(again, made, "the clock it was minted at, not the one it is asked at")
         self.assertEqual(chats.read(self.path), before)
 
     def test_two_bots_never_share_the_record(self) -> None:
-        one = chats.own_main({}, db_path(Path(self.tmp.name) / "one"), 7)
-        two = chats.own_main({}, db_path(Path(self.tmp.name) / "two"), 7)
+        one = chats.own_main({}, db_path(Path(self.tmp.name) / "one"), 7, "one")
+        two = chats.own_main({}, db_path(Path(self.tmp.name) / "two"), 7, "two")
         self.assertNotEqual(one["id"], two["id"], "the id is derived from the bot, not from the clock")
 
 
@@ -536,9 +595,9 @@ class TheListAnswer(TempHome):
             }
         )
         listed = self.listed()
-        self.assertEqual(self.flagged(listed), ["bot-1"])
+        self.assertEqual(self.flagged(listed), [MAIN_ID])
         self.assertEqual(
-            listed["bot-1"]["value"],
+            listed[MAIN_ID]["value"],
             {
                 "title": BOT_CHAT,
                 "hermesSessionId": "bot-1",
@@ -559,7 +618,7 @@ class TheListAnswer(TempHome):
         authority = Authority(self.home)
         host(self, authority)
         listed = self.listed(HostAdapter(object()))
-        self.assertEqual(self.flagged(listed), ["bot-1"], "the chat the gateway minted is Main")
+        self.assertEqual(self.flagged(listed), [MAIN_ID], "the chat the gateway minted is Main")
         self.assertEqual(len(authority.actors), 1, "the mint is the gateway's own creation")
         self.listed(HostAdapter(object()))
         self.assertEqual(len(authority.actors), 1, "and a host that has one now is never asked again")
@@ -578,6 +637,38 @@ class TheListAnswer(TempHome):
             self.listed(HostAdapter(object()))
         self.assertEqual(len(authority.actors), 1, "one attempt, then the answer stands for a while")
 
+    def test_a_mint_refused_once_is_asked_again_when_the_window_opens(self) -> None:
+        # A refusal is a moment's — an owner draining, a writer holding the title — and not a state.
+        # The window opened, the host answered, and a bot that had been left on a Gots chat of its own
+        # was moved onto the Bot Chat Hermes minted for it.
+        store(self.home, [])
+        authority = Authority(self.home, refused=True)
+        host(self, authority)
+        first = self.flagged(self.listed(HostAdapter(object())))
+        self.assertEqual(len(authority.actors), 1, "the first window is spent on a refusal")
+        self.assertEqual(len(first), 1, "and the bot is given a Main of its own meanwhile")
+        authority.refused = False
+        with mock.patch.object(plugin, "MAIN_ABSENT_TTL_S", 0):
+            listed = self.listed(HostAdapter(object()))
+        self.assertEqual(len(authority.actors), 2, "the next window asks again")
+        self.assertEqual(self.flagged(listed), [MAIN_ID], "and the minted chat is Main")
+        self.assertNotIn(MAIN, listed[first[0]]["value"], "the fallback stays a side chat with all it had")
+
+    def test_a_store_that_will_not_take_the_write_still_answers_the_list(self) -> None:
+        # Main of the bot's own is a write the list read does not need: a store another writer holds,
+        # or one mounted read-only, raises out of `own_main`'s merge — and this route answered 500 for
+        # a list whose answer was in hand all along.
+        store(self.home, [])
+        with mock.patch.object(
+            chats, "merge", side_effect=sqlite3.OperationalError("attempt to write a readonly database")
+        ):
+            listed = self.listed(HostAdapter())
+        self.assertEqual(
+            self.flagged(listed),
+            [chats.main_id(BOT, chats.own_main_id(db_path(self.home)))],
+            "Main is still the answer",
+        )
+
     def test_a_title_another_surface_holds_is_deferred_to_and_never_overwritten(self) -> None:
         # A conversation the gateway can never own holding the canonical title: Hermes's own mint
         # answers nothing rather than displacing it, so the chat it named is Main and nothing moved.
@@ -585,7 +676,7 @@ class TheListAnswer(TempHome):
         authority = Authority(self.home)
         host(self, authority)
         listed = self.listed(HostAdapter(object()))
-        self.assertEqual(self.flagged(listed), ["api-1"])
+        self.assertEqual(self.flagged(listed), ["main-default-api-1"], "the deferred row, keyed by the bot and the session")
         self.assertEqual(authority.actors, [], "nothing is minted over a title another surface holds")
         self.assertEqual(
             [(row["id"], row["title"], row["hidden"], row["archived"]) for row in rows(self.home / "state.db")],
@@ -597,8 +688,15 @@ class TheListAnswer(TempHome):
         self.seed(**{"a-chat": {"at": 4, "value": {"title": "A chat", "hermesSessionId": "gots-a"}}})
         listed = self.listed(HostAdapter())
         main = self.flagged(listed)[0]
-        self.assertEqual(main, listed[main]["value"]["hermesSessionId"], "keyed by the session Main is")
-        self.assertTrue(main.startswith("gots-"), "a Gots chat, so every reader already knows it for one")
+        self.assertEqual(
+            main,
+            chats.main_id(BOT, listed[main]["value"]["hermesSessionId"]),
+            "keyed by the bot and the session Main is",
+        )
+        self.assertTrue(
+            listed[main]["value"]["hermesSessionId"].startswith("gots-"),
+            "a Gots chat, so every reader already knows it for one",
+        )
         self.assertEqual(listed[main]["value"]["title"], BOT_CHAT)
         self.assertGreater(listed[main]["at"], 0, "a real clock, so the row is dated by when it began")
         again = self.listed(HostAdapter())
@@ -608,16 +706,16 @@ class TheListAnswer(TempHome):
     def test_a_host_that_later_names_a_bot_chat_rebinds_and_the_old_record_stays(self) -> None:
         self.seed(**{"a-chat": {"at": 4, "value": {"title": "A chat", "hermesSessionId": "gots-a"}}})
         first = self.flagged(self.listed(HostAdapter()))[0]
-        self.assertTrue(first.startswith("gots-"))
+        self.assertTrue(self.listed(HostAdapter())[first]["value"]["hermesSessionId"].startswith("gots-"))
         store(self.home, [bot_chat_row()])
         host(self, Authority(self.home))
         listed = self.listed(HostAdapter(object()))
-        self.assertEqual(self.flagged(listed), ["bot-1"], "Main is the host's chat now")
+        self.assertEqual(self.flagged(listed), [MAIN_ID], "Main is the host's chat now")
         self.assertIn(first, listed, "the conversation it was is still a chat of this bot's")
         self.assertNotIn(MAIN, listed[first]["value"])
         self.assertEqual(
             listed[first]["value"]["hermesSessionId"],
-            first,
+            chats.own_main_id(db_path(self.home)),
             "and keeps the session its history is in",
         )
         self.assertEqual(listed[first]["value"]["title"], BOT_CHAT)
@@ -656,7 +754,7 @@ class TheListAnswer(TempHome):
         listed = self.listed()
         self.assertEqual(listed["a-chat"]["value"]["archived"], True, "the Dashboard's archive")
         self.assertNotIn("archived", listed["b-chat"]["value"])
-        self.assertEqual(self.flagged(listed), ["bot-1"], "and the same one Main")
+        self.assertEqual(self.flagged(listed), [MAIN_ID], "and the same one Main")
 
     def test_a_second_answer_writes_nothing_new(self) -> None:
         store(self.home, [bot_chat_row()])
@@ -709,6 +807,31 @@ class TheArchiveRoute(TempHome):
         )
         self.assertEqual(answer["status"], 200)
         self.assertEqual(answer["payload"]["host"], True)
+
+    def test_an_unarchive_of_main_is_allowed(self) -> None:
+        # A device that put a Main away before the plugin's flag reached it has to be able to bring it
+        # back, or the row is stranded under the Archived pill for ever and no list can reach it. The
+        # refusal is Main being *archived* — an unarchive is always allowed.
+        store(self.home, [bot_chat_row()])
+        self.seed(
+            **{
+                "bot-1": {
+                    "at": 5,
+                    "value": {"title": BOT_CHAT, "hermesSessionId": "bot-1", "archived": True},
+                }
+            }
+        )
+        answer = ask(
+            self, ARCHIVE_PATH, method="POST", match={"chat_id": "bot-1"}, body={"archived": False}
+        )
+        self.assertEqual(answer["status"], 200)
+        self.assertEqual(answer["payload"]["host"], True, "the host took the flag off")
+        self.assertEqual(rows(self.home / "state.db")[0]["archived"], 0)
+        self.assertNotIn(
+            "archived",
+            chats.one(db_path(self.home), "bot-1")["value"],
+            "and the record's own copy of the flag came off with it",
+        )
 
 
 if __name__ == "__main__":
