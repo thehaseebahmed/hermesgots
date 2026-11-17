@@ -158,6 +158,19 @@ export const APPEARANCE_FIELDS = [
 /** Those fields as sync reads them, present rather than optional, so a read needs no fallback. */
 export type Appearance = Required<Pick<Settings, (typeof APPEARANCE_FIELDS)[number]>>
 
+/**
+ * The list and the record name the same members, said as a value whose type is the record's: a
+ * field added to one of them alone is a `pnpm typecheck` failure here — an excess property — rather
+ * than a switch that sync drops, or a member the record promises and no field holds. Nothing reads
+ * this; the type is the whole point.
+ */
+export const APPEARANCE_NAMES = {
+  steerByDefault: "steerByDefault",
+  breakReminders: "breakReminders",
+  navShortcuts: "navShortcuts",
+  sidebarLayout: "sidebarLayout",
+} satisfies { [Field in keyof Appearance]: Field }
+
 /** A Hermes profile Gots can talk to. Its Gots plugin registers it (see `registry.ts`). */
 export interface Profile {
   id: string

@@ -1,15 +1,11 @@
 /**
- * The sidebar's edit mode, and the row body both of its states draw.
+ * The sidebar's edit mode.
  *
  * `SidebarEdit` is the mode: one group, labelled for what it is, holding the rows above the boundary
  * and the focus the reader gave it when they opened it. A row in it is no link — a press that
  * navigates while a reader is arranging is how they lose their place — so each row keeps the resting
  * row's 44px height, its label, its pill and its pin's mark, and takes a `data-sidebar-row` naming the
  * id the record files it under.
- *
- * `SidebarRowBody` is what a row shows in either state, held here so the resting sidebar's rows and
- * the mode's cannot drift apart: one label, one pill, one mark. A resting row wraps it in the link
- * that makes it a destination; the mode wraps it in a row that goes nowhere.
  */
 import {
   useEffect,
@@ -18,24 +14,13 @@ import {
   type PointerEvent as PointerEventOf,
   type ReactNode,
 } from "react"
-import {
-  AudioLinesIcon,
-  ChevronDownIcon,
-  ChevronUpIcon,
-  CodeXmlIcon,
-  FolderKanbanIcon,
-  FrameIcon,
-  GripVerticalIcon,
-  TelescopeIcon,
-} from "lucide-react"
+import { ChevronDownIcon, ChevronUpIcon, GripVerticalIcon } from "lucide-react"
 
 import { Refusal } from "@/components/banner"
-import { CanvasMark } from "@/components/canvas-mark"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
-import { LabLabel } from "@/components/lab-badge"
+import { SidebarRowBody } from "@/components/sidebar-row-body"
 import { Separator } from "@/components/ui/separator"
 import type {
-  SidebarFeatureId,
   SidebarLayoutRow,
   SidebarMove,
   SidebarPin,
@@ -44,18 +29,6 @@ import type {
 } from "@/lib/sidebar-layout"
 import { cn } from "@/lib/utils"
 import { useRefusal } from "@/lib/use-refusal"
-
-/**
- * Each feature's mark, by the id the table files it under. Typed by those ids, so a feature added to
- * the table without an icon here fails `pnpm typecheck` rather than drawing a row with no mark.
- */
-const FEATURE_ICONS: Record<SidebarFeatureId, typeof FolderKanbanIcon> = {
-  projects: FolderKanbanIcon,
-  code: CodeXmlIcon,
-  canvas: FrameIcon,
-  research: TelescopeIcon,
-  meetings: AudioLinesIcon,
-}
 
 /**
  * The palette every quiet control in the mode wears: the muted ink, the hover that lifts it, and the
@@ -95,51 +68,6 @@ const RESET_CONTROL = cn(
   QUIET_CONTROL,
   "disabled:opacity-40",
 )
-
-/**
- * A row's mark and name: a feature's icon and its label, or a canvas's own mark and title.
- *
- * A lab feature's name wears the pill that says a switch can take the row away — except in the mode,
- * whose row carries a 44px grip and three 44px controls: on a docked sidebar's 303px the pill leaves
- * the name no width at all, and a name is what a reader arranging the list reads. The word stays in
- * the row for a reader who hears the list, and the resting row still draws the pill.
- */
-export function SidebarRowBody<Pin extends SidebarPin>({
-  row,
-  collapsed = false,
-  mode = false,
-}: {
-  row: SidebarLayoutRow<Pin>
-  /** The icon rail draws no name: the row's own `aria-label` says it to a reader who hears the list. */
-  collapsed?: boolean
-  /** The edit mode's row, which holds one more control than the resting row and less room for a pill. */
-  mode?: boolean
-}) {
-  if (row.kind === "pin")
-    // A pin's `lab` is the switch its row is drawn under, never a badge: the pill marks the features
-    // a switch can take away, and a canvas's row is the canvas's own.
-    return (
-      <>
-        <CanvasMark mark={row.pin.mark} />
-        {!collapsed && <span className="min-w-0 truncate">{row.label}</span>}
-      </>
-    )
-  const Icon = FEATURE_ICONS[row.id]
-  // A mode's row holds a grip and three more controls, so its name takes what is left and truncates
-  // there; the resting row has the width to draw a lab feature's name with its pill beside it.
-  const name = (
-    <span className="min-w-0 flex-1 truncate">
-      {row.label}
-      {row.lab && mode && <span className="sr-only">Labs</span>}
-    </span>
-  )
-  return (
-    <>
-      <Icon className="size-5 text-muted-foreground" />
-      {!collapsed && (row.lab && !mode ? <LabLabel fill>{row.label}</LabLabel> : name)}
-    </>
-  )
-}
 
 /**
  * Where a row let go at `y` lands, over the feet of the rows measured at the press: the first row

@@ -14,7 +14,8 @@ import {
 } from "lucide-react"
 
 import { Bot } from "@/components/bot"
-import { SidebarEdit, SidebarRowBody } from "@/components/sidebar-edit"
+import { SidebarEdit } from "@/components/sidebar-edit"
+import { SidebarRowBody } from "@/components/sidebar-row-body"
 import { SortMenu } from "@/components/sort-menu"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"

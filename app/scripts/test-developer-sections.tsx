@@ -5,12 +5,23 @@
  *
  * The page's own switches are read here too: **Flat chat list** is the layout's one switch, and hiding
  * Developer must not flip the layout back under the user.
+ *
+ * The settings row's own writes are read at the foot, beside the screen that hides them: what
+ * `adoptAppearance` keeps of another device's record, and which of this device's writes move the
+ * appearance clock the account carries.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
 
-import { adoptAppearance, db, DEFAULT_SETTINGS, getSettings } from "@/lib/db"
+import {
+  adoptAppearance,
+  db,
+  DEFAULT_SETTINGS,
+  getSettings,
+  saveAppearance,
+  saveSettings,
+} from "@/lib/db"
 import type { SidebarLayoutRecord } from "@/lib/sidebar-layout"
 import { syncedAppearance } from "@/lib/sync"
 import { DeveloperSettings, SettingsPage } from "@/routes/settings"
@@ -189,4 +200,22 @@ test("a member whose shape this build knows is kept, and one it does not is drop
   assert.equal(adopted.breakReminders, false, "and a value shaped like no switch is dropped")
   assert.deepEqual(adopted.sidebarLayout, layout, "the layout comes through the round trip equal")
   assert.equal(adopted.appearanceAt, 7, "with the appearance clock moved")
+})
+
+test("an appearance write moves the clock, and a write that changed nothing leaves it", async () => {
+  // The clock starts a moment in the past, so "it moved" is a fact about the write rather than about
+  // two reads landing in the same millisecond.
+  await seedSettings({ appearanceAt: 1, steerByDefault: false })
+  // Every field already matches, so there is nothing for the account to carry and the write is
+  // skipped — which is what holds the sidebar's Reset where the record is today's list already
+  // (`sidebar-edit.tsx`).
+  await saveSettings({ steerByDefault: false })
+  assert.equal((await getSettings()).appearanceAt, 1, "a write that changed nothing leaves the clock")
+  await saveAppearance({ steerByDefault: true })
+  const saved = await getSettings()
+  assert.equal(saved.steerByDefault, true, "a switch the account carries is written")
+  assert.ok(
+    (saved.appearanceAt ?? 0) > 1,
+    "and the clock moves with it, which is the one thing sync reads the change from",
+  )
 })
