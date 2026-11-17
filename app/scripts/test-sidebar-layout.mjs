@@ -8,6 +8,7 @@ import test from "node:test"
 
 import {
   DEFAULT_SIDEBAR_LAYOUT,
+  isDefaultLayout,
   move,
   moveTo,
   restingSidebarRows,
@@ -66,6 +67,34 @@ test("an empty record is today's list", () => {
     assert.deepEqual(resting(record), TODAY, "no record, the default's, or an empty one")
     assert.deepEqual(putAway(record), [], "is today's rows in today's order, nothing hidden")
   }
+})
+
+test("a record that reads as today's list says Reset has nothing to clear", () => {
+  // What the mode holds its foot control on: today's rows in today's order, and nothing put away.
+  for (const record of [undefined, DEFAULT_SIDEBAR_LAYOUT, { version: 1, order: [], hidden: [] }]) {
+    assert.equal(isDefaultLayout(sidebarRows([]), record), true, "no record, an empty one, the default")
+  }
+  // A record that names every row is today's list too, so a write of today's order is not a change.
+  assert.equal(
+    isDefaultLayout(sidebarRows([]), { version: 1, order: TODAY, hidden: [] }),
+    true,
+    "the whole catalogue, named in the catalogue's own order",
+  )
+  assert.equal(
+    isDefaultLayout(sidebarRows([]), { version: 1, order: ["meetings", ...TODAY.slice(0, -1)], hidden: [] }),
+    false,
+    "another order is an arrangement to clear",
+  )
+  assert.equal(
+    isDefaultLayout(sidebarRows([]), { version: 1, order: TODAY, hidden: ["research"] }),
+    false,
+    "and so is a row put away",
+  )
+  assert.equal(
+    isDefaultLayout(sidebarRows([PIN]), { version: 1, order: TODAY, hidden: [] }),
+    true,
+    "and a pin standing at the catalogue's foot is where the rule puts it, not an arrangement",
+  )
 })
 
 test("a record this build does not know is today's list, and resolving it writes nothing", () => {

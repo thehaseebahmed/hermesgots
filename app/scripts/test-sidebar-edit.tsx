@@ -21,6 +21,7 @@ import {
   click,
   find,
   findAll,
+  findText,
   json,
   missing,
   mount,
@@ -715,3 +716,138 @@ test("an unpin the host refuses keeps the row, in the host's words", async () =>
     assert.equal(missing('nav[aria-label="Main"] a[href="/canvas/p1"]'), true, "the pin's row gone")
   })
 })
+
+/**
+ * An arrangement that is not the default: Meetings first, and Code put away. Reset's question is only
+ * a question where there is something to clear.
+ */
+const ARRANGED = {
+  version: 1,
+  order: ["meetings", "projects", "code", "canvas", "research"],
+  hidden: ["code"],
+}
+
+/** The mode's foot: the one control that clears the arrangement. */
+const resetControl = () => find("[data-sidebar-reset]")
+/** The question a destructive control asks, and a press offered inside it. */
+const question = () => find('[role="alertdialog"]')
+const inQuestion = (label: string) => findText('[role="alertdialog"] button', label)
+
+test("Reset asks first and leaves every pin alone", async () => {
+  await seed()
+  await seedSettings({ activeProfileId: bot.id, meetings: true, sidebarLayout: ARRANGED, appearanceAt: 0 })
+  // A host that would answer an unpin, so a request about a canvas would be seen rather than refused.
+  const posts = serveUnpin("unpinned")
+  pinnedIds = []
+  await mount(sidebarAndStore(), async () => {
+    await openMode()
+    await until(async () => Boolean(pinRow()), "the pin's row")
+    const arranged = rowIds()
+    assert.deepEqual(
+      arranged,
+      ["meetings", "canvas:p1", "projects", "code", "canvas", "research"],
+      "the record's arrangement, the pin after the row it follows",
+    )
+
+    // The mode's foot: below every row, under the rule that divides the list from what comes after.
+    const reset = resetControl()
+    assert.ok(reset, "the mode's own Reset to default")
+    assert.equal(wordsOf(reset), "Reset to default", "worded for what it does")
+    assert.equal(
+      reset.previousElementSibling?.getAttribute("data-slot"),
+      "separator",
+      "under a separator, below the rows",
+    )
+    assert.equal(
+      reset.hasAttribute("disabled"),
+      false,
+      "pressable, since there is an arrangement to clear",
+    )
+
+    await click(reset)
+    await until(async () => Boolean(question()), "the question")
+    assert.equal(
+      wordsOf(find('[role="alertdialog"] [data-slot="alert-dialog-title"]')),
+      "Reset the sidebar?",
+      "the app's one confirmation, asking",
+    )
+    const body = wordsOf(find('[role="alertdialog"] [data-slot="alert-dialog-description"]'))
+    assert.match(body, /usual order/, "what it does: every feature back in its usual order")
+    assert.match(body, /hid/, "hidden rows shown again")
+    assert.match(body, /pin/i, "and what it does not: no canvas unpinned")
+
+    // While the question stands nothing is written, and no row moves under it.
+    assert.deepEqual(
+      (await db.settings.get("settings"))?.sidebarLayout,
+      ARRANGED,
+      "nothing written while the question is open",
+    )
+    assert.deepEqual(rowIds(), arranged, "the rows exactly where they stood")
+
+    // The question owns Escape while it stands: that press shuts the question, and the mode it was
+    // asked from is still there behind it.
+    await pressEscape()
+    await until(async () => missing('[role="alertdialog"]'), "the question shut by Escape")
+    assert.ok(group(), "the mode standing behind it")
+    assert.deepEqual(
+      (await db.settings.get("settings"))?.sidebarLayout,
+      ARRANGED,
+      "and nothing written by a question walked away from",
+    )
+
+    // Cancel writes nothing at all: the record, its clock, the rows and the pin are as they were.
+    await click(resetControl())
+    await until(async () => Boolean(question()), "the question, asked again")
+    await click(inQuestion("Cancel"))
+    await until(async () => missing('[role="alertdialog"]'), "the question shut")
+    let stored = await db.settings.get("settings")
+    assert.deepEqual(stored?.sidebarLayout, ARRANGED, "Cancel leaves the record")
+    assert.equal(stored?.appearanceAt, 0, "and the clock it rides")
+    assert.deepEqual(rowIds(), arranged, "the rows as they stood")
+    assert.equal(
+      find('[data-sidebar-row="code"]')?.hasAttribute("data-hidden"),
+      true,
+      "Code still put away",
+    )
+
+    // The confirm writes the default — the empty record — through the appearance clock, so the
+    // account carries it like any other edit, and the mode stays open on the layout it wrote.
+    await click(resetControl())
+    await until(async () => Boolean(question()), "the question again")
+    await click(inQuestion("Reset"))
+    await until(async () => missing('[role="alertdialog"]'), "the question answered")
+    await until(async () => rowIds()[0] === "projects", "today's order")
+    assert.deepEqual(
+      rowIds(),
+      ["projects", "code", "canvas", "research", "meetings", "canvas:p1"],
+      "every feature back in its usual order, Code shown again",
+    )
+    assert.equal(
+      find('[data-sidebar-row="code"]')?.hasAttribute("data-hidden"),
+      false,
+      "the row no longer put away",
+    )
+    assert.ok(group(), "the mode stays open on the default layout")
+    stored = await db.settings.get("settings")
+    assert.deepEqual(stored?.sidebarLayout, DEFAULT_SIDEBAR_LAYOUT, "the default record, written")
+    assert.ok((stored?.appearanceAt ?? 0) > 0, "through the appearance clock, as an edit is")
+    assert.equal(
+      resetControl()?.hasAttribute("disabled"),
+      true,
+      "and held, since a layout at the default has nothing left to clear",
+    )
+
+    // Reset is the layout's and never a pin's: no request went anywhere about a canvas, the store
+    // still holds the pin, and the resting sidebar still draws it.
+    assert.equal(posts.length, 0, "no request about any canvas")
+    assert.deepEqual(pinnedIds, [PINNED.id], "the store still holds the pin")
+    await click(doneButton())
+    await until(async () => Boolean(editButton()), "the switch at rest")
+    assert.deepEqual(
+      addresses(),
+      ["/projects", "/code", "/canvas", "/research", "/meetings", "/canvas/p1"],
+      "and the resting sidebar draws it, pinned, in today's order",
+    )
+  })
+})
+

@@ -33,6 +33,8 @@ import { formatRelative } from "@/lib/format"
 import { useMeetingsEnabled } from "@/lib/meetings"
 import { plainPress, pressOpeningRoot, useNav } from "@/lib/nav"
 import {
+  DEFAULT_SIDEBAR_LAYOUT,
+  isDefaultLayout,
   move,
   moveTo,
   restingSidebarRows,
@@ -411,6 +413,9 @@ export function ConversationList({
   const [layout, saveLayout] = useSidebarLayout()
   const rows = restingSidebarRows(known, layout).filter(drawn)
   const editRows = sidebarModeRows(known, layout).filter(({ row }) => drawn(row))
+  // A record already reading as today's list has nothing for the foot's Reset to clear, so the mode
+  // holds that control rather than asking a question with no answer in it.
+  const atDefault = isDefaultLayout(known, layout)
 
   // The mode is this component's own state and never a stored setting: a reload must not land a
   // reader in a mode where a row press navigates nowhere. The switch's ref is what the mode gives the
@@ -471,6 +476,7 @@ export function ConversationList({
           {editing ? (
             <SidebarEdit
               rows={editRows}
+              atDefault={atDefault}
               onLeave={leaveEdit}
               onSetHidden={(id, hidden) => saveLayout(withHidden(known, layout, id, hidden))}
               // One write per press, through the appearance clock, so the account and a second device
@@ -488,6 +494,11 @@ export function ConversationList({
               // The layout record is not touched either way. `quiet`, since the row draws the refusal
               // itself: the same sentence in a toast is gone before the reader finds it there.
               onUnpin={(canvasId) => updateCanvas(canvasId, { pinned: false }, { quiet: true })}
+              // Reset clears the arrangement and nothing else: the default record, written through
+              // the live record's writer so the account carries it as it carries every other edit.
+              // A new object rather than `DEFAULT_SIDEBAR_LAYOUT` itself, which is the default
+              // settings row's own. No pin is asked about, so no canvas is unpinned.
+              onReset={() => saveLayout({ ...DEFAULT_SIDEBAR_LAYOUT })}
             />
           ) : (
             rows.map((row) => (

@@ -177,6 +177,21 @@ export function sidebarModeRows<Pin extends SidebarPin>(
 }
 
 /**
+ * Whether the record this build reads is today's arrangement already: no row put away, and every row
+ * in the place the catalogue gives it. A record that is absent, empty, or one this build cannot read
+ * is today's list too (see `readableRecord`), so Reset has nothing to do for any of them — which is
+ * what lets the mode hold its Reset control rather than ask a question with no answer in it.
+ */
+export function isDefaultLayout<Pin extends SidebarPin>(
+  rows: readonly SidebarLayoutRow<Pin>[],
+  record: SidebarLayoutRecord | undefined,
+): boolean {
+  return placedRows(rows, record).every(
+    ({ row, hidden }, index) => !hidden && row.id === rows[index]?.id,
+  )
+}
+
+/**
  * The record a hide or a show writes: every known row in the place it stands, and the one row put
  * away or let back.
  *

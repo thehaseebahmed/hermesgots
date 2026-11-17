@@ -31,7 +31,9 @@ import {
 
 import { Refusal } from "@/components/banner"
 import { CanvasMark } from "@/components/canvas-mark"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { LabLabel } from "@/components/lab-badge"
+import { Separator } from "@/components/ui/separator"
 import type {
   SidebarFeatureId,
   SidebarLayoutRow,
@@ -69,6 +71,17 @@ const WORD_CONTROL = cn(
   "flex h-11 shrink-0 items-center rounded-2xl px-1.5 text-xs font-medium",
   "text-muted-foreground hover:bg-muted hover:text-foreground",
   "disabled:opacity-60 disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
+)
+
+/**
+ * The mode's foot: the one press that clears the arrangement. A word rather than an icon, since the
+ * mode's rows already carry four controls each and this is a sentence about the whole list; held
+ * where there is nothing to clear, and never drawn outside the mode.
+ */
+const RESET_CONTROL = cn(
+  "flex h-11 w-full items-center rounded-2xl px-3 text-xs font-medium",
+  "text-muted-foreground hover:bg-muted hover:text-foreground",
+  "disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
 )
 
 /**
@@ -426,16 +439,24 @@ function PinModeRow<Pin extends SidebarPin & { mark?: string }>({
  * swipes everywhere else — the row lifts, the row whose place it would take is marked, and the release
  * writes the order once. A gesture that is given up — the browser cancelling the pointer, Escape, or a
  * release outside the list — writes nothing at all.
+ *
+ * At the foot, under a separator and above the boundary, stands the one press that clears the whole
+ * arrangement: "Reset to default", which asks the app's one question first and, answered, writes the
+ * default record. It never asks anything of a canvas, so every pin stays where its host put it.
  */
 export function SidebarEdit<Pin extends SidebarPin & { mark?: string }>({
   rows,
+  atDefault,
   onLeave,
   onSetHidden,
   onMove,
   onDrop,
   onUnpin,
+  onReset,
 }: {
   rows: readonly SidebarPlacedRow<Pin>[]
+  /** The record already reads as today's list: there is nothing for the foot's Reset to clear. */
+  atDefault: boolean
   /** Leaves the mode, and is the one way out a reader can take from inside it. */
   onLeave: () => void
   /** Puts one row away, or brings it back: the mode's one write for a hidden row, carried by the account. */
@@ -446,9 +467,13 @@ export function SidebarEdit<Pin extends SidebarPin & { mark?: string }>({
   onDrop: (id: string, onto: string) => void
   /** Lets one canvas go on its host: the pin's write, and no part of the account's layout. */
   onUnpin: (canvasId: string) => Promise<void>
+  /** Writes today's arrangement over the record: the foot's Reset, once its question is answered. */
+  onReset: () => Promise<unknown>
 }) {
   const group = useRef<HTMLDivElement>(null)
   const [said, setSaid] = useState("")
+  /** Whether the foot's question is up: the one press that clears the layout asks before it does. */
+  const [asking, setAsking] = useState(false)
   /**
    * The pointer's gesture, as it runs: the pointer it belongs to and the foot of every row as the
    * list stood when the press began. Measured once, at the press, so the marker drawn under the
@@ -487,6 +512,9 @@ export function SidebarEdit<Pin extends SidebarPin & { mark?: string }>({
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return
+      // The question owns Escape while it stands: that press closes it, and the next one leaves the
+      // mode — a reader answering a question is not asking to leave the list behind it.
+      if (asking) return
       // A gesture still in the air is what Escape means first: it is given up, nothing is written,
       // and the press after it is the one that leaves the mode.
       if (gesture.current) {
@@ -499,7 +527,7 @@ export function SidebarEdit<Pin extends SidebarPin & { mark?: string }>({
     }
     document.addEventListener("keydown", onKey)
     return () => document.removeEventListener("keydown", onKey)
-  }, [onLeave])
+  }, [asking, onLeave])
 
   /** Keeps a row's control by the row and the way it moves, so the focus can be handed back to it. */
   const keepControl = (control: string) => (node: HTMLButtonElement | null) => {
@@ -622,6 +650,29 @@ export function SidebarEdit<Pin extends SidebarPin & { mark?: string }>({
       <p role="status" aria-live="polite" className="sr-only">
         {said}
       </p>
+      {/* The mode's foot: under the rule that divides these rows from what the sidebar draws below
+          the boundary. Held where the record already reads as today's list — there is nothing to
+          clear, and a save of it would move the appearance clock for no change (`saveSettings` skips
+          a write whose fields all match, but `saveAppearance` carries a new clock with every one). */}
+      <Separator className="mx-1 mt-3 mb-1 data-horizontal:w-auto" />
+      <button
+        type="button"
+        data-sidebar-reset=""
+        disabled={atDefault}
+        onClick={() => setAsking(true)}
+        className={RESET_CONTROL}
+      >
+        Reset to default
+      </button>
+      <ConfirmDestructive
+        open={asking}
+        title="Reset the sidebar?"
+        description="Every feature goes back to its usual order, and every row you hid shows again. A pinned canvas stays pinned."
+        confirmLabel="Reset"
+        onOpenChange={setAsking}
+        // The write is the record's own, so the question closes on its answer and never on the press.
+        onConfirm={onReset}
+      />
     </div>
   )
 }

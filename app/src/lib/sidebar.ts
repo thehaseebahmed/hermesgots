@@ -15,12 +15,13 @@ export function useSidebarCollapsed(): [boolean, () => void] {
  *
  * The write is `saveAppearance`'s rather than `saveSettings`'s so the appearance clock moves with the
  * record and sync carries the arrangement to the account's other devices (a Decision: the layout is
- * one of the appearance fields).
+ * one of the appearance fields). It answers the write's own promise, so a confirmation that writes
+ * through it can close on the answer rather than on the press.
  */
 export function useSidebarLayout(): [
   SidebarLayoutRecord | undefined,
-  (layout: SidebarLayoutRecord) => void,
+  (layout: SidebarLayoutRecord) => Promise<void>,
 ] {
   const layout = useLiveQuery(async () => (await getSettings()).sidebarLayout, [])
-  return [layout, (next) => void saveAppearance({ sidebarLayout: next })]
+  return [layout, (next) => saveAppearance({ sidebarLayout: next })]
 }
