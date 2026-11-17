@@ -11,6 +11,7 @@
  * plugin sends: a picture and two links are forwarded, and anything that isn't one is dropped.
  */
 import assert from "node:assert/strict"
+import { readFileSync } from "node:fs"
 import test from "node:test"
 
 import { message } from "../netlify/lib/fcm.ts"
@@ -202,5 +203,35 @@ test("the registry bounds a notice and drops what isn't a picture or a link", as
       { label: "Deny", url: DENY },
     ],
     "at most two, each a label and an http(s) link, in the order they were sent",
+  )
+})
+
+test("the dev mock answers a tray's button the way the plugin does", () => {
+  // AGENTS.md requires the mock to serve what the app calls, and this one route no browser flow can
+  // reach: nothing in the mock sends a push, so a press is driven from the source it serves. The
+  // words are held to the plugin's own, since a reader shown a different sentence than the host says
+  // would be reading a screen this app never shows.
+  const mock = readFileSync(new URL("./mock-hermes.mjs", import.meta.url), "utf8")
+  const plugin = readFileSync(new URL("../../plugin/__init__.py", import.meta.url), "utf8")
+  assert.ok(
+    mock.includes(String.raw`/^\/api\/plugins\/gots\/push\/answer\/([^/]+)$/`),
+    "the mock matches the link an approval's button posts to, and nothing else",
+  )
+  for (const said of [
+    "That button isn't one this bot sent.",
+    "That button has already been answered.",
+  ]) {
+    assert.ok(plugin.includes(said), `the plugin answers a press with "${said}"`)
+    assert.ok(mock.includes(said), `and the mock answers it the same way, not in words of its own`)
+  }
+  assert.match(
+    mock,
+    /object: "gots\.push\.answer",\s*\n\s*answered: true,\s*\n\s*choice: held\.choice/,
+    "a press that settles answers as the plugin's route does: the choice the row held",
+  )
+  assert.match(
+    mock,
+    /const resolve = pendingApprovals\.get\(held\.runId\)/,
+    "and it settles the run that minted the token, as `answers.answer_run` settles one through Hermes's queue",
   )
 })
