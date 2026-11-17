@@ -16,7 +16,9 @@ Off — the app's answer on every device — is the new UX: a bot opens on its M
 a Side Chat List. On is the single list the app shipped before that: every chat of a bot in one flat
 list at the bot's own address, its routines' runs among the rows, all six pills, and — at the split
 width — the item lane's "No chat selected" beside it. Main is drawn in it as an ordinary row, because
-that layout's address is its list and a Main it did not draw could not be reached.
+that layout's address is its list and a Main it did not draw could not be reached — an ordinary row in
+the bar too: the context ring, the Edit sheet its title opens, the usage sheet behind the ring and the
+way back to that list, none of the new UX's Main-only bar (`drawsMain` in `chat-layout.ts`).
 
 **The stored key stays `legacyChat`.** It is a device setting and devices have it written; renaming it
 would be a migration nobody asked for and a key every other reader would have to learn. What changed
@@ -64,6 +66,7 @@ boolean and described a layout that no longer exists; the key is `layout`, carry
 - `scripts/test-bot-rows.tsx` holds that neither setting draws Recents, a Rooms section, a routines row
   or New chat; `test-bot-chats.tsx` holds the flat list's screen with its switch on and the bot's
   address landing on Main with it off; `test-back-press.tsx` holds the flat list's guard as the app's
-  and the side list's as Main.
+  and the side list's as Main; `test-main-navigation.tsx` holds Main drawn as one chat of the flat list
+  — its ring, its sheet and its way back — and as the bot's home with the switch off.
 - `pnpm e2e bot-list` walks the flat list's order, its panes and its empty item lane with the switch
   on, and `bot-chats` walks Main's addresses with it off.

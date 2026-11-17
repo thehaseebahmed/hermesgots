@@ -9,14 +9,16 @@
  * control wears come from here, named for the list it lands on, so four screens cannot word one move
  * four ways.
  *
- * The bot's **Main** is the one screen of a bot's that leads nowhere: it is what the bot's own entry
- * opens onto (G1), so it names no list and draws no way back from it.
+ * The bot's **Main** is the one screen of a bot's that leads nowhere — on the new UX's layout: it is
+ * what the bot's own entry opens onto (G1), so it names no list and draws no way back from it. The
+ * flat layout's list holds Main's row, so there Main is one chat among the rest and leads back like
+ * any other (ADR 0162); `drawsMain` is the one rule that says which screen a reader is on.
  */
 import { useCallback, useEffect, useRef } from "react"
 
 import { BackButton } from "@/components/back-button"
 import { botChatsPath, botMainPath } from "@/lib/bot-tabs"
-import { useChatLayout, type ChatLayout } from "@/lib/chat-layout"
+import { drawsMain, useChatLayout, type ChatLayout } from "@/lib/chat-layout"
 import { useNav } from "@/lib/nav"
 import { setBackGuard } from "@/lib/native"
 import { useSplit } from "@/lib/pane"
@@ -62,10 +64,12 @@ export function useChatLead({
   // the bot's own row: the screens this leads already hold that row, and a second read of it would
   // leave the row's first slot empty until it landed.
   const named = useBotLabels().get(bot ?? "")
-  // The flat layout's list is the bot's own address and the new UX's has one of its own, so a chat's
-  // way back is the list its layout draws. Main is the bot's entry rather than a rung above it, so it
-  // names no list either; a device whose settings have not answered draws the control once they do.
-  const list = bot && !main && layout ? listPathOf(layout, bot) : undefined
+  // A Main is no rung of a list on the new UX's layout alone: the flat layout's list holds its row, so
+  // there the control leads back like any other chat's (`drawsMain`). The flat layout's list is the
+  // bot's own address and the new UX's has one of its own, so a chat's way back is the list its layout
+  // draws; a device whose settings have not answered draws the control once they do.
+  const onMain = drawsMain(layout, main)
+  const list = bot && !onMain && layout ? listPathOf(layout, bot) : undefined
   const besideList = (beside ?? split) && Boolean(list)
   const ontoList = useCallback(() => {
     if (list) up(list)

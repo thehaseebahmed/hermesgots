@@ -243,9 +243,11 @@ _Avoid_: thread, bot chat, "the bot's screen"
 The one permanent conversation a bot has, and what its address opens on. The bot's host keeps it as its
 own **Bot Chat**, and the plugin publishes that session as the bot's one record flagged Main, minting
 one through the bot's gateway where the host has none and following the host's again if it names
-another. It is never renamable, archivable or deletable, it reads no context usage, and its title is a
-press onto the bot's settings page. Every other chat of the bot's is a **Side chat**; the app draws
-"Main" over whatever title the host gave it.
+another. It is never renamable, archivable or deletable, and on the new UX's layout it reads no context
+usage and its title is a press onto the bot's settings page. Every other chat of the bot's is a **Side
+chat**; the app draws "Main" over whatever title the host gave it. A **flat chat list** draws it as one
+of its rows, under the host's title and with the bar a chat of that list wears, because that layout is
+the list the app shipped before a bot opened on a Main (ADR 0161, ADR 0162).
 _Avoid_: bot chat, home chat, default chat, root conversation
 
 **Side chat**:
@@ -480,7 +482,7 @@ The mark Gots leaves on a task it has claimed.
 _Avoid_: claimed, in-progress, assigned, taken
 
 **Bar**:
-A child screen's top bar: the leading control, the title, the line under it, the actions and the slot a screen pins with it, drawn by one component in two forms — floating over a thread, pinned in a list's scroll flow. Its leading control is the app's menu only on a bot's **Main**, which is where the app is; every screen opened off it — a **Side chat list**, and a chat, a room, a routine's run, the routines page and a new room's picker one rung further down — leads with its way back to the bot's Main instead, and a project session with "Back to Code". One slot, one of the two, never both. Every icon control on it is a frosted outline circle.
+A child screen's top bar: the leading control, the title, the line under it, the actions and the slot a screen pins with it, drawn by one component in two forms — floating over a thread, pinned in a list's scroll flow. Its leading control is the app's menu only on a bot's **Main**, which is where the app is; every screen opened off it — a **Side chat list**, and a chat, a room, a routine's run, the routines page and a new room's picker one rung further down — leads with its way back to the list that holds its row, which is the bot's Side chat list, and a project session with "Back to Code". Main is no rung of a list, so nothing leads back from it — in the new UX's layout. The flat chat list holds Main's row as one more chat, so there Main is drawn as that chat is, with the ring, the Edit sheet its title opens and the same way back the rest of its rows keep (ADR 0162). One slot, one of the two, never both. Every icon control on it is a frosted outline circle.
 _Avoid_: topbar, navbar, toolbar, app bar, header
 
 **Foot**:

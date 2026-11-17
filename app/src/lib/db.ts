@@ -1883,8 +1883,10 @@ db.version(49).upgrade((tx) =>
  * v50: a Main this build does not publish. Main is the host's canonical Bot Chat now, resolved and laid
  * over the list answers by the plugin, so a record an older build wrote under a `main-*` id is no Main
  * at all — the flag it carries is cleared, and the record stays as an ordinary side chat with its
- * history. Only ids of that shape lose the flag: a Main this build holds is keyed by the host's session
- * id, and no record of any other id is touched, so a device's real Main keeps the mark it was given.
+ * history. Only ids of that shape lose the flag: a Main this build holds is keyed by its bot and the
+ * session (`chats.main_id` in the plugin), which a device that has crossed this upgrade holds without
+ * ever running it again — and one that crosses it late is told again by the projection, which dates the
+ * flag past the record it lays it on whenever the store's copy does not carry it yet (ADR 0160).
  *
  * Nothing else about these records moves: they keep their title, their messages, their marks and their
  * drafts, and one that the host's Bot Chat has since replaced is simply a conversation of the bot's.

@@ -147,6 +147,7 @@ import { isUnsent } from "@/chat-next/unsent"
 import { useSessionLeave } from "@/components/chat/session-leave"
 import { chatFlow } from "@/lib/chat-flow"
 import { hasStarted, MAIN_TITLE } from "@/lib/chat-list"
+import { drawsMain, useChatLayout } from "@/lib/chat-layout"
 import { botPath } from "@/lib/bot-tabs"
 import { useChatLead } from "@/lib/chat-lead"
 
@@ -417,15 +418,18 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
     unsent: isUnsent,
   })
   // Main is the bot's own conversation with its host: its bar carries the bot's list in the ring's
-  // place, no context readout at all, and a title that leads to the bot's settings page (G3, G13). One
-  // reading of the record's flag, which the lead and the bar both take, so the two cannot disagree.
-  const main = Boolean(chat?.main)
+  // place, no context readout at all, and a title that leads to the bot's settings page (G3, G13) —
+  // on the new UX's layout. The flat layout is today's list, so there that record is one of its
+  // chats and its bar is a chat's (`drawsMain`). One reading of the record's flag and the layout,
+  // which the lead and the bar both take, so the two cannot disagree.
+  const layout = useChatLayout()
+  const main = drawsMain(layout, chat?.main)
   const lead = useChatLead({
     bot: chat && listsAsChat(chat) ? chat.profileId : undefined,
     // A bot's Main is what its own entry opens onto, so it names no list and leads nowhere. A bot's
     // other conversation is one rung off its list, so the hook registers its leading control's move as
     // the platform's back; a session holds no list, so nothing is registered for it.
-    main,
+    main: Boolean(chat?.main),
     underCode,
     leave,
   })
@@ -558,7 +562,8 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
               onDeleted={() => root("/")}
             />
           )}
-          {/* Main carries no usage readout at all, and a sheet nothing can open is no sheet. */}
+          {/* Main carries no usage readout at all, and a sheet nothing can open is no sheet — on the
+              new UX's layout, where Main's bar is not a chat's. The flat list's Main keeps both. */}
           {!main && (
             <UsageSheet
               open={usageOpen}
@@ -1064,15 +1069,17 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
     unsent: hasNoMessages,
   })
   // Main is the bot's own conversation with its host: its bar carries the bot's list in the ring's
-  // place, no context readout at all, and a title that leads to the bot's settings page (G3, G13). One
-  // reading of the record's flag, which the lead and the bar both take, so the two cannot disagree.
-  const main = Boolean(conversation?.main)
+  // place, no context readout at all, and a title that leads to the bot's settings page (G3, G13) —
+  // on the new UX's layout. Under the flat layout that record is one chat of today's list, drawn as
+  // the chat it is (`drawsMain`). One reading of the flag and the layout, which the lead shares.
+  const layout = useChatLayout()
+  const main = drawsMain(layout, conversation?.main)
   const lead = useChatLead({
     bot: conversation && listsAsChat(conversation) ? conversation.profileId : undefined,
     // The same guard as the leading control's: a bot's conversation is answered by its list — except
     // Main, which is the bot's entry and answers with nothing. A session holds no list, so nothing is
     // registered for it.
-    main,
+    main: Boolean(conversation?.main),
     underCode,
     leave,
   })
@@ -1133,7 +1140,8 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
   const centered = Boolean(session)
   // Nothing started has no title yet, and its bot is the big one in the middle. A chat gone from this
   // device draws no title: it is never drawn as a new one, and a header standing empty is the honest
-  // answer. Main is titled with the app's own word for it, never the host's title.
+  // answer. Main is titled with the app's own word for it, never the host's — on the new UX's layout;
+  // the flat list draws it under the title the host gave it, as it does every row.
   const headerTitle = gone
     ? ""
     : unstarted
@@ -1424,7 +1432,8 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
         onOpenChange={(next) => !next && setAgentView(undefined)}
       />
       <Cheatsheet open={sheet.open} onOpenChange={sheet.setOpen} switches={sheet.switches} />
-      {/* Main carries no usage readout at all, and a sheet nothing can open is no sheet. */}
+      {/* Main carries no usage readout at all, and a sheet nothing can open is no sheet — on the new
+          UX's layout, where Main's bar is not a chat's. The flat list's Main keeps both. */}
       {!main && (
         <UsageSheet
           open={usageOpen}

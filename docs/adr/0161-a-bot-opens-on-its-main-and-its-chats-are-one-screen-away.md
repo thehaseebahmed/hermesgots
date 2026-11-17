@@ -42,15 +42,18 @@ order the reader saw, and the clock the list asked for would never reach the scr
 rows, the subtitle's count and Main's control's badge read it — `sideChats`, less the archived ones
 (`shownSideChats`), which is the one rule the three count by; archiving a side chat takes it out of all
 three and puts it under the Archived pill. Main is never offered a rename, a pin, an archive or a
-delete, and its sheet is not offered at all: its title is a press onto the bot's settings page, where
-the bot's own mute is the way to quiet it. The row Main is drawn as above the list is that list's own
+delete, and on this layout its sheet is not offered at all: its title is a press onto the bot's
+settings page, where the bot's own mute is the way to quiet it. These are the layout's own bar and
+sheet, not Main's: under the flat chat list Main is drawn as one of that list's chats, with the ring,
+the Edit sheet its title opens and the way back every other row keeps (ADR 0162). The row Main is drawn as above the list is that list's own
 row (`BotChatRow`, wearing the Home glyph), so it keeps the unread dot, the spinner and the press that
 takes the pane's place. A room's news is not a chat's, so the badge counts the bot's chats: the rooms
 poller is the list's read, and a header that ran it would pay for a projection on every flushed reply.
 
 **Main's bar carries the list, and no context.** The `list-todo` control stands in the context ring's
 place, badged when any side chat is unread, and is not drawn where the list already stands beside the
-chat. Main mounts no usage sheet and no ring. Its badge is a query of its own over the bot's chat
+chat. This layout's Main mounts no usage sheet and no ring — the ring, the sheet and the way back are
+a chat's, and Main is nobody's chat here (`drawsMain`, ADR 0162). Its badge is a query of its own over the bot's chat
 records and this device's read marks, never the list's rows: the bar is on screen through every flushed
 reply, and a tail read per chat on each of those writes is what a dot must not cost.
 

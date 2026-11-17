@@ -310,6 +310,40 @@ test("the switch turns on today's flat list, at the bot's own address", async ()
   })
 })
 
+test("with the switch on, Main is one chat of the flat list: its ring, its sheet, its way back", async () => {
+  // The flat layout is the list this app shipped before a bot opened on a Main (ADR 0162), so it is
+  // that list unchanged: Main stands as one of its rows and is drawn as the chat it is — the context
+  // ring in the actions slot, a title that opens the Edit sheet, and a way back to the list its row
+  // stands in. None of the new UX's bar belongs to it (ADR 0161).
+  await seed([mainRow(), sideRow()], { legacyChat: true })
+  globalThis.fetch = async () => json({})
+  await mount(app(`/c/${MAIN}`), async () => {
+    await until(async () => Boolean(find('[data-slot="header-actions"]')), "Main's bar")
+    assert.equal(
+      findAll('[data-slot="header-actions"] [aria-label^="Context"]').length,
+      1,
+      "the ring every chat of that list keeps",
+    )
+    assert.ok(missing('[data-slot="side-chats-button"]'), "and no list control in its place")
+    const title = () => find("[data-chat-settings-open]")
+    await until(async () => Boolean(title()), "Main's title as a chat's own press")
+    assert.equal(
+      (title()?.textContent ?? "").trim(),
+      "Bot Chat",
+      "wearing the host's title, as that list draws its rows",
+    )
+    await click(title())
+    await until(async () => Boolean(findText("[role=dialog]", "Edit chat")), "the Edit sheet")
+  })
+  // And the list it leads back to is the flat layout's, which is the bot's own address.
+  await mount(app(`/c/${MAIN}`), async () => {
+    const back = () => find('button[aria-label="Back to Mainly"]')
+    await until(async () => Boolean(back()), "the chat's way back")
+    await click(back())
+    await until(async () => path() === `/b/${bot.id}`, "the list Main's row stands in")
+  })
+})
+
 test("the sidebar's Canvas row follows its Labs switch", async () => {
   await seed([], { canvas: false })
   globalThis.fetch = async () => json({})
