@@ -86,29 +86,40 @@ def after_llm(**kwargs: Any) -> None:
         logger.debug("gots: couldn't keep a reply", exc_info=True)
 
 
-def _working(home: Path, session_id: str) -> bool:
-    """Whether the session still has work of its own — the other half of a finished run.
+def _busy(home: Path) -> Dict[str, int]:
+    """Every session on this host that still has work, read once.
 
     ``delegation.live_sessions`` is what ``runs/live`` reports to the app, and
     ``delegation.waking_sessions`` is the map beside it: a finished subagent whose wake run is still
     owed. Between the one ending and its wake turn starting there is a moment with no live run and
-    no running subagent, and that moment is not the conversation at rest — a notification then
-    would say the run was over just as the bot resumes it. Both maps are keyed by the chat's root
-    session, and one read each answers every session the app draws, so a push and every screen read
-    one answer rather than each deciding what "finished" means. A read that fails says nothing
-    either, and holds nothing back.
+    no running subagent, and that moment is not the conversation at rest — a notification then would
+    say the run was over just as the bot resumes it. Both maps are keyed by the chat's root session
+    and one read each answers every session the app draws, so a pass that asks about several holds
+    reads them once. A read that fails says nothing, and holds nothing back.
     """
     from . import delegation
 
+    busy: Dict[str, int] = {}
+    try:
+        busy.update(delegation.live_sessions(home))
+    except Exception:
+        logger.debug("gots: couldn't read the subagents still at work", exc_info=True)
+    try:
+        for root, count in delegation.waking_sessions(home).items():
+            busy[root] = busy.get(root, 0) + count
+    except Exception:
+        logger.debug("gots: couldn't read the wake runs still owed", exc_info=True)
+    return busy
+
+
+def _working(home: Path, session_id: str, busy: Optional[Dict[str, int]] = None) -> bool:
+    """Whether the session still has work of its own — the other half of a finished run."""
     try:
         root = sessions.chat_session(home, session_id)
-        return (
-            delegation.live_sessions(home).get(root, 0) > 0
-            or delegation.waking_sessions(home).get(root, 0) > 0
-        )
     except Exception:
         logger.debug("gots: couldn't tell whether %s still works", session_id, exc_info=True)
         return False
+    return (busy if busy is not None else _busy(home)).get(root, 0) > 0
 
 
 def _hold(session_id: str, body: Optional[str]) -> None:
@@ -132,9 +143,11 @@ def tell_finished(path: Path, home: Path) -> int:
     """
     with _lock:
         held = list(_held)
+    # One read of what the host is still working on answers every hold, not two per hold.
+    busy = _busy(home)
     told = 0
     for session_id in held:
-        if _working(home, session_id):
+        if _working(home, session_id, busy):
             continue
         with _lock:
             if session_id not in _held:
