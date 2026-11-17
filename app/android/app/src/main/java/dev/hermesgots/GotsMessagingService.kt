@@ -13,6 +13,7 @@ import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import com.capacitorjs.plugins.pushnotifications.PushNotificationsPlugin
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import org.json.JSONArray
@@ -187,6 +188,19 @@ class GotsMessagingService : FirebaseMessagingService() {
         } finally {
             runCatching { connection.disconnect() }
         }
+    }
+
+    /**
+     * A new registration id, handed to the push plugin's own static so the page still hears it.
+     *
+     * This build's service replaced the plugin's on `MESSAGING_EVENT` (see `AndroidManifest.xml`),
+     * so a rotated token would otherwise never reach the page that sends it to the registry. The
+     * plugin keeps the bridge and the `registration` listener; its static is null-safe and answers
+     * nothing while the app isn't running.
+     */
+    override fun onNewToken(token: String) {
+        super.onNewToken(token)
+        PushNotificationsPlugin.onNewToken(token)
     }
 
     /** A message's buttons: at most two, each a label and an http(s) link, as the registry bounded them. */

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -95,6 +96,17 @@
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
             </intent-filter>
         </service>
+
+        <!--
+            One handler, not two. The push plugin ships its own `MessagingService` on the same
+            action; Firebase hands a message to one of them and says nothing about which, so a
+            message could reach a service that draws no tray entry. This build's service draws the
+            entry itself and forwards a new token through the plugin's own static, so the plugin's
+            is removed here rather than left to race it.
+        -->
+        <service
+            android:name="com.capacitorjs.plugins.pushnotifications.MessagingService"
+            tools:node="remove" />
 
         <!-- A button's press with the app closed: it posts the one-shot link and clears the row. -->
         <receiver
