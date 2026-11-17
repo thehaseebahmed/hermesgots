@@ -221,19 +221,22 @@ test("a message that didn't go keeps the files it was sent with", async () => {
     attachments: [{ name: "photo.png", type: "image/png", size: 12, image: true }],
     at: Date.now() - 1_000,
   }
-  const device = await openDevice(host)
-  await turn(device, host, "an ask", "An answer.")
-  await device.database.sessionStates.put({ session: host.session, unsent: [row] })
-  try {
+  const first = await openDevice(host)
+  await turn(first, host, "an ask", "An answer.")
+  await first.close()
+  // Written while no screen holds the session: the store keeps its record in memory and writes it
+  // back whole, so a row put beside an open screen can be overwritten by that screen's next write.
+  const kept = await first.database.sessionStates.get(host.session)
+  await first.database.sessionStates.put({ ...kept, session: host.session, unsent: [row] })
+
+  await withDevice(openDevice(host, { database: first.database }), async (device) => {
     await eventually(
       () => assert.deepEqual(device.unsent().map((one) => one.text), ["look at this"]),
       "the message to be drawn from the device",
     )
     assert.equal(device.unsent()[0].files, "photo.png", "with the file it was sent with")
     assert.equal(device.unsent()[0].retry, true, "and Retry, to send it again with it")
-  } finally {
-    await device.close()
-  }
+  })
 })
 
 test("a retry that fails again leaves the row exactly where it was", async () => {
