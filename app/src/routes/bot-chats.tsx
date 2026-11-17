@@ -6,7 +6,7 @@ import { Bot } from "@/components/bot"
 import { ChatList } from "@/components/chat/chat-list"
 import { EmptyPane } from "@/components/empty-pane"
 import { buttonVariants } from "@/components/ui/button"
-import { botPath, botRoutinesPath } from "@/lib/bot-tabs"
+import { botMainPath, botPath, botRoutinesPath } from "@/lib/bot-tabs"
 import { labelOf } from "@/lib/bot-name"
 import { CHAT_FILTERS, isChatFilter, type ChatFilter } from "@/lib/chat-list"
 import { useChatLayout } from "@/lib/chat-layout"
@@ -19,17 +19,18 @@ import { useBotLabels } from "@/lib/use-bot-labels"
 import { cn } from "@/lib/utils"
 
 /**
- * A bot's chats as the flat layout's one screen: every chat of the bot's, drawn flat. The bot's own
- * address lands on its Main, and its side chats have their own screen (`routes/side-chats.tsx`); this
- * is the list that layout draws, which the developer switch is what turns back on.
+ * A bot's chats as the flat layout's one screen: every chat of the bot's, drawn flat, with its
+ * routines' deliveries among the rows — the list the developer switch turns back on (ADR 0162). The
+ * bot's own address is where this list stands, as it was before a bot opened on a Main of its own, so
+ * the switch's reader lands exactly where the old layout left them.
  */
 export function BotChatsPage() {
   const { profileId } = useParams()
   const layout = useChatLayout()
   const enabled = layout === "flat"
   const pane = useBotChatsPane()
-  // Nothing is drawn before the layout answers, and a device on the legacy layout — where a bot has
-  // no screen — lands home rather than on a list it cannot fill.
+  // Nothing is drawn before the layout answers, and a device drawing the new UX — where this list has
+  // no address — lands home rather than on a list it cannot fill.
   if (layout === undefined) return null
   if (!enabled || !profileId) return <Navigate to="/" replace />
   if (pane) return <NoChatOpen />
@@ -112,6 +113,7 @@ function BotChatsList({
       pills={CHAT_FILTERS}
       filter={filter}
       onFilter={(next) => void saveChatFilter(profileId, next).catch(quietly("Saving the filter"))}
+      listPath={botMainPath(bot.id)}
       rows={answer.rows}
       selected={selected}
       beside={beside}

@@ -45,15 +45,17 @@ try {
     ])
   }, mock)
   await page.reload()
-  await page
-    .getByRole("navigation", { name: "Recents" })
-    .getByText("Plain chat", { exact: true })
-    .waitFor()
+  // A bot's own list is where its chats stand, and a project session is Code's — never a row of it
+  // (ADR 0161). The switch keeps that list the flat one, the layout whose address is its list.
+  const bot = await page.evaluate(async () => {
+    const { saveSettings, db } = await import("/src/lib/db.ts")
+    await saveSettings({ legacyChat: true })
+    return (await db.profiles.toArray())[0].id
+  })
+  await page.goto(`${app}/b/${bot}`)
+  await page.getByText("Plain chat", { exact: true }).first().waitFor({ timeout: 20_000 })
   assert.equal(
-    await page
-      .getByRole("navigation", { name: "Recents" })
-      .getByText("Code session", { exact: true })
-      .count(),
+    await page.getByText("Code session", { exact: true }).count(),
     0,
     "Code sessions must not appear under bot chats",
   )

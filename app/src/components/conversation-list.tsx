@@ -1,10 +1,8 @@
 import { useLiveQuery } from "dexie-react-hooks"
-import type { ReactNode } from "react"
 import { Link, matchPath, NavLink, useLocation, type NavLinkProps } from "react-router"
 import {
   AudioLinesIcon,
   BellOffIcon,
-  ChevronRightIcon,
   CodeXmlIcon,
   FolderKanbanIcon,
   ListChecksIcon,
@@ -12,8 +10,6 @@ import {
   MessageCircleQuestionMarkIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
-  PlusIcon,
-  RotateCcwClockIcon,
   SearchIcon,
   ShieldAlertIcon,
   TelescopeIcon,
@@ -24,7 +20,6 @@ import {
 import { Bot } from "@/components/bot"
 import { CanvasMark } from "@/components/canvas-mark"
 import { LabLabel } from "@/components/lab-badge"
-import { RoomFaces } from "@/components/room/room-faces"
 import { SortMenu } from "@/components/sort-menu"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -33,22 +28,14 @@ import { stateLine } from "@/lib/bot-chrome"
 import { closeCanvas, useCanvasOpened } from "@/lib/canvas-open"
 import { useCanvasEnabled, usePinnedCanvases, type Canvas } from "@/lib/canvases"
 import { chatOwner } from "@/lib/chat-owner"
-import { compareChatOrder, keptBy, waitReasonOf } from "@/lib/chat-list"
-import { listingChats } from "@/lib/chat-rows"
-import type { Conversation, Profile } from "@/lib/db"
-import { db, isReply, newestMessage } from "@/lib/db"
+import { db } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
-import { useCanMakeRoom, useRoomNeeds } from "@/lib/room"
-import { roomMembersLine, roomNeedsOf } from "@/lib/rooms"
-import { useChatLayout } from "@/lib/chat-layout"
 import { useMeetingsEnabled } from "@/lib/meetings"
-import { pressOpeningRoot, plainPress, useNav } from "@/lib/nav"
+import { plainPress, pressOpeningRoot, useNav } from "@/lib/nav"
 import { useSyncState } from "@/lib/sync"
 import { BOT_SORTS, sortBots, useBotSort, useBotSummaries, useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
-import { reasonText, useWaiting, useWaitingSessions, type WaitingReason } from "@/lib/waiting"
-
-const RECENTS = 10
+import { reasonText, useWaitingSessions, type WaitingReason } from "@/lib/waiting"
 
 const rowClass = ({ isActive }: { isActive: boolean }) =>
   cn(
@@ -71,14 +58,7 @@ function RootLink({
   ...props
 }: NavLinkProps & { to: string } & Record<`data-${string}`, string | undefined>) {
   const { root } = useNav()
-  return (
-    <NavLink
-      to={to}
-      replace
-      onClick={pressOpeningRoot(root, to, onClick)}
-      {...props}
-    />
-  )
+  return <NavLink to={to} replace onClick={pressOpeningRoot(root, to, onClick)} {...props} />
 }
 
 const REASON_ICONS: Record<WaitingReason["kind"], typeof ListChecksIcon> = {
@@ -88,120 +68,12 @@ const REASON_ICONS: Record<WaitingReason["kind"], typeof ListChecksIcon> = {
   stalled: TriangleAlertIcon,
 }
 
-/** A reason in words, or nothing at all where nothing waits: a chat at rest has none to say. */
-const reasonTextOf = (reason?: WaitingReason) => (reason ? reasonText(reason) : undefined)
-
 /** A row's age, in the one voice every list that draws one uses. */
 function RowAge({ at, now }: { at: number; now: number }) {
   return (
     <span className="shrink-0 text-xs font-normal text-muted-foreground">
       {formatRelative(at, now)}
     </span>
-  )
-}
-
-/**
- * One row of a chat list: the bot's picture, its name and what it holds, and a dot when it waits on
- * the user. A room is drawn by the same row — its name, the members it seats, its last activity and
- * the mark its own log reads (ADR 0120) — so a room and a chat are ordered, pinned and marked by one
- * rule (ADR 0116, ADR 0121).
- */
-function ChatRow({
-  chat,
-  bot,
-  faces,
-  reason,
-  now,
-  collapsed,
-  onNavigate,
-}: {
-  chat: Conversation
-  bot?: Profile
-  /** A room's members, as pictures: what the row draws instead of the one bot a chat is (ADR 0126). */
-  faces?: { shown: string[]; more: number }
-  /** What waits on the user, in words the screen reader hears: a chat's, or the room's own reading. */
-  reason?: string
-  now: number
-  collapsed: boolean
-  onNavigate?: () => void
-}) {
-  return (
-    <RootLink
-      to={`/c/${chat.id}`}
-      onClick={onNavigate}
-      // A rail draws no text, so the mark's words are the row's name: a room that needs the user
-      // says so in the only place an icon-only rail can say it.
-      aria-label={collapsed ? (reason ? `${chat.title}. ${reason}` : chat.title) : undefined}
-      className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
-    >
-      {faces ? (
-        <RoomFaces shown={faces.shown} more={faces.more} collapsed={collapsed} />
-      ) : (
-        <Bot id={bot?.botId} className="size-5" />
-      )}
-      {!collapsed && (
-        <>
-          <span className="min-w-0 flex-1">
-            <span className="block truncate">{chat.title}</span>
-            {/* A room is a conversation of several bots, so its row names them: the record a device
-                merges carries its roster, and nothing of its transcript (ADR 0116). */}
-            {chat.room && (
-              <span className="block truncate text-xs font-normal text-muted-foreground">
-                {roomMembersLine(chat.room)}
-              </span>
-            )}
-          </span>
-          {chat.room && <RowAge at={chat.updatedAt} now={now} />}
-          {reason && (
-            <>
-              <span
-                aria-hidden
-                data-needs-you
-                className="size-2 shrink-0 rounded-full bg-warning"
-              />
-              <span className="sr-only">{reason}</span>
-            </>
-          )}
-        </>
-      )}
-    </RootLink>
-  )
-}
-
-/**
- * A band of the chat list: its heading, and the rows it holds, in the order the list decided. A band
- * with nothing in it draws nothing at all.
- */
-function Band({
-  name,
-  label,
-  collapsed,
-  children,
-}: {
-  name: string
-  label: string
-  collapsed: boolean
-  children: ReactNode
-}) {
-  return (
-    <>
-      {!collapsed && (
-        <h2
-          id={`${name}-heading`}
-          className="px-3 pt-1 pb-2 text-sm font-medium text-muted-foreground"
-        >
-          {label}
-        </h2>
-      )}
-      <ul
-        data-band={name}
-        aria-labelledby={collapsed ? undefined : `${name}-heading`}
-        aria-label={collapsed ? label : undefined}
-        className={cn("flex flex-col gap-0.5", collapsed && "items-center")}
-      >
-        {children}
-      </ul>
-    </>
   )
 }
 
@@ -217,12 +89,7 @@ function PinnedCanvases({
   return (
     <>
       {pinned.map((canvas) => (
-        <CanvasRow
-          key={canvas.id}
-          canvas={canvas}
-          collapsed={collapsed}
-          onNavigate={onNavigate}
-        />
+        <CanvasRow key={canvas.id} canvas={canvas} collapsed={collapsed} onNavigate={onNavigate} />
       ))}
     </>
   )
@@ -266,117 +133,12 @@ function CanvasRow({
 }
 
 /**
- * The newest chats across every bot, each with its bot's image, and a dot at the row's end when one
- * waits on the user. Project sessions stay on Code, and rooms have a section of their own. An archived
- * chat stands in no band — the Archived pill is its only place, and this layout holds none — and a
- * chat nothing was said in and no draft holds is no row at all (ADR 0158). A pinned chat is lifted
- * into the band above in the order the pins were made, which is the list's own order
- * (`compareChatOrder`) and not one this sidebar keeps apart.
- */
-function Recents({
-  onNavigate,
-  collapsed = false,
-}: {
-  onNavigate?: () => void
-  collapsed?: boolean
-}) {
-  const live = useWaiting()
-  const now = useNow()
-  const recents = useLiveQuery(async () => {
-    const profiles = await db.profiles.toArray()
-    const bots = new Map(profiles.map((p) => [p.id, p]))
-    // Pinned first by ADR 0103, so every listed chat is read: a pin may be older than the ten newest.
-    const held = await db.conversations
-      .orderBy("updatedAt")
-      .reverse()
-      // Rooms have a section of their own, so Recents holds chats alone (ADR 0127), and the rows a
-      // band draws are one pill's: All's, which is every archived row's exclusion (`keptBy`).
-      .filter((c) => chatOwner(c, bots).listed && !c.room && keptBy("all", c))
-      .toArray()
-    // A chat nothing was said in and no draft is holding is no row of any list (ADR 0158), read by
-    // the one rule and the same two reads the bot's list uses (`listingChats`).
-    const listed = await listingChats(held)
-    const chats = [
-      ...listed.filter((c) => c.pinned),
-      ...listed.filter((c) => !c.pinned).slice(0, RECENTS),
-    ]
-    // This device's own unanswered approval or question, which a keyless bot or one without the
-    // plugin can't report. Only a chat's newest reply can wait, so only that one is read.
-    const newest = await Promise.all(chats.map((c) => newestMessage(c.id, isReply)))
-    // One reader for the wait: `waitReasonOf` is the rule the bot's own list words a row with, so a
-    // reason cannot be read one way here and another there.
-    const local = new Map<string, WaitingReason>()
-    for (const message of newest) {
-      const reason = message ? waitReasonOf(message) : undefined
-      if (message && reason) local.set(message.conversationId, reason)
-    }
-    return chats.map((chat) => ({
-      chat,
-      bot: chatOwner(chat, bots).bot,
-      local: local.get(chat.id),
-    }))
-  }, [])
-
-  const pinned = [...(recents?.filter((one) => one.chat.pinned) ?? [])].sort((one, two) =>
-    compareChatOrder(placeOf(one.chat), placeOf(two.chat)),
-  )
-  const rest = recents?.filter((one) => !one.chat.pinned) ?? []
-
-  const rows = (band: typeof rest) =>
-    band.map(({ chat, bot, local }) => (
-      <li key={chat.id}>
-        <ChatRow
-          chat={chat}
-          bot={bot}
-          now={now}
-          collapsed={collapsed}
-          onNavigate={onNavigate}
-          reason={reasonTextOf(local) ?? reasonTextOf(live[chat.hermesSessionId])}
-        />
-      </li>
-    ))
-
-  return (
-    <nav
-      className="flex flex-col gap-0.5"
-      aria-labelledby={collapsed ? undefined : "recents-heading"}
-      aria-label={collapsed ? "Recent chats" : undefined}
-    >
-      {pinned.length > 0 && (
-        <Band name="pinned" label="Pinned" collapsed={collapsed}>
-          {rows(pinned)}
-        </Band>
-      )}
-      {rest.length > 0 && (
-        <Band name="recents" label="Recents" collapsed={collapsed}>
-          {rows(rest)}
-        </Band>
-      )}
-      {!collapsed && recents && rest.length === 0 && pinned.length === 0 && (
-        <p className="px-3 py-2 text-sm text-muted-foreground">No chats yet. Say hi to Hermes!</p>
-      )}
-      {!collapsed && rest.length > 0 && (
-        <button
-          type="button"
-          className="flex min-h-11 items-center gap-1 rounded-2xl px-3 text-sm text-muted-foreground transition-colors hover:bg-muted"
-        >
-          View all
-          <ChevronRightIcon className="size-4" />
-        </button>
-      )}
-    </nav>
-  )
-}
-
-/**
- * With bot threads on, in place of Recents: every bot that's turned on, each with its newest thread
- * and its state — something unread, or whether its host is checking in (ADR 0151). A bot opens as one
- * chat holding its threads.
+ * Every bot that's turned on, each with the line saying its state — something unread, or whether its
+ * host is checking in (ADR 0151) — and a press that opens the bot on its **Main**.
  *
- * The Host's rooms are rows of the same list, after the bots: a room is nobody's thread, so it is never
- * a row of a bot's own — though a room its roster seats counts toward that bot's unread (ADR 0151). It
- * is not a section of its own either — it is drawn by the chat list's own row, with its members, its
- * last activity and the mark its log reads (ADR 0115).
+ * The sidebar draws no chat list of its own: a bot's conversations are that bot's screens, one press
+ * in (ADR 0161), so the Host's rooms are rows of the bot's own lists rather than a section here. A room
+ * its roster seats still counts toward that bot's unread (ADR 0151).
  */
 function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; collapsed?: boolean }) {
   const summaries = useBotSummaries()
@@ -496,99 +258,6 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
   )
 }
 
-/**
- * The legacy layout's Rooms section: the Host's rooms, ranked as every list here ranks a row, with the
- * one control a room is started from at its end.
- *
- * Recents is the only list that layout has, and it holds chats alone, so this is where a room stands
- * (ADR 0115). The bot layout has no section of its own: a room is a row of every bot's chat list,
- * among the chats, so it needs neither a place here nor an order of its own. The section is drawn even
- * with no rooms in it: an empty room list is where someone who has never made a room finds the control.
- */
-function Rooms({
-  onNavigate,
-  collapsed = false,
-}: {
-  onNavigate?: () => void
-  collapsed?: boolean
-}) {
-  const now = useNow()
-  const rows = useRoomNeeds()
-  const canMake = useCanMakeRoom()
-  if (!rows) return null
-  // An archived room is the Archived pill's alone, and a band holds no pill: it stands in no band
-  // here, as it stands in no other list's row.
-  const ordered = rows
-    .filter(({ chat }) => keptBy("all", chat))
-    .sort((one, two) => compareChatOrder(placeOf(one.chat), placeOf(two.chat)))
-  return (
-    <>
-      <Separator className="mx-1 my-3 data-horizontal:w-auto" />
-      <nav
-        className="flex flex-col gap-0.5"
-        aria-labelledby={collapsed ? undefined : "rooms-heading"}
-        aria-label={collapsed ? "Rooms" : undefined}
-      >
-        {!collapsed && (
-          <h2
-            id="rooms-heading"
-            className="px-3 pt-1 pb-2 text-sm font-medium text-muted-foreground"
-          >
-            Rooms
-          </h2>
-        )}
-        <ul data-band="rooms" className={cn("flex flex-col gap-0.5", collapsed && "items-center")}>
-          {ordered.map(({ chat, bot, faces }) => (
-            <li key={chat.id}>
-              <ChatRow
-                chat={chat}
-                bot={bot}
-                faces={faces}
-                reason={roomNeedsOf(chat)}
-                now={now}
-                collapsed={collapsed}
-                onNavigate={onNavigate}
-              />
-            </li>
-          ))}
-          {canMake && (
-            <li>
-              <RootLink
-                to="/new-room"
-                onClick={onNavigate}
-                aria-label={collapsed ? "New room" : undefined}
-                data-slot="new-room"
-                className={({ isActive }) =>
-                  cn(
-                    collapsed ? railClass({ isActive }) : rowClass({ isActive }),
-                    "text-muted-foreground",
-                  )
-                }
-              >
-                <span className="flex size-9 items-center justify-center">
-                  <PlusIcon className="size-5" />
-                </span>
-                {!collapsed && "New room"}
-              </RootLink>
-            </li>
-          )}
-        </ul>
-      </nav>
-    </>
-  )
-}
-
-/**
- * A row's place in the list's one order (`compareChatOrder`), off the record a band drew it from:
- * `updatedAt` is the clock an unpinned row is ranked by, and `pinnedAt` the one a pin is.
- */
-const placeOf = (chat: Pick<Conversation, "id" | "updatedAt" | "pinned" | "pinnedAt">) => ({
-  id: chat.id,
-  at: chat.updatedAt,
-  pinned: Boolean(chat.pinned),
-  pinnedAt: chat.pinnedAt,
-})
-
 /** Project sessions, across every project, that wait on the user. Hidden when there are none. */
 function Waiting({
   onNavigate,
@@ -684,6 +353,11 @@ function ProfileButton({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
+/**
+ * The app's sidebar: the screens that are places, the sessions waiting on the reader, and every bot
+ * with its state. It draws no chat list of its own — a bot's conversations are that bot's screens,
+ * one press in (ADR 0161) — and no New chat, since a chat is started from the list it belongs to.
+ */
 export function ConversationList({
   onNavigate,
   collapsed = false,
@@ -695,8 +369,6 @@ export function ConversationList({
   /** Given only by the docked sidebar, so the drawer grows no collapse control of its own. */
   onToggleCollapsed?: () => void
 }) {
-  const { root } = useNav()
-  const layout = useChatLayout()
   const meetings = useMeetingsEnabled()
   const canvas = useCanvasEnabled()
 
@@ -785,56 +457,20 @@ export function ConversationList({
               {!collapsed && <LabLabel fill>Meetings</LabLabel>}
             </RootLink>
           )}
-          {layout === "recents" && (
-            <RootLink
-              to="/routines"
-              onClick={onNavigate}
-              aria-label={collapsed ? "Routines" : undefined}
-              className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
-            >
-              <RotateCcwClockIcon className="size-5 text-muted-foreground" />
-              {!collapsed && "Routines"}
-            </RootLink>
-          )}
           {canvas && <PinnedCanvases onNavigate={onNavigate} collapsed={collapsed} />}
         </nav>
         <Separator className="mx-1 my-3 data-horizontal:w-auto" />
         <Waiting onNavigate={onNavigate} collapsed={collapsed} />
-        {layout === "flat" ? (
-          <Bots onNavigate={onNavigate} collapsed={collapsed} />
-        ) : (
-          layout === "recents" && (
-            <>
-              <Recents onNavigate={onNavigate} collapsed={collapsed} />
-              <Rooms onNavigate={onNavigate} collapsed={collapsed} />
-            </>
-          )
-        )}
+        <Bots onNavigate={onNavigate} collapsed={collapsed} />
       </div>
 
       <div
         className={cn(
-          "flex items-center justify-between gap-3 px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]",
-          collapsed && "flex-col justify-center gap-2 px-2",
+          "flex items-center px-4 pt-2 pb-[max(1rem,env(safe-area-inset-bottom))]",
+          collapsed && "justify-center px-2",
         )}
       >
         <ProfileButton onNavigate={onNavigate} />
-        <div className={cn("flex items-center gap-2", collapsed && "flex-col gap-2")}>
-          {layout === "recents" && (
-            <Button
-              size="lg"
-              className={cn("h-11 rounded-full", collapsed ? "w-11 px-0" : "px-5")}
-              aria-label="New chat"
-              onClick={() => {
-                root("/")
-                onNavigate?.()
-              }}
-            >
-              <PlusIcon data-icon={collapsed ? undefined : "inline-start"} />
-              {!collapsed && "New chat"}
-            </Button>
-          )}
-        </div>
       </div>
     </div>
   )

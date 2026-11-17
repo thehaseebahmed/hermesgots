@@ -14,14 +14,8 @@ import { Button } from "@/components/ui/button"
 import { InputGroup, InputGroupInput } from "@/components/ui/input-group"
 import { mayArchive, pinSwitchOf } from "@/lib/chat-list"
 import { setArchived, setPinned, usePinsInList } from "@/lib/chat-marks"
-import {
-  deleteConversation,
-  updateConversation,
-  type Conversation,
-  type Profile,
-} from "@/lib/db"
+import { deleteConversation, updateConversation, type Conversation, type Profile } from "@/lib/db"
 import { usePluginFeatureOn } from "@/lib/features"
-import { useChatLayout } from "@/lib/chat-layout"
 import { setThreadMuted } from "@/lib/push"
 import { disbandRoomNow, renameRoomTo } from "@/lib/room-writes"
 import { stopMessage } from "@/lib/chat"
@@ -161,10 +155,9 @@ export function ChatSettings({
     }
     onOpenChange(next)
   }
-  // The Archived pill is the only place a row is set aside *from*, and the legacy bands hold none:
-  // archiving is offered only where that pill is. The way back is offered everywhere — an archive that
-  // arrived by merge is in no band on this layout, and a row nothing could bring back is a trap.
-  const archivesHere = useChatLayout() === "flat"
+  // Archive is offered by the pill every layout has, and the way back with it: a row an archive that
+  // arrived by merge set aside is in no pill but Archived, and a row nothing could bring back is a
+  // trap.
   // The field holds what is being typed, and the record what was last written: an edit abandoned or
   // refused leaves the name as it was, and the Host's words stand under the field that asked for it.
   const [typed, setTyped] = useState<string>()
@@ -258,7 +251,7 @@ export function ChatSettings({
               {open && <PinRow chat={chat} profileId={profileId ?? chat.profileId} />}
             </Group>
             <div className="flex flex-col gap-2">
-              {(archivesHere || chat.archived) && mayArchive(chat) && (
+              {mayArchive(chat) && (
                 <Button
                   type="button"
                   variant="outline"

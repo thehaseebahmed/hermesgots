@@ -1,7 +1,8 @@
 /**
- * A bot's list is a list: whatever this device last had open in one of its chats, the screen draws the
- * chats to pick from and nothing opens itself, and a row pressed in it opens that conversation. What a
- * bot's own entry opens on is `scripts/test-main-navigation`'s to hold; this holds the list's screen.
+ * The flat layout's list is a list: whatever this device last had open in one of its chats, the screen
+ * draws the chats to pick from and nothing opens itself, and a row pressed in it opens that
+ * conversation. It is the layout the Developer switch turns on (ADR 0162), so every case seeds the
+ * switch; what a bot's own entry opens on — its **Main** — is `scripts/test-main-navigation`'s to hold.
  *
  * A memory of the chat a bot was last in is this device's own, so a case writes it where an older
  * build kept it — the address, under the bot's id — and never through a module the app no longer has.
@@ -40,7 +41,7 @@ const remember = (profileId: string, chat: string) =>
 
 /** The chats a device holds: `at` is the chat's own clock, which is what "newest" is read by. */
 async function seed(chats: { id: string; at: number; bot?: string; routine?: boolean }[]) {
-  await seedSettings({ developer: true, activeProfileId: bot.id })
+  await seedSettings({ developer: true, legacyChat: true, activeProfileId: bot.id })
   await db.profiles.clear()
   await db.profiles.bulkPut([bot, other])
   await db.conversations.clear()

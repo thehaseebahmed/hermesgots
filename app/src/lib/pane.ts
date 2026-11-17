@@ -91,10 +91,12 @@ export interface BotPane extends FeaturePane {
  * row, and the list's own links say which bot they are for in `state.bot`, so the lane holds while
  * the row loads.
  *
- * The bot's two list addresses — its root and the list's own — are the screens its **Main** stands
- * beside, so those answer with Main selected and open only where this device holds one: a bot whose
- * Main is not known yet keeps its list standing whole rather than beside a blank. Its routines are a
- * page of the bot's rather than a chat, so the list stands beside them without a selected row.
+ * Which list the lane holds is the layout's (ADR 0161): the new UX draws its **Side Chat List** at
+ * both of the bot's list addresses, with the bot's **Main** selected beside it — open only where this
+ * device holds one, so a bot whose Main is not known yet keeps its list standing whole rather than
+ * beside a blank — and the flat layout draws its one list at the bot's address with no chat selected,
+ * since nothing stands beside it. Its routines are a page of the bot's rather than a chat, so either
+ * list stands beside them without a selected row.
  *
  * Everything the list draws is a row of it — the bot's chats, the rooms its roster seats and its
  * routines' runs — so each opens beside it; a project session is Code's and a canvas is its own
@@ -104,8 +106,7 @@ export interface BotPane extends FeaturePane {
  */
 export function useBotChatsPane(): BotPane | undefined {
   const split = useSplit()
-  // A bot's screens are the bot-first layout's: the Recents layout keeps the sidebar as its one list,
-  // and a bot has no screen of its own there (ADR 0110, ADR 0136).
+  // Which list the lane holds, and whether Main is the chat beside it.
   const layout = useChatLayout()
   const { pathname, state } = useLocation()
   const id = matchPath("/c/:id", pathname)?.params.id
@@ -127,16 +128,17 @@ export function useBotChatsPane(): BotPane | undefined {
       profileId: found?.profileId,
     }
   }, [id])
-  // Main, read only for the address whose item it is.
+  // Main, read only for the address whose item it is, and only where that address has an item lane.
   const main = useLiveQuery(async () => {
-    if (!own || !atList || !profileId) return null
+    if (!own || !atList || !profileId || layout !== "sides") return null
     return (await mainChatOf(profileId))?.id ?? null
-  }, [Boolean(own), atList, profileId])
-  if (!split || layout !== "flat") return undefined
+  }, [Boolean(own), atList, profileId, layout])
+  if (!split || !layout) return undefined
   if (own) {
-    if (!atList) return { open: true, profileId }
-    // Nothing stands beside the list until Main is known — the answer still out, or a bot no plugin
-    // has published one for — so the list is the screen rather than half of one.
+    // The flat layout's bot address is its one list's screen: the lane holds the list and the item
+    // lane says nothing is selected. The new UX draws the pair — the list in the lane and Main beside
+    // it — and nothing stands there until Main is known, so the list is the screen, not half of one.
+    if (layout === "flat" || !atList) return { open: true, profileId }
     return main ? { open: true, profileId, selected: main } : { open: false, profileId }
   }
   if (!id) return undefined

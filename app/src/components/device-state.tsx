@@ -68,7 +68,7 @@ export async function readDeviceDiagnostics(): Promise<DiagDevice> {
     route: window.location.pathname,
     schema: db.verno,
     developer: Boolean(settings?.developer),
-    botThreads: chatLayout(settings) === "flat",
+    layout: chatLayout(settings),
     ...(trace ? { resume: diagResume(trace) } : {}),
     bots,
   }

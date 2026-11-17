@@ -36,7 +36,6 @@ import { Refusal } from "@/components/banner"
 import { useBotLabels } from "@/lib/use-bot-labels"
 import { useBreakReminderEligibility } from "@/components/break-reminder-context"
 import { ApprovalCard } from "@/components/chat/approval-card"
-import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { ChatSettings, ChatTitlePress } from "@/components/chat/chat-settings"
 import { SideChatsButton } from "@/components/chat/side-chats-button"
@@ -139,7 +138,6 @@ import {
 } from "@/lib/workspace"
 import { lastActivityAt } from "@/lib/session-work"
 import { hold, type HoldSlot } from "@/lib/chat-hold"
-import { useChatLayout } from "@/lib/chat-layout"
 import { EmptyChatState, MissingThread } from "@/components/chat/empty-states"
 import type { DiagReadFailure } from "@/lib/read-failure"
 import { describeReadFailure, formatReadFailure } from "@/lib/read-failure"
@@ -596,7 +594,6 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
   // Settings answer "no row" on a device that never wrote one, so an absent answer is `null` here
   // rather than the `undefined` a query that has not run hands back.
   const settings = useLiveQuery(async () => (await db.settings.get("settings")) ?? null, [])
-  const layout = useChatLayout()
   const found = useLiveQuery(
     async () => (id ? ((await db.conversations.get(id)) ?? null) : undefined),
     [id],
@@ -665,7 +662,6 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
   const flow = useMemo(() => chatFlow({ thread, compacted }), [thread, compacted])
   const answered =
     settings !== undefined &&
-    layout !== undefined &&
     (id === undefined || conversation !== undefined) &&
     profile !== undefined &&
     messages !== undefined
@@ -1299,11 +1295,6 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
                 )
               )}
             </div>
-          </div>
-        )}
-        {!id && profile && layout === "recents" && (
-          <div className={`${COLUMN_BOX} flex pb-2`}>
-            <BotPicker profile={profile} />
           </div>
         )}
         {session?.discardedAt ? (

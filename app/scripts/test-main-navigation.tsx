@@ -9,6 +9,10 @@
  * in favour of the one control that opens the Side Chat List, badged when a side chat is unread and
  * gone where that list is already beside the chat, and the title leads to the bot's settings page
  * rather than opening an Edit sheet. The last cases hold that.
+ *
+ * The Developer switch turns the app back onto the flat list (ADR 0162): the bot's own address draws
+ * every chat of it, a routine's delivery included, and the side-chat address lands there rather than
+ * on a list the layout has not got. The case before the sidebar's holds that.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -141,8 +145,15 @@ test("a bot with no Main yet draws its list where its address stands", async () 
   globalThis.fetch = async () => json({})
   await mount(app(`/b/${bot.id}`), async () => {
     await until(async () => rowIds().includes(`/c/${SIDE}`), "the bot's chats")
-    assert.equal(path(), `/b/${bot.id}`, "the address the reader gave it: no Main to replace it with")
-    assert.ok(findText('[data-slot="header-title"]', "Sidechats"), "and the list's own bar, not nothing")
+    assert.equal(
+      path(),
+      `/b/${bot.id}`,
+      "the address the reader gave it: no Main to replace it with",
+    )
+    assert.ok(
+      findText('[data-slot="header-title"]', "Sidechats"),
+      "and the list's own bar, not nothing",
+    )
     assert.ok(findText('[data-slot="header-line"]', "Mainly"), "naming the bot it is a list of")
     assert.equal(
       await db.conversations.filter((chat) => Boolean(chat.main)).count(),
@@ -160,7 +171,10 @@ test("the bot's list keeps an address of its own", async () => {
     assert.equal(path(), `/b/${bot.id}/sidechats`, "the list at its own address, Main known or not")
     // Main is the screen this list is of, not a row of it: `test-side-chats.tsx` holds the row it is
     // given at the split width, where it is the chat drawn beside the list.
-    assert.ok(findText('[data-slot="header-title"]', "Sidechats"), "the Side Chat List, not the entry's screen")
+    assert.ok(
+      findText('[data-slot="header-title"]', "Sidechats"),
+      "the Side Chat List, not the entry's screen",
+    )
   })
 })
 
@@ -197,7 +211,7 @@ test("Main is where a bot opens, so nothing leads back from it", async () => {
   })
 })
 
-test("with nothing stored the app is the bot-first layout", async () => {
+test("with nothing stored the app draws the new UX", async () => {
   await seed()
   globalThis.fetch = async () => json({})
   await mount(app("/"), async () => {
@@ -236,29 +250,63 @@ test("a chat open writes no memory", async () => {
   })
 })
 
-test("the legacy switch brings the Recents list and the New chat button back", async () => {
-  await seed([], { legacyChat: true })
+test("the switch turns on today's flat list, at the bot's own address", async () => {
+  // The flat layout is the one screen of every chat the app shipped before a bot opened on a Main
+  // (ADR 0162): the bot's address draws it, its routines' deliveries are rows among the chats, and the
+  // six pills are back. A chat of it is one step above that list.
+  const run = {
+    id: "run-bot-1",
+    profileId: bot.id,
+    title: "Morning watch",
+    routine: true,
+    line: "The tide turns at 06:40.",
+    hermesSessionId: `gots-run-${bot.id}`,
+    createdAt: 5,
+    updatedAt: 5,
+    changedAt: 5,
+  }
+  await seed([mainRow(), sideRow(), run], { legacyChat: true })
   globalThis.fetch = async () => json({})
-  await mount(app("/"), async () => {
-    assert.equal(path(), "/", "home is the new-chat screen again")
-  })
   await mount(app(`/b/${bot.id}`), async () => {
-    assert.equal(path(), "/", "and a bot's entry falls back home: that layout draws no bot's screen")
-    assert.equal(await db.conversations.count(), 0, "no Main")
+    await until(
+      async () => Boolean(findText('[data-slot="header-title"]', "Mainly")),
+      "the bot's list",
+    )
+    assert.equal(path(), `/b/${bot.id}`, "the bot's address is its list, not a chat")
+    assert.equal(
+      findAll('[role="group"][aria-label="Filter chats"] button')
+        .map((one) => (one.textContent ?? "").trim())
+        .join(" "),
+      "All Unread Archived Chats Rooms Routines",
+      "the six pills of that list, the routines' one among them",
+    )
+    assert.ok(
+      rowIds().includes(`/c/${run.id}`),
+      "and its routines' deliveries are rows of it, which the new UX's list leaves to the page",
+    )
+    assert.ok(
+      rowIds().includes(`/c/${SIDE}`),
+      "with Main drawn as one of its rows rather than a screen of its own",
+    )
   })
-  await mount(
-    <MemoryRouter initialEntries={["/"]}>
-      <ConversationList />
-    </MemoryRouter>,
-    async () => {
-      await until(async () => Boolean(findText("button", "New chat")), "the New chat button")
-      assert.equal(
-        findAll("a").some((row) => row.getAttribute("href") === `/c/${MAIN}`),
-        false,
-        "nothing opens a bot's Main: the list is Recents",
-      )
-    },
-  )
+  // A chat of it leads back to that address, which is the list's own under this layout.
+  await mount(app(`/c/${SIDE}`), async () => {
+    const back = () => find('button[aria-label="Back to Mainly"]')
+    await until(async () => Boolean(back()), "the chat's way back")
+    await click(back())
+    await until(async () => path() === `/b/${bot.id}`, "the list the chat stands in")
+  })
+  // The new UX's address is no screen under this layout: it lands the list this one draws.
+  await mount(app(`/b/${bot.id}/sidechats`), async () => {
+    await until(
+      async () => path() === `/b/${bot.id}`,
+      "the address the flat layout's list stands on",
+    )
+    await until(
+      async () => Boolean(findText('[data-slot="header-title"]', "Mainly")),
+      "its one list, drawn there",
+    )
+  })
 })
 
 test("the sidebar's Canvas row follows its Labs switch", async () => {
@@ -365,7 +413,7 @@ test("a Main on the current screen draws the same bar: the list in the ring's pl
   await db.conversations.bulkPut([mainRow(), sideRow()])
   globalThis.fetch = async () => json({})
   await mount(app(`/c/${MAIN}`), async () => {
-    await until(async () => Boolean(find('header')), "the chat's bar")
+    await until(async () => Boolean(find("header")), "the chat's bar")
     await until(async () => Boolean(listButton()), "the control that opens the bot's list")
     assert.equal(
       listButton()?.getAttribute("href"),

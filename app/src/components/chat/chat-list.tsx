@@ -1,9 +1,10 @@
 /**
  * A bot's chats as a screen draws them: the bar the words are pinned under, the search where the
  * width puts it, the pill row, the rows themselves, the sentence a pill that keeps nothing says, and
- * the foot. A layout supplies what its bar says and which pills it holds; everything a second list
- * of the same chats must not be able to word or place differently — the press a row makes, the
- * search's one field, the order of the pills under it — is drawn here.
+ * the foot. A layout supplies what its bar says, which pills it holds — and the address it stands on,
+ * since the flat list's is the bot's own — while everything a second list of the same chats must not
+ * be able to word or place differently — the press a row makes, the search's one field, the order of
+ * the pills under it — is drawn here.
  */
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { useLocation, useNavigate } from "react-router"
@@ -14,7 +15,6 @@ import { Chip, ChipRow } from "@/components/chip"
 import { ItemGroup } from "@/components/item-list"
 import { CHATS_SEARCH_FIELD_ID, ListFoot } from "@/components/list-foot"
 import { SearchField } from "@/components/search-field"
-import { botChatsPath } from "@/lib/bot-tabs"
 import {
   CHAT_FILTERS,
   chatList,
@@ -49,6 +49,8 @@ export function ChatList({
   above,
   group,
   clock = "at",
+  listPath,
+  onBack,
   rows,
   selected,
   beside,
@@ -78,6 +80,18 @@ export function ChatList({
    * the reader has just written in is the one they are in.
    */
   clock?: ChatClock
+  /**
+   * The address this list stands on. A row's press replaces an item already open beside the list
+   * rather than stacking a second — two rows of one list are siblings — and the list's own address is
+   * where the press is a push instead, so the list stays the rung behind the chat it opens.
+   */
+  listPath: string
+  /**
+   * What the platform's back press is where this list is the screen: the step behind it, where the
+   * screen has none to name. A list whose way back is a named screen — the Side Chat List's is Main —
+   * hands its own move here, so the control and the press cannot disagree.
+   */
+  onBack?: () => boolean
   rows: ChatListRow[]
   selected?: string
   /** Whether the list stands beside a chat, which is what its rows' presses turn on. */
@@ -88,8 +102,10 @@ export function ChatList({
   const { pathname } = useLocation()
   const marks = useReadMarks()
   // The press is the app's at its first entry — where this list stands when nothing opened it — and a
-  // step back wherever something did, which `back()` answers itself.
-  useEffect(() => setBackGuard(back()), [back])
+  // step back wherever something did, which `back()` answers itself; a list with a screen above it
+  // names that screen's move instead.
+  const step = onBack ?? back()
+  useEffect(() => setBackGuard(step), [step])
   // The host's answer for each session, read once for the whole list: a run started on another device
   // is in flight here too, and only the poll can say so.
   const runs = useAllLiveRuns()
@@ -115,7 +131,7 @@ export function ChatList({
   // A row opens its conversation over this list: a push from the list's own screen, so the list stays
   // the rung behind it. Where an item already stands beside the list the press replaces it instead —
   // two rows of one list are siblings, not steps, so back from the second is still the list.
-  const replace = Boolean(beside) && pathname !== botChatsPath(bot.id)
+  const replace = Boolean(beside) && pathname !== listPath
 
   // A chat is made first and the address moved after it, so the screen that draws it is the one this
   // list opens. The entry says which bot it is for, so the shell keeps the list's lane while the new

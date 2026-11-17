@@ -17,8 +17,9 @@ import { CrashBoundary } from "@/components/crash-screen"
 import { KeyboardShortcuts } from "@/components/keyboard-shortcuts"
 import { DrawerContext } from "@/components/drawer-context"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
-import { botChatsPath } from "@/lib/bot-tabs"
+import { botChatsPath, botMainPath } from "@/lib/bot-tabs"
 import { useBubbleMirror, useBubbleTakeaways } from "@/lib/bubble"
+import { useChatLayout } from "@/lib/chat-layout"
 import { useForgetOpenCanvas } from "@/lib/canvas-open"
 import { prefersReducedMotion, useLarge, useWide } from "@/lib/media"
 import { depth } from "@/lib/nav"
@@ -72,6 +73,9 @@ const ProjectsPane = lazy(() =>
 )
 const SideChatsPane = lazy(() =>
   import("@/routes/side-chats").then((m) => ({ default: m.SideChatsPane })),
+)
+const BotChatsPane = lazy(() =>
+  import("@/routes/bot-chats").then((m) => ({ default: m.BotChatsPane })),
 )
 
 function chatOf(screen: string) {
@@ -201,6 +205,7 @@ export function AppShell({ children }: { children?: ReactNode }) {
   // press at the app's edge offers nothing rather than a sheet over a list that is already there.
   useEffect(() => (wide ? undefined : setMenuOpener(openDrawer)), [openDrawer, wide])
   const [collapsed, toggleCollapsed] = useSidebarCollapsed()
+  const layout = useChatLayout()
   const { pathname } = useLocation()
   useForgetOpenCanvas(pathname)
   const main = useRef<HTMLElement>(null)
@@ -220,10 +225,12 @@ export function AppShell({ children }: { children?: ReactNode }) {
       }
     : bot
       ? {
-          screen: botChatsPath(bot.profileId),
+          // The layout names its own list: the new UX's stands at the bot's side-chat address, and the
+          // flat list's is the bot's own, so the pane's identity is where a reader sees that list.
+          screen: layout === "flat" ? botMainPath(bot.profileId) : botChatsPath(bot.profileId),
           open: bot.open,
           itemKey: bot.selected,
-          node: <SideChatsPane pane={bot} />,
+          node: layout === "flat" ? <BotChatsPane pane={bot} /> : <SideChatsPane pane={bot} />,
         }
       : projects
         ? {

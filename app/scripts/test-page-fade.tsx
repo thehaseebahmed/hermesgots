@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { Route } from "react-router"
 
-import { BotChatsPage } from "@/routes/bot-chats"
+import { SideChatsPage } from "@/routes/side-chats"
 import { forgetHeldChats } from "@/lib/chat-hold"
 import { FADE_MS as COPY_FADE_MS } from "@/components/pane-transition"
 import {
@@ -87,19 +87,15 @@ test(
     await seedChats(
       [
         { id: MAIN, profileId: bot.id, title: "Fader", main: true, messages: ["alpha one"] },
-        {
-          id: MAIN_OTHER,
-          profileId: other.id,
-          title: "Otherly",
-          main: true,
-          messages: ["beta one"],
-        },
+        // The other bot has no Main of its own here, so its address keeps its Side Chat List standing
+        // where it stands: what a bot's row opens, with a chat on screen beside it.
+        { id: MAIN_OTHER, profileId: other.id, title: "Otherly", messages: ["beta one"] },
       ],
       { bots: [bot, other], active: bot.id },
     )
     await mount(
       phone(`/c/${MAIN}`, `/c/${MAIN}`, {
-        routes: <Route path="b/:profileId" element={<BotChatsPage />} />,
+        routes: <Route path="b/:profileId" element={<SideChatsPage />} />,
       }),
       async () => {
         await until(async () => text().includes("alpha one"), "the bot on screen")

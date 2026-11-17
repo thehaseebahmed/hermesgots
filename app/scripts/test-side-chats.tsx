@@ -165,9 +165,15 @@ test("the bar leads back to Main, names the screen over the bot's count, and tra
       `${LABEL} · 2 side chats`,
       "and the bot over how many side chats it has, less what it archived",
     )
-    const back = find('a[aria-label="Back to Main"]')
+    // The way back is a step rather than a link: from Main's own control this list stands one rung
+    // under it, so a link would push a second copy of Main over a list that came from it.
+    const back = find('button[aria-label="Back to Main"]')
     assert.ok(back, "the bar leads with the way back")
-    assert.equal(back?.getAttribute("href"), `/b/${bot.id}`, "onto the bot's Main")
+    assert.equal(
+      back?.closest('[data-slot="header-leading"]') !== null,
+      true,
+      "in the leading slot",
+    )
     const routines = find('header a[aria-label="Routines"]')
     assert.equal(
       routines?.getAttribute("href"),

@@ -8,7 +8,6 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { useLayoutEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router"
 
-import { BotPicker } from "@/components/chat/bot-picker"
 import { ChatComposer } from "@/components/chat/chat-composer"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { EmptyChatState } from "@/components/chat/empty-states"
@@ -17,20 +16,18 @@ import { db, type Attachment, type ModelChoice } from "@/lib/db"
 import { randomId } from "@/lib/utils"
 import { dictationHint } from "@/lib/dictation-hint"
 import { draftKey } from "@/lib/drafts"
-import { COLUMN_BOX, COMPOSER_SLOT } from "@/lib/layout"
+import { COMPOSER_SLOT } from "@/lib/layout"
 import { chosenOf, storedPick } from "@/lib/model-pick"
-import { useChatLayout } from "@/lib/chat-layout"
 import { tell } from "@/lib/tell"
 import { beginChat } from "@/lib/threads"
 
 /**
- * The bot a new chat would go to, drawn before the chat exists. The picker writes the active bot and
- * the screen's verdict draws this surface again for it; the model pill's pick has no row to be
- * written to yet, so it rides into the record the first send makes.
+ * The bot a new chat would go to, drawn before the chat exists — the bot's own, since a chat is
+ * started from its list, and the model pill's pick has no row to be written to yet, so it rides into
+ * the record the first send makes.
  */
 export function ChatNextBlank({ botId, slot }: { botId: string; slot: HoldSlot }) {
   const bot = useLiveQuery(() => db.profiles.get(botId), [botId])
-  const layout = useChatLayout()
   const navigate = useNavigate()
   const [modelPick, setModelPick] = useState<ModelChoice>()
   // A press that lands while the first chat is being made must not make a second one.
@@ -68,16 +65,7 @@ export function ChatNextBlank({ botId, slot }: { botId: string; slot: HoldSlot }
     >
       <ChatHeader title="" showBot={false} />
       <EmptyChatState botId={bot.botId} configured onSend={(text) => send(text, [])} />
-      <div
-        data-slot="composer-slot"
-        data-toast-above
-        className={COMPOSER_SLOT}
-      >
-        {layout === "recents" && (
-          <div className={`${COLUMN_BOX} flex pb-2`}>
-            <BotPicker profile={bot} />
-          </div>
-        )}
+      <div data-slot="composer-slot" data-toast-above className={COMPOSER_SLOT}>
         <ChatComposer
           bot={bot}
           mentionable={{ bot }}

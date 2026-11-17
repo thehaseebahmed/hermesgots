@@ -1,21 +1,31 @@
 /**
- * A bot's screen is the list of its chats: `/b/<bot>` draws them, flat — its pinned ones first and the
- * rest by what was last said — each a row with a chat's icon, its title, its last line, its age and the
- * dot this device's read mark decides, and a reply that waits on the reader marked on its row. The
- * header's title is the way to the bot's settings, the search floats at the foot's left and narrows
- * the rows to what it finds in a title or a line, and one button at the foot's right starts a chat or
- * a room. `scripts/test-chat-list.mjs` holds the rules (the order, the row's shape, the search); this
- * holds the screen they are drawn by.
+ * The flat layout's one screen is the list of a bot's chats: `/b/<bot>` draws them, flat — its pinned
+ * ones first and the rest by what was last said — each a row with a chat's icon, its title, its last
+ * line, its age and the dot this device's read mark decides, and a reply that waits on the reader
+ * marked on its row. The header's title is the way to the bot's settings, the search floats at the
+ * foot's left and narrows the rows to what it finds in a title or a line, and one button at the foot's
+ * right starts a chat or a room. `scripts/test-chat-list.mjs` holds the rules (the order, the row's
+ * shape, the search); this holds the screen they are drawn by.
+ *
+ * It is the layout the Developer switch turns on (ADR 0162), so every case here seeds the switch; the
+ * last one holds the other half of it, where a bot's address is its **Main** and this list is nowhere.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
 import { act } from "react"
 import { MemoryRouter, Route, Routes, useNavigate, type InitialEntry } from "react-router"
 
-import { Home } from "@/App"
+import { AppRoutes, Home } from "@/App"
 import { BotChatsPage, BotChatsPane } from "@/routes/bot-chats"
 import { BOT_CHATS } from "@/lib/chat-list"
-import { db, deleteConversation, getSettings, saveChatFilter, saveSettings, type Message } from "@/lib/db"
+import {
+  db,
+  deleteConversation,
+  getSettings,
+  saveChatFilter,
+  saveSettings,
+  type Message,
+} from "@/lib/db"
 import { draftKey, flushDrafts, saveDraft } from "@/lib/drafts"
 import { pressBack } from "@/lib/native"
 import { markRead } from "@/lib/read-marks"
@@ -45,6 +55,8 @@ import {
 
 const bot = botProfile("bot-chats", { id: "bot-1", name: "Mainly", hermesProfile: "default" })
 const LABEL = "Mainly"
+/** The bot's Main, for the one case that reads the app's other layout. */
+const MAIN = "main-bot-1"
 
 /**
  * A filter pill, by the word it wears. Named by its group rather than by `header [role="group"] button`,
@@ -105,7 +117,8 @@ async function seed(
 ) {
   offers = rooms ? ["chats", "rooms", "rooms_write"] : ["chats", "rooms"]
   infoReads = 0
-  await seedSettings({ developer: true, activeProfileId: host.id })
+  // This is the flat layout's screen: the Developer switch is what draws it (ADR 0162).
+  await seedSettings({ developer: true, legacyChat: true, activeProfileId: host.id })
   await db.profiles.clear()
   await db.profiles.put(host)
   await db.conversations.clear()
@@ -124,7 +137,12 @@ async function seed(
       ...(one.routine ? { routine: true, line: one.routine.line } : {}),
       ...(one.main ? { main: true } : {}),
       ...(one.room
-        ? { room: { id: `room-${one.id}`, members: [{ profile: "default", displayName: "Mainly" }] } }
+        ? {
+            room: {
+              id: `room-${one.id}`,
+              members: [{ profile: "default", displayName: "Mainly" }],
+            },
+          }
         : {}),
     })),
   )
@@ -220,6 +238,29 @@ function StepBack() {
     </button>
   )
 }
+
+test("with the switch off a bot's address lands on its Main, and this list is nowhere", async () => {
+  // The app's own route table: the switch is off, the bot's Main is a record this device holds, and
+  // the address is a doorway onto it (ADR 0161) rather than onto this list.
+  await seed([{ id: MAIN, title: "Main", at: 10, main: true }])
+  await seedSettings({ developer: true, activeProfileId: bot.id })
+  await mount(
+    <MemoryRouter initialEntries={[`/b/${bot.id}`]}>
+      <Path />
+      <Nav />
+      <AppRoutes />
+    </MemoryRouter>,
+    async () => {
+      await until(async () => path() === `/c/${MAIN}`, "the bot's Main")
+      await until(async () => Boolean(findText('[data-slot="header-title"]', "Main")), "Main's bar")
+      assert.equal(
+        findAll('[role="group"][aria-label="Filter chats"] button').length,
+        0,
+        "and no list of the bot's chats was drawn in its place",
+      )
+    },
+  )
+})
 
 test("Home is the active bot's screen: `/` sends the reader to its list", async () => {
   // A bot with nothing to open, so the address `/` lands on is the list itself: the door, seen without
@@ -903,17 +944,28 @@ test("the pills narrow the rows to the kind each names, and say what their empti
       ["All", "Unread", "Archived", "Chats", "Rooms", "Routines"],
       "the six pills, in the rule's own order, Archived straight after Unread",
     )
-    assert.equal(filterPill("All")?.getAttribute("aria-pressed"), "true", "All is what the list opens on")
+    assert.equal(
+      filterPill("All")?.getAttribute("aria-pressed"),
+      "true",
+      "All is what the list opens on",
+    )
 
     await click(filterPill("Unread"))
     assert.deepEqual(rowIds(), ["trip"], "Unread keeps the rows that wear this device's dot")
     await click(filterPill("Chats"))
-    assert.deepEqual(rowIds(), ["trip", "dinner"], "Chats is a row that is neither a room nor a run")
+    assert.deepEqual(
+      rowIds(),
+      ["trip", "dinner"],
+      "Chats is a row that is neither a room nor a run",
+    )
     await click(filterPill("Rooms"))
     assert.deepEqual(rowIds(), ["planning"], "Rooms is the room's own row")
     await click(filterPill("Routines"))
     assert.deepEqual(rowIds(), [], "no routine has delivered here")
-    assert.ok(findText("p", "No routines."), "so the pill says what its emptiness is, in its own words")
+    assert.ok(
+      findText("p", "No routines."),
+      "so the pill says what its emptiness is, in its own words",
+    )
 
     // A search inside a pill that holds rows is the search's emptiness, not the pill's.
     await click(filterPill("Rooms"))
@@ -1081,14 +1133,23 @@ test("the filter a device kept is the one its list opens on", async () => {
     { id: "trip", title: "Trip to Lisbon", at: 300, said: "Booked the flights" },
     { id: "planning", title: "Planning", at: 150, said: "All aboard", room: true },
   ])
-  // A device that has never chosen: the ground the first visit stands on.
-  await seedSettings({ developer: true, activeProfileId: bot.id })
+  // A device that has never chosen: the ground the first visit stands on. The switch stays on, since
+  // this is the flat layout's list.
+  await seedSettings({ developer: true, legacyChat: true, activeProfileId: bot.id })
   await mount(screen(), async () => {
     await until(async () => rowIds().length === 2, "the list")
-    assert.equal(filterPill("All")?.getAttribute("aria-pressed"), "true", "a device that never chose opens on All")
+    assert.equal(
+      filterPill("All")?.getAttribute("aria-pressed"),
+      "true",
+      "a device that never chose opens on All",
+    )
     await click(filterPill("Rooms"))
     assert.deepEqual(rowIds(), ["planning"], "the press narrows the rows")
-    assert.equal((await getSettings()).chatFilters?.[bot.id], "rooms", "and is what this device keeps for this bot")
+    assert.equal(
+      (await getSettings()).chatFilters?.[bot.id],
+      "rooms",
+      "and is what this device keeps for this bot",
+    )
   })
   // The next visit is the pill it left, not the ground.
   await mount(screen(), async () => {
@@ -1148,11 +1209,7 @@ test("a pill pressed on one bot leaves every other bot's list on its own", async
       "true",
       "a bot that never chose opens on All, not on the pill another bot kept",
     )
-    assert.deepEqual(
-      rowIds().sort(),
-      ["other-chat", "other-room"],
-      "and lists every row it holds",
-    )
+    assert.deepEqual(rowIds().sort(), ["other-chat", "other-room"], "and lists every row it holds")
   })
   // And the pill the first bot kept is still its own, with nothing on it taken by the second.
   await mount(screen(), async () => {
@@ -1167,10 +1224,7 @@ test("a pill saved beside another write of the settings row survives it", async 
   // the pill's own write and the row's are both transactions, and the later one keeps both fields.
   let lost = 0
   for (let i = 0; i < 20; i += 1) {
-    await Promise.all([
-      saveChatFilter(bot.id, "rooms"),
-      saveSettings({ appearanceAt: i + 1 }),
-    ])
+    await Promise.all([saveChatFilter(bot.id, "rooms"), saveSettings({ appearanceAt: i + 1 })])
     if ((await getSettings()).chatFilters?.[bot.id] !== "rooms") lost += 1
   }
   assert.equal(lost, 0, "no pill is lost to a save of the switches beside it")

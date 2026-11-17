@@ -35,11 +35,16 @@ try {
       changedAt: at,
     })
   }, { mock, id })
-  await page.reload()
-  await page
-    .getByRole("navigation", { name: "Recents" })
-    .getByText("Overlap test", { exact: true })
-    .waitFor()
+  // The chat is on the device before the sends: a chat nothing was said in is no row of any list
+  // (ADR 0158), so the wait is the store's own answer rather than a row on a screen.
+  assert.equal(
+    await page.evaluate(async (id) => {
+      const { db } = await import("/src/lib/db.ts")
+      return Boolean(await db.conversations.get(id))
+    }, id),
+    true,
+    "the chat this flow sends into is on the device",
+  )
 
   // Count POST /v1/runs requests
   let runPosts = 0

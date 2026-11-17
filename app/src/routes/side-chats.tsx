@@ -19,6 +19,7 @@
  * when each chat last moved at all (`latest`), since a chat the reader has just written in is the one
  * they are in.
  */
+import { useCallback } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { HouseIcon, RotateCcwClockIcon } from "lucide-react"
 import { Link, Navigate, useParams } from "react-router"
@@ -28,7 +29,7 @@ import { ChatList } from "@/components/chat/chat-list"
 import { ItemRow, pinnedLine } from "@/components/item-list"
 import { buttonVariants } from "@/components/ui/button"
 import { labelOf } from "@/lib/bot-name"
-import { botMainPath, botRoutinesPath } from "@/lib/bot-tabs"
+import { botChatsPath, botMainPath, botRoutinesPath } from "@/lib/bot-tabs"
 import { useBotRows } from "@/lib/chat-rows"
 import {
   CHAT_FILTERS,
@@ -41,6 +42,7 @@ import {
 } from "@/lib/chat-list"
 import { chatFilterOf, saveChatFilter, type Profile } from "@/lib/db"
 import { HEADER_BUTTON } from "@/lib/layout"
+import { useNav } from "@/lib/nav"
 import { useBotChatsPane, useSplit, type BotPane } from "@/lib/pane"
 import { quietly } from "@/lib/report"
 import { useNow } from "@/lib/threads"
@@ -100,6 +102,14 @@ function SideChatsList({
   const answer = useBotRows(profileId, filter, "latest")
   const split = useSplit()
   const now = useNow()
+  const { up } = useNav()
+  // The one move the bar's control and the platform's press both make: a step up to the bot's Main,
+  // which is the bot's entry — not a second copy of Main pushed over a list that came from it. Opened
+  // cold this list stands at the app's first entry, where the same step puts Main in its place.
+  const ontoMain = useCallback(() => {
+    up(botMainPath(profileId))
+    return true
+  }, [profileId, up])
   if (!answer) return null
   // A bot that is gone — deleted here or on another device — lands home rather than on a list it
   // cannot fill.
@@ -115,7 +125,7 @@ function SideChatsList({
   return (
     <ChatList
       bot={bot}
-      leading={<BackButton label="Back to Main" to={botMainPath(bot.id)} floating />}
+      leading={<BackButton label="Back to Main" onClick={ontoMain} floating />}
       title="Sidechats"
       subtitle={`${labelOf(labels, bot)} · ${count} ${count === 1 ? "side chat" : "side chats"}`}
       actions={
@@ -134,6 +144,8 @@ function SideChatsList({
       pills={PILLS}
       filter={filter}
       onFilter={(next) => void saveChatFilter(profileId, next).catch(quietly("Saving the filter"))}
+      listPath={botChatsPath(bot.id)}
+      onBack={!beside && main ? ontoMain : undefined}
       above={
         split && main ? <MainRow row={main} now={now} bot={bot} selected={selected} /> : undefined
       }

@@ -15,8 +15,8 @@
 import { useCallback, useEffect, useRef } from "react"
 
 import { BackButton } from "@/components/back-button"
-import { botChatsPath } from "@/lib/bot-tabs"
-import { useChatLayout } from "@/lib/chat-layout"
+import { botChatsPath, botMainPath } from "@/lib/bot-tabs"
+import { useChatLayout, type ChatLayout } from "@/lib/chat-layout"
 import { useNav } from "@/lib/nav"
 import { setBackGuard } from "@/lib/native"
 import { useSplit } from "@/lib/pane"
@@ -24,6 +24,14 @@ import { useBotLabels } from "@/lib/use-bot-labels"
 
 /** What the control says where this device cannot name the bot whose list it lands. */
 export const UNNAMED = "Back to chats"
+
+/**
+ * The list a layout draws a bot's chats on: the new UX's has an address of its own under the bot, and
+ * the flat layout's is the bot's own address, because that layout's list is the bot's screen.
+ */
+export function listPathOf(layout: ChatLayout, bot: string) {
+  return layout === "flat" ? botMainPath(bot) : botChatsPath(bot)
+}
 
 export function useChatLead({
   bot,
@@ -54,9 +62,10 @@ export function useChatLead({
   // the bot's own row: the screens this leads already hold that row, and a second read of it would
   // leave the row's first slot empty until it landed.
   const named = useBotLabels().get(bot ?? "")
-  // The legacy layout has no bot's screen at all, so nothing of the list is drawn there. Main is the
-  // bot's own entry rather than a rung above it, so it names no list either.
-  const list = layout === "flat" && bot && !main ? botChatsPath(bot) : undefined
+  // The flat layout's list is the bot's own address and the new UX's has one of its own, so a chat's
+  // way back is the list its layout draws. Main is the bot's entry rather than a rung above it, so it
+  // names no list either; a device whose settings have not answered draws the control once they do.
+  const list = bot && !main && layout ? listPathOf(layout, bot) : undefined
   const besideList = (beside ?? split) && Boolean(list)
   const ontoList = useCallback(() => {
     if (list) up(list)
