@@ -98,6 +98,8 @@ interface RowPress {
 
 /** The keyboard's half: the column's handle, held by its row's id so a move hands the focus back. */
 interface Handle {
+  /** Whether the column this handle stands in has finished growing. */
+  open: boolean
   /** ArrowUp and ArrowDown, where the handle holds the focus: one place, the way a press moves a row. */
   onKeyDown: (event: KeyboardEventOf<HTMLButtonElement>) => void
   /** Keeps the handle by its row's id, so a move can hand the focus back to it once the row has landed. */
@@ -107,6 +109,11 @@ interface Handle {
 interface RowWiring {
   hidden: boolean
   index: number
+  /**
+   * Whether the column has finished growing: the row's column and its eye ride the same 300ms the
+   * mode takes to arrive, so the list is one motion rather than a jump followed by a settle.
+   */
+  open: boolean
   /** The row a reader is carrying, or none: a row reads its own lift and the place it would take. */
   drag: Drag | null
   press: RowPress
@@ -194,7 +201,7 @@ function RowHandle<Pin extends SidebarPin>({
 }) {
   const { keep, onKeyDown } = handle
   return (
-    <RowGutter>
+    <RowGutter open={handle.open}>
       <button
         type="button"
         ref={keep}
@@ -241,7 +248,12 @@ function FeatureModeRow<Pin extends SidebarPin>({
         // that is put away.
         aria-label={`${hidden ? "Show" : "Hide"} ${row.label}`}
         onClick={() => void onSetHidden(!hidden)}
-        className={EYE_CONTROL}
+        // The eye rides the column's own 300ms, so the mode arrives as one motion.
+        className={cn(
+          EYE_CONTROL,
+          "transition-opacity duration-300 motion-reduce:transition-none",
+          wiring.open ? "opacity-100" : "opacity-0",
+        )}
       >
         {hidden ? <EyeIcon className="size-4" /> : <EyeOffIcon className="size-4" />}
       </button>
@@ -362,6 +374,7 @@ function PinModeRow<Pin extends SidebarPin>({
  */
 export function SidebarEdit<Pin extends SidebarPin>({
   rows,
+  open = true,
   atDefault,
   onLeave,
   onSetHidden,
@@ -371,6 +384,11 @@ export function SidebarEdit<Pin extends SidebarPin>({
   onReset,
 }: {
   rows: readonly SidebarPlacedRow<Pin>[]
+  /**
+   * Whether the mode is open or folding away: closing runs the column back to zero and fades the eye,
+   * and the sidebar's own list replaces these rows once the motion is over.
+   */
+  open?: boolean
   /** The record already reads as today's list: there is nothing for the foot's Reset to clear. */
   atDefault: boolean
   /** Leaves the mode, and is the one way out a reader can take from inside it. */
@@ -388,6 +406,20 @@ export function SidebarEdit<Pin extends SidebarPin>({
 }) {
   const group = useRef<HTMLDivElement>(null)
   const [said, setSaid] = useState("")
+  /**
+   * Whether the column has grown. The rows mount at zero — exactly the resting row's spacing, so the
+   * swap from the sidebar's own list is invisible — and grow on the next frame, which is what gives
+   * the browser two styles to tween between (transitions.dev's card resize). Closing runs it back.
+   */
+  const [grown, setGrown] = useState(false)
+  useEffect(() => {
+    if (!open) {
+      setGrown(false)
+      return
+    }
+    const frame = requestAnimationFrame(() => setGrown(true))
+    return () => cancelAnimationFrame(frame)
+  }, [open])
   /** Whether the foot's question is up: the one press that clears the layout asks before it does. */
   const [asking, setAsking] = useState(false)
   /**
@@ -458,6 +490,9 @@ export function SidebarEdit<Pin extends SidebarPin>({
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return
+      // A mode already folding away owns nothing: the next press is the sheet's, or the page's, and
+      // stopping it there would leave a drawer that no key can shut.
+      if (!open) return
       // The question owns Escape while it stands: that press closes it, and the next one leaves the
       // mode — a reader answering a question is not asking to leave the list behind it. So the press is
       // let through to the question, which owns the key by being the frontmost pop-up.
@@ -476,7 +511,7 @@ export function SidebarEdit<Pin extends SidebarPin>({
     }
     document.addEventListener("keydown", onKey, true)
     return () => document.removeEventListener("keydown", onKey, true)
-  }, [asking, onLeave])
+  }, [asking, onLeave, open])
 
   const keepControl = (control: string) => (node: HTMLButtonElement | null) => {
     if (node) controls.current.set(control, node)
@@ -599,7 +634,9 @@ export function SidebarEdit<Pin extends SidebarPin>({
       role="group"
       aria-label="Sidebar layout"
       tabIndex={-1}
-      className="flex flex-col gap-0.5"
+      // Nothing in the mode takes a press while it is folding away: the motion is the mode leaving,
+      // and a row pressed mid-motion is a press the reader meant for the list underneath.
+      className={cn("flex flex-col gap-0.5", !open && "pointer-events-none")}
     >
       {rows.map(({ row, hidden }, index) => {
         // What every row takes from the list it stands in: its place, the gesture, and the two ways
@@ -608,6 +645,7 @@ export function SidebarEdit<Pin extends SidebarPin>({
         const wiring: RowWiring = {
           hidden,
           index,
+          open: grown,
           drag,
           press: {
             onPointerDown: beginDrag(row, index),
@@ -616,6 +654,7 @@ export function SidebarEdit<Pin extends SidebarPin>({
             onPointerCancel: cancelDrag,
           },
           handle: {
+            open: grown,
             onKeyDown: (event) => stepByKey(event, row),
             keep: keepControl(row.id),
           },

@@ -1,5 +1,5 @@
 import { useLiveQuery } from "dexie-react-hooks"
-import { useCallback, useRef, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Link, matchPath, NavLink, useLocation, type NavLinkProps } from "react-router"
 import {
   BellOffIcon,
@@ -15,7 +15,7 @@ import {
 
 import { Bot } from "@/components/bot"
 import { SidebarEdit } from "@/components/sidebar-edit"
-import { RowGutter, SidebarRowBody } from "@/components/sidebar-row-body"
+import { SidebarRowBody } from "@/components/sidebar-row-body"
 import { SortMenu } from "@/components/sort-menu"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -44,6 +44,10 @@ import { useSyncState } from "@/lib/sync"
 import { BOT_SORTS, sortBots, useBotSort, useBotSummaries, useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { reasonText, useWaitingSessions, type WaitingReason } from "@/lib/waiting"
+
+/** The column's own transition, in the mode: how long the sidebar waits before the resting
+ * rows replace the mode's, so the two meet at the same geometry. */
+const COLUMN_MS = 300
 
 const rowClass = ({ isActive }: { isActive: boolean }) =>
   cn(
@@ -112,7 +116,6 @@ function SidebarRow({
       data-sidebar-row={row.id}
       className={collapsed ? railClass : rowClass}
     >
-      {!collapsed && <RowGutter />}
       <SidebarRowBody row={row} collapsed={collapsed} />
     </RootLink>
   )
@@ -149,7 +152,6 @@ function CanvasRow({
       data-sidebar-row={row.id}
       className={(collapsed ? railClass : rowClass)({ isActive: opened })}
     >
-      {!collapsed && <RowGutter />}
       <SidebarRowBody row={row} collapsed={collapsed} />
     </Link>
   )
@@ -220,7 +222,6 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
                     : cn(rowClass({ isActive: isActive || owner === bot.id }), "min-h-14 py-2")
                 }
               >
-                {!collapsed && <RowGutter />}
                 <span className="relative flex shrink-0">
                   <Bot id={bot.botId} className="size-9" />
                   {/* The rail draws no line under the name, so its mark is the only one a row has
@@ -324,8 +325,7 @@ function Waiting({
                     collapsed ? railClass(state) : cn(rowClass(state), "min-h-14 py-2")
                   }
                 >
-                  {!collapsed && <RowGutter />}
-                  <Icon
+                    <Icon
                     className={
                       collapsed
                         ? "size-5 shrink-0 text-warning"
@@ -423,12 +423,28 @@ export function ConversationList({
   // reader in a mode where a row press navigates nowhere. The switch's ref is what the mode gives the
   // focus back to.
   const [editing, setEditing] = useState(false)
+  /**
+   * Whether the mode is on its way out. It stays mounted while its column closes, because at zero the
+   * column is the resting row's spacing: the list that replaces it lands exactly where the motion
+   * left off, so leaving is not a jump. `COLUMN_MS` is the column's own transition.
+   */
+  const [leaving, setLeaving] = useState(false)
+  const closing = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(closing.current), [])
   const editButton = useRef<HTMLButtonElement>(null)
   // Held as one function for the sidebar's whole life: the mode answers Escape on the document, and a
   // fresh `onLeave` every render would re-register that listener on every one.
   const leaveEdit = useCallback(() => {
-    setEditing(false)
+    // A second press while the mode is already folding away is the same press: the focus is back on
+    // the switch, and the list underneath is not there yet.
+    if (closing.current !== undefined) return
+    setLeaving(true)
     editButton.current?.focus()
+    closing.current = window.setTimeout(() => {
+      closing.current = undefined
+      setLeaving(false)
+      setEditing(false)
+    }, COLUMN_MS)
   }, [])
 
   return (
@@ -452,6 +468,10 @@ export function ConversationList({
             // Collapsing leaves the mode before it collapses (a Decision): the rail has no switch to
             // come back through, so the control that took the reader there keeps the focus.
             onClick={() => {
+              // The sidebar is folding, so the mode has no list to linger over: it goes at once.
+              window.clearTimeout(closing.current)
+              closing.current = undefined
+              setLeaving(false)
               setEditing(false)
               onToggleCollapsed()
             }}
@@ -468,7 +488,7 @@ export function ConversationList({
             className="size-11 rounded-full aria-pressed:bg-muted aria-pressed:text-foreground"
             aria-label={editing ? "Done editing sidebar" : "Edit sidebar"}
             aria-pressed={editing}
-            onClick={() => setEditing((open) => !open)}
+            onClick={() => (editing ? leaveEdit() : setEditing(true))}
           >
             <SlidersHorizontalIcon className="size-5" />
           </Button>
@@ -477,9 +497,10 @@ export function ConversationList({
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         <nav className={cn("flex flex-col gap-0.5", collapsed && "items-center")} aria-label="Main">
-          {editing ? (
+          {editing || leaving ? (
             <SidebarEdit
               rows={editRows}
+              open={!leaving}
               atDefault={atDefault}
               onLeave={leaveEdit}
               onSetHidden={(id, hidden) => saveLayout(withHidden(known, layout, id, hidden))}

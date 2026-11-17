@@ -37,18 +37,18 @@ const gripOf = (page, id) => page.locator(`[data-sidebar-row="${id}"] [data-side
 
 /**
  * Where a row's content starts, how wide the column before it is and how tall the row is: the mark's
- * left edge, the column's own box, and the row's. Read in both states, since the column every row
- * keeps is what holds both answers the same when the mode opens — the one thing about it only a
+ * left edge, the column's own box (zero where the row has none, which is every resting row) and the
+ * row's. Read in both states, since what the column costs the row is the one thing about it only a
  * laid-out page can measure. The mark is the thing after the column, never the grip's glyph inside it.
  */
 const leadingOf = (row) =>
   row.evaluate((el) => {
     const column = el.querySelector("[data-sidebar-gutter]")
-    const mark = column?.nextElementSibling
+    const mark = column ? column.nextElementSibling : el.firstElementChild
     const box = el.getBoundingClientRect()
     return {
       markX: Math.round(mark.getBoundingClientRect().left),
-      column: Math.round(column.getBoundingClientRect().width),
+      column: column ? Math.round(column.getBoundingClientRect().width) : 0,
       height: Math.round(box.height),
     }
   })
@@ -80,15 +80,14 @@ await flow(
       0,
       "a sidebar at rest draws no grip",
     )
-    // The column is reserved on every row in both states: at rest it is empty, 12px of a row that
-    // would otherwise start its mark where a name wanted it.
+    // No column at rest: the sidebar keeps the spacing it shipped with, and the mode brings its own.
     assert.equal(
       await page.locator('[data-sidebar-row="projects"] [data-sidebar-gutter]').count(),
-      1,
-      "and the column every row starts with is kept, empty, at rest",
+      0,
+      "and no column on a row at rest",
     )
     const leading = await leadingOf(page.locator('[data-sidebar-row="projects"]'))
-    assert.equal(leading.column, 12, `the column is 12px wide (${leading.column})`)
+    assert.equal(leading.column, 0, `the row has no column to spend (${leading.column}px)`)
     // One grid: a bot's face begins where a feature's mark does, in the same sidebar, at rest.
     const botFace = await leadingOf(page.getByRole("link", { name: "Test bot" }).first())
     assert.equal(
@@ -100,11 +99,16 @@ await flow(
     const before = await openMode(page)
     await shot("editing")
     await settled(page)
-    assert.deepEqual(
-      await leadingOf(page.locator('[data-sidebar-row="projects"]')),
-      leading,
-      "the mode opens into the column the resting row kept: the same mark, at the same x, in a row of the same height",
+    // The column has grown, and it is the only thing the mode spends on the row: 12px of it and the
+    // 8px gap beside it, with the row's height untouched.
+    const grown = await leadingOf(page.locator('[data-sidebar-row="projects"]'))
+    assert.equal(grown.column, 12, `the column grows to 12px (${grown.column})`)
+    assert.equal(
+      grown.markX,
+      leading.markX + 20,
+      `and the mark moves 20px further in, the column and its gap (${grown.markX} against ${leading.markX})`,
     )
+    assert.equal(grown.height, leading.height, "in a row of the same height")
     assert.equal(
       await page
         .locator('[data-sidebar-row="projects"] [data-sidebar-gutter] [data-sidebar-grip]')
@@ -112,12 +116,20 @@ await flow(
       1,
       "with the grip standing in the resting row's empty column",
     )
+    const arranged = await page.locator("[data-sidebar-row]").count()
+    assert.equal(
+      await page.locator("[data-sidebar-row] [data-sidebar-gutter]").count(),
+      arranged,
+      `one column on each of the ${arranged} rows the mode arranges, and none below the boundary`,
+    )
     assert.equal(
       await page
-        .locator('[data-sidebar-row="projects"] [data-sidebar-gutter]')
-        .getAttribute("aria-hidden"),
-      null,
-      "and the column audible, since the grip it holds is a control a keyboard reaches",
+        .getByRole("link", { name: "Test bot" })
+        .first()
+        .locator("[data-sidebar-gutter]")
+        .count(),
+      0,
+      "a bot's row below the boundary carries none",
     )
 
     // The gesture: press the row's own body — not the column, and not a control, since the whole row
@@ -247,19 +259,25 @@ await flow(
       0,
       "the drawer at rest draws no grip either",
     )
-    // The column is the sheet's too, but only once the sheet has finished sliding in: a box measured
-    // mid-animation is the animation's, not the row's.
+    // No column at rest in the drawer either: the sheet's list is the sidebar's list.
     await settled(page)
-    const leading = await leadingOf(page.locator('[data-sidebar-row="projects"]'))
-    assert.equal(leading.column, 12, `the column is 12px wide at 390px too (${leading.column})`)
+    const resting = await leadingOf(page.locator('[data-sidebar-row="projects"]'))
+    assert.equal(resting.column, 0, `no column on a drawer row at rest (${resting.column}px)`)
 
     const before = await openMode(page)
     await shot("editing")
     await settled(page)
-    assert.deepEqual(
-      await leadingOf(page.locator('[data-sidebar-row="projects"]')),
-      leading,
-      "and the drawer's rows keep their column too: the same mark, at the same x, at 390px",
+    // A box measured mid-animation is the animation's, not the row's: wait for the column to report
+    // itself open before reading it.
+    await page
+      .locator('[data-sidebar-row="projects"] [data-sidebar-gutter][data-open]')
+      .waitFor({ timeout: 5_000 })
+    const leading = await leadingOf(page.locator('[data-sidebar-row="projects"]'))
+    assert.equal(leading.column, 12, `the column grows to 12px at 390px too (${leading.column})`)
+    assert.equal(
+      leading.markX,
+      resting.markX + 20,
+      `and the mark moves the column and its gap (${leading.markX} against ${resting.markX})`,
     )
 
     // A finger, through the browser's own input pipeline: on the row's name it is the drawer's — the

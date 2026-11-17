@@ -3,8 +3,9 @@
  * button is the switch, Escape gives the button and the links back, a row in the mode is no link, a
  * row can be put away by its eye and brought back by the same press, and a row moves by the arrows on
  * its column's handle — each press writing the account's record and saying what it did, with the focus
- * left on the control that moved the row. Every row in the sidebar starts with the same narrow column
- * in both states, whatever kind of row it is, so opening the mode moves nothing but the controls. The
+ * left on the control that moved the row. The mode's rows carry a narrow column the resting sidebar
+ * does not, grown when the mode opens and closed before it goes, so the two states meet at one
+ * geometry. The
  * last case is the same sidebar in a phone's drawer, where Escape is the mode's first and the sheet's
  * only after it.
  */
@@ -519,19 +520,19 @@ async function seedWaitingSession() {
 }
 
 /**
- * The column every sidebar row starts with, in both states and for every kind of row: 12px of it,
- * down the row's whole height, empty at rest and holding the mode's grip while the reader is
- * arranging. A feature's mark, a pinned canvas's mark, a waiting session's warning and a bot's face
- * all begin in the same place — so opening the mode moves no mark, and no kind of row stands further
- * in than another.
+ * The column is the mode's alone. The resting sidebar draws none — its spacing is the spacing it
+ * shipped with — and the mode's rows mount with the column closed, which is that same resting
+ * geometry, then grow it. That is what makes entering and leaving seamless: at zero the row is a
+ * resting row, so the list may replace the mode's rows (or the reverse) at either end of the motion
+ * without a jump.
  *
- * A DOM without layout cannot measure pixels, so this holds the arithmetic's parts: one column on
- * every row, the row's first child, 12px wide and stretching to the row's own height, with the row's
- * 12px padding and its 8px gap around it in both states — the mark starting 32px in, the least the
- * row can spend on a column it keeps for the grip. The sweep measures the boxes (ADR 0019), and does,
- * at 1024px and again in the drawer.
+ * A DOM without layout cannot measure a tween, so this holds the parts the tween is made of: no
+ * column at rest, one on every row the mode arranges and none below the boundary, its width class
+ * going from zero to 12px with the transition and the reduced-motion guard on it, the grip standing
+ * in it, and the column closing back to zero before the resting list returns. The sweep measures the
+ * boxes before and after the motion (ADR 0019).
  */
-test("every row, in both states and every kind, starts with the 12px column", async () => {
+test("the column belongs to the mode, and grows out of the resting row's geometry", async () => {
   await seed()
   serveWaiting()
   await seedWaitingSession()
@@ -541,101 +542,66 @@ test("every row, in both states and every kind, starts with the 12px column", as
       "the waiting row",
     )
     await until(async () => Boolean(find('nav[aria-labelledby="bots-heading"] a')), "the bot's row")
-    const columnOf = (row: string) => find(row)?.querySelector("[data-sidebar-gutter]")
-    const FEATURE = 'nav[aria-label="Main"] [data-sidebar-row="projects"]'
-    const PIN = '[data-sidebar-row="canvas:p1"]'
-    const WAITING = 'nav[aria-labelledby="waiting-heading"] a'
-    const BOT_ROW = 'nav[aria-labelledby="bots-heading"] a'
 
-    // Every kind of row starts with the column, and with nothing else.
-    for (const [what, row] of [
-      ["a feature", FEATURE],
-      ["the pin", PIN],
-      ["a waiting session", WAITING],
-      ["a bot", BOT_ROW],
-    ] as const) {
-      const column = columnOf(row)
-      assert.ok(column, `${what} starts with the column`)
-      assert.equal(find(row)?.firstElementChild, column, `and the ${what} starts with nothing else`)
-      assert.equal(column.classList.contains("w-3"), true, "12px of it")
-      assert.equal(column.classList.contains("shrink-0"), true, "which no name squeezes")
-      assert.equal(
-        column.classList.contains("self-stretch"),
-        true,
-        "down the row's whole height, whatever height that row is",
-      )
-      assert.equal(column.getAttribute("aria-hidden"), "true", "hidden, standing empty at rest")
-      assert.equal(column.firstElementChild, null, "and empty: nothing is drawn in it at rest")
-      assert.equal(column.classList.contains("touch-none"), false, "with no touch-action at rest")
-      assert.equal(
-        find(row)?.classList.contains("gap-2"),
-        true,
-        "beside 12px of padding and an 8px gap — the arithmetic the mark stands on",
-      )
-    }
+    // At rest there is no column at all: no kind of row carries one, so the sidebar is the sidebar.
+    assert.equal(findAll("[data-sidebar-gutter]").length, 0, "no column anywhere at rest")
     assert.equal(
-      columnOf(FEATURE)?.nextElementSibling?.tagName.toLowerCase(),
+      find('nav[aria-label="Main"] [data-sidebar-row="projects"]')?.firstElementChild?.tagName.toLowerCase(),
       "svg",
-      "a feature's mark is the next thing after its column",
-    )
-    assert.equal(
-      columnOf(BOT_ROW)?.nextElementSibling?.tagName.toLowerCase(),
-      "span",
-      "and a bot's face the next thing after its own",
-    )
-    assert.equal(
-      findAll("[data-sidebar-gutter]").length,
-      8,
-      "every row the sidebar draws carries one: five features, the pin, the waiting row and the bot",
+      "and a feature row starts with its mark, as it always did",
     )
 
     await click(editButton())
     await until(async () => Boolean(group()), "the mode")
-    const modeColumn = columnOf('[data-sidebar-row="projects"]')
-    assert.equal(modeColumn?.classList.contains("w-3"), true, "the mode's row keeps the same 12px")
-    assert.equal(
-      modeColumn?.firstElementChild?.hasAttribute("data-sidebar-grip"),
-      true,
-      "with the grip standing in it",
+    const column = () => find('[data-sidebar-row="projects"] [data-sidebar-gutter]')
+
+    // One on each row the mode arranges, and none on the rows it does not.
+    assert.equal(findAll("[data-sidebar-gutter]").length, 6, "one on each row the mode arranges")
+    assert.ok(
+      find('[data-sidebar-row="canvas:p1"] [data-sidebar-gutter]'),
+      "the pinned canvas's too",
     )
     assert.equal(
-      modeColumn?.getAttribute("aria-hidden"),
+      find('nav[aria-labelledby="bots-heading"] a')?.querySelector("[data-sidebar-gutter]"),
       null,
-      "audible in the mode, since the grip it holds is a control a reader reaches",
+      "and none below the boundary, where nothing is arranged",
     )
+
+    // It grows, and it is the app's own curve in both directions, never for a reader who asked for
+    // less motion.
+    await until(async () => column()?.getAttribute("data-open") === "", "the column grown")
+    assert.equal(column()?.classList.contains("w-3"), true, "12px once it has grown")
     assert.equal(
-      modeColumn?.classList.contains("touch-none"),
+      column()?.classList.contains("transition-[width,margin]"),
       true,
-      "and the column keeps the touch while the grip stands in it",
+      "its width tweened, with the gap it pays back",
     )
     assert.equal(
-      modeRow("projects")?.firstElementChild?.firstElementChild,
-      modeColumn,
-      "the row's own line starts with it here too",
-    )
-    assert.equal(
-      modeRow("projects")?.firstElementChild?.classList.contains("gap-2"),
+      column()?.classList.contains("motion-reduce:transition-none"),
       true,
-      "and the line spends 8px on the gap beside it, as the resting row does",
+      "and no motion for the reader who asked for none",
     )
+    assert.equal(column()?.classList.contains("overflow-hidden"), true, "clipped to its own width")
     assert.equal(
-      findAll("[data-sidebar-gutter] [data-sidebar-grip]").length,
-      6,
-      "the rows the mode arranges, each holding a grip",
-    )
-    // The rows below the boundary keep their column, empty: a mark down there stands at the same x it
-    // stood at, and at the same x as a feature's above it.
-    assert.equal(
-      columnOf('[data-sidebar-row="projects"]')?.querySelector("[data-sidebar-grip]") !== null,
+      column()?.firstElementChild?.hasAttribute("data-sidebar-grip"),
       true,
-      "the grip above the boundary",
+      "holding the grip, the row's handle for a pointer and for a key",
     )
     assert.equal(
-      columnOf(BOT_ROW)?.firstElementChild,
-      null,
-      "and a bot's column still empty, in the mode as at rest",
+      column()?.classList.contains("touch-none"),
+      true,
+      "and the column's own touch-action, so a finger here drags while the list still scrolls",
     )
-    assert.equal(findAll("[data-sidebar-gutter]").length, 8, "every row of the sidebar, again")
+
+    // Leaving runs it back to zero, and only then does the resting list take its place.
+    await click(doneButton())
+    await until(async () => column()?.getAttribute("data-open") == null, "the column closing")
+    assert.equal(column()?.classList.contains("w-0"), true, "at zero, the resting row's geometry")
+    await until(
+      async () => !group() && Boolean(find('nav[aria-label="Main"] a[href="/projects"]')),
+      "the resting list back",
+    )
+    assert.equal(findAll("[data-sidebar-gutter]").length, 0, "and no column left on it")
   })
 })
 
@@ -1596,8 +1562,8 @@ test(
         )
         assert.equal(
           findAll("[data-sidebar-gutter]").length,
-          7,
-          "the column every row keeps in both states: the rows the drawer arranges, and the bot's",
+          6,
+          "one column on each row the drawer arranges, and none on the bot below it",
         )
         assert.equal(
           find('button[aria-label="Hide Projects"]')?.classList.contains("size-11"),
