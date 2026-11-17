@@ -1,88 +1,65 @@
-/* The roadmap page. It shares the leaderboard's shell and hero (board.css); its tokens are site.css's. */
+/* The roadmap page. Its panels and rows are the leaderboard's (board.css); this adds only the vote,
+   the link a feature opens and the admin's form. */
 .road-account {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  margin-top: 1.5rem;
+  justify-content: center;
+  margin-top: 1.75rem;
 }
 
 .road-signed {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
   margin: 0;
   color: var(--muted-foreground);
   font-size: 0.875rem;
-}
-
-.link {
-  min-height: 2.75rem;
-  padding: 0 0.25rem;
-  border: 0;
-  background: none;
-  color: var(--info);
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
 }
 
 .road-error {
   margin: 1rem 0 0;
   color: var(--bad);
   font-size: 0.875rem;
+  text-align: center;
 }
 
-.road-group {
-  margin-top: 2rem;
-}
-
-.road-group h2 {
+.board-page .road-board h2 {
   display: flex;
   align-items: baseline;
   gap: 0.5rem;
-  margin: 0 0 0.75rem;
-  font-size: 1rem;
-  font-weight: 600;
+  margin: 0 0 0.5rem;
+  padding-inline: 0.75rem;
 }
 
-.road-group h2 span {
+.road-board h2 small {
   color: var(--muted-foreground);
-  font-size: 0.875rem;
-  font-weight: 500;
+  font-size: 0.8125rem;
+  font-weight: 400;
 }
 
-.road-features {
-  display: grid;
-  gap: 0.625rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
+.row.road-row {
+  grid-template-columns: 3rem minmax(0, 1fr);
 }
 
-.road-feature {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: start;
-  gap: 0.25rem 0.875rem;
-  padding: 0.875rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--card);
-  box-shadow: var(--shadow);
+.row.road-row.has-tools {
+  grid-template-columns: 3rem minmax(0, 1fr) auto;
 }
 
+/* The vote wears the period switch's look: a muted track, lifted onto the card once it is yours. */
 .vote {
   display: grid;
   justify-items: center;
   align-content: center;
-  width: 3.25rem;
-  min-height: 3.5rem;
-  gap: 0.125rem;
-  border: 1px solid var(--line-2);
-  border-radius: 14px;
+  width: 3rem;
+  min-height: 3rem;
+  border: 0;
+  border-radius: calc(var(--radius) * 0.6);
   background: var(--tile-2);
   color: var(--muted-foreground);
   font: inherit;
   font-size: 0.875rem;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
+  line-height: 1.1;
   cursor: pointer;
 }
 
@@ -91,80 +68,85 @@
 }
 
 .vote[aria-pressed="true"] {
-  border-color: var(--green);
-  background: color-mix(in oklch, var(--green) 14%, transparent);
+  background: var(--card);
   color: var(--green-ink);
+  box-shadow:
+    0 1px 2px oklch(0 0 0 / 12%),
+    inset 0 0 0 1px var(--green);
 }
 
 .vote:disabled {
   cursor: default;
-  opacity: 0.7;
 }
 
 .vote:focus-visible,
-.feature-link:focus-visible,
+.road-link:focus-visible,
 .link:focus-visible {
-  outline: 2px solid var(--green);
-  outline-offset: 3px;
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }
 
-.feature-link {
+.road-link {
   display: grid;
-  gap: 0.25rem;
+  gap: 0.125rem;
   min-width: 0;
-  padding: 0.25rem 0;
-  border-radius: 10px;
+  border-radius: 0.5rem;
   color: inherit;
   text-decoration: none;
 }
 
-.feature-link b {
+.road-link b {
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 
-.feature-link:hover b {
+.road-link:hover b {
   text-decoration: underline;
 }
 
-.feature-summary {
+.road-link span {
   color: var(--muted-foreground);
-  font-size: 0.9375rem;
+  font-size: 0.875rem;
   overflow-wrap: anywhere;
 }
 
-.feature-link small {
-  color: var(--soft);
-  font-family: "JetBrains Mono Variable", ui-monospace, monospace;
-  font-size: 0.75rem;
-  overflow-wrap: anywhere;
+.road-tools {
+  display: grid;
+  justify-items: end;
 }
 
-.feature-tools {
-  display: flex;
-  grid-column: 2;
-  gap: 0.5rem;
-}
-
-.btn-xs {
+.link {
   min-height: 2.75rem;
-  padding: 0 0.875rem;
-  font-size: 0.8125rem;
+  padding: 0 0.25rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: none;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.link:hover {
+  color: var(--foreground);
+}
+
+.link.danger:hover {
+  color: var(--bad);
 }
 
 .road-admin {
-  margin-top: 1.5rem;
-  padding: 0.875rem 1rem;
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--card);
+  padding: 0.25rem 1rem;
 }
 
 .road-admin summary {
-  min-height: 2.75rem;
   display: flex;
   align-items: center;
+  min-height: 2.75rem;
+  font-size: 1.125rem;
   font-weight: 600;
+  letter-spacing: -0.01em;
   cursor: pointer;
 }
 
@@ -172,6 +154,7 @@
   display: grid;
   gap: 0.875rem;
   margin-top: 0.5rem;
+  padding-bottom: 1rem;
 }
 
 .road-admin label {
@@ -190,9 +173,9 @@
 .road-admin textarea,
 .road-admin select {
   min-height: 2.75rem;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid var(--line-2);
-  border-radius: 12px;
+  padding: 0.5rem 0.875rem;
+  border: 0;
+  border-radius: calc(var(--radius) * 0.6);
   background: var(--tile-2);
   color: var(--foreground);
   font: inherit;
@@ -200,14 +183,17 @@
   font-weight: 400;
 }
 
+.road-admin input:focus-visible,
+.road-admin textarea:focus-visible,
+.road-admin select:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
 .road-form-actions {
   display: flex;
   justify-content: flex-end;
   gap: 0.5rem;
-}
-
-[hidden] {
-  display: none !important;
 }
 
 #roadmap {

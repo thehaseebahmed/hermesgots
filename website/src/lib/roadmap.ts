@@ -140,19 +140,17 @@ function card(f: Feature, o: RenderOptions) {
     : `${on ? "Remove your vote for" : "Vote for"} ${f.title}, ${f.votes} ${noun}`
   const disabled = !o.live || shipped || o.busy.has(f.id)
   const vote = `<button type="button" class="vote" data-vote="${escape(f.id)}" aria-pressed="${on}" aria-label="${escape(label)}"${disabled ? " disabled" : ""}>${ARROW}<span>${f.votes}</span></button>`
-  const ref = `${f.issue.owner}/${f.issue.repo}#${f.issue.number}`
-  const link = `<a class="feature-link" href="${escape(f.url)}" target="_blank" rel="noreferrer">
+  const link = `<a class="road-link" href="${escape(f.url)}" target="_blank" rel="noreferrer">
       <b>${escape(f.title)}</b>
-      ${f.summary ? `<span class="feature-summary">${escape(f.summary)}</span>` : ""}
-      <small>${escape(ref)}</small>
+      ${f.summary ? `<span>${escape(f.summary)}</span>` : ""}
     </a>`
   const tools = o.admin
-    ? `<div class="feature-tools">
-        <button type="button" class="btn btn-glass btn-xs" data-edit="${escape(f.id)}">Edit</button>
-        <button type="button" class="btn btn-glass btn-xs" data-remove="${escape(f.id)}">Remove</button>
+    ? `<div class="road-tools">
+        <button type="button" class="link" data-edit="${escape(f.id)}">Edit</button>
+        <button type="button" class="link danger" data-remove="${escape(f.id)}">Remove</button>
       </div>`
     : ""
-  return `<li class="road-feature" data-status="${f.status}">${vote}${link}${tools}</li>`
+  return `<li class="row road-row${o.admin ? " has-tools" : ""}">${vote}${link}${tools}</li>`
 }
 
 /** The features grouped by status, building first, an empty group left out. */
@@ -160,9 +158,9 @@ export function roadmapHtml(features: Feature[], o: RenderOptions) {
   const groups = STATUSES.map((s) => ({ ...s, rows: features.filter((f) => f.status === s.key) }))
     .filter((g) => g.rows.length > 0)
     .map(
-      (g) => `<section class="road-group">
-        <h2>${g.label} <span>${g.rows.length}</span></h2>
-        <ol class="road-features">${g.rows.map((f) => card(f, o)).join("")}</ol>
+      (g) => `<section class="board road-board">
+        <h2>${g.label} <small>${g.rows.length}</small></h2>
+        <ol class="rows">${g.rows.map((f) => card(f, o)).join("")}</ol>
       </section>`,
     )
   return groups.length ? groups.join("") : '<p class="empty">Nothing on the roadmap yet.</p>'
