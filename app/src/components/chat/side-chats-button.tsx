@@ -9,42 +9,35 @@
  * reader is looking at.
  *
  * It is badged when any side chat is unread, and the badge is the Side Chat List's own rule rather
- * than a second one: `sideChats(rows)` less the archived rows — which no pill but Archived draws —
- * with each row's dot read by `isUnread(row.at, marks[row.id])`, the rule the list's Unread pill and
- * its rows are drawn by. Main is no side chat (`sideChats`), so a word in Main never lights it. The
- * rows are the bot's own, read once for this screen's one control, through the one door a screen reads
- * them by (`useBotRows`).
+ * than a second one: `shownSideChats` — the bot's chats that are neither Main nor a run, less the
+ * archived ones — with each chat's dot read by `isUnread(at, marks[id])`, the rule the list's Unread
+ * pill and its rows are drawn by. Main is no side chat (`sideChats`), so a word in Main never lights
+ * it. The badge is a query of its own over the chat records and this device's read marks
+ * (`useSideChatsUnread`), never the list's rows: the header is on screen through every flushed reply,
+ * and the rows cost a tail read per chat.
  */
 import { ListTodoIcon } from "lucide-react"
 import { Link } from "react-router"
 
 import { buttonVariants } from "@/components/ui/button"
 import { botChatsPath } from "@/lib/bot-tabs"
-import { sideChats } from "@/lib/chat-list"
-import { useBotRows } from "@/lib/chat-rows"
+import { useSideChatsUnread } from "@/lib/chat-rows"
 import { HEADER_BUTTON } from "@/lib/layout"
 import { useSplit } from "@/lib/pane"
-import { useReadMarks } from "@/lib/read-marks"
-import { isUnread } from "@/lib/session-work"
 import { cn } from "@/lib/utils"
 
 /** The control, where there is a list to reveal: Main's bar, at one pane. */
 export function SideChatsButton({ profileId }: { profileId: string }) {
   const split = useSplit()
   // The list already stands beside the chat at this width: there is nothing here for it to open, and
-  // the bot's rows are not read for a dot nothing would wear.
+  // the bot's chats are not read for a dot nothing would wear.
   if (split) return null
   return <SideChatsLink profileId={profileId} />
 }
 
 /** Main's press onto the Side Chat List, wearing the dot its unread side chats earn it. */
 function SideChatsLink({ profileId }: { profileId: string }) {
-  const marks = useReadMarks()
-  const answer = useBotRows(profileId)
-  const unread = Boolean(
-    answer &&
-    sideChats(answer.rows).some((row) => !row.archived && isUnread(row.at, marks[row.id])),
-  )
+  const unread = useSideChatsUnread(profileId)
   return (
     <Link
       to={botChatsPath(profileId)}

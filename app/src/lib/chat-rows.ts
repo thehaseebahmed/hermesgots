@@ -9,8 +9,7 @@ import {
   BOT_CHATS,
   chatRowOf,
   isListed,
-  orderChatRows,
-  type ChatClock,
+  shownSideChats,
   type ChatFilter,
   type ChatListRow,
   type ChatRecord,
@@ -26,8 +25,10 @@ import {
 } from "@/lib/db"
 import { draftKey, unsentAmong } from "@/lib/drafts"
 import { listsAsChat } from "@/lib/lists-as-chat"
+import { useReadMarks } from "@/lib/read-marks"
 import { useRoomNeeds, type RoomNeedsRow } from "@/lib/room"
 import { roomRowOf } from "@/lib/rooms"
+import { isUnread } from "@/lib/session-work"
 
 /**
  * Every chat the bot has, newest first. Every one of them is a row of its list — a chat older than any
@@ -160,6 +161,42 @@ export function useBotMain(profileId: string): string | null | undefined {
   }, [profileId])
 }
 
+/** What a badge counts of one chat's record: the side-chat marks, and the clock an arrival moves. */
+function badgeMarkOf(chat: Conversation) {
+  return {
+    id: chat.id,
+    main: chat.main,
+    routine: chat.routine,
+    archived: chat.archived,
+    at: chat.updatedAt,
+  }
+}
+
+/**
+ * Whether any of a bot's side chats is unread: Main's one control in the bar is badged by this and
+ * nothing else.
+ *
+ * A query of its own, and not the list's rows (`useBotRows`): the control stands in Main's bar while a
+ * reply streams into the thread under it, and every flush writes `db.messages` — a badge that read the
+ * rows would re-run one index read per tailed chat on each of those writes, for a dot. So it reads the
+ * bot's chat records and this device's read marks, and compares the record's own `updatedAt`, which is
+ * the clock an arrival moves (the reply flush updates the record) and the one a read mark is written
+ * against when the thread renders. No `messages`, no rooms poller, no row: a room's news is not a
+ * chat's, and the list is where its rows are read.
+ */
+export function useSideChatsUnread(profileId: string): boolean {
+  const marks = useReadMarks()
+  return (
+    useLiveQuery(async () => {
+      if (!profileId) return false
+      const chats = await readBotChats(profileId)
+      return shownSideChats(chats.map(badgeMarkOf)).some((chat) =>
+        isUnread(chat.at, marks[chat.id]),
+      )
+    }, [profileId, marks]) ?? false
+  )
+}
+
 /** What one bot's list is drawn from: the address the answer ran for, the bot, and its rows. */
 export interface BotChats {
   /** The address this answer was read for, so one bot's answer can never pass for another's. */
@@ -198,19 +235,14 @@ function useBotChats(profileId: string, filter?: ChatFilter): BotChats | undefin
 
 /**
  * One bot's rows as its list draws them: the chats it holds, each dated by what arrived in it, and
- * the rooms its roster seats — one list, one order, composed here rather than by each screen that
- * draws them.
+ * the rooms its roster seats — one list, composed here rather than by each screen that draws them.
  *
- * `clock` is the order its caller lists them in (`ChatClock`): the flat layout takes the default, the
- * received one it has always drawn, and the Side Chat List asks for `latest` so the chat the reader has
- * just written in stands where they are. Both clocks are on the rows already — the one tail read
- * answers for both — so asking for the other orders the list without reading anything again.
+ * They are **not ordered**: the list applies the clock it is drawn by (`chatList`, `ChatClock`), which
+ * is the one place an order is decided. Both of a row's clocks ride the tail read, so a list that
+ * orders by `latest` needs no second query and the reader's order is never the one a sort here has
+ * already spent.
  */
-export function useBotRows(
-  profileId: string,
-  filter?: ChatFilter,
-  clock: ChatClock = "at",
-): BotChats | undefined {
+export function useBotRows(profileId: string, filter?: ChatFilter): BotChats | undefined {
   const answer = useBotChats(profileId, filter)
   // The rooms this device lists, read by their membership: a room belongs to its Host and lists in
   // every bot its roster seats, whatever bot carried the record here (ADR 0115).
@@ -218,16 +250,7 @@ export function useBotRows(
   // The answer names the address it ran for, so one bot's answer can never pass for another's.
   const fresh = answer && answer.profileId === profileId ? answer : undefined
   return useMemo(
-    () =>
-      fresh
-        ? {
-            ...fresh,
-            rows: orderChatRows(
-              [...fresh.rows, ...seatedRoomRows(rooms ?? [], profileId)],
-              clock,
-            ),
-          }
-        : undefined,
-    [fresh, rooms, profileId, clock],
+    () => (fresh ? { ...fresh, rows: [...fresh.rows, ...seatedRoomRows(rooms ?? [], profileId)] } : undefined),
+    [fresh, rooms, profileId],
   )
 }

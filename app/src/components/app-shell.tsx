@@ -17,8 +17,8 @@ import { CrashBoundary } from "@/components/crash-screen"
 import { KeyboardShortcuts } from "@/components/keyboard-shortcuts"
 import { DrawerContext } from "@/components/drawer-context"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
-import { botChatsPath, botMainPath } from "@/lib/bot-tabs"
 import { useBubbleMirror, useBubbleTakeaways } from "@/lib/bubble"
+import { listPathOf } from "@/lib/chat-lead"
 import { useChatLayout } from "@/lib/chat-layout"
 import { useForgetOpenCanvas } from "@/lib/canvas-open"
 import { prefersReducedMotion, useLarge, useWide } from "@/lib/media"
@@ -223,11 +223,12 @@ export function AppShell({ children }: { children?: ReactNode }) {
         itemKey: code.selected,
         node: <CodePane pane={code} />,
       }
-    : bot
+    : bot && layout
       ? {
-          // The layout names its own list: the new UX's stands at the bot's side-chat address, and the
-          // flat list's is the bot's own, so the pane's identity is where a reader sees that list.
-          screen: layout === "flat" ? botMainPath(bot.profileId) : botChatsPath(bot.profileId),
+          // The layout names its own list, through the one rule that says which address that is: the
+          // new UX's stands at the bot's side-chat address, and the flat list's is the bot's own, so
+          // the pane's identity is where a reader sees that list.
+          screen: listPathOf(layout, bot.profileId),
           open: bot.open,
           itemKey: bot.selected,
           node: layout === "flat" ? <BotChatsPane pane={bot} /> : <SideChatsPane pane={bot} />,

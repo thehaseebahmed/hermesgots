@@ -45,7 +45,6 @@ export function ChatList({
   pills,
   filter,
   onFilter,
-  emptyFor,
   above,
   group,
   clock = "at",
@@ -68,8 +67,6 @@ export function ChatList({
   /** The pill this list is drawn under, and the way the reader presses another. */
   filter: ChatFilter
   onFilter: (filter: ChatFilter) => void
-  /** The sentence a pill that keeps nothing says — the pills' own words unless a screen words it. */
-  emptyFor?: (filter: ChatFilter) => string
   /** What the screen draws above its rows, under the pills: the Side Chat List's Main. */
   above?: ReactNode
   /** The heading its rows stand under, in Code's group style; a list that has none draws them bare. */
@@ -123,7 +120,7 @@ export function ChatList({
   const shown = useMemo(() => chatList(kept, query, clock), [kept, query, clock])
   const empty =
     kept.length === 0
-      ? (emptyFor ?? emptyOf)(filter)
+      ? emptyOf(filter)
       : shown.length === 0
         ? "No chats match."
         : null
@@ -202,7 +199,7 @@ export function ChatList({
           (group ? (
             // One heading over the whole band, in Code's group style: the count it draws is the
             // rows this list is showing, and the group's own order is the list's.
-            <ItemGroup group={{ key: "rows", label: group, items: shown }}>
+            <ItemGroup group={{ label: group, items: shown }}>
               {shown.map(draw)}
             </ItemGroup>
           ) : (

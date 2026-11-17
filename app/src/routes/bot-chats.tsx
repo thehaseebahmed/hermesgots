@@ -1,22 +1,20 @@
 import { useLiveQuery } from "dexie-react-hooks"
-import { MessageCircleIcon, RotateCcwClockIcon } from "lucide-react"
+import { MessageCircleIcon } from "lucide-react"
 import { Link, Navigate, useParams } from "react-router"
 
 import { Bot } from "@/components/bot"
 import { ChatList } from "@/components/chat/chat-list"
+import { RoutinesButton } from "@/components/chat/routines-button"
 import { EmptyPane } from "@/components/empty-pane"
-import { buttonVariants } from "@/components/ui/button"
-import { botMainPath, botPath, botRoutinesPath } from "@/lib/bot-tabs"
+import { botMainPath, botPath } from "@/lib/bot-tabs"
 import { labelOf } from "@/lib/bot-name"
 import { CHAT_FILTERS, isChatFilter, type ChatFilter } from "@/lib/chat-list"
 import { useChatLayout } from "@/lib/chat-layout"
 import { useBotRows } from "@/lib/chat-rows"
 import { chatFilterOf, saveChatFilter } from "@/lib/db"
-import { HEADER_BUTTON } from "@/lib/layout"
 import { useBotChatsPane, type BotPane } from "@/lib/pane"
 import { quietly } from "@/lib/report"
 import { useBotLabels } from "@/lib/use-bot-labels"
-import { cn } from "@/lib/utils"
 
 /**
  * A bot's chats as the flat layout's one screen: every chat of the bot's, drawn flat, with its
@@ -97,19 +95,7 @@ function BotChatsList({
           <span className="truncate">{labelOf(labels, bot)}</span>
         </Link>
       }
-      actions={
-        <Link
-          to={botRoutinesPath(bot.id)}
-          aria-label="Routines"
-          className={cn(
-            buttonVariants({ variant: "outline", size: "icon-lg" }),
-            HEADER_BUTTON,
-            "shrink-0 text-muted-foreground",
-          )}
-        >
-          <RotateCcwClockIcon />
-        </Link>
-      }
+      actions={<RoutinesButton profileId={bot.id} />}
       pills={CHAT_FILTERS}
       filter={filter}
       onFilter={(next) => void saveChatFilter(profileId, next).catch(quietly("Saving the filter"))}

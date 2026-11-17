@@ -416,12 +416,16 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
     beside,
     unsent: isUnsent,
   })
+  // Main is the bot's own conversation with its host: its bar carries the bot's list in the ring's
+  // place, no context readout at all, and a title that leads to the bot's settings page (G3, G13). One
+  // reading of the record's flag, which the lead and the bar both take, so the two cannot disagree.
+  const main = Boolean(chat?.main)
   const lead = useChatLead({
     bot: chat && listsAsChat(chat) ? chat.profileId : undefined,
     // A bot's Main is what its own entry opens onto, so it names no list and leads nowhere. A bot's
     // other conversation is one rung off its list, so the hook registers its leading control's move as
     // the platform's back; a session holds no list, so nothing is registered for it.
-    main: Boolean(chat?.main),
+    main,
     underCode,
     leave,
   })
@@ -466,9 +470,6 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
   const online = useOnline()
   // A bot's own chat is edited from its bar; a session and a chat not yet started are not.
   const editable = Boolean(chat) && !session
-  // Main is the bot's own conversation with its host: its bar carries the bot's list in the ring's
-  // place, no context readout at all, and a title that leads to the bot's settings page (G3, G13).
-  const main = Boolean(chat?.main)
   // A session keeps the bar's menu: resolve, discard and its delete are not a chat's settings. A bot's
   // own chat has no menu — its title opens the sheet, and its context stands in the bar as the ring,
   // at every width, because the sheet no longer carries it (ADR 0153). Main is no chat's settings at
@@ -1062,12 +1063,16 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
     beside,
     unsent: hasNoMessages,
   })
+  // Main is the bot's own conversation with its host: its bar carries the bot's list in the ring's
+  // place, no context readout at all, and a title that leads to the bot's settings page (G3, G13). One
+  // reading of the record's flag, which the lead and the bar both take, so the two cannot disagree.
+  const main = Boolean(conversation?.main)
   const lead = useChatLead({
     bot: conversation && listsAsChat(conversation) ? conversation.profileId : undefined,
     // The same guard as the leading control's: a bot's conversation is answered by its list — except
     // Main, which is the bot's entry and answers with nothing. A session holds no list, so nothing is
     // registered for it.
-    main: Boolean(conversation?.main),
+    main,
     underCode,
     leave,
   })
@@ -1103,9 +1108,6 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
       refusal.refuse(failed(error, "Couldn't send your message.")),
     )
 
-  // Main is the bot's own conversation with its host: its bar carries the bot's list in the ring's
-  // place, no context readout at all, and a title that leads to the bot's settings page (G3, G13).
-  const main = Boolean(conversation?.main)
   // A session keeps the bar's menu; a bot's own chat opens its sheet from the title and keeps its
   // context in the bar as the ring, at every width (ADR 0153).
   const actions =

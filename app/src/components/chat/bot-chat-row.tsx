@@ -21,6 +21,7 @@
  *
  * The link names the bot it is a chat of, so the shell keeps the list's lane while the row loads.
  */
+import type { ReactNode } from "react"
 import { CircleAlertIcon, MessageCircleIcon, RotateCcwClockIcon } from "lucide-react"
 
 import { ItemRow, pinnedLine } from "@/components/item-list"
@@ -38,6 +39,8 @@ export function BotChatRow({
   profileId,
   replace,
   live,
+  icon,
+  badge,
 }: {
   row: ChatListRow
   now: number
@@ -48,6 +51,14 @@ export function BotChatRow({
   replace?: boolean
   /** What the host says of this chat's run: `running` beats a reply still streaming here. */
   live?: LiveRunStatus
+  /**
+   * The mark this row wears where a chat's message icon stands, for a row of the same list that is not
+   * a chat's — Main's Home glyph. What a row is *doing* still wins over what it is: a wait takes the
+   * alert icon and a run in flight the spinner, whatever stands here.
+   */
+  icon?: ReactNode
+  /** A mark beside the title, for what the row is rather than what it's doing (`ItemRow`'s badge). */
+  badge?: ReactNode
 }) {
   const working = runInFlight(live, { streaming: row.streaming, waiting: Boolean(row.needs) })
   return (
@@ -60,7 +71,7 @@ export function BotChatRow({
         ) : working ? (
           <Spinner />
         ) : (
-          <MessageCircleIcon />
+          (icon ?? <MessageCircleIcon />)
         )
       }
       avatar={
@@ -72,6 +83,7 @@ export function BotChatRow({
       unread={isUnread(row.at, mark)}
       selected={selected}
       title={row.title}
+      badge={badge}
       when={chatAge(row.at, now)}
       line={pinnedLine(row.pinned, row.needs ?? row.line)}
       warn={Boolean(row.needs)}

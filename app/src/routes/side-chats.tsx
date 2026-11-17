@@ -15,39 +15,38 @@
  * A bot whose Main this device does not hold keeps the list standing whole rather than beside a blank.
  *
  * The rows, the subtitle's count and Main's badge all read `sideChats(rows)`, less the archived ones
- * (`sideChats`), so the three cannot disagree about what a side chat is — and the rows are ordered by
- * when each chat last moved at all (`latest`), since a chat the reader has just written in is the one
- * they are in.
+ * (`shownSideChats`), so the three cannot disagree about what a side chat is — and the list orders its
+ * rows by when each chat last moved at all (`clock="latest"`), since a chat the reader has just written
+ * in is the one they are in. The order is this list's: the rows arrive unsorted.
  */
 import { useCallback } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { HouseIcon, RotateCcwClockIcon } from "lucide-react"
-import { Link, Navigate, useParams } from "react-router"
+import { HouseIcon } from "lucide-react"
+import { Navigate, useParams } from "react-router"
 
 import { BackButton } from "@/components/back-button"
+import { BotChatRow } from "@/components/chat/bot-chat-row"
 import { ChatList } from "@/components/chat/chat-list"
-import { ItemRow, pinnedLine } from "@/components/item-list"
-import { buttonVariants } from "@/components/ui/button"
+import { RoutinesButton } from "@/components/chat/routines-button"
 import { labelOf } from "@/lib/bot-name"
-import { botChatsPath, botMainPath, botRoutinesPath } from "@/lib/bot-tabs"
+import { botChatsPath, botMainPath } from "@/lib/bot-tabs"
 import { useBotRows } from "@/lib/chat-rows"
 import {
   CHAT_FILTERS,
-  MAIN_TITLE,
-  chatAge,
   isChatFilter,
+  shownSideChats,
   sideChats,
   type ChatFilter,
   type ChatListRow,
 } from "@/lib/chat-list"
 import { chatFilterOf, saveChatFilter, type Profile } from "@/lib/db"
-import { HEADER_BUTTON } from "@/lib/layout"
 import { useNav } from "@/lib/nav"
 import { useBotChatsPane, useSplit, type BotPane } from "@/lib/pane"
+import { useReadMarks } from "@/lib/read-marks"
 import { quietly } from "@/lib/report"
 import { useNow } from "@/lib/threads"
 import { useBotLabels } from "@/lib/use-bot-labels"
-import { cn } from "@/lib/utils"
+import { useAllLiveRuns } from "@/lib/waiting"
 import { ChatPage } from "@/routes/chat"
 
 /**
@@ -99,7 +98,7 @@ function SideChatsList({
   const kept = useLiveQuery(async () => (await chatFilterOf(profileId)) ?? null, [profileId])
   const filter: ChatFilter = isChatFilter(kept) && kept !== "routines" ? kept : "all"
   const labels = useBotLabels()
-  const answer = useBotRows(profileId, filter, "latest")
+  const answer = useBotRows(profileId, filter)
   const split = useSplit()
   const now = useNow()
   const { up } = useNav()
@@ -120,34 +119,31 @@ function SideChatsList({
   const main = answer.rows.find((row) => row.main)
   const sides = sideChats(answer.rows)
   // The count speaks for the bot's side chats, not for the pill on screen: an archived one is a side
-  // chat the reader set aside, and the Archived pill is where it stands.
-  const count = sides.filter((row) => !row.archived).length
+  // chat the reader set aside, and the Archived pill is where it stands. It is the one rule — Main's
+  // control is badged by the same `shownSideChats` — so the two cannot disagree.
+  const count = shownSideChats(answer.rows).length
   return (
     <ChatList
       bot={bot}
       leading={<BackButton label="Back to Main" onClick={ontoMain} floating />}
       title="Sidechats"
       subtitle={`${labelOf(labels, bot)} · ${count} ${count === 1 ? "side chat" : "side chats"}`}
-      actions={
-        <Link
-          to={botRoutinesPath(bot.id)}
-          aria-label="Routines"
-          className={cn(
-            buttonVariants({ variant: "outline", size: "icon-lg" }),
-            HEADER_BUTTON,
-            "shrink-0 text-muted-foreground",
-          )}
-        >
-          <RotateCcwClockIcon />
-        </Link>
-      }
+      actions={<RoutinesButton profileId={bot.id} />}
       pills={PILLS}
       filter={filter}
       onFilter={(next) => void saveChatFilter(profileId, next).catch(quietly("Saving the filter"))}
       listPath={botChatsPath(bot.id)}
       onBack={!beside && main ? ontoMain : undefined}
       above={
-        split && main ? <MainRow row={main} now={now} bot={bot} selected={selected} /> : undefined
+        split && main ? (
+          <MainRow
+            row={main}
+            now={now}
+            bot={bot}
+            replace={Boolean(beside)}
+            selected={selected}
+          />
+        ) : undefined
       }
       group="Side Chats"
       clock="latest"
@@ -162,32 +158,42 @@ function SideChatsList({
  * A bot's Main above its side chats, at the split width only: the conversation the bot's own address
  * opens on, drawn as the row every list draws — marked with a Home glyph, since it is the bot's home
  * rather than one of its chats — and set off from the side chats under a separator.
+ *
+ * It is `BotChatRow`, the row the side chats under it are, with the glyph for its icon: a hand-built
+ * row here lost the unread dot, the spinner and the `replace` its neighbours have, and read `Main`
+ * where the record says `Bot Chat`. Its marks are its own reads — this device's read mark and the
+ * host's live run — because it stands outside the list that draws the others.
  */
 function MainRow({
   row,
   now,
   bot,
+  replace,
   selected,
 }: {
   row: ChatListRow
   now: number
   bot: Profile
+  /** Whether the press takes the place of the chat the pane holds, as every row beside a list does. */
+  replace?: boolean
   /** The chat the pane holds, so the row says when it is the one drawn beside this list. */
   selected?: string
 }) {
+  const mark = useReadMarks()[row.id]
+  const runs = useAllLiveRuns()
   return (
     <div className="flex flex-col gap-2">
       <ul data-slot="main-row" className="flex flex-col">
         <li>
-          <ItemRow
-            icon={<HouseIcon />}
-            tone="muted"
-            title={MAIN_TITLE}
-            when={chatAge(row.at, now)}
-            line={pinnedLine(row.pinned, row.needs ?? row.line)}
-            warn={Boolean(row.needs)}
+          <BotChatRow
+            row={row}
+            now={now}
+            mark={mark}
             selected={selected === row.id}
-            link={{ to: `/c/${row.id}`, state: { bot: bot.id } }}
+            profileId={bot.id}
+            replace={replace}
+            live={row.session ? runs[row.session] : undefined}
+            icon={<HouseIcon />}
           />
         </li>
       </ul>

@@ -2,8 +2,10 @@ import { useEffect } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { matchPath, useLocation } from "react-router"
 
+import { botChatsPath, botMainPath } from "@/lib/bot-tabs"
+import { useBotMain } from "@/lib/chat-rows"
 import { useChatLayout } from "@/lib/chat-layout"
-import { db, mainChatOf } from "@/lib/db"
+import { db } from "@/lib/db"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { useLarge, useXLarge } from "@/lib/media"
 import { useSidebarCollapsed } from "@/lib/sidebar"
@@ -114,9 +116,11 @@ export function useBotChatsPane(): BotPane | undefined {
   // too, so one pattern answers every address under a bot.
   const own = matchPath("/b/:profileId/*", pathname)
   const profileId = own?.params.profileId ?? ""
-  // The two addresses that draw the list itself, which is where Main is the item beside it.
+  // The two addresses that draw the list itself, which is where Main is the item beside it. They are
+  // read off the one place each is built, so a renamed address cannot leave Main unselected.
   const atList = Boolean(
-    matchPath("/b/:profileId", pathname) || matchPath("/b/:profileId/sidechats", pathname),
+    matchPath(botMainPath(":profileId"), pathname) ||
+      matchPath(botChatsPath(":profileId"), pathname),
   )
   // Tagged with the id it ran for, since a new id still sees the last answer for a moment.
   const read = useLiveQuery(async () => {
@@ -128,11 +132,9 @@ export function useBotChatsPane(): BotPane | undefined {
       profileId: found?.profileId,
     }
   }, [id])
-  // Main, read only for the address whose item it is, and only where that address has an item lane.
-  const main = useLiveQuery(async () => {
-    if (!own || !atList || !profileId || layout !== "sides") return null
-    return (await mainChatOf(profileId))?.id ?? null
-  }, [Boolean(own), atList, profileId, layout])
+  // Main, read only for the address whose item it is, and only where that address has an item lane:
+  // the one read of it (`useBotMain`), which answers null for the empty id every other case passes.
+  const main = useBotMain(own && atList && layout === "sides" ? profileId : "")
   if (!split || !layout) return undefined
   if (own) {
     // The flat layout's bot address is its one list's screen: the lane holds the list and the item

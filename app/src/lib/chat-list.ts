@@ -279,6 +279,12 @@ export function chatRowOf(
 }
 
 /**
+ * What the side-chat rule reads of a row: a chat-list row, or the record-derived marks a badge is
+ * counted from — the two clocks and the words are nobody's business of this rule's.
+ */
+type SidedRow = Pick<ChatListRow, "main" | "routine" | "archived">
+
+/**
  * The rows a bot's screen lists as its side chats: one rule for the Side Chat List, its subtitle's
  * count and Main's badge, so no two of them can disagree about what a side chat is (G5).
  *
@@ -286,10 +292,19 @@ export function chatRowOf(
  * the screen it is drawn from, and a run is the routines page's row, not a conversation of the bot's.
  * The archive is deliberately not this rule's: `keptBy`/`KEEPS` decide that, so a row the reader put
  * away is still a side chat and stands under the Archived pill, which is the only pill that draws it.
- * What a screen shows of these is this less the archived rows.
+ * What a screen shows of these is `shownSideChats` below.
  */
-export function sideChats(rows: readonly ChatListRow[]): ChatListRow[] {
+export function sideChats<T extends SidedRow>(rows: readonly T[]): T[] {
   return rows.filter((row) => !row.main && !row.routine)
+}
+
+/**
+ * What a screen shows of a bot's side chats: `sideChats` less the ones the reader archived, which no
+ * pill but Archived draws. The Side Chat List's subtitle counts these, Main's control is badged by
+ * them, and the list's All pill draws them, so three surfaces cannot disagree about how many there are.
+ */
+export function shownSideChats<T extends SidedRow>(rows: readonly T[]): T[] {
+  return sideChats(rows).filter((row) => !row.archived)
 }
 
 /**
@@ -297,6 +312,10 @@ export function sideChats(rows: readonly ChatListRow[]): ChatListRow[] {
  * by — the newest word the bot sent, so a chat is as new as the last thing the reader was told — and
  * `latest` is the newest message of either role, which is the clock the Side Chat List reads: a chat
  * the reader has just written in is where they are, so it stands on top. The flat layout keeps `at`.
+ *
+ * The list is the one owner of this: `chatList` applies it as the rows are drawn, and no query that
+ * answers rows orders them by a clock of its own, since a second order would be the one the reader
+ * sees (ADR 0161).
  */
 export type ChatClock = "at" | "latest"
 

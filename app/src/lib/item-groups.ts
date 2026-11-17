@@ -88,10 +88,11 @@ const PINNED_LABEL = "Pinned" as const
 
 export interface ListGroup<T = unknown> {
   /**
-   * What the group is. `rows` is a list that words its own one group — the Side Chat List's — rather
-   * than one of the vocabularies here.
+   * What the group is, where the list's vocabulary says: a dated or Code group, a list's pins or its
+   * archived band. A list that words one group of its own — the Side Chat List's — names no key, since
+   * nothing narrows or folds by it.
    */
-  key: ItemGroupKey | CodeGroupKey | "pinned" | "archived" | "rows"
+  key?: ItemGroupKey | CodeGroupKey | "pinned" | "archived"
   label: string
   items: T[]
   /** Drawn closed until the reader asks: what a list is done with, or put out of the way. */

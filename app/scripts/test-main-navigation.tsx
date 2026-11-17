@@ -19,6 +19,7 @@ import test from "node:test"
 import { MemoryRouter } from "react-router"
 
 import { AppRoutes } from "@/App"
+import { SideChatsButton } from "@/components/chat/side-chats-button"
 import { ConversationList } from "@/components/conversation-list"
 import { db } from "@/lib/db"
 import { markRead } from "@/lib/read-marks"
@@ -362,11 +363,13 @@ test("the sidebar marks the lab features with the pill, and its own screens with
 })
 
 /**
- * A word the bot said in a chat at `at`: what the row's own clock — the one the unread rule measures
- * — is read from, and the only thing that can light Main's control.
+ * A word the bot said in a chat at `at`: the message itself, and the record clock an arrival moves —
+ * what the reply flush writes as a turn lands (`chat.ts`), and the clock the unread rule and the
+ * control's badge both read. A message on its own is this device's row, not the news the mark is
+ * kept against.
  */
-const saidIn = (id: string, at: number) =>
-  db.messages.put({
+const saidIn = async (id: string, at: number) => {
+  await db.messages.put({
     id: `${id}-said`,
     conversationId: id,
     role: "assistant",
@@ -374,6 +377,8 @@ const saidIn = (id: string, at: number) =>
     status: "done",
     createdAt: at,
   })
+  await db.conversations.update(id, { updatedAt: at })
+}
 
 /** Main's control in the bar's actions — the place every other chat keeps its context ring in. */
 const listButton = () => find('[data-slot="header-actions"] [data-slot="side-chats-button"]')
@@ -458,6 +463,34 @@ test("Main's control is badged for an unread side chat, and not for a word in Ma
     await until(async () => Boolean(listButton()), "Main's control")
     assert.ok(missing('[data-slot="side-chats-button"] [data-unread]'), "no dot for a word in Main")
   })
+})
+
+test("Main's control reads no message: a landing re-runs nothing for its dot", async () => {
+  // The control stands in the bar while a reply streams into the thread under it, and every flush
+  // writes `db.messages`. Read off the list's rows, the badge would run one index read per tailed chat
+  // on each of those writes for a dot; it is counted off the chat records and this device's marks, so
+  // a message landing is no read of the table at all — and a turn landing still lights it, because the
+  // record clock the flush moves is what it counts.
+  await seed([mainRow(), sideRow()])
+  globalThis.fetch = async () => json({})
+  let reads = 0
+  db.messages.hook("reading", (message) => {
+    reads += 1
+    return message
+  })
+  await mount(
+    <MemoryRouter initialEntries={[`/c/${MAIN}`]}>
+      <SideChatsButton profileId={bot.id} />
+    </MemoryRouter>,
+    async () => {
+      const control = () => find('[data-slot="side-chats-button"]')
+      await until(async () => Boolean(control()), "the control")
+      assert.equal(reads, 0, "the badge is counted off the chat records, never their messages")
+      await saidIn(SIDE, Date.now() - 1_000)
+      await until(async () => Boolean(badge()), "the dot the arrival earns")
+      assert.equal(reads, 0, "and a message landing is still no read of the table")
+    },
+  )
 })
 
 test(

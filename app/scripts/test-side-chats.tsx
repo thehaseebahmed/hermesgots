@@ -17,9 +17,11 @@ import { MemoryRouter, Route, Routes } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
 import { db, saveChatFilter } from "@/lib/db"
+import { markRead } from "@/lib/read-marks"
 import { SideChatsPage } from "@/routes/side-chats"
 
 import {
+  Nav,
   Path,
   atWidth,
   botProfile,
@@ -30,6 +32,7 @@ import {
   laptop,
   missing,
   mount,
+  nav,
   path,
   seedSettings,
   until,
@@ -255,6 +258,60 @@ test(
       await click(mainRow())
       await until(async () => path() === `/c/${MAIN}`, "the chat the row opens")
     })
+  }),
+)
+
+test(
+  "Main's row is the list's own row: its dot, and a press that takes the pane's place",
+  laptop(async () => {
+    // Main above the rows is a row of this list like the ones under it, so it wears the dot an unread
+    // chat earns and a press beside the list takes the place of the chat it opened — a row built by
+    // hand here lost both, and read its title where the app draws its own word over the host's.
+    const at = Date.now() - 60_000
+    await seed([
+      { id: MAIN, title: "Bot Chat", main: true, at, said: [{ content: "Morning", at }] },
+      {
+        id: "trip",
+        title: "Trip to Lisbon",
+        at: at - 1_000,
+        said: [{ content: "Booked", at: at - 1_000 }],
+      },
+    ])
+    // This device read Main before that word arrived, and has read the side chat since: one dot, on
+    // Main's row alone.
+    markRead(MAIN, at - 1)
+    markRead("trip", at)
+    await mount(
+      <MemoryRouter initialEntries={["/c/trip"]}>
+        <Path />
+        <Nav />
+        <Routes>
+          <Route element={<AppShell />}>
+            <Route path="b/:profileId/sidechats" element={<SideChatsPage />} />
+            <Route path="c/:id" element={<p data-chat />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+      async () => {
+        await until(async () => Boolean(mainRow()), "Main's row beside the list")
+        assert.ok(
+          mainRow()?.querySelector("[data-unread]"),
+          "the dot the arrival in it earns, as every row of this list wears one",
+        )
+        assert.equal(wordsOf(mainRow()).includes("Main"), true, "at the app's word, never the host's")
+        assert.ok(
+          missing(`[data-unread] a[href="/c/trip"], a[href="/c/trip"] [data-unread]`),
+          "and the chat this device has read wears none",
+        )
+        await click(mainRow())
+        await until(async () => path() === `/c/${MAIN}`, "the chat the row opens")
+        assert.equal(
+          nav(),
+          `REPLACE:/c/${MAIN}`,
+          "and it takes the place of the chat beside the list, as its neighbours' presses do",
+        )
+      },
+    )
   }),
 )
 
