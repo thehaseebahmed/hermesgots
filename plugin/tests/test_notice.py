@@ -294,6 +294,44 @@ class Bodies(unittest.TestCase):
             "the reason the run ended with, not the kind's own line",
         )
 
+    def test_a_failed_turn_that_keeps_no_words_does_not_repeat_an_older_turns_error(self):
+        """A wordless failure says the kind's own line, never the error of the turn before it.
+
+        ``failures.after_run`` used to write only when it had words, so an older failed turn's row
+        survived this one: the notice stated an error this run never ended with, and the app drew
+        it under the failed reply.
+        """
+        self.start()
+        # An earlier turn failed with the provider's own words, kept where every device may read them.
+        failures.write(self.path, "gots-1", "429 from the provider: the usage window is spent.", 1)
+        # This turn failed with nothing worth saying — Hermes's own wordless notice, which
+        # `failures.reason_of` leaves behind rather than keeping.
+        book = SimpleNamespace(
+            _run_statuses={
+                "run_2": {
+                    "status": "failed",
+                    "session_id": "gots-1",
+                    "error": "Agent run failed",
+                    "updated_at": 2,
+                }
+            }
+        )
+        with mock.patch.object(alerts.sessions, "adapter", book), mock.patch.object(
+            alerts.sessions, "record_for", lambda *args: {"mode": "auto"}
+        ):
+            failures.after_run(
+                session_id="gots-1", platform="api_server", failed=True, interrupted=False
+            )
+        self.assertIsNone(
+            failures.read(self.path, "gots-1"), "a failure that kept nothing keeps nothing at all"
+        )
+        self.end(completed=False, failed=True, interrupted=False)
+        self.assertEqual(
+            self.told,
+            [("run_failed", "gots-1", None)],
+            "so the notice falls back to the kind's own line, which every transport knows",
+        )
+
     def test_a_run_held_over_a_subagent_says_nothing_until_it_is_gone(self):
         self.start()
         self.said("Wrote the migration and ran it.\n\nThe  index now covers  the new table.")
