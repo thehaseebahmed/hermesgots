@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react"
 
 import { connectionKey } from "@/lib/connection"
 import { db } from "@/lib/db"
+import { refreshDictationInfo } from "@/lib/dictation"
 import { PROBE_TIMEOUT_MS, READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import {
   getSpeechSettings,
@@ -38,6 +39,14 @@ type Server = { baseUrl: string; apiKey: string }
 
 /** What a screen says where a bot's host never answered its speech read. */
 export const READ_FAILED = "Couldn't read this bot's host."
+
+/**
+ * The speech settings the host's own answer about whether it can hear a take is made of: the
+ * master switch, and the provider it resolves (`dictation.info()` in the plugin reads those two and
+ * the model each names). The rest of the page tunes a take's decode or its tidying, so a write of
+ * one leaves the composer's mic where it is (ADR 0164).
+ */
+const HEARD_KEYS = new Set(["stt.enabled", "stt.provider"])
 
 /** The last speech answer a bot's host gave this device, or nothing where it never read one. */
 export async function cachedSpeech(key: string): Promise<SpeechSettings | undefined> {
@@ -246,6 +255,11 @@ export function useSpeech(profile?: Server | null) {
       // The host's answer is the block it now holds, so the copy this device keeps moves with it:
       // the next open draws the write rather than the answer before it.
       await landStt(stt)
+      // The write is this device's own, so the mic follows the switch now rather than at the next
+      // read's turn — the answer it is drawn from is one this device keeps for five minutes (ADR
+      // 0164). Only a key that answer is made of can move it; the rest tune a take's decode or its
+      // tidying and leave the composer where it is.
+      if (HEARD_KEYS.has(setting)) refreshDictationInfo({ baseUrl, apiKey })
       // Who hears a take is not in the `stt` block this answers with, so a provider pick is followed
       // by the read that names it: the page greys Cleanup on that route, and must not keep saying the
       // provider the bot has just left (ADR 0132).

@@ -176,7 +176,7 @@
 //   pnpm mock            # then point Settings at http://localhost:8642/v1
 
 import http from "node:http"
-import { randomUUID } from "node:crypto"
+import { randomBytes, randomUUID } from "node:crypto"
 import { mkdirSync, readFileSync, statSync, writeFileSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, extname, join } from "node:path"
@@ -195,6 +195,9 @@ const TOOL_PLACEMENT = JSON.parse(
 
 const PORT = Number(process.env.PORT ?? 8642)
 const pendingApprovals = new Map()
+/** The buttons an approval's notice would carry, by token, so a press can be tried by hand
+ *  (`plugin/answers.py`): the choice is the row's, since a token in a URL names nothing. */
+const pushAnswers = new Map()
 const pendingClarifies = new Map()
 /** Questions Hermes's own route is asked one at a time, by `prompt_id` (0.22.5 and newer). */
 const pendingPrompts = new Map()
@@ -3463,6 +3466,29 @@ const confirmDelay = (value, held) => {
   const ms = Number(value)
   return Number.isFinite(ms) ? Math.min(DICTATION_WAIT_MS, Math.max(0, ms)) : held
 }
+// Whether this host can hear a take, as `plugin/dictation.py` asks Hermes's `is_stt_enabled`: the
+// switch on the bot's own Speech-to-text page, and the default where the file holds nothing for it.
+// So a write of `stt.enabled` is what moves the answer below, and what the composer's mic follows.
+const hearsTakes = () => (stt.values["stt.enabled"] ?? STT_DEFAULTS["stt.enabled"]) !== false
+/**
+ * `info.dictation`, as `plugin/dictation.py`'s `info()` answers it: no provider to hear a take, a
+ * switch read as off, or a host that can. `MOCK_DICTATION=off` is the first — a host that has none.
+ * The switch-off answer names no route, where the plugin's does not either.
+ */
+function dictationAnswer() {
+  const heard = { model: "base", wait_ms: DICTATION_WAIT_MS }
+  if (DICTATION === "off")
+    return {
+      ready: false,
+      reason:
+        "No speech provider on this host can hear a take. Install faster-whisper, or set a provider's key.",
+      ...heard,
+      provider: { name: "none", backend: null, cloud: false },
+    }
+  if (!hearsTakes())
+    return { ready: false, reason: "Speech-to-text is turned off on the host.", ...heard }
+  return { ready: true, ...heard, language: "en", provider: heardBy() }
+}
 let dictationConfirmMs = confirmDelay(process.env.MOCK_DICTATION_CONFIRM_MS ?? 400, 400)
 // How many takes have their first Confirm refused for a missing Piece, so the re-send is exercised.
 let dictationRefusals = Number(process.env.MOCK_DICTATION_REFUSE ?? 0)
@@ -3993,6 +4019,15 @@ function startRun(req, body, options = {}) {
         choices: ["once", "session", "always", "deny"],
       }
       push("approval.request", run.approval)
+      // The two buttons the plugin would mint for this notice (Allow once, Deny), so the answer route
+      // below can be pressed the way a phone presses it: a token names nothing, so each is kept with
+      // the choice it means. Nothing here sends a push, so this is where a tray entry would arrive.
+      const links = ["once", "deny"].map((choice) => {
+        const token = randomBytes(32).toString("base64url")
+        pushAnswers.set(token, { runId: id, choice })
+        return `http://localhost:${PORT}/api/plugins/gots/push/answer/${token}`
+      })
+      console.log(`Approval buttons: ${links.join("  ")}`)
       return waitForApproval(id).then(async (choice) => {
         run.status = "running"
         run.approval = undefined
@@ -4382,23 +4417,7 @@ http
           reason: null,
           writers: { model: RESEARCH_WRITERS, provider: RESEARCH_WRITERS },
         },
-        dictation:
-          DICTATION === "off"
-            ? {
-                ready: false,
-                reason:
-                  "No speech provider on this host can hear a take. Install faster-whisper, or set a provider's key.",
-                model: "base",
-                provider: { name: "none", backend: null, cloud: false },
-                wait_ms: DICTATION_WAIT_MS,
-              }
-            : {
-                ready: true,
-                model: "base",
-                language: "en",
-                provider: heardBy(),
-                wait_ms: DICTATION_WAIT_MS,
-              },
+        dictation: dictationAnswer(),
       })
     }
     if (
@@ -4789,6 +4808,32 @@ http
       }
       pushSubscriptions.set(subscription.endpoint, { device, categories })
       return json(res, 200, { object: "gots.push", subscribed: true })
+    }
+    // An approval answered from the tray's own button, as the plugin answers one (plugin/answers.py):
+    // the token in the path is the whole credential and nothing else is asked for, a press settles
+    // the run that minted it, and the same button pressed twice is 410. A token this mock never
+    // minted is 404 — a link preview that fetched it spent nothing. Nothing here expires one: the
+    // plugin's tokens live as long as the push that carried them, which the mock never sends.
+    const answer = /^\/api\/plugins\/gots\/push\/answer\/([^/]+)$/.exec(url.pathname)
+    if (PLUGIN && !profile && req.method === "POST" && answer) {
+      const held = pushAnswers.get(decodeURIComponent(answer[1]))
+      if (!held) return json(res, 404, { error: { message: "That button isn't one this bot sent." } })
+      if (held.spent) {
+        return json(res, 410, { error: { message: "That button has already been answered." } })
+      }
+      held.spent = true
+      // Spent either way, as the plugin spends it: a press whose approval is no longer waiting
+      // answered nothing, and a second press of the same button is told it was answered.
+      const resolve = pendingApprovals.get(held.runId)
+      if (!resolve) {
+        return json(res, 409, { error: { message: "That approval isn't waiting any more." } })
+      }
+      resolve(held.choice)
+      return json(res, 200, {
+        object: "gots.push.answer",
+        answered: true,
+        choice: held.choice,
+      })
     }
     // ntfy: the mock keeps the bot's topic and stands in for Hermes's own NTFY_SERVER_URL and
     // NTFY_TOKEN, and publishes nothing (plugin/ntfy.py).

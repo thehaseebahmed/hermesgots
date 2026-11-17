@@ -106,5 +106,12 @@ def after_run(**kwargs: Any) -> None:
         found = reason_of(sessions.adapter, session_id)
         if found is not None:
             write(path, session_id, *found)
+        else:
+            # A failed turn that kept no words has nothing to say: Hermes's own wordless notice, or
+            # a run this host can no longer read. The row the session's last failure left is not
+            # this turn's, and a notice reading it would state an error this run never ended with —
+            # so it goes, and the notice falls back to its kind's own line. The app draws Hermes's
+            # notice for those failures itself, so nothing is lost from the thread.
+            clear(path, session_id)
     except Exception:
         logger.debug("gots: couldn't keep what a turn failed of", exc_info=True)

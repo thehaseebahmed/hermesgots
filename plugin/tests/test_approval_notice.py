@@ -65,6 +65,23 @@ class NoticeTest(unittest.TestCase):
         events.on_approval_request(**self.request)
         self.assertEqual(self.sent, [("approval", ("sess_1",))])
 
+    def test_the_device_hears_the_card_it_must_answer(self) -> None:
+        heard: list = []
+        with mock.patch.object(
+            events.push,
+            "notify",
+            lambda kind, sid, **kw: heard.append((kind, sid, kw.get("body"))),
+        ):
+            events.on_approval_request(
+                surface="gateway",
+                **{**self.request, "description": "Clear the build", "command": "rm -rf ./build"},
+            )
+        self.assertEqual(
+            heard,
+            [("approval", "sess_1", "Clear the build\n\nrm -rf ./build")],
+            "the words the card draws, so a tray says what it is asking about",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

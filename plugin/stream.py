@@ -2,7 +2,8 @@
 
 The app keeps one of these open per bot while it is on screen and fetches whatever an event names;
 events never carry message text. ``events.py`` writes the rows this reads. Routine changes have no
-hook (the cron ledger is written by Hermes's scheduler), so the stream looks at them itself.
+hook (the cron ledger is written by Hermes's scheduler), so the stream looks at them itself; so does
+the profile's settings file, which the CLI and another Hermes write without asking anyone here.
 """
 
 from __future__ import annotations
@@ -28,6 +29,10 @@ PING_SECONDS = 20
 CRON_SECONDS = 4
 TITLE_WATCH_SECONDS = 90
 TITLE_TICK_SECONDS = 2
+# How often the profile's settings file is looked at. A setting written by the CLI or another Hermes
+# has no hook here at all, so the settings reader below watches the file's stamp instead; a stat on a
+# tick costs nothing beside the write it notices (ADR 0164).
+CONFIG_TICK_SECONDS = 2
 CRON_JOB_FIELDS = (
     "id",
     "name",
@@ -139,6 +144,50 @@ async def _read_titles(path: Path, db: Any, home: Path, since: int) -> None:
         except Exception:
             logger.debug("gots: a title watch failed a pass", exc_info=True)
         await asyncio.sleep(TITLE_TICK_SECONDS)
+
+
+def config_mark(home: Path) -> Optional[Tuple[int, int]]:
+    """The profile's ``config.yaml`` as a stamp: its size, and the moment its contents last changed.
+
+    Nothing more is read. A settings file is written by processes with no hook into this one — the
+    CLI, another Hermes — so a stat is all the answer there is, and a stamp that moves is a change.
+    """
+    try:
+        stat = (home / "config.yaml").stat()
+    except OSError:
+        return None
+    return (stat.st_size, stat.st_mtime_ns)
+
+
+def watch_config(path: Path, home: Path) -> "asyncio.Task[None]":
+    """Starts this store's settings reader; the plugin keeps one running for its life.
+
+    A speech setting decides whether the app's composer offers a mic, and the plugin's own routes
+    note their writes as they make them. This is the other writer — the CLI, another process — which
+    no hook sees: the file is stamped on a tick, and a moved stamp becomes a row like any other, so a
+    device that was away reads it back from its cursor (ADR 0164).
+    """
+    return asyncio.ensure_future(_read_config(path, home))
+
+
+async def _read_config(path: Path, home: Path) -> None:
+    """Notes a settings change whenever the profile's file is written by something else."""
+    mark = await asyncio.to_thread(config_mark, home)
+    while True:
+        await asyncio.sleep(CONFIG_TICK_SECONDS)
+        try:
+            latest = await asyncio.to_thread(config_mark, home)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.debug("gots: a settings read failed a pass", exc_info=True)
+            continue
+        if latest == mark:
+            continue
+        mark = latest
+        # Not throttled: two writes inside the ledger's quarter-second would otherwise be one event,
+        # and the app would read the state between them and hear nothing of the second.
+        events.note("settings", path=path, force=True)
 
 
 def sse_headers(adapter: Any, request: Any) -> Dict[str, str]:

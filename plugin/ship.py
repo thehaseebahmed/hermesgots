@@ -14,9 +14,8 @@ import threading
 from pathlib import Path
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
-from . import github, merges, projects, push, tools_common
+from . import github, merges, projects, tools_common
 from .sessions import WorkspaceError, _git
-from .store import db_path
 
 logger = logging.getLogger(__name__)
 
@@ -320,7 +319,6 @@ def _open_pr(
     state: Dict[str, Any],
     title: Optional[str],
     body: Optional[str],
-    session_id: Optional[str] = None,
     task: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     name = github.origin_repo(repo["repo_root"])
@@ -349,8 +347,6 @@ def _open_pr(
     except github.GitHubError as error:
         raise ShipError(str(error), error.status) from None
     github.forget_pull_request(repo["repo_root"], repo["branch"])
-    if session_id and reference:
-        push.notify("afk_pr", session_id, db_path(hermes_home))
     return created
 
 
@@ -407,9 +403,7 @@ def ship(
                     _push(hermes_home, repo["path"], repo["branch"], force)
                     result["pushed"] = True
                 if wants_pr:
-                    result["pr"] = _open_pr(
-                        hermes_home, repo, state, title, body, session_id, task
-                    )
+                    result["pr"] = _open_pr(hermes_home, repo, state, title, body, task)
             except (ShipError, WorkspaceError) as error:
                 result["error"] = str(error)
             results.append(result)

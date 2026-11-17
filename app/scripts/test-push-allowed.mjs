@@ -19,7 +19,7 @@ import { body, read } from "./push-source.mjs"
 const ids = (categories) => categories.map((category) => category.id)
 /** Every id, in the order the list keeps: what a phone that can reach everything is told. */
 const all = ids(reachableCategories(true))
-/** The sixteen a phone without the Meetings experiment can reach. */
+/** The same ids on a phone that can't reach the Meetings experiment. */
 const withoutMeetings = ids(reachableCategories(false))
 /** A phone that has made every channel and left it alone: Android's importance 2, 3 or 4. */
 const healthy = PUSH_CATEGORIES.map(({ id, importance }) => ({ id, importance }))
@@ -36,7 +36,7 @@ test("a channel switched off in Android's settings is left out", () => {
 })
 
 test("each channel the user switched off is left out, however many", () => {
-  const off = ["chat_input", "code_pr_merged", "routine_failed"]
+  const off = ["chat_input", "code_setup_failed", "routine_failed"]
   const channels = healthy.map((channel) =>
     off.includes(channel.id) ? { ...channel, importance: 0 } : channel,
   )
@@ -71,7 +71,7 @@ test("a channel the phone doesn't list counts as allowed", () => {
 test("a healthy phone allows every type, in the order the list keeps", () => {
   const allowed = allowedCategoryIds({ allowed: true, channels: healthy }, true)
   assert.deepEqual(allowed, all)
-  assert.equal(allowed.length, PUSH_CATEGORIES.length, "the eighteen stay eighteen")
+  assert.equal(allowed.length, PUSH_CATEGORIES.length, "the fifteen stay fifteen")
 })
 
 test("with the phone's notifications off the registration carries an empty list", () => {
@@ -94,28 +94,28 @@ test("an importance the phone doesn't report is a channel the user left alone", 
 test("a phone that cannot reach Meetings does not register its two", () => {
   for (const meetings of [false, undefined]) {
     const allowed = allowedCategoryIds({ allowed: true, channels: healthy }, meetings)
-    assert.deepEqual(allowed, withoutMeetings, "sixteen, and Meetings' two among the missing")
+    assert.deepEqual(allowed, withoutMeetings, "thirteen, and Meetings' two among the missing")
     assert.equal(allowed.includes("meeting_done"), false, "no channel it will never be shown")
     assert.equal(allowed.includes("meeting_failed"), false)
   }
   assert.deepEqual(
     allowedCategoryIds({ allowed: true, channels: [] }, false),
     withoutMeetings,
-    "a first launch on such a phone registers sixteen",
+    "a first launch on such a phone registers thirteen",
   )
 })
 
 test("a channel the phone already holds keeps the importance the phone reported", () => {
   const plan = channelPlan(reachableCategories(false), [
-    { id: "code_pr_merged", importance: 4 },
+    { id: "code_run_done", importance: 4 },
     { id: "chat_input", importance: 2 },
   ])
   const planned = (id) => plan.find((channel) => channel.id === id)
-  assert.equal(planned("code_pr_merged").importance, 4, "the user's louder choice is left as it is")
+  assert.equal(planned("code_run_done").importance, 4, "the user's louder choice is left as it is")
   assert.equal(planned("chat_input").importance, 2, "and their silence is not undone")
   assert.equal(
-    planned("code_pr_merged").name,
-    "Code: Pull request merged",
+    planned("code_run_done").name,
+    "Code: Run finished",
     "while the name still tracks the code",
   )
 })
