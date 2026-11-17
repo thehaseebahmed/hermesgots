@@ -1,7 +1,8 @@
 // The sidebar's edit mode arranged by the pointer: a row dragged by its own grip past its neighbour
 // and dropped — sent as real pointer events, so the gesture's capture and the grip's `touch-action`
 // decide what happens, not a handler's own idea of it — the order read back off the nav, a reload
-// reading the same order again, and the same drag with a finger in the phone's drawer.
+// reading the same order again, and the same drag with a finger in the phone's drawer, where Escape
+// is the mode's one press and the sheet's the next.
 import { app, assert, flow, pass, settled, swipeBy } from "./lib.mjs"
 
 /** A box's middle in the page's own px, and the height a drag has to cross to take a row's place. */
@@ -197,6 +198,41 @@ await flow(
       await modeRows(page),
       swapped(before),
       "a finger drops the row in the place a mouse would",
+    )
+
+    // Escape in the drawer is the mode's first: the press leaves it, its switch back at rest, and the
+    // sheet the reader arranged in still stands over the screen. Only the press after that is the
+    // sheet's, which is what a phone's back button does too (it sends Escape to the frontmost popup).
+    await page.keyboard.press("Escape")
+    await page.getByRole("button", { name: "Edit sidebar" }).waitFor({ timeout: 5_000 })
+    assert.equal(
+      await page.locator('[role="group"][aria-label="Sidebar layout"]').count(),
+      0,
+      "the press that left the mode took it with it",
+    )
+    assert.equal(
+      await page.locator("[data-sidebar-grip]").count(),
+      0,
+      "and no grip is drawn at rest",
+    )
+    assert.equal(
+      await page.locator('[role="dialog"][data-open]').count(),
+      1,
+      "and the drawer stayed open on the press the mode claimed",
+    )
+    assert.deepEqual(
+      await navRows(page),
+      ["/code", "/projects", ...atRest.slice(2)],
+      "the drawer resting in the order the drag made",
+    )
+    await shot("escape-left-the-mode")
+
+    await page.keyboard.press("Escape")
+    await page.locator('[role="dialog"][data-open]').waitFor({ state: "detached", timeout: 5_000 })
+    assert.equal(
+      await page.locator('[role="dialog"][data-open]').count(),
+      0,
+      "the second press shut the drawer, as Escape closes a sheet",
     )
 
     await page.reload()

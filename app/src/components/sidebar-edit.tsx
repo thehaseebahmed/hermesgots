@@ -509,11 +509,22 @@ export function SidebarEdit<Pin extends SidebarPin & { mark?: string }>({
   // Escape is a way out that needs no pointer. It is answered on the document because the mode is a
   // state of the whole sidebar rather than a control's pop-up: whichever part of the list holds the
   // focus, the reader's Escape means this mode.
+  //
+  // The listener is in the capture phase, and stops the press where it answers it. In the phone's
+  // drawer this is what makes one press leave the mode and a second close the sheet: Base UI's dialog
+  // dismisses on a `keydown` on the document in the bubble phase (`useDismiss`), and on the popup's own
+  // `onKeyDown` below it — both downstream of the document's capture, so a press stopped here reaches
+  // neither, and the mode's own press is never also the sheet's. The dialog's `onOpenChange` would have
+  // been the other place to draw the line, and it is the wrong one: the docked sidebar has no sheet and
+  // no `onOpenChange`, so its Escape would have had to be wired through the drawer's, and the sheet's
+  // own dismissal would have had to be re-derived from a reason string rather than from the key the
+  // reader pressed. Nothing here knows whether a sheet is mounting it.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return
       // The question owns Escape while it stands: that press closes it, and the next one leaves the
-      // mode — a reader answering a question is not asking to leave the list behind it.
+      // mode — a reader answering a question is not asking to leave the list behind it. So the press is
+      // let through to the question, which owns the key by being the frontmost pop-up.
       if (asking) return
       // A gesture still in the air is what Escape means first: it is given up, nothing is written,
       // and the press after it is the one that leaves the mode.
@@ -521,12 +532,14 @@ export function SidebarEdit<Pin extends SidebarPin & { mark?: string }>({
         gesture.current = null
         setDrag(null)
         event.preventDefault()
+        event.stopPropagation()
         return
       }
+      event.stopPropagation()
       onLeave()
     }
-    document.addEventListener("keydown", onKey)
-    return () => document.removeEventListener("keydown", onKey)
+    document.addEventListener("keydown", onKey, true)
+    return () => document.removeEventListener("keydown", onKey, true)
   }, [asking, onLeave])
 
   /** Keeps a row's control by the row and the way it moves, so the focus can be handed back to it. */

@@ -2,7 +2,8 @@
  * The sidebar's edit mode as a reader opens and leaves it, and as they arrange it: the header's
  * button is the switch, Escape gives the button and the links back, a row in the mode is no link, a
  * row can be put away and brought back, and a row can be moved by its own controls — each press
- * writing the account's record and saying what it did.
+ * writing the account's record and saying what it did. The last case is the same sidebar in a
+ * phone's drawer, where Escape is the mode's first and the sheet's only after it.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -10,6 +11,7 @@ import { act, useEffect, useState } from "react"
 import { MemoryRouter } from "react-router"
 
 import { ConversationList } from "@/components/conversation-list"
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { CANVAS_UNREACHABLE, useCanvasStore } from "@/lib/canvases"
 import { adoptAppearance, db, getSettings } from "@/lib/db"
 import { DEFAULT_SIDEBAR_LAYOUT } from "@/lib/sidebar-layout"
@@ -17,6 +19,7 @@ import { syncedAppearance } from "@/lib/sync"
 
 import {
   Path,
+  atWidth,
   botProfile,
   click,
   find,
@@ -851,3 +854,176 @@ test("Reset asks first and leaves every pin alone", async () => {
   })
 })
 
+/**
+ * The phone's drawer at 390px, mounted as `app-shell.tsx` mounts it: an 85vw sheet over the reader's
+ * screen, the sidebar expanded inside it, and the door the app's own header opens it through. The
+ * shell's drawer passes no `onToggleCollapsed` — which is what the mode reads to draw its switch —
+ * and this probe passes none either. The press that opens it stands in for the header's door, and
+ * `shutDrawer` is the `onOpenChange` the shell hands the sheet, which is what Base UI calls on the
+ * dismissals it makes itself; the sweep's 390px leg presses the real drawer under the real shell.
+ */
+let shutDrawer: () => void = () => {}
+
+function Drawer() {
+  const [open, setOpen] = useState(false)
+  // The one thing a mounted page cannot press: the dismissal Base UI makes for a press outside the
+  // sheet, which the shell wires to its own `setOpen` and this probe to its state.
+  useEffect(() => {
+    shutDrawer = () => setOpen(false)
+  }, [])
+  return (
+    <>
+      <button type="button" aria-label="Open conversations" onClick={() => setOpen(true)}>
+        Menu
+      </button>
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetContent side="left" className="w-[85vw] max-w-80 p-0" showCloseButton={false}>
+          <SheetTitle className="sr-only">Conversations</SheetTitle>
+          <ConversationList onNavigate={() => setOpen(false)} />
+        </SheetContent>
+      </Sheet>
+    </>
+  )
+}
+
+/** The drawer while it stands: Base UI's popup, marked open. */
+const DRAWER_OPEN = '[role="dialog"][data-open]'
+
+test(
+  "the drawer's mode edits the same record, and Escape leaves the mode before the sheet",
+  atWidth(390, async () => {
+    await seed()
+    await mount(
+      <MemoryRouter initialEntries={["/"]}>
+        <Path />
+        <Drawer />
+      </MemoryRouter>,
+      async () => {
+        await click(find('button[aria-label="Open conversations"]'))
+        await until(async () => Boolean(find(DRAWER_OPEN)), "the drawer open")
+        await until(async () => Boolean(find('nav[aria-label="Main"]')), "its list")
+
+        // The drawer is the sidebar expanded: the switch is drawn, and no collapse control is, since
+        // the shell hands the drawer no toggle (a Decision: the rail keeps no switch to come back
+        // through). The switch also stands outside the list that scrolls, so no amount of scrolling
+        // carries it away from the thumb that opened the mode.
+        assert.equal(
+          missing('button[aria-label="Edit sidebar"]'),
+          false,
+          "the drawer draws the mode's switch",
+        )
+        assert.ok(
+          missing('button[aria-label="Collapse sidebar"]'),
+          "and grows no collapse control of its own",
+        )
+        const scrolling = find('nav[aria-label="Main"]')?.closest(".overflow-y-auto")
+        assert.equal(Boolean(scrolling), true, "the rows scroll in the list's own box")
+        assert.equal(
+          scrolling?.contains(editButton()),
+          false,
+          "which the switch stands outside, however far the list is scrolled",
+        )
+
+        await click(editButton())
+        await until(async () => Boolean(group()), "the mode in the drawer")
+
+        // At an 85vw sheet the row is the row it rests at, and every control keeps the 44px box a
+        // thumb gets and the name that says what it does — the label is what gives way.
+        const row = find('[data-sidebar-row="projects"]')
+        assert.equal(row?.classList.contains("min-h-11"), true, "the row keeps its resting height")
+        assert.equal(
+          find("[data-sidebar-grip]")?.classList.contains("size-11"),
+          true,
+          "the grip is 44px",
+        )
+        assert.equal(
+          moveControl("Projects", "down")?.classList.contains("size-11"),
+          true,
+          "the move control is 44px",
+        )
+        assert.equal(
+          find('button[aria-label="Hide Projects"]')?.classList.contains("h-11"),
+          true,
+          "and the word control 44px",
+        )
+        assert.equal(
+          row?.querySelector(".truncate")?.classList.contains("min-w-0"),
+          true,
+          "the name takes what is left and truncates there",
+        )
+        // A name cut on screen is still whole to a reader who hears the list.
+        assert.equal(
+          missing('button[aria-label="Move A pinned timetable up"]'),
+          false,
+          "a control is named for its whole row, however the row is cut",
+        )
+        assert.equal(
+          missing('button[aria-label="Unpin A pinned timetable"]'),
+          false,
+          "the pin's own press too",
+        )
+
+        // A row pressed in the mode is no destination: arranging never navigates, and never shuts the
+        // drawer the reader is arranging in.
+        await click(row)
+        assert.equal(path(), "/", "a row pressed in the mode navigates nowhere")
+        assert.equal(missing(DRAWER_OPEN), false, "and the drawer holds")
+
+        await click(find('button[aria-label="Hide Code"]'))
+        await until(async () => Boolean(find('button[aria-label="Show Code"]')), "Code put away")
+
+        // Escape is the mode's while the mode stands: one press leaves it, its focus back on the
+        // switch, and the drawer the reader arranged in stays open behind it. The press after that
+        // is the sheet's, and shuts it.
+        await pressEscape()
+        await until(async () => Boolean(editButton()), "the switch at rest, the mode left")
+        assert.equal(missing(DRAWER_OPEN), false, "the drawer still open on the press that left it")
+        assert.ok(missing('[role="group"][aria-label="Sidebar layout"]'), "and the mode gone")
+        assert.ok(document.activeElement === editButton(), "the switch holding the mode's focus")
+        assert.ok(missing('nav[aria-label="Main"] a[href="/code"]'), "and Code left the sidebar")
+
+        await pressEscape()
+        await until(async () => missing(DRAWER_OPEN), "the drawer shut by the second press")
+
+        // Opened again, the drawer rests: no mode, no Code, and the account still naming it — the
+        // record is the sidebar's, and the sheet took only the state that drew it.
+        await click(find('button[aria-label="Open conversations"]'))
+        await until(async () => Boolean(find(DRAWER_OPEN)), "the drawer opened again")
+        await until(async () => Boolean(find('nav[aria-label="Main"]')), "its list again")
+        assert.ok(missing('[role="group"][aria-label="Sidebar layout"]'), "it draws resting")
+        assert.equal(editButton()?.getAttribute("aria-pressed"), "false", "its switch at rest")
+        assert.ok(missing('nav[aria-label="Main"] a[href="/code"]'), "with Code still away")
+        assert.deepEqual(
+          addresses(),
+          ["/projects", "/canvas", "/research", "/meetings", "/canvas/p1"],
+          "every other row in its place",
+        )
+        assert.deepEqual(
+          (await db.settings.get("settings"))?.sidebarLayout?.hidden,
+          ["code"],
+          "the record the drawer's press wrote still names Code",
+        )
+
+        // A drawer shut mid-edit opens resting, since the mode is the sidebar's own state and the
+        // sheet takes the list with it: the dismissal Base UI makes for a press outside is one way
+        // the shell shuts it.
+        await click(editButton())
+        await until(async () => Boolean(group()), "the mode again")
+        await act(async () => shutDrawer())
+        await settle()
+        await until(async () => missing(DRAWER_OPEN), "the drawer shut with the mode open")
+        assert.ok(
+          missing('nav[aria-label="Main"]'),
+          "the sheet took the sidebar's list with it, the mode inside it",
+        )
+        await click(find('button[aria-label="Open conversations"]'))
+        await until(async () => Boolean(find(DRAWER_OPEN)), "the drawer opened once more")
+        assert.ok(
+          missing('[role="group"][aria-label="Sidebar layout"]'),
+          "and it draws resting, the mode gone with the sheet that held it",
+        )
+        assert.equal(editButton()?.getAttribute("aria-pressed"), "false", "its switch untouched")
+      },
+    )
+  }),
+)
