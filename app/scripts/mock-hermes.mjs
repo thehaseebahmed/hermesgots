@@ -3466,6 +3466,29 @@ const confirmDelay = (value, held) => {
   const ms = Number(value)
   return Number.isFinite(ms) ? Math.min(DICTATION_WAIT_MS, Math.max(0, ms)) : held
 }
+// Whether this host can hear a take, as `plugin/dictation.py` asks Hermes's `is_stt_enabled`: the
+// switch on the bot's own Speech-to-text page, and the default where the file holds nothing for it.
+// So a write of `stt.enabled` is what moves the answer below, and what the composer's mic follows.
+const hearsTakes = () => (stt.values["stt.enabled"] ?? STT_DEFAULTS["stt.enabled"]) !== false
+/**
+ * `info.dictation`, as `plugin/dictation.py`'s `info()` answers it: no provider to hear a take, a
+ * switch read as off, or a host that can. `MOCK_DICTATION=off` is the first — a host that has none.
+ * The switch-off answer names no route, where the plugin's does not either.
+ */
+function dictationAnswer() {
+  const heard = { model: "base", wait_ms: DICTATION_WAIT_MS }
+  if (DICTATION === "off")
+    return {
+      ready: false,
+      reason:
+        "No speech provider on this host can hear a take. Install faster-whisper, or set a provider's key.",
+      ...heard,
+      provider: { name: "none", backend: null, cloud: false },
+    }
+  if (!hearsTakes())
+    return { ready: false, reason: "Speech-to-text is turned off on the host.", ...heard }
+  return { ready: true, ...heard, language: "en", provider: heardBy() }
+}
 let dictationConfirmMs = confirmDelay(process.env.MOCK_DICTATION_CONFIRM_MS ?? 400, 400)
 // How many takes have their first Confirm refused for a missing Piece, so the re-send is exercised.
 let dictationRefusals = Number(process.env.MOCK_DICTATION_REFUSE ?? 0)
@@ -4393,23 +4416,7 @@ http
           reason: null,
           writers: { model: RESEARCH_WRITERS, provider: RESEARCH_WRITERS },
         },
-        dictation:
-          DICTATION === "off"
-            ? {
-                ready: false,
-                reason:
-                  "No speech provider on this host can hear a take. Install faster-whisper, or set a provider's key.",
-                model: "base",
-                provider: { name: "none", backend: null, cloud: false },
-                wait_ms: DICTATION_WAIT_MS,
-              }
-            : {
-                ready: true,
-                model: "base",
-                language: "en",
-                provider: heardBy(),
-                wait_ms: DICTATION_WAIT_MS,
-              },
+        dictation: dictationAnswer(),
       })
     }
     if (

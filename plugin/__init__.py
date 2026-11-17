@@ -525,6 +525,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if title_db is not None:
             # The reader hands back its task, so the shutdown below cancels it with the rest.
             tasks.append(stream.watch_titles(store_path(), title_db, home))
+        # Whether this host can hear a take decides whether the app offers a mic, and a device keeps
+        # that answer for five minutes: the plugin's own writes note a change as they make it, and
+        # this watches the file for the ones made by the CLI or another Hermes; see stream.py
+        # (ADR 0164).
+        tasks.append(stream.watch_config(store_path(), home))
         yield
         for task in tasks:
             task.cancel()
@@ -3183,6 +3188,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             except Exception as error:
                 logger.warning(failed, exc_info=True)
                 return _error(web, f"{failed}: {error}", 502)
+            # What this write changed is drawn on devices this one will never touch — the mic in
+            # another phone's composer, which keeps its answer for five minutes — so the write is
+            # noted for them, the way a title is (ADR 0164). Not throttled: two settings written a
+            # moment apart are two changes, and a device told to read only once would keep the state
+            # between them.
+            events.note("settings", path=store_path(), force=True)
             return web.json_response({"object": object_name, field: payload})
 
         return handler
