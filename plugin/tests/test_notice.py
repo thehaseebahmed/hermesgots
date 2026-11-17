@@ -140,9 +140,28 @@ class AnApprovalsBody(unittest.TestCase):
         )
 
     def test_a_command_longer_than_the_bound_is_cut_with_an_ellipsis(self):
-        body = notice.approval_body(None, "echo " + "word " * 200)
-        self.assertEqual(len(body), notice.BODY_MAX, "a body is exactly as long as the bound says")
+        body = notice.approval_body(None, "echo " + "word " * 400)
+        self.assertLessEqual(len(body), notice.APPROVAL_MAX, "a command's body is held to its bound")
+        self.assertGreater(
+            len(body),
+            notice.BODY_MAX,
+            "and that bound is a command's, not the sentence a reply's paragraph is cut to — "
+            "the card shows the whole command, so a tray has to hold more than a sentence of it",
+        )
         self.assertTrue(body.endswith("…"), "and says it was cut")
+
+    def test_a_long_command_is_cut_at_a_line_and_never_mid_token(self):
+        command = "\n".join(f"step {n}: run the {n}th check" for n in range(200))
+        body = notice.approval_body(None, command)
+        self.assertLessEqual(len(body), notice.APPROVAL_MAX)
+        self.assertTrue(body.endswith("…"), "a cut body says so")
+        kept = body[:-1].split("\n")
+        self.assertEqual(
+            kept,
+            command.split("\n")[: len(kept)],
+            "every line it keeps is a line of the command, whole",
+        )
+        self.assertEqual(kept[-1], f"step {len(kept) - 1}: run the {len(kept) - 1}th check")
 
     def test_an_approval_that_says_nothing_answers_nothing(self):
         for description, command in ((None, None), ("  \n", "\n \n"), ("", "")):
@@ -197,7 +216,13 @@ class TheRegistrysBound(unittest.TestCase):
         ).read_text(encoding="utf-8")
         found = re.search(r"body: text\(input\?\.body, (\d+)\)", registry)
         self.assertIsNotNone(found, "the registry still bounds a detail's body")
-        self.assertEqual(int(found.group(1)), notice.BODY_MAX)
+        self.assertLessEqual(notice.BODY_MAX, notice.APPROVAL_MAX, "a command has the longer bound")
+        self.assertEqual(
+            int(found.group(1)),
+            notice.APPROVAL_MAX,
+            "a body cut here must not be cut again on the way to Android, and an approval's command "
+            "is the longest one the plugin sends",
+        )
 
     def test_the_phone_holds_the_notice_as_long_as_the_push(self):
         """A button lives as long as the tray entry it rode on, and Android is told by the message."""

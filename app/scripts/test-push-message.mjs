@@ -176,7 +176,7 @@ test("the registry bounds a notice and drops what isn't a picture or a link", as
     category: "chat_input",
     session_id: "gots-1",
     title: `  ${"t".repeat(200)}  `,
-    body: "b".repeat(400),
+    body: "b".repeat(1200),
     bot: "nova",
     icon: "javascript:alert(1)",
     actions: [
@@ -189,7 +189,11 @@ test("the registry bounds a notice and drops what isn't a picture or a link", as
     ],
   })
   assert.equal(detail.title.length, 120, "a title is cut at the length a tray shows")
-  assert.equal(detail.body.length, 200, "and so is a body")
+  assert.equal(
+    detail.body.length,
+    800,
+    "and a body is cut at the longest one the plugin sends — an approval's command",
+  )
   assert.equal(detail.icon, undefined, "a picture is an http(s) address or it is nothing")
   assert.deepEqual(
     detail.actions,

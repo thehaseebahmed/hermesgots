@@ -349,9 +349,12 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
       // links an approval carries. Everything here was written by the plugin, so all of it is
       // bounded and none of it is trusted — a picture or a button is an http(s) address or it is
       // nothing, and a notice with more than two buttons gives a tray the first two.
+      // The body's bound is the plugin's own (`notice.APPROVAL_MAX` in `plugin/notice.py`, which a
+      // plugin test holds this number to): the longest body it sends is an approval's command, and
+      // a cut here would be a second cut of words a reader approves.
       const detail: PushDetail = {
         title: text(input?.title, 120),
-        body: text(input?.body, 200),
+        body: text(input?.body, 800),
         bot: botId(input?.bot),
         icon: pictureOf(input?.icon),
         actions: actionsOf(input?.actions),

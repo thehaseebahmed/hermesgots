@@ -76,11 +76,33 @@ def carried(notice: Any) -> Dict[str, Any]:
 # body at this too (`app/netlify/lib/registry.ts`), so a phone that goes through Firebase shows the
 # words a browser and ntfy do rather than a second cut of its own.
 BODY_MAX = 200
+# An approval's own bound, and the longest body this plugin sends. A paragraph is a sentence; a
+# command is what the reader judges, and the card shows it whole — 200 characters cut a heredoc
+# mid-token, so the reader allowed a command they could not read. A tray's expanded view holds a
+# handful of lines, which is what this is.
+APPROVAL_MAX = 800
 
 
 def _cut(text: str, limit: int = BODY_MAX) -> str:
     """Text at a bound, saying it was cut with the same ellipsis a paragraph ends on."""
     return text[: limit - 1].rstrip() + "…" if len(text) > limit else text
+
+
+def _cut_lines(text: str, limit: int = APPROVAL_MAX) -> str:
+    """Text at its bound, cut where a line ends: a command keeps every line it says, whole.
+
+    A command is read line by line — a heredoc, a chain of ``&&`` — so a cut in the middle of one
+    leaves the reader judging half a word. The last line that fits is kept and the rest goes, with
+    the same ellipsis a paragraph's cut carries. One line longer than the bound is cut where it
+    must be, since there is no line end to keep.
+    """
+    if len(text) <= limit:
+        return text
+    whole = text[: limit - 1].rstrip()
+    line = whole.rfind("\n")
+    if line > 0:
+        whole = whole[:line].rstrip()
+    return whole + "…"
 
 
 def one_line(text: str) -> str:
@@ -113,13 +135,15 @@ def approval_body(description: Optional[str], command: Optional[str]) -> Optiona
     command underneath on its own lines.
 
     The command stands unlabelled — the hook names no tool, so there is nothing true to label it
-    with — with no backticks and no fence, since a tray shows plain text. Nothing said answers
-    None, which leaves the kind its own line.
+    with — with no backticks and no fence, since a tray shows plain text. It is held to a command's
+    own bound rather than a sentence's, and cut where a line ends when it must be cut, since the
+    reader approves what they can read. Nothing said answers None, which leaves the kind its own
+    line.
     """
     said = one_line(description) if isinstance(description, str) and description.strip() else None
     script = _command_lines(command) if isinstance(command, str) else None
     parts = [part for part in (said, script) if part]
-    return _cut("\n\n".join(parts)) if parts else None
+    return _cut_lines("\n\n".join(parts)) if parts else None
 
 
 def question_body(question: Optional[str]) -> Optional[str]:
