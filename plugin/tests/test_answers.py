@@ -501,6 +501,52 @@ class TheAddress(unittest.TestCase):
         self.assertIsNone(push.base(self.path), "no address is no button, rather than a guess")
         self.assertIsNone(push.base_url(self.request("/somewhere/else", headers={"Host": "h"}), "/push"))
 
+    def test_the_address_a_phone_polls_from_is_kept_even_though_it_never_subscribes(self) -> None:
+        """The Android app has no Push API, so it never posts `push`: every screen polls `runs/live`.
+
+        `base` is what an approval's two buttons post back to, and a Firebase-only phone minted
+        none at all while only `push` and `push/ntfy` wrote it. The poll every screen already makes
+        writes it instead, so an approval relayed to the registry carries its links.
+        """
+        request = self.request("/api/plugins/gots/runs/live", headers={"Host": "bot.example"})
+        answer = asyncio.run(route(self.app, plugin.PREFIX + "/runs/live", "GET")(request))
+        self.assertEqual(answer["status"], 200)
+        self.assertEqual(
+            push.base(self.path),
+            "https://bot.example/api/plugins/gots",
+            "the address this phone dialled, kept from the route it really calls",
+        )
+        relayed: List[Any] = []
+        with mock.patch.object(
+            push, "_relay", lambda path, kind, category, session_id, notice: relayed.append(notice)
+        ):
+            push._run(
+                self.path, "approval", "gots-1", answer=answers.run_target("run_1", "gots-1")
+            )
+        self.assertEqual(
+            [one.label for one in relayed[-1].actions],
+            ["Allow once", "Deny"],
+            "so the approval it is sent carries two buttons that post to that address",
+        )
+
+    def test_a_mute_write_keeps_the_address_the_phone_reached_it_at(self) -> None:
+        # `syncMutes` posts this from a phone with the app closed, so it is another route the
+        # native app really calls, and it says where it reached this bot the same way.
+        request = self.request("/api/plugins/gots/push/mute", headers={"Host": "bot.example"})
+        body = {"muted": True, "bot": "nova"}
+
+        async def read() -> Any:
+            return body
+
+        async def text() -> str:
+            return json.dumps(body)
+
+        request.json = read
+        request.text = text
+        answer = asyncio.run(route(self.app, plugin.PREFIX + "/push/mute", "POST")(request))
+        self.assertEqual(answer["status"], 200)
+        self.assertEqual(push.base(self.path), "https://bot.example/api/plugins/gots")
+
     def test_a_stored_address_that_is_not_one_is_not_used(self) -> None:
         push.set_base(self.path, "javascript:alert(1)")
         self.assertIsNone(push.base(self.path))

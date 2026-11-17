@@ -2482,6 +2482,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         denied = unauthorized(request)
         if denied is not None:
             return denied
+        # Every screen polls this route, and the Android app calls nothing else a button could be
+        # minted from — its WebView has no Push API, so it never posts `push`. The address it dialled
+        # is kept here, which is where an approval's two buttons post back to (see `push.base_url`).
+        dialled = push.base_url(request, "/runs/live")
+        if dialled:
+            await asyncio.to_thread(push.set_base, store_path(), dialled)
         owned = owned_runs(request)
         # On the loop thread, like store_path.
         home = hermes_home()
@@ -2614,6 +2620,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         await asyncio.to_thread(push.set_bot_muted, store_path(), muted)
         if character:
             await asyncio.to_thread(push.set_bot, store_path(), character)
+        # Another route the native app really calls, and it says where it reached this bot as it
+        # does so: a phone that never subscribes still has an address its buttons post back to.
+        dialled = push.base_url(request, "/push/mute")
+        if dialled:
+            await asyncio.to_thread(push.set_base, store_path(), dialled)
         return web.json_response({"object": "gots.push", "muted": muted})
 
     async def push_ntfy_read(request: "web.Request") -> "web.Response":

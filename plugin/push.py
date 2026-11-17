@@ -669,7 +669,17 @@ def base_url(request: Any, tail: str) -> Optional[str]:
 
 
 def set_base(path: Path, base: Optional[str]) -> None:
-    """Keeps the address the app dialled, so a notice built later can carry a button back to it."""
+    """Keeps the address the app dialled, so a notice built later can carry a button back to it.
+
+    A request that names no address leaves the one already kept alone rather than forgetting it: the
+    routes that record this include the poll every screen makes, and a poll that reached one some
+    other way must not take away the address a button already posts to. An address this profile
+    already holds is not written again — that poll comes every few seconds, and nothing changed.
+    """
+    if not base:
+        return
+    if _pref(path, "base", BASE) == base:
+        return
     _set_pref(path, "base", base)
 
 
