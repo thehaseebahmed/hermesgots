@@ -226,14 +226,31 @@ class OnThePhone(Env):
         self.assertNotIn("actions", body, "a button is not a word: it rides in a header, not the JSON")
         self.assertEqual(body["title"], "Fix the build")
 
-    def test_a_profile_that_never_said_where_its_app_lives_carries_neither(self):
+    def test_buttons_ride_even_where_the_picture_cannot(self):
+        """A phone that chose ntfy never posts `push`, so nothing names the app's origin.
+
+        Its buttons are minted all the same — the address they post to is the host's, which the
+        phone dialled — so the message carries them and leaves off only the picture it has no
+        origin for. Dropping the buttons with the picture left the transport for an APK without
+        Firebase unable to answer an approval at all.
+        """
         push.set_web(self.path, "mailto:bot@example.com")
         self.assertIsNone(push.web(self.path), "only an http or https origin is the app's own")
         notice = Notice(title="Fix the build", actions=(Action("Allow once", ONCE), Action("Deny", DENY)))
         headers = self.sent(notice)
-        self.assertNotIn("x-icon", headers)
-        self.assertNotIn("x-actions", headers, "a button with no picture to sit under is not sent either")
+        self.assertNotIn("x-icon", headers, "there is no origin to name the badged picture at")
+        self.assertEqual(
+            [one["label"] for one in json.loads(headers["x-actions"])],
+            ["Allow once", "Deny"],
+            "but the buttons post to the host the phone dialled, and are carried",
+        )
         self.assertEqual(json.loads(self.requests[-1].data)["title"], "Fix the build")
+
+    def test_a_notice_with_no_buttons_and_no_picture_carries_neither(self):
+        push.set_web(self.path, None)
+        headers = self.sent(Notice(title="Fix the build"))
+        self.assertNotIn("x-icon", headers)
+        self.assertNotIn("x-actions", headers)
 
 
 class Deliver(Env):

@@ -353,18 +353,20 @@ def icon(origin: Optional[str], bot: Optional[str]) -> Optional[str]:
 def headers(
     origin: Optional[str], bot: Optional[str], notice: Optional[Notice] = None
 ) -> Dict[str, str]:
-    """What a publish carries beside its words: the picture and the buttons, both the app's own.
+    """What a publish carries beside its words: the buttons, and the picture where it can be named.
 
-    A profile that has never heard where its app lives and which bot it is says neither, since a
-    button drawn under no picture is a notice that doesn't look like this bot's at all.
+    The buttons are the notice's own — an approval's links post to the host the phone dialled, and
+    that address is known wherever they were minted at all — so they ride whichever way the picture
+    goes. The picture is the app's own file at the origin a browser subscription named, and a phone
+    that chose ntfy never subscribes: it is left off on its own, never taking the buttons with it.
     """
-    picture = icon(origin, bot)
-    if not picture:
-        return {}
-    extra = {ICON: picture}
+    extra: Dict[str, str] = {}
     actions = buttons(notice)
     if actions:
         extra[ACTIONS] = actions
+    picture = icon(origin, bot)
+    if picture:
+        extra[ICON] = picture
     return extra
 
 
