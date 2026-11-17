@@ -92,7 +92,10 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     # Main a Gots chat of its own instead of the profile's real chat, and no test of ours can see it:
     # the tests stub these modules, the host renames them without knowing this plugin exists.
     (("gateway/session_bot.py",), "async def _create_bot_chat"),
-    (("gateway/session_contract.py",), "class Principal"),
+    # The actor that creation is handed. Hermes renamed it `Principal` -> `SessionActor` without moving
+    # a field, and `plugin/sessions.py` asks the module for either name, so the anchor pins the name a
+    # current host uses and the plugin keeps the older one working.
+    (("gateway/session_contract.py",), "class SessionActor"),
     (("gateway/session_runtime_workers.py",), "def track_mutation"),
     # The title of that chat, which `plugin/chats.py` publishes as Main's one record and reads its
     # `is_chat` lineage by. Hermes gates its own Bot Chat prompt section on it and resumes `-c "Bot

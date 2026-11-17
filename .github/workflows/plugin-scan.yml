@@ -49,7 +49,12 @@ jobs:
           repository: NousResearch/hermes-agent
           ref: ${{ steps.ref.outputs.ref }}
           path: .hermes
-          sparse-checkout: tools
+          # The scanner lives in `tools` and Hermes's own shim forwards it to `hermes_cli`
+          # (whose `hermes_agent` bootstrap sets up the module moves), so all three come along.
+          sparse-checkout: |
+            tools
+            hermes_cli
+            hermes_agent
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
