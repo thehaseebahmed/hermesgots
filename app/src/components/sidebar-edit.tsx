@@ -22,7 +22,13 @@ import {
 
 import { CanvasMark } from "@/components/canvas-mark"
 import { LabLabel } from "@/components/lab-badge"
-import type { SidebarFeatureId, SidebarLayoutRow, SidebarPin } from "@/lib/sidebar-layout"
+import type {
+  SidebarFeatureId,
+  SidebarLayoutRow,
+  SidebarPin,
+  SidebarPlacedRow,
+} from "@/lib/sidebar-layout"
+import { cn } from "@/lib/utils"
 
 /**
  * Each feature's mark, by the id the table files it under. Typed by those ids, so a feature added to
@@ -68,14 +74,22 @@ export function SidebarRowBody<Pin extends SidebarPin & { mark?: string }>({
  * The mode, open over the sidebar's rows: one group that takes the focus, holding every row above the
  * boundary in the order the sidebar would draw them. A row is a name and a mark, never a destination —
  * a press that navigated while a reader is arranging is how they lose their place.
+ *
+ * Each feature row carries the control that puts it away or brings it back, named for the row and what
+ * the press does. A row already put away stays here, in its place and muted, so one list keeps one
+ * order and a hidden row is one press from coming back. A pin carries no such control: it left the
+ * sidebar because the host pinned it, and only Unpin may end it.
  */
 export function SidebarEdit<Pin extends SidebarPin & { mark?: string }>({
   rows,
   onLeave,
+  onSetHidden,
 }: {
-  rows: readonly SidebarLayoutRow<Pin>[]
+  rows: readonly SidebarPlacedRow<Pin>[]
   /** Leaves the mode, and is the one way out a reader can take from inside it. */
   onLeave: () => void
+  /** Puts one row away, or brings it back: the mode's one write, carried by the account. */
+  onSetHidden: (id: string, hidden: boolean) => void
 }) {
   const group = useRef<HTMLDivElement>(null)
 
@@ -104,14 +118,35 @@ export function SidebarEdit<Pin extends SidebarPin & { mark?: string }>({
       tabIndex={-1}
       className="flex flex-col gap-0.5"
     >
-      {rows.map((row) => (
+      {rows.map(({ row, hidden }) => (
         <div
           key={row.id}
           data-sidebar-row={row.id}
+          data-hidden={hidden ? "" : undefined}
           data-canvas-pinned={row.kind === "pin" ? "" : undefined}
-          className="flex min-h-11 items-center gap-3 rounded-2xl px-3 text-sm"
+          className={cn(
+            "flex min-h-11 items-center gap-3 rounded-2xl px-3 text-sm",
+            hidden && "text-muted-foreground",
+          )}
         >
           <SidebarRowBody row={row} />
+          {/* The eye reads the muted row; a reader who hears the list needs the word. */}
+          {hidden && <span className="sr-only">Hidden</span>}
+          {row.kind === "feature" && (
+            <button
+              type="button"
+              // A name that says what the press does, rather than a pressed state a reader has to work
+              // out — which is why this control carries no `aria-pressed`: its words are the state.
+              aria-label={`${hidden ? "Show" : "Hide"} ${row.label}`}
+              onClick={() => onSetHidden(row.id, !hidden)}
+              className={cn(
+                "ml-auto flex h-11 shrink-0 items-center rounded-2xl px-3 text-xs font-medium",
+                "text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+            >
+              {hidden ? "Show" : "Hide"}
+            </button>
+          )}
         </div>
       ))}
     </div>

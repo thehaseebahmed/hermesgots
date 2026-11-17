@@ -452,6 +452,11 @@ test("the sidebar draws today's rows, in today's order, with today's labels", as
         "today's rows, in today's order: the features, then the pin the reader keeps at their foot",
       )
       assert.deepEqual(
+        mainRows().map((row) => row.getAttribute("data-sidebar-row")),
+        ["projects", "code", "canvas", "research", "meetings", "canvas:p1"],
+        "each row named by the id the record files it under, resting as it is in the mode",
+      )
+      assert.deepEqual(
         mainRows()
           .filter((row) => row.textContent?.includes("Labs"))
           .map((row) => row.getAttribute("href")),

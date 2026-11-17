@@ -27,7 +27,15 @@ import { db } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useMeetingsEnabled } from "@/lib/meetings"
 import { plainPress, pressOpeningRoot, useNav } from "@/lib/nav"
-import { sidebarRows, type SidebarLab, type SidebarLayoutRow } from "@/lib/sidebar-layout"
+import {
+  restingSidebarRows,
+  sidebarModeRows,
+  sidebarRows,
+  withHidden,
+  type SidebarLab,
+  type SidebarLayoutRow,
+} from "@/lib/sidebar-layout"
+import { useSidebarLayout } from "@/lib/sidebar"
 import { useSyncState } from "@/lib/sync"
 import { BOT_SORTS, sortBots, useBotSort, useBotSummaries, useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
@@ -98,6 +106,7 @@ function SidebarRow({
       end={row.end}
       onClick={onNavigate}
       aria-label={collapsed ? row.label : undefined}
+      data-sidebar-row={row.id}
       className={collapsed ? railClass : rowClass}
     >
       <SidebarRowBody row={row} collapsed={collapsed} />
@@ -133,6 +142,7 @@ function CanvasRow({
       aria-label={collapsed ? row.label : undefined}
       aria-current={opened ? "page" : undefined}
       data-canvas-pinned=""
+      data-sidebar-row={row.id}
       className={(collapsed ? railClass : rowClass)({ isActive: opened })}
     >
       <SidebarRowBody row={row} collapsed={collapsed} />
@@ -384,10 +394,16 @@ export function ConversationList({
     canvas: canvas === true,
     meetings: meetings === true,
   }
-  // The pins are read only under Canvas's switch, so a build with Canvas off refreshes nothing; which
-  // rows are drawn is the table's gate below, one decision for every row alike.
+  // The pins are read only under Canvas's switch, so a build with Canvas off refreshes nothing.
   const pinned = usePinnedCanvases(gates.canvas)
-  const rows = sidebarRows(pinned).filter((row) => row.lab === null || gates[row.lab])
+  // Every row this build knows, gate or no gate: the rule holds a switched-off row's id in the
+  // account's record, so turning the lab back on returns the row where the reader put it. The gate
+  // decides what is drawn, never what the record says.
+  const known = sidebarRows(pinned)
+  const drawn = (row: SidebarLayoutRow<Canvas>) => row.lab === null || gates[row.lab]
+  const [layout, saveLayout] = useSidebarLayout()
+  const rows = restingSidebarRows(known, layout).filter(drawn)
+  const editRows = sidebarModeRows(known, layout).filter(({ row }) => drawn(row))
 
   // The mode is this component's own state and never a stored setting: a reload must not land a
   // reader in a mode where a row press navigates nowhere. The switch's ref is what the mode gives the
@@ -446,7 +462,11 @@ export function ConversationList({
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         <nav className={cn("flex flex-col gap-0.5", collapsed && "items-center")} aria-label="Main">
           {editing ? (
-            <SidebarEdit rows={rows} onLeave={leaveEdit} />
+            <SidebarEdit
+              rows={editRows}
+              onLeave={leaveEdit}
+              onSetHidden={(id, hidden) => saveLayout(withHidden(known, layout, id, hidden))}
+            />
           ) : (
             rows.map((row) => (
               <SidebarRow key={row.id} row={row} collapsed={collapsed} onNavigate={onNavigate} />

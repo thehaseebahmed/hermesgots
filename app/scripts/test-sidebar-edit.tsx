@@ -10,7 +10,8 @@ import { act, useState } from "react"
 import { MemoryRouter } from "react-router"
 
 import { ConversationList } from "@/components/conversation-list"
-import { db } from "@/lib/db"
+import { adoptAppearance, db, getSettings } from "@/lib/db"
+import { syncedAppearance } from "@/lib/sync"
 
 import {
   Path,
@@ -60,7 +61,7 @@ function servePinned() {
 
 /** A device with one bot, every lab switch on, and the canvas the reader pinned on its sidebar. */
 async function seed() {
-  await seedSettings({ activeProfileId: bot.id, meetings: true })
+  await seedSettings({ activeProfileId: bot.id, meetings: true, appearanceAt: 0 })
   await db.profiles.clear()
   await db.profiles.put(bot)
   await db.conversations.clear()
@@ -80,6 +81,8 @@ const editButton = () => find('button[aria-label="Edit sidebar"]')
 const doneButton = () => find('button[aria-label="Done editing sidebar"]')
 /** The mode itself: the group the sidebar's own state opens. */
 const group = () => find('[role="group"][aria-label="Sidebar layout"]')
+/** A row's own words, before the control the mode puts beside them. */
+const labelOf = (row: Element | null) => wordsOf(row).replace(/(?:Hide|Show)$/, "")
 
 /** Escape, pressed where the reader's focus already is. */
 async function pressEscape() {
@@ -130,18 +133,18 @@ test("the header's button is the mode's switch", async () => {
     assert.ok(row, "the row, named by the id the table gives it")
     assert.equal(row.getAttribute("href"), null, "no address of its own")
     assert.equal(row.classList.contains("min-h-11"), true, "still the 44px row")
-    assert.equal(wordsOf(row), "Projects", "still its label")
+    assert.equal(labelOf(row), "Projects", "still its label, its own control beside it")
     assert.ok(
       missing('nav[aria-label="Main"] a[href="/projects"]'),
       "and no link where the row stands",
     )
     assert.equal(
-      wordsOf(find('[data-sidebar-row="canvas"]')).replace("Labs", ""),
+      labelOf(find('[data-sidebar-row="canvas"]')).replace("Labs", ""),
       "Canvas",
       "the lab feature keeps its name, its pill beside it",
     )
     assert.equal(
-      wordsOf(find('[data-sidebar-row="canvas"]')).includes("Labs"),
+      labelOf(find('[data-sidebar-row="canvas"]')).includes("Labs"),
       true,
       "and the pill itself",
     )
@@ -216,6 +219,123 @@ test("Collapse leaves the mode before it collapses", async () => {
       assert.ok(missing('button[aria-label="Edit sidebar"]'), "and the rail keeps no switch")
     },
   )
+})
+
+/**
+ * The record the account carries: Meetings first, Research put away. One reader's arrangement, as a
+ * device that has heard nothing but this record would draw it — the pin the host holds at its foot.
+ */
+const ORDERED = {
+  version: 1,
+  order: ["meetings", "projects", "code", "canvas", "research"],
+  hidden: ["research"],
+}
+
+/** The addresses the resting sidebar draws, in the order it draws them. */
+const addresses = () =>
+  findAll('nav[aria-label="Main"] a').map((row) => row.getAttribute("href"))
+
+test("a hidden row leaves the sidebar and stays in the mode, muted", async () => {
+  await seed()
+  await mount(sidebar(), async () => {
+    await until(async () => Boolean(find('a[href="/code"]')), "the nav")
+    await click(editButton())
+    await until(async () => Boolean(group()), "the mode")
+
+    await click(find('button[aria-label="Hide Code"]'))
+    const row = () => find('[data-sidebar-row="code"]')
+    await until(async () => Boolean(find('button[aria-label="Show Code"]')), "the row put away")
+    assert.equal(row()?.hasAttribute("data-hidden"), true, "the row in the mode says it is hidden")
+    assert.equal(
+      row()?.classList.contains("text-muted-foreground"),
+      true,
+      "and stands muted, in its place",
+    )
+    assert.equal(
+      wordsOf(row()).includes("Hidden"),
+      true,
+      "with the word a screen reader hears, the eye reading the muted colour",
+    )
+    assert.equal(row()?.previousElementSibling?.getAttribute("data-sidebar-row"), "projects")
+    assert.equal(
+      row()?.nextElementSibling?.getAttribute("data-sidebar-row"),
+      "canvas",
+      "still where the reader had it in the one list, not grouped away",
+    )
+
+    // The resting sidebar draws no hidden row — the mode did not have to close to make it so.
+    await click(doneButton())
+    await until(async () => Boolean(editButton()), "the switch at rest")
+    assert.ok(missing('nav[aria-label="Main"] a[href="/code"]'), "Code has left the sidebar")
+    assert.deepEqual(
+      addresses(),
+      ["/projects", "/canvas", "/research", "/meetings", "/canvas/p1"],
+      "every other row stands, in its place",
+    )
+
+    const stored = await db.settings.get("settings")
+    assert.deepEqual(
+      stored?.sidebarLayout,
+      {
+        version: 1,
+        order: ["projects", "code", "canvas", "research", "meetings", "canvas:p1"],
+        hidden: ["code"],
+      },
+      "the account's record names Code put away, with the whole order beside it",
+    )
+    assert.ok((stored?.appearanceAt ?? 0) > 0, "and the appearance clock moved with the write")
+  })
+
+  // A reader who opens the app again finds it as they left it: the record is the account's, and the
+  // sidebar a fresh mount draws reads it before it draws a row.
+  await mount(sidebar(), async () => {
+    await until(async () => missing('nav[aria-label="Main"] a[href="/code"]'), "the row still away")
+    assert.deepEqual(
+      addresses(),
+      ["/projects", "/canvas", "/research", "/meetings", "/canvas/p1"],
+      "a second mount over the same device draws the same sidebar",
+    )
+  })
+})
+
+test("a record written on one device draws the same rows on the next", async () => {
+  await seed()
+  await seedSettings({ activeProfileId: bot.id, meetings: true, sidebarLayout: ORDERED })
+  await mount(sidebar(), async () => {
+    await until(
+      async () => missing('nav[aria-label="Main"] a[href="/research"]'),
+      "the arrangement this device wrote",
+    )
+    assert.deepEqual(
+      addresses(),
+      ["/meetings", "/projects", "/code", "/canvas", "/canvas/p1"],
+      "Meetings first, Research put away, the pin at the foot",
+    )
+  })
+
+  // The record as sync carries it to another device, and as that device adopts it: one doc's value
+  // and the clock it arrived on.
+  const { appearance } = syncedAppearance(await getSettings())
+  await seed()
+  await seedSettings({ activeProfileId: bot.id, meetings: true })
+  await adoptAppearance(appearance.value, appearance.at)
+  assert.deepEqual(
+    (await getSettings()).sidebarLayout,
+    ORDERED,
+    "the record arrives whole, its order and its hidden list together",
+  )
+
+  await mount(sidebar(), async () => {
+    await until(
+      async () => missing('nav[aria-label="Main"] a[href="/research"]'),
+      "the adopted arrangement",
+    )
+    assert.deepEqual(
+      addresses(),
+      ["/meetings", "/projects", "/code", "/canvas", "/canvas/p1"],
+      "and the next device draws the same sidebar from it",
+    )
+  })
 })
 
 test("a collapsed sidebar draws no edit button, and an expanded one draws it", async () => {
