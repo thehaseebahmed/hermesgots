@@ -1,10 +1,12 @@
 /**
- * The tray rules, driven exhaustively; the wiring around them is pinned as text, because reading a
- * real tray needs a browser or a phone (`push-source.mjs`).
+ * The tray rules, driven exhaustively; the worker's own half is driven too, in a stubbed worker
+ * scope, and the app-side wiring around them is pinned as text, because reading a real tray needs a
+ * browser or a phone (`push-source.mjs`).
  */
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
+import vm from "node:vm"
 
 import { aboutSubject, chatSubject, pushSubject } from "../src/lib/push-kinds.ts"
 import { body, read } from "./push-source.mjs"
@@ -140,4 +142,121 @@ test("both writers end a tag with the id a dismissal reads", () => {
       `${file}'s tag names the session its push is about`,
     )
   }
+})
+
+/** A value of the worker's realm as this one reads it: `vm`'s objects are not this realm's. */
+const plain = (value) => JSON.parse(JSON.stringify(value))
+
+/**
+ * The worker scope `push-sw.js` runs in, stubbed: the listeners it registers, the entries it puts in
+ * the tray, and the two things a press can reach — a link it can post to, and a window it can open.
+ * No client is listed, so the worker reads the app as being away, which is when a tray entry stays.
+ */
+function tray() {
+  const listeners = []
+  const shown = []
+  const posted = []
+  const opened = []
+  const closed = []
+  const scope = {
+    setTimeout,
+    fetch: async (url, init) => {
+      posted.push({ url, init })
+      return {}
+    },
+    self: {
+      addEventListener: (type, fn) => listeners.push({ type, fn }),
+      registration: {
+        showNotification: async (title, options) => shown.push({ title, options }),
+        getNotifications: async () => [],
+      },
+      clients: { matchAll: async () => [], openWindow: async (path) => opened.push(path) },
+    },
+  }
+  vm.createContext(scope)
+  vm.runInContext(readFileSync(new URL("../public/push-sw.js", import.meta.url), "utf8"), scope)
+  // A browser runs a listener and waits on what it asked to keep alive, so the two are one step.
+  const fire = async (type, event) => {
+    const waits = []
+    const one = { ...event, waitUntil: (promise) => waits.push(promise) }
+    for (const listener of listeners) if (listener.type === type) listener.fn(one)
+    await Promise.all(waits)
+    return one
+  }
+  return {
+    shown,
+    posted,
+    opened,
+    closed,
+    push: (data) => fire("push", { data: { json: () => data } }),
+    press: (event) => fire("notificationclick", event),
+  }
+}
+
+/** The notice an approval's push carries: the chat's name, the card's body, and its two buttons. */
+const ONCE = "https://bot.example/api/plugins/gots/push/answer/once-1"
+const DENY = "https://bot.example/api/plugins/gots/push/answer/deny-1"
+const approval = {
+  kind: "approval",
+  session_id: "gots-1",
+  title: "Fix the build",
+  body: "Clear the build\n\nrm -rf ./build",
+  bot: "nova",
+  actions: [
+    { label: "Allow once", url: ONCE },
+    { label: "Deny", url: DENY },
+  ],
+}
+
+test("a tray entry is the notice's: its body, its picture and its buttons", async () => {
+  const worker = tray()
+  await worker.push(approval)
+  const entry = worker.shown[0]
+  assert.equal(entry.title, "Fix the build", "the chat's name is the title")
+  assert.equal(entry.options.body, approval.body, "and the card's own body is under it")
+  assert.equal(entry.options.icon, "/bots/nova/notify.png", "the badged picture, not the plain pose")
+  assert.deepEqual(
+    plain(entry.options.actions),
+    [
+      { action: "0", title: "Allow once" },
+      { action: "1", title: "Deny" },
+    ],
+    "both buttons are the notice's, each one numbered by where it sits",
+  )
+  // A host that still holds a retired id draws the character that replaced it, badge and all.
+  await worker.push({ kind: "run_done", session_id: "gots-2", bot: "sprout" })
+  assert.equal(worker.shown[1].options.icon, "/bots/nova/notify.png")
+  // And a push that names no bot keeps the app's own icon, with no buttons to draw.
+  await worker.push({ kind: "run_done", session_id: "gots-3" })
+  assert.equal(worker.shown[2].options.icon, "/pwa-192x192.png")
+  assert.equal(worker.shown[2].options.actions, undefined, "a finished run carries none")
+})
+
+test("a press of a button posts its link and opens no window", async () => {
+  const worker = tray()
+  await worker.push(approval)
+  const entry = worker.shown[0]
+  await worker.press({
+    action: "0",
+    notification: { data: plain(entry.options.data), close: () => worker.closed.push(true) },
+  })
+  assert.deepEqual(
+    worker.posted.map((one) => [one.url, plain(one.init)]),
+    [[ONCE, { method: "POST", mode: "no-cors" }]],
+    "the first button posts the link the notice gave it, and nothing else",
+  )
+  assert.deepEqual(worker.opened, [], "an answer is not a visit: no window opens")
+  assert.equal(worker.closed.length, 1, "and the row leaves the tray")
+})
+
+test("a press with no button still opens what the push is about", async () => {
+  const worker = tray()
+  await worker.push({ kind: "approval", session_id: "gots-1", title: "Fix the build" })
+  const entry = worker.shown[0]
+  await worker.press({
+    notification: { data: plain(entry.options.data), close: () => worker.closed.push(true) },
+  })
+  assert.deepEqual(worker.opened, ["/s/gots-1"], "the chat the push is about")
+  assert.deepEqual(worker.posted, [], "a visit answers nothing")
+  assert.equal(worker.closed.length, 1)
 })

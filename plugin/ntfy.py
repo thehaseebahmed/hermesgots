@@ -4,7 +4,8 @@ A phone built without Firebase, or one whose user would rather not go through it
 notifications from the ntfy app instead, and ``deliver`` publishes there whenever ``push.notify`` has
 news. The plugin publishes itself — ntfy needs no key that can't live on a host, so nothing goes
 through the registry — and what it says is what a push says: the title of what it is about and one
-sentence of what happened, never what was asked.
+sentence of what happened, never what was asked. A notice that carries an approval's buttons or this
+bot's own picture says those too, as the two headers ntfy draws under the message.
 
 **The server and the token are Hermes's own.** Hermes's ntfy platform reads ``NTFY_SERVER_URL``
 (``https://ntfy.sh`` where unset) and ``NTFY_TOKEN`` (a bearer token, or ``user:pass`` for Basic) from
@@ -287,9 +288,8 @@ def message(
     """The JSON a publish posts to the server's root: the notice's title over its body, with the
     kind's own line standing in where the notice names no words.
 
-    An approval's buttons ride in the JSON as each one's label and link, which is what a publish's
-    ``X-Actions`` header carries once the sender fills that in; neither is a word Gots would have to
-    say twice.
+    Only words ride here. An approval's buttons are a header (``headers``), since a button is not a
+    sentence, and neither is a word Gots would have to say twice.
     """
     title = ((notice or {}).get("title") or "").strip() or UNTITLED.get(kind) or "Gots"
     words = ((notice or {}).get("body") or "").strip() or WORDS.get(kind, "Waiting for you")
@@ -304,10 +304,69 @@ def message(
         # A newer message of the same category about the same thing replaces one still showing.
         "sequence_id": base64.urlsafe_b64encode(sequence).rstrip(b"=").decode(),
     }
-    buttons = carried(notice).get("actions")
-    if buttons:
-        body["actions"] = buttons
     return body
+
+
+# ntfy's own headers for a message's extras: the buttons to draw under it, and the picture it wears.
+# ntfy fetches the picture itself, so it is a URL the phone's server can reach, and the buttons are
+# posted by the phone's ntfy app — neither is a page's request, so no CORS list has a say.
+ACTIONS = "X-Actions"
+ICON = "X-Icon"
+
+
+def buttons(notice: Optional[Notice]) -> Optional[str]:
+    """An approval's two buttons as ntfy's ``X-Actions``: an ``http`` action each.
+
+    A press posts the link the notice minted and clears the row it came from, so the notification
+    answers the waiting run and leaves the tray in one gesture.
+    """
+    actions = carried(notice).get("actions") or []
+    if not actions:
+        return None
+    return json.dumps(
+        [
+            {
+                "action": "http",
+                "label": one["label"],
+                "url": one["url"],
+                "method": "POST",
+                "clear": True,
+            }
+            for one in actions
+        ],
+        separators=(",", ":"),
+    )
+
+
+def icon(origin: Optional[str], bot: Optional[str]) -> Optional[str]:
+    """The badged picture of this profile's bot, at the app's own origin, or None while either is
+    unknown.
+
+    The badge is the app's own file (``build-badges.mjs``), so it is named where the app lives rather
+    than at the host, which may be a tunnel or a LAN name that a phone's ntfy server can't reach.
+    """
+    if not origin or not bot:
+        return None
+    return f"{origin}/bots/{bot}/notify.png"
+
+
+def headers(
+    origin: Optional[str], bot: Optional[str], notice: Optional[Notice] = None
+) -> Dict[str, str]:
+    """What a publish carries beside its words: the picture and the buttons, both the app's own.
+
+    A profile that has never heard where its app lives and which bot it is says neither — the message
+    is then the title and one sentence, as it was before either existed — since a button drawn under
+    no picture is a notice that doesn't look like this bot's at all.
+    """
+    picture = icon(origin, bot)
+    if not picture:
+        return {}
+    extra = {ICON: picture}
+    actions = buttons(notice)
+    if actions:
+        extra[ACTIONS] = actions
+    return extra
 
 
 def auth_header(token: str) -> Dict[str, str]:
@@ -321,12 +380,15 @@ def auth_header(token: str) -> Dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def publish(held: Dict[str, Any], body: Dict[str, Any]) -> Optional[int]:
-    """One message to the topic. The server's status, or None if it didn't answer."""
+def publish(
+    held: Dict[str, Any], body: Dict[str, Any], extra: Optional[Dict[str, str]] = None
+) -> Optional[int]:
+    """One message to the topic, with the extras a phone draws under it. The server's status, or None
+    if it didn't answer."""
     request = urllib.request.Request(
         held["server"] + "/",
         data=json.dumps(body, separators=(",", ":")).encode(),
-        headers={**auth_header(held["token"]), "Content-Type": "application/json"},
+        headers={**auth_header(held["token"]), "Content-Type": "application/json", **(extra or {})},
         method="POST",
     )
     try:
@@ -352,10 +414,16 @@ def deliver(
     held = target(path)
     if not held or not wants(held, category):
         return None
+    from .push import bot as bot_of, web as web_of
+
     chosen = [d for d in held.get("devices") or [] if isinstance(d, str)]
     if chosen and all(device in (on_screen or []) for device in chosen):
         return None
-    status = publish(held, message(held, kind, category, session_id, notice))
+    status = publish(
+        held,
+        message(held, kind, category, session_id, notice),
+        headers(web_of(path), bot_of(path), notice),
+    )
     if status is None or status >= 300:
         # 401 and 403 are the token; the app's own switch is where it is put right.
         logger.warning("gots: ntfy at %s answered %s", urllib.parse.urlsplit(held["server"]).netloc, status)

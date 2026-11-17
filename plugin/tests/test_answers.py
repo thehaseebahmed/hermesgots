@@ -376,10 +376,12 @@ class OnTheWire(unittest.TestCase):
         )
         held = {"topic": "gots-Zk3", "server": "https://ntfy.example", "token": "tk_abc"}
         message = ntfy.message(held, "approval", "chat_input", "gots-1", self.relayed[0])
+        self.assertNotIn("actions", message, "a button is a header, not a word of ntfy's JSON")
+        header = ntfy.headers("https://gots.example", "nova", self.relayed[0])["X-Actions"]
         self.assertEqual(
-            [one["label"] for one in message["actions"]],
+            [one["label"] for one in json.loads(header)],
             ["Allow once", "Deny"],
-            "and ntfy's JSON carries them until its own header does (step 8)",
+            "and ntfy's own header carries them to the phone",
         )
 
     def test_a_token_is_never_written_as_it_is_carried(self) -> None:

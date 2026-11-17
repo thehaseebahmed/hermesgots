@@ -2566,6 +2566,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # Where this app dialled this bot, kept for the buttons an approval's notice carries: a host
         # behind a tunnel or on a LAN name doesn't know its own address, the phone does.
         await asyncio.to_thread(push.set_base, store_path(), push.base_url(request, "/push"))
+        # And where the app itself lives — the `subject` it subscribed with — since the picture a
+        # notification wears is the app's own file, served from there and not from the host.
+        await asyncio.to_thread(push.set_web, store_path(), body.get("subject"))
         return web.json_response({"object": "gots.push", "subscribed": True})
 
     async def push_answer(request: "web.Request") -> "web.Response":

@@ -686,3 +686,39 @@ def base(path: Path) -> Optional[str]:
     finally:
         conn.close()
     return row[0] if row and isinstance(row[0], str) and BASE.match(row[0]) else None
+
+
+# The app's own origin, as a browser's `location.origin` spells it: scheme, host and port, no path,
+# no search and no fragment. A notification's picture is the app's own file (`/bots/<id>/notify.png`),
+# so it is named at this origin rather than at the host, which may be a tunnel or a LAN name.
+WEB = re.compile(r"^https?://[^\s/?#]+$")
+
+
+def set_web(path: Path, origin: Optional[str]) -> None:
+    """Keeps where the app lives, so a notice published elsewhere can name the app's own picture.
+
+    Read from the ``subject`` the app subscribed with — its ``location.origin``. A subscription that
+    names a ``mailto:`` contact instead (an older app's) leaves none: there is no picture at a mailbox.
+    """
+    conn = connect(path)
+    try:
+        if isinstance(origin, str) and WEB.match(origin.strip()):
+            conn.execute(
+                "INSERT OR REPLACE INTO push_prefs (key, value) VALUES ('web', ?)", (origin.strip(),)
+            )
+        else:
+            conn.execute("DELETE FROM push_prefs WHERE key = 'web'")
+    finally:
+        conn.close()
+
+
+def web(path: Path) -> Optional[str]:
+    """Where the app lives, or None while no app has subscribed from a page of its own."""
+    if not path.exists():
+        return None
+    conn = connect(path)
+    try:
+        row = conn.execute("SELECT value FROM push_prefs WHERE key = 'web'").fetchone()
+    finally:
+        conn.close()
+    return row[0] if row and isinstance(row[0], str) and WEB.match(row[0]) else None
