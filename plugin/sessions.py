@@ -1014,6 +1014,23 @@ def bot_chat(home: Path) -> Optional[Dict[str, Any]]:
     return list_state(home).bot_chat
 
 
+def _session_actor() -> Optional[type]:
+    """The session actor Hermes's own creation is handed, under the name that host gives it.
+
+    ``gateway.session_contract`` held this class as ``Principal`` and calls it ``SessionActor`` now:
+    the fields never moved — ``subject``, ``profile_id``, ``capabilities``, ``transport_id``, in that
+    order — so this is a name to find, not a shape to guess. None where the host names neither, which
+    is a Hermes this plugin cannot mint on.
+    """
+    from gateway import session_contract
+
+    for name in ("SessionActor", "Principal"):
+        found = getattr(session_contract, name, None)
+        if isinstance(found, type):
+            return found
+    return None
+
+
 async def mint_bot_chat(home: Path) -> Optional[str]:
     """Asks the gateway to mint this profile's canonical Bot Chat, and answers its session.
 
@@ -1035,12 +1052,15 @@ async def mint_bot_chat(home: Path) -> Optional[str]:
         return None
     try:
         from gateway.session_bot import _create_bot_chat
-        from gateway.session_contract import Principal
         from gateway.session_runtime_workers import track_mutation
     except ImportError:
         logger.debug("gots: this Hermes has no Bot Chat creation to ask")
         return None
-    actor = Principal(
+    actor_class = _session_actor()
+    if actor_class is None:
+        logger.debug("gots: this Hermes names no session actor to hand that creation")
+        return None
+    actor = actor_class(
         "gots-main",
         owner.profile_id,
         frozenset({"session:create", "session:read", "session:submit"}),

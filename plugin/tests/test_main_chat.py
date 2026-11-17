@@ -98,8 +98,12 @@ def record(**value: Any) -> Dict[str, Any]:
     return {"at": 5, "value": value}
 
 
-class Principal:
-    """Hermes's own ``gateway.session_contract.Principal``, as the mint is handed one."""
+class SessionActor:
+    """Hermes's own session actor, as the mint is handed one.
+
+    ``gateway.session_contract`` names it ``SessionActor`` today and ``Principal`` on the hosts
+    before that rename; the fields are the same four, in the same order, either way.
+    """
 
     def __init__(self, subject: str, profile_id: str, capabilities: Any, transport_id: str) -> None:
         self.subject = subject
@@ -119,12 +123,12 @@ class Authority:
         self.profile_id = str(home)
         self.home = home
         self.refused = refused
-        self.actors: List[Principal] = []
+        self.actors: List[SessionActor] = []
 
     def _require_admission_open(self) -> None:
         pass
 
-    async def create(self, actor: Principal, *, displace: Any = None) -> Any:
+    async def create(self, actor: SessionActor, *, displace: Any = None) -> Any:
         """Hermes's mint, which makes the chat its own title lookup found no row for."""
         self.actors.append(actor)
         if self.refused:
@@ -148,17 +152,24 @@ def inserted(home: Path) -> str:
     return session_id
 
 
-def host(case: unittest.TestCase, authority: Optional[Authority], *, older: bool = False) -> None:
+def host(
+    case: unittest.TestCase,
+    authority: Optional[Authority],
+    *,
+    older: bool = False,
+    actor: str = "SessionActor",
+) -> None:
     """The gateway modules a mint imports, planted for the case.
 
     ``authority`` None is a home this process serves no authority for; ``older`` is a Hermes from
-    before the call this plugin makes existed at all.
+    before the call this plugin makes existed at all; ``actor`` is the name that host gives the
+    session actor it hands that call, ``SessionActor`` on a current one and ``Principal`` before it.
     """
     gateways = ModuleType("gateway")
     authorities = ModuleType("gateway.session_authorities")
     authorities.authority_for_home = lambda runner, home: authority
     contract = ModuleType("gateway.session_contract")
-    contract.Principal = Principal
+    setattr(contract, actor, SessionActor)
     workers = ModuleType("gateway.session_runtime_workers")
     # The owner runs the write; a stub returns it to be awaited as it stands.
     workers.track_mutation = lambda given, operation: operation
@@ -390,6 +401,15 @@ class Minting(TempHome):
             frozenset({"session:create", "session:read", "session:submit"}),
             "creation is the actor's own capability, as the Desktop's roster is granted it",
         )
+
+    def test_a_host_that_names_its_actor_principal_still_mints(self) -> None:
+        # The rename went the other way round: `SessionActor` is the name a current host uses, and
+        # `Principal` is what the same four fields were called before it. A mint that asked for one
+        # name by hand answered None on the other host and left every Main a Gots chat of its own.
+        store(self.home, [])
+        authority = Authority(self.home)
+        host(self, authority, actor="Principal")
+        self.assertEqual(self.mint(HostAdapter(object())), "bot-1")
 
     def test_a_host_that_will_not_mint_is_a_capability_answer_and_not_an_exception(self) -> None:
         store(self.home, [])
