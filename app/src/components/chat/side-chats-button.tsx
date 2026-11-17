@@ -7,14 +7,6 @@
  * reach the bot's other chats from. The control is drawn only where those chats are not already on
  * screen: at the split width the list stands beside Main, so a control there would reveal what the
  * reader is looking at.
- *
- * It is badged when any side chat is unread, and the badge is the Side Chat List's own rule rather
- * than a second one: `shownSideChats` — the bot's chats that are neither Main nor a run, less the
- * archived ones — with each chat's dot read by `isUnread(at, marks[id])`, the rule the list's Unread
- * pill and its rows are drawn by. Main is no side chat (`sideChats`), so a word in Main never lights
- * it. The badge is a query of its own over the chat records and this device's read marks
- * (`useSideChatsUnread`), never the list's rows: the header is on screen through every flushed reply,
- * and the rows cost a tail read per chat.
  */
 import { ListTodoIcon } from "lucide-react"
 import { Link } from "react-router"
@@ -29,8 +21,6 @@ import { cn } from "@/lib/utils"
 /** The control, where there is a list to reveal: Main's bar, at one pane. */
 export function SideChatsButton({ profileId }: { profileId: string }) {
   const split = useSplit()
-  // The list already stands beside the chat at this width: there is nothing here for it to open, and
-  // the bot's chats are not read for a dot nothing would wear.
   if (split) return null
   return <SideChatsLink profileId={profileId} />
 }

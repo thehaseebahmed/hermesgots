@@ -20,7 +20,6 @@
  * in is the one they are in. The order is this list's: the rows arrive unsorted.
  */
 import { useCallback } from "react"
-import { useLiveQuery } from "dexie-react-hooks"
 import { HouseIcon } from "lucide-react"
 import { Navigate, useParams } from "react-router"
 
@@ -33,13 +32,12 @@ import { botChatsPath, botMainPath } from "@/lib/bot-tabs"
 import { useBotRows } from "@/lib/chat-rows"
 import {
   CHAT_FILTERS,
-  isChatFilter,
   shownSideChats,
   sideChats,
-  type ChatFilter,
   type ChatListRow,
 } from "@/lib/chat-list"
-import { chatFilterOf, saveChatFilter, type Profile } from "@/lib/db"
+import { saveChatFilter, type Profile } from "@/lib/db"
+import { useChatFilter } from "@/lib/use-chat-filter"
 import { useNav } from "@/lib/nav"
 import { useBotChatsPane, useSplit, type BotPane } from "@/lib/pane"
 import { useReadMarks } from "@/lib/read-marks"
@@ -91,12 +89,7 @@ function SideChatsList({
   /** Whether this list stands beside the chat it opened, which is what its rows' presses turn on. */
   beside?: boolean
 }) {
-  // The pill this bot's list keeps on this device, read as the key itself rather than the settings
-  // row, for the reason the flat list reads it that way: a live query answering a fresh object would
-  // re-render on every sync write. The key is the bot's own and shared with that list, so a stored
-  // Routines — a pill this screen has not got — reads as All.
-  const kept = useLiveQuery(async () => (await chatFilterOf(profileId)) ?? null, [profileId])
-  const filter: ChatFilter = isChatFilter(kept) && kept !== "routines" ? kept : "all"
+  const filter = useChatFilter(profileId, PILLS)
   const labels = useBotLabels()
   const answer = useBotRows(profileId, filter)
   const split = useSplit()
@@ -114,8 +107,6 @@ function SideChatsList({
   // cannot fill.
   if (!answer.bot) return <Navigate to="/" replace />
   const bot = answer.bot
-  // Main is the bot's own screen and no side chat, so it stands above the rows rather than in them —
-  // and only where there is a pane beside this list to draw it in.
   const main = answer.rows.find((row) => row.main)
   const sides = sideChats(answer.rows)
   // The count speaks for the bot's side chats, not for the pill on screen: an archived one is a side

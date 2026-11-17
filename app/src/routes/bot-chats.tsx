@@ -1,4 +1,3 @@
-import { useLiveQuery } from "dexie-react-hooks"
 import { MessageCircleIcon } from "lucide-react"
 import { Link, Navigate, useParams } from "react-router"
 
@@ -8,12 +7,13 @@ import { RoutinesButton } from "@/components/chat/routines-button"
 import { EmptyPane } from "@/components/empty-pane"
 import { botMainPath, botPath } from "@/lib/bot-tabs"
 import { labelOf } from "@/lib/bot-name"
-import { CHAT_FILTERS, isChatFilter, type ChatFilter } from "@/lib/chat-list"
+import { CHAT_FILTERS } from "@/lib/chat-list"
 import { useChatLayout } from "@/lib/chat-layout"
 import { useBotRows } from "@/lib/chat-rows"
-import { chatFilterOf, saveChatFilter } from "@/lib/db"
+import { saveChatFilter } from "@/lib/db"
 import { useBotChatsPane, type BotPane } from "@/lib/pane"
 import { quietly } from "@/lib/report"
+import { useChatFilter } from "@/lib/use-chat-filter"
 import { useBotLabels } from "@/lib/use-bot-labels"
 
 /**
@@ -67,12 +67,7 @@ function BotChatsList({
   selected?: string
   beside?: boolean
 }) {
-  // The pill this bot's list keeps on this device, read as the key itself rather than the settings
-  // row: a live query that answered a fresh object would re-render the list on every sync write (the
-  // reason `useStoredSort` records), and anything that is not one of the pills reads as All. It is
-  // read here rather than in the list because the tail read is what the pill widens.
-  const keptKey = useLiveQuery(async () => (await chatFilterOf(profileId)) ?? null, [profileId])
-  const filter: ChatFilter = isChatFilter(keptKey) ? keptKey : "all"
+  const filter = useChatFilter(profileId, CHAT_FILTERS)
   // The bar names the bot as the sidebar's row does (ADR 0149).
   const labels = useBotLabels()
   const answer = useBotRows(profileId, filter)

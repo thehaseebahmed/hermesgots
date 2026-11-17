@@ -108,7 +108,6 @@ export interface BotPane extends FeaturePane {
  */
 export function useBotChatsPane(): BotPane | undefined {
   const split = useSplit()
-  // Which list the lane holds, and whether Main is the chat beside it.
   const layout = useChatLayout()
   const { pathname, state } = useLocation()
   const id = matchPath("/c/:id", pathname)?.params.id

@@ -197,8 +197,6 @@ export function ChatList({
 
         {shown.length > 0 &&
           (group ? (
-            // One heading over the whole band, in Code's group style: the count it draws is the
-            // rows this list is showing, and the group's own order is the list's.
             <ItemGroup group={{ label: group, items: shown }}>
               {shown.map(draw)}
             </ItemGroup>

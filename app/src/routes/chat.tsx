@@ -417,11 +417,8 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
     beside,
     unsent: isUnsent,
   })
-  // Main is the bot's own conversation with its host: its bar carries the bot's list in the ring's
-  // place, no context readout at all, and a title that leads to the bot's settings page (G3, G13) —
-  // on the new UX's layout. The flat layout is today's list, so there that record is one of its
-  // chats and its bar is a chat's (`drawsMain`). One reading of the record's flag and the layout,
-  // which the lead and the bar both take, so the two cannot disagree.
+  // One reading of the record's flag and the layout, which the lead and the bar both take, so the
+  // two cannot disagree.
   const layout = useChatLayout()
   const main = drawsMain(layout, chat?.main)
   const lead = useChatLead({
@@ -562,8 +559,6 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
               onDeleted={() => root("/")}
             />
           )}
-          {/* Main carries no usage readout at all, and a sheet nothing can open is no sheet — on the
-              new UX's layout, where Main's bar is not a chat's. The flat list's Main keeps both. */}
           {!main && (
             <UsageSheet
               open={usageOpen}
@@ -1068,10 +1063,7 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
     beside,
     unsent: hasNoMessages,
   })
-  // Main is the bot's own conversation with its host: its bar carries the bot's list in the ring's
-  // place, no context readout at all, and a title that leads to the bot's settings page (G3, G13) —
-  // on the new UX's layout. Under the flat layout that record is one chat of today's list, drawn as
-  // the chat it is (`drawsMain`). One reading of the flag and the layout, which the lead shares.
+  // One reading of the flag and the layout, which the lead shares.
   const layout = useChatLayout()
   const main = drawsMain(layout, conversation?.main)
   const lead = useChatLead({
@@ -1432,8 +1424,6 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
         onOpenChange={(next) => !next && setAgentView(undefined)}
       />
       <Cheatsheet open={sheet.open} onOpenChange={sheet.setOpen} switches={sheet.switches} />
-      {/* Main carries no usage readout at all, and a sheet nothing can open is no sheet — on the new
-          UX's layout, where Main's bar is not a chat's. The flat list's Main keeps both. */}
       {!main && (
         <UsageSheet
           open={usageOpen}
