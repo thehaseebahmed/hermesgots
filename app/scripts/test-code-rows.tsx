@@ -206,18 +206,30 @@ test("a dot needs a read mark to measure against, and a read mark clears it", as
   })
 })
 
-test("a closed session never opened here is not dotted, one read before it closed is dotted", async () => {
-  await drawRow(conversation("closed-never-opened", { resolvedAt: 300 }), {
-    body: async () => {
-      assert.ok(missing("[data-unread]"), "Resolved with no mark here: nothing to compare against")
+test("a resolved or discarded session is never dotted, whatever landed since the mark", async () => {
+  for (const patch of [{ resolvedAt: 300 }, { discardedAt: 300 }])
+    await drawRow(conversation("closed-read", patch), {
+      mark: 250,
+      body: async () => {
+        assert.ok(missing("[data-unread]"), `${Object.keys(patch)[0]} after the mark: no dot`)
+      },
+    })
+})
+
+test("the subtitle carries no pull request status", async () => {
+  await drawRow(
+    conversation("pr-line", {
+      prs: [pr("open", "success")],
+      worktree: { branch: "feature-branch", repos: [], instructions: "" },
+    }),
+    {
+      body: async () => {
+        const text = document.body.textContent ?? ""
+        assert.match(text, /feature-branch/, "the branch is the subtitle")
+        assert.doesNotMatch(text, /· (Open|Draft|Merged|Closed)\b/, "no pull request state word")
+      },
     },
-  })
-  await drawRow(conversation("closed-read", { resolvedAt: 300 }), {
-    mark: 250,
-    body: async () => {
-      assert.ok(dot(), "Resolved after the mark, so it is new")
-    },
-  })
+  )
 })
 
 test("a pinned row leads its line with the pin's mark, and an unpinned row carries none", async () => {
