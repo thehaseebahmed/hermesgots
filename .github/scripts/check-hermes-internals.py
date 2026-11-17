@@ -94,6 +94,11 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     (("gateway/session_bot.py",), "async def _create_bot_chat"),
     (("gateway/session_contract.py",), "class Principal"),
     (("gateway/session_runtime_workers.py",), "def track_mutation"),
+    # The title of that chat, which `plugin/chats.py` publishes as Main's one record and reads its
+    # `is_chat` lineage by. Hermes gates its own Bot Chat prompt section on it and resumes `-c "Bot
+    # Chat"` by it, so a rename or a reword here would leave every Main a chat this plugin can no
+    # longer resolve while nothing of ours failed.
+    (("tools/bot_mode_probe.py",), 'BOT_CHAT_TITLE = "Bot Chat"'),
     # The Host's rooms, as `plugin/rooms.py` reaches them (ADR 0117): the dispatcher the seam hands a
     # request to in process, the two contract entries it calls and the `groups.capabilities` fields
     # it reads (`driver`, `methods`, `features`, `seatable_profiles`), and the loopback client it

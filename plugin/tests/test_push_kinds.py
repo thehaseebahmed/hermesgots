@@ -251,7 +251,7 @@ class Scope(unittest.TestCase):
         conn.execute(
             "INSERT INTO sessions (id, title, archived) VALUES (?, ?, ?)"
             " ON CONFLICT(id) DO UPDATE SET title = excluded.title, archived = excluded.archived",
-            (session_id, chats.MAIN_TITLE, archived),
+            (session_id, chats.BOT_CHAT_TITLE, archived),
         )
         conn.commit()
         conn.close()
@@ -326,7 +326,7 @@ class Scope(unittest.TestCase):
         self.assertTrue(answer, "a turn in Main is the bot's own news")
         self.assertEqual(
             sent,
-            [{"kind": "question", "session_id": "sess_main", "title": chats.MAIN_TITLE}],
+            [{"kind": "question", "session_id": "sess_main", "title": chats.BOT_CHAT_TITLE}],
             "the session, and the host's own word for the chat it is",
         )
 
@@ -344,7 +344,7 @@ class Scope(unittest.TestCase):
             self.assertTrue(answer, "%s's ancestry reaches Main, so its turn is Main's" % child)
             self.assertEqual(
                 sent,
-                [{"kind": "question", "session_id": child, "title": chats.MAIN_TITLE}],
+                [{"kind": "question", "session_id": child, "title": chats.BOT_CHAT_TITLE}],
                 "the child's id, under the chat Main's ancestry names",
             )
 

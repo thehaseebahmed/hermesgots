@@ -119,11 +119,13 @@ def carrying_archive(
 
 
 # The flag a record carries when it is the bot's Main, and the title such a record is minted with:
-# Hermes's own word for the profile's canonical chat (`BOT_CHAT_TITLE` in
-# ``tools.bot_mode_probe``), which the app draws its own "Main" over. A record that stops being Main
-# keeps that title and reads as the thread it is, rather than as a second row called Main.
+# Hermes's own word for the profile's canonical chat, which the app draws its own "Main" over. It is
+# the host's constant (`BOT_CHAT_TITLE` in ``tools.bot_mode_probe``, pinned by
+# ``.github/scripts/check-hermes-internals.py``) and never the app's word, so a rename there fails the
+# drift check rather than leaving this plugin resolving nothing. A record that stops being Main keeps
+# that title and reads as the thread it is, rather than as a second row called Main.
 MAIN = "main"
-MAIN_TITLE = "Bot Chat"
+BOT_CHAT_TITLE = "Bot Chat"
 
 
 def _naming(record: Any, session_id: str) -> bool:
@@ -148,7 +150,7 @@ def _main_record(session: Dict[str, Any]) -> Dict[str, Any]:
     return {
         "at": at,
         "value": {
-            "title": MAIN_TITLE,
+            "title": BOT_CHAT_TITLE,
             "hermesSessionId": session["id"],
             "createdAt": at,
             "updatedAt": at,
@@ -162,14 +164,16 @@ def carrying_main(
 ) -> Dict[str, Dict[str, Any]]:
     """Every record, with exactly one of them Main: the session ``sessions.bot_chat`` names.
 
-    Shaped like ``carrying_archive``: a projection over one list answer, idempotent, and nothing
-    written — so a device that never asks keeps what it holds, and asking twice says the same thing.
+    Shaped like ``carrying_archive``: a projection over one list answer, and nothing written — so a
+    device that never asks keeps what it holds, and asking twice says the same thing but for the
+    clock a retraction is dated at.
 
     The record already bound to that session is the one flagged, under whichever id a device gave it:
     a re-pointed chat id would graft a new session's history onto the old chat's drafts and marks.
     With none, a record is minted under the session's own id — derived from it, so a store wiped clean
-    mints the very same one again. Every other record carrying the flag loses it and keeps everything
-    else, so a Main an older build wrote stays a side chat with its history (G10).
+    mints the very same one again. Every other record carrying the flag loses it, keeps everything
+    else, and is dated past the record it was, so the retraction reaches a device that had already
+    synced the older Main; a Main an older build wrote then stays a side chat with its history (G10).
 
     It runs after ``carrying_archive`` and drops the archive from the record it flags: a Bot Chat
     archived on the Dashboard is a *retired* Main and never an archived one, and G2 forbids an
@@ -194,8 +198,13 @@ def carrying_main(
             flagged.setdefault("hermesSessionId", session_id)
             laid[chat_id] = {**record, "value": {**flagged, MAIN: True}}
         elif value.get(MAIN):
+            # The flag comes off the value, and the record's clock moves past the one it had: the app
+            # applies a remote record only when its clock is strictly newer, so a strip dated at the
+            # record's own clock never reaches a device that synced the retired Main, and two Mains
+            # stand for ever (``set_archived`` dates its write the same way).
             laid[chat_id] = {
                 **record,
+                "at": _ahead(record),
                 "value": {field: held for field, held in value.items() if field != MAIN},
             }
         else:
@@ -203,6 +212,26 @@ def carrying_main(
     if main not in laid:
         laid[main] = _main_record(session)
     return laid
+
+
+def own_main_id(path: Path) -> str:
+    """The session id Main of this bot's own carries: derived from the bot, never from the clock.
+
+    One spelling for the two things that have to agree about it — the record the fallback mints
+    (``own_main``), and the archive route's refusal to put away the bot's one conversation.
+    """
+    return f"gots-main-{hashlib.sha1(str(path).encode('utf-8')).hexdigest()[:12]}"
+
+
+def holds_own_main(records: Dict[str, Dict[str, Any]], path: Path) -> bool:
+    """Whether these records already hold the Gots chat this bot's Main of its own is.
+
+    A profile that holds one has nothing to ask the gateway for: Hermes writes its own Bot Chat when
+    Bot Mode is turned on, and this list reads the store for it on every answer, so a mint here would
+    be a chat nobody asked for (``own_main``, G9).
+    """
+    session_id = own_main_id(path)
+    return any(_naming(record, session_id) for record in records.values())
 
 
 def own_main(records: Dict[str, Dict[str, Any]], path: Path, now: int) -> Dict[str, Any]:
@@ -217,7 +246,7 @@ def own_main(records: Dict[str, Dict[str, Any]], path: Path, now: int) -> Dict[s
 
     ``now`` is this host's clock, which is the record's change clock and the date its row draws.
     """
-    session_id = f"gots-main-{hashlib.sha1(str(path).encode('utf-8')).hexdigest()[:12]}"
+    session_id = own_main_id(path)
     held = next((record for record in records.values() if _naming(record, session_id)), None)
     if held is not None:
         return {"id": session_id, "hidden": False, "at": int(held.get("at") or 0)}

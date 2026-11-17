@@ -917,50 +917,82 @@ def set_archived(home: Path, session_id: str, archived: bool) -> Optional[str]:
     return None if written else NO_SESSION
 
 
-def archived_flags(home: Path) -> Dict[str, bool]:
-    """Hermes's archive flag for every session this profile's store holds, by session id.
+class ListState(NamedTuple):
+    """What one list answer reads out of a profile's ``state.db``.
 
-    One read for one list answer: the plugin lays these over the chats it answers with
-    (``chats.carrying_archive``), so an archive made on the Dashboard hides the row in Gots and an
-    unarchive there brings it back. Empty where this Hermes has no store, no ``sessions`` table or no
-    ``archived`` column — a host that can't say keeps every row as the device holds it (ADR 0159).
+    Hermes's archive flag for every session the store holds, and the row it calls its Bot Chat — what
+    ``chats.carrying_archive`` and ``chats.carrying_main`` lay over the answer. Both come off one pass
+    in one connection: the flags used to cost a scan of their own and the title a second one after it.
+    """
+
+    archived: Dict[str, bool]
+    bot_chat: Optional[Dict[str, Any]]
+
+
+# The columns one pass can use, in the order it asks for them: every session's id and title, the
+# archive Hermes holds for it, and what dates and hides the one row titled as the Bot Chat. A store
+# from before any of them answers the ones it has rather than failing the read.
+_LIST_COLUMNS = ("id", "title", "archived", "started_at", "hidden")
+
+
+def list_state(home: Path) -> ListState:
+    """Hermes's archive flags and its Bot Chat, read together in one pass over this profile's store.
+
+    One read for one list answer, and both readings ride it: an archive made on the Dashboard hides
+    the row in Gots and an unarchive there brings it back (ADR 0159), and the row titled ``"Bot
+    Chat"`` is Main (ADR 0160). Empty and None where this Hermes has no store, no ``sessions`` table,
+    no ``archived`` column or no such row — a host that can't say keeps every row as the device holds
+    it, and names no Main for the projection to fall back from.
+
+    Read-only, and never retitles anything: a store another writer holds answers nothing.
     """
     conn = _open_state(home)
     if conn is None:
-        return {}
+        return ListState({}, None)
     try:
         with closing(conn):
-            return {row[0]: bool(row[1]) for row in conn.execute("SELECT id, archived FROM sessions")}
+            # Which columns this store has, asked of the statement it compiles rather than of PRAGMA:
+            # `LIMIT 0` reads no row at all, so the schema costs one prepared statement.
+            columns = {held[0] for held in conn.execute("SELECT * FROM sessions LIMIT 0").description}
+            if "id" not in columns:
+                return ListState({}, None)
+            asked = [name for name in _LIST_COLUMNS if name in columns]
+            rows = conn.execute(f"SELECT {', '.join(asked)} FROM sessions").fetchall()
     except sqlite3.Error:
-        logger.debug("gots: couldn't read %s's archive flags", home / "state.db", exc_info=True)
-        return {}
+        logger.debug("gots: couldn't read %s's list state", home / "state.db", exc_info=True)
+        return ListState({}, None)
+    archived = (
+        {row["id"]: bool(row["archived"]) for row in rows} if "archived" in columns else {}
+    )
+    return ListState(archived, _bot_chat_row(rows, columns))
 
 
-def _bot_chat_row(conn: sqlite3.Connection) -> Optional[Dict[str, Any]]:
-    """The canonical Bot Chat, read from a connection already open: ``bot_chat``'s own query.
+def _bot_chat_row(rows: List[sqlite3.Row], columns: Set[str]) -> Optional[Dict[str, Any]]:
+    """The canonical Bot Chat among one pass's rows: the earliest row titled so that is not archived.
 
-    Shared so the two questions asked about that conversation — which row Main is
-    (``bot_chat``), and whether a turn's session is a turn in Main (``is_chat``) — can never
-    disagree about which row is canonical. Raises ``sqlite3.Error`` for a store that can't be
-    asked; what that means is the caller's answer.
+    Hermes titles one conversation per profile this way and lists a chat by its newest row, so the
+    earliest is the one the others compacted from — the id Main is, and the id an ancestry is walked
+    to for a turn in Main (``is_chat``). Both questions ask this one rule, which is why neither needs
+    a schema of its own. A store from before ``archived`` answers as unarchived, which is all it can
+    say; one from before ``started_at`` dates the chat at zero.
     """
-    columns = {row[1] for row in conn.execute("PRAGMA table_info(sessions)")}
-    if "id" not in columns:
+    if "title" not in columns:
         return None
-    asked = ["id"] + [column for column in ("hidden", "started_at") if column in columns]
-    archived = " AND archived = 0" if "archived" in columns else ""
-    order = " ORDER BY started_at" if "started_at" in columns else ""
-    row = conn.execute(
-        f"SELECT {', '.join(asked)} FROM sessions WHERE title = ?{archived}{order} LIMIT 1",
-        (chats.MAIN_TITLE,),
-    ).fetchone()
-    if row is None or not row["id"]:
+    candidates = [
+        row
+        for row in rows
+        if row["id"]
+        and row["title"] == chats.BOT_CHAT_TITLE
+        and ("archived" not in columns or not row["archived"])
+    ]
+    if not candidates:
         return None
-    started = row["started_at"] if "started_at" in columns else None
+    dated = "started_at" in columns
+    row = min(candidates, key=lambda held: float(held["started_at"] or 0)) if dated else candidates[0]
     return {
         "id": row["id"],
         "hidden": bool(row["hidden"]) if "hidden" in columns else False,
-        "at": int(float(started or 0) * 1000),
+        "at": int(float(row["started_at"] or 0) * 1000) if dated else 0,
     }
 
 
@@ -976,19 +1008,10 @@ def bot_chat(home: Path) -> Optional[Dict[str, Any]]:
     that has been **archived** — which is a retired Bot Chat, not a Main to draw, since the reader
     put it away on the Dashboard and G2 forbids an archived Main.
 
-    Read-only, and never retitles anything: a store that can't answer answers nothing. A schema from
-    before ``archived`` or ``hidden`` still answers (the row is unarchived and visible as far as it
-    can say), which is the host the plugin has to keep working on rather than guess about.
+    It is ``list_state``'s own answer (one pass, kept in one place), so the route that refuses to
+    archive Main and the projection that lays it over the list cannot disagree about which row it is.
     """
-    conn = _open_state(home)
-    if conn is None:
-        return None
-    try:
-        with closing(conn):
-            return _bot_chat_row(conn)
-    except sqlite3.Error:
-        logger.debug("gots: couldn't read %s's Bot Chat", home / "state.db", exc_info=True)
-        return None
+    return list_state(home).bot_chat
 
 
 async def mint_bot_chat(home: Path) -> Optional[str]:
@@ -1098,11 +1121,21 @@ def is_chat(home: Path, session_id: str) -> bool:
             ids = [row["id"] for row in rows if isinstance(row["id"], str)]
             if any(one.startswith(ID_PREFIXES) for one in ids):
                 return True
-            main = _bot_chat_row(conn)
+            if not ids:
+                return False
+            # Main is asked of the ancestry the walk already holds, in one query over its ids and the
+            # predicate ``list_state`` reads: no second scan of the store, no schema read of its own,
+            # and no id list compared here. A compaction of the Bot Chat is on this ancestry, so it is
+            # Main's too.
+            main = conn.execute(
+                "SELECT 1 FROM sessions WHERE id IN (%s) AND title = ? AND archived = 0 LIMIT 1"
+                % ", ".join("?" * len(ids)),
+                (*ids, chats.BOT_CHAT_TITLE),
+            ).fetchone()
     except sqlite3.Error:
         logger.debug("gots: couldn't read a session's ancestry", exc_info=True)
         return False
-    return main is not None and main["id"] in ids
+    return main is not None
 
 
 def live_runs(
