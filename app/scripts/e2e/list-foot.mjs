@@ -11,6 +11,17 @@ const NEW = "[data-new-menu]"
 const PICKS = "[data-picks]"
 
 /**
+ * The list these widths measure is the flat one, which the Developer switch turns on (ADR 0162): it is
+ * the list that keeps a New room beside its New chat, and the one whose foot and bar this flow was
+ * written for. A bot's default screen is its Main, which has no list of its own.
+ */
+const turnOn = (page) =>
+  page.evaluate(async () => {
+    const { saveSettings } = await import("/src/lib/db.ts")
+    await saveSettings({ legacyChat: true })
+  })
+
+/**
  * The picks' own state, read off the attributes the component test reads too: a closed cluster stays
  * mounted, so its presence in the tree says nothing.
  */
@@ -23,6 +34,7 @@ const focused = (page, attribute) =>
   page.evaluate((a) => document.activeElement?.hasAttribute(a) ?? false, attribute)
 
 async function drive({ page, profileId, until, shot }) {
+  await turnOn(page)
   await page.goto(`${app}/b/${profileId}`)
   await until(async () => (await page.locator(NEW).count()) === 1, 30_000, "the foot's button")
 
@@ -158,6 +170,7 @@ async function drive({ page, profileId, until, shot }) {
  * layout (ADR 0019).
  */
 async function driveLaptop({ page, profileId, until, shot }) {
+  await turnOn(page)
   await page.goto(`${app}/b/${profileId}`)
   await until(async () => (await page.locator(NEW).count()) === 1, 30_000, "the foot's button")
   assert.equal(
@@ -220,6 +233,7 @@ async function driveLaptop({ page, profileId, until, shot }) {
  */
 async function driveCrossing({ page, profileId, until }) {
   await page.setViewportSize({ width: 1024, height: 768 })
+  await turnOn(page)
   await page.goto(`${app}/b/${profileId}`)
   await until(
     async () => (await page.locator("[data-search-toggle]").count()) === 1,

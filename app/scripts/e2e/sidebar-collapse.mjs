@@ -59,12 +59,8 @@ for (const dark of [false, true]) {
   await flow(
     `sidebar-collapse-${look}`,
     async ({ page, shot }) => {
-      // The legacy layout: this flow's first half reads the Recents sidebar and its New chat button,
-      // and the bots' own sidebar is only turned on further down.
-      await page.evaluate(async () => {
-        const { saveSettings } = await import("/src/lib/db.ts")
-        await saveSettings({ legacyChat: true })
-      })
+      // The app's sidebar, which is the same at either setting of the developer switch: the bots, its
+      // own screens and the sessions waiting on the reader (ADR 0162).
       await page.goto(`${app}/code`)
       await page.getByRole("link", { name: "Code" }).first().waitFor({ timeout: 15_000 })
       // A tablet at lg: the docked sidebar is 320px before the button is pressed.
@@ -101,7 +97,7 @@ for (const dark of [false, true]) {
           `${name} stays visible when collapsed`,
         )
       }
-      for (const name of ["Search", "New chat", "Expand sidebar"]) {
+      for (const name of ["Search", "Expand sidebar"]) {
         assert.equal(
           await page.getByRole("button", { name }).first().isVisible(),
           true,
@@ -143,12 +139,8 @@ for (const dark of [false, true]) {
         "the wordmark is back",
       )
 
-      // Back under bot threads, the layout the app now ships: the Bots heading and its sort control
-      // go and the bots keep their icons.
-      await page.evaluate(async () => {
-        const { saveSettings } = await import("/src/lib/db.ts")
-        await saveSettings({ developer: true, legacyChat: false })
-      })
+      // The rail again after a reload, whichever setting the developer switch is on: the layout does not
+      // change what the sidebar holds (ADR 0162).
       await page.reload()
       await page.getByRole("link", { name: "Test bot" }).first().waitFor({ timeout: 15_000 })
       assert.equal(
@@ -161,24 +153,23 @@ for (const dark of [false, true]) {
       assert.equal(
         await aside.getByText("Bots", { exact: true }).count(),
         0,
-        "the Bots heading is hidden with bot threads on",
+        "the Bots heading is hidden with the rail collapsed",
       )
       assert.equal(
         await page.getByRole("button", { name: /^Sort bots by / }).count(),
         0,
-        "the bots' sort control is hidden with bot threads on",
+        "the bots' sort control is hidden with the rail collapsed",
       )
       assert.equal(
         await aside.getByRole("link", { name: "Test bot" }).first().isVisible(),
         true,
         "a bot keeps its icon",
       )
-      // The bot layout has no Rooms section: a room is a row of every bot's chat list, so the
-      // sidebar has none to draw.
+      // The sidebar has no Rooms section: a room is a row of every bot's list, so it has none to draw.
       assert.equal(
         await aside.getByRole("link", { name: "New room" }).count(),
         0,
-        "and the sidebar offers no New room in the bot layout",
+        "and the sidebar offers no New room",
       )
       // The rail draws a picture and no line under it, so it keeps its 44px square — and the picture
       // hangs on the row's centre line, not on the top of the line box it was drawn in.
