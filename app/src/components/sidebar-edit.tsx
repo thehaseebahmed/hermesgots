@@ -58,20 +58,31 @@ const FEATURE_ICONS: Record<SidebarFeatureId, typeof FolderKanbanIcon> = {
 }
 
 /**
+ * The palette every quiet control in the mode wears: the muted ink, the hover that lifts it, and the
+ * hover a held control keeps off. The disabled dim is the one value the boxes and the word-buttons
+ * do not share (40 against 60, since a word is the only thing a held button still says), so each
+ * control names its own — and every class here is still written out, so the build keeps them.
+ */
+const QUIET_CONTROL = cn(
+  "text-muted-foreground hover:bg-muted hover:text-foreground",
+  "disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
+)
+
+/**
  * A row's move control: the 44px box a press needs, quiet until the row is the reader's to move, and
  * dimmed rather than gone at either end of the list.
  */
 const MOVE_CONTROL = cn(
   "flex size-11 shrink-0 items-center justify-center rounded-2xl",
-  "text-muted-foreground hover:bg-muted hover:text-foreground",
-  "disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
+  QUIET_CONTROL,
+  "disabled:opacity-40",
 )
 
 /** The one shape a row's word-button takes, whether it puts a row away or lets a canvas go. */
 const WORD_CONTROL = cn(
   "flex h-11 shrink-0 items-center rounded-2xl px-1.5 text-xs font-medium",
-  "text-muted-foreground hover:bg-muted hover:text-foreground",
-  "disabled:opacity-60 disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
+  QUIET_CONTROL,
+  "disabled:opacity-60",
 )
 
 /**
@@ -81,8 +92,8 @@ const WORD_CONTROL = cn(
  */
 const RESET_CONTROL = cn(
   "flex h-11 w-full items-center rounded-2xl px-3 text-xs font-medium",
-  "text-muted-foreground hover:bg-muted hover:text-foreground",
-  "disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
+  QUIET_CONTROL,
+  "disabled:opacity-40",
 )
 
 /**
@@ -160,8 +171,10 @@ interface RowWiring {
   grip: Grip
   /** Keeps a row's control by the row and the way it moves, so the focus can be handed back to it. */
   keepControl: (control: string) => (node: HTMLButtonElement | null) => void
-  onMoveUp: () => void
-  onMoveDown: () => void
+  /** What the row has to say under it: the mode's refusal, drawn under the row whose press made it. */
+  foot?: ReactNode
+  onMoveUp: () => Promise<unknown>
+  onMoveDown: () => Promise<unknown>
 }
 
 /**
@@ -255,7 +268,7 @@ function RowMoves<Pin extends SidebarPin>({
         // Held rather than absent at the ends, so a row's controls never come and go under the reader
         // as the list changes.
         disabled={index === 0}
-        onClick={onMoveUp}
+        onClick={() => void onMoveUp()}
         className={MOVE_CONTROL}
       >
         <ChevronUpIcon className="size-4" />
@@ -265,7 +278,7 @@ function RowMoves<Pin extends SidebarPin>({
         ref={keepControl(`${row.id}:1`)}
         aria-label={`Move ${row.label} down`}
         disabled={index === count - 1}
-        onClick={onMoveDown}
+        onClick={() => void onMoveDown()}
         className={MOVE_CONTROL}
       >
         <ChevronDownIcon className="size-4" />
@@ -281,11 +294,12 @@ function FeatureModeRow<Pin extends SidebarPin>({
 }: {
   row: SidebarLayoutRow<Pin>
   wiring: RowWiring
-  onSetHidden: (hidden: boolean) => void
+  /** Puts the row away, or brings it back, answering with the write's own promise: a refusal is drawn. */
+  onSetHidden: (hidden: boolean) => Promise<unknown>
 }) {
   const { hidden } = wiring
   return (
-    <RowShell row={row} hidden={hidden} index={wiring.index} drag={wiring.drag}>
+    <RowShell row={row} hidden={hidden} index={wiring.index} drag={wiring.drag} foot={wiring.foot}>
       <RowGrip grip={wiring.grip} />
       <SidebarRowBody row={row} mode />
       {/* The eye reads the muted row; a reader who hears the list needs the word. */}
@@ -296,7 +310,7 @@ function FeatureModeRow<Pin extends SidebarPin>({
         // A name that says what the press does, rather than a pressed state a reader has to work
         // out — which is why this control carries no `aria-pressed`: its words are the state.
         aria-label={`${hidden ? "Show" : "Hide"} ${row.label}`}
-        onClick={() => onSetHidden(!hidden)}
+        onClick={() => void onSetHidden(!hidden)}
         className={WORD_CONTROL}
       >
         {hidden ? "Show" : "Hide"}
@@ -357,7 +371,14 @@ function PinModeRow<Pin extends SidebarPin>({
       hidden={hidden}
       index={wiring.index}
       drag={wiring.drag}
-      foot={<Refusal hold={refusal} className="mb-1" />}
+      // Two writes meet in this row and each says its own: the pin's, under the control that asked
+      // its host, and the mode's, under the row whose press moved it.
+      foot={
+        <>
+          {wiring.foot}
+          <Refusal hold={refusal} className="mb-1" />
+        </>
+      }
     >
       <RowGrip grip={wiring.grip} />
       <SidebarRowBody row={row} mode />
@@ -418,11 +439,11 @@ export function SidebarEdit<Pin extends SidebarPin>({
   /** Leaves the mode, and is the one way out a reader can take from inside it. */
   onLeave: () => void
   /** Puts one row away, or brings it back: the mode's one write for a hidden row, carried by the account. */
-  onSetHidden: (id: string, hidden: boolean) => void
-  /** Moves one row a place up or down, over the whole list: the order is the account's. */
-  onMove: (id: string, direction: SidebarMove) => void
+  onSetHidden: (id: string, hidden: boolean) => Promise<unknown>
+  /** Moves one row a place up or down among the rows the mode draws: the order is the account's. */
+  onMove: (id: string, direction: SidebarMove) => Promise<unknown>
   /** Puts one row in the place another holds — a drop — over the whole list, as one write. */
-  onDrop: (id: string, onto: string) => void
+  onDrop: (id: string, onto: string) => Promise<unknown>
   /** Lets one canvas go on its host: the pin's write, and no part of the account's layout. */
   onUnpin: (canvasId: string) => Promise<void>
   /** Writes today's arrangement over the record: the foot's Reset, once its question is answered. */
@@ -447,6 +468,26 @@ export function SidebarEdit<Pin extends SidebarPin>({
    */
   const handBack = useRef<{ control: string; id: string; from: number } | null>(null)
   const controls = useRef(new Map<string, HTMLButtonElement>())
+
+  /**
+   * The mode's one hold for its own writes — a row put away or brought back, a row moved — since all
+   * of them are the same record's, and one of them refused is one sentence. It is held here rather
+   * than in the row a press was made in because a drop is the list's write made from a grip: the row
+   * that carries it is whichever one the reader picked up.
+   */
+  const refusal = useRefusal("layout")
+  /** The row the words belong to: drawn under it, so the refusal stands where the press was made. */
+  const [refused, setRefused] = useState<string | null>(null)
+
+  /**
+   * One layout write, answered where it was pressed. `write` catches the rejection and words it
+   * (`useRefusal`), so a device that refused the write — no room, a locked store — is a sentence
+   * under the row rather than a rejection nothing hears. A write that lands is not drawn at all.
+   */
+  const write = (id: string, what: string, action: () => Promise<unknown>) => {
+    setRefused(id)
+    return refusal.write(what, action)
+  }
 
   // The mode takes the focus it was opened with, so the next key a reader presses lands in it rather
   // than where the switch left them.
@@ -500,7 +541,6 @@ export function SidebarEdit<Pin extends SidebarPin>({
     return () => document.removeEventListener("keydown", onKey, true)
   }, [asking, onLeave])
 
-  /** Keeps a row's control by the row and the way it moves, so the focus can be handed back to it. */
   const keepControl = (control: string) => (node: HTMLButtonElement | null) => {
     if (node) controls.current.set(control, node)
     else controls.current.delete(control)
@@ -513,14 +553,19 @@ export function SidebarEdit<Pin extends SidebarPin>({
   const say = (label: string, at: number) =>
     setSaid(`${label} moved to ${at + 1} of ${rows.length}`)
 
-  const moveRow = (row: SidebarLayoutRow<Pin>, direction: SidebarMove) => {
+  const moveRow = async (row: SidebarLayoutRow<Pin>, direction: SidebarMove) => {
     const from = rows.findIndex((placed) => placed.row.id === row.id)
     const to = from + direction
     // The ends hold their control, so a press here always has a place to go.
     if (to < 0 || to >= rows.length) return
     handBack.current = { control: `${row.id}:${direction}`, id: row.id, from }
-    onMove(row.id, direction)
-    say(row.label, to)
+    // The words wait for the write: a move the device refused moved nothing, so it is announced as
+    // nothing and the refusal is the row's to draw.
+    if (await write(row.id, "move this row", () => onMove(row.id, direction))) {
+      say(row.label, to)
+    } else {
+      handBack.current = null
+    }
   }
 
   /** The foot of every row as the list stands, measured in one pass so no two are a reflow apart. */
@@ -575,8 +620,11 @@ export function SidebarEdit<Pin extends SidebarPin>({
       event.clientY <= box.bottom
     const onto = inside ? rows[drop.at] : undefined
     if (!onto || onto.row.id === drop.id) return
-    onDrop(drop.id, onto.row.id)
-    say(drop.label, drop.at)
+    // The write is the dropped row's, and so is its refusal: a list the device would not keep is the
+    // row still where the reader let go of it, with the reason under it.
+    void write(drop.id, "move this row", () => onDrop(drop.id, onto.row.id)).then((landed) => {
+      if (landed) say(drop.label, drop.at)
+    })
   }
 
   /** The browser took the gesture back — a call, a second finger, a scroll it kept: nothing written. */
@@ -608,6 +656,10 @@ export function SidebarEdit<Pin extends SidebarPin>({
             onPointerCancel: cancelDrag,
           },
           keepControl,
+          // The mode's own hold, drawn under the row whose press made the write: a row's own control
+          // has no notice of its own to draw, and a refusal beside the list is not where the reader
+          // is looking.
+          foot: refused === row.id ? <Refusal hold={refusal} className="mb-1" /> : undefined,
           onMoveUp: () => moveRow(row, -1),
           onMoveDown: () => moveRow(row, 1),
         }
@@ -618,7 +670,11 @@ export function SidebarEdit<Pin extends SidebarPin>({
             key={row.id}
             row={row}
             wiring={wiring}
-            onSetHidden={(next) => onSetHidden(row.id, next)}
+            onSetHidden={(next) =>
+              write(row.id, next ? "hide this row" : "show this row", () =>
+                onSetHidden(row.id, next),
+              )
+            }
           />
         )
       })}

@@ -43,6 +43,34 @@ export interface SidebarLayoutRecord {
 export const DEFAULT_SIDEBAR_LAYOUT: SidebarLayoutRecord = { version: 1, hidden: [], order: [] }
 
 /**
+ * The shape every layout record has, whatever build wrote it: the number that names the shape, and
+ * the two lists the record is made of.
+ */
+export type SidebarLayoutShape = {
+  version: number
+  order: readonly string[]
+  hidden: readonly string[]
+}
+
+/**
+ * Whether a value is a layout record at all — a shape number and its two lists of ids — rather than
+ * what this build can read: which number it reads is `readableRecord`'s to ask, and what the ids mean
+ * is `placedRows`'s, since a row this build no longer carries is dropped rather than refused. So this
+ * is the one shape test the rule below and the account's write both read: a value with no `order`, or
+ * an `order` that is no list of ids, is no record to either of them.
+ */
+export function isSidebarLayoutRecord(value: unknown): value is SidebarLayoutShape {
+  if (typeof value !== "object" || value === null) return false
+  const { version, order, hidden } = value as Partial<SidebarLayoutShape>
+  return typeof version === "number" && isIdList(order) && isIdList(hidden)
+}
+
+/** A list of row ids, as every version of the record writes one. */
+function isIdList(list: unknown): list is string[] {
+  return Array.isArray(list) && list.every((id) => typeof id === "string")
+}
+
+/**
  * What a row needs of a pinned canvas: the id it is filed under, the title it is drawn with and the
  * mark it draws — a canvas's own picture, or the frame it falls back to, so a pin without one is still
  * a pin a row can draw.
@@ -97,14 +125,18 @@ export interface SidebarPlacedRow<Pin extends SidebarPin = SidebarPin> {
 }
 
 /**
- * The record as this build can read it, or nothing where it cannot: a record that is absent, whose
- * `version` is not this one's, or whose `order` names no row this build carries is today's list. The
- * last case is what makes an empty order today's arrangement rather than a record whose order alone
- * says nothing — and it is read, never written, so a newer build's arrangement survives this one.
+ * The record as this build can read it, or nothing where it cannot: a record that is absent, that is
+ * no record at all (`isSidebarLayoutRecord`), whose `version` is not the one this build reads, or
+ * whose `order` names no row this build carries is today's list. The last case is what makes an empty
+ * order today's arrangement rather than a record whose order alone says nothing — and it is read,
+ * never written, so a newer build's arrangement survives this one. Nothing here throws: the sidebar is
+ * mounted on every route, and a value the account kept is no reason for the app to draw no nav.
  */
-function readableRecord(record: SidebarLayoutRecord | undefined, known: Map<string, unknown>) {
-  if (!record || record.version !== 1) return undefined
-  return record.order.some((id) => known.has(id)) ? record : undefined
+function readableRecord(record: unknown, known: Map<string, unknown>): SidebarLayoutRecord | undefined {
+  // The number is this build's to read, and the shape test has said the lists are its two — so what is
+  // left to ask is whether the record is one this build knows and whether it names a row it draws.
+  if (!isSidebarLayoutRecord(record) || record.version !== 1) return undefined
+  return record.order.some((id) => known.has(id)) ? (record as SidebarLayoutRecord) : undefined
 }
 
 /**
@@ -125,7 +157,10 @@ function placedRows<Pin extends SidebarPin>(
 ): SidebarPlacedRow<Pin>[] {
   const byId = new Map(rows.map((row) => [row.id, row]))
   const readable = readableRecord(record, byId)
-  const named = (readable?.order ?? []).filter((id) => byId.has(id))
+  // One row, one place: a record whose order names an id twice — a write another build made, a hand
+  // edit — draws that row where it first stands and nowhere again, so the list holds one row and one
+  // control for it, and the next write names it once.
+  const named = [...new Set((readable?.order ?? []).filter((id) => byId.has(id)))]
   const namedSet = new Set(named)
   const hidden = new Set((readable?.hidden ?? []).filter((id) => byId.has(id)))
   const placed = named.map((id) => byId.get(id)!)
@@ -298,17 +333,32 @@ function placedOver<Pin extends SidebarPin>(
 }
 
 /**
- * The record a move writes: the row named, one place up (`-1`) or down (`1`) — the place a control
- * at either end of a row asks for, expressed over the same placement the drop writes through, so both
- * writes normalise once and the list is placed once for the press rather than twice.
+ * The record a move writes: the row named, one place up (`-1`) or down (`1`) among the rows the mode
+ * draws — the place a control at either end of a row asks for, expressed over the same placement the
+ * drop writes through, so both writes normalise once and the list is placed once for the press rather
+ * than twice.
+ *
+ * `drawn` is the ids of the rows the mode draws, in the order it draws them, and it is the list a
+ * press moves among: a row a lab switch has taken away is no place the reader can see, so a press
+ * moves past it rather than swapping with it — a swap would leave the drawn list exactly as it was
+ * while the live region said the row had moved. The row it reaches is the next row the reader can
+ * see, and the place it takes is that row's own (`moveTo`'s), which is the place a drag writes. A
+ * press at either end of the drawn list writes nothing new; every known id where a caller names none.
  */
 export function move<Pin extends SidebarPin>(
   id: string,
   direction: SidebarMove,
   record: SidebarLayoutRecord | undefined,
   rows: readonly SidebarLayoutRow<Pin>[],
+  drawn?: readonly string[],
 ): SidebarLayoutRecord {
   const placed = placedRows(rows, record)
-  const from = placed.findIndex(({ row }) => row.id === id)
-  return placedOver(placed, id, from + direction)
+  const order = placed.map(({ row }) => row.id)
+  const shown = drawn ?? order
+  const at = shown.indexOf(id)
+  // The row the press reaches: the next one the reader can see. Nothing where the drawn list ends
+  // there, and the row's own place is where it then stands — placed once, and named once.
+  const neighbour = at === -1 ? undefined : shown[at + direction]
+  const to = neighbour === undefined ? order.indexOf(id) : order.indexOf(neighbour)
+  return placedOver(placed, id, to)
 }

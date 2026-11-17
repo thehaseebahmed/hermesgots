@@ -14,7 +14,7 @@ import { ConversationList } from "@/components/conversation-list"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { CANVAS_UNREACHABLE, useCanvasStore } from "@/lib/canvases"
 import { adoptAppearance, db, getSettings } from "@/lib/db"
-import { DEFAULT_SIDEBAR_LAYOUT } from "@/lib/sidebar-layout"
+import { DEFAULT_SIDEBAR_LAYOUT, type SidebarLayoutRecord } from "@/lib/sidebar-layout"
 import { syncedAppearance } from "@/lib/sync"
 
 import {
@@ -430,6 +430,205 @@ test("a record written on one device draws the same rows on the next", async () 
   })
 })
 
+/**
+ * Canvas's switch off: the record still holds Canvas's row between Projects and Code, while the mode
+ * draws Projects, Code, Research and Meetings. The list a press moves among is the one drawn.
+ */
+const CANVAS_GAP = {
+  version: 1,
+  order: ["projects", "canvas", "code", "research", "meetings"],
+  hidden: [],
+}
+
+test("a Move press beside a row the switch takes away moves the row the reader sees", async () => {
+  await seed()
+  // Canvas's switch off, so its row is no row of the mode's list — though the record still names it.
+  await seedSettings({
+    activeProfileId: bot.id,
+    meetings: true,
+    canvas: false,
+    sidebarLayout: CANVAS_GAP,
+    appearanceAt: 0,
+  })
+  await mount(sidebar(), async () => {
+    await openMode()
+    assert.deepEqual(
+      rowIds(),
+      ["projects", "code", "research", "meetings"],
+      "the rows the switch lets through",
+    )
+    assert.equal(
+      moveControl("Meetings", "down")?.hasAttribute("disabled"),
+      true,
+      "the last drawn row holds its control at the drawn list's end",
+    )
+
+    // Code one place down: past Research, the next row the reader can see — not past the Canvas the
+    // record holds between them, which would leave the drawn list exactly as it was.
+    await click(moveControl("Code", "down"))
+    await until(
+      async () => wordsOf(liveRegion()) === "Code moved to 3 of 4",
+      "the drawn count, not the record's",
+    )
+    assert.deepEqual(
+      rowIds(),
+      ["projects", "research", "code", "meetings"],
+      "the row past the next one on screen",
+    )
+    assert.equal(
+      document.activeElement?.getAttribute("aria-label"),
+      "Move Code down",
+      "and the focus still on the control that moved it",
+    )
+    assert.deepEqual(
+      ((await db.settings.get("settings"))?.sidebarLayout?.order ?? []).filter(
+        (id) => !id.startsWith("canvas:"),
+      ),
+      ["projects", "canvas", "research", "code", "meetings"],
+      "the account's record moves Code past Research and leaves Canvas where it stood",
+    )
+
+    // And back up over the same gap: the row the reader sees is the one press away.
+    await click(moveControl("Code", "up"))
+    await until(async () => wordsOf(liveRegion()) === "Code moved to 2 of 4", "the way back")
+    assert.deepEqual(
+      ((await db.settings.get("settings"))?.sidebarLayout?.order ?? []).filter(
+        (id) => !id.startsWith("canvas:"),
+      ),
+      ["projects", "canvas", "code", "research", "meetings"],
+      "the order the presses started from",
+    )
+  })
+})
+
+/** A record another device, or a hand edit, left naming Code twice. */
+const DOUBLED = {
+  version: 1,
+  order: ["projects", "code", "code", "canvas", "research", "meetings"],
+  hidden: [],
+}
+
+test("a record that names a row twice draws one row and one control", async () => {
+  await seed()
+  await seedSettings({
+    activeProfileId: bot.id,
+    meetings: true,
+    canvas: false,
+    sidebarLayout: DOUBLED,
+    appearanceAt: 0,
+  })
+  await mount(sidebar(), async () => {
+    await until(async () => Boolean(find('a[href="/projects"]')), "the nav")
+    assert.equal(
+      findAll('nav[aria-label="Main"] a[href="/code"]').length,
+      1,
+      "one Code in the resting sidebar",
+    )
+
+    await openMode()
+    assert.deepEqual(
+      rowIds(),
+      ["projects", "code", "research", "meetings"],
+      "one row each, the id standing where it first stands, out of the rows the switch draws",
+    )
+    assert.equal(findAll('button[aria-label="Hide Code"]').length, 1, "one Hide control, not two")
+
+    // A press writes the list once: the double is gone with the first edit made after it.
+    await click(find('button[aria-label="Hide Code"]'))
+    await until(
+      async () => Boolean((await db.settings.get("settings"))?.sidebarLayout?.hidden?.length),
+      "the write",
+    )
+    const written = (await db.settings.get("settings"))?.sidebarLayout
+    assert.deepEqual(
+      (written?.order ?? []).filter((id) => !id.startsWith("canvas:")),
+      ["projects", "code", "canvas", "research", "meetings"],
+      "the record a press writes names every row once",
+    )
+    assert.deepEqual(written?.hidden, ["code"], "and the row it put away, once")
+    assert.deepEqual(
+      rowIds(),
+      ["projects", "code", "research", "meetings"],
+      "and the mode still draws one row for it",
+    )
+  })
+})
+
+test("a record this build cannot read draws today's sidebar and is left as it stands", async () => {
+  await seed()
+  // Exactly what an account can put on the settings row: version 1, `hidden`, and no `order` at all.
+  // The sidebar is mounted on every route, so a record it cannot read may not throw the nav away.
+  const malformed = { version: 1, hidden: ["code"] } as unknown as SidebarLayoutRecord
+  await seedSettings({
+    activeProfileId: bot.id,
+    meetings: true,
+    sidebarLayout: malformed,
+    appearanceAt: 0,
+  })
+  await mount(sidebar(), async () => {
+    await until(async () => Boolean(find('a[href="/projects"]')), "the nav")
+    assert.deepEqual(
+      addresses(),
+      ["/projects", "/code", "/canvas", "/research", "/meetings", "/canvas/p1"],
+      "today's list, every row drawn",
+    )
+    await openMode()
+    assert.deepEqual(
+      rowIds(),
+      ["projects", "code", "canvas", "research", "meetings", "canvas:p1"],
+      "and the mode draws every row, in today's order",
+    )
+    assert.equal(
+      find('[data-sidebar-row="code"]')?.hasAttribute("data-hidden"),
+      false,
+      "Code shown, as today's list has it",
+    )
+    assert.deepEqual(
+      (await db.settings.get("settings"))?.sidebarLayout,
+      malformed,
+      "the record it cannot read, left exactly as it was — never written over",
+    )
+  })
+})
+
+test("the account keeps a record it can read and drops a value that is no record", async () => {
+  await seed()
+  // What sync hands the row: a value per appearance field, and the clock it arrived on.
+  await adoptAppearance({ sidebarLayout: ORDERED }, 7)
+  assert.deepEqual(
+    (await getSettings()).sidebarLayout,
+    ORDERED,
+    "a record arrives, and the row keeps it",
+  )
+
+  // A value with no `order`, an `order` that is no list of ids, and a value that is no record at all:
+  // none is a layout this build can carry, so none is a value to keep.
+  for (const arriving of [
+    { version: 1, hidden: ["code"] },
+    { version: 1, order: "projects,code" },
+    { version: 1, order: [1, 2], hidden: [] },
+    [],
+    null,
+  ]) {
+    await adoptAppearance({ sidebarLayout: arriving }, 8)
+    assert.deepEqual(
+      (await getSettings()).sidebarLayout,
+      ORDERED,
+      `the layout the row held, not ${JSON.stringify(arriving)}`,
+    )
+  }
+
+  // And one written by a newer build is kept exactly as it arrived: it is a record, though not one
+  // this build reads — dropping it would let this device push the default over the account's.
+  const newer = { version: 2, order: ["projects"], hidden: [] }
+  await adoptAppearance({ sidebarLayout: newer }, 9)
+  assert.deepEqual(
+    (await getSettings()).sidebarLayout,
+    newer,
+    "a newer build's record, kept on the row it arrived on",
+  )
+})
+
 test("a collapsed sidebar draws no edit button, and an expanded one draws it", async () => {
   await seed()
   await mount(
@@ -682,6 +881,91 @@ test("an unpin the host refuses keeps the row, in the host's words", async () =>
     await click(doneButton())
     await until(async () => Boolean(editButton()), "the switch at rest")
     assert.equal(missing('nav[aria-label="Main"] a[href="/canvas/p1"]'), true, "the pin's row gone")
+  })
+})
+
+/** The write a device with no room for it answers every `put` with: a full quota, a locked store. */
+const NO_ROOM = "The device has no room for this change."
+
+/** Holds the settings row's own write to a refusal, for the presses a case makes inside it. */
+async function withNoRoom(body: () => Promise<void>) {
+  const settings = Object.getPrototypeOf(db.settings)
+  const put = settings.put
+  settings.put = async () => {
+    throw new Error(NO_ROOM)
+  }
+  try {
+    await body()
+  } finally {
+    settings.put = put
+  }
+}
+
+/** A row's refusal, drawn where the press was made rather than beside the list or in a toast. */
+const refusalIn = (id: string) =>
+  find(`[data-sidebar-row="${id}"]`)?.querySelector('[role="alert"]') ?? null
+
+test("a layout the device refuses is said under the row the press was made in", async () => {
+  // A device with no room: the write rejects, and a press that threw its promise away would leave the
+  // mode silent and the rejection unhandled. The refusal is the row's — the row stays exactly as it
+  // stood, since a write that never landed changed nothing — and nothing is said in passing.
+  await seed()
+  await mount(sidebar(), async () => {
+    await openMode()
+    const before = rowIds()
+    const record = (await db.settings.get("settings"))?.sidebarLayout
+
+    await withNoRoom(async () => {
+      await withToasts(async (said) => {
+        // Hide: refused under the row it was pressed in.
+        await click(find('button[aria-label="Hide Code"]'))
+        await until(async () => wordsOf(refusalIn("code")) === NO_ROOM, "the refusal, under Code")
+        assert.equal(
+          find('[data-sidebar-row="code"]')?.hasAttribute("data-hidden"),
+          false,
+          "the row not put away",
+        )
+        assert.equal(
+          wordsOf(find('button[aria-label="Hide Code"]')),
+          "Hide",
+          "the control still reading what its press does",
+        )
+        assert.deepEqual(rowIds(), before, "every row exactly where it stood")
+        assert.deepEqual(
+          said,
+          [],
+          "nothing said in passing: the refusal stands where the press was",
+        )
+
+        // Dismissed, so the next press's words are the next press's own.
+        await click(find(`[data-sidebar-row="code"] button[aria-label="Dismiss"]`))
+        await until(
+          async () => missing(`[data-sidebar-row="code"] [role="alert"]`),
+          "the words gone",
+        )
+
+        // Move: the same, and a move that never landed is never announced.
+        await click(moveControl("Code", "down"))
+        await until(
+          async () => wordsOf(refusalIn("code")) === NO_ROOM,
+          "the refusal, the second press",
+        )
+        assert.deepEqual(rowIds(), before, "the rows as they stood")
+        assert.equal(wordsOf(liveRegion()), "", "and nothing announced, since nothing moved")
+        assert.equal(
+          moveControl("Code", "down")?.hasAttribute("disabled"),
+          false,
+          "the control that was pressed, still in its row and still pressable",
+        )
+      })
+    })
+
+    assert.deepEqual(
+      (await db.settings.get("settings"))?.sidebarLayout,
+      record,
+      "the account's record untouched by a write that never landed",
+    )
+    assert.ok(group(), "the mode still open, the list exactly as it stood")
   })
 })
 

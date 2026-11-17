@@ -415,6 +415,9 @@ export function ConversationList({
   const { resting, mode, atDefault } = sidebarPlacement(known, layout)
   const rows = resting.filter(drawn)
   const editRows = mode.filter(({ row }) => drawn(row))
+  // The ids the mode draws, in the order it draws them: the list a press moves among, since a row a
+  // lab switch has taken away is no place on screen for the row to be moved past.
+  const shown = editRows.map(({ row }) => row.id)
 
   // The mode is this component's own state and never a stored setting: a reload must not land a
   // reader in a mode where a row press navigates nowhere. The switch's ref is what the mode gives the
@@ -481,14 +484,16 @@ export function ConversationList({
               onLeave={leaveEdit}
               onSetHidden={(id, hidden) => saveLayout(withHidden(known, layout, id, hidden))}
               // One write per press, through the appearance clock, so the account and a second device
-              // arrive at the same order this one draws.
-              onMove={(id, direction) => saveLayout(move(id, direction, layout, known))}
+              // arrive at the same order this one draws. The press is placed over the rows the mode
+              // draws (`shown`), so it moves the row past the next row the reader can see rather than
+              // swapping with one a lab switch took off the screen.
+              onMove={(id, direction) => saveLayout(move(id, direction, layout, known, shown))}
               // A drop names the row whose place the reader took, and the index is read off the whole
               // placement rather than off the rows the mode drew: a row a lab switch has taken off the
               // screen still holds its place, so a drop below it lands below it, not one place early.
               onDrop={(id, onto) => {
                 const at = mode.findIndex(({ row }) => row.id === onto)
-                if (at !== -1) saveLayout(moveTo(id, at, layout, known))
+                return at === -1 ? Promise.resolve() : saveLayout(moveTo(id, at, layout, known))
               }}
               // A pin is the host's record, not the account's arrangement: the write goes to the
               // canvas's own bot, and its answer folds into the store the sidebar's pins are read from.

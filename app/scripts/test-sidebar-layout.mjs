@@ -9,6 +9,7 @@ import test from "node:test"
 import {
   DEFAULT_SIDEBAR_LAYOUT,
   isDefaultLayout,
+  isSidebarLayoutRecord,
   move,
   moveTo,
   restingSidebarRows,
@@ -315,4 +316,125 @@ test("a move carries the pins with the features", () => {
     },
     "a pin is a row of the one list, so it moves past the feature it follows like any other",
   )
+})
+
+test("a press moves a row past the next row the reader can see", () => {
+  // Canvas's switch off takes its row off the screen; the record still holds it between Projects and
+  // Code. The drawn list is Projects, Code, Research, Meetings, so a press on Code moves it past
+  // Research — the next row the reader can see — and not past the Canvas nobody draws. A swap with the
+  // row between them would take the press nowhere on screen while the live region said it had moved.
+  const record = {
+    version: 1,
+    order: ["projects", "canvas", "code", "research", "meetings"],
+    hidden: [],
+  }
+  const shown = ["projects", "code", "research", "meetings"]
+  assert.deepEqual(
+    move("code", 1, record, sidebarRows([]), shown),
+    {
+      version: 1,
+      order: ["projects", "canvas", "research", "code", "meetings"],
+      hidden: [],
+    },
+    "Code past Research, Canvas still where it stood",
+  )
+  assert.deepEqual(
+    move("code", -1, record, sidebarRows([]), shown),
+    {
+      version: 1,
+      order: ["code", "projects", "canvas", "research", "meetings"],
+      hidden: [],
+    },
+    "and one place up, past Projects, over the Canvas between them",
+  )
+  // A switch that takes the last row away holds the press where the drawn list ends, though the
+  // record names a row below it: the ends are the ends of the list the reader is arranging.
+  const lastOff = { version: 1, order: TODAY, hidden: [] }
+  assert.deepEqual(
+    move("research", 1, lastOff, sidebarRows([]), ["projects", "code", "canvas", "research"]),
+    lastOff,
+    "the last drawn row has nowhere down to go",
+  )
+  assert.deepEqual(
+    move("projects", -1, lastOff, sidebarRows([]), ["projects", "code", "canvas", "research"]),
+    lastOff,
+    "nor the first anywhere up",
+  )
+})
+
+test("a record that names a row twice draws it once, and every write names it once", () => {
+  // A record another device or a hand edit left: the row appears twice, with a duplicate key, and each
+  // press would keep the double. One row, one control, and a write that names it once.
+  const record = {
+    version: 1,
+    order: ["projects", "code", "code", "canvas", "research", "meetings"],
+    hidden: ["code"],
+  }
+  assert.deepEqual(
+    resting(record),
+    ["projects", "canvas", "research", "meetings"],
+    "the first occurrence's place, and one row for it",
+  )
+  assert.deepEqual(modeIds(record), TODAY, "the mode draws it once too, where it first stands")
+  assert.deepEqual(putAway(record), ["code"], "and it is put away once")
+  assert.deepEqual(
+    withHidden(sidebarRows([]), record, "canvas", true),
+    { version: 1, order: TODAY, hidden: ["code", "canvas"] },
+    "the record a press writes names every row once",
+  )
+  assert.deepEqual(
+    move("meetings", -1, record, sidebarRows([])).order,
+    ["projects", "code", "canvas", "meetings", "research"],
+    "and so does a move's",
+  )
+})
+
+test("a record this build cannot read is today's list, and never a throw", () => {
+  // The shapes that reach the rule: a value the account kept before this build read shapes (no
+  // `order`), an `order` that is not a list, ids that are not ids, and values that are no record at
+  // all. The sidebar is mounted on every route, so any of these throwing is an app with no nav.
+  const unreadable = [
+    { version: 1, hidden: ["code"] },
+    { version: 1, order: "projects,code" },
+    { version: 1, order: null, hidden: [] },
+    { version: 1, order: [], hidden: "code" },
+    { version: 1, order: [1, 2], hidden: [] },
+    { version: "1", order: [], hidden: [] },
+    [],
+    "projects",
+    null,
+  ]
+  for (const record of unreadable) {
+    const seen = JSON.stringify(record)
+    assert.equal(isSidebarLayoutRecord(record), false, `no record: ${seen}`)
+    assert.deepEqual(resting(record), TODAY, `today's rows: ${seen}`)
+    assert.deepEqual(putAway(record), [], `nothing put away: ${seen}`)
+    assert.equal(isDefaultLayout(sidebarRows([]), record), true, `nothing for Reset: ${seen}`)
+    assert.deepEqual(
+      withHidden(sidebarRows([]), record, "code", true).order,
+      TODAY,
+      `a press writes today's order: ${seen}`,
+    )
+    assert.deepEqual(
+      move("code", 1, record, sidebarRows([])).order,
+      ["projects", "canvas", "code", "research", "meetings"],
+      `and so does a move: ${seen}`,
+    )
+    assert.equal(JSON.stringify(record), seen, "reading it wrote nothing over it")
+  }
+  // A newer build's record is a record — the shape is the same — that this build cannot read: today's
+  // list, and never a write over it, which is what lets a later build of the app find it again.
+  const newer = { version: 2, order: TODAY, hidden: ["code"] }
+  assert.equal(isSidebarLayoutRecord(newer), true, "a record, in a shape this build does not read")
+  assert.deepEqual(resting(newer), TODAY, "today's list, since its number is not this build's")
+  assert.deepEqual(putAway(newer), [], "and none of what it put away is hidden here")
+  assert.equal(JSON.stringify(newer), JSON.stringify({ version: 2, order: TODAY, hidden: ["code"] }))
+  // The shapes that are records, so this is a test of the shape and not of `false`.
+  assert.equal(isSidebarLayoutRecord(DEFAULT_SIDEBAR_LAYOUT), true, "the default is a record")
+  assert.equal(
+    isSidebarLayoutRecord({ version: 1, order: TODAY, hidden: ["code"] }),
+    true,
+    "and so is an arrangement with a row put away",
+  )
+  assert.equal(isSidebarLayoutRecord(undefined), false, "and an absent value is no record at all")
 })

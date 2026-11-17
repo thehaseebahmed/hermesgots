@@ -14,7 +14,11 @@ import { mediaKeyPrefix } from "@/lib/media-key"
 import { forgetRead } from "@/lib/read-marks"
 import type { Compaction, ModelChange, ProviderUsage, Skill, Tidied } from "@/lib/hermes"
 import type { PromptEntry } from "@/lib/prompt-library"
-import { DEFAULT_SIDEBAR_LAYOUT, type SidebarLayoutRecord } from "@/lib/sidebar-layout"
+import {
+  DEFAULT_SIDEBAR_LAYOUT,
+  isSidebarLayoutRecord,
+  type SidebarLayoutRecord,
+} from "@/lib/sidebar-layout"
 import type { SpeechSettings } from "@/lib/speech"
 import type { ReasoningRun } from "@/lib/thinking"
 import { randomId } from "@/lib/utils"
@@ -2005,9 +2009,11 @@ export async function forgetChatFilter(profileId: string) {
  * Takes the appearance record another device wrote, clock and all, so this one doesn't push it back.
  * A record can name a member this build doesn't have — one that was retired, or one from a newer
  * build — and writing that name back would put a field nothing reads in this device's settings row.
- * A member is kept only where its value has the shape this build's default for it has: a switch is a
- * boolean, the sidebar's layout a record. What a record's own version or ids mean is the layout
- * rule's to say, not this path's, and a field with no default is a switch, as all of them were.
+ * A member is kept only where its value is a real one: a switch is a boolean, and the sidebar's layout
+ * a record this build's shape test accepts (`isSidebarLayoutRecord`, beside the record it reads) — a
+ * value with no `order`, or an `order` that is no list of ids, is no record to keep, and dropping it
+ * here is what keeps the sidebar from being mounted on one its rule would have to throw on. Which
+ * shape number a record's own version names, and what its ids mean, stay the layout rule's to say.
  */
 export async function adoptAppearance(
   value: Partial<Record<keyof Appearance, unknown>>,
@@ -2016,6 +2022,11 @@ export async function adoptAppearance(
   const known: Partial<Record<keyof Appearance, unknown>> = {}
   for (const field of APPEARANCE_FIELDS) {
     const next = value[field]
+    // The one member whose shape is this build's own to read, through the predicate beside its record.
+    if (field === "sidebarLayout") {
+      if (isSidebarLayoutRecord(next)) known[field] = next
+      continue
+    }
     const shape = typeof DEFAULT_SETTINGS[field]
     // `typeof` calls `null` and an array an object, so a member whose default is a record is held to
     // an object that is neither: a layout another build wrote as `[]` is no record this one reads.
