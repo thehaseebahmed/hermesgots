@@ -1,45 +1,57 @@
 import { useLiveQuery } from "dexie-react-hooks"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { Link, matchPath, NavLink, useLocation, type NavLinkProps } from "react-router"
 import {
-  AudioLinesIcon,
   BellOffIcon,
-  CodeXmlIcon,
-  FolderKanbanIcon,
   ListChecksIcon,
-  FrameIcon,
   MessageCircleQuestionMarkIcon,
   PanelLeftCloseIcon,
   PanelLeftOpenIcon,
-  SearchIcon,
   ShieldAlertIcon,
-  TelescopeIcon,
+  SlidersHorizontalIcon,
   TriangleAlertIcon,
   UserIcon,
 } from "lucide-react"
 
 import { Bot } from "@/components/bot"
-import { CanvasMark } from "@/components/canvas-mark"
-import { LabLabel } from "@/components/lab-badge"
+import { SidebarEdit } from "@/components/sidebar-edit"
+import { SidebarRowBody } from "@/components/sidebar-row-body"
 import { SortMenu } from "@/components/sort-menu"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { botMainPath } from "@/lib/bot-tabs"
 import { stateLine } from "@/lib/bot-chrome"
 import { closeCanvas, useCanvasOpened } from "@/lib/canvas-open"
-import { useCanvasEnabled, usePinnedCanvases, type Canvas } from "@/lib/canvases"
+import { updateCanvas, useCanvasEnabled, usePinnedCanvases, type Canvas } from "@/lib/canvases"
 import { chatOwner } from "@/lib/chat-owner"
 import { db } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
 import { useMeetingsEnabled } from "@/lib/meetings"
 import { plainPress, pressOpeningRoot, useNav } from "@/lib/nav"
+import {
+  DEFAULT_SIDEBAR_LAYOUT,
+  move,
+  moveTo,
+  sidebarPlacement,
+  sidebarRows,
+  withHidden,
+  type SidebarLab,
+  type SidebarLayoutRow,
+  type SidebarPinRow,
+} from "@/lib/sidebar-layout"
+import { useSidebarLayout } from "@/lib/sidebar"
 import { useSyncState } from "@/lib/sync"
 import { BOT_SORTS, sortBots, useBotSort, useBotSummaries, useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { reasonText, useWaitingSessions, type WaitingReason } from "@/lib/waiting"
 
+/** The column's own transition, in the mode: how long the sidebar waits before the resting
+ * rows replace the mode's, so the two meet at the same geometry. */
+const COLUMN_MS = 300
+
 const rowClass = ({ isActive }: { isActive: boolean }) =>
   cn(
-    "flex min-h-11 items-center gap-3 rounded-2xl px-3 text-sm transition-colors hover:bg-muted",
+    "flex min-h-11 items-center gap-2 rounded-2xl px-3 text-sm transition-colors hover:bg-muted",
     isActive && "bg-muted font-medium",
   )
 
@@ -48,6 +60,8 @@ const railClass = ({ isActive }: { isActive: boolean }) =>
     "flex size-11 shrink-0 items-center justify-center rounded-2xl transition-colors hover:bg-muted",
     isActive && "bg-muted font-medium",
   )
+
+type PinRow = SidebarPinRow<Canvas>
 
 /**
  * A sidebar destination: top-level, so it opens as the only entry and back leaves the app.
@@ -77,21 +91,33 @@ function RowAge({ at, now }: { at: number; now: number }) {
   )
 }
 
-function PinnedCanvases({
-  onNavigate,
+/**
+ * One row of the sidebar's list, drawn from the table (`lib/sidebar-layout.ts`) — a feature's screen,
+ * or the canvas the reader pinned. A pin's own body is `CanvasRow`, since a pin is marked by the tab
+ * that opened it and not by its address, and the table's row is all either kind has in common.
+ */
+function SidebarRow({
+  row,
   collapsed,
+  onNavigate,
 }: {
-  onNavigate?: () => void
+  row: SidebarLayoutRow<Canvas>
   collapsed: boolean
+  onNavigate?: () => void
 }) {
-  const pinned = usePinnedCanvases()
-  if (pinned.length === 0) return null
+  if (row.kind === "pin")
+    return <CanvasRow row={row} collapsed={collapsed} onNavigate={onNavigate} />
   return (
-    <>
-      {pinned.map((canvas) => (
-        <CanvasRow key={canvas.id} canvas={canvas} collapsed={collapsed} onNavigate={onNavigate} />
-      ))}
-    </>
+    <RootLink
+      to={row.address}
+      end={row.end}
+      onClick={onNavigate}
+      aria-label={collapsed ? row.label : undefined}
+      data-sidebar-row={row.id}
+      className={collapsed ? railClass : rowClass}
+    >
+      <SidebarRowBody row={row} collapsed={collapsed} />
+    </RootLink>
   )
 }
 
@@ -100,34 +126,33 @@ function PinnedCanvases({
  * (`lib/canvas-open.ts`, ADR 0151).
  */
 function CanvasRow({
-  canvas,
+  row,
   collapsed,
   onNavigate,
 }: {
-  canvas: Canvas
+  row: PinRow
   collapsed: boolean
   onNavigate?: () => void
 }) {
   const { root } = useNav()
-  const to = `/canvas/${canvas.id}`
-  const opened = useCanvasOpened(canvas.id)
+  const opened = useCanvasOpened(row.pin.id)
   return (
     <Link
-      to={to}
+      to={row.address}
       replace
-      onClick={pressOpeningRoot(root, to, (event) => {
+      onClick={pressOpeningRoot(root, row.address, (event) => {
         onNavigate?.()
         // A row's press is a way onto the canvas like any other and no open, so the mark the flow
         // wrote goes with it (ADR 0151) — a press meant for a new tab leaves this tab as it was.
         if (plainPress(event)) closeCanvas()
       })}
-      aria-label={collapsed ? canvas.title : undefined}
+      aria-label={collapsed ? row.label : undefined}
       aria-current={opened ? "page" : undefined}
       data-canvas-pinned=""
+      data-sidebar-row={row.id}
       className={(collapsed ? railClass : rowClass)({ isActive: opened })}
     >
-      <CanvasMark mark={canvas.mark} />
-      {!collapsed && <span className="min-w-0 truncate">{canvas.title}</span>}
+      <SidebarRowBody row={row} collapsed={collapsed} />
     </Link>
   )
 }
@@ -300,7 +325,7 @@ function Waiting({
                     collapsed ? railClass(state) : cn(rowClass(state), "min-h-14 py-2")
                   }
                 >
-                  <Icon
+                    <Icon
                     className={
                       collapsed
                         ? "size-5 shrink-0 text-warning"
@@ -371,6 +396,56 @@ export function ConversationList({
 }) {
   const meetings = useMeetingsEnabled()
   const canvas = useCanvasEnabled()
+  // A switch this device has not answered yet draws no row: `undefined` is no yes.
+  const gates: Record<SidebarLab, boolean> = {
+    canvas: canvas === true,
+    meetings: meetings === true,
+  }
+  // The pins are read only under Canvas's switch, so a build with Canvas off refreshes nothing.
+  const pinned = usePinnedCanvases(gates.canvas)
+  // Every row this build knows, gate or no gate: the rule holds a switched-off row's id in the
+  // account's record, so turning the lab back on returns the row where the reader put it. The gate
+  // decides what is drawn, never what the record says.
+  const known = sidebarRows(pinned)
+  const drawn = (row: SidebarLayoutRow<Canvas>) => row.lab === null || gates[row.lab]
+  const [layout, saveLayout] = useSidebarLayout()
+  // One placement a render, and the three answers drawn from it: the rows at rest, the mode's rows and
+  // whether the record already reads as today's list — which is what holds the foot's Reset while
+  // there is nothing to clear. The gate decides what is drawn, never where a row stands.
+  const { resting, mode, atDefault } = sidebarPlacement(known, layout)
+  const rows = resting.filter(drawn)
+  const editRows = mode.filter(({ row }) => drawn(row))
+  // The ids the mode draws, in the order it draws them: the list a press moves among, since a row a
+  // lab switch has taken away is no place on screen for the row to be moved past.
+  const shown = editRows.map(({ row }) => row.id)
+
+  // The mode is this component's own state and never a stored setting: a reload must not land a
+  // reader in a mode where a row press navigates nowhere. The switch's ref is what the mode gives the
+  // focus back to.
+  const [editing, setEditing] = useState(false)
+  /**
+   * Whether the mode is on its way out. It stays mounted while its column closes, because at zero the
+   * column is the resting row's spacing: the list that replaces it lands exactly where the motion
+   * left off, so leaving is not a jump. `COLUMN_MS` is the column's own transition.
+   */
+  const [leaving, setLeaving] = useState(false)
+  const closing = useRef<number | undefined>(undefined)
+  useEffect(() => () => window.clearTimeout(closing.current), [])
+  const editButton = useRef<HTMLButtonElement>(null)
+  // Held as one function for the sidebar's whole life: the mode answers Escape on the document, and a
+  // fresh `onLeave` every render would re-register that listener on every one.
+  const leaveEdit = useCallback(() => {
+    // A second press while the mode is already folding away is the same press: the focus is back on
+    // the switch, and the list underneath is not there yet.
+    if (closing.current !== undefined) return
+    setLeaving(true)
+    editButton.current?.focus()
+    closing.current = window.setTimeout(() => {
+      closing.current = undefined
+      setLeaving(false)
+      setEditing(false)
+    }, COLUMN_MS)
+  }, [])
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -390,74 +465,73 @@ export function ConversationList({
             className={cn("size-11 rounded-full", collapsed && "text-muted-foreground")}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-expanded={!collapsed}
-            onClick={onToggleCollapsed}
+            // Collapsing leaves the mode before it collapses (a Decision): the rail has no switch to
+            // come back through, so the control that took the reader there keeps the focus.
+            onClick={() => {
+              // The sidebar is folding, so the mode has no list to linger over: it goes at once.
+              window.clearTimeout(closing.current)
+              closing.current = undefined
+              setLeaving(false)
+              setEditing(false)
+              onToggleCollapsed()
+            }}
           >
             {collapsed ? <PanelLeftOpenIcon className="size-5" /> : <PanelLeftCloseIcon />}
           </Button>
         )}
-        <Button
-          variant="ghost"
-          size="icon-lg"
-          className={cn("size-11 rounded-full", collapsed && "text-muted-foreground")}
-          aria-label="Search"
-        >
-          <SearchIcon className={collapsed ? "size-5" : undefined} />
-        </Button>
+        {/* The rail keeps no edit button, so a collapsed sidebar draws none at all. */}
+        {!collapsed && (
+          <Button
+            ref={editButton}
+            variant="ghost"
+            size="icon-lg"
+            className="size-11 rounded-full aria-pressed:bg-muted aria-pressed:text-foreground"
+            aria-label={editing ? "Done editing sidebar" : "Edit sidebar"}
+            aria-pressed={editing}
+            onClick={() => (editing ? leaveEdit() : setEditing(true))}
+          >
+            <SlidersHorizontalIcon className="size-5" />
+          </Button>
+        )}
       </div>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
         <nav className={cn("flex flex-col gap-0.5", collapsed && "items-center")} aria-label="Main">
-          <RootLink
-            to="/projects"
-            onClick={onNavigate}
-            aria-label={collapsed ? "Projects" : undefined}
-            className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
-          >
-            <FolderKanbanIcon className="size-5 text-muted-foreground" />
-            {!collapsed && "Projects"}
-          </RootLink>
-          <RootLink
-            to="/code"
-            onClick={onNavigate}
-            aria-label={collapsed ? "Code" : undefined}
-            className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
-          >
-            <CodeXmlIcon className="size-5 text-muted-foreground" />
-            {!collapsed && "Code"}
-          </RootLink>
-          {canvas && (
-            <RootLink
-              to="/canvas"
-              end
-              onClick={onNavigate}
-              aria-label={collapsed ? "Canvas" : undefined}
-              className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
-            >
-              <FrameIcon className="size-5 text-muted-foreground" />
-              {!collapsed && <LabLabel fill>Canvas</LabLabel>}
-            </RootLink>
+          {editing || leaving ? (
+            <SidebarEdit
+              rows={editRows}
+              open={!leaving}
+              atDefault={atDefault}
+              onLeave={leaveEdit}
+              onSetHidden={(id, hidden) => saveLayout(withHidden(known, layout, id, hidden))}
+              // One write per press, through the appearance clock, so the account and a second device
+              // arrive at the same order this one draws. The press is placed over the rows the mode
+              // draws (`shown`), so it moves the row past the next row the reader can see rather than
+              // swapping with one a lab switch took off the screen.
+              onMove={(id, direction) => saveLayout(move(id, direction, layout, known, shown))}
+              // A drop names the row whose place the reader took, and the index is read off the whole
+              // placement rather than off the rows the mode drew: a row a lab switch has taken off the
+              // screen still holds its place, so a drop below it lands below it, not one place early.
+              onDrop={(id, onto) => {
+                const at = mode.findIndex(({ row }) => row.id === onto)
+                return at === -1 ? Promise.resolve() : saveLayout(moveTo(id, at, layout, known))
+              }}
+              // A pin is the host's record, not the account's arrangement: the write goes to the
+              // canvas's own bot, and its answer folds into the store the sidebar's pins are read from.
+              // The layout record is not touched either way. `quiet`, since the row draws the refusal
+              // itself: the same sentence in a toast is gone before the reader finds it there.
+              onUnpin={(canvasId) => updateCanvas(canvasId, { pinned: false }, { quiet: true })}
+              // Reset clears the arrangement and nothing else: the default record, written through
+              // the live record's writer so the account carries it as it carries every other edit.
+              // A new object rather than `DEFAULT_SIDEBAR_LAYOUT` itself, which is the default
+              // settings row's own. No pin is asked about, so no canvas is unpinned.
+              onReset={() => saveLayout({ ...DEFAULT_SIDEBAR_LAYOUT })}
+            />
+          ) : (
+            rows.map((row) => (
+              <SidebarRow key={row.id} row={row} collapsed={collapsed} onNavigate={onNavigate} />
+            ))
           )}
-          <RootLink
-            to="/research"
-            onClick={onNavigate}
-            aria-label={collapsed ? "Research" : undefined}
-            className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
-          >
-            <TelescopeIcon className="size-5 text-muted-foreground" />
-            {!collapsed && "Research"}
-          </RootLink>
-          {meetings && (
-            <RootLink
-              to="/meetings"
-              onClick={onNavigate}
-              aria-label={collapsed ? "Meetings" : undefined}
-              className={({ isActive }) => (collapsed ? railClass : rowClass)({ isActive })}
-            >
-              <AudioLinesIcon className="size-5 text-muted-foreground" />
-              {!collapsed && <LabLabel fill>Meetings</LabLabel>}
-            </RootLink>
-          )}
-          {canvas && <PinnedCanvases onNavigate={onNavigate} collapsed={collapsed} />}
         </nav>
         <Separator className="mx-1 my-3 data-horizontal:w-auto" />
         <Waiting onNavigate={onNavigate} collapsed={collapsed} />

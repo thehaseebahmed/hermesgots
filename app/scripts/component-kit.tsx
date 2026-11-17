@@ -92,6 +92,37 @@ export function serveTranscript(rows: SessionMessage[]) {
   }) as unknown as typeof fetch
 }
 
+/**
+ * The canvas a reader pinned to the sidebar, as its bot's plugin lists it: the row's mark, its title
+ * and the record's clock — no page, since a pin is a row and not an open.
+ */
+export const PINNED_CANVAS = {
+  id: "p1",
+  title: "A pinned timetable",
+  session_id: "gots-chat-p1",
+  chat_id: "chat-p1",
+  version: 2,
+  pinned: true,
+  archived: false,
+  at: 20,
+  created_at: 1,
+  tools: [],
+}
+
+/**
+ * The bot's plugin, as far as the sidebar's pins are read: its features, and the list it holds. Both
+ * tiers that draw a pin over a seeded device read this one stub, so the pin's shape is stated once.
+ */
+export function servePinnedCanvases(canvases: readonly unknown[] = [PINNED_CANVAS]) {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input instanceof Request ? input.url : input))
+    if (url.pathname.endsWith("/info")) return json({ version: "0.114.0", features: ["canvas"] })
+    if (url.pathname.endsWith("/canvases"))
+      return json({ object: "gots.canvases", canvases: [...canvases] })
+    return json({ error: { message: "no route" } }, 404)
+  }) as unknown as typeof fetch
+}
+
 /** The wake run's own input, as the plugin posts it: the pinned header, the result, core's footer. */
 export const wakePromptText = (body = "A finding") =>
   `${WAKE_PROMPT_HEADER}child-1]\n${body}\n\n${WAKE_PROMPT_FOOTER} to keep you going]`
