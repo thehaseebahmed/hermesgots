@@ -28,12 +28,12 @@ from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 from .notice import Action
 from .store import connect, now_ms
 
-# The two ways a tray can answer an approval. The row holds which one a token is, so this tuple is the
-# whole vocabulary: a press cannot ask for a third.
-CHOICES: Tuple[str, ...] = ("once", "deny")
-# What each button says, in the order the tray draws them: Allow once first, since it is the answer
-# the user's own card offers first.
+# The two ways a tray can answer an approval, and what each one's button says. The row holds which
+# one a token is, so this table is the whole vocabulary: a press cannot ask for a third.
 LABELS: Dict[str, str] = {"once": "Allow once", "deny": "Deny"}
+# The choices themselves, in the order the tray draws them: Allow once first, since it is the answer
+# the user's own card offers first.
+CHOICES: Tuple[str, ...] = tuple(LABELS)
 # Where a button's link goes, under the address the app dialled (``push.base``, which already carries
 # the plugin's prefix and any /p/<profile> a bot sits under).
 PATH = "/push/answer/"
