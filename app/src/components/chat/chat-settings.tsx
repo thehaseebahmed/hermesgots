@@ -4,20 +4,17 @@ import {
   ArchiveXIcon,
   BellOffIcon,
   CheckIcon,
-  FolderGit2Icon,
+  GitForkIcon,
   PinIcon,
   RotateCcwIcon,
 } from "lucide-react"
 
 import { ConfirmDestructive } from "@/components/confirm-destructive"
-import { ContextIcon, ContextPercent, type ContextUsage } from "@/components/chat/usage-sheet"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
 import {
   DestructiveButton,
   Group,
-  RowText,
   SwitchRow,
-  linkRowClass,
   fieldInnerClass,
   fieldLabelClass,
 } from "@/components/settings-chrome"
@@ -126,7 +123,7 @@ function PinRow({ chat, profileId }: { chat: Conversation; profileId: string }) 
  * and its archive are still the reader's own marks, drawn on any Host. A **run** keeps the name and the
  * mute a chat has, and a chat keeps everything else. A bot's **Main** keeps its mute alone: its title is
  * the Host's, its place is permanent, and nothing on any surface renames, pins, archives or deletes it
- * (G2). A project session is edited here too, on `code`: its context, the repositories it works in,
+ * (G2). A project session is edited here too, on `code`: the repositories it works in,
  * and its own resolve, discard and delete beside the name, mute and pin; it is never archived, since
  * discarding is its way of being put away. The bot's own mute and delete stay on its settings page.
  */
@@ -142,13 +139,11 @@ export function ChatSettings({
   chat: Conversation
   /**
    * What a project session adds to the sheet: the bot it works as (the host that closes its work),
-   * every repository it works in, and the context the `…` menu used to carry. Absent for a chat.
+   * every repository it works in. Its context stays in the bar's ring. Absent for a chat.
    */
   code?: {
     profile: Profile
     repos: readonly string[]
-    usage: ContextUsage
-    onOpenUsage: () => void
   }
   /**
    * The bot's list the pin cap is counted over: the profile this chat is a row of, defaulting to the
@@ -280,43 +275,18 @@ export function ChatSettings({
                 )}
               </div>
             )}
-            {code && (
-              <Group>
-                {code.usage.tracked && (
-                  <button
-                    type="button"
-                    data-session-context
-                    className={linkRowClass}
-                    onClick={() => {
-                      setSheetOpen(false)
-                      code.onOpenUsage()
-                    }}
-                  >
-                    <span className="flex size-5 shrink-0 items-center justify-center [&>svg]:size-5">
-                      <ContextIcon usage={code.usage} />
-                    </span>
-                    <RowText title="Context" subtitle={undefined} />
-                    <ContextPercent usage={code.usage} />
-                  </button>
-                )}
-                {code.repos.length > 0 && (
-                  <div data-session-repos className="flex items-start gap-4 bg-card px-5 py-3">
-                    <FolderGit2Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                    <div className="flex min-w-0 flex-col">
-                      <span className="text-sm font-medium">
-                        {code.repos.length === 1 ? "Repository" : "Repositories"}
-                      </span>
-                      <ul className="flex flex-col text-sm text-muted-foreground">
-                        {code.repos.map((name) => (
-                          <li key={name} className="truncate">
-                            {name}
-                          </li>
-                        ))}
-                      </ul>
+            {code && code.repos.length > 0 && (
+              <section data-session-repos className="flex flex-col gap-2">
+                <h3 className="px-1 text-sm font-medium">Context</h3>
+                <Group>
+                  {code.repos.map((name) => (
+                    <div key={name} className="flex min-h-14 items-center gap-4 bg-muted px-5 py-3">
+                      <GitForkIcon className="size-5 shrink-0" />
+                      <span className="min-w-0 flex-1 truncate text-base">{name}</span>
                     </div>
-                  </div>
-                )}
-              </Group>
+                  ))}
+                </Group>
+              </section>
             )}
             <Group>
               {/* A room has no mute: it runs no model call of its own, so nothing pushes for it. */}

@@ -402,10 +402,11 @@ test("a project session's header opens the sheet that held its menu, and has no 
     await click(titlePress())
     await until(async () => Boolean(findText("[role=dialog]", "Edit session")), "the session's settings")
     assert.deepEqual(
-      [...(find("[data-session-repos] ul")?.children ?? [])].map((li) => li.textContent),
-      ["app", "docs", "site"],
+      [...findAll("[data-session-repos] span.truncate")].map((row) => row.textContent),
+      ["gots/app", "gots/docs", "gots/site"],
       "the sheet lists every repository",
     )
+    assert.equal(missing("[data-session-context]"), true, "context stays in the header's ring")
     assert.ok(find("[data-session-resolve]"), "Resolve")
     assert.ok(find("[data-session-discard]"), "Discard")
     assert.ok(find("[data-chat-pin]"), "Pin")

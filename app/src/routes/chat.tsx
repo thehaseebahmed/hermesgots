@@ -31,7 +31,7 @@ import { noteFailure, quietly } from "@/lib/report"
 import { awayLine } from "@/lib/away"
 import { useOnline } from "@/lib/online"
 import { labelOf } from "@/lib/bot-name"
-import { repoNames, sessionSubtitle } from "@/lib/repo-line"
+import { sessionSubtitle } from "@/lib/repo-line"
 import { Refusal } from "@/components/banner"
 import { useBotLabels } from "@/lib/use-bot-labels"
 import { useBreakReminderEligibility } from "@/components/break-reminder-context"
@@ -111,7 +111,6 @@ import { tell } from "@/lib/tell"
 import { useLiveRun, useLiveSubagents } from "@/lib/waiting"
 import { runFinished } from "@/lib/session-work"
 import { usePoll } from "@/lib/poll"
-import { useWide } from "@/lib/media"
 import { useCodePane, useRememberOpened } from "@/lib/pane"
 import { markRead } from "@/lib/read-marks"
 import { useDismissChatPushes } from "@/lib/push"
@@ -373,7 +372,6 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
   const ready = Boolean(chat && bot && chat.id === id)
   const { state: address } = useLocation()
   const { root, up } = useNav()
-  const wide = useWide()
   // A session is a place in a project: it sits under Code, unless it is drawn beside Code's list,
   // and a session nothing was sent in isn't kept.
   const session = chat?.projectId ? chat : undefined
@@ -444,8 +442,7 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
   // A chat is edited from its bar, and so is a session; a chat not yet started is not.
   const editable = Boolean(chat) && !(session && unstarted)
   // Nothing here has a menu: a title opens the sheet. A bot's own chat keeps its context in the bar as
-  // the ring at every width (ADR 0153); a session's sheet carries it, with the ring beside the header
-  // from the wide width. Main is no chat's settings at all: the ring becomes the way to its side
+  // the ring at every width (ADR 0153); a session's bar keeps it as the ring too. Main is no chat's settings at all: the ring becomes the way to its side
   // chats, and no usage sheet is mounted to open.
   const bar = useChatBar({
     main,
@@ -460,7 +457,7 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
   })
   const actions =
     chat && bot && session ? (
-      wide && bot.baseUrl.trim() ? (
+      bot.baseUrl.trim() ? (
         <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
       ) : undefined
     ) : chat && bot && bot.baseUrl.trim() ? (
@@ -516,9 +513,7 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
                 session
                   ? {
                       profile: bot,
-                      repos: repoNames(sessionRepos.map((repo) => repo.name)),
-                      usage,
-                      onOpenUsage: () => setUsageOpen(true),
+                      repos: sessionRepos.map((repo) => repo.name),
                     }
                   : undefined
               }
@@ -1014,7 +1009,6 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
 
   // A session opens beside Code's list where there's room, and is then a top-level screen with
   // nothing to go back to.
-  const wide = useWide()
   const beside = Boolean(useCodePane()) && Boolean(session)
   useRememberOpened("code", session?.id)
   const {
@@ -1091,11 +1085,10 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
     centered: Boolean(session),
   })
   // Every chat opens its sheet from the title. A bot's own chat keeps its context in the bar as the
-  // ring at every width (ADR 0153); a session carries it in the sheet, with the ring from the wide
-  // width.
+  // ring at every width (ADR 0153); a session's bar keeps it as the ring too.
   const actions =
     conversation && session ? (
-      wide && configured ? (
+      configured ? (
         <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
       ) : undefined
     ) : conversation && configured ? (
@@ -1386,9 +1379,7 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
             session && profile
               ? {
                   profile,
-                  repos: repoNames(sessionRepos.map((repo) => repo.name)),
-                  usage,
-                  onOpenUsage: () => setUsageOpen(true),
+                  repos: sessionRepos.map((repo) => repo.name),
                 }
               : undefined
           }
