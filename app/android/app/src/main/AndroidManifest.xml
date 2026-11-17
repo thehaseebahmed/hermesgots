@@ -81,6 +81,25 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/accessibility_service_config" />
         </service>
+
+        <!--
+            The phone's tray, drawn by the app rather than by Android: a push arrives as a data-only
+            message, since a notification payload is drawn by Android itself and can carry no button.
+            The app then draws the notice's words, its bot's badged picture and an approval's two
+            buttons (`GotsMessagingService.kt`).
+        -->
+        <service
+            android:name=".GotsMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- A button's press with the app closed: it posts the one-shot link and clears the row. -->
+        <receiver
+            android:name=".NoticeAnswerReceiver"
+            android:exported="false" />
     </application>
 
     <!-- Permissions -->

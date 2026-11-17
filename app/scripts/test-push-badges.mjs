@@ -13,7 +13,19 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 
-import { ICON, INSET, MARK, SIZE, badgeBytes, badgePath, botIds, checkBadges, photoPath } from "./build-badges.mjs"
+import {
+  ICON,
+  INSET,
+  MARK,
+  SIZE,
+  badgeBytes,
+  badgePath,
+  botIds,
+  checkBadges,
+  drawableName,
+  drawablePath,
+  photoPath,
+} from "./build-badges.mjs"
 import { decode } from "./lib/png.mjs"
 
 /** Where the icon's top-left lands in the badge: its size and its margin taken off the edge. */
@@ -107,6 +119,20 @@ test("the badge is cut once: a second render is byte-identical", () => {
   }
 })
 
+test("the APK ships the same badge under a drawable name", () => {
+  for (const id of botIds()) {
+    // One image, cut once: the copy the app draws when a phone can't fetch the picture at all.
+    assert.deepEqual(
+      readFileSync(drawablePath(id)),
+      readFileSync(badgePath(id)),
+      `${id}'s drawable is the bytes .../notify.png holds`,
+    )
+    // A resource name carries no hyphen, so a bot id's is written with an underscore on both sides
+    // (`GotsMessagingService` looks the same name up).
+    assert.equal(drawableName(id), `bot_${id.replace(/-/g, "_")}.png`)
+  }
+})
+
 test("--check passes on the committed badges and names a stale one", () => {
   assert.deepEqual(checkBadges(), [], "every committed badge is what the generator renders")
 
@@ -118,4 +144,13 @@ test("--check passes on the committed badges and names a stale one", () => {
   assert.equal(stale.length, 1, "one altered badge is one difference")
   assert.equal(stale[0].id, "bubble", "the difference names the bot whose badge is stale")
   assert.match(stale[0].why, /differ/, "the difference says the bytes differ")
+
+  // Both copies are checked: the APK's is the one no browser's request would ever put right.
+  const drawable = checkBadges((path) => {
+    const bytes = Buffer.from(readFileSync(path))
+    if (path === drawablePath("nova")) bytes[100] ^= 0xff
+    return bytes
+  })
+  assert.equal(drawable.length, 1, "one altered drawable is one difference")
+  assert.equal(drawable[0].path, drawablePath("nova"), "and it names the file that is stale")
 })

@@ -309,6 +309,12 @@ def _relay(path: Path, kind: str, category: str, session_id: str, notice: Notice
     state = link.load_state(home)
     if not state.get("token") or state.get("revoked") or not state.get("site"):
         return
+    fields = carried(notice)
+    # The phone draws the notice itself (a notification payload is Android's to draw, and its drawing
+    # can carry no button), so it is told whose picture to wear and where that picture is: the app's
+    # own file, at the origin its subscription named (`build-badges.mjs` cuts it, and the browser's
+    # tray and ntfy read the same bytes), never the host's address, which may be a tunnel.
+    picture = ntfy.icon(web(path), fields.get("bot"))
     answer = None
     for attempt in range(RELAY_TRIES):
         try:
@@ -323,9 +329,8 @@ def _relay(path: Path, kind: str, category: str, session_id: str, notice: Notice
                     "session_id": session_id,
                     # A device that chose ntfy is told there, so a token it left on file stays quiet.
                     "skip": list(dict.fromkeys(_on_screen_devices(path) + ntfy.devices(path)))[:50],
-                    # Android shows no bot picture, so the registry isn't told which bot it is — but
-                    # it is told the buttons, since a phone answers an approval from the tray too.
-                    **{k: v for k, v in carried(notice).items() if k != "bot"},
+                    **fields,
+                    **({"icon": picture} if picture else {}),
                 },
             )
             break

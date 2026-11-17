@@ -71,12 +71,13 @@ test("the app, the registry and the manifest name the same test channel", () => 
   const made = push.match(
     /createChannel\(\{\s*id:\s*"([a-z_]+)",\s*name:\s*"([^"]+)",\s*importance:\s*(\d)/,
   )
-  const sent = registry.match(/channel_id:\s*kind === "test"\s*\?\s*"([a-z_]+)"\s*:\s*category/)
+  const sent = registry.match(/channel:\s*kind === "test"\s*\?\s*"([a-z_]+)"\s*:\s*category/)
   const fallback = manifest.match(
     /default_notification_channel_id"\s*\n\s*android:value="([a-z_]+)"/,
   )
-  // A channel-less push falls back to the manifest's id, so it must be a channel that exists once a
-  // tap has made it, never the deleted legacy one (which would land in Android's "Miscellaneous").
+  // A message names the channel it is drawn in (`GotsMessagingService`), and the manifest's default is
+  // the same id: it must be a channel that exists once a tap has made it, never the deleted legacy one
+  // (which would land in Android's "Miscellaneous").
   assert.deepEqual(
     [made?.[1], sent?.[1], fallback?.[1]],
     ["test_notification", "test_notification", "test_notification"],

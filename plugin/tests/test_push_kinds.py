@@ -698,3 +698,39 @@ class OnScreen(unittest.TestCase):
                 ],
                 "the phone whose app is open is the one the registry leaves out",
             )
+
+    def test_the_relay_tells_the_registry_which_bot_and_picture_it_is(self):
+        # A phone draws the notice now (a notification payload can carry no button), so it is told
+        # the bot whose picture to wear, where that picture is, and the buttons to draw.
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "gots.db"
+            bodies = []
+            state = {"token": "token", "site": "https://app.example"}
+
+            def call(site, method, route, **kwargs):
+                bodies.append(kwargs.get("body"))
+                return {}
+
+            push.set_bot(path, "nova")
+            push.set_web(path, "https://hermesgots.dev")
+            notice = push.Notice(
+                title="Fix the build",
+                body="rm -rf ./build",
+                bot="nova",
+                actions=(push.Action("Allow once", "https://bot.example/once"),),
+            )
+            with mock.patch.object(push.link, "load_state", lambda home: state), mock.patch.object(
+                push.link, "call", call
+            ):
+                push._relay(path, "approval", "chat_input", "gots-1", notice)
+            self.assertEqual(bodies[0]["bot"], "nova", "the phone's entry wears this bot's picture")
+            self.assertEqual(
+                bodies[0]["icon"],
+                "https://hermesgots.dev/bots/nova/notify.png",
+                "the app's own file, the one the browser's tray and ntfy read",
+            )
+            self.assertEqual(
+                bodies[0]["actions"],
+                [{"label": "Allow once", "url": "https://bot.example/once"}],
+                "the button a press posts back",
+            )

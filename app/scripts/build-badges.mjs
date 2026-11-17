@@ -4,14 +4,17 @@
  * image per bot, cut once — the browser's tray, ntfy's `X-Icon` and Android's large icon all read
  * these bytes, so a notification looks the same wherever it is drawn.
  *
- *   node scripts/build-badges.mjs           # write public/bots/<id>/notify.png for every bot
+ *   node scripts/build-badges.mjs           # write both copies of every bot's badge
  *   node scripts/build-badges.mjs --check   # render in memory, compare, exit 1 on a difference
  *
- * Nothing leaves this machine and nothing but `public/bots/<id>/notify.png` is written. The same
- * photo and icon encode to the same bytes every run (`lib/png.mjs`), which is what lets `--check`
- * and `scripts/test-push-badges.mjs` call a committed badge current rather than assume it.
+ * One image, cut once and shipped in two places: `public/bots/<id>/notify.png` is the one the
+ * browser's tray and ntfy's `X-Icon` fetch, and `android/app/src/main/res/drawable-nodpi/bot_<id>.png`
+ * is the copy the APK carries, so a phone that can't reach the picture still draws the same badge.
+ * Nothing leaves this machine and nothing else is written. The same photo and icon encode to the
+ * same bytes every run (`lib/png.mjs`), which is what lets `--check` and `scripts/test-push-badges.mjs`
+ * call a committed badge current rather than assume it.
  */
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { join, relative } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
@@ -36,6 +39,18 @@ const APP = fileURLToPath(new URL("..", import.meta.url))
 /** A bot's own picture, and the badge cut from it. */
 export const photoPath = (id) => join(BOTS, id, "happy.png")
 export const badgePath = (id) => join(BOTS, id, "notify.png")
+
+/** The APK's copy of the same badge: a drawable the service falls back to when it can't fetch one. */
+export const DRAWABLES = fileURLToPath(
+  new URL("../android/app/src/main/res/drawable-nodpi/", import.meta.url),
+)
+
+/**
+ * That copy's file name. A resource name carries no hyphen (`[a-z0-9_]`), so a bot id's is written
+ * with an underscore — `GotsMessagingService` looks the same name up the same way.
+ */
+export const drawableName = (id) => `bot_${id.replace(/-/g, "_")}.png`
+export const drawablePath = (id) => join(DRAWABLES, drawableName(id))
 
 /**
  * The bots a badge is cut for: every directory in `public/bots` that carries a `happy.png`. Read off
@@ -100,26 +115,30 @@ export function badgeBytes(id, read = readFileSync) {
 export function checkBadges(read = readFileSync) {
   const stale = []
   for (const id of botIds()) {
-    const path = badgePath(id)
     const want = badgeBytes(id, read)
-    let have = null
-    try {
-      have = read(path)
-    } catch (error) {
-      if (error.code !== "ENOENT") throw error
+    for (const path of [badgePath(id), drawablePath(id)]) {
+      let have = null
+      try {
+        have = read(path)
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error
+      }
+      if (!have) stale.push({ id, path, why: "is missing" })
+      else if (Buffer.compare(Buffer.from(have), want) !== 0)
+        stale.push({ id, path, why: `differs from the ${want.length} bytes rendered here (${have.length} on disk)` })
     }
-    if (!have) stale.push({ id, path, why: "is missing" })
-    else if (Buffer.compare(Buffer.from(have), want) !== 0)
-      stale.push({ id, path, why: `differs from the ${want.length} bytes rendered here (${have.length} on disk)` })
   }
   return stale
 }
 
-/** Write every badge. Answers the paths written, in bot order. */
+/** Write every badge, both copies. Answers the paths written, in bot order. */
 export function writeBadges() {
-  return botIds().map((id) => {
-    writeFileSync(badgePath(id), badgeBytes(id))
-    return badgePath(id)
+  mkdirSync(DRAWABLES, { recursive: true })
+  return botIds().flatMap((id) => {
+    const bytes = badgeBytes(id)
+    // Rendered once and written twice, so the two copies can never be two different pictures.
+    for (const path of [badgePath(id), drawablePath(id)]) writeFileSync(path, bytes)
+    return [badgePath(id), drawablePath(id)]
   })
 }
 
