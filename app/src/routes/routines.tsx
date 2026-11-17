@@ -9,7 +9,7 @@ import {
   RotateCwIcon,
 } from "lucide-react"
 
-import { botChatsPath, botRoutinesPath } from "@/lib/bot-tabs"
+import { botRoutinesPath } from "@/lib/bot-tabs"
 import { LIST_MS, SAFETY_MS } from "@/lib/freshness"
 import { BackButton } from "@/components/back-button"
 import { ChatHeader } from "@/components/chat/chat-header"
@@ -34,7 +34,8 @@ import {
   type CronState,
 } from "@/lib/cron"
 import { db, conversationsOf, getActiveProfile, type Conversation, type Profile } from "@/lib/db"
-import { UNNAMED, useChatLead } from "@/lib/chat-lead"
+import { listPathOf, UNNAMED, useChatLead } from "@/lib/chat-lead"
+import { useChatLayout } from "@/lib/chat-layout"
 import { useChanges, useLive } from "@/lib/live"
 import { useNav } from "@/lib/nav"
 import { usePoll } from "@/lib/poll"
@@ -61,9 +62,14 @@ export function RoutinesPage() {
   }, [profileId])
   const bot = answered && answered.profileId === profileId ? answered.bot : undefined
   // A bot's screens all wear one way back — the control leading the bar, named for the list it lands on
-  // — with the platform's press registered beside it (ADR 0144). The legacy layout has no bot's list
-  // for the lead to step onto, so the fallback below is what leads there.
+  // — with the platform's press registered beside it (ADR 0144). The routines control stands in the
+  // corner of the list its layout draws, so this page steps back onto that list: the Side Chat
+  // List's, or the flat layout's bot screen. The lead withholds its own control until the device's
+  // settings answer, and the new UX's list is what a device with no settings row draws, which is the
+  // fallback below.
   const lead = useChatLead({ bot: profileId })
+  const layout = useChatLayout()
+  const list = listPathOf(layout ?? "sides", profileId)
   const { up } = useNav()
   const [tick, setTick] = useState(0)
   const [pollTick, setPollTick] = useState(0)
@@ -93,11 +99,7 @@ export function RoutinesPage() {
       <ChatHeader
         pinned
         showBot={false}
-        leading={
-          lead.leading ?? (
-            <BackButton label={UNNAMED} onClick={() => up(botChatsPath(profileId))} floating />
-          )
-        }
+        leading={lead.leading ?? <BackButton label={UNNAMED} onClick={() => up(list)} floating />}
         title="Routines"
         actions={
           <Button

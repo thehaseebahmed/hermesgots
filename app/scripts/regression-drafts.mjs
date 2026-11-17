@@ -54,19 +54,16 @@ try {
     assert.equal(text, value, `the draft under ${key}`)
   }
 
-  // A new chat's text survives leaving for Settings and coming back.
-  await page.goto(app)
-  await composer.fill("half a new chat")
-  await saved("new", "half a new chat")
-  await page.goto(`${app}/settings`)
-  await page.goto(app)
-  await shows("half a new chat")
+  // A new chat's own draft is the blank surface's, which `scripts/test-chat-next-new-chat.tsx` holds:
+  // a new chat is only reachable from a list's New chat now, not from the app's address (ADR 0161).
 
   // Each chat keeps its own text, across switching and a reload.
   await page.goto(`${app}/c/one`)
   await composer.fill("draft for one")
-  await page.getByRole("navigation", { name: "Recents" }).getByText("Chat two").click()
-  await page.waitForURL("**/c/two")
+  // The words reach the device a moment after the typing stops, and an address change is a full load:
+  // the draft is waited for before the page moves (ADR 0161 makes every chat switch an address).
+  await saved("c:one", "draft for one")
+  await page.goto(`${app}/c/two`)
   await page.waitForTimeout(500)
   assert.equal(await text(), "", "another chat starts from its own text")
   await composer.fill("draft for two")

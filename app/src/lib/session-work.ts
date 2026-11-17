@@ -114,8 +114,9 @@ export function closedSession(facts: Pick<SessionFacts, "resolvedAt" | "discarde
  * user rather than running. With no answer from the host, this device's own newest reply decides:
  * still streaming is the run running, unless an approval or a question in it waits.
  *
- * Exported because a bot's chat list asks the same question of a chat (`routes/bot-chats.tsx`), and
- * one rule for both lists is what keeps a chat and its Code row reading alike.
+ * Exported because a bot's chat list asks the same question of a chat
+ * (`components/chat/bot-chat-row.tsx`), and one rule for both lists is what keeps a chat and its Code
+ * row reading alike.
  */
 export function runInFlight(live?: LiveTurn, local?: LocalTurn): boolean {
   if (live) return live === "running"

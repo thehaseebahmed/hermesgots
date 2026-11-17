@@ -93,6 +93,26 @@ PREFIX = "/api/plugins/gots"
 PRS_BATCH_DEADLINE_S = 8.0
 # The resolve passes a batch starts, held here so nothing collects a future still running.
 _resolving: Set[Any] = set()
+# How long "this profile names no Bot Chat" is trusted before the gateway is asked again. Seconds and
+# not minutes: the answer costs a list read nothing, but the mint that follows it runs on this loop
+# and takes the gateway's titled-create lock, so a profile whose store holds no record — and every
+# archived Bot Chat, or one whose title an unownable row holds — must not re-ask on every request. A
+# host that gains Bot Mode writes its own Bot Chat, which the read sees at once; this is only the
+# window a mint is retried in.
+MAIN_ABSENT_TTL_S = 30.0
+_main_absent: Dict[Path, float] = {}
+
+
+def _may_mint(home: Path) -> bool:
+    """Whether the gateway may be asked again for this profile's Main: the last "none" has aged out.
+
+    The mint runs on the API server's loop and takes the gateway's titled-create lock, so a list read
+    asks once and remembers the answer for ``MAIN_ABSENT_TTL_S`` rather than on every request.
+    """
+    asked = _main_absent.get(home)
+    return asked is None or time.monotonic() - asked >= MAIN_ABSENT_TTL_S
+
+
 # The workers a batch's pull-request chains run on: a slot here is a thread, and a read still queued
 # when the batch answers is a future that never starts, where `to_thread` could only be abandoned
 # running. Sized from `github.MAX_OUTBOUND`, made on first use so a test can patch the limit.
@@ -1182,6 +1202,51 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         """
         return await asyncio.to_thread(rooms.chat_records, home=rooms_home())
 
+    def bot_name() -> str:
+        """The bot this answer is for, as a chat id may carry it: its Hermes profile's own name.
+
+        A single-profile gateway resolves no prefix, so the request's profile is None there and the
+        home's own name answers instead. Two bots reaching this host by different profiles key their
+        Mains apart (`chats.main_id`), and neither takes the other's record.
+        """
+        return _request_profile() or link.profile_name(profile_home())
+
+    async def main_session(
+        records: Dict[str, Dict[str, Any]], found: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        """Which session this bot's Main is, from the store's own answer and, failing that, a mint.
+
+        ``found`` is the profile's canonical Bot Chat as one pass over the store answered it
+        (``sessions.list_state``). Where this host names none — no Bot Mode, nothing minted yet — the
+        gateway is asked to mint one, through its own creation and never a row of this plugin's
+        making; a mint that named a chat is read back, since a "Bot Chat" another surface already
+        holds is deferred to rather than fought over the title. Where the host cannot answer at all,
+        Main is a Gots chat of the bot's own (``chats.own_main``), which is the one this plugin may
+        make.
+
+        A read never retries the mint on every request, which is what it did while this was asked on
+        the loop: the answer that named nothing is remembered per profile for ``MAIN_ABSENT_TTL_S``.
+        The window alone paces it — a bot holding a Main of its own is asked again when the window
+        opens, because a refusal is a moment's (an owner draining, a writer holding the title) and not
+        a state: skipped for holding one, a single refusal left the bot on a Gots Main for ever, and
+        a host that answered on the next window was never adopted. The one write the fallback makes
+        stays one (``chats.own_main``).
+        """
+        if found is not None:
+            _main_absent.pop(profile_home(), None)
+            return found
+        home = profile_home()
+        if _may_mint(home):
+            if await sessions.mint_bot_chat(home) is not None:
+                found = (await asyncio.to_thread(sessions.list_state, home)).bot_chat
+            if found is not None:
+                _main_absent.pop(home, None)
+                return found
+            _main_absent[home] = time.monotonic()
+        return await asyncio.to_thread(
+            chats.own_main, records, store_path(), int(time.time() * 1000), bot_name()
+        )
+
     async def merged_chats(records: Dict[str, Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
         """The list a device is answered with: this bot's chats, and its rooms under their marks.
 
@@ -1194,16 +1259,29 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         the Dashboard leaves this list and an unarchive there brings it back, since a chat's archive
         is Hermes's and not this store's (chats.carrying_archive, ADR 0159). A store that can't say —
         no ``state.db``, no ``archived`` column — answers no flags, and every row stands as it was.
+
+        Main is laid over that, last and on top: exactly one record flagged ``main``, the profile's
+        canonical Bot Chat (chats.carrying_main, G9), keyed by the bot and the session. It runs after
+        the archive, since a Bot Chat archived on the Dashboard is a retired Main rather than an
+        archived one.
+
+        The store is read in one pass (a session's flag and its title together, ``sessions.
+        list_state``) beside the Host's rooms, which are a projection and not a read of this store:
+        neither waits on the other, and neither waits on the answer.
         """
         kept = {
             chat_id: record
             for chat_id, record in records.items()
             if not chats.carries_room_marks((record or {}).get("value"))
         }
-        flags = await asyncio.to_thread(sessions.archived_flags, profile_home())
-        return chats.carrying_archive(
-            {**kept, **rooms.carrying_marks(await projected_rooms(), records)}, flags
+        home = profile_home()
+        state, rooms_projected = await asyncio.gather(
+            asyncio.to_thread(sessions.list_state, home), projected_rooms()
         )
+        carried = chats.carrying_archive(
+            {**kept, **rooms.carrying_marks(rooms_projected, records)}, state.archived
+        )
+        return chats.carrying_main(carried, await main_session(records, state.bot_chat), bot_name())
 
     async def list_chats(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -1239,6 +1317,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         ``host`` says whether Hermes's own session took the flag. A store with no ``archived`` column,
         or no store at all, answers ``false`` and the app keeps its own mark, which is the behaviour
         every device had before this route existed.
+
+        Main is refused (409) rather than archived: it is the bot's one permanent conversation, and a
+        retired Main is not one the app can put away (G2). An **unarchive** is always allowed, though
+        — a device that put a Main away before the projection's flag reached it has to be able to
+        bring the row back, and a refusal there would strand it under the Archived pill.
         """
         denied = unauthorized(request)
         if denied is not None:
@@ -1253,6 +1336,22 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         record = await asyncio.to_thread(chats.one, store_path(), chat_id)
         value = (record or {}).get("value")
         session_id = value.get("hermesSessionId") if isinstance(value, dict) else None
+        home = profile_home()
+        # Main is the bot's permanent conversation: not archivable, not deletable, and offered no mark
+        # by any surface (G2). The record's own copy of the flag is projection-only until a device
+        # merges it back, so it is no answer here: the route asks the resolvers the projection asks —
+        # the host's Bot Chat, through the chat's lineage so a compaction of Main is Main, else the
+        # Gots chat this bot's Main of its own is. Read off the record, the flag's absence archived the
+        # bot's canonical chat with a 200 and retired Main.
+        if isinstance(session_id, str) and session_id:
+            main = await asyncio.to_thread(sessions.bot_chat, home)
+            if isinstance(main, dict) and main.get("id"):
+                resolved = await asyncio.to_thread(sessions.chat_session, home, session_id)
+                is_main = resolved == main["id"]
+            else:
+                is_main = session_id == chats.own_main_id(store_path())
+            if is_main and archived:
+                return _error(web, "Main can't be archived.", 409)
         if not isinstance(session_id, str) or not session_id:
             # A room and a chat nothing has been said in have no session of their own: a room keeps
             # its own mark (ADR 0157), and there is nothing here for Hermes to archive.

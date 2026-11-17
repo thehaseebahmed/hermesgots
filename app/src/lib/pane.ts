@@ -2,6 +2,9 @@ import { useEffect } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { matchPath, useLocation } from "react-router"
 
+import { botChatsPath, botMainPath } from "@/lib/bot-tabs"
+import { useBotMain } from "@/lib/chat-rows"
+import { useChatLayout } from "@/lib/chat-layout"
 import { db } from "@/lib/db"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { useLarge, useXLarge } from "@/lib/media"
@@ -85,10 +88,17 @@ export interface BotPane extends FeaturePane {
 
 /**
  * A bot's own chats stay beside the chat they opened, the way Code's sessions stay beside theirs:
- * its screen (`/b/<bot>`, and the routines under it) keeps the list's lane with nothing selected,
- * and a chat of that bot's (`/c/<id>`) opens it with the chat's row selected. A chat is read from
- * its address's row, and the list's own links say which bot they are for in `state.bot`, so the
- * lane holds while the row loads.
+ * its own addresses (`/b/<bot>`, its list and the routines under it) keep the list's lane, and a chat
+ * of that bot's (`/c/<id>`) opens it with the chat's row selected. A chat is read from its address's
+ * row, and the list's own links say which bot they are for in `state.bot`, so the lane holds while
+ * the row loads.
+ *
+ * Which list the lane holds is the layout's (ADR 0161): the new UX draws its **Side Chat List** at
+ * both of the bot's list addresses, with the bot's **Main** selected beside it — open only where this
+ * device holds one, so a bot whose Main is not known yet keeps its list standing whole rather than
+ * beside a blank — and the flat layout draws its one list at the bot's address with no chat selected,
+ * since nothing stands beside it. Its routines are a page of the bot's rather than a chat, so either
+ * list stands beside them without a selected row.
  *
  * Everything the list draws is a row of it — the bot's chats, the rooms its roster seats and its
  * routines' runs — so each opens beside it; a project session is Code's and a canvas is its own
@@ -96,10 +106,21 @@ export interface BotPane extends FeaturePane {
  * bot whose list it was picked from, so a room reads the state its row carries instead of its
  * record's owner: the list the reader was looking at is the one that stays.
  */
-export function useBotChatsPane(enabled: boolean | undefined): BotPane | undefined {
+export function useBotChatsPane(): BotPane | undefined {
   const split = useSplit()
+  const layout = useChatLayout()
   const { pathname, state } = useLocation()
   const id = matchPath("/c/:id", pathname)?.params.id
+  // A bot's own screen, and everything the list opens over it: the splat matches the bare address
+  // too, so one pattern answers every address under a bot.
+  const own = matchPath("/b/:profileId/*", pathname)
+  const profileId = own?.params.profileId ?? ""
+  // The two addresses that draw the list itself, which is where Main is the item beside it. They are
+  // read off the one place each is built, so a renamed address cannot leave Main unselected.
+  const atList = Boolean(
+    matchPath(botMainPath(":profileId"), pathname) ||
+      matchPath(botChatsPath(":profileId"), pathname),
+  )
   // Tagged with the id it ran for, since a new id still sees the last answer for a moment.
   const read = useLiveQuery(async () => {
     const found = id ? await db.conversations.get(id) : undefined
@@ -110,24 +131,30 @@ export function useBotChatsPane(enabled: boolean | undefined): BotPane | undefin
       profileId: found?.profileId,
     }
   }, [id])
-  if (!split || !enabled) return undefined
-  // A bot's own screen, and everything the list opens over it: the splat matches the bare address
-  // too, so one pattern answers every address under a bot.
-  const own = matchPath("/b/:profileId/*", pathname)
-  if (own) return { open: true, profileId: own.params.profileId ?? "" }
+  // Main, read only for the address whose item it is, and only where that address has an item lane:
+  // the one read of it (`useBotMain`), which answers null for the empty id every other case passes.
+  const main = useBotMain(own && atList && layout === "sides" ? profileId : "")
+  if (!split || !layout) return undefined
+  if (own) {
+    // The flat layout's bot address is its one list's screen: the lane holds the list and the item
+    // lane says nothing is selected. The new UX draws the pair — the list in the lane and Main beside
+    // it — and nothing stands there until Main is known, so the list is the screen, not half of one.
+    if (layout === "flat" || !atList) return { open: true, profileId }
+    return main ? { open: true, profileId, selected: main } : { open: false, profileId }
+  }
   if (!id) return undefined
   const from = (state as { bot?: string } | null)?.bot
   const answered = read?.id === id ? read : undefined
   // The record is the authority for a chat; a room's record names its Host, so only a room takes
   // the bot it was picked from. A session or a canvas answers nothing, whatever the link claims.
-  const profileId = answered
+  const profileIdOf = answered
     ? answered.listed
       ? answered.profileId
       : answered.room
         ? (from ?? answered.profileId)
         : undefined
     : from
-  return profileId ? { open: true, selected: id, profileId } : undefined
+  return profileIdOf ? { open: true, selected: id, profileId: profileIdOf } : undefined
 }
 
 /** The features whose item pane opens on the one opened last, per device. */

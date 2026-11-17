@@ -3,8 +3,8 @@
  * the switch off lands back on the menu rather than drawing a screen the device cannot use. The menu
  * row is gated separately, which is why this reads the address rather than the list.
  *
- * The page's own switches are read here too: **Enable legacy chat UX** is the layout's one switch,
- * and hiding Developer must not flip the layout back under the user.
+ * The page's own switches are read here too: **Flat chat list** is the layout's one switch, and hiding
+ * Developer must not flip the layout back under the user.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -39,7 +39,7 @@ const at = (entry: string) => (
   </MemoryRouter>
 )
 
-const LEGACY = "Enable legacy chat UX"
+const LEGACY = "Flat chat list"
 
 /** The row a title names, as the label Base UI wraps its switch in. */
 const rowOf = (title: string) =>
@@ -67,7 +67,11 @@ test("the Developer screen offers no AFK Workflows row", async () => {
   await mount(at("/settings/developer"), async () => {
     await settle()
     // A boolean, not a node: a failing assertion must not print a whole DOM tree.
-    assert.equal(Boolean(find("#afk-workflows-label")), false, "the switch is gone with the library")
+    assert.equal(
+      Boolean(find("#afk-workflows-label")),
+      false,
+      "the switch is gone with the library",
+    )
   })
 })
 
@@ -77,7 +81,12 @@ test("/settings/developer with the switch on draws it", async () => {
     await settle()
     assert.equal(path(), "/settings/developer", "the address is kept")
     assert.ok(switchOf(LEGACY), "the layout switch is drawn")
-    assert.match(text(), /Enable legacy chat UX/, "under its own name")
+    assert.match(text(), /Flat chat list/, "under its own name")
+    assert.match(
+      text(),
+      /Every chat of a bot in one list/,
+      "saying what it draws, now that it turns the flat list on rather than the old chat UX",
+    )
     assert.equal(
       rowOf(LEGACY)?.querySelector('[data-slot="badge"]'),
       null,
@@ -91,7 +100,7 @@ test("/settings/developer with the switch on draws it", async () => {
   })
 })
 
-test("the legacy switch writes legacyChat and nothing else", async () => {
+test("the flat-list switch writes legacyChat and nothing else", async () => {
   await seedSettings({ developer: true })
   await mount(developerPage, async () => {
     assert.equal(checkedOf(LEGACY), "false", "off until it is turned on")
@@ -99,7 +108,7 @@ test("the legacy switch writes legacyChat and nothing else", async () => {
     assert.equal(checkedOf(LEGACY), "true", "and on once it is")
   })
   const stored = await db.settings.get("settings")
-  assert.equal(stored?.legacyChat, true, "the device kept the legacy layout")
+  assert.equal(stored?.legacyChat, true, "the device kept the flat list")
   assert.equal("botThreads" in (stored ?? {}), false, "the retired key is never written")
   await mount(developerPage, async () => {
     assert.equal(checkedOf(LEGACY), "true", "a fresh read of the device finds it on")

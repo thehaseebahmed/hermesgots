@@ -1,56 +1,35 @@
-import { useEffect, useMemo, useState } from "react"
-import { useLiveQuery } from "dexie-react-hooks"
-import { CircleAlertIcon, MessageCircleIcon, RotateCcwClockIcon } from "lucide-react"
-import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router"
+import { MessageCircleIcon } from "lucide-react"
+import { Link, Navigate, useParams } from "react-router"
 
 import { Bot } from "@/components/bot"
-import { ChatHeader } from "@/components/chat/chat-header"
-import { Chip, ChipRow } from "@/components/chip"
+import { ChatList } from "@/components/chat/chat-list"
+import { RoutinesButton } from "@/components/chat/routines-button"
 import { EmptyPane } from "@/components/empty-pane"
-import { ItemRow, pinnedLine } from "@/components/item-list"
-import { SearchField } from "@/components/search-field"
-import { CHATS_SEARCH_FIELD_ID, ListFoot } from "@/components/list-foot"
-import { RoomFaces } from "@/components/room/room-faces"
-import { Spinner } from "@/components/ui/spinner"
-import { buttonVariants } from "@/components/ui/button"
-import { botChatsPath, botPath, botRoutinesPath } from "@/lib/bot-tabs"
-import {
-  CHAT_FILTERS,
-  chatAge,
-  chatList,
-  emptyOf,
-  filterChatRows,
-  isChatFilter,
-  type ChatFilter,
-  type ChatListRow,
-} from "@/lib/chat-list"
+import { botMainPath, botPath } from "@/lib/bot-tabs"
 import { labelOf } from "@/lib/bot-name"
-import { seatedRoomRows, useBotChats } from "@/lib/chat-rows"
-import { chatFilterOf, saveChatFilter, type Profile } from "@/lib/db"
-import type { LiveRunStatus } from "@/lib/hermes"
-import { HEADER_BUTTON } from "@/lib/layout"
-import { useBotLabels } from "@/lib/use-bot-labels"
-import { useXLarge } from "@/lib/media"
-import { setBackGuard } from "@/lib/native"
-import { useNav } from "@/lib/nav"
+import { CHAT_FILTERS } from "@/lib/chat-list"
+import { useChatLayout } from "@/lib/chat-layout"
+import { useBotRows } from "@/lib/chat-rows"
+import { saveChatFilter } from "@/lib/db"
 import { useBotChatsPane, type BotPane } from "@/lib/pane"
-import { useReadMarks } from "@/lib/read-marks"
 import { quietly } from "@/lib/report"
-import { useCanMakeRoom, useRoomNeeds } from "@/lib/room"
-import { useAllLiveRuns } from "@/lib/waiting"
-import { isUnread, runInFlight } from "@/lib/session-work"
-import { useLegacyChat } from "@/lib/legacy-chat"
-import { beginChat, useNow } from "@/lib/threads"
-import { cn } from "@/lib/utils"
+import { useChatFilter } from "@/lib/use-chat-filter"
+import { useBotLabels } from "@/lib/use-bot-labels"
 
+/**
+ * A bot's chats as the flat layout's one screen: every chat of the bot's, drawn flat, with its
+ * routines' deliveries among the rows — the list the developer switch turns back on (ADR 0162). The
+ * bot's own address is where this list stands, as it was before a bot opened on a Main of its own, so
+ * the switch's reader lands exactly where the old layout left them.
+ */
 export function BotChatsPage() {
   const { profileId } = useParams()
-  const legacy = useLegacyChat()
-  const enabled = legacy === false
-  const pane = useBotChatsPane(enabled)
-  // Nothing is drawn before the layout answers, and a device on the legacy layout — where a bot has
-  // no screen — lands home rather than on a list it cannot fill.
-  if (legacy === undefined) return null
+  const layout = useChatLayout()
+  const enabled = layout === "flat"
+  const pane = useBotChatsPane()
+  // Nothing is drawn before the layout answers, and a device drawing the new UX — where this list has
+  // no address — lands home rather than on a list it cannot fill.
+  if (layout === undefined) return null
   if (!enabled || !profileId) return <Navigate to="/" replace />
   if (pane) return <NoChatOpen />
   return <BotChatsList profileId={profileId} />
@@ -74,8 +53,9 @@ function NoChatOpen() {
 }
 
 /**
- * A bot's chats, each row dated by the newest reply the bot sent, and the rooms it is a participant
- * of: one list, one order.
+ * A bot's chats, drawn by the shared list screen with this layout's own bar: the bot's face and its
+ * name are the way to its settings, the routines control trails them, and the list holds every pill.
+ * The rows — the bot's chats and the rooms its roster seats — are `useBotRows`'s one list.
  */
 function BotChatsList({
   profileId,
@@ -87,249 +67,37 @@ function BotChatsList({
   selected?: string
   beside?: boolean
 }) {
-  // The rooms this device lists, read by their membership: a room belongs to its Host and lists in
-  // every bot its roster seats, whatever bot carried the record here (ADR 0115).
-  const rooms = useRoomNeeds()
-  // The pill this bot's list keeps on this device, read as the key itself rather than the settings
-  // row: a live query that answered a fresh object would re-render the list on every sync write (the
-  // reason `useStoredSort` records), and anything that is not one of the pills reads as All. It is
-  // read here rather than in the list because the tail read is what the pill widens.
-  const keptKey = useLiveQuery(async () => (await chatFilterOf(profileId)) ?? null, [profileId])
-  const filter: ChatFilter = isChatFilter(keptKey) ? keptKey : "all"
-  const answer = useBotChats(profileId, filter)
-  // The answer names the address it ran for, so one bot's answer can never pass for another's.
-  const fresh = answer && answer.profileId === profileId ? answer : undefined
-  if (!fresh) return null
+  const filter = useChatFilter(profileId, CHAT_FILTERS)
+  // The bar names the bot as the sidebar's row does (ADR 0149).
+  const labels = useBotLabels()
+  const answer = useBotRows(profileId, filter)
+  if (!answer) return null
   // A bot that is gone — deleted here or on another device — lands home rather than on a list it
   // cannot fill.
-  if (!fresh.bot) return <Navigate to="/" replace />
+  if (!answer.bot) return <Navigate to="/" replace />
+  const bot = answer.bot
   return (
     <ChatList
-      bot={fresh.bot}
+      bot={bot}
+      title={
+        <Link
+          to={botPath(bot.id)}
+          className="-ml-2 flex min-h-11 min-w-0 items-center gap-2 rounded-full px-2 outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <span aria-hidden className="shrink-0">
+            <Bot id={bot.botId} className="size-9" />
+          </span>
+          <span className="truncate">{labelOf(labels, bot)}</span>
+        </Link>
+      }
+      actions={<RoutinesButton profileId={bot.id} />}
+      pills={CHAT_FILTERS}
       filter={filter}
       onFilter={(next) => void saveChatFilter(profileId, next).catch(quietly("Saving the filter"))}
-      rows={[...fresh.rows, ...seatedRoomRows(rooms ?? [], profileId)]}
+      listPath={botMainPath(bot.id)}
+      rows={answer.rows}
       selected={selected}
       beside={beside}
-    />
-  )
-}
-
-function ChatList({
-  bot,
-  filter,
-  onFilter,
-  rows,
-  selected,
-  beside,
-}: {
-  bot: Profile
-  /** The pill this list is drawn under, and the way the reader presses another. */
-  filter: ChatFilter
-  onFilter: (filter: ChatFilter) => void
-  rows: ChatListRow[]
-  selected?: string
-  /** Whether the list stands beside a chat, which is what its rows' presses turn on. */
-  beside?: boolean
-}) {
-  const navigate = useNavigate()
-  const { back } = useNav()
-  const { pathname } = useLocation()
-  // The bar names the bot as the sidebar's row does (ADR 0149).
-  const label = labelOf(useBotLabels(), bot)
-  const marks = useReadMarks()
-  // The press is the app's at its first entry — where this list stands when nothing opened it — and a
-  // step back wherever something did, which `back()` answers itself.
-  useEffect(() => setBackGuard(back()), [back])
-  // The host's answer for each session, read once for the whole list: a run started on another device
-  // is in flight here too, and only the poll can say so.
-  const runs = useAllLiveRuns()
-  // A room is made on a Host that advertises it, so the control is offered only where it can be used
-  // — the same rule the legacy layout's Rooms section keeps (ADR 0129).
-  const canMakeRoom = useCanMakeRoom()
-  const now = useNow()
-  // From the laptop width up the list has room for the field to stand in the bar, and the foot draws no
-  // search at all there: one field, in the one place this width puts it (ADR 0145).
-  const wide = useXLarge()
-  const [query, setQuery] = useState("")
-  // The pill narrows first and the search narrows what it kept, so the two emptinesses stay apart: a pill
-  // that holds nothing says its own sentence, and a pill whose rows the words miss says the search's.
-  const kept = useMemo(() => filterChatRows(rows, filter, marks), [rows, filter, marks])
-  const shown = useMemo(() => chatList(kept, query), [kept, query])
-  const empty = kept.length === 0 ? emptyOf(filter) : shown.length === 0 ? "No chats match." : null
-
-  // A row opens its conversation over this list: a push from the list's own screen, so the list stays
-  // the rung behind it. Where an item already stands beside the list the press replaces it instead —
-  // two rows of one list are siblings, not steps, so back from the second is still the list.
-  const replace = Boolean(beside) && pathname !== botChatsPath(bot.id)
-
-  // A chat is made first and the address moved after it, so the screen that draws it is the one this
-  // list opens. The entry says which bot it is for, so the shell keeps the list's lane while the new
-  // row loads.
-  const openChat = (to: string) => navigate(to, { replace, state: { bot: bot.id } })
-  const start = async () => {
-    const chat = await beginChat(bot.id)
-    openChat(`/c/${chat.id}`)
-  }
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
-      <ChatHeader
-        pinned
-        showBot={false}
-        title={
-          <Link
-            to={botPath(bot.id)}
-            className="-ml-2 flex min-h-11 min-w-0 items-center gap-2 rounded-full px-2 outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <span aria-hidden className="shrink-0">
-              <Bot id={bot.botId} className="size-9" />
-            </span>
-            <span className="truncate">{label}</span>
-          </Link>
-        }
-        actions={
-          <Link
-            to={botRoutinesPath(bot.id)}
-            aria-label="Routines"
-            className={cn(
-              buttonVariants({ variant: "outline", size: "icon-lg" }),
-              HEADER_BUTTON,
-              "shrink-0 text-muted-foreground",
-            )}
-          >
-            <RotateCcwClockIcon />
-          </Link>
-        }
-        // The pills are pinned with the bar, in the slot the routines page fills with its state chips, so
-        // a long list is filtered without scrolling back up to reach them (ADR 0145).
-        below={
-          <div className="flex flex-col gap-2">
-            {wide && (
-              <SearchField
-                id={CHATS_SEARCH_FIELD_ID}
-                value={query}
-                onChange={setQuery}
-                label="Search chats"
-              />
-            )}
-            <ChipRow label="Filter chats">
-              {CHAT_FILTERS.map(({ key, label }) => (
-                <Chip key={key} active={filter === key} onClick={() => onFilter(key)}>
-                  {label}
-                </Chip>
-              ))}
-            </ChipRow>
-          </div>
-        }
-      />
-
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
-        {empty && <p className="py-8 text-center text-sm text-muted-foreground">{empty}</p>}
-
-        <ul className="flex flex-col">
-          {shown.map((row) => (
-            <li key={row.id}>
-              <BotChatItem
-                row={row}
-                now={now}
-                mark={marks[row.id]}
-                selected={row.id === selected}
-                profileId={bot.id}
-                // Every row here is a sibling of the list's: a chat, a room and a routine's run alike
-                // open above it, and take the place of one already open beside it.
-                replace={replace}
-                live={row.session ? runs[row.session] : undefined}
-              />
-            </li>
-          ))}
-        </ul>
-      </div>
-
-      <ListFoot
-        canMakeRoom={canMakeRoom}
-        searchable={!wide}
-        query={query}
-        onQueryChange={setQuery}
-        onNewChat={() => void start()}
-        onNewRoom={() => navigate("/new-room", { state: { bot: bot.id } })}
-      />
-    </div>
-  )
-}
-
-/**
- * One row of the list: a chat's icon — every row here is the same bot's, so the bot's face would say
- * nothing — its title, the bot's last word, its age, and the dot this device's read mark decides. The
- * row of the chat drawn beside the list is marked as the one open, as Code's list marks its own.
- *
- * The icon says what is happening, in the three states Code's rows use: a chat at rest is grey, the
- * app's own colour for nothing to say; a run in flight — the host's answer, else a reply this device
- * still watches arrive — is a spinner, so a list of quiet rows shows the one that is working; and a
- * row that waits on the reader takes the alert icon in the warning tone, with the reason in place of
- * the line. Yellow is spent on the one thing that wants the reader, never on nothing happening.
- *
- * A routine's delivery is a row of this list too, and wears the routine's icon rather than a chat's,
- * because it is a run rather than a chat with the bot: its line and time are the record's, since
- * the run's words are in the run's own session.
- *
- * A room is one of these rows, drawn by the same rule: it wears its members' pictures where a chat
- * wears its icon and says the last message received in it, and while its own log ends asking the
- * reader for something its line is that sentence, in the warning tone, because the line is where the
- * room's own screen says it too (ADR 0115, ADR 0126).
- *
- * The link names the bot it is a chat of, so the shell keeps the list's lane while the row loads.
- */
-export function BotChatItem({
-  row,
-  now,
-  mark,
-  selected,
-  profileId,
-  replace,
-  live,
-}: {
-  row: ChatListRow
-  now: number
-  mark?: number
-  selected?: boolean
-  profileId: string
-  /** Whether the press takes the place of an item already beside the list, rather than stepping onto it. */
-  replace?: boolean
-  /** What the host says of this chat's run: `running` beats a reply still streaming here. */
-  live?: LiveRunStatus
-}) {
-  const working = runInFlight(live, { streaming: row.streaming, waiting: Boolean(row.needs) })
-  return (
-    <ItemRow
-      icon={
-        row.routine ? (
-          <RotateCcwClockIcon />
-        ) : row.needs ? (
-          <CircleAlertIcon />
-        ) : working ? (
-          <Spinner />
-        ) : (
-          <MessageCircleIcon />
-        )
-      }
-      avatar={
-        row.room ? (
-          <RoomFaces shown={row.room.shown} more={row.room.more} label={row.room.names} />
-        ) : undefined
-      }
-      tone={row.room ? undefined : row.needs ? "warning" : "muted"}
-      unread={isUnread(row.at, mark)}
-      selected={selected}
-      title={row.title}
-      when={chatAge(row.at, now)}
-      line={pinnedLine(row.pinned, row.needs ?? row.line)}
-      warn={Boolean(row.needs)}
-      link={{
-        to: `/c/${row.id}`,
-        state: { bot: profileId },
-        replace,
-      }}
     />
   )
 }

@@ -220,6 +220,14 @@ class Scope(unittest.TestCase):
             self.arrived.wait(self.WAIT_S)
         return answer, self.sent
 
+    # Hermes's own store: the columns the ancestry walk reads, and the title that makes a row the
+    # profile's Bot Chat.
+    SCHEMA = (
+        "CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, parent_session_id TEXT,"
+        " end_reason TEXT, model_config TEXT, source TEXT, title TEXT, archived INTEGER,"
+        " hidden INTEGER, started_at REAL)"
+    )
+
     def lineage(self, rows):
         """Hermes's own store, with the parent links compression leaves behind.
 
@@ -227,14 +235,23 @@ class Scope(unittest.TestCase):
         make a session a fork of its parent rather than the chat's continuation.
         """
         conn = sqlite3.connect(self.home / "state.db")
-        conn.execute(
-            "CREATE TABLE sessions (id TEXT PRIMARY KEY, parent_session_id TEXT, end_reason TEXT,"
-            " model_config TEXT, source TEXT)"
-        )
+        conn.execute(self.SCHEMA)
         conn.executemany(
             "INSERT INTO sessions (id, parent_session_id, end_reason, model_config, source)"
             " VALUES (?, ?, ?, ?, ?)",
             rows,
+        )
+        conn.commit()
+        conn.close()
+
+    def bot_chat(self, session_id="sess_main", archived=0):
+        """The row Hermes keeps titled ``"Bot Chat"``: the profile's canonical chat, and Main."""
+        conn = sqlite3.connect(self.home / "state.db")
+        conn.execute(self.SCHEMA)
+        conn.execute(
+            "INSERT INTO sessions (id, title, archived) VALUES (?, ?, ?)"
+            " ON CONFLICT(id) DO UPDATE SET title = excluded.title, archived = excluded.archived",
+            (session_id, chats.BOT_CHAT_TITLE, archived),
         )
         conn.commit()
         conn.close()
@@ -299,6 +316,44 @@ class Scope(unittest.TestCase):
         ])
         answer, sent = self.tell("question", "sess_de1e")
         self.assertFalse(answer, "no ancestor is the app's, so it is no device's news")
+        self.assertEqual(sent, [])
+
+    def test_a_turn_in_the_profiles_bot_chat_is_pushed(self):
+        # Main is Hermes's own conversation, so its id carries no prefix of the app's: the
+        # profile's canonical Bot Chat is the other answer a chat's session is found by (G2).
+        self.bot_chat()
+        answer, sent = self.tell("question", "sess_main")
+        self.assertTrue(answer, "a turn in Main is the bot's own news")
+        self.assertEqual(
+            sent,
+            [{"kind": "question", "session_id": "sess_main", "title": chats.BOT_CHAT_TITLE}],
+            "the session, and the host's own word for the chat it is",
+        )
+
+    def test_a_compaction_or_a_fork_of_main_is_still_mains(self):
+        # The two shapes the walk already follows: a chat a compaction moved onto a child
+        # session, and a session a subagent forked off it.
+        self.lineage([
+            ("sess_main", None, "compression", None, None),
+            ("sess_c0ffee", "sess_main", None, None, None),
+            ("sess_de1e", "sess_main", None, '{"_delegate_from": "sess_main"}', "subagent"),
+        ])
+        self.bot_chat()
+        for child in ("sess_c0ffee", "sess_de1e"):
+            answer, sent = self.tell("question", child)
+            self.assertTrue(answer, "%s's ancestry reaches Main, so its turn is Main's" % child)
+            self.assertEqual(
+                sent,
+                [{"kind": "question", "session_id": child, "title": chats.BOT_CHAT_TITLE}],
+                "the child's id, under the chat Main's ancestry names",
+            )
+
+    def test_a_bot_chat_archived_on_the_dashboard_is_not_main(self):
+        # An archived Bot Chat is a retired Main — ``sessions.bot_chat`` answers nothing for it —
+        # so its turns are another conversation's news until the host names a replacement.
+        self.bot_chat(archived=1)
+        answer, sent = self.tell("question", "sess_main")
+        self.assertFalse(answer)
         self.assertEqual(sent, [])
 
     def test_a_store_that_cannot_be_read_drops_the_push(self):

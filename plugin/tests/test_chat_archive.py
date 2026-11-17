@@ -141,8 +141,10 @@ class SetArchived(TempHome):
 
     def test_the_flags_are_read_in_one_pass_over_the_store(self) -> None:
         store(self.home, [{"id": "a", "archived": 1}, {"id": "b", "archived": 0}])
-        self.assertEqual(sessions.archived_flags(self.home), {"a": True, "b": False})
-        self.assertEqual(sessions.archived_flags(self.home / "elsewhere"), {}, "no store, no flags")
+        self.assertEqual(sessions.list_state(self.home).archived, {"a": True, "b": False})
+        self.assertEqual(
+            sessions.list_state(self.home / "elsewhere").archived, {}, "no store, no flags"
+        )
 
 
 class CarryingArchive(unittest.TestCase):

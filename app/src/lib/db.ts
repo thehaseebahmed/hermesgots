@@ -57,7 +57,7 @@ export interface Settings {
   /**
    * The layout the app drew before a bot's screen became the list of its chats: Recents in the
    * sidebar and a New chat screen. Local and off by default; on is the opt-out, read by
-   * `useLegacyChat` in `legacy-chat.ts`.
+   * `chatLayout` in `chat-layout.ts`.
    */
   legacyChat?: boolean
   /**
@@ -1880,6 +1880,32 @@ db.version(49).upgrade((tx) =>
 )
 
 /**
+ * v50: a Main this build does not publish. Main is the host's canonical Bot Chat now, resolved and laid
+ * over the list answers by the plugin, so a record an older build wrote under a `main-*` id is no Main
+ * at all — the flag it carries is cleared, and the record stays as an ordinary side chat with its
+ * history. Only ids of that shape lose the flag: a Main this build holds is keyed by its bot and the
+ * session (`chats.main_id` in the plugin), which a device that has crossed this upgrade holds without
+ * ever running it again — and one that crosses it late is told again by the projection, which dates the
+ * flag past the record it lays it on whenever the store's copy does not carry it yet (ADR 0160).
+ *
+ * Nothing else about these records moves: they keep their title, their messages, their marks and their
+ * drafts, and one that the host's Bot Chat has since replaced is simply a conversation of the bot's.
+ */
+db.version(50).upgrade((tx) =>
+  tx
+    .table("conversations")
+    .filter(
+      (conversation: Record<string, unknown>) =>
+        typeof conversation.id === "string" &&
+        conversation.id.startsWith("main-") &&
+        "main" in conversation,
+    )
+    .modify((conversation: Record<string, unknown>) => {
+      delete conversation.main
+    }),
+)
+
+/**
  * How many rows of one room's log this device keeps: the page a reader can scroll back through.
  * A room's log lives on its Host and is read by sequence, so a page is what a screen needs and no
  * more — without a bound, every fold and every read mark would pay for the room's whole history.
@@ -2154,6 +2180,19 @@ export function conversationsOf(profileId: string) {
   return db.conversations
     .where("[profileId+updatedAt]")
     .between([profileId, Dexie.minKey], [profileId, Dexie.maxKey])
+}
+
+/**
+ * The record one bot's list draws as its **Main**: the chat the plugin flags, read off the bot's own
+ * chats. Nothing where the bot has none, which is a device that has never met a plugin publishing one —
+ * so no screen mints one here. Asked by everything that has to draw the chat a bot's list stands
+ * beside: Main's own address, the pane that keeps that list on screen, and the read a badge counts
+ * from (`mainChatOf` is the one query under `useBotMain`).
+ */
+export function mainChatOf(profileId: string) {
+  return conversationsOf(profileId)
+    .filter((chat) => Boolean(chat.main))
+    .first()
 }
 
 /**

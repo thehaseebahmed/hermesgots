@@ -34,6 +34,8 @@ const SESSION = "c-session"
 /** What the bot's plugin advertises, and whether Hermes's own session took the flag. */
 let features: string[] = ["chats"]
 let host = true
+/** Whether the host refuses the write — Main is the one chat it will not archive (409). */
+let refuse = false
 /** Every request that reached the archive route, so a case can hold the wire to what it did. */
 let posts: { path: string; body?: { archived?: boolean } }[] = []
 
@@ -45,6 +47,11 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (url.pathname.endsWith("/plugins/gots/info")) return json({ features })
   if (url.pathname.includes("/plugins/gots/chats/") && url.pathname.endsWith("/archived")) {
     posts.push({ path: url.pathname, body })
+    if (refuse)
+      return new Response(JSON.stringify({ error: { message: "Main can't be archived." } }), {
+        status: 409,
+        headers: { "Content-Type": "application/json" },
+      })
     return json({ object: "gots.chat.archived", archived: body?.archived === true, host })
   }
   return json({})
@@ -66,6 +73,7 @@ async function seed(name: string, patch: Partial<Conversation> = {}, advertised:
   const bot = botOf(name)
   features = advertised
   host = true
+  refuse = false
   posts = []
   localStorage.clear()
   await seedSettings({ developer: true, activeProfileId: bot.id })
@@ -173,4 +181,45 @@ test("a room's archive is still the reader's own mark, and no session flag is wr
   assert.equal(typeof row?.roomMarksAt, "number", "stamped with the clock its record travels on")
   await settle()
   assert.deepEqual(posts, [], "a room has no session of its own to archive (ADR 0157)")
+})
+
+/**
+ * Main is never put away (G2) — but an unarchive is always allowed, and a refusal is undone.
+ *
+ * The guard refused both directions, so a device that archived Main before the plugin's flag
+ * reached it could never bring the row back: it sat under the Archived pill for ever, and a bot
+ * whose bar draws it as the chat it is had no way to reach it. And where the host answers 409 —
+ * the flag is Main's, the route's answer is the truth — the mark written here first has to come
+ * back off the row rather than leave this device saying a chat is put away that no surface put away.
+ */
+test("Main put away before its flag arrived can be brought back, and a refused archive is undone", async () => {
+  await seed("archive-main-back", { main: true, archived: true }, ["chats", "session_archive"])
+  await setArchived(CHAT, false)
+  assert.equal(
+    (await db.conversations.get(CHAT))?.archived,
+    undefined,
+    "Main comes back out from under the pill",
+  )
+  assert.deepEqual(
+    posts.map((one) => one.body),
+    [{ archived: false }],
+    "and the host is asked too",
+  )
+
+  // The archive of a Main this device has not been told about yet — the flag is projection-only
+  // until a device merges it back, so this row carries none: the mark is written here first, the
+  // route refuses it, and the mark goes back off.
+  await seed("archive-main-refused", {}, ["chats", "session_archive"])
+  refuse = true
+  await setArchived(CHAT, true)
+  assert.deepEqual(
+    posts.map((one) => one.body),
+    [{ archived: true }],
+    "the archive was asked for",
+  )
+  assert.equal(
+    (await db.conversations.get(CHAT))?.archived,
+    undefined,
+    "and refused, so nothing is archived here either",
+  )
 })

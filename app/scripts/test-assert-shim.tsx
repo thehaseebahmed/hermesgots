@@ -16,9 +16,9 @@ import assert, { equal } from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter } from "react-router"
 
-import { ConversationList } from "@/components/conversation-list"
 import { db } from "@/lib/db"
-import { botProfile, find, mount, seedChat, settle } from "./component-kit.tsx"
+import { ConversationList } from "@/components/conversation-list"
+import { botProfile, find, mount, seedChat, settle, until } from "./component-kit.tsx"
 
 /** The failure an assertion raised, which a green one did not. */
 function failureOf(run: () => void) {
@@ -31,21 +31,22 @@ function failureOf(run: () => void) {
 }
 
 test("a red assertion handed a mounted element prints its message, at once", async () => {
+  // The row is the sidebar's bot row: a mounted `<a>` with spans in it, which is all this case needs —
+  // the assertion is about what the shim hands Node, never about which list drew it.
+  const bot = botProfile("assert-shim")
   await seedChat({
     id: "chat-1",
-    profile: botProfile("assert-shim"),
-    settings: { onboarded: true, legacyChat: true },
+    profile: bot,
+    settings: { onboarded: true },
   })
-  // A chat something was said in: the legacy bands draw no row for one nothing was said in
-  // (ADR 0158), and this case needs the row the assertion is handed.
-  await db.conversations.update("chat-1", { updatedAt: 2 })
   await mount(
     <MemoryRouter initialEntries={["/"]}>
       <ConversationList />
     </MemoryRouter>,
     async () => {
+      await until(async () => Boolean(find(`a[href="/b/${bot.id}"]`)), "the bot's row")
       await settle()
-      const row = find('a[href^="/c/"]')
+      const row = find(`a[href="/b/${bot.id}"]`)
       assert.ok(row, "the row drew")
       const span = row!.querySelector("span")
       assert.ok(span, "the row draws a span")

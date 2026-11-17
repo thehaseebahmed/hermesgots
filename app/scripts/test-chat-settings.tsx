@@ -1,7 +1,9 @@
 /**
  * A bot's own chat: its bar carries neither a way to its bot's list nor a `…`, and the press its
  * title answers opens the chat's settings — its name, its mute, its pin, its archive and its delete,
- * which the menu that stood there held (ADR 0153).
+ * which the menu that stood there held (ADR 0153). A bot's **Main** is the exception on both counts:
+ * its bar carries the way to the bot's list where the ring stands, and its title opens the bot's
+ * settings page instead of a sheet (G3, G13) — its case stands near the end.
  *
  * A project session is not a chat's settings: it keeps the menu, whose resolve, discard and delete
  * are its own. That is what the last case holds.
@@ -11,9 +13,10 @@ import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { ChatPage } from "@/routes/chat"
-import { setPinned } from "@/lib/chat-marks"
+import { setArchived, setPinned } from "@/lib/chat-marks"
 import { db, type Conversation } from "@/lib/db"
 import {
+  absentText,
   atWidth,
   botProfile,
   click,
@@ -380,4 +383,48 @@ test("a project session keeps its menu: its settings are not a chat's", async ()
     await until(async () => Boolean(find('[aria-label="Chat options"]')), "the session's menu")
     assert.ok(missing("[data-chat-settings-open]"), "and no title that opens a chat's settings")
   })
+})
+
+/**
+ * Main is the bot's own conversation with its host, and it stays that: it may not be renamed, pinned,
+ * archived or deleted from any surface (G2). Since its bar answers its title with the bot's settings
+ * page rather than an Edit sheet (G13), it is offered no sheet at all — no name, no mute, no pin, no
+ * archive and no delete, because there is nothing a press on it opens.
+ */
+test("Main is offered no name, no pin, no archive and no sheet at all", async () => {
+  await seed({ id: "main-1", title: "Bot Chat", main: true, updatedAt: 11, hermesSessionId: "s-main" })
+  globalThis.fetch = async () => json({})
+  await mount(screen("main-1"), async () => {
+    await until(async () => Boolean(find('[data-slot="header-title"]')), "Main's bar")
+    assert.equal(missing("[data-chat-settings-open]"), true, "no press that opens an Edit sheet")
+    assert.equal(missing("[data-chat-name]"), true, "no name field: the host's title is not ours to write")
+    assert.equal(missing("[data-chat-pin]"), true, "no pin: Main stands where it stands")
+    assert.equal(missing("[data-chat-archive]"), true, "and no way to put it away")
+    absentText("button", "Delete chat")
+    assert.equal(missing('[role="dialog"]'), true, "and nothing a press on its title opens")
+    // What the title answers instead is the page a bot itself is configured on.
+    assert.equal(
+      find('[data-slot="header-title"] a')?.getAttribute("href"),
+      `/settings/bots/${bot.id}`,
+      "the bot's own settings page, as the sidebar's Settings row opens it",
+    )
+  })
+})
+
+/**
+ * The sheet is one way in and the marks are written by two writers besides it, so the refusal lives
+ * in them rather than in the surface that offers the press: a pin or an archive written straight
+ * through — by a screen, a queue or a caller this build has not written yet — is refused, and
+ * nothing is written at all.
+ */
+test("the writers refuse Main, and write nothing", async () => {
+  await seed({ id: "main-1", title: "Bot Chat", main: true, createdAt: 1, updatedAt: 11 })
+  globalThis.fetch = async () => json({})
+  assert.equal(await setPinned("main-1", true), false, "a pin on Main is refused")
+  await setArchived("main-1", true)
+  const row = await db.conversations.get("main-1")
+  assert.equal(row?.pinned, undefined, "and nothing was pinned")
+  assert.equal(row?.pinnedAt, undefined)
+  assert.equal(row?.archived, undefined, "nor put away")
+  assert.equal(row?.main, true, "Main is still Main")
 })

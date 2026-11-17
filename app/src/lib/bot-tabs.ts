@@ -94,17 +94,31 @@ export function botPath(botId: string): string {
 }
 
 /**
- * A bot's screen: the list of its chats, which is also where back from a chat and from everything
- * under the list returns. One definition, so the address the whole shell is built on cannot
- * disagree with itself.
+ * A bot's entry: its own address, which is a doorway rather than a screen. It lands on the bot's Main
+ * chat, taking that chat's address in this entry's place, so a bot opens on the conversation it keeps
+ * rather than on a list to choose from (an absent Main — a host that publishes none — leaves the
+ * bot's list standing where this address is).
  */
-export function botChatsPath(botId: string): string {
+export function botMainPath(botId: string): string {
   return `/b/${botId}`
 }
 
-/** A bot's routines, which its own list opens and its list is the way back from. */
+/**
+ * A bot's chats as a list: the screen its entry leads into, and the list a chat of the bot's leads
+ * back to. Under the bot's root rather than an address of its own, since it is the bot the screen is
+ * of. One definition, so the address the whole shell is built on cannot disagree with itself.
+ */
+export function botChatsPath(botId: string): string {
+  return `${botMainPath(botId)}/sidechats`
+}
+
+/**
+ * A bot's routines, which its list opens and its list is the way back from. Built from the bot's root
+ * and never from the list's address: a routine's notification still opens it, and it is the bot's
+ * rather than the list's.
+ */
 export function botRoutinesPath(botId: string): string {
-  return `${botChatsPath(botId)}/routines`
+  return `${botMainPath(botId)}/routines`
 }
 
 /** A page's address: every page carries its own segment, General's included. */

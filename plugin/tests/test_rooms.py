@@ -627,6 +627,18 @@ def asked_route(
     return asyncio.run(route(app, path, method)(request))
 
 
+def chats_only(listed):
+    """A list answer's chat ids, without the bot's Main, which every list now carries.
+
+    Main is the profile's canonical Bot Chat, published by the plugin beside the chats and rooms it
+    projects (`test_main_chat`): a case about the Host's rooms says what stands beside Main, and
+    never counts Main itself as one of them.
+    """
+    return sorted(
+        chat_id for chat_id, record in listed.items() if not (record.get("value") or {}).get("main")
+    )
+
+
 class RoomRoutes(unittest.TestCase):
     """A room created, renamed and disbanded through the plugin's own routes."""
 
@@ -1117,7 +1129,9 @@ class RoomInTheChatList(unittest.TestCase):
                 body={"chats": {"chat-1": {"at": 5, "value": {}}}},
                 method="POST",
             )
-        self.assertEqual(answer["payload"]["chats"], {"chat-1": {"at": 5, "value": {}}})
+        answered = answer["payload"]["chats"]
+        self.assertEqual(chats_only(answered), ["chat-1"], "nothing of the Host's was added beside it")
+        self.assertEqual(answered["chat-1"], {"at": 5, "value": {}}, "and the chat is exactly as posted")
 
     def test_a_disbanded_room_is_the_records_deletion(self):
         disbanded = {**ROOM, "disbanded_at": 1_760_001_000.0}
@@ -1157,7 +1171,10 @@ class RoomInTheChatList(unittest.TestCase):
                 reader.start()
             for reader in readers:
                 reader.join()
-        self.assertEqual(answers, [{"room-1": answers[0]["room-1"]}] * 2)
+        # Main's own clock is this host's, so two reads that mint one can differ by the instant
+        # between them; everything the Host answered is the same answer.
+        self.assertEqual([answer["room-1"] for answer in answers], [answers[0]["room-1"]] * 2)
+        self.assertEqual([chats_only(answer) for answer in answers], [["room-1"]] * 2)
         self.assertEqual(
             [one["method"] for one in host.requests],
             ["groups.capabilities", "groups.list"],
@@ -1167,13 +1184,13 @@ class RoomInTheChatList(unittest.TestCase):
     def test_a_host_that_pages_its_rooms_is_read_to_the_last_page(self):
         many = [{**ROOM, "room_id": f"room-{n}", "name": f"Room {n}"} for n in range(3)]
         chats = self.chats(host=Host(listed=many, page=2))
-        self.assertEqual(sorted(chats), ["room-0", "room-1", "room-2"], "every page is a row")
+        self.assertEqual(chats_only(chats), ["room-0", "room-1", "room-2"], "every page is a row")
 
     def test_the_list_carries_a_rooms_marks_and_never_the_record_itself(self):
         held = room_mark_record(pinned=True, pinnedAt=1_760_000_500_000, marksAt=1_760_000_700_000)
         chats.merge(store.db_path(self.home), {"room-1": held})
         listed = self.chats([ROOM])
-        self.assertEqual(sorted(listed), ["room-1"], "a room's mark record is no chat of its own")
+        self.assertEqual(chats_only(listed), ["room-1"], "a room's mark record is no chat of its own")
         self.assertEqual(listed["room-1"]["value"]["pinned"], True)
         self.assertEqual(listed["room-1"]["value"]["marksAt"], 1_760_000_700_000)
         self.assertEqual(
@@ -1191,7 +1208,7 @@ class RoomInTheChatList(unittest.TestCase):
             )
         self.assertEqual(answer["status"], 200)
         answered = answer["payload"]["chats"]
-        self.assertEqual(sorted(answered), ["room-1"], "nothing of the mark record reads as a chat")
+        self.assertEqual(chats_only(answered), ["room-1"], "nothing of the mark record reads as a chat")
         self.assertEqual(answered["room-1"]["value"]["pinned"], True)
         self.assertEqual(answered["room-1"]["value"]["archived"], False)
         self.assertEqual(

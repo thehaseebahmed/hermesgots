@@ -501,12 +501,17 @@ export const FLOWS = {
   "bot-chats": {
     script: "e2e/bot-chats.mjs",
     about:
-      "A bot pressed from the sidebar or Home always draws its list, at the app's only entry, with nothing made for it and no chat resumed; a chat picked from it takes the app's only entry, a room keeps the list as its way back, and a reload keeps the reader where they were",
+      "A bot pressed from the sidebar or Home lands on its Main at the app's only entry, and its Side Chat List is a screen its chat opens above it: the bar's control and the platform's own back both step onto that list, a side chat opened cold lands it, and a reload keeps the reader where they were",
   },
   "bot-list": {
     script: "e2e/bot-list.mjs",
     about:
-      "A bot's list as the way into every conversation: ordered by the last message received, a chat, a room and a routine's run each opening in the pane beside it at 1280px with the bot's face drawn once, a bot's sidebar row at the app's 56px row for a title with a line under it, its picture on the row's own centre line, and on a phone a row opening its chat as the app's only entry with the sidebar the way back to the list",
+      "The flat chat list, with the Developer switch on: a bot's address draws every chat of its, a routine's run among the rows, ordered by the last message received, each row opening in the pane beside the list at 1280px with the bot's face drawn once, the bar's control returning to the list beside the item lane's 'No chat selected', a bot's sidebar row at the app's 56px row with its picture on the centre line, and on a phone a row opening its chat one step above the list",
+  },
+  "side-chats": {
+    script: "e2e/side-chats.mjs",
+    about:
+      "The way out of a bot's chats, rung by rung: a launch lands on its Main at the app's only entry, Main's control opens the Side Chat List one step above it, a row opens a side chat one step above the list, and the way back walks the same rungs down to the app — while a side chat opened cold steps into its bot's list rather than out of the app",
   },
   "card-widths": {
     script: "e2e/card-widths.mjs",

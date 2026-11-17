@@ -123,7 +123,7 @@ async function seed({
   published = false,
   bots = [BOT_A, BOT_B],
   legacy = false,
-}: { published?: boolean; bots?: typeof BOT_A[]; legacy?: boolean } = {}) {
+}: { published?: boolean; bots?: (typeof BOT_A)[]; legacy?: boolean } = {}) {
   // The active bot is the one the page is *not* opened for, so the root address has to read it.
   await seedSettings({ developer: true, legacyChat: legacy, activeProfileId: BOT_B.id })
   await db.profiles.clear()
@@ -167,18 +167,16 @@ const routinesScreen = (profileId: string) => (
     <Path />
     <Routes>
       <Route path="b/:profileId/routines" element={<RoutinesPage />} />
-      <Route path="b/:profileId" element={<p data-list />} />
+      <Route path="b/:profileId/sidechats" element={<p data-list />} />
       <Route path="c/:id" element={<p data-chat />} />
     </Routes>
   </MemoryRouter>
 )
 
 /** The jobs the page draws, by the name each card carries — the order it draws them in. */
-const jobNames = () =>
-  findAll("h3").map((one) => wordsOf(one))
+const jobNames = () => findAll("h3").map((one) => wordsOf(one))
 /** One filter pill, by the word it carries. */
-const pill = (label: string) =>
-  findAll("button").find((one) => wordsOf(one) === label) ?? null
+const pill = (label: string) => findAll("button").find((one) => wordsOf(one) === label) ?? null
 
 /** A bot's list, with the page its own control opens behind it. */
 const listScreen = (profileId: string) => (
@@ -283,28 +281,28 @@ test("a run with no row of its own still says what happened under the bars", asy
   })
 })
 
-test(
-  "a page at the app's first entry steps onto the bot's list, rather than arming the exit",
-  async () => {
-    await seed()
-    const history = atDepth(0)
-    try {
-      await mount(routinesScreen(BOT_A.id), async () => {
-        await until(async () => Boolean(find('[aria-label="Back to Mainly"]')), "the page's way back")
-        assert.equal(
-          pressBack(),
-          "screen",
-          "the screen takes the press rather than the app arming its exit",
-        )
-        assert.deepEqual(history.backs, [], "with no step to take: the list takes the page's entry")
-        await until(async () => path() === `/b/${BOT_A.id}`, "the bot's list in the page's place")
-        assert.ok(find("[data-list]"), "the list the routines stand one rung above")
-      })
-    } finally {
-      history.restore()
-    }
-  },
-)
+test("a page at the app's first entry steps onto the bot's list, rather than arming the exit", async () => {
+  await seed()
+  const history = atDepth(0)
+  try {
+    await mount(routinesScreen(BOT_A.id), async () => {
+      await until(async () => Boolean(find('[aria-label="Back to Mainly"]')), "the page's way back")
+      assert.equal(
+        pressBack(),
+        "screen",
+        "the screen takes the press rather than the app arming its exit",
+      )
+      assert.deepEqual(history.backs, [], "with no step to take: the list takes the page's entry")
+      await until(
+        async () => path() === `/b/${BOT_A.id}/sidechats`,
+        "the bot's list in the page's place",
+      )
+      assert.ok(find("[data-list]"), "the list the routines stand one rung above")
+    })
+  } finally {
+    history.restore()
+  }
+})
 
 test("the page leads with the bot's way back, as a conversation does", async () => {
   await seed()
@@ -332,26 +330,9 @@ test("the page leads with the bot's way back, as a conversation does", async () 
     assert.ok((back?.className ?? "").includes("size-11"), "the list's control size")
     assert.ok((back?.className ?? "").includes("rounded-full"), "and its round shape")
     await click(back)
-    await until(async () => path() === `/b/${BOT_A.id}`, "the bot's list")
+    await until(async () => path() === `/b/${BOT_A.id}/sidechats`, "the bot's list")
   })
 })
-
-test(
-  "on the legacy layout, where no bot's list exists, the page keeps its leading way back",
-  async () => {
-    await seed({ legacy: true })
-    await mount(routinesScreen(BOT_A.id), async () => {
-      await until(async () => Boolean(find('[aria-label="Back to chats"]')), "the page's way back")
-      assert.equal(
-        findAll('[data-slot="header-actions"] [aria-label^="Back to "]').length,
-        0,
-        "the corner holds nothing: the legacy layout has no list for a control to step onto",
-      )
-      await click(find('[aria-label="Back to chats"]'))
-      await until(async () => path() !== `/b/${BOT_A.id}/routines`, "off the page, toward the chats")
-    })
-  },
-)
 
 test("the bar's Refresh is a frosted circle of the bar's own size", async () => {
   await seed()
@@ -374,7 +355,8 @@ test("the bar's Refresh is a frosted circle of the bar's own size", async () => 
 })
 
 test("the list's header carries the control that opens the bot's routines", async () => {
-  await seed()
+  // The flat list, which is the layout the switch turns on and which keeps its routines control.
+  await seed({ legacy: true })
   await mount(listScreen(BOT_A.id), async () => {
     await until(async () => Boolean(find('header a[aria-label="Routines"]')), "the routine control")
     await click(find('header a[aria-label="Routines"]'))
@@ -403,7 +385,7 @@ test(
   "where there is room the bot's list keeps its lane beside the routines",
   laptop(async () => {
     localStorage.clear()
-    await seed()
+    await seed({ legacy: true })
     await mount(
       <MemoryRouter initialEntries={[`/b/${BOT_A.id}/routines`]}>
         <Path />

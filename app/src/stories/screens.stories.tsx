@@ -96,10 +96,12 @@ const screen = (route: string, device: Device, globals = PHONE): Story => ({
   loaders: [onDevice(device)],
 })
 
-export const ChatListPhone = screen("/b/bot-cubby", { chats })
-export const ChatListLaptop = screen("/b/bot-cubby", { chats }, LAPTOP)
-export const ChatListEmpty = screen("/b/bot-cubby", { chats: [] })
-export const ChatListHostAway = screen("/b/bot-cubby", { chats, host: "away" })
+// A bot's list has an address of its own: the bot's own address lands on its Main (and, with no Main
+// in this device, draws this same list where it stands).
+export const ChatListPhone = screen("/b/bot-cubby/sidechats", { chats })
+export const ChatListLaptop = screen("/b/bot-cubby/sidechats", { chats }, LAPTOP)
+export const ChatListEmpty = screen("/b/bot-cubby/sidechats", { chats: [] })
+export const ChatListHostAway = screen("/b/bot-cubby/sidechats", { chats, host: "away" })
 export const OpenChat = screen("/c/c1", { chats })
 export const OpenChatLaptop = screen("/c/c1", { chats }, LAPTOP)
 export const OpenChatWithTools = screen("/c/w1", { chats: working })
@@ -117,4 +119,4 @@ export const ProjectsEmpty = screen("/projects", {})
 export const ProjectsHostAway = screen("/projects", { host: "away" })
 export const ResearchEmpty = screen("/research", {})
 export const Routines = screen("/b/bot-cubby/routines", {})
-export const OneBotOnly = screen("/b/bot-cubby", { bots: [BOTS[0]], chats })
+export const OneBotOnly = screen("/b/bot-cubby/sidechats", { bots: [BOTS[0]], chats })

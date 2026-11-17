@@ -18,7 +18,7 @@ import { chatRowOf, PIN_LIMIT, pinsOf, type ChatListRow } from "./chat-list"
 import { readListedChats, seatedRoomRows } from "./chat-rows"
 import { hasServer, serverConfig } from "./connection"
 import { db, updateConversation, type Conversation, type Room } from "./db"
-import { hasPluginFeature, setSessionArchived } from "./hermes"
+import { hasPluginFeature, hostAnswered, setSessionArchived } from "./hermes"
 import { readRoomNeeds, useRoomNeeds, type RoomNeedsRow } from "./room"
 import { seatingBots } from "./rooms"
 import { syncChatsOf } from "./sync"
@@ -44,6 +44,9 @@ export async function setPinned(id: string, on: boolean): Promise<boolean> {
   // ever the wire's way of saying "no pin", never this device's (`sync.ts` spells it there).
   const marks = on ? { pinned: true, pinnedAt: now } : { pinned: undefined, pinnedAt: undefined }
   const row = await db.conversations.get(id)
+  // A bot's Main is not the reader's to mark (G2): it stands where it stands on every surface, so the
+  // press is refused here rather than only by the switch that offers it.
+  if (row?.main) return false
   if (on && row && !(await hasRoomForPin(row))) return false
   const room = row?.room
   if (row && room) {
@@ -66,6 +69,9 @@ export async function setPinned(id: string, on: boolean): Promise<boolean> {
  * list as well. The row here is written first and either way — the press is drawn at once, and a
  * chat whose session has gone still reads as one the reader put away. A host that can't hold the
  * flag answers `host: false`, and this device's mark is all the archive there is, exactly as before.
+ * A host that **refuses** the write — a 409, the one answer that says this chat may not be marked
+ * so — takes the mark back off the row: the refusal is the truth, and a mark left behind it is a row
+ * out of every list that no surface can bring back.
  */
 export async function setArchived(id: string, on: boolean) {
   const now = Date.now()
@@ -73,29 +79,49 @@ export async function setArchived(id: string, on: boolean) {
     ? { archived: true, pinned: undefined, pinnedAt: undefined }
     : { archived: undefined }
   const row = await db.conversations.get(id)
+  // Main is never put away, on any Host (G2): nothing is written on the row and nothing is asked of
+  // the Host, so no press can leave a bot without the conversation its screen opens on. An
+  // **unarchive** is always allowed, though: a device that put a Main away before the plugin's flag
+  // reached it would otherwise be stranded under the Archived pill, with no list that could bring
+  // the row back.
+  if (row?.main && on) return
   const room = row?.room
   if (row && room) return markRoom(row, room, marks, now)
   await updateConversation(id, marks)
-  if (row) await writeSessionArchive(row, on)
+  if (!row) return
+  if (await writeSessionArchive(row, on)) {
+    // Refused: the row goes back to the marks it carried, in one write, so the switch the press
+    // turned reads what every surface reads.
+    await updateConversation(id, {
+      archived: row.archived,
+      pinned: row.pinned,
+      pinnedAt: row.pinnedAt,
+    })
+  }
 }
 
 /**
- * Hermes's archive flag for one chat's session, where the Host can be asked for it.
+ * Hermes's archive flag for one chat's session, where the Host can be asked for it, answering whether
+ * the Host **refused** it.
  *
  * Two gates, held here and not by the sheet: a bot this device can call at all (`hasServer`), and a
  * plugin new enough to write the flag — `session_archive` (ADR 0159). An older plugin stores the
  * record and nothing else, so asking it would be a request whose answer the app would ignore; a
  * failed ask is swallowed for the same reason, since the write above is already the reader's mark.
+ * A refusal is the one failure that is an answer about the row rather than about the wire — Main is
+ * the chat a Host refuses (409) — so it is the one a caller must undo.
  */
-async function writeSessionArchive(row: Conversation, on: boolean) {
+async function writeSessionArchive(row: Conversation, on: boolean): Promise<boolean> {
   const bot = await db.profiles.get(row.profileId)
-  if (!hasServer(bot)) return
+  if (!hasServer(bot)) return false
   const config = serverConfig(bot)
   try {
-    if (!(await hasPluginFeature(config, "session_archive"))) return
+    if (!(await hasPluginFeature(config, "session_archive"))) return false
     await setSessionArchived(config, row.id, on)
-  } catch {
+    return false
+  } catch (error) {
     // Away, or a Host from before the route: the mark on the row above is what this device reads.
+    return hostAnswered(error) && error.status === 409
   }
 }
 

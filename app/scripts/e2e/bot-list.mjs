@@ -1,15 +1,16 @@
 import { app, assert, flow, markOffsetIn, pass, rung, settled } from "./lib.mjs"
 
 /**
- * A bot's list is the way into every conversation (ADR 0153, ADR 0154): a bot pressed from the sidebar
- * always draws its list, the list is ordered by the last message *received* in each row, every row
- * opens in the pane beside it at 1280px, the bot's face is drawn once on that screen, and the control
- * leading the bar takes the reader back to the list with nothing beside it — a large chat mark over
- * "No chat selected", centred on both axes. From a phone a row opens one step above the list, and that
- * control or the drawer's bot row lands that list.
+ * The flat chat list, with the Developer switch on (ADR 0162): a bot's address draws every chat of its,
+ * its routines' deliveries among the rows, ordered by the last message *received* in each, every row
+ * opening in the pane beside it at 1280px with the bot's face drawn once, and the control leading the
+ * bar taking the reader back to the list with nothing beside it — a large chat mark over "No chat
+ * selected", centred on both axes. From a phone a row opens one step above the list, and that control
+ * or the drawer's bot row lands that list.
  *
  * The clocks are written here rather than left to the seed's "now", because the order is the claim:
- * the chat the reader spoke in last was answered first, so it is the list's last row.
+ * the chat the reader spoke in last was answered first, so it is the list's last row. The switch is
+ * turned on before the app is opened, since off is the new UX, where a bot's address is its Main.
  */
 const LANE = '[data-slot="list-lane"]'
 const ITEM = '[data-slot="item-lane"]'
@@ -27,6 +28,10 @@ await flow(
   "bot-list",
   async ({ page, profileId, shot, until }) => {
     const here = () => new URL(page.url()).pathname
+    await page.evaluate(async () => {
+      const { saveSettings } = await import("/src/lib/db.ts")
+      await saveSettings({ legacyChat: true })
+    })
     const rows = (scope = LANE) =>
       page.evaluate(
         (selector) =>
