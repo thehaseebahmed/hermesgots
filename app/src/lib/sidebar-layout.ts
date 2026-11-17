@@ -203,16 +203,43 @@ export function withHidden<Pin extends SidebarPin>(
 export type SidebarMove = -1 | 1
 
 /**
- * The record a move writes: the row named, one place up (`-1`) or down (`1`). Read it as "move this
- * row this way, in this record, over these rows".
+ * The record a drop writes: the row named, standing at `index` of the list when the write is done.
+ * Read it as "put this row in this place, in this record, over these rows".
  *
- * The answer is a complete record — every known row once, in the order this move made, so a move also
- * heals a record another build left, and an id no row carries is gone with it. `hidden` is kept as it
- * stood: a row a reader cannot see still has its place, and moving a visible row past it is a move of
- * the whole list, not of the rows on screen. A move past either end writes the arrangement it found,
- * unchanged, and a first move over a record nobody wrote starts from today's order, since the order a
- * move begins with is the one the sidebar draws. A new record every time: nothing here edits one in
- * place.
+ * The one placement both ways of reordering go through, so a drag and a button cannot write two
+ * shapes of record: `move` asks it for the place its direction reaches. The answer is a complete
+ * record — every known row once, in the order this placement made, so a drop also heals a record
+ * another build left, and an id no row carries is gone with it. `hidden` is kept as it stood: a row
+ * a reader cannot see still has its place, and carrying a row past it is a move of the whole list,
+ * not of the rows on screen. A place past either end is that end, an id no row carries has no place
+ * to leave or take, and the first placement over a record nobody wrote starts from today's order.
+ * A new record every time: nothing here edits one in place.
+ */
+export function moveTo<Pin extends SidebarPin>(
+  id: string,
+  index: number,
+  record: SidebarLayoutRecord | undefined,
+  rows: readonly SidebarLayoutRow<Pin>[],
+): SidebarLayoutRecord {
+  const placed = placedRows(rows, record)
+  const order = placed.map(({ row }) => row.id)
+  const from = order.indexOf(id)
+  if (from !== -1) {
+    const [moved] = order.splice(from, 1)
+    // The list is one shorter now, so its last place is its length: a drop below the last row lands
+    // there rather than one past it.
+    order.splice(Math.max(0, Math.min(index, order.length)), 0, moved)
+  }
+  return {
+    version: 1,
+    order,
+    hidden: placed.filter((row) => row.hidden).map(({ row }) => row.id),
+  }
+}
+
+/**
+ * The record a move writes: the row named, one place up (`-1`) or down (`1`) — the place a control
+ * at either end of a row asks for, expressed over `moveTo` so both writes normalise once.
  */
 export function move<Pin extends SidebarPin>(
   id: string,
@@ -220,17 +247,6 @@ export function move<Pin extends SidebarPin>(
   record: SidebarLayoutRecord | undefined,
   rows: readonly SidebarLayoutRow<Pin>[],
 ): SidebarLayoutRecord {
-  const placed = placedRows(rows, record)
-  const order = placed.map(({ row }) => row.id)
-  const from = order.indexOf(id)
-  const to = from + direction
-  if (from !== -1 && to >= 0 && to < order.length) {
-    const [moved] = order.splice(from, 1)
-    order.splice(to, 0, moved)
-  }
-  return {
-    version: 1,
-    order,
-    hidden: placed.filter((row) => row.hidden).map(({ row }) => row.id),
-  }
+  const from = placedRows(rows, record).findIndex(({ row }) => row.id === id)
+  return moveTo(id, from + direction, record, rows)
 }

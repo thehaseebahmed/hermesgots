@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **98 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 98 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **99 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 99 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --------- | ------ |
-| stay | 43 |
+| stay | 44 |
 | component | 51 |
 | plugin | 2 |
 | delete | 2 |
-| **total** | **98** |
+| **total** | **99** |
 
-Of those 98, 92 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 90 distinct files) and 6 point at the older
+Of those 99, 93 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 91 distinct files) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -224,20 +224,30 @@ no harness that stubs `history.back`, has. So the registry holds 97 + 1 = **98**
 verdicts unchanged at **51**, the plugin verdicts **2**, the deletes **2**, and the stays are 42 + 1:
 **43**.
 
+A forty-fourth stay has arrived with the sidebar's edit mode: `sidebar-edit`, because a drag is a
+laid-out page's. The place a row would land is reckoned from the rows' own boxes, the gesture's
+moves are kept on the grip by pointer capture, `touch-action` on that one control is what keeps the
+list's scroll and the drawer's swipe out of it, and a phone's finger goes through the browser's own
+input pipeline — none of which a DOM without layout, without a touchscreen and without a capture
+model has. `test-sidebar-edit.tsx` holds the grip to the mode and to its 44px box, and
+`test-sidebar-layout.mjs` holds the record a drop writes to the one a button's move writes; neither
+can drop a row anywhere. So the registry holds 98 + 1 = **99** keys, the component verdicts unchanged
+at **51**, the plugin verdicts **2**, the deletes **2**, and the stays are 43 + 1: **44**.
+
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above
-that its rows don't add up to, or a stay beyond the forty-three fails the app's gates. A new flow is
+that its rows don't add up to, or a stay beyond the forty-four fails the app's gates. A new flow is
 then an argument this page has to carry, never a default (ADR 0019).
 
 Check any of it in one line:
 
 ```bash
-grep -c '^| `' docs/e2e-flow-audit.md                           # 98 rows, one per registry key
-grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 43
+grep -c '^| `' docs/e2e-flow-audit.md                           # 99 rows, one per registry key
+grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 44
 grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 51
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 2
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm -s e2e list | wc -l                             # 98 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 99 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
@@ -539,6 +549,15 @@ test's; what that test cannot see is a six-column table at a phone's width.
 | Key | Verdict | What it asserts today | Why it moves | What replaces it |
 | --------------------- | ------- | --------------------------------------------------------------------------------- | ---------------------------------------------------------------- | ---------------- |
 | `research-literature` | stay | A literature review on the mock at 390px (light and dark), 820px and 1440px: the card is no placeholder, the brief reads back the years and the criteria, the Scope Gate the queries; while it reads the funnel and a paper's row are drawn with no theme yet; delivered, the funnel's four counts, a row per included paper and the plugin's reference list. The papers table is wider than its card wherever the card is narrower than the table's 56rem and scrolls inside it, the page and the reading column never scroll sideways, the last column starts off screen and is fully in view once the card is scrolled to its end, and each row's control is a 44px target; a row opens its quotes and a cell's chip opens the Sources drawer on its claim. No errors in the console. | The table's overflow, the page's stillness around it and a column's reach are layout, which only a browser has; the join from the route through the store to the canvas is exercised on the way. | Nothing: it stays. |
+
+## The sidebar's edit mode — the arrange branch
+
+One key, a stay. The rows above the boundary are hidden, moved and — G4's other half — dragged into
+place, and what only a laid-out page answers is where a pointer let go.
+
+| Key | Verdict | What it asserts today | Why it moves | What replaces it |
+| ----------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `sidebar-edit` | stay | The sidebar's edit mode arranged by the pointer, at 1024px and in the 390px drawer: a row's own grip pressed, the row carried past its neighbour with real pointer events — lifted, and the row whose place it would take marked while the button is still down — and let go, after which the mode draws the order the drop made and the nav rests in it; the order read again after a reload, so the account carries it; and on a phone the same drag sent as one finger through the browser's own input pipeline, in a drawer that still scrolls and still swipes everywhere but the grip. No grip is drawn outside the mode. | Geometry and a gesture, both the page's alone. A drop's place is reckoned from the rows' own boxes, which a DOM without layout does not have; the moves stay on the grip because of pointer capture, and `touch-action` on that one control is what keeps the list's scroll and the drawer's swipe out of the gesture. A finger has no stand-in below a browser either. `test-sidebar-edit.tsx` proves the grip is drawn in the mode alone and is the 44px box, and `test-sidebar-layout.mjs` proves the record a drop writes is the record a button's move writes; neither can drop a row anywhere. | Nothing: a stay is replaced by itself. The placement is `moveTo`'s, which `move` is expressed over, so a drag and a button cannot write two shapes of record. |
 
 ## The coverage a demotion leaves with no home
 

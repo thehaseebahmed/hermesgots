@@ -29,6 +29,7 @@ import { useMeetingsEnabled } from "@/lib/meetings"
 import { plainPress, pressOpeningRoot, useNav } from "@/lib/nav"
 import {
   move,
+  moveTo,
   restingSidebarRows,
   sidebarModeRows,
   sidebarRows,
@@ -470,6 +471,13 @@ export function ConversationList({
               // One write per press, through the appearance clock, so the account and a second device
               // arrive at the same order this one draws.
               onMove={(id, direction) => saveLayout(move(id, direction, layout, known))}
+              // A drop names the row whose place the reader took, and the index is read off the whole
+              // placement rather than off the rows the mode drew: a row a lab switch has taken off the
+              // screen still holds its place, so a drop below it lands below it, not one place early.
+              onDrop={(id, onto) => {
+                const at = sidebarModeRows(known, layout).findIndex(({ row }) => row.id === onto)
+                if (at !== -1) saveLayout(moveTo(id, at, layout, known))
+              }}
             />
           ) : (
             rows.map((row) => (

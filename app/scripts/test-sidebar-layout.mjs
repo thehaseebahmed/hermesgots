@@ -9,6 +9,7 @@ import test from "node:test"
 import {
   DEFAULT_SIDEBAR_LAYOUT,
   move,
+  moveTo,
   restingSidebarRows,
   sidebarModeRows,
   sidebarRows,
@@ -213,6 +214,45 @@ test("a move names every row the catalogue knows and drops one it does not", () 
       hidden: ["canvas"],
     },
     "the whole order after the move, and the hidden list untouched",
+  )
+})
+
+test("a row dropped at a place lands in it, and a drop writes the record a press would", () => {
+  const record = {
+    version: 1,
+    order: ["meetings", "projects", "code", "canvas", "research"],
+    hidden: ["canvas"],
+  }
+  assert.deepEqual(
+    moveTo("research", 0, record, sidebarRows([])),
+    {
+      version: 1,
+      order: ["research", "meetings", "projects", "code", "canvas"],
+      hidden: ["canvas"],
+    },
+    "the last row carried to the front, every other row shifted and the hidden list kept",
+  )
+  assert.deepEqual(
+    moveTo("projects", 1, record, sidebarRows([])),
+    record,
+    "a row dropped on the place it already holds is the arrangement it found",
+  )
+  // One rule, so a drag and a button cannot disagree: dropping a row where the next one stands is
+  // the button's own move down, and both write the same record.
+  assert.deepEqual(
+    moveTo("projects", 2, record, sidebarRows([])),
+    move("projects", 1, record, sidebarRows([])),
+    "a drop on the next row's place is the control's one move down",
+  )
+  assert.deepEqual(
+    moveTo("meetings", 9, record, sidebarRows([])).order,
+    ["projects", "code", "canvas", "research", "meetings"],
+    "a place past the end is the last place",
+  )
+  assert.deepEqual(
+    moveTo("retired", 0, record, sidebarRows([])),
+    record,
+    "an id no row carries has no place to leave or take, and writes nothing new",
   )
 })
 

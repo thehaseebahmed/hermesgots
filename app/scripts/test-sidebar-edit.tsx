@@ -114,11 +114,12 @@ test("the header's button is the mode's switch", async () => {
     assert.ok(missing('button[aria-label="Search"]'), "Search gone, its place taken (a Decision)")
 
     await click(editButton())
-    await until(
-      async () => Boolean(doneButton()),
-      "the switch named for what its press now does",
+    await until(async () => Boolean(doneButton()), "the switch named for what its press now does")
+    assert.equal(
+      doneButton()?.getAttribute("aria-pressed"),
+      "true",
+      "pressed while the mode is open",
     )
-    assert.equal(doneButton()?.getAttribute("aria-pressed"), "true", "pressed while the mode is open")
     const mode = group()
     assert.ok(mode, "the mode is one group, labelled for what it is")
     assert.equal(
@@ -198,10 +199,7 @@ test("Escape leaves the mode, and the switch has the focus back", async () => {
 function Docked() {
   const [collapsed, setCollapsed] = useState(false)
   return (
-    <ConversationList
-      collapsed={collapsed}
-      onToggleCollapsed={() => setCollapsed((was) => !was)}
-    />
+    <ConversationList collapsed={collapsed} onToggleCollapsed={() => setCollapsed((was) => !was)} />
   )
 }
 
@@ -238,8 +236,7 @@ const ORDERED = {
 }
 
 /** The addresses the resting sidebar draws, in the order it draws them. */
-const addresses = () =>
-  findAll('nav[aria-label="Main"] a').map((row) => row.getAttribute("href"))
+const addresses = () => findAll('nav[aria-label="Main"] a').map((row) => row.getAttribute("href"))
 
 test("a hidden row leaves the sidebar and stays in the mode, muted", async () => {
   await seed()
@@ -380,6 +377,35 @@ test("a row moves by its own controls, and the order is the account's", async ()
       "and the account's record holds the order the presses made",
     )
     assert.ok((stored?.appearanceAt ?? 0) > 0, "written through the appearance clock")
+  })
+})
+
+test("a row's grip is the mode's alone, and it is the 44px box a thumb gets", async () => {
+  await seed()
+  await mount(sidebar(), async () => {
+    await until(async () => Boolean(find('a[href="/projects"]')), "the nav")
+    // At rest the rows are destinations: a grip drawn there is a handle on a list nobody is arranging.
+    assert.equal(findAll("[data-sidebar-grip]").length, 0, "no grip is drawn outside the mode")
+
+    await click(editButton())
+    await until(async () => Boolean(group()), "the mode")
+    const grips = findAll("[data-sidebar-grip]")
+    assert.equal(grips.length, 6, "every row above the boundary carries one, the pin included")
+    const grip = find('[data-sidebar-row="projects"] [data-sidebar-grip]')
+    assert.ok(grip, "the grip stands inside the row it reorders")
+    assert.equal(
+      grip.classList.contains("size-11"),
+      true,
+      "and is the 44px box a thumb gets, the same box the move controls take",
+    )
+    // The gesture belongs to the grip alone: the list still scrolls and the drawer still swipes
+    // everywhere else, which is what `touch-action` on this one control is for.
+    assert.equal(grip.classList.contains("touch-none"), true, "the grip keeps the touch for itself")
+    assert.equal(
+      grip.getAttribute("tabindex"),
+      "-1",
+      "and stays out of the tab order, since a drag is no key press — the move controls are that path",
+    )
   })
 })
 
