@@ -245,6 +245,12 @@ export function host(
     // The bot's Hermes, which the cleanup pick's own picker lists: two providers, so the picker
     // offers its "Default" row over them rather than drilling into the only one it has.
     if (path.endsWith("/api/model/options")) return json(options.models ?? BOT_MODELS)
+    if (path.includes("/api/plugins/gots/stt/key")) {
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined
+      calls.push({ path, method, body })
+      if (options.refuseStt) return json({ error: { message: options.refuseStt } }, 400)
+      return json({ stt: options.nextStt ?? options.speech?.stt })
+    }
     if (path.endsWith("/api/plugins/gots/stt")) {
       const body = init?.body ? JSON.parse(String(init.body)) : undefined
       calls.push({ path, method, body })

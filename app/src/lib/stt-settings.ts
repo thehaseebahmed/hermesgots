@@ -20,6 +20,9 @@ import {
 /** The feature a host advertises when it carries the speech settings beyond the model. */
 export const STT_SETTINGS = "stt_settings"
 
+/** The feature a host advertises when a provider's API key can be written from the page. */
+export const STT_KEYS = "stt_keys"
+
 /** One setting's value: what the file says, or what Hermes does with nothing written. */
 export type SttValue = string | number | boolean | null
 
