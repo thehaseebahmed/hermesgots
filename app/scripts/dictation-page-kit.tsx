@@ -83,6 +83,8 @@ export const speech = (patch: Record<string, unknown> = {}) => ({
 })
 
 type Speech = ReturnType<typeof speech>
+/** One host's `stt` block, as `GET speech` and the `stt` write both answer it. */
+type SttBlock = ReturnType<typeof STT>
 
 /**
  * The same host with nobody having measured it yet: every row carries no factor, and a measurement
@@ -202,7 +204,7 @@ export function host(
     /** The bot's models, as the cleanup pick's own picker reads them. */
     models?: unknown
     /** The fresh `stt` block a write answers with: the one the page draws after it. */
-    nextStt?: unknown
+    nextStt?: SttBlock
     /** What `GET speech` answers once a setting has been written: the route a pick moved to. */
     afterStt?: Speech
     /** What a `POST stt` answers with where the host refuses the write. */
@@ -216,6 +218,15 @@ export function host(
     options.speechRefusals ?? 0,
     "Speech-to-text is turned off on this host.",
   )
+  // The settings block this host holds now — what its `stt` route and `info.dictation` both answer
+  // from: the block before a write, and the write's own answer after it. (`GET speech` has a knob of
+  // its own, `afterStt`, for the route a provider pick moves the bot to.)
+  const heldStt = (): SttBlock | undefined =>
+    written ? (options.nextStt ?? options.speech?.stt) : options.speech?.stt
+  // Whether this host can hear a take, which is the composer's mic: Hermes reads it off the switch in
+  // that block, so a write of `stt.enabled` is what moves the answer (ADR 0164).
+  const hearsTakes = () =>
+    (heldStt()?.values?.["stt.enabled"] ?? heldStt()?.defaults?.["stt.enabled"]) !== false
   const fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = new URL(String(input)).pathname
     const method = init?.method ?? "GET"
@@ -223,6 +234,13 @@ export function host(
       return json({
         features,
         research: { writers: options.writers ?? { model: true, provider: true } },
+        dictation: hearsTakes()
+          ? { ready: true, model: "small", provider: { name: "local", cloud: false }, wait_ms: 4000 }
+          : {
+              ready: false,
+              reason: "Speech-to-text is turned off on the host.",
+              wait_ms: 4000,
+            },
       })
     // The bot's Hermes, which the cleanup pick's own picker lists: two providers, so the picker
     // offers its "Default" row over them rather than drilling into the only one it has.
@@ -232,7 +250,7 @@ export function host(
       calls.push({ path, method, body })
       if (options.refuseStt) return json({ error: { message: options.refuseStt } }, 400)
       written = true
-      return json({ stt: options.nextStt ?? options.speech?.stt })
+      return json({ stt: heldStt() })
     }
     if (path.endsWith("/api/plugins/gots/speech/probe")) {
       calls.push({ path, method, body: undefined })
