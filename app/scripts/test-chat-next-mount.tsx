@@ -448,6 +448,51 @@ test("a file steered into a reply is drawn where the steer stands", async () => 
   })
 })
 
+test("a steer stands in the reply the moment it is sent, before the host has taken it", async () => {
+  const { host } = await onChatNext(
+    "c-steer-at-once",
+    {},
+    { plugin: true, settings: { steerByDefault: true }, host: { uploads: true } },
+  )
+  await mount(chatScreen("c-steer-at-once"), async () => {
+    const run = await midReply(host, "Write a poem")
+    // The host is slow to take what the steer carries: the file's save is what the queue waits on, so
+    // nothing has reached the plugin — or its queue — while the bubble is asked for.
+    const uploads = host.holdUploads()
+    try {
+      await paste([new File(["notes"], "notes.txt", { type: "text/plain" })])
+      await type(composerField(), "Make it rhyme")
+      await sendPress()
+      await until(
+        () =>
+          findAll('[data-chat-next] [data-message-id$="-a"] [data-slot="bubble-content"]').some(
+            (one) => one.textContent === "Make it rhyme",
+          ),
+        "the steer stands in the reply while the host is still taking it",
+      )
+      assert.equal(host.queue.length, 0, "and nothing has been queued yet")
+    } finally {
+      uploads.release()
+    }
+    await until(
+      () => host.rows.some((row) => row.display_kind === "steer"),
+      "the plugin steered the running reply",
+    )
+    await until(
+      () => Boolean(find('[data-chat-next] [data-message-id$="-a"] [aria-label="Download notes.txt"]')),
+      "the file the host saved is drawn on the same steer",
+    )
+    assert.deepEqual(
+      findAll('[data-chat-next] [data-message-id$="-a"] [data-slot="bubble-content"]').filter(
+        (one) => one.textContent === "Make it rhyme",
+      ).length,
+      1,
+      "one steer, drawn once",
+    )
+    run.finish("Roses are red.")
+  })
+})
+
 test("a bot whose plugin can't queue hands a mid-reply message back", async () => {
   const { host } = await onChatNext("c-noqueue")
   await mount(chatScreen("c-noqueue"), async () => {
