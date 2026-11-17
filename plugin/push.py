@@ -473,48 +473,50 @@ def notify(
 BOT_ID = re.compile(r"^[a-z0-9-]{1,32}$")
 
 
-def set_bot(path: Path, bot: str) -> None:
-    """Which of the app's bot characters this profile is, so a notification shows its picture."""
-    if not BOT_ID.match(bot):
-        raise PushError("Not a bot.")
-    conn = connect(path)
-    try:
-        conn.execute("INSERT OR REPLACE INTO push_prefs (key, value) VALUES ('bot', ?)", (bot,))
-    finally:
-        conn.close()
-
-
-def bot(path: Path) -> Optional[str]:
+def _pref(path: Path, key: str, valid: Any = None) -> Optional[str]:
+    """One value this profile keeps in `push_prefs`, where it holds one this build still accepts."""
     if not path.exists():
         return None
     conn = connect(path)
     try:
-        row = conn.execute("SELECT value FROM push_prefs WHERE key = 'bot'").fetchone()
+        row = conn.execute("SELECT value FROM push_prefs WHERE key = ?", (key,)).fetchone()
     finally:
         conn.close()
-    return row[0] if row and isinstance(row[0], str) and BOT_ID.match(row[0]) else None
+    if row is None or not isinstance(row[0], str):
+        return None
+    return row[0] if valid is None or valid.match(row[0]) else None
+
+
+def _set_pref(path: Path, key: str, value: Optional[str]) -> None:
+    """Keeps one value in `push_prefs`, or drops the row while there is none to keep."""
+    conn = connect(path)
+    try:
+        if value:
+            conn.execute("INSERT OR REPLACE INTO push_prefs (key, value) VALUES (?, ?)", (key, value))
+        else:
+            conn.execute("DELETE FROM push_prefs WHERE key = ?", (key,))
+    finally:
+        conn.close()
+
+
+def set_bot(path: Path, bot: str) -> None:
+    """Which of the app's bot characters this profile is, so a notification shows its picture."""
+    if not BOT_ID.match(bot):
+        raise PushError("Not a bot.")
+    _set_pref(path, "bot", bot)
+
+
+def bot(path: Path) -> Optional[str]:
+    return _pref(path, "bot", BOT_ID)
 
 
 def set_bot_muted(path: Path, muted: bool) -> None:
     """Mutes or unmutes every push from this profile (the bot), whatever device would get it."""
-    conn = connect(path)
-    try:
-        if muted:
-            conn.execute("INSERT OR REPLACE INTO push_prefs (key, value) VALUES ('muted', '1')")
-        else:
-            conn.execute("DELETE FROM push_prefs WHERE key = 'muted'")
-    finally:
-        conn.close()
+    _set_pref(path, "muted", "1" if muted else None)
 
 
 def bot_muted(path: Path) -> bool:
-    if not path.exists():
-        return False
-    conn = connect(path)
-    try:
-        return conn.execute("SELECT 1 FROM push_prefs WHERE key = 'muted'").fetchone() is not None
-    finally:
-        conn.close()
+    return _pref(path, "muted") is not None
 
 
 def _lineage(path: Path, session_id: str) -> List[str]:
@@ -669,26 +671,12 @@ def base_url(request: Any, tail: str) -> Optional[str]:
 
 def set_base(path: Path, base: Optional[str]) -> None:
     """Keeps the address the app dialled, so a notice built later can carry a button back to it."""
-    conn = connect(path)
-    try:
-        if base:
-            conn.execute("INSERT OR REPLACE INTO push_prefs (key, value) VALUES ('base', ?)", (base,))
-        else:
-            conn.execute("DELETE FROM push_prefs WHERE key = 'base'")
-    finally:
-        conn.close()
+    _set_pref(path, "base", base)
 
 
 def base(path: Path) -> Optional[str]:
     """Where the app last dialled this bot, or None while no app has subscribed from anywhere."""
-    if not path.exists():
-        return None
-    conn = connect(path)
-    try:
-        row = conn.execute("SELECT value FROM push_prefs WHERE key = 'base'").fetchone()
-    finally:
-        conn.close()
-    return row[0] if row and isinstance(row[0], str) and BASE.match(row[0]) else None
+    return _pref(path, "base", BASE)
 
 
 # The app's own origin, as a browser's `location.origin` spells it: scheme, host and port, no path,
@@ -703,25 +691,10 @@ def set_web(path: Path, origin: Optional[str]) -> None:
     Read from the ``subject`` the app subscribed with — its ``location.origin``. A subscription that
     names a ``mailto:`` contact instead (an older app's) leaves none: there is no picture at a mailbox.
     """
-    conn = connect(path)
-    try:
-        if isinstance(origin, str) and WEB.match(origin.strip()):
-            conn.execute(
-                "INSERT OR REPLACE INTO push_prefs (key, value) VALUES ('web', ?)", (origin.strip(),)
-            )
-        else:
-            conn.execute("DELETE FROM push_prefs WHERE key = 'web'")
-    finally:
-        conn.close()
+    origin = origin.strip() if isinstance(origin, str) else None
+    _set_pref(path, "web", origin if origin and WEB.match(origin) else None)
 
 
 def web(path: Path) -> Optional[str]:
     """Where the app lives, or None while no app has subscribed from a page of its own."""
-    if not path.exists():
-        return None
-    conn = connect(path)
-    try:
-        row = conn.execute("SELECT value FROM push_prefs WHERE key = 'web'").fetchone()
-    finally:
-        conn.close()
-    return row[0] if row and isinstance(row[0], str) and WEB.match(row[0]) else None
+    return _pref(path, "web", WEB)

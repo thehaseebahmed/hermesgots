@@ -422,7 +422,9 @@ def deliver(
     status = publish(
         held,
         message(held, kind, category, session_id, notice),
-        headers(web_of(path), bot_of(path), notice),
+        # The notice already carries the bot whose picture it wears; the store answers for a caller
+        # that handed one without it.
+        headers(web_of(path), carried(notice).get("bot") or bot_of(path), notice),
     )
     if status is None or status >= 300:
         # 401 and 403 are the token; the app's own switch is where it is put right.
