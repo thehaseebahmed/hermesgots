@@ -697,7 +697,6 @@ function ProviderPage({
           <>
             <ValueRow
               title="API key"
-              purpose="Used when this provider hears a take"
               value={keySet ? "Set" : ""}
               muted={speech.stale}
               disabled={speech.stale}
