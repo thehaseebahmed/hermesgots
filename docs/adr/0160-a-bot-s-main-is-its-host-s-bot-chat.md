@@ -12,11 +12,15 @@ exists, read-only — and `chats.carrying_main(records, session)` lays it over t
 projection: the record already bound to that session, else a record minted under an id derived from the
 session, so a wiped store mints the same one again. It runs where `carrying_archive` already runs, at
 `merged_chats`, and it is the only place a Main is written. Every other record carrying the flag loses
-it and keeps its history, which is how the `main-*` records an earlier build wrote become ordinary side
-chats (ADR 0161).
+it, keeps its history, and is **dated past the record it was** — the app applies a remote record only
+when its clock is strictly newer, so a strip carrying the old clock never reached a device that had
+already synced the retired Main, and two Mains stood for ever, the stale one undeletable because every
+guard refuses `main`. That is how the `main-*` records an earlier build wrote become ordinary side chats
+(ADR 0161). The store's own copy catches up when a device merges the answer back, so the retraction
+costs one crossing rather than one per read.
 
-**Where a host has no Bot Chat, Gots asks the gateway to mint one.** `sessions.mint_bot_chat` goes
-through the gateway's own session creation — the call the Desktop's Bots roster makes — never a raw
+**Where a host has no Bot Chat, Gots asks the gateway to mint one — once.** `sessions.mint_bot_chat`
+goes through the gateway's own session creation — the call the Desktop's Bots roster makes — never a raw
 insert: the title carries a unique index, and Hermes drops a conflicting retitle silently, so a second
 row inserting the same title is how a profile ends up with a squatter and a bot whose chat never
 resolves. The title is looked up first, so a `Bot Chat` another surface already holds is adopted or
@@ -24,14 +28,35 @@ deferred to rather than fought over. A host that cannot answer (no such call, an
 refusal) leaves the bot with a Main of Gots's own — a Gots chat, honest about what it is — rather than
 two that may later diverge.
 
-**Main never carries the host's archive flag.** `carrying_archive` lays Hermes's flag over every
-record with a session, so a Bot Chat archived on the Dashboard would otherwise put Main under the
-Archived pill. An archived Bot Chat is a retired one: it is resolved as absent, and Main re-binds to
-the host's next answer. The old record stays as a side chat with everything it had.
+**A list read never asks for a mint on every request.** The answer that named no Bot Chat is remembered
+per profile for half a minute (`MAIN_ABSENT_TTL_S`), and a bot that already holds a Main of its own is
+not asked to mint at all: the mint is awaited on the API server's loop and takes the gateway's
+titled-create lock, and the state that prompts it — an archived Bot Chat, a title an unownable row
+holds, a host that cannot mint — is permanent. The window is seconds because a host that gains Bot Mode
+writes its own chat, which the read sees on the next answer; the retry is only for the store that holds
+no record yet. The one write the fallback makes stays one: the Gots chat is minted into the store on the
+first answer that needs it and every answer after it reads the record.
+
+**Main never carries the host's archive flag, and no route can put it away.** `carrying_archive` lays
+Hermes's flag over every record with a session, so a Bot Chat archived on the Dashboard would otherwise
+put Main under the Archived pill. An archived Bot Chat is a retired one: it is resolved as absent, and
+Main re-binds to the host's next answer. The old record stays as a side chat with everything it had.
+The archive route refuses a chat that is Main (409) by asking the same resolvers the projection asks —
+the host's Bot Chat through the chat's lineage, else the Gots chat the fallback minted — because the
+record's copy of the flag is projection-only until a device merges it back, and reading it there
+archived the bot's canonical chat with a 200 and retired Main.
 
 **A turn in Main is the bot's own news.** `sessions.is_chat` answers true for the profile's canonical
 Bot Chat as well as for a `gots-` session, so a reply in Main is pushed, muted and counted like any
-other chat's; the daily sweep already spares a record flagged `main`.
+other chat's; the daily sweep already spares a record flagged `main`. The Bot Chat is asked of the
+ancestry the walk already holds, in one statement over its ids — a push runs this on Hermes's hook
+thread, and a second scan of the store (or a schema read of its own) is not something a hook event can
+pay for.
+
+**One read of the store serves one list answer.** The archive flags and the Bot Chat come off one pass
+in one connection (`sessions.list_state`), gathered beside the Host's rooms projection rather than
+awaited in series: the two used to be two scans, and both are only laid over the answer once they
+arrive.
 
 ## Considered options
 
