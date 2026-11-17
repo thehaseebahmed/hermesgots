@@ -442,7 +442,7 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
   const [away, setAway] = useState(false)
   const online = useOnline()
   // A chat is edited from its bar, and so is a session; a chat not yet started is not.
-  const editable = Boolean(chat)
+  const editable = Boolean(chat) && !(session && unstarted)
   // Nothing here has a menu: a title opens the sheet. A bot's own chat keeps its context in the bar as
   // the ring at every width (ADR 0153); a session's sheet carries it, with the ring beside the header
   // from the wide width. Main is no chat's settings at all: the ring becomes the way to its side
