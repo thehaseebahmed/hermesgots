@@ -4,6 +4,11 @@ status: accepted
 
 # A run may finish its own pull request, when its Prompt asks it to
 
+> **Amended.** The `pr_merged` push this decision mentions below no longer exists: Gots stopped
+> sending every pull-request notification — checks failing, merged, and a task's pull request ready
+> to review — because GitHub is where that news belongs. `merges.check` still resolves the chat, and
+> says nothing to any device.
+
 The `pull_request` tool could open a draft and go no further. Marking one ready and merging it were
 refused with a teaching error — "merging and closing are the user's decision" — so "end to end" was
 a person doing the last two steps by hand. The tool now has `ready` and `merge` beside `ship`,

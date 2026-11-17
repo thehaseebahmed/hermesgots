@@ -8,7 +8,6 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from plugin import github, ship
-from plugin.store import db_path
 
 
 def _record(tmp):
@@ -247,20 +246,10 @@ class AfkTaskTests(_Base):
         data, _ = self._ship(task=None)
         self.assertNotIn("Closes #", data["body"])
 
-    def test_opening_the_tasks_pull_request_says_it_is_ready_to_review(self):
-        _, notify = self._ship(task=TASK)
-        notify.assert_called_once()
-        args, _ = notify.call_args
-        self.assertEqual(args[:2], ("afk_pr", "s1"))
-        self.assertEqual(args[2], db_path(Path(self.tmp)))
-
-    def test_another_repositorys_pull_request_is_not_the_tasks_news(self):
-        _, notify = self._ship(task=TASK, repo_root="o/other")
-        notify.assert_not_called()
-
-    def test_a_session_that_is_not_afks_says_nothing(self):
-        _, notify = self._ship(task=None)
-        notify.assert_not_called()
+    def test_opening_a_pull_request_is_not_news(self):
+        for task, repo_root in ((TASK, None), (TASK, "o/other"), (None, None)):
+            _, notify = self._ship(task=task, repo_root=repo_root)
+            notify.assert_not_called()
 
 
 class AfkUpdateTests(_Base):

@@ -17,15 +17,12 @@ export const PUSH_KINDS = [
   "plan",
   "run_done",
   "run_failed",
-  "pr_checks",
-  "pr_merged",
   "clone_failed",
   "routine_failed",
   "research_brief",
   "research_scope",
   "research_done",
   "research_failed",
-  "afk_pr",
   "routine_message",
   "meeting_done",
   "meeting_failed",
@@ -42,9 +39,6 @@ export const PUSH_CATEGORIES = [
   "code_input",
   "code_run_failed",
   "code_run_done",
-  "code_pr_checks",
-  "code_pr_merged",
-  "code_afk_pr",
   "code_setup_failed",
   "routine_failed",
   "routine_message",
@@ -73,9 +67,22 @@ export function categoryOf(kind: PushKind): PushCategory | "test" {
   return `code_${kind}`
 }
 
-/** What the plugin tells about a push beyond its kind (0.33): the chat's title. */
+/** One button a notice carries: what it says, and the link a press posts (`plugin/notice.py`). */
+export interface PushAction {
+  label: string
+  url: string
+}
+
+/** What the plugin tells about a push beyond its kind (0.33): the chat's title, and what it says. */
 export interface PushDetail {
   title?: string
+  body?: string
+  /** The badged picture to draw, at the app's own origin (`build-badges.mjs`). */
+  icon?: string
+  /** Whose picture it is, so a phone that can't fetch it falls back to the badge the APK ships. */
+  bot?: string
+  /** The buttons a tray may draw: an approval's two, and no other kind's. */
+  actions?: PushAction[]
 }
 
 export interface FcmSender {
@@ -103,15 +110,12 @@ const WORDS: Record<PushKind, string> = {
   plan: "The plan is ready for your review",
   run_done: "You have a new reply",
   run_failed: "The run stopped with an error",
-  pr_checks: "Checks are failing on the pull request",
-  pr_merged: "Your pull request was merged",
   clone_failed: "This project couldn't be set up",
   routine_failed: "The last run failed",
   research_brief: "The brief is ready for your review",
   research_scope: "The scope is ready for your approval",
   research_done: "Your research is ready",
   research_failed: "The mission stopped with an error",
-  afk_pr: "A task's pull request is ready to review",
   routine_message: "A bot has a message",
   meeting_done: "Your meeting notes are ready",
   meeting_failed: "Meeting notes failed",
@@ -133,11 +137,46 @@ const UNTITLED: Partial<Record<PushKind, string>> = {
   room_input: "A room",
 }
 
-/** The notification's title and body. */
+/** The notification's title and body: the notice's, and the kind's own line where it names none. */
 export function pushText(kind: PushKind, detail: PushDetail = {}) {
   const title = detail.title?.trim() || UNTITLED[kind] || "Gots"
-  const body = WORDS[kind]
+  const body = detail.body?.trim() || WORDS[kind]
   return { title, body }
+}
+
+/**
+ * An http(s) address, and nothing else: what it is handed comes from a plugin, and a phone will
+ * open whatever it is told to — a notice's picture, or a button's link (`actionsOf`).
+ */
+export function pictureOf(value: unknown) {
+  const one = typeof value === "string" ? value.trim() : ""
+  return /^https?:\/\/[^\s]+$/.test(one) ? one.slice(0, 512) : undefined
+}
+
+/** A bot id as the plugin keeps them (`BOT_ID` in `plugin/push.py`), which also names a drawable. */
+export function botId(value: unknown) {
+  const one = typeof value === "string" ? value.trim() : ""
+  return /^[a-z0-9-]{1,32}$/.test(one) ? one : undefined
+}
+
+/**
+ * The buttons a tray may draw: at most two, each a label and an http(s) link, in the order the
+ * notice carries them. Anything else is dropped rather than trusted — the plugin writes these, and
+ * a phone's receiver posts whatever it is given.
+ */
+export function actionsOf(value: unknown): PushAction[] {
+  if (!Array.isArray(value)) return []
+  const kept: PushAction[] = []
+  for (const one of value) {
+    if (kept.length === 2) break
+    if (!one || typeof one !== "object") continue
+    const { label, url } = one as Partial<PushAction>
+    if (typeof label !== "string" || !label.trim()) continue
+    const link = pictureOf(url)
+    if (!link) continue
+    kept.push({ label: label.trim().slice(0, 40), url: link })
+  }
+  return kept
 }
 
 const SCOPE = "https://www.googleapis.com/auth/firebase.messaging"
@@ -219,6 +258,15 @@ async function accessToken(account: ServiceAccount, cache: { token?: string; exp
   return cache.token
 }
 
+/**
+ * The message Firebase sends: data-only, and every value a string.
+ *
+ * A `notification` payload is drawn by Android itself, while the app is closed and with no code of
+ * ours running — and Android's own drawing has no room for a button. So the message carries the
+ * notice instead and the app draws it (`GotsMessagingService`): the title and body, the badged
+ * picture, the category's channel, the tag a newer notice of the same thing replaces, and the two
+ * links an approval carries as JSON, since a data value can be nothing but a string.
+ */
 export function message(
   token: string,
   kind: PushKind,
@@ -226,24 +274,29 @@ export function message(
   sessionId: string,
   detail: PushDetail = {},
 ) {
+  const { title, body } = pushText(kind, detail)
+  const actions = actionsOf(detail.actions)
+  const face = botId(detail.bot)
+  const icon = pictureOf(detail.icon)
   return {
     message: {
       token,
-      // A notification message: Android shows it itself while the app is closed, with no code of
-      // ours running. The data rides along for the tap.
-      notification: pushText(kind, detail),
-      data: { kind, session_id: sessionId },
-      android: {
-        priority: "HIGH",
-        ttl: "600s",
-        // A newer message of the same category about the same thing replaces one still showing. The
-        // app makes a channel for each category (`src/lib/push.ts`), which Android's settings turn
-        // off one by one; the test has its own, made on the tap that sends one.
-        notification: {
-          tag: `${category}:${sessionId}`.slice(0, 200),
-          channel_id: kind === "test" ? "test_notification" : category,
-        },
+      data: {
+        kind,
+        session_id: sessionId,
+        title,
+        body,
+        category,
+        // A newer message of the same category about the same thing replaces one still showing.
+        tag: `${category}:${sessionId}`.slice(0, 200),
+        // The channel Android's settings turn off one by one. The app makes one for each category
+        // (`src/lib/push.ts`); the test has its own, made on the tap that sends one.
+        channel: kind === "test" ? "test_notification" : category,
+        ...(face ? { bot: face } : {}),
+        ...(icon ? { icon } : {}),
+        ...(actions.length ? { actions: JSON.stringify(actions) } : {}),
       },
+      android: { priority: "HIGH", ttl: "600s" },
     },
   }
 }

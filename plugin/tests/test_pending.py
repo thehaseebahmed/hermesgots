@@ -188,6 +188,19 @@ class AvailableTest(unittest.TestCase):
         with mock.patch.dict(sys.modules, modules):
             self.assertIn("no session admission ledger", pending.available() or "")
 
+    def test_a_host_that_moved_the_ledger_is_still_asked(self) -> None:
+        # Hermes 0.23 took the readers out of the top-level module and into the persistence package.
+        # A host on that side of the move keeps the feature: the queue is read through its home.
+        host = Host([admission("a", "queued", "still waiting")])
+        modules = host.modules()
+        runtime = modules.pop("hermes_state_runtime")
+        modules["persistence.sqlite.authority._admission_store"] = runtime
+        with mock.patch.dict(sys.modules, modules):
+            self.assertIsNone(pending.available())
+            found = pending.read_for(SimpleNamespace(gateway_runner=object()), Path("/home"), "s1")
+        self.assertEqual(host.reads, ["s1"])
+        self.assertEqual(found["items"][0]["text"], "still waiting")
+
 
 class ReadTest(unittest.TestCase):
     def test_a_session_is_read_through_the_ledgers_own_reader(self) -> None:

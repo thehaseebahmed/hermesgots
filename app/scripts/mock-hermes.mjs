@@ -176,7 +176,7 @@
 //   pnpm mock            # then point Settings at http://localhost:8642/v1
 
 import http from "node:http"
-import { randomUUID } from "node:crypto"
+import { randomBytes, randomUUID } from "node:crypto"
 import { mkdirSync, readFileSync, statSync, writeFileSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, extname, join } from "node:path"
@@ -195,6 +195,9 @@ const TOOL_PLACEMENT = JSON.parse(
 
 const PORT = Number(process.env.PORT ?? 8642)
 const pendingApprovals = new Map()
+/** The buttons an approval's notice would carry, by token, so a press can be tried by hand
+ *  (`plugin/answers.py`): the choice is the row's, since a token in a URL names nothing. */
+const pushAnswers = new Map()
 const pendingClarifies = new Map()
 /** Questions Hermes's own route is asked one at a time, by `prompt_id` (0.22.5 and newer). */
 const pendingPrompts = new Map()
@@ -4016,6 +4019,15 @@ function startRun(req, body, options = {}) {
         choices: ["once", "session", "always", "deny"],
       }
       push("approval.request", run.approval)
+      // The two buttons the plugin would mint for this notice (Allow once, Deny), so the answer route
+      // below can be pressed the way a phone presses it: a token names nothing, so each is kept with
+      // the choice it means. Nothing here sends a push, so this is where a tray entry would arrive.
+      const links = ["once", "deny"].map((choice) => {
+        const token = randomBytes(32).toString("base64url")
+        pushAnswers.set(token, { runId: id, choice })
+        return `http://localhost:${PORT}/api/plugins/gots/push/answer/${token}`
+      })
+      console.log(`Approval buttons: ${links.join("  ")}`)
       return waitForApproval(id).then(async (choice) => {
         run.status = "running"
         run.approval = undefined
@@ -4795,6 +4807,32 @@ http
       }
       pushSubscriptions.set(subscription.endpoint, { device, categories })
       return json(res, 200, { object: "gots.push", subscribed: true })
+    }
+    // An approval answered from the tray's own button, as the plugin answers one (plugin/answers.py):
+    // the token in the path is the whole credential and nothing else is asked for, a press settles
+    // the run that minted it, and the same button pressed twice is 410. A token this mock never
+    // minted is 404 — a link preview that fetched it spent nothing. Nothing here expires one: the
+    // plugin's tokens live as long as the push that carried them, which the mock never sends.
+    const answer = /^\/api\/plugins\/gots\/push\/answer\/([^/]+)$/.exec(url.pathname)
+    if (PLUGIN && !profile && req.method === "POST" && answer) {
+      const held = pushAnswers.get(decodeURIComponent(answer[1]))
+      if (!held) return json(res, 404, { error: { message: "That button isn't one this bot sent." } })
+      if (held.spent) {
+        return json(res, 410, { error: { message: "That button has already been answered." } })
+      }
+      held.spent = true
+      // Spent either way, as the plugin spends it: a press whose approval is no longer waiting
+      // answered nothing, and a second press of the same button is told it was answered.
+      const resolve = pendingApprovals.get(held.runId)
+      if (!resolve) {
+        return json(res, 409, { error: { message: "That approval isn't waiting any more." } })
+      }
+      resolve(held.choice)
+      return json(res, 200, {
+        object: "gots.push.answer",
+        answered: true,
+        choice: held.choice,
+      })
     }
     // ntfy: the mock keeps the bot's topic and stands in for Hermes's own NTFY_SERVER_URL and
     // NTFY_TOKEN, and publishes nothing (plugin/ntfy.py).

@@ -46,7 +46,18 @@ from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-from . import link, ntfy
+from . import answers, link, ntfy
+from .notice import (
+    CATEGORIES,
+    KINDS,
+    LEGACY_CATEGORIES,
+    SESSION_KINDS,
+    Action,
+    Notice,
+    carried,
+    category_of,
+    flatten,
+)
 from .store import connect, current_path, home_of
 
 logger = logging.getLogger(__name__)
@@ -63,84 +74,6 @@ TITLE_MAX = 80
 # The push services accept 4096 bytes; ours are far smaller.
 RECORD_SIZE = 4096
 MAX_SUBSCRIPTIONS = 20
-# What a push is about. `approval`, `question`, `plan` and `room_input` wait on the user; the rest
-# are news. The registry (`app/netlify/lib/fcm.ts`) and the app (`app/src/lib/push-kinds.ts`) keep
-# the same lists.
-KINDS = (
-    "approval",
-    "question",
-    "plan",
-    "run_done",
-    "run_failed",
-    "pr_checks",
-    "pr_merged",
-    "clone_failed",
-    "routine_failed",
-    "research_brief",
-    "research_scope",
-    "research_done",
-    "research_failed",
-    "afk_pr",
-    "routine_message",
-    "meeting_done",
-    "meeting_failed",
-    # A room of this Host's bots waits on the user, and it is its own kind because a room is
-    # nobody's chat: a push about one names the room, not a session.
-    "room_input",
-)
-# What a device switches: a kind within a feature (chats, code, routines, research). A session's
-# kinds belong to Code when it is a project session, else to Chats; a room's is the room's own,
-# whichever feature its session would have been in.
-CATEGORIES = (
-    "chat_input",
-    "chat_run_failed",
-    "chat_run_done",
-    "room_input",
-    "code_input",
-    "code_run_failed",
-    "code_run_done",
-    "code_pr_checks",
-    "code_pr_merged",
-    "code_afk_pr",
-    "code_setup_failed",
-    "routine_failed",
-    "routine_message",
-    "research_input",
-    "research_done",
-    "research_failed",
-    "meeting_done",
-    "meeting_failed",
-)
-# What a device that never said which it wants gets: what pushed before there were more.
-LEGACY_CATEGORIES = ("chat_input", "code_input")
-# Kinds that are about a chat's session, so that chat can be muted.
-SESSION_KINDS = (
-    "approval", "question", "plan", "run_done", "run_failed", "pr_checks", "pr_merged", "afk_pr",
-    # A routine's answer lands in a chat's own session, so that chat's mute silences it too.
-    "routine_message",
-)
-INPUT_KINDS = ("approval", "question", "plan")
-
-
-def category_of(kind: str, project: bool = False) -> str:
-    if kind == "routine_failed":
-        return "routine_failed"
-    if kind == "routine_message":
-        return "routine_message"
-    # A room is nobody's chat, so which feature a session is in says nothing about it.
-    if kind == "room_input":
-        return "room_input"
-    if kind == "clone_failed":
-        return "code_setup_failed"
-    if kind in ("research_brief", "research_scope"):
-        return "research_input"
-    if kind.startswith(("research_", "meeting_")):
-        return kind
-    if kind in ("pr_checks", "pr_merged", "afk_pr"):
-        return f"code_{kind}"
-    feature = "code" if project or kind == "plan" else "chat"
-    return f"{feature}_{'input' if kind in INPUT_KINDS else kind}"
-
 
 _lock = threading.Lock()
 _last: Dict[Tuple[str, str, str], float] = {}
@@ -370,12 +303,18 @@ def _on_screen_devices(path: Path) -> List[str]:
         return [device for (db, device) in _open if db == str(path)]
 
 
-def _relay(path: Path, kind: str, category: str, session_id: str, extra: Dict[str, str]) -> None:
+def _relay(path: Path, kind: str, category: str, session_id: str, notice: Notice) -> None:
     """Asks the registry to push to the account's Android installs, if this profile is linked."""
     home = home_of(path)
     state = link.load_state(home)
     if not state.get("token") or state.get("revoked") or not state.get("site"):
         return
+    fields = carried(notice)
+    # The phone draws the notice itself (a notification payload is Android's to draw, and its drawing
+    # can carry no button), so it is told whose picture to wear and where that picture is: the app's
+    # own file, at the origin its subscription named (`build-badges.mjs` cuts it, and the browser's
+    # tray and ntfy read the same bytes), never the host's address, which may be a tunnel.
+    picture = ntfy.icon(web(path), fields.get("bot"))
     answer = None
     for attempt in range(RELAY_TRIES):
         try:
@@ -390,8 +329,8 @@ def _relay(path: Path, kind: str, category: str, session_id: str, extra: Dict[st
                     "session_id": session_id,
                     # A device that chose ntfy is told there, so a token it left on file stays quiet.
                     "skip": list(dict.fromkeys(_on_screen_devices(path) + ntfy.devices(path)))[:50],
-                    # Android shows no bot picture, so the registry isn't told which bot it is.
-                    **{k: v for k, v in extra.items() if k != "bot"},
+                    **fields,
+                    **({"icon": picture} if picture else {}),
                 },
             )
             break
@@ -418,11 +357,12 @@ def _linked(path: Path) -> bool:
     return bool(state.get("token") and not state.get("revoked") and state.get("site"))
 
 
-def _deliver(path: Path, kind: str, category: str, session_id: str, extra: Optional[Dict[str, str]] = None) -> None:
-    extra = extra or {}
+def _deliver(path: Path, kind: str, category: str, session_id: str, notice: Optional[Notice] = None) -> None:
+    # A notice with no words is still a notice: it may carry buttons, and an empty mapping is falsy.
+    notice = notice if notice is not None else Notice()
     # At most 32 characters of base64url, and distinct per session however long its id is.
     topic = _b64(hashlib.sha256(f"{kind}:{session_id}".encode()).digest()[:18])
-    payload = {"kind": kind, "session_id": session_id, **extra}
+    payload = {"kind": kind, "session_id": session_id, **carried(notice)}
     for row in _rows(path):
         if _on_screen(path, row["device"]) or not wants(row, category):
             continue
@@ -433,10 +373,10 @@ def _deliver(path: Path, kind: str, category: str, session_id: str, extra: Optio
         elif status is None or status >= 300:
             logger.debug("gots: push to %s answered %s", urllib.parse.urlsplit(row["endpoint"]).netloc, status)
     try:
-        ntfy.deliver(path, kind, category, session_id, extra, _on_screen_devices(path))
+        ntfy.deliver(path, kind, category, session_id, notice, _on_screen_devices(path))
     except Exception:
         logger.debug("gots: an ntfy publish failed", exc_info=True)
-    _relay(path, kind, category, session_id, extra)
+    _relay(path, kind, category, session_id, notice)
 
 
 SEEN_KEEP_MS = 30 * 24 * 3600 * 1000
@@ -486,17 +426,23 @@ def notify(
     session_id: Optional[str],
     path: Optional[Path] = None,
     title: Optional[str] = None,
+    body: Optional[str] = None,
+    answer: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Something a device should hear about. ``session_id`` is the session it is about, or for the
     kinds that aren't about one the routine's job id (``routine_failed``), the project's id
     (``clone_failed``), the research mission's id (``research_*``) or the room's id
     (``room_input``); it only picks what a tap opens. ``title`` names what it is about when that
-    isn't a session (whose chat title is looked up). A kind about a session (``SESSION_KINDS``) is
-    only pushed for a session that is one of the app's chats, or one a chat record names; another
-    surface's session is no device's news. Answers whether a push will be sent — a device exists that
-    asked for this category, and one of this kind for this id wasn't told a moment ago — so a caller
-    that remembers what it has told the user doesn't remember a push that was dropped. Never raises:
-    it runs inside Hermes's hooks."""
+    isn't a session (whose chat title is looked up), and ``body`` is what it says where a kind's own
+    line is not the news — a finished run's paragraph, a failed one's error. ``answer`` is the
+    approval the notice is about, as ``answers.run_target`` or ``answers.room_target`` spells it,
+    and the notice then carries the two buttons that settle it — where this host knows the address
+    the app dialled, since a button that can't be pressed is worse than no button. A kind about a
+    session (``SESSION_KINDS``) is only pushed for a session that is one of the app's chats, or one
+    a chat record names; another surface's session is no device's news. Answers whether a push will
+    be sent — a device exists that asked for this category, and one of this kind for this id wasn't
+    told a moment ago — so a caller that remembers what it has told the user doesn't remember a
+    push that was dropped. Never raises: it runs inside Hermes's hooks."""
     try:
         if kind not in KINDS or not session_id:
             return False
@@ -516,7 +462,7 @@ def notify(
         if not reachable(path):
             return False
         threading.Thread(
-            target=_run, args=(path, kind, session_id, title), name="gots-push", daemon=True
+            target=_run, args=(path, kind, session_id, title, body, answer), name="gots-push", daemon=True
         ).start()
         return True
     except Exception:
@@ -527,48 +473,50 @@ def notify(
 BOT_ID = re.compile(r"^[a-z0-9-]{1,32}$")
 
 
-def set_bot(path: Path, bot: str) -> None:
-    """Which of the app's bot characters this profile is, so a notification shows its picture."""
-    if not BOT_ID.match(bot):
-        raise PushError("Not a bot.")
-    conn = connect(path)
-    try:
-        conn.execute("INSERT OR REPLACE INTO push_prefs (key, value) VALUES ('bot', ?)", (bot,))
-    finally:
-        conn.close()
-
-
-def bot(path: Path) -> Optional[str]:
+def _pref(path: Path, key: str, valid: Any = None) -> Optional[str]:
+    """One value this profile keeps in `push_prefs`, where it holds one this build still accepts."""
     if not path.exists():
         return None
     conn = connect(path)
     try:
-        row = conn.execute("SELECT value FROM push_prefs WHERE key = 'bot'").fetchone()
+        row = conn.execute("SELECT value FROM push_prefs WHERE key = ?", (key,)).fetchone()
     finally:
         conn.close()
-    return row[0] if row and isinstance(row[0], str) and BOT_ID.match(row[0]) else None
+    if row is None or not isinstance(row[0], str):
+        return None
+    return row[0] if valid is None or valid.match(row[0]) else None
+
+
+def _set_pref(path: Path, key: str, value: Optional[str]) -> None:
+    """Keeps one value in `push_prefs`, or drops the row while there is none to keep."""
+    conn = connect(path)
+    try:
+        if value:
+            conn.execute("INSERT OR REPLACE INTO push_prefs (key, value) VALUES (?, ?)", (key, value))
+        else:
+            conn.execute("DELETE FROM push_prefs WHERE key = ?", (key,))
+    finally:
+        conn.close()
+
+
+def set_bot(path: Path, bot: str) -> None:
+    """Which of the app's bot characters this profile is, so a notification shows its picture."""
+    if not BOT_ID.match(bot):
+        raise PushError("Not a bot.")
+    _set_pref(path, "bot", bot)
+
+
+def bot(path: Path) -> Optional[str]:
+    return _pref(path, "bot", BOT_ID)
 
 
 def set_bot_muted(path: Path, muted: bool) -> None:
     """Mutes or unmutes every push from this profile (the bot), whatever device would get it."""
-    conn = connect(path)
-    try:
-        if muted:
-            conn.execute("INSERT OR REPLACE INTO push_prefs (key, value) VALUES ('muted', '1')")
-        else:
-            conn.execute("DELETE FROM push_prefs WHERE key = 'muted'")
-    finally:
-        conn.close()
+    _set_pref(path, "muted", "1" if muted else None)
 
 
 def bot_muted(path: Path) -> bool:
-    if not path.exists():
-        return False
-    conn = connect(path)
-    try:
-        return conn.execute("SELECT 1 FROM push_prefs WHERE key = 'muted'").fetchone() is not None
-    finally:
-        conn.close()
+    return _pref(path, "muted") is not None
 
 
 def _lineage(path: Path, session_id: str) -> List[str]:
@@ -633,10 +581,7 @@ def session_title(path: Path, session_id: str) -> Optional[str]:
 def _short(text: Optional[str]) -> Optional[str]:
     if not isinstance(text, str):
         return None
-    text = " ".join(text.split())
-    if len(text) > TITLE_MAX:
-        text = text[: TITLE_MAX - 1].rstrip() + "…"
-    return text or None
+    return flatten(text, TITLE_MAX) or None
 
 
 def muted(path: Path, kind: str, session_id: str) -> bool:
@@ -649,14 +594,116 @@ def _project_session(path: Path, session_id: str) -> bool:
     return bool(sessions.record_for(path, home_of(path), session_id))
 
 
-def _run(path: Path, kind: str, session_id: str, title: Optional[str] = None) -> None:
+def _run(
+    path: Path,
+    kind: str,
+    session_id: str,
+    title: Optional[str] = None,
+    body: Optional[str] = None,
+    answer: Optional[Dict[str, Any]] = None,
+) -> None:
     try:
         if muted(path, kind, session_id):
             return
         project = kind in SESSION_KINDS and _project_session(path, session_id)
         if kind in SESSION_KINDS and not title:
             title = session_title(path, session_id)
-        message = {"title": _short(title), "bot": bot(path)}
-        _deliver(path, kind, category_of(kind, project), session_id, {k: v for k, v in message.items() if v})
+        notice = Notice(
+            title=_short(title), body=body, bot=bot(path), actions=_buttons(path, answer)
+        )
+        _deliver(path, kind, category_of(kind, project), session_id, notice)
     except Exception:
         logger.debug("gots: a push failed", exc_info=True)
+
+
+def _buttons(path: Path, answer: Optional[Dict[str, Any]]) -> Tuple[Action, ...]:
+    """The buttons a notice carries: an approval's two, where this host knows how to be reached.
+
+    The address is the one the phone dialled — a host behind a tunnel or on a LAN name doesn't know
+    its own — so a profile no app has subscribed to from anywhere mints none: a button that can't be
+    pressed is worse than no button.
+    """
+    if not answer:
+        return ()
+    return answers.mint(path, answer, base(path), TTL_SECONDS)
+
+
+# Where the app dialled this bot, as `POST push` and `POST push/ntfy` keep it: the scheme and host,
+# then every path segment up to the plugin's own routes (a bot at /p/<profile> carries that too).
+# A button posts back to the same address, since the same phone reaches both.
+BASE = re.compile(r"^https?://[^\s/?#]+(?:/[^\s?#]*)?$")
+_FORWARDED = ("X-Forwarded-Proto", "X-Forwarded-Host")
+
+
+def _header(request: Any, name: str) -> Optional[str]:
+    """One request header by name, first value only.
+
+    The server's own mapping already answers whatever case a client sent it in, so the name is asked
+    for once. A proxy appends what it forwarded to a list, and the first is the client's own.
+    """
+    headers = getattr(request, "headers", None) or {}
+    value = headers.get(name)
+    if isinstance(value, str) and value.strip():
+        return value.split(",")[0].strip()
+    return None
+
+
+def base_url(request: Any, tail: str) -> Optional[str]:
+    """The address an app dialled this bot at, to the plugin's own prefix: for a button's link.
+
+    Read off the request the app subscribed with — ``request.scheme`` and ``Host``, or what a proxy
+    forwarded as ``X-Forwarded-Proto``/``X-Forwarded-Host``, since a host behind one is reached by the
+    proxy's name and scheme, not its own. ``tail`` is this route's own path under the plugin, which is
+    cut off; ``None`` where the request doesn't say (an app that reached a route some other way), which
+    leaves no button rather than a guess at where one lives.
+    """
+    path = getattr(request, "path", "") or ""
+    if not isinstance(path, str) or not path.endswith(tail):
+        return None
+    proto = _header(request, _FORWARDED[0]) or getattr(request, "scheme", None)
+    host = _header(request, _FORWARDED[1]) or _header(request, "Host")
+    if proto not in ("http", "https") or not isinstance(host, str) or not host:
+        return None
+    base = f"{proto}://{host}{path[: -len(tail)]}"
+    return base if BASE.match(base) else None
+
+
+def set_base(path: Path, base: Optional[str]) -> None:
+    """Keeps the address the app dialled, so a notice built later can carry a button back to it.
+
+    A request that names no address leaves the one already kept alone rather than forgetting it: the
+    routes that record this include the poll every screen makes, and a poll that reached one some
+    other way must not take away the address a button already posts to. An address this profile
+    already holds is not written again — that poll comes every few seconds, and nothing changed.
+    """
+    if not base:
+        return
+    if _pref(path, "base", BASE) == base:
+        return
+    _set_pref(path, "base", base)
+
+
+def base(path: Path) -> Optional[str]:
+    """Where the app last dialled this bot, or None while no app has subscribed from anywhere."""
+    return _pref(path, "base", BASE)
+
+
+# The app's own origin, as a browser's `location.origin` spells it: scheme, host and port, no path,
+# no search and no fragment. A notification's picture is the app's own file (`/bots/<id>/notify.png`),
+# so it is named at this origin rather than at the host, which may be a tunnel or a LAN name.
+WEB = re.compile(r"^https?://[^\s/?#]+$")
+
+
+def set_web(path: Path, origin: Optional[str]) -> None:
+    """Keeps where the app lives, so a notice published elsewhere can name the app's own picture.
+
+    Read from the ``subject`` the app subscribed with — its ``location.origin``. A subscription that
+    names a ``mailto:`` contact instead (an older app's) leaves none: there is no picture at a mailbox.
+    """
+    origin = origin.strip() if isinstance(origin, str) else None
+    _set_pref(path, "web", origin if origin and WEB.match(origin) else None)
+
+
+def web(path: Path) -> Optional[str]:
+    """Where the app lives, or None while no app has subscribed from a page of its own."""
+    return _pref(path, "web", WEB)
