@@ -292,13 +292,15 @@ export function ChatSettings({
                       code.onOpenUsage()
                     }}
                   >
-                    <ContextIcon usage={code.usage} />
+                    <span className="flex size-5 shrink-0 items-center justify-center [&>svg]:size-5">
+                      <ContextIcon usage={code.usage} />
+                    </span>
                     <RowText title="Context" subtitle={undefined} />
                     <ContextPercent usage={code.usage} />
                   </button>
                 )}
                 {code.repos.length > 0 && (
-                  <div data-session-repos className="flex items-start gap-3 px-4 py-3">
+                  <div data-session-repos className="flex items-start gap-4 bg-card px-5 py-3">
                     <FolderGit2Icon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
                     <div className="flex min-w-0 flex-col">
                       <span className="text-sm font-medium">
