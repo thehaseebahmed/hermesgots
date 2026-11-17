@@ -97,18 +97,24 @@ for (const dark of [false, true]) {
           `${name} stays visible when collapsed`,
         )
       }
-      for (const name of ["Search", "Expand sidebar"]) {
+      for (const name of ["Expand sidebar"]) {
         assert.equal(
           await page.getByRole("button", { name }).first().isVisible(),
           true,
           `${name} stays visible when collapsed`,
         )
       }
+      // The rail keeps no edit switch: the mode is opened from a sidebar with its labels (a Decision).
+      assert.equal(
+        await page.getByRole("button", { name: "Edit sidebar" }).count(),
+        0,
+        "the rail draws no edit button",
+      )
       const rows = await railRows(page)
       const shown = shownRows(rows)
-      // A filter can't leave nothing to check: the rail always shows its destinations and its two
-      // header controls at the least.
-      assert.ok(shown.length >= 8, `the rail shows its rows: ${JSON.stringify(rows)}`)
+      // A filter can't leave nothing to check: the rail always shows its destinations and its one
+      // header control at the least.
+      assert.ok(shown.length >= 7, `the rail shows its rows: ${JSON.stringify(rows)}`)
       for (const row of shown) {
         assert.ok(
           row.width >= 44 && row.height >= 44,
@@ -120,7 +126,7 @@ for (const dark of [false, true]) {
           `row ${row.name} is centred: ${JSON.stringify(row)}`,
         )
       }
-      // The collapse control leads the rail, above Search.
+      // The collapse control leads the rail, and nothing else of the header is drawn beside it.
       assert.equal(rows[0].name, "Expand sidebar", "the toggle is the top row")
       await shot("collapsed")
 

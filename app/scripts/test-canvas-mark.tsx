@@ -100,7 +100,7 @@ const CANVAS = {
 }
 
 const row = (id: string) => find(`a[data-canvas-pinned][href="/canvas/${id}"]`)
-/** The row's head: the one slot the mark draws in. */
+/** The row's head: the mark a pinned canvas draws first in its resting row, before its title. */
 const head = (id: string) => row(id)?.firstElementChild ?? null
 const classes = (id: string) => head(id)?.getAttribute("class") ?? ""
 
@@ -130,8 +130,9 @@ test("a pinned canvas draws the mark its user chose", async () => {
       assert.match(emoji?.getAttribute("class") ?? "", /\bsize-5\b/, "in the same 20px slot")
 
       // A canvas nobody marked is drawn exactly as it was before a mark existed: one svg and the
-      // name, the frame's own mark, and no wrapper the mark's arrival added.
-      assert.equal(row("m3")?.children.length, 2, "the head and the name, as before")
+      // name, and no wrapper the mark's arrival added. A resting row carries no grip column either —
+      // that column is the edit mode's alone.
+      assert.equal(row("m3")?.children.length, 2, "the head and the name")
       assert.equal(head("m3")?.tagName.toLowerCase(), "svg")
       assert.equal(classes("m3"), "lucide lucide-frame size-5 text-muted-foreground")
       assert.equal(row("m3")?.children[1]?.textContent, PLAIN.title)
