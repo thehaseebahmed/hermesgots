@@ -490,7 +490,7 @@ The bar of floating controls a list keeps at the foot of its scroll, above the s
 _Avoid_: bottom bar, FAB row, dock
 
 **Filter**:
-One of the pills that narrow a list. A bot's list wears them in the **bar** under its title row — under the search where there is one — and the one pressed is remembered on this device, with All what a device that never chose opens on; Chats is a row that is neither a room nor a routine's run, Unread is the same mark this device's read dot reads, and Archived is the one pill a row the reader put away is kept by, so All's own list is the rows nobody archived. The **Side chat list** wears All, Unread, Archived, Chats and Rooms — a run is no side chat, so the Routines pill would draw what that screen has already left out — while the **flat chat list** wears all six. A bot's **Skills tab** wears All and its **skill categories** instead, drawn in the tab's own flow rather than pinned to a header, forgotten when the tab is left, and each one holding at least one skill by construction — so the tab's only "nothing here" is the search's. Either way a filter only narrows and never re-orders.
+One of the pills that narrow a list. A bot's list wears them in the **bar** under its title row — under the search where there is one — and the one pressed is remembered on this device, with All what a device that never chose opens on; Chats is a row that is not a room, Unread is the same mark this device's read dot reads, and Archived is the one pill a row the reader put away is kept by, so All's own list is the rows nobody archived. The **Side chat list** wears All, Unread, Archived, Chats and Rooms — the flat chat list wears the same five. A bot's **Skills tab** wears All and its **skill categories** instead, drawn in the tab's own flow rather than pinned to a header, forgotten when the tab is left, and each one holding at least one skill by construction — so the tab's only "nothing here" is the search's. Either way a filter only narrows and never re-orders.
 _Avoid_: tab, segment, tag
 
 **Tell**:
@@ -696,7 +696,7 @@ _Avoid_: app setting, local setting, device setting
 
 **Flat chat list**:
 The Developer setting that draws every chat a bot has as one list at its own address, its routines'
-runs among the rows and the six pills — All, Unread, Archived, Chats, Rooms and Routines — and no
+the five pills — All, Unread, Archived, Chats and Rooms — and no
 **Main** (ADR 0162). Off on every device, where a bot opens on its Main and its chats are a screen
 away; on, the bot's address is that list, and the side-chat address lands it.
 _Avoid_: legacy chat UX, old layout, classic mode, bot threads
@@ -922,12 +922,12 @@ A job a bot's host runs on a schedule. It belongs to that bot — its id is in t
 the jobs themselves.
 _Avoid_: cron job, automation, task, schedule
 
-**Routine row**:
-The row a routine's run publishes in its bot's list: one per run, wearing the routine's icon rather
-than a chat's, its line and its time the run's own. It opens the run's transcript read-only, which
-is why it has no composer; a run that ended silent, or that never delivered to Gots, has no row at
-all.
-_Avoid_: routine message, notification, chip, card
+**Routine marker**:
+The line a bot's Main draws where a routine's run came back: `Routine "<name>" ran for X min Y secs`,
+placed among Main's messages by time. It is no message and is in no transcript, so the bot never reads
+it; it lights Main unread, and it opens the run's transcript read-only. A run that ended silent, or
+that never delivered to Gots, has no marker, and no list draws a row for one (ADR 0164).
+_Avoid_: routine row, routine message, notification, chip, card
 
 **Routine run**:
 One execution of a routine, whose transcript a routine row opens: read-only, since a run's session
