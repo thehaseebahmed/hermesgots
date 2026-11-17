@@ -14,6 +14,7 @@ import { useLocation, useNavigate, useSearchParams } from "react-router"
 
 import { Refusal } from "@/components/banner"
 import { PointChips } from "@/components/chat/canvas-points"
+import type { TakenForm } from "@/components/chat/question-card"
 import { isPhoto } from "@/lib/attachment-caps"
 import { drawnCell } from "@/lib/media-kind"
 import { Markdown } from "@/components/chat/markdown"
@@ -106,7 +107,7 @@ import {
   type Waiting,
 } from "./state"
 import { readRows, storeFor } from "./store"
-import type { PreparedTurn } from "./turn"
+import type { PreparedTurn, SteerAnswer } from "./turn"
 
 /** The questions a finished `clarify` call got answered, each as "<question> → <answer>". */
 function answered(call: ToolCall): string[] {
@@ -259,9 +260,8 @@ const TurnView = memo(
             )
           if (part.kind === "steer")
             return (
-              <div key={at} data-steer className="ml-auto w-fit max-w-[85%] space-y-1 text-right">
+              <div key={at} data-steer className="ml-auto w-fit max-w-[85%] text-right">
                 <UserBubble>{part.text}</UserBubble>
-                <p className="text-xs text-muted-foreground">Steered</p>
               </div>
             )
           if (part.kind === "reminder") return <ReminderRow key={at} reminder={part} />
@@ -665,6 +665,17 @@ function promptKey(waiting: Waiting, questions?: ClarifyQuestion[]): string {
   return `call:${questions.map((one) => one.question).join("\u0000")}`
 }
 
+/**
+ * A form a call's card took, filed under the call it was given for: the run it was taken in and the
+ * call's own `promptKey`, so a card of another call — or of the same words asked by a later run — is
+ * never answered by it. The form itself is the card's own (`TakenForm`); this is what the page holds
+ * of it between one of a call's prompts and the next.
+ */
+export interface CarriedForm {
+  key: string
+  form: TakenForm
+}
+
 export interface PromptProps {
   waiting: Waiting
   /** The questions of the call the wait came out of, where the thread has read them. */
@@ -675,6 +686,10 @@ export interface PromptProps {
   asker?: string
   /** `waiting` is answered and the call's next question is still to be asked: nothing is sent. */
   held?: boolean
+  /** The form this call's card already took, where it was drawn again after the host took its time. */
+  taken?: TakenForm
+  /** Where the card records the form it took — and that it took none, when a send was refused. */
+  onTaken?: (taken: TakenForm | undefined) => void
 }
 
 /** What a composer drawn by the app is handed to drive the thread with. */
@@ -719,12 +734,9 @@ interface ThreadOptions {
   queueTurn?: (text: string, attachments: Attachment[]) => Promise<void>
   /**
    * Steers the running reply through the plugin's queue; without it, nothing can be steered. Answers
-   * whether the reply took it, which is when the thread may draw it.
+   * whether the reply took it, which settles the part the thread drew at the press.
    */
-  steerTurn?: (
-    text: string,
-    attachments: Attachment[],
-  ) => Promise<{ took: boolean; files: SentFile[] }>
+  steerTurn?: (text: string, attachments: Attachment[]) => Promise<SteerAnswer>
   /**
    * Called once the thread has read the host (`opened`), each time a turn has ended (`turn`), and
    * when the page comes back to the foreground and has caught up (`returned`): where the app reads
@@ -804,6 +816,21 @@ export function ChatNextThread({
     const lapse = setTimeout(() => dispatch({ type: "between-lapsed" }), BETWEEN_MS)
     return () => clearTimeout(lapse)
   }, [doing.between, dispatch])
+  // The form a call's card took, held here rather than in the card: a host asks the call's next
+  // question when it is ready, and a card drawn again in the meantime takes the form back, so the
+  // answers the reader gave ahead still go in rather than one per visit (`CarriedForm`).
+  const [carried, setCarried] = useState<CarriedForm | undefined>(undefined)
+  // The card's own key, and the name the form is filed under: one call, one identity, so a form the
+  // card took is never looked for under another name than the one it was stored with.
+  const call = asking ? promptKey(asking, doing.questionSet) : undefined
+  const carriedForm = carried && carried.key === call ? carried.form : undefined
+  useEffect(() => {
+    // A call cannot outlive its run, so a form taken during one is nothing once the run is over —
+    // dropped rather than merely ignored, so no reader's answers sit in the page past their call.
+    // Only the run's end says so: while the host is between two questions no card is on screen and
+    // the form is exactly what is owed.
+    if (!carried || !doing.running) setCarried(undefined)
+  }, [carried, doing.running])
   const rows = useLiveQuery(
     () => readRows(database, session ?? "", "live"),
     [database, session],
@@ -1698,10 +1725,27 @@ export function ChatNextThread({
 
   async function steerMessage(text: string, attachments: Attachment[]) {
     if (!steerTurn) throw new Error("This reply can't be steered.")
-    // A steer the host took stands in the reply at once: its transcript row lands only when the run
-    // reads it. One it refused stays queued, and the queue row is what draws it.
-    const steered = await steerTurn(text, attachments)
-    if (steered.took) dispatch({ type: "steered", text, files: steered.files })
+    // The message stands in the reply the moment it goes, with the files it carries: the queue post,
+    // the steer and the save of those files are all round trips, and the reader's own words are not
+    // something to wait for. The host's answer then settles that part — with the files as it saved
+    // them, each naming a path the agent can open — or takes it back out, since the queue draws a
+    // steer it never took. Whether there is a reply to draw on at all is `withSteer`'s own rule.
+    const send = randomId()
+    dispatch({
+      type: "steer-drawn",
+      send,
+      text,
+      ...(attachments.length ? { files: attachments.map(sentFileOf) } : {}),
+    })
+    let answer: SteerAnswer
+    try {
+      answer = await steerTurn(text, attachments)
+    } catch (error) {
+      dispatch({ type: "unsteered", send })
+      throw error
+    }
+    if (answer.took) dispatch({ type: "steer-settled", send, files: answer.files })
+    else dispatch({ type: "unsteered", send })
     void catchUp()
   }
 
@@ -1839,11 +1883,17 @@ export function ChatNextThread({
   const waitingCard =
     asking && Prompt ? (
       <Prompt
-        key={promptKey(asking, doing.questionSet)}
+        key={call}
         waiting={asking}
         questions={doing.questionSet}
         asker={asker}
         held={!doing.waiting}
+        taken={carriedForm}
+        onTaken={(form) =>
+          setCarried((was) =>
+            !form ? undefined : was && was.key === call ? was : { key: call ?? "", form },
+          )
+        }
         answer={async (value) => {
           if (!doing.waiting) return
           await answer(doing.waiting, value, { rethrow: true })

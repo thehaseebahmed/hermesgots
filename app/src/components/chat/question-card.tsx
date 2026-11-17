@@ -23,11 +23,14 @@ import { cn } from "@/lib/utils"
 const OTHER = "\u0000other"
 
 /** What the user has picked or typed for one question, before it's sent. */
-interface Picked {
+export interface Picked {
   choices: string[]
   other: string
   usingOther: boolean
 }
+
+/** A form as the reader filled it in, by question id. */
+export type PickedForm = Record<string, Picked>
 
 /** Nothing picked yet: a question the card has not been answered on reads as this. */
 const NOTHING_PICKED: Picked = Object.freeze({ choices: [], other: "", usingOther: false })
@@ -181,6 +184,19 @@ const motion = () => (prefersReducedMotion() ? "auto" : "smooth")
 const HALF_SCREEN = "max-h-[50dvh]"
 
 /**
+ * The form a card took for a call, and the prompt it last answered with it. The screen drawing the
+ * card keeps it, so a card drawn again is handed it back: a host asks a call's questions one prompt
+ * at a time and takes its own while to ask the next, and a card that left the composer in between
+ * would otherwise take the reader's answers with it — one answer per visit, each needing its own tap.
+ */
+export interface TakenForm {
+  /** The form as the reader filled it in, per question, so a card drawn again shows what they gave. */
+  form: PickedForm
+  /** The prompt the form last answered, so a question already sent is not sent again. */
+  sent: string
+}
+
+/**
  * The agent's questions, in place of the composer until answered; the answers then show as a card
  * in the thread (`ClarifyCard`). One question is a plain form. Two or more are pages of one card
  * (swipe, or the arrows beside its count), and any question may be skipped — so a question longer
@@ -198,6 +214,8 @@ export function QuestionCard({
   askedId,
   from,
   held = false,
+  taken,
+  onTaken,
   onAnswer = (answers) => answerClarify(message, answers),
 }: {
   message: Message
@@ -207,6 +225,10 @@ export function QuestionCard({
   from?: string
   /** The question shown is answered and the host has yet to ask the next: nothing can be sent. */
   held?: boolean
+  /** The form this card took for the call before it was drawn again, with the prompt it last answered. */
+  taken?: TakenForm
+  /** Where the form taken goes, so a card drawn again answers the rest from it; undefined on a refusal. */
+  onTaken?: (taken: TakenForm | undefined) => void
   /** Where the answers go; the chat's own engine unless the screen drawing the card answers itself. */
   onAnswer?: (answers: ClarifyAnswers) => Promise<void>
 }) {
@@ -216,10 +238,14 @@ export function QuestionCard({
   const oneAtATime = askedPage >= 0
   const [sending, setPending] = useState(false)
   const refusal = useRefusal()
-  // The form as sent, still owed to a host that asks one question at a time.
-  const [committed, setCommitted] = useState<ClarifyAnswers | null>(null)
+  // The form as sent, still owed to a host that asks one question at a time — taken up again where
+  // this card is the call's card drawn a second time, since a host that outlasts the card's hold has
+  // the reader's answers go with the first one otherwise. A lone question has no second prompt to
+  // owe, and takes no form up (nothing ever draws it again).
+  const owed = oneAtATime && paged ? taken : undefined
+  const [committed, setCommitted] = useState<PickedForm | null>(owed?.form ?? null)
   /** The asked question the committed form last answered, so no question is answered twice. */
-  const sentFor = useRef<string>(undefined)
+  const sentFor = useRef<string>(owed?.sent)
   const pending = sending || held || committed !== null
   const [page, setPage] = useState(oneAtATime ? askedPage : 0)
   const card = useRef<HTMLDivElement>(null)
@@ -231,8 +257,9 @@ export function QuestionCard({
   const pages = useRef<(HTMLDivElement | null)[]>([])
   // The row is as tall as the page showing, so a short question leaves no gap above the buttons.
   const [height, setHeight] = useState<number>()
-  // A question read in after the prompt named another has nothing picked yet: an empty form.
-  const [picked, setPicked] = useState<Record<string, Picked>>({})
+  // A question read in after the prompt named another has nothing picked yet: an empty form. One the
+  // form was already filled in for opens with the answers it gave, as the reader left them.
+  const [picked, setPicked] = useState<PickedForm>(() => owed?.form ?? {})
   const pickOf = (id: string): Picked => picked[id] ?? NOTHING_PICKED
   const answers: ClarifyAnswers = Object.fromEntries(
     questions.map((q) => [q.id, answerOf(q, pickOf(q.id))]),
@@ -328,7 +355,7 @@ export function QuestionCard({
   const current = questions[page]
   const skip = () => {
     setPicked((all) => ({ ...all, [current.id]: NOTHING_PICKED }))
-    if (last) commit({ ...answers, [current.id]: null })
+    if (last) commit({ ...picked, [current.id]: NOTHING_PICKED })
     else goTo(page + 1)
   }
 
@@ -341,24 +368,43 @@ export function QuestionCard({
     }
   }
 
-  // A host asking one at a time takes only the question it asks; the rest wait in the commit.
-  const answerAsked = async (form: ClarifyAnswers) => {
-    sentFor.current = askedId
-    if (await send({ [askedId!]: form[askedId!] ?? null })) return
+  // Lets the form go: the card comes back to the reader, on the page the host asks.
+  const release = () => {
     setCommitted(null)
+    // The reader gives this one again: the question is theirs while the card stays on it.
+    sentFor.current = undefined
+    onTaken?.(undefined)
     goTo(askedPage)
   }
 
-  const commit = (form: ClarifyAnswers) => {
-    if (!oneAtATime) return void send(form)
+  // A host asking one at a time takes only the question it asks; the rest wait in the commit. One
+  // answer per prompt: a card drawn again while an answer was still going must not send it twice.
+  const answerAsked = async (form: PickedForm) => {
+    if (!askedId || sentFor.current === askedId) return
+    const question = questions.find((one) => one.id === askedId)
+    if (!question) return release()
+    sentFor.current = askedId
+    onTaken?.({ form, sent: askedId })
+    if (await send({ [askedId]: answerOf(question, form[askedId] ?? NOTHING_PICKED) })) return
+    release()
+  }
+
+  const commit = (form: PickedForm) => {
+    if (!oneAtATime)
+      return void send(
+        Object.fromEntries(questions.map((one) => [one.id, answerOf(one, form[one.id] ?? NOTHING_PICKED)])),
+      )
     setCommitted(form)
     void answerAsked(form)
   }
 
   // The host asks the next question of the call a moment after the last answer: it is answered from
-  // the commit, since the reader already gave it.
+  // the commit, since the reader already gave it. A question the form has no page for is the
+  // reader's own to give — a call whose ask was read differently is never skipped in their name.
   useEffect(() => {
-    if (!committed || held || sending || !oneAtATime || sentFor.current === askedId) return
+    if (!committed || !askedId || held || sending || !oneAtATime) return
+    if (sentFor.current === askedId) return
+    if (!(askedId in committed)) return release()
     void answerAsked(committed)
   })
 
@@ -472,7 +518,7 @@ export function QuestionCard({
             size="lg"
             className="h-11 flex-1 sm:min-w-40 sm:flex-none"
             disabled={pending || !answers[current.id]}
-            onClick={() => commit(answers)}
+            onClick={() => commit(picked)}
           >
             Send
           </Button>

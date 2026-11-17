@@ -31,6 +31,17 @@ const MOCKS = {
   muted: { port: MOCK_BASE + 6, env: { MOCK_MUTE_PROMPT: "1", MOCK_LIVE_CLARIFY: "1" } },
   // The shape Hermes's own route asks: one prompt per question, no plugin batch fields.
   "live-clarify": { port: MOCK_BASE + 7, env: { MOCK_LIVE_CLARIFY: "1" } },
+  // A host that takes its time between two questions of one call, as the model loop it runs between
+  // them does: the card is gone and back before the next question is asked, and the request for the
+  // question the chat comes back to is not replayed either.
+  "slow-clarify": {
+    port: MOCK_BASE + 8,
+    env: {
+      MOCK_WITHHOLD_PROMPT: "1",
+      MOCK_CLARIFY_GAP_MS: "7000",
+      MOCK_CLARIFY_LEAD_MS: "3000",
+    },
+  },
 }
 // How many ports a lane's mocks take, and so how far apart two lanes' sets start.
 const LANE_PORTS = Object.keys(MOCKS).length
@@ -126,6 +137,12 @@ export const FLOWS = {
     mock: "withheld",
     about:
       "A chat whose run already waits on a question opens with the question's form, read off the run's own status on a host that never re-sends the request: never a \"No answer\" card while it waits, and the answer reading back once given",
+  },
+  "question-reload-many": {
+    script: "e2e/question-reload-many.mjs",
+    mock: "slow-clarify",
+    about:
+      "A call's five questions waited on, the chat left and come back to, and the whole form filled in on the card it comes back as: one Send carries every answer, each going in as the host asks it, with the chat never left again",
   },
   "question-drop": {
     script: "e2e/question-drop.mjs",

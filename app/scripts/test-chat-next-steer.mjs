@@ -6,7 +6,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { withCarried, withSteer } from "../src/chat-next/fold.ts"
+import { settleSteer, withCarried, withSteer, withoutSteer } from "../src/chat-next/fold.ts"
 import { kinds } from "./chat-next-fixtures.ts"
 
 const steer = (text) => ({ kind: "steer", text })
@@ -44,7 +44,7 @@ test("a steer the stream has not caught up to yet waits at the foot, rather than
 })
 
 test("a steer this device sent is drawn once, not again when its row arrives", () => {
-  const live = withSteer(reply([words("One.")]), "please slow down")
+  const live = withSteer(reply([words("One.")]), { send: "s1", text: "please slow down" })
   assert.deepEqual(kinds(live), ["text", "steer"], "the steer stands at once")
   const copy = reply([words("One."), steer("please slow down"), words("Two.")])
   const drawn = withCarried(live, copy)
@@ -52,7 +52,7 @@ test("a steer this device sent is drawn once, not again when its row arrives", (
 })
 
 test("another device's steer still lands beside this device's own", () => {
-  const live = withSteer(reply([words("One.")]), "mine")
+  const live = withSteer(reply([words("One.")]), { send: "s1", text: "mine" })
   const copy = reply([words("One."), steer("mine"), words("Two."), steer("theirs")])
   const drawn = withCarried(live, copy)
   assert.deepEqual(said(drawn), ["mine", "theirs"])
@@ -60,7 +60,37 @@ test("another device's steer still lands beside this device's own", () => {
 
 test("a steer with nothing to say is not a part", () => {
   const live = reply([words("One.")])
-  assert.equal(withSteer(live, "   "), live)
+  assert.equal(withSteer(live, { send: "s1", text: "   " }), live)
+})
+
+test("the host's answer settles the part this device drew, rather than standing beside it", () => {
+  const sent = withSteer(reply([words("One.")]), { send: "s1", text: "please slow down" })
+  const files = [{ name: "notes.txt", type: "text/plain", size: 5, image: false, path: "/h/n" }]
+  const settled = settleSteer(sent, { send: "s1", files })
+  assert.deepEqual(said(settled), ["please slow down"], "one steer, not a second")
+  assert.deepEqual(
+    settled.parts.filter((part) => part.kind === "steer").map((part) => part.files?.[0]?.path),
+    ["/h/n"],
+    "and it carries the file the host saved",
+  )
+})
+
+test("an answer for a part the reply no longer holds draws nothing", () => {
+  // The run ended, or a rejoin rebuilt the turn from its own events, before the host answered: the
+  // words are the reader's, and a second copy at the foot of another reply would be a steer the
+  // agent never read. The transcript's row is what draws it from here.
+  const other = reply([words("Next question.")])
+  const files = [{ name: "notes.txt", type: "text/plain", size: 5, image: false, path: "/h/n" }]
+  assert.equal(settleSteer(other, { send: "s1", files }), other)
+  const sent = withSteer(reply([words("One.")]), { send: "s1", text: "please slow down" })
+  assert.equal(withSteer(sent, { send: "s1", text: "please slow down" }), sent, "and a second draw settles nothing")
+})
+
+test("a steer the host never took comes back out of the reply", () => {
+  const live = withSteer(reply([words("One.")]), { send: "s1", text: "please slow down" })
+  const back = withoutSteer(live, "s1")
+  assert.deepEqual(kinds(back), ["text"], "the reply is what it was before the words went in")
+  assert.equal(withoutSteer(back, "s1"), back, "and nothing to take back leaves it alone")
 })
 
 test("a reply with nothing carried is the stream's own turn, untouched", () => {

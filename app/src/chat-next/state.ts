@@ -17,6 +17,8 @@ import {
   withArchive,
   withCarried,
   withSteer,
+  settleSteer,
+  withoutSteer,
   type FoldOptions,
   type Part,
   type Row,
@@ -184,10 +186,14 @@ export type ThreadEvent =
   /** The files a send carried, as the host saved them, onto the message that send drew. */
   | { type: "saved"; send: string; files: SentFile[] }
   /**
-   * A steer the host took: it stands in the reply at once, rather than waiting for the transcript's
-   * row, which the host writes only when the run reads the steer.
+   * The press that put a steer in the reply, before the host was asked: only a reply this page is
+   * drawing can hold one, and with none the transcript's row for the steer is what draws it.
    */
-  | { type: "steered"; text: string; files?: SentFile[] }
+  | { type: "steer-drawn"; send: string; text: string; files?: SentFile[] }
+  /** The files the host saved for a steer this page already drew, on that same part. */
+  | { type: "steer-settled"; send: string; files: SentFile[] }
+  /** A steer the host never took: the queue draws it, so the part standing in the reply comes out. */
+  | { type: "unsteered"; send: string }
   /** A read the host answered with something other than the rows: said as a toast, drawn nowhere. */
   | { type: "read-failed" }
   /** `run` is the run being joined: a wait this page already read for it is that run's own. */
@@ -478,8 +484,28 @@ function withFailures(turns: Turn[], failures?: Record<string, string>): Turn[] 
   })
 }
 
+/**
+ * The fold with the steers this device sent stood at the foot of the reply it is replaying: those are
+ * the only parts of a live turn that are in neither the transcript the replay came from nor the copy
+ * it draws, and a reader who pressed send while it caught up is owed their own words.
+ */
+function withSentSteers(folded: Turn[], live: Turn): Turn[] {
+  const copy = folded.at(-1)
+  if (!copy || copy.row !== live.row) return folded
+  const held = new Set(copy.parts.flatMap((part) => (part.kind === "steer" ? [part.text] : [])))
+  const sent = live.parts.flatMap((part) =>
+    part.kind === "steer" && part.send && !held.has(part.text) ? [part] : [],
+  )
+  if (!sent.length) return folded
+  return [...folded.slice(0, -1), { ...copy, parts: [...copy.parts, ...sent] }]
+}
+
 function drawn(folded: Turn[], live?: LiveTurn, waiting?: Waiting): Turn[] {
-  if (!live || live.replay) return folded
+  // A run joined from its start replays its events before the turn is drawn from them, and what this
+  // device sent while that happens is in neither — the transcript has no row for it yet, and the
+  // replayed turn is not what the screen draws. A steer waits for nothing: it stands on the copy.
+  if (live?.replay) return withSentSteers(folded, live.turn)
+  if (!live) return folded
   const copy = folded.at(-1)
   // The rows have moved past the turn the stream stands on — another's work landed while the run
   // waits, a child's delivery or a wake turn: they are the thread now, and the streamed copy is a
@@ -783,6 +809,17 @@ function waitingAfter(state: ThreadState, event: RunEvent): Waiting | undefined 
   return ENDINGS.includes(event.event) ? undefined : waiting
 }
 
+/**
+ * The state with this page's live turn patched, or the very state it was given where the patch
+ * changed nothing. The identity check is load-bearing: a new live turn wakes the store's fold and
+ * re-renders the thread, so an event that settles nothing must not make one.
+ */
+function withLiveTurn(state: ThreadState, patch: (turn: Turn) => Turn): ThreadState {
+  if (!state.live) return state
+  const turn = patch(state.live.turn)
+  return turn === state.live.turn ? state : { ...state, live: { ...state.live, turn } }
+}
+
 /** The one place the thread changes: what is on screen is this state and nothing else. */
 export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
   switch (event.type) {
@@ -910,12 +947,19 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       }
     }
     case "saved": {
-      if (!event.files.length) return state
-      const live = state.live
-      if (!live || live.turn.sendId !== event.send) return state
-      if (equal(live.turn.files, event.files)) return state
-      return { ...state, live: { ...live, turn: { ...live.turn, files: event.files } } }
+      const turn = state.live?.turn
+      if (!event.files.length || turn?.sendId !== event.send) return state
+      if (equal(turn.files, event.files)) return state
+      return withLiveTurn(state, (live) => ({ ...live, files: event.files }))
     }
+    case "steer-drawn":
+      return withLiveTurn(state, (turn) =>
+        withSteer(turn, { send: event.send, text: event.text, files: event.files }),
+      )
+    case "steer-settled":
+      return withLiveTurn(state, (turn) => settleSteer(turn, { send: event.send, files: event.files }))
+    case "unsteered":
+      return withLiveTurn(state, (turn) => withoutSteer(turn, event.send))
     case "unsent": {
       const unsent = [
         ...(state.unsent ?? []).filter((one) => one.id !== event.row.id),
@@ -935,13 +979,6 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       const unsent = state.unsent?.filter((row) => row.id !== event.id)
       if (!unsent || unsent.length === state.unsent?.length) return state
       return { ...state, unsent: unsent.length ? unsent : undefined }
-    }
-    case "steered": {
-      // Only a reply this page draws can be steered: with none, the transcript's row for the steer is
-      // what draws it, and `withCarried` puts it where the run read it.
-      if (!state.live) return state
-      const turn = withSteer(state.live.turn, event.text, event.files)
-      return turn === state.live.turn ? state : { ...state, live: { ...state.live, turn } }
     }
     case "read-failed":
       return state.status === "loading" ? { ...state, status: "ready" } : state

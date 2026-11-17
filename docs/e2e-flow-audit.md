@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **99 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 99 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **100 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 100 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --------- | ------ |
-| stay | 44 |
+| stay | 45 |
 | component | 51 |
 | plugin | 2 |
 | delete | 2 |
-| **total** | **99** |
+| **total** | **100** |
 
-Of those 99, 93 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 91 distinct files) and 6 point at the older
+Of those 100, 94 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 93 distinct files) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -182,6 +182,17 @@ archived turns once, in order, under a divider that stays where the compaction r
 `test-chat-next-compaction-matrix.tsx` holds the page's gate over the same host (handed the record
 as a prop), so it passes whether or not anything in the app reads the chat's own; this flow is the
 only place the app is asked, and it fails at the base commit on the button alone.
+The other half of a question that reaches a page arrives with `question-reload-many`, because the claim
+is that the answers a reader gave ahead are still owed when the card that took them is drawn again.
+Hermes asks a call's questions one prompt at a time, and a real host takes its own while between two —
+longer, sometimes, than the hold that keeps the card in the composer's place. The card that comes back
+has an empty form, and one answer gets through per visit unless the screen drawing it keeps the form it
+took. The `slow-clarify` mock withholds a prompt's request from any stream that was not there for it and
+takes seven seconds between two questions, so the card is gone and back before the next; nothing below a
+browser holds a page whose card a run's prompt draws again. It fails at the base commit on the second
+question — the card back on page 2 of 5 with nothing filled in — and passes with the page's hold in
+place.
+
 
 A twenty-ninth stay has arrived with a bot's own screen (G1): `bot-chats`, because what it walks is the
 browser's session history — the entry a page stands on, the address a press walks to, and the stack a
@@ -306,6 +317,7 @@ reads, and a question whose window closed.
 | `question-card` | stay | On the new chat screen (chat-next) a waiting question is the composer's form alone: the thread says it in one line and draws no card of the question, and once answered the thread's card reads the answer and reads it again from the host's transcript after a reload. A question with more choices than a phone holds keeps its own Skip and Send on it — the card stops at half the screen and the choices scroll inside — at both widths. A call that asked five questions is served one prompt at a time — the shape Hermes's own route asks, which the flow's mock reproduces (`live-clarify`) — and its card holds the whole ask: the page showing is the question the prompt names — never the call's first again — with the rest a page away on the same card, and every answer reaches the run with the chat left open. The instant the card takes the answer, rather than a beat later when the transcript lands, is the reducer test's (`test-chat-next-state.tsx`): the mock's transcript answers too promptly to hold that window open. | The new screen is only drawn through the app (`ChatPage` picks it, the settings switch and the Developer switch decide), and the claim is one question in two places at two widths: the device harness draws chat-next's own plain markup, never `AppChatNextThread`'s rows, so no component tier can stand in. The card's height against the screen is layout no DOM without a layout engine can measure. The five-question walk is the same claim one question further, and it runs at both widths because the phone is where the walk was reported broken; the answered card it reads is the app's own, which the device harness never draws. | Nothing yet — it is the only flow that drives the new screen, and the tier it would move to waits for a harness that mounts `AppChatNextThread` over a fake host. |
 | `question-muted` | stay | A call's second question is published on the run's status and to nobody's stream, the way a host that raises one with no subscriber attached leaves it: the form comes back while the chat stays open, its card turns to the page the status names — of the call's whole ask — and all five answers reach the run. | A status read behind a page that is following a run is the only thing that can find it, and the page's own pace and busy-ness are layout- and clock-free: the flow is the wall clock of a poll landing, and the composer the form replaces is the app's own. `test-chat-next-reads.mjs` holds the read, and no component test draws a real stream going quiet on a live run. | Nothing yet: it shares the `muted` mock with no other flow, and the claim it makes is about a host this repo can only fake. |
 | `question-reload` | stay | A chat whose run already waits on a question, opened again on a host that never re-sends the request: the question's form is in the composer within a second of the chat drawing, the thread draws its one waiting line and never a "No answer" card through the loading window, and the answer reads back on the card at once. | The wait is read off the run's own status, which a component test over a `withhold`ing host rules (`test-chat-next-waiting.tsx`), as it does the send a pending prompt turns down, and the status read itself (`test-chat-next-reads.mjs`); what no lower tier holds is the app's own thread under a real reload — the device harness draws chat-next's plain markup, never `AppChatNextThread`'s rows — and the sub-second window, which is wall clock. | Nothing yet: the recovery, the refused send and the parse are components, and the flow keeps the reload and the absence of the card watched frame by frame. |
+| `question-reload-many` | stay | A call's questions are answered whole from a chat that is come back to: on a host that withholds a prompt's request from streams that were not there for it and takes longer between two questions than the card holds its place, one Send carries every answer — the wait up and the chat left and opened again; the chat left before the host asks and opened onto a call already waiting; and a run answered, carried on and asking a second call, whose card is its own with nothing of the first form on it. | The gap between two prompts is the host's own clock, and the card standing down in it is the app's own choice: no component test draws a page whose card is gone and drawn again by a run's prompt, and the hold between two is wall clock. What the card does with a form handed back is `test-question-card.tsx`'s; what the page hands back is only visible with the app's own thread and a host that takes its time. | The card's own rules — take up the form it took and answer from it, never answer a prompt twice, hand the form back rather than hold the card inert when it has no page for the question asked, take no form up for a lone question — are the component tier (`test-question-card.tsx`); what stays here is that the page holds it across the host's gap, and that a second call opens empty. |
 | `question-drop` | stay | A chat whose run waits on a question, on a host that cuts the run's event stream a second and a half in, over and over: the question's form stays in the composer across the drops and the thread keeps its one waiting line, so the answer still lands and reads back on the card. | The wait is the run's to settle, and the rule that neither a whole read of the transcript nor a failed one settles it is a component test over a `withhold`ing host whose stream dies (`test-chat-next-waiting.tsx`) beside the reducer's (`test-chat-next-state.tsx`); what no lower tier holds is the app's own composer under a stream that keeps dying — the device harness draws chat-next's plain markup, never `AppChatNextThread`'s rows — and the wall clock of the page rejoining the run. | Nothing yet: the card's survival over twenty seconds of drops is the shape a phone asleep has, and the flow watches the form and the thread's line together. |
 
 ### The composer — #308

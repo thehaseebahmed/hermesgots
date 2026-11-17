@@ -12,17 +12,24 @@ import { cn } from "@/lib/utils"
  * A titled group of rows with its count; a `folded` group starts closed. `sticky` pins the heading
  * under the screen's own header while the group scrolls (Code's four): the header publishes its
  * height as `--list-header-h` on the list's scroll container, and the heading stops beneath it.
+ *
+ * `listSlot` names the `<ul>` for a screen whose rows are read without the heading — a list that
+ * draws its heading only where it divides something (the Side Chat List), so a reader of the DOM
+ * finds the rows at every width.
  */
 export function ItemGroup({
   group,
   sticky,
   listClassName,
+  listSlot,
   children,
 }: {
   group: ListGroup
   sticky?: boolean
   /** The list's own arrangement, where its rows are drawn as something else than a column. */
   listClassName?: string
+  /** The `data-slot` the `<ul>` wears, where a screen's rows are read apart from its heading. */
+  listSlot?: string
   children: ReactNode
 }) {
   const heading = (
@@ -39,7 +46,11 @@ export function ItemGroup({
     </>
   )
   const stickyClass = sticky ? "sticky z-[5] bg-background top-[var(--list-header-h)]" : ""
-  const list = <ul className={cn("flex flex-col", listClassName)}>{children}</ul>
+  const list = (
+    <ul data-slot={listSlot} className={cn("flex flex-col", listClassName)}>
+      {children}
+    </ul>
+  )
   if (!group.folded)
     return (
       <section className="flex flex-col gap-1" aria-label={group.label}>

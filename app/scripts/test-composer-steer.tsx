@@ -163,9 +163,10 @@ test("a steer of a file reads in the thread as what the user wrote", async () =>
   ]
   await seedChat({ id: "c1", messages, profile: botProfile("steer-bubble", { apiKey: undefined }) })
   await mount(chatScreen("c1"), async () => {
-    await until(async () => text().includes("Steered"), "the steer in the thread")
+    await until(async () => text().includes("read this"), "the steer in the thread")
     assert.match(text(), /read this/, "the reply shows what the user wrote")
     assert.doesNotMatch(text(), /<attachment/, "not the markers it reached the model as")
+    assert.doesNotMatch(text(), /Steered/, "and no mark says it arrived mid-run")
   })
 })
 

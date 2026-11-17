@@ -50,6 +50,7 @@ The CLI reuses any server that is already up, so after `pnpm e2e up` each run st
 | 18647 | Mock `triage-thread`: `MOCK_TRIAGE=thread`, so triage sends into the newest plain thread |
 | 18648 | Mock `withheld`: `MOCK_WITHHOLD_PROMPT=1`, a host that never re-sends a prompt's request to a subscriber that arrives after it |
 | 18649 | Mock `dropped`: `MOCK_WITHHOLD_PROMPT=1` and `MOCK_DROP_EVENTS_MS=1500`, a host that keeps no replay of a prompt's request and cuts every run's event stream a second and a half in |
+| 18650 | Mock `slow-clarify`: `MOCK_WITHHOLD_PROMPT=1`, `MOCK_CLARIFY_GAP_MS=7000` and `MOCK_CLARIFY_LEAD_MS=3000`, a host that thinks before it asks and takes its time between two of a call's questions — longer than the question card holds its place |
 
 A `--jobs N` sweep runs N lanes at once: lane n takes its own mock ports, starting at 18642 + 9n (its own mock
 state) and every lane drives the one app on 15173. `pnpm e2e down` stops every lane's servers.

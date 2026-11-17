@@ -53,7 +53,13 @@ export type Part =
   /** The host compacted the conversation here; the rows above are summarised in what follows. */
   | { kind: "compaction"; row?: number; at?: number }
   /** A message the user sent while the reply ran, which the agent read after its calls. */
-  | { kind: "steer"; text: string; files?: SentFile[] }
+  | {
+      kind: "steer"
+      text: string
+      files?: SentFile[]
+      /** The send this device drew it for, which the host's answer settles it by; one folded from the transcript has none. */
+      send?: string
+    }
   /**
    * A progress reminder's note, drawn only behind *Show progress reminders*: the call it refused never
    * ran, so it stands as a row of its own rather than in the group beside it (ADR 0068).
@@ -521,19 +527,46 @@ export function withCarried(live: Turn, copy: Turn): Turn {
   return { ...live, parts }
 }
 
+/** Where the reply holds the steer this device sent as `send`. */
+const steerAt = (parts: Part[], send: string) =>
+  parts.findIndex((part) => part.kind === "steer" && part.send === send)
+
 /**
- * A steer the user just sent, standing in the reply where they sent it. It is drawn at once rather
- * than waiting for the transcript's row, which the host writes when the run reads the steer — after
- * its next tool result, or at the turn's end. `withCarried` pairs the row off against this part, so
- * the two never draw twice.
+ * A steer the user just sent, standing in the reply where they sent it: putting it in the plugin's
+ * queue and steering it there are round trips, and a file it carries is saved before both, so the
+ * words and the files they went with are the reader's before the host has either. `withCarried`
+ * pairs the transcript's row off against this part by its words, so the two never draw twice.
  */
-export function withSteer(live: Turn, text: string, files?: SentFile[]): Turn {
+export function withSteer(
+  live: Turn,
+  { send, text, files }: { send: string; text: string; files?: SentFile[] },
+): Turn {
   const said = text.trim()
-  if (!said) return live
-  return {
-    ...live,
-    parts: [...live.parts, { kind: "steer", text: said, ...(files?.length ? { files } : {}) }],
-  }
+  if (!said || steerAt(live.parts, send) >= 0) return live
+  const part: Part = { kind: "steer", text: said, send, ...(files?.length ? { files } : {}) }
+  return { ...live, parts: [...live.parts, part] }
+}
+
+/**
+ * The files the host saved for a steer this device drew, on that same part and never a second one.
+ * A settle that finds no part leaves the turn alone: the read that dropped the live turn — a rejoin
+ * replaying the run, a turn that ended before the answer — draws the steer from the transcript's row
+ * instead, and appending the words here would put a steer the agent never read under another turn.
+ */
+export function settleSteer(live: Turn, { send, files }: { send: string; files: SentFile[] }): Turn {
+  const at = steerAt(live.parts, send)
+  const found = live.parts[at]
+  if (found?.kind !== "steer" || !files.length) return live
+  const parts = [...live.parts]
+  parts[at] = { ...found, files }
+  return { ...live, parts }
+}
+
+/** Takes back a steer the host never took: the queue draws it, so the reply must not. */
+export function withoutSteer(live: Turn, send: string): Turn {
+  const at = steerAt(live.parts, send)
+  if (at < 0) return live
+  return { ...live, parts: [...live.parts.slice(0, at), ...live.parts.slice(at + 1)] }
 }
 
 /** Whether a reply already drawn ended on these very words. */
