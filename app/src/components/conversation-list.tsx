@@ -220,6 +220,7 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
                     : cn(rowClass({ isActive: isActive || owner === bot.id }), "min-h-14 py-2")
                 }
               >
+                {!collapsed && <RowGutter />}
                 <span className="relative flex shrink-0">
                   <Bot id={bot.botId} className="size-9" />
                   {/* The rail draws no line under the name, so its mark is the only one a row has
@@ -323,6 +324,7 @@ function Waiting({
                     collapsed ? railClass(state) : cn(rowClass(state), "min-h-14 py-2")
                   }
                 >
+                  {!collapsed && <RowGutter />}
                   <Icon
                     className={
                       collapsed

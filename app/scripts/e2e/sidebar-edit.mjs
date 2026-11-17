@@ -1,10 +1,12 @@
-// The sidebar's edit mode arranged by the pointer: a row dragged by its own grip past its neighbour
-// and dropped — sent as real pointer events, so the gesture's capture and the grip's `touch-action`
-// decide what happens, not a handler's own idea of it — the order read back off the nav, a reload
-// reading the same order again, and the same drag with a finger in the phone's drawer, where Escape
-// is the mode's one press and the sheet's the next. And the slot the grip stands in, kept in both
-// states: the row's mark and its height the same before and after the mode opens, which only a
-// laid-out page can say.
+// The sidebar's edit mode arranged by the pointer: a row dragged by its own body — the whole row is
+// the handle, so a mouse press anywhere on it takes the gesture — past its neighbour and dropped,
+// sent as real pointer events, so the gesture's capture and the column's `touch-action` decide what
+// happens, not a handler's own idea of it; the order read back off the nav, a reload reading the same
+// order again, and the same drag with a finger in the phone's drawer, where a finger starts one only
+// on the indicator column and Escape is the mode's one press and the sheet's the next. And the narrow
+// column every row starts with, kept in both states: the row's mark and its height the same before and
+// after the mode opens, and a bot's face starting where a feature's mark does — which only a laid-out
+// page can say.
 import { app, assert, flow, pass, settled, swipeBy } from "./lib.mjs"
 
 /** A box's middle in the page's own px, and the height a drag has to cross to take a row's place. */
@@ -30,21 +32,23 @@ const navRows = (page) =>
     .locator('nav[aria-label="Main"] a')
     .evaluateAll((rows) => rows.map((row) => row.getAttribute("href")))
 
-/** One row's grip — the pointer's way into the order, and the keys' way too. */
+/** One row's grip — the indicator column's handle, and the keys' way into the order. */
 const gripOf = (page, id) => page.locator(`[data-sidebar-row="${id}"] [data-sidebar-grip]`)
 
 /**
- * Where a row's content starts and how tall the row is: the mark's left edge, and the row's own box.
- * Read in both states, since the 44px slot a resting row reserves is what keeps both answers the
- * same when the mode opens — the one thing about the gutter only a laid-out page can measure. The
- * mark is the thing after the slot, never the grip's own glyph inside it.
+ * Where a row's content starts, how wide the column before it is and how tall the row is: the mark's
+ * left edge, the column's own box, and the row's. Read in both states, since the column every row
+ * keeps is what holds both answers the same when the mode opens — the one thing about it only a
+ * laid-out page can measure. The mark is the thing after the column, never the grip's glyph inside it.
  */
 const leadingOf = (row) =>
   row.evaluate((el) => {
-    const mark = el.querySelector("[data-sidebar-gutter]")?.nextElementSibling
+    const column = el.querySelector("[data-sidebar-gutter]")
+    const mark = column?.nextElementSibling
     const box = el.getBoundingClientRect()
     return {
       markX: Math.round(mark.getBoundingClientRect().left),
+      column: Math.round(column.getBoundingClientRect().width),
       height: Math.round(box.height),
     }
   })
@@ -76,14 +80,22 @@ await flow(
       0,
       "a sidebar at rest draws no grip",
     )
-    // The grip's slot is reserved in both states: at rest it is empty, and 44px of a row that
+    // The column is reserved on every row in both states: at rest it is empty, 20px of a row that
     // would otherwise start its mark where a name wanted it.
     assert.equal(
       await page.locator('[data-sidebar-row="projects"] [data-sidebar-gutter]').count(),
       1,
-      "though the slot the grip stands in is kept, empty, at rest",
+      "and the column every row starts with is kept, empty, at rest",
     )
     const leading = await leadingOf(page.locator('[data-sidebar-row="projects"]'))
+    assert.equal(leading.column, 20, `the column is 20px wide (${leading.column})`)
+    // One grid: a bot's face begins where a feature's mark does, in the same sidebar, at rest.
+    const botFace = await leadingOf(page.getByRole("link", { name: "Test bot" }).first())
+    assert.equal(
+      botFace.markX,
+      leading.markX,
+      `a bot's face starts on the feature mark's x (${botFace.markX} against ${leading.markX})`,
+    )
 
     const before = await openMode(page)
     await shot("editing")
@@ -91,26 +103,32 @@ await flow(
     assert.deepEqual(
       await leadingOf(page.locator('[data-sidebar-row="projects"]')),
       leading,
-      "the mode opens into the slot the resting row kept: the same mark, at the same x, in a row of the same height",
+      "the mode opens into the column the resting row kept: the same mark, at the same x, in a row of the same height",
     )
     assert.equal(
       await page.locator('[data-sidebar-row="projects"] [data-sidebar-gutter] [data-sidebar-grip]').count(),
       1,
-      "with the grip standing where the resting row's empty slot was",
+      "with the grip standing in the resting row's empty column",
     )
     assert.equal(
       await page.locator('[data-sidebar-row="projects"] [data-sidebar-gutter]').getAttribute("aria-hidden"),
       null,
-      "and the slot audible, since the grip it holds is a control a keyboard reaches",
+      "and the column audible, since the grip it holds is a control a keyboard reaches",
     )
 
-    // The gesture: press the grip, carry the row over its neighbour, and let go. The row is lifted
-    // and the place it would land is marked while the button is still down.
-    const grip = await boxOf(gripOf(page, "projects"))
+    // The gesture: press the row's own body — not the column, and not a control, since the whole row
+    // is the handle — carry it over its neighbour, and let go. The row is lifted and the place it
+    // would land is marked while the button is still down.
+    const carried = await boxOf(page.locator('[data-sidebar-row="projects"]'))
     const neighbour = await boxOf(page.locator('[data-sidebar-row="code"]'))
-    await page.mouse.move(grip.x, grip.y)
+    await page.mouse.move(carried.x, carried.y)
     await page.mouse.down()
-    await page.mouse.move(grip.x, grip.y + Math.round(neighbour.height / 2), { steps: 4 })
+    assert.equal(
+      await page.locator('[data-sidebar-row="projects"]').getAttribute("data-dragging"),
+      "",
+      "a press on the row's body lifts it, with no column pressed",
+    )
+    await page.mouse.move(carried.x, carried.y + Math.round(neighbour.height / 2), { steps: 4 })
     await page.mouse.move(neighbour.x, neighbour.y, { steps: 6 })
     assert.equal(
       await page.locator('[data-sidebar-row="projects"]').getAttribute("data-dragging"),
@@ -150,9 +168,9 @@ await flow(
       })
     const written = await stored()
 
-    const carried = await boxOf(gripOf(page, "projects"))
+    const body = await boxOf(page.locator('[data-sidebar-row="projects"]'))
     const outside = await boxOf(page.locator('[data-sidebar-row="research"]'))
-    await page.mouse.move(carried.x, carried.y)
+    await page.mouse.move(body.x, body.y)
     await page.mouse.down()
     await page.mouse.move(outside.x, outside.y, { steps: 8 })
     assert.equal(
@@ -167,7 +185,7 @@ await flow(
     assert.deepEqual(await stored(), written, "a release outside the list writes nothing")
     assert.deepEqual(await modeRows(page), swapped(before), "and the row stands where it stood")
 
-    const again = await boxOf(gripOf(page, "projects"))
+    const again = await boxOf(page.locator('[data-sidebar-row="projects"]'))
     await page.mouse.move(again.x, again.y)
     await page.mouse.down()
     await page.mouse.move(again.x, again.y + neighbour.height, { steps: 8 })
@@ -202,7 +220,7 @@ await flow(
     assert.deepEqual(await navRows(page), resting, "the order survived the reload")
     await shot("reloaded")
 
-    pass("A row dragged by its grip takes its neighbour's place, and stays there, at 1024px")
+    pass("A row dragged by its body takes its neighbour's place, and stays there, at 1024px")
   },
   { viewport: { width: 1024, height: 768 } },
 )
@@ -225,10 +243,11 @@ await flow(
       0,
       "the drawer at rest draws no grip either",
     )
-    // The slot is the sheet's too, but only once the sheet has finished sliding in: a box measured
+    // The column is the sheet's too, but only once the sheet has finished sliding in: a box measured
     // mid-animation is the animation's, not the row's.
     await settled(page)
     const leading = await leadingOf(page.locator('[data-sidebar-row="projects"]'))
+    assert.equal(leading.column, 20, `the column is 20px wide at 390px too (${leading.column})`)
 
     const before = await openMode(page)
     await shot("editing")
@@ -236,20 +255,20 @@ await flow(
     assert.deepEqual(
       await leadingOf(page.locator('[data-sidebar-row="projects"]')),
       leading,
-      "and the drawer's rows keep their slot too: the same mark, at the same x, at 390px",
+      "and the drawer's rows keep their column too: the same mark, at the same x, at 390px",
     )
 
-    // A finger, through the browser's own input pipeline: the grip keeps the touch, so the list does
-    // not scroll under the drag and the sheet does not go with it — everywhere else on the list
-    // still swipes.
-    const grip = await boxOf(gripOf(page, "projects"))
+    // A finger, through the browser's own input pipeline: on the row's name it is the drawer's — the
+    // list scrolls and the sheet swipes — and only the indicator column takes the gesture, its
+    // `touch-action` keeping the touch out of both. So the drag is pressed there.
+    const column = await boxOf(gripOf(page, "projects"))
     const neighbour = await boxOf(page.locator('[data-sidebar-row="code"]'))
-    await swipeBy(page, grip, neighbour.height)
+    await swipeBy(page, column, neighbour.height)
     await settled(page)
     assert.deepEqual(
       await modeRows(page),
       swapped(before),
-      "a finger drops the row in the place a mouse would",
+      "a finger on the column drops the row in the place a mouse would",
     )
 
     // Escape in the drawer is the mode's first: the press leaves it, its switch back at rest, and the
@@ -299,7 +318,7 @@ await flow(
     await shot("reloaded")
 
     pass(
-      "A row dragged with a finger in the drawer takes its neighbour's place, and stays there, at 390px",
+      "A row dragged by its column with a finger takes its neighbour's place, and stays there, at 390px",
     )
   },
   { viewport: { width: 390, height: 844 }, touch: true },

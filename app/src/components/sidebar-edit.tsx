@@ -21,7 +21,6 @@ import { Refusal } from "@/components/banner"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { RowGutter, SidebarRowBody } from "@/components/sidebar-row-body"
 import { Button } from "@/components/ui/button"
-import { Separator } from "@/components/ui/separator"
 import type {
   SidebarLayoutRow,
   SidebarMove,
@@ -37,10 +36,13 @@ import { useRefusal } from "@/lib/use-refusal"
  * hover a held control keeps off. The disabled dim is the one value the boxes and the word-buttons
  * do not share (40 against 60, since a word is the only thing a held button still says), so each
  * control names its own — and every class here is still written out, so the build keeps them.
+ *
+ * The pointer is here because these controls stand on a row that wears the grab cursor the whole of
+ * it is a handle by: without it, a press on the eye would offer the drag it does not start.
  */
 const QUIET_CONTROL = cn(
-  "text-muted-foreground hover:bg-muted hover:text-foreground",
-  "disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
+  "cursor-pointer text-muted-foreground hover:bg-muted hover:text-foreground",
+  "disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-muted-foreground",
 )
 
 /** The one shape a row's word-button takes: the press that lets a canvas go. */
@@ -62,11 +64,13 @@ const EYE_CONTROL = cn(
 
 /**
  * The mode's foot: the one press that clears the arrangement, drawn as the app's delete control is
- * drawn — 44px, a full radius, an icon inline-start and its words beside it — in the neutral colour a
- * secondary action wears rather than the destructive one. Held where there is nothing to clear, and
+ * — 44px, a full radius, an icon inline-start and its words beside it — in the neutral colour a
+ * secondary action wears rather than the destructive one. It stands directly under the last row with
+ * a small margin and nothing else between them: a rule there drew a line across the mode for a press
+ * that is about the list above it, not a section of its own. Held where there is nothing to clear, and
  * never drawn outside the mode.
  */
-const RESET_CONTROL = "mx-auto h-11 rounded-full"
+const RESET_CONTROL = "mx-auto mt-2 h-11 rounded-full"
 
 /**
  * Where a row let go at `y` lands, over the feet of the rows measured at the press: the first row
@@ -81,14 +85,22 @@ function landingIndex(bottoms: readonly number[], y: number) {
 
 type Drag = { id: string; label: string; at: number }
 
-interface Grip {
-  onPointerDown: (event: PointerEventOf<HTMLButtonElement>) => void
-  onPointerMove: (event: PointerEventOf<HTMLButtonElement>) => void
-  onPointerUp: (event: PointerEventOf<HTMLButtonElement>) => void
+/**
+ * The pointer's half of a row: the whole line takes the press, so a row in the mode is one handle.
+ * Captured at the press, every move after it lands on the row rather than on the rows it passes over.
+ */
+interface RowPress {
+  onPointerDown: (event: PointerEventOf<HTMLDivElement>) => void
+  onPointerMove: (event: PointerEventOf<HTMLDivElement>) => void
+  onPointerUp: (event: PointerEventOf<HTMLDivElement>) => void
   onPointerCancel: () => void
-  /** ArrowUp and ArrowDown, where the grip holds the focus: one place, the way a press moves a row. */
+}
+
+/** The keyboard's half: the column's handle, held by its row's id so a move hands the focus back. */
+interface Handle {
+  /** ArrowUp and ArrowDown, where the handle holds the focus: one place, the way a press moves a row. */
   onKeyDown: (event: KeyboardEventOf<HTMLButtonElement>) => void
-  /** Keeps the grip by its row's id, so a move can hand the focus back to it once the row has landed. */
+  /** Keeps the handle by its row's id, so a move can hand the focus back to it once the row has landed. */
   keep: (node: HTMLButtonElement | null) => void
 }
 
@@ -97,14 +109,17 @@ interface RowWiring {
   index: number
   /** The row a reader is carrying, or none: a row reads its own lift and the place it would take. */
   drag: Drag | null
-  grip: Grip
+  press: RowPress
+  handle: Handle
   /** What the row has to say under it: the mode's refusal, drawn under the row whose press made it. */
   foot?: ReactNode
 }
 
 /**
  * A row in the mode, as the list draws it: the lift and the place it would take, and the 44px line
- * the row's own contents stand on. `foot` is what a row has to say under that line — a refusal is the
+ * the row's own contents stand on. The line is the handle the pointer reaches — a press anywhere on
+ * it starts the drag, and the grab cursor says so — while a press on a control inside it is that
+ * control's, never a gesture. `foot` is what a row has to say under that line — a refusal is the
  * row's, so the row draws it rather than a notice beside the list.
  */
 function RowShell<Pin extends SidebarPin>({
@@ -112,6 +127,7 @@ function RowShell<Pin extends SidebarPin>({
   hidden,
   index,
   drag,
+  press,
   foot,
   children,
 }: {
@@ -119,6 +135,7 @@ function RowShell<Pin extends SidebarPin>({
   hidden: boolean
   index: number
   drag: Drag | null
+  press: RowPress
   foot?: ReactNode
   children: ReactNode
 }) {
@@ -142,28 +159,36 @@ function RowShell<Pin extends SidebarPin>({
         landsHere && "bg-primary/10 ring-2 ring-primary/40 ring-inset",
       )}
     >
-      <div className="flex min-h-11 items-center gap-3">{children}</div>
+      <div
+        {...press}
+        className="flex min-h-11 cursor-grab items-center gap-3 active:cursor-grabbing"
+      >
+        {children}
+      </div>
       {foot}
     </div>
   )
 }
 
 /**
- * A row's grip: the mode's half of the 44px leading slot the resting row leaves empty, and the one
- * control the order is reached by both ways. A press on it takes the pointer's drag; ArrowUp and
- * ArrowDown, while it holds the focus, move the row a drawn place through the rule the drop commits
- * through. It is a real tab stop, named for its row — a control that reorders a list is a control a
- * keyboard must be able to reach and a screen reader must be able to hear — and `touch-action` is its
- * alone, so the list still scrolls and the drawer still swipes everywhere else.
+ * A row's grip: the narrow indicator column's glyph, and the one control the order is reached by both
+ * ways. A press anywhere on the row takes the pointer's drag — the whole line is the handle, and this
+ * glyph is what says so — while ArrowUp and ArrowDown, with this holding the focus, move the row a
+ * drawn place through the rule the drop commits through. It is a real tab stop, named for its row — a
+ * control that reorders a list is a control a keyboard must be able to reach and a screen reader must
+ * be able to hear — and it is 20px wide and 44px tall, the column's own box.
+ *
+ * `touch-action` is the column's rather than the row's (see `RowGutter`): a finger on the glyph starts
+ * a drag, and a finger anywhere else on the row still scrolls the list and swipes the drawer.
  */
-function RowGrip<Pin extends SidebarPin>({
+function RowHandle<Pin extends SidebarPin>({
   row,
-  grip,
+  handle,
 }: {
   row: SidebarLayoutRow<Pin>
-  grip: Grip
+  handle: Handle
 }) {
-  const { keep, ...presses } = grip
+  const { keep, onKeyDown } = handle
   return (
     <RowGutter>
       <button
@@ -171,13 +196,10 @@ function RowGrip<Pin extends SidebarPin>({
         ref={keep}
         aria-label={`Reorder ${row.label}`}
         data-sidebar-grip=""
-        {...presses}
-        className={cn(
-          "flex size-11 shrink-0 cursor-grab touch-none items-center justify-center rounded-2xl",
-          "text-muted-foreground hover:bg-muted hover:text-foreground active:cursor-grabbing",
-        )}
+        onKeyDown={onKeyDown}
+        className="flex h-11 w-5 shrink-0 items-center justify-center rounded-2xl text-muted-foreground hover:text-foreground"
       >
-        <GripVerticalIcon className="size-4" />
+        <GripVerticalIcon className="size-3.5" />
       </button>
     </RowGutter>
   )
@@ -195,8 +217,15 @@ function FeatureModeRow<Pin extends SidebarPin>({
 }) {
   const { hidden } = wiring
   return (
-    <RowShell row={row} hidden={hidden} index={wiring.index} drag={wiring.drag} foot={wiring.foot}>
-      <RowGrip row={row} grip={wiring.grip} />
+    <RowShell
+      row={row}
+      hidden={hidden}
+      index={wiring.index}
+      drag={wiring.drag}
+      press={wiring.press}
+      foot={wiring.foot}
+    >
+      <RowHandle row={row} handle={wiring.handle} />
       <SidebarRowBody row={row} mode />
       {/* The eye reads the muted row; a reader who hears the list needs the word. */}
       {hidden && <span className="sr-only">Hidden</span>}
@@ -268,6 +297,7 @@ function PinModeRow<Pin extends SidebarPin>({
       hidden={hidden}
       index={wiring.index}
       drag={wiring.drag}
+      press={wiring.press}
       // Two writes meet in this row and each says its own: the pin's, under the control that asked
       // its host, and the mode's, under the row whose press moved it.
       foot={
@@ -277,7 +307,7 @@ function PinModeRow<Pin extends SidebarPin>({
         </>
       }
     >
-      <RowGrip row={row} grip={wiring.grip} />
+      <RowHandle row={row} handle={wiring.handle} />
       <SidebarRowBody row={row} mode />
       <button
         type="button"
@@ -307,20 +337,24 @@ function PinModeRow<Pin extends SidebarPin>({
  * host pinned it, and only Unpin may end it.
  *
  * A reorder is silent to a reader who cannot see it, so one polite line inside the group says where
- * the row went, and the grip that was pressed keeps the focus, so the next press is the next place.
+ * the row went, and the handle that was pressed keeps the focus, so the next press is the next place.
  *
- * Each row's grip is the only way to the order, both ways: ArrowUp and ArrowDown move the row a drawn
- * place while the grip holds the focus, and a pointer press on it takes the gesture — the pointer is
- * captured, so every move lands on the grip rather than on what it passes over, and `touch-action` is
- * the grip's alone, so the list still scrolls and the drawer still swipes everywhere else — the row
- * lifts, the row whose place it would take is marked, and the release writes the order once. A gesture
- * that is given up — the browser cancelling the pointer, Escape, or a release outside the list —
- * writes nothing at all. Both ways commit through one rule, so a key and a drop cannot disagree.
+ * The order is reached two ways, both of them the row's. A press anywhere on a row takes the pointer's
+ * gesture — a row in the mode goes nowhere, so the whole of it is the handle, and the column's grip is
+ * the glyph that says so: the pointer is captured, so every move lands on the row rather than on what
+ * it passes over, the row lifts, the row whose place it would take is marked, and the release writes
+ * the order once. A press on a control inside the row is that control's and never a gesture. A finger
+ * is the exception the scrolling drawer forces, and the whole reason `touch-action` is the column's:
+ * with a touch pointer only the indicator column starts a drag, so a finger on the row still scrolls
+ * the drawer. ArrowUp and ArrowDown move the row a drawn place while the column's handle holds the
+ * focus. A gesture that is given up — the browser cancelling the pointer, Escape, or a release outside
+ * the list — writes nothing at all. Both ways commit through one rule, so a key and a drop cannot
+ * disagree.
  *
- * At the foot, under a separator and above the boundary, stands the one press that clears the whole
- * arrangement: "Reset to default", centred in the mode's width, which asks the app's one question
- * first and, answered, writes the default record. It never asks anything of a canvas, so every pin
- * stays where its host put it.
+ * At the foot, directly under the last row with a small margin and no rule between them, stands the
+ * one press that clears the whole arrangement: "Reset to default", centred in the mode's width, which
+ * asks the app's one question first and, answered, writes the default record. It never asks anything
+ * of a canvas, so every pin stays where its host put it.
  */
 export function SidebarEdit<Pin extends SidebarPin>({
   rows,
@@ -486,13 +520,24 @@ export function SidebarEdit<Pin extends SidebarPin>({
     )
 
   /**
-   * A press on the grip takes the gesture: the pointer is captured, so every move after it lands
-   * here rather than on the rows it passes over, and the browser's own defaults — selecting the
-   * row's words, dragging them off, scrolling the list — are the gesture's to skip.
+   * A press on a row takes the gesture: the pointer is captured by the row's own line, so every move
+   * after it lands there rather than on the rows it passes over, and the browser's own defaults —
+   * selecting the row's words, dragging them off, scrolling the list — are the gesture's to skip.
+   *
+   * Two presses are not the gesture's. One that lands on a control inside the row is that control's:
+   * the eye's, the unpin press's — a press there means what the control says, and a drag that started
+   * under it would take the control away from the reader. And a finger, from anywhere but the
+   * indicator column: the phone's drawer scrolls and swipes under the finger, so a drag that began at
+   * the row's name would cost the reader both. `touch-action` is the column's alone for the same
+   * reason, which is why a touch pointer is asked where it landed rather than what it pressed.
    */
   const beginDrag =
-    (row: SidebarLayoutRow<Pin>, at: number) => (event: PointerEventOf<HTMLButtonElement>) => {
+    (row: SidebarLayoutRow<Pin>, at: number) => (event: PointerEventOf<HTMLDivElement>) => {
       if (event.pointerType === "mouse" && event.button !== 0) return
+      const target = event.target instanceof Element ? event.target : null
+      const control = target?.closest("button")
+      if (control && !control.hasAttribute("data-sidebar-grip")) return
+      if (event.pointerType === "touch" && !target?.closest("[data-sidebar-gutter]")) return
       event.preventDefault()
       event.currentTarget.setPointerCapture?.(event.pointerId)
       const bottoms = rowFeet()
@@ -503,7 +548,7 @@ export function SidebarEdit<Pin extends SidebarPin>({
       setDrag({ id: row.id, label: row.label, at })
     }
 
-  const overDrag = (event: PointerEventOf<HTMLButtonElement>) => {
+  const overDrag = (event: PointerEventOf<HTMLDivElement>) => {
     const held = gesture.current
     if (!held || held.pointer !== event.pointerId) return
     const at = landingIndex(held.bottoms, event.clientY)
@@ -514,7 +559,7 @@ export function SidebarEdit<Pin extends SidebarPin>({
    * The release: one write, and only where the reader let go of a place. A release outside the list
    * is a gesture given up — the row stands where it stood, and nothing is written.
    */
-  const endDrag = (event: PointerEventOf<HTMLButtonElement>) => {
+  const endDrag = (event: PointerEventOf<HTMLDivElement>) => {
     const held = gesture.current
     if (!held || held.pointer !== event.pointerId) return
     gesture.current = null
@@ -560,11 +605,13 @@ export function SidebarEdit<Pin extends SidebarPin>({
           hidden,
           index,
           drag,
-          grip: {
+          press: {
             onPointerDown: beginDrag(row, index),
             onPointerMove: overDrag,
             onPointerUp: endDrag,
             onPointerCancel: cancelDrag,
+          },
+          handle: {
             onKeyDown: (event) => stepByKey(event, row),
             keep: keepControl(row.id),
           },
@@ -592,12 +639,11 @@ export function SidebarEdit<Pin extends SidebarPin>({
       <p role="status" aria-live="polite" className="sr-only">
         {said}
       </p>
-      {/* The mode's foot: under the rule that divides these rows from what the sidebar draws below
-          the boundary, and centred in the mode's own width — one press about the whole list rather
-          than about a row. Held where the record already reads as today's list — there is nothing to
-          clear, and a save of it would move the appearance clock for no change (`saveSettings` skips
-          a write whose fields all match, but `saveAppearance` carries a new clock with every one). */}
-      <Separator className="mx-1 mt-3 mb-1 data-horizontal:w-auto" />
+      {/* The mode's foot: directly under the last row, with a small margin and no rule — one press
+          about the whole list rather than about a row, centred in the mode's own width. Held where
+          the record already reads as today's list — there is nothing to clear, and a save of it would
+          move the appearance clock for no change (`saveSettings` skips a write whose fields all match,
+          but `saveAppearance` carries a new clock with every one). */}
       <Button
         type="button"
         data-sidebar-reset=""

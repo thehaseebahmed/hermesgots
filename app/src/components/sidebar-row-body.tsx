@@ -18,6 +18,7 @@ import {
 import { CanvasMark } from "@/components/canvas-mark"
 import { LabLabel } from "@/components/lab-badge"
 import type { SidebarFeatureId, SidebarLayoutRow, SidebarPin } from "@/lib/sidebar-layout"
+import { cn } from "@/lib/utils"
 
 /**
  * Each feature's mark, by the id the table files it under. Typed by those ids, so a feature added to
@@ -32,12 +33,15 @@ const FEATURE_ICONS: Record<SidebarFeatureId, typeof FolderKanbanIcon> = {
 }
 
 /**
- * The 44px slot a row above the boundary starts with, in either state: empty and hidden from a screen
- * reader at rest, holding the mode's grip while the reader is arranging.
+ * The narrow column every sidebar row starts with, in either state: 20px of it, down the row's whole
+ * height, empty at rest and holding the mode's grip while the reader is arranging.
  *
- * Reserved in both states, so opening and closing the mode moves nothing — the mark, the name and the
- * row's own height stand where they stood either way. The icon rail draws none (its row is a 44px box
- * whose mark is the row), and nothing below the boundary is arranged, so nothing below it reserves one.
+ * Kept on every row — a feature, a pinned canvas, a session waiting on the reader, a bot — so that a
+ * mark or a face starts at the same x whatever kind of row it is and whether the mode is open or shut.
+ * The icon rail draws none: its row is a 44px box whose mark is the row, and the rail has no mode.
+ *
+ * `touch-action: none` is this column's alone, and only in the mode: a finger here starts a drag,
+ * while a finger anywhere else on the row still scrolls the list and swipes the drawer.
  */
 export function RowGutter({ children }: { children?: ReactNode }) {
   return (
@@ -46,7 +50,10 @@ export function RowGutter({ children }: { children?: ReactNode }) {
       // Hidden while it stands empty; in the mode it is the grip's own box, and a focusable control
       // inside a hidden element is a control no one can hear.
       aria-hidden={children ? undefined : true}
-      className="flex size-11 shrink-0 items-center justify-center"
+      className={cn(
+        "flex w-5 shrink-0 items-center justify-center self-stretch",
+        children && "touch-none",
+      )}
     >
       {children}
     </span>
@@ -57,8 +64,8 @@ export function RowGutter({ children }: { children?: ReactNode }) {
  * A row's mark and name: a feature's icon and its label, or a canvas's own mark and title.
  *
  * A lab feature's name wears the pill that says a switch can take the row away — except in the mode,
- * whose row carries a 44px grip and the eye beside it: on a docked sidebar's 303px the pill leaves the
- * name no width at all, and a name is what a reader arranging the list reads. The word stays in the
+ * whose row carries a narrow grip and the eye beside it: on a docked sidebar's 303px the pill leaves
+ * the name no width at all, and a name is what a reader arranging the list reads. The word stays in the
  * row for a reader who hears the list, and the resting row still draws the pill.
  */
 export function SidebarRowBody<Pin extends SidebarPin>({
