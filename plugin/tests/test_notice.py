@@ -228,6 +228,7 @@ class Bodies(unittest.TestCase):
         alerts._started.clear()
         alerts._held.clear()
         alerts._replies.clear()
+        alerts._resumed.clear()
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.home = Path(self.tmp.name)
@@ -336,6 +337,37 @@ class Bodies(unittest.TestCase):
             [("run_done", "gots-1", "Done — the migration is in and the tests pass.")],
             "once, and only the run that just ended",
         )
+
+    def test_a_wake_turn_that_resumes_the_run_speaks_however_short_it_was(self):
+        """A wake is seconds long, and its end is the run's only news.
+
+        The turn that ended over a live subagent parked its words; the wake drops them because the
+        run went on. That run's end is then everything the user has not heard, so the short-run
+        floor — which keeps a chat's own quick turn quiet — cannot swallow it. Nothing is backdated
+        here: the wake's own start is the clock its end is judged against.
+        """
+        self.start()
+        self.said("Half of it is done; the rest is with the subagent.")
+        with mock.patch.object(delegation, "live_sessions", lambda home: {"gots-1": 1}):
+            self.end(completed=True, failed=False, interrupted=False)
+        self.assertEqual(self.told, [], "the subagent still works, so nothing is said yet")
+        # The wake resumes the conversation: the hold is dropped, and the turn lasts seconds.
+        alerts.turn_started(session_id="gots-1", platform="api_server")
+        self.said("Done — the migration is in and the tests pass.")
+        at_rest, waking = self.at_rest()
+        with at_rest, waking:
+            self.end(completed=True, failed=False, interrupted=False)
+        self.assertEqual(
+            self.told,
+            [("run_done", "gots-1", "Done — the migration is in and the tests pass.")],
+            "the run resumed, so its own end is news however short that turn was",
+        )
+        # The floor still holds for a run that resumed nothing: a chat's own quick turn is quiet.
+        alerts.turn_started(session_id="gots-2", platform="api_server")
+        self.said("ok", session="gots-2")
+        with at_rest, waking:
+            self.end(session="gots-2", completed=True, failed=False, interrupted=False)
+        self.assertEqual(len(self.told), 1, "a short turn that held nothing is still not news")
 
 
 if __name__ == "__main__":

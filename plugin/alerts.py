@@ -14,7 +14,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Set
 
 from . import failures, notice, push, sessions
 from .store import db_path
@@ -38,6 +38,11 @@ _replies: Dict[str, str] = {}
 # `_started`: a restart loses this and the turn clock the same turn was judged against, so neither
 # half outlives the process alone.
 _held: Dict[str, Optional[str]] = {}
+# A session whose next turn is a run resuming itself: a subagent's wake restarted the conversation,
+# so the turn before's news was dropped rather than told. The resumed turn's end is then the whole
+# run's news, however short it is — the short-run floor keeps a chat's own quick turn quiet, not the
+# wake that finishes the work. The mark goes as the end is judged, so one drop widens one turn.
+_resumed: Set[str] = set()
 
 
 def _text(value: Any) -> Optional[str]:
@@ -50,7 +55,9 @@ def turn_started(**kwargs: Any) -> None:
     A turn that starts on a session whose news is still held is that run going on, not ending: a
     subagent's wake resumes the conversation, and a user who writes again is looking at the chat.
     The hold is dropped rather than told — the run that is now running will say what it did when it
-    ends — so nothing announces a run that is working again.
+    ends — so nothing announces a run that is working again. The session is marked resumed as it is
+    dropped: the turn that drop widened is the one whose end is the whole run's news, and
+    ``turn_finished`` counts that turn as news however short the wake was.
     """
     session_id = _text(kwargs.get("session_id"))
     if not session_id or kwargs.get("platform") != "api_server":
@@ -59,8 +66,13 @@ def turn_started(**kwargs: Any) -> None:
         if len(_started) > 512:
             _started.clear()
         _started.setdefault(session_id, time.monotonic())
-        dropped = _held.pop(session_id, None)
-    if dropped is not None:
+        dropped = session_id in _held
+        _held.pop(session_id, None)
+        if dropped:
+            if len(_resumed) > 512:
+                _resumed.clear()
+            _resumed.add(session_id)
+    if dropped:
         logger.debug("gots: %s started again, so its held news is the turn before's", session_id)
 
 
@@ -171,6 +183,10 @@ def turn_finished(**kwargs: Any) -> None:
             return
         with _lock:
             started = _started.pop(session_id, None)
+            # Taken as the end is judged: one dropped hold widens one turn, and a mark left behind
+            # would make the session's next short turn news for a reason that has gone.
+            resumed = session_id in _resumed
+            _resumed.discard(session_id)
             # Released here whichever way the turn went: a reply is only ever news of the run it
             # was said in, and one kept past its own end would be the next turn's lie.
             words = _replies.pop(session_id, None)
@@ -187,8 +203,9 @@ def turn_finished(**kwargs: Any) -> None:
             push.notify("run_failed", session_id, path, body=_failed_body(path, session_id))
         elif (
             stopped.finished
-            and started is not None
-            and time.monotonic() - started >= RUN_DONE_MIN_S
+            # A run that resumed is a run whose work the user has not heard the end of, so its end
+            # is news whatever the clock says — a wake turn is seconds long by nature.
+            and (resumed or (started is not None and time.monotonic() - started >= RUN_DONE_MIN_S))
             # A plan waiting for review is told as such.
             and not (record and record["mode"] == "plan")
         ):
