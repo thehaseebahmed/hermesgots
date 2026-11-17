@@ -95,22 +95,9 @@ Skip the sync server entirely and Gots still works on the device you set it up o
 
 ## Self-Hosting & Deployment
 
-### Deploy to Netlify
+You can run your own copy of Gots and its sync server on Netlify, so your accounts and your bots' records pass through no one else's deployment. [docs/self-hosting.md](docs/self-hosting.md) takes you through the whole path: the Netlify deploy and its Identity provider, pointing your host at your own address, building the Android app yourself, and where each notification transport comes from.
 
-You can deploy your own instance of Gots with zero-knowledge sync using Netlify:
-
-1. Import this repository into Netlify (`netlify.toml` configures build settings, SPA redirects, and headers).
-2. Set up **Netlify Identity** under **Project configuration → Identity**:
-   - Enable Identity.
-   - Under **Registration → External providers**, add GitHub.
-   - Set **Registration preferences** to **Invite only**, then invite yourself.
-3. Add your Netlify site URL to `API_SERVER_CORS_ORIGINS` in your Hermes Host configuration.
-
-### Zero-Knowledge Sync Security
-
-- Sync encrypts your Bot connection details, API keys, and settings with an AES-256-GCM data key on your device.
-- The sync server only holds the key wrapped by a passkey (WebAuthn PRF) or a 25-character recovery code.
-- Signing in with GitHub authenticates ownership, but Netlify can never decrypt your data. Transcripts and server data remain on your Hermes Host.
+What does not change is what the server can read: your bot list and settings are sealed on the device with a key your passkey or recovery code unwraps, so the deploy holds ciphertext, and your messages and your bots' work never leave your Host at all.
 
 ---
 
