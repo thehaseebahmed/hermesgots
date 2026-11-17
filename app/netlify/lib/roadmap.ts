@@ -148,13 +148,9 @@ async function tally(store: RegistryStore, voter: string | null) {
   return { counts, mine }
 }
 
-const ORDER: Record<Status, number> = { building: 0, planned: 1, shipped: 2 }
-
-/** The board's order: what's being built, then planned, then shipped; most votes first in each. */
+/** The board's order is its rank: most votes first, the older of two ties first. */
 export function ordered(rows: FeatureRow[]) {
-  return [...rows].sort(
-    (a, b) => ORDER[a.status] - ORDER[b.status] || b.votes - a.votes || a.createdAt - b.createdAt,
-  )
+  return [...rows].sort((a, b) => b.votes - a.votes || a.createdAt - b.createdAt)
 }
 
 async function body(req: Request): Promise<Record<string, unknown> | null> {

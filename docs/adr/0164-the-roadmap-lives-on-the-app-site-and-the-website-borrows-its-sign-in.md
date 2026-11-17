@@ -48,6 +48,6 @@ role, nobody can edit the roadmap, and everybody can still read and vote.
 **A feature is its issue.** An admin gives an issue link (required, `github.com/<owner>/<repo>/issues/<n>`).
 The title is the issue's own, read from GitHub, unless one is given. An issue is listed once. The
 page opens the issue when the feature is tapped, so the issue is the feature's details and nothing
-is written twice. Shipped features stay on the board under their own heading, and stop taking votes.
+is written twice. The board is one list ranked by votes, with no section per status. A shipped feature keeps its place with a tag saying so, and stops taking votes.
 
 Not built: comments, suggestions from readers, and votes on the app's own screens.

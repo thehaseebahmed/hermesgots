@@ -114,7 +114,7 @@ export function sampleRoadmap(): Roadmap {
       votes: 64,
     },
   ]
-  return { features, signedIn: false, admin: false, voted: [] }
+  return { features: ranked(features), signedIn: false, admin: false, voted: [] }
 }
 
 const escape = (value: string) => value.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
@@ -141,7 +141,7 @@ function card(f: Feature, o: RenderOptions) {
   const disabled = !o.live || shipped || o.busy.has(f.id)
   const vote = `<button type="button" class="vote" data-vote="${escape(f.id)}" aria-pressed="${on}" aria-label="${escape(label)}"${disabled ? " disabled" : ""}>${ARROW}<span>${f.votes}</span></button>`
   const link = `<a class="road-link" href="${escape(f.url)}" target="_blank" rel="noreferrer">
-      <b>${escape(f.title)}</b>
+      <b>${escape(f.title)}${shipped ? ' <em class="road-tag">Shipped</em>' : ""}</b>
       ${f.summary ? `<span>${escape(f.summary)}</span>` : ""}
     </a>`
   const tools = o.admin
@@ -153,15 +153,17 @@ function card(f: Feature, o: RenderOptions) {
   return `<li class="row road-row${o.admin ? " has-tools" : ""}">${vote}${link}${tools}</li>`
 }
 
-/** The features grouped by status, building first, an empty group left out. */
+/**
+ * Most votes first. The sort is stable, so a tie keeps the order the board gave it (the older
+ * feature first), and a vote cast here moves its feature without asking for the board again.
+ */
+export const ranked = (features: Feature[]) => [...features].sort((a, b) => b.votes - a.votes)
+
+/** Every feature on one panel, in the board's rank order (most votes first). */
 export function roadmapHtml(features: Feature[], o: RenderOptions) {
-  const groups = STATUSES.map((s) => ({ ...s, rows: features.filter((f) => f.status === s.key) }))
-    .filter((g) => g.rows.length > 0)
-    .map(
-      (g) => `<section class="board road-board">
-        <h2>${g.label} <small>${g.rows.length}</small></h2>
-        <ol class="rows">${g.rows.map((f) => card(f, o)).join("")}</ol>
-      </section>`,
-    )
-  return groups.length ? groups.join("") : '<p class="empty">Nothing on the roadmap yet.</p>'
+  if (!features.length) return '<p class="empty">Nothing on the roadmap yet.</p>'
+  return `<section class="board road-board">
+      <h2>Features <small>${features.length}</small></h2>
+      <ol class="rows">${ranked(features).map((f) => card(f, o)).join("")}</ol>
+    </section>`
 }

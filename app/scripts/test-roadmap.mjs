@@ -136,15 +136,19 @@ test("an unknown feature can't be voted on, nor a shipped one", async () => {
   assert.equal((await call(env, alice, "POST", `route=vote&id=${id}`)).status, 409)
 })
 
-test("the board runs building, planned, shipped, most votes first", async () => {
+test("the board is ranked by votes, whatever the status, the older of a tie first", async () => {
   const env = setup()
-  await addFeature(env, { issue: `${ISSUE.slice(0, -2)}1`, title: "A" })
-  const b = await addFeature(env, { issue: `${ISSUE.slice(0, -2)}2`, title: "B" })
-  await addFeature(env, { issue: `${ISSUE.slice(0, -2)}3`, title: "C", status: "building" })
-  await addFeature(env, { issue: `${ISSUE.slice(0, -2)}4`, title: "D", status: "shipped" })
+  const issue = (n) => `${ISSUE.slice(0, -2)}${n}`
+  const a = await addFeature(env, { issue: issue(1), title: "A", status: "building" })
+  const b = await addFeature(env, { issue: issue(2), title: "B" })
+  await addFeature(env, { issue: issue(3), title: "C", status: "building" })
+  const d = await addFeature(env, { issue: issue(4), title: "D" })
+  for (const voter of [alice, bob]) await call(env, voter, "POST", `route=vote&id=${d.id}`)
   await call(env, alice, "POST", `route=vote&id=${b.id}`)
+  await call(env, alice, "POST", `route=vote&id=${a.id}`)
+  // A and B tie on one vote; A was added first. C has none.
   const titles = (await call(env, null, "GET", "route=board")).body.features.map((f) => f.title)
-  assert.deepEqual(titles, ["C", "B", "A", "D"])
+  assert.deepEqual(titles, ["D", "A", "B", "C"])
 })
 
 test("an edit keeps what it doesn't name, and a removal takes its votes", async () => {
