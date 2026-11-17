@@ -259,8 +259,11 @@ class GotsMessagingService : FirebaseMessagingService() {
         /** A message naming no channel at all still has to name one on Android 8 and later. */
         private const val FALLBACK_CHANNEL = "gots"
 
-        /** The categories that wait on the user, and so may peek (`PUSH_CATEGORIES` says the same). */
-        private val WAITS = setOf("chat_input", "code_input", "room_input")
+        /**
+         * The categories that wait on the user, and so may peek: the same list Settings reads, where
+         * every one of them is at importance 4 (`PUSH_CATEGORIES` in `src/lib/push-kinds.ts`).
+         */
+        private val WAITS = setOf("chat_input", "code_input", "room_input", "research_input")
 
         // The message's data, as `app/netlify/lib/fcm.ts` writes it.
         private const val KEY_KIND = "kind"
