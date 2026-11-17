@@ -85,7 +85,7 @@ async function show(data) {
   const title =
     (typeof data.title === "string" && data.title.trim()) || UNTITLED[data.kind] || "Gots"
   const body =
-    WORDS[data.kind] || "Waiting for you"
+    (typeof data.body === "string" && data.body.trim()) || WORDS[data.kind] || "Waiting for you"
   // The bot's own picture, so it's plain which bot it is. A host that still holds a retired id
   // draws the character that replaced it.
   const bot = typeof data.bot === "string" && /^[a-z0-9-]{1,32}$/.test(data.bot) ? data.bot : ""

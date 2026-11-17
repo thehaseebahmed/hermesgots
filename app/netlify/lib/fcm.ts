@@ -73,9 +73,10 @@ export function categoryOf(kind: PushKind): PushCategory | "test" {
   return `code_${kind}`
 }
 
-/** What the plugin tells about a push beyond its kind (0.33): the chat's title. */
+/** What the plugin tells about a push beyond its kind (0.33): the chat's title, and what it says. */
 export interface PushDetail {
   title?: string
+  body?: string
 }
 
 export interface FcmSender {
@@ -133,10 +134,10 @@ const UNTITLED: Partial<Record<PushKind, string>> = {
   room_input: "A room",
 }
 
-/** The notification's title and body. */
+/** The notification's title and body: the notice's, and the kind's own line where it names none. */
 export function pushText(kind: PushKind, detail: PushDetail = {}) {
   const title = detail.title?.trim() || UNTITLED[kind] || "Gots"
-  const body = WORDS[kind]
+  const body = detail.body?.trim() || WORDS[kind]
   return { title, body }
 }
 

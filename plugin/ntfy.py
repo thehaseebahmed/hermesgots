@@ -284,14 +284,16 @@ def click(kind: str, session_id: str) -> str:
 def message(
     held: Dict[str, Any], kind: str, category: str, session_id: str, notice: Optional[Notice] = None
 ) -> Dict[str, Any]:
-    """The JSON a publish posts to the server's root."""
+    """The JSON a publish posts to the server's root: the notice's title over its body, with the
+    kind's own line standing in where the notice names no words."""
     title = ((notice or {}).get("title") or "").strip() or UNTITLED.get(kind) or "Gots"
+    words = ((notice or {}).get("body") or "").strip() or WORDS.get(kind, "Waiting for you")
     priorities = held.get("priorities") if isinstance(held.get("priorities"), dict) else {}
     sequence = hashlib.sha256(f"{category}:{session_id}".encode()).digest()[:18]
     return {
         "topic": held["topic"],
         "title": title,
-        "message": WORDS.get(kind, "Waiting for you"),
+        "message": words,
         "priority": priorities.get(category, DEFAULT_PRIORITY),
         "click": click(kind, session_id),
         # A newer message of the same category about the same thing replaces one still showing.
