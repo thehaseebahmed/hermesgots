@@ -19,8 +19,9 @@ import { useBotLabels } from "@/lib/use-bot-labels"
 import { cn } from "@/lib/utils"
 
 /**
- * A bot's chats at the list's own address (`/b/<bot>/sidechats`): the entry that leads a reader to a
- * bot lands on its Main instead, so this screen is one they open rather than the one a bot opens on.
+ * A bot's chats as the flat layout's one screen: every chat of the bot's, drawn flat. The bot's own
+ * address lands on its Main, and its side chats have their own screen (`routes/side-chats.tsx`); this
+ * is the list that layout draws, which the developer switch is what turns back on.
  */
 export function BotChatsPage() {
   const { profileId } = useParams()

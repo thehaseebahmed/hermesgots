@@ -135,7 +135,8 @@ test("a bot with no Main yet draws its list where its address stands", async () 
   await mount(app(`/b/${bot.id}`), async () => {
     await until(async () => rowIds().includes(`/c/${SIDE}`), "the bot's chats")
     assert.equal(path(), `/b/${bot.id}`, "the address the reader gave it: no Main to replace it with")
-    assert.ok(findText('[data-slot="header-title"]', "Mainly"), "and the list's own bar, not nothing")
+    assert.ok(findText('[data-slot="header-title"]', "Sidechats"), "and the list's own bar, not nothing")
+    assert.ok(findText('[data-slot="header-line"]', "Mainly"), "naming the bot it is a list of")
     assert.equal(
       await db.conversations.filter((chat) => Boolean(chat.main)).count(),
       0,
@@ -150,7 +151,9 @@ test("the bot's list keeps an address of its own", async () => {
   await mount(app(`/b/${bot.id}/sidechats`), async () => {
     await until(async () => rowIds().includes(`/c/${SIDE}`), "the bot's chats")
     assert.equal(path(), `/b/${bot.id}/sidechats`, "the list at its own address, Main known or not")
-    assert.ok(rowIds().includes(`/c/${MAIN}`), "with the bot's Main drawn as one of its rows")
+    // Main is the screen this list is of, not a row of it: `test-side-chats.tsx` holds the row it is
+    // given at the split width, where it is the chat drawn beside the list.
+    assert.ok(findText('[data-slot="header-title"]', "Sidechats"), "the Side Chat List, not the entry's screen")
   })
 })
 

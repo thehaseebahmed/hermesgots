@@ -16,8 +16,8 @@ import { ChatPage } from "@/routes/chat"
 import { SetupGate } from "@/routes/setup"
 
 // Only a chat is on the startup path; every other screen loads when it's first opened.
-const BotChatsPage = lazy(() =>
-  import("@/routes/bot-chats").then((m) => ({ default: m.BotChatsPage })),
+const SideChatsPage = lazy(() =>
+  import("@/routes/side-chats").then((m) => ({ default: m.SideChatsPage })),
 )
 const OpenSessionPage = lazy(() =>
   import("@/routes/open-session").then((m) => ({ default: m.OpenSessionPage })),
@@ -98,9 +98,10 @@ export function Home() {
  * again. The entry is tagged with the bot it is a chat of, so the shell keeps the list's lane while
  * the row loads.
  *
- * A bot whose Main this device does not hold — a host that publishes none yet — keeps its list where
- * the address stands rather than drawing a blank, and the answer is still out on the first read, so
- * nothing is drawn until it lands. Nothing is ever made here: the plugin is Main's only writer.
+ * A bot whose Main this device does not hold — a host that publishes none yet — keeps its Side Chat
+ * List where the address stands rather than drawing a blank, and the answer is still out on the first
+ * read, so nothing is drawn until it lands. Nothing is ever made here: the plugin is Main's only
+ * writer.
  */
 function BotMain() {
   const { profileId } = useParams()
@@ -111,7 +112,7 @@ function BotMain() {
   // home there — the one gate the flat list keeps until the switch means the layout under it.
   if (layout !== "flat" || !profileId) return <Navigate to="/" replace />
   if (main === undefined) return null
-  if (!main) return <BotChatsPage />
+  if (!main) return <SideChatsPage />
   return <Navigate to={`/c/${main}`} replace state={{ bot: profileId }} />
 }
 
@@ -136,7 +137,7 @@ export function AppRoutes() {
         <Route index element={<Home />} />
         {/* A bot's entry is a doorway onto its Main; its list has an address of its own. */}
         <Route path="b/:profileId" element={<BotMain />} />
-        <Route path="b/:profileId/sidechats" element={<BotChatsPage />} />
+        <Route path="b/:profileId/sidechats" element={<SideChatsPage />} />
         <Route path="b/:profileId/routines" element={<RoutinesPage />} />
         <Route path="c/:id" element={<ChatPage slot="route" />} />
         {/* A room that does not exist yet: its first send makes it (ADR 0125). */}

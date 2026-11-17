@@ -87,7 +87,11 @@ export type CodeGroupKey = keyof typeof CODE_LABELS
 const PINNED_LABEL = "Pinned" as const
 
 export interface ListGroup<T = unknown> {
-  key: ItemGroupKey | CodeGroupKey | "pinned" | "archived"
+  /**
+   * What the group is. `rows` is a list that words its own one group — the Side Chat List's — rather
+   * than one of the vocabularies here.
+   */
+  key: ItemGroupKey | CodeGroupKey | "pinned" | "archived" | "rows"
   label: string
   items: T[]
   /** Drawn closed until the reader asks: what a list is done with, or put out of the way. */

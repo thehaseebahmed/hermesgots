@@ -11,6 +11,7 @@ import { useLocation, useNavigate } from "react-router"
 import { BotChatRow } from "@/components/chat/bot-chat-row"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { Chip, ChipRow } from "@/components/chip"
+import { ItemGroup } from "@/components/item-list"
 import { CHATS_SEARCH_FIELD_ID, ListFoot } from "@/components/list-foot"
 import { SearchField } from "@/components/search-field"
 import { botChatsPath } from "@/lib/bot-tabs"
@@ -19,6 +20,7 @@ import {
   chatList,
   emptyOf,
   filterChatRows,
+  type ChatClock,
   type ChatFilter,
   type ChatListRow,
 } from "@/lib/chat-list"
@@ -44,6 +46,9 @@ export function ChatList({
   filter,
   onFilter,
   emptyFor,
+  above,
+  group,
+  clock = "at",
   rows,
   selected,
   beside,
@@ -63,6 +68,16 @@ export function ChatList({
   onFilter: (filter: ChatFilter) => void
   /** The sentence a pill that keeps nothing says — the pills' own words unless a screen words it. */
   emptyFor?: (filter: ChatFilter) => string
+  /** What the screen draws above its rows, under the pills: the Side Chat List's Main. */
+  above?: ReactNode
+  /** The heading its rows stand under, in Code's group style; a list that has none draws them bare. */
+  group?: string
+  /**
+   * The clock the rows are ordered by (`ChatClock`). A bot's list is as old as the last thing it was
+   * told, so the flat layout takes the default; the Side Chat List asks for `latest`, since the chat
+   * the reader has just written in is the one they are in.
+   */
+  clock?: ChatClock
   rows: ChatListRow[]
   selected?: string
   /** Whether the list stands beside a chat, which is what its rows' presses turn on. */
@@ -89,7 +104,7 @@ export function ChatList({
   // The pill narrows first and the search narrows what it kept, so the two emptinesses stay apart: a pill
   // that holds nothing says its own sentence, and a pill whose rows the words miss says the search's.
   const kept = useMemo(() => filterChatRows(rows, filter, marks), [rows, filter, marks])
-  const shown = useMemo(() => chatList(kept, query), [kept, query])
+  const shown = useMemo(() => chatList(kept, query, clock), [kept, query, clock])
   const empty =
     kept.length === 0
       ? (emptyFor ?? emptyOf)(filter)
@@ -110,6 +125,24 @@ export function ChatList({
     const chat = await beginChat(bot.id)
     openChat(`/c/${chat.id}`)
   }
+
+  /**
+   * One row of the list. Every row here is a sibling of the list's: a chat, a room and a routine's
+   * run alike open above it, and take the place of one already open beside it.
+   */
+  const draw = (row: ChatListRow) => (
+    <li key={row.id}>
+      <BotChatRow
+        row={row}
+        now={now}
+        mark={marks[row.id]}
+        selected={row.id === selected}
+        profileId={bot.id}
+        replace={replace}
+        live={row.session ? runs[row.session] : undefined}
+      />
+    </li>
+  )
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
@@ -146,25 +179,19 @@ export function ChatList({
       />
 
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
+        {above}
         {empty && <p className="py-8 text-center text-sm text-muted-foreground">{empty}</p>}
 
-        <ul className="flex flex-col">
-          {shown.map((row) => (
-            <li key={row.id}>
-              <BotChatRow
-                row={row}
-                now={now}
-                mark={marks[row.id]}
-                selected={row.id === selected}
-                profileId={bot.id}
-                // Every row here is a sibling of the list's: a chat, a room and a routine's run alike
-                // open above it, and take the place of one already open beside it.
-                replace={replace}
-                live={row.session ? runs[row.session] : undefined}
-              />
-            </li>
+        {shown.length > 0 &&
+          (group ? (
+            // One heading over the whole band, in Code's group style: the count it draws is the
+            // rows this list is showing, and the group's own order is the list's.
+            <ItemGroup group={{ key: "rows", label: group, items: shown }}>
+              {shown.map(draw)}
+            </ItemGroup>
+          ) : (
+            <ul className="flex flex-col">{shown.map(draw)}</ul>
           ))}
-        </ul>
       </div>
 
       <ListFoot
