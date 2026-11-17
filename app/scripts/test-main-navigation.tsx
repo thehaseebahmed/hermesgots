@@ -401,13 +401,10 @@ test("the sidebar marks the lab features with the pill, and its own screens with
   )
 })
 
-/** The sidebar's rows, in the order it draws them. */
 const mainRows = () => findAll('nav[aria-label="Main"] a')
 
-/** The pinned canvas's row, which is drawn last. */
 const pinnedRow = () => find('nav[aria-label="Main"] a[data-canvas-pinned]')
 
-/** A row's name: its words without the pill a lab feature wears beside them. */
 const rowName = (row: Element) => (row.textContent ?? "").replace("Labs", "").trim()
 
 test("the sidebar draws today's rows, in today's order, with today's labels", async () => {

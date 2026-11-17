@@ -25,7 +25,6 @@ export const SIDEBAR_FEATURES = [
   { id: "meetings", label: "Meetings", address: "/meetings", lab: "meetings", end: false },
 ] as const
 
-/** The features this build knows, by the id each row is filed under. */
 export type SidebarFeatureId = (typeof SIDEBAR_FEATURES)[number]["id"]
 
 /**
@@ -41,7 +40,6 @@ export interface SidebarLayoutRecord {
   order: string[]
 }
 
-/** Today's arrangement: nothing hidden, and the order the table draws. */
 export const DEFAULT_SIDEBAR_LAYOUT: SidebarLayoutRecord = { version: 1, hidden: [], order: [] }
 
 /**
@@ -55,11 +53,9 @@ export interface SidebarPin {
   mark?: string
 }
 
-/** One row: a feature's screen, or the canvas the reader pinned. */
 export type SidebarLayoutRow<Pin extends SidebarPin = SidebarPin> =
   SidebarFeatureRow | SidebarPinRow<Pin>
 
-/** A feature's row: what the table says about it, and the kind of row it is. */
 type SidebarFeatureRow = (typeof SIDEBAR_FEATURES)[number] & { kind: "feature" }
 
 /** A pin's row: the one row that lets its canvas go. */
@@ -79,7 +75,6 @@ export interface SidebarPinRow<Pin extends SidebarPin> {
 
 const CANVAS_ROW = "canvas:"
 
-/** The rows the sidebar draws, in order: the features, then the pins the reader keeps. */
 export function sidebarRows<Pin extends SidebarPin>(
   pins: readonly Pin[] = [],
 ): SidebarLayoutRow<Pin>[] {
@@ -96,7 +91,6 @@ export function sidebarRows<Pin extends SidebarPin>(
   ]
 }
 
-/** A row as the account's record leaves it: the row the table draws, and whether the reader put it away. */
 export interface SidebarPlacedRow<Pin extends SidebarPin = SidebarPin> {
   row: SidebarLayoutRow<Pin>
   hidden: boolean
@@ -167,7 +161,6 @@ export function restingSidebarRows<Pin extends SidebarPin>(
   return restingOf(placedRows(rows, record))
 }
 
-/** The resting rows of a placement already made, so a caller reading all of it places the list once. */
 function restingOf<Pin extends SidebarPin>(
   placed: readonly SidebarPlacedRow<Pin>[],
 ): SidebarLayoutRow<Pin>[] {
@@ -201,7 +194,6 @@ export function isDefaultLayout<Pin extends SidebarPin>(
   return isDefaultOf(placedRows(rows, record), rows)
 }
 
-/** Whether a placement already made is today's arrangement, read the same way for both callers. */
 function isDefaultOf<Pin extends SidebarPin>(
   placed: readonly SidebarPlacedRow<Pin>[],
   rows: readonly SidebarLayoutRow<Pin>[],
@@ -209,7 +201,6 @@ function isDefaultOf<Pin extends SidebarPin>(
   return placed.every(({ row, hidden }, index) => !hidden && row.id === rows[index]?.id)
 }
 
-/** The placement, and the three answers the sidebar draws from it. */
 export interface SidebarPlacement<Pin extends SidebarPin = SidebarPin> {
   /** The rows the resting sidebar draws — every known row the reader has not put away, in order. */
   resting: SidebarLayoutRow<Pin>[]
@@ -286,7 +277,6 @@ export function moveTo<Pin extends SidebarPin>(
   return placedOver(placedRows(rows, record), id, index)
 }
 
-/** The record one row's new place writes, over a placement already made. */
 function placedOver<Pin extends SidebarPin>(
   placed: readonly SidebarPlacedRow<Pin>[],
   id: string,

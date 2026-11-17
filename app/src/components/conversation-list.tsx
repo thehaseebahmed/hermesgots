@@ -61,7 +61,6 @@ const railClass = ({ isActive }: { isActive: boolean }) =>
     isActive && "bg-muted font-medium",
   )
 
-/** A pinned canvas's row, as the table files it: the one row whose mark is the canvas's own. */
 type PinRow = SidebarPinRow<Canvas>
 
 /**

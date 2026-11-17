@@ -56,16 +56,12 @@ const sidebar = () => (
   </MemoryRouter>
 )
 
-/** The header's switch, by the words its name says at rest. */
 const editButton = () => find('button[aria-label="Edit sidebar"]')
-/** The same switch, named for what its press does while the mode is open. */
 const doneButton = () => find('button[aria-label="Done editing sidebar"]')
-/** The mode itself: the group the sidebar's own state opens. */
 const group = () => find('[role="group"][aria-label="Sidebar layout"]')
 /** A row's own words, before the control the mode puts beside them. */
 const labelOf = (row: Element | null) =>
   wordsOf(row).replace(/(?:Hide|Show|Unpin|Unpinning|Try again)$/, "")
-/** A row's move control, named for the row it moves and the place it goes. */
 const moveControl = (label: string, direction: "up" | "down") =>
   find(`button[aria-label="Move ${label} ${direction}"]`)
 /** The mode's live region: what a reorder says to a reader who cannot see the rows move. */
@@ -221,7 +217,6 @@ const ORDERED = {
   hidden: ["research"],
 }
 
-/** The addresses the resting sidebar draws, in the order it draws them. */
 const addresses = () => findAll('nav[aria-label="Main"] a').map((row) => row.getAttribute("href"))
 
 test("a hidden row leaves the sidebar and stays in the mode, muted", async () => {
@@ -474,7 +469,6 @@ type UnpinAnswer = "refused" | "silent" | "unpinned"
 const REFUSED_WORDS = "The host won't let this pin go while its bot is busy."
 
 function serveUnpin(answer: UnpinAnswer, hold?: Promise<void>) {
-  /** Every write the mode made, in the order it made it. */
   const posts: { body: unknown }[] = []
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input))
@@ -518,13 +512,10 @@ const sidebarAndStore = () => (
   </MemoryRouter>
 )
 
-/** The pin's row in the mode. */
 const pinRow = () => find('[data-sidebar-row="canvas:p1"]')
-/** The one control a pin carries, named for the canvas it lets go. */
 const unpinControl = () => find('[data-sidebar-row="canvas:p1"] [data-sidebar-unpin]')
 /** What a row's refusal says, and it is drawn by the row it was made in. */
 const refusalInRow = () => pinRow()?.querySelector('[role="alert"]') ?? null
-/** The rows the mode draws, in the order it draws them. */
 const rowIds = () => findAll("[data-sidebar-row]").map((row) => row.getAttribute("data-sidebar-row"))
 
 /** Opens the mode over a sidebar whose rows have arrived. */
@@ -704,9 +695,7 @@ const ARRANGED = {
   hidden: ["code"],
 }
 
-/** The mode's foot: the one control that clears the arrangement. */
 const resetControl = () => find("[data-sidebar-reset]")
-/** The question a destructive control asks, and a press offered inside it. */
 const question = () => find('[role="alertdialog"]')
 const inQuestion = (label: string) => findText('[role="alertdialog"] button', label)
 

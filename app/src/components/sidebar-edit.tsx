@@ -141,10 +141,8 @@ function landingIndex(bottoms: readonly number[], y: number) {
   return over === -1 ? bottoms.length - 1 : over
 }
 
-/** The row a reader is carrying, and the place it would land. */
 type Drag = { id: string; label: string; at: number }
 
-/** The grip's pointer handlers, taken from the list so one gesture runs at a time. */
 interface Grip {
   onPointerDown: (event: PointerEventOf<HTMLButtonElement>) => void
   onPointerMove: (event: PointerEventOf<HTMLButtonElement>) => void
@@ -152,7 +150,6 @@ interface Grip {
   onPointerCancel: () => void
 }
 
-/** What every row in the mode takes from the list it stands in: its place, and the gesture. */
 interface RowWiring {
   hidden: boolean
   index: number
@@ -277,7 +274,6 @@ function RowMoves<Pin extends SidebarPin>({
   )
 }
 
-/** One feature's row: its name, its places to go, and the press that puts it away or brings it back. */
 function FeatureModeRow<Pin extends SidebarPin>({
   row,
   wiring,
@@ -551,7 +547,6 @@ export function SidebarEdit<Pin extends SidebarPin>({
       setDrag({ id: row.id, label: row.label, at })
     }
 
-  /** Carries the row to the place under the pointer, marked as it goes. */
   const overDrag = (event: PointerEventOf<HTMLButtonElement>) => {
     const held = gesture.current
     if (!held || held.pointer !== event.pointerId) return
