@@ -127,10 +127,11 @@ test("the APK ships the same badge under a drawable name", () => {
       readFileSync(badgePath(id)),
       `${id}'s drawable is the bytes .../notify.png holds`,
     )
-    // A resource name carries no hyphen, so a bot id's is written with an underscore on both sides
-    // (`GotsMessagingService` looks the same name up).
-    assert.equal(drawableName(id), `bot_${id.replace(/-/g, "_")}.png`)
   }
+  // A resource name carries no hyphen, so a bot id's is written with an underscore on both sides
+  // (`GotsMessagingService` looks the same name up). No bot in the tree is hyphenated, so the rule
+  // is pinned on a name rather than left to the ones that happen to exist.
+  assert.equal(drawableName("ada-love"), "bot_ada_love.png")
 })
 
 test("--check passes on the committed badges and names a stale one", () => {
