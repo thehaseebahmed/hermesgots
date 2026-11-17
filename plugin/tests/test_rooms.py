@@ -2268,10 +2268,12 @@ class RoomPushes(unittest.TestCase):
         rooms._noted.clear()
         self.told = []
         self.bodies = []
+        self.answers = []
 
-        def note(kind, session_id, path=None, title=None, body=None):
+        def note(kind, session_id, path=None, title=None, body=None, answer=None):
             self.told.append((kind, session_id, title))
             self.bodies.append(body)
+            self.answers.append(answer)
             return True
 
         patches = [
@@ -2396,6 +2398,33 @@ class RoomPushes(unittest.TestCase):
         with dispatcher(self.host(waiting=True)), no_loopback():
             rooms._pass(SimpleNamespace())
         self.assertEqual(len(self.told), 1, "the loop the server runs is the pass itself")
+
+    def test_a_rooms_approval_notice_names_the_request_the_tray_answers(self):
+        # G7: the notice's two buttons settle the one approval the room found first, so the target
+        # rides with the push that carries them.
+        self.assertEqual(self.check(self.host(waiting=True)), 1)
+        self.assertEqual(
+            self.answers,
+            [
+                {
+                    "kind": "room",
+                    "room_id": "room-1",
+                    "member_id": "m1",
+                    "task_id": "dtask:1",
+                    "generation": 3,
+                    "request_id": "approval-1",
+                }
+            ],
+            "the Host's own request, generation and member: what `groups.approve` resolves",
+        )
+
+    def test_a_rooms_question_offers_no_button(self):
+        self.check(self.host())
+        rooms.hold_question("room-1", "m2", "srq-1", [QUESTION])
+        self.assertEqual(self.check(self.host(events=[event(1, "message.user", USER, {"text": "go"})])), 1)
+        self.assertEqual(
+            self.answers[-1], None, "a question is answered by opening the room, not from the tray"
+        )
 
     def test_a_question_the_hook_held_is_a_wait(self):
         host = self.host()

@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-from . import notice, push
+from . import answers, notice, push
 from .store import connect, current_path
 
 logger = logging.getLogger(__name__)
@@ -215,7 +215,8 @@ def on_approval_request(**kwargs: Any) -> None:
     """``pre_approval_request``: as ``on_approval``, and the user's other devices hear of it.
 
     What they hear is the card's own body — the description and the command that waits to be run —
-    built here, where the payload is, rather than read back from a screen the user hasn't opened.
+    built here, where the payload is, rather than read back from a screen the user hasn't opened; and
+    the run the hook names, so the notice can carry the two buttons that settle it.
     """
     if _is_guardian_pass(kwargs):
         return
@@ -226,6 +227,8 @@ def on_approval_request(**kwargs: Any) -> None:
             "approval",
             session_id,
             body=notice.approval_body(kwargs.get("description"), kwargs.get("command")),
+            # The approval key is the run id: the same one Hermes's queue answers by.
+            answer=answers.run_target(kwargs.get("session_key"), session_id),
         )
 
 

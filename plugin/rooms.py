@@ -42,7 +42,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 
-from . import attachments, chats, config_keys, events, link, media, notice, push, ticker
+from . import answers, attachments, chats, config_keys, events, link, media, notice, push, ticker
 from .store import db_path
 
 logger = logging.getLogger(__name__)
@@ -1742,9 +1742,15 @@ def check(hermes_home: Path) -> int:
         if ids - told:
             name = room.get("name") if isinstance(room.get("name"), str) else None
             # A push the throttle or a quiet Host dropped is one the user hasn't heard: the waits stay
-            # unannounced, and the next pass is still the transition it pushes.
+            # unannounced, and the next pass is still the transition it pushes. The wait it names is
+            # also what the notice's two buttons would settle, where that wait is an approval (G7).
             if not push.notify(
-                "room_input", room_id, path=path, title=name, body=_wait_body(waits[0])
+                "room_input",
+                room_id,
+                path=path,
+                title=name,
+                body=_wait_body(waits[0]),
+                answer=answers.room_target(room_id, waits[0]),
             ):
                 return
             pushed += 1

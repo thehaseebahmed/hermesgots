@@ -12,7 +12,7 @@ that silences it, the sentence it says and what a title falls back to when nothi
 from __future__ import annotations
 
 import re
-from typing import Dict, Iterable, NamedTuple, Optional, Tuple
+from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Tuple
 
 
 class Action(NamedTuple):
@@ -27,8 +27,8 @@ class Notice(dict):
 
     The notice *is* that mapping, so a transport spreads it onto its own payload unchanged rather than
     picking fields out of it, and a field with no value is left out rather than sent empty — a device
-    reads a missing title as ``Gots``. ``actions`` are the buttons a tray may draw, which no payload
-    carries: a press posts a link of its own.
+    reads a missing title as ``Gots``. ``actions`` are the buttons a tray may draw: they are not in the
+    mapping, since a button is not a word, so a transport spreads ``payload()`` instead.
     """
 
     def __init__(
@@ -54,6 +54,34 @@ class Notice(dict):
     @property
     def bot(self) -> Optional[str]:
         return self.get("bot")
+
+    def payload(self) -> Dict[str, Any]:
+        """The notice as a transport carries it: its fields, and its buttons where it has any.
+
+        ``actions`` is the one field that is not in the mapping, since a button is the one part of a
+        notice that is not a word — so what a transport spreads is this, and a notice with no buttons
+        carries no key at all rather than an empty list.
+        """
+        carried: Dict[str, Any] = dict(self)
+        if self.actions:
+            carried["actions"] = actions_wire(self.actions)
+        return carried
+
+
+def actions_wire(actions: Iterable[Action]) -> List[Dict[str, str]]:
+    """Buttons as the wire carries them: each one's label, and the link a press posts."""
+    return [{"label": action.label, "url": action.url} for action in actions]
+
+
+def carried(notice: Any) -> Dict[str, Any]:
+    """What a transport spreads onto its own payload, from a notice or a plain mapping alike.
+
+    A caller that hands a bare dict (a hook that knows only what it was told) carries no buttons,
+    which is exactly what a notice without any carries.
+    """
+    if isinstance(notice, Notice):
+        return notice.payload()
+    return dict(notice or {})
 
 
 # What a body carries: the paragraph a reply ends on, on one line. The registry cuts a detail's

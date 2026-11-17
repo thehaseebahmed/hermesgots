@@ -39,7 +39,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from . import link
-from .notice import UNTITLED, WORDS, Notice
+from .notice import UNTITLED, WORDS, Notice, carried
 from .store import connect, home_of
 
 logger = logging.getLogger(__name__)
@@ -285,12 +285,17 @@ def message(
     held: Dict[str, Any], kind: str, category: str, session_id: str, notice: Optional[Notice] = None
 ) -> Dict[str, Any]:
     """The JSON a publish posts to the server's root: the notice's title over its body, with the
-    kind's own line standing in where the notice names no words."""
+    kind's own line standing in where the notice names no words.
+
+    An approval's buttons ride in the JSON as each one's label and link, which is what a publish's
+    ``X-Actions`` header carries once the sender fills that in; neither is a word Gots would have to
+    say twice.
+    """
     title = ((notice or {}).get("title") or "").strip() or UNTITLED.get(kind) or "Gots"
     words = ((notice or {}).get("body") or "").strip() or WORDS.get(kind, "Waiting for you")
     priorities = held.get("priorities") if isinstance(held.get("priorities"), dict) else {}
     sequence = hashlib.sha256(f"{category}:{session_id}".encode()).digest()[:18]
-    return {
+    body = {
         "topic": held["topic"],
         "title": title,
         "message": words,
@@ -299,6 +304,10 @@ def message(
         # A newer message of the same category about the same thing replaces one still showing.
         "sequence_id": base64.urlsafe_b64encode(sequence).rstrip(b"=").decode(),
     }
+    buttons = carried(notice).get("actions")
+    if buttons:
+        body["actions"] = buttons
+    return body
 
 
 def auth_header(token: str) -> Dict[str, str]:

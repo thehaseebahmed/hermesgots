@@ -28,6 +28,7 @@ from urllib.parse import quote
 from . import (
     afk,
     alerts,
+    answers,
     approvals,
     attachments,
     canvases,
@@ -82,7 +83,7 @@ from . import (
     todos,
     usage,
 )
-from .store import current_path
+from .store import current_path, home_of
 
 logger = logging.getLogger(__name__)
 
@@ -2562,7 +2563,38 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             await asyncio.to_thread(push.subscribe, store_path(), body)
         except push.PushError as exc:
             return _error(web, str(exc), 400)
+        # Where this app dialled this bot, kept for the buttons an approval's notice carries: a host
+        # behind a tunnel or on a LAN name doesn't know its own address, the phone does.
+        await asyncio.to_thread(push.set_base, store_path(), push.base_url(request, "/push"))
         return web.json_response({"object": "gots.push", "subscribed": True})
+
+    async def push_answer(request: "web.Request") -> "web.Response":
+        # The one route with no key of the account's: the token in the path is the credential, which
+        # is what makes an approval answerable from a notification with the app closed. It is
+        # registered as a POST and nothing else, so aiohttp answers a read of the link with 405 — a
+        # link preview that fetches the URL therefore spends no button, which is the point of it. The
+        # token is never logged: nothing here says it, and `_error`'s words never carry it.
+        path = store_path()
+        claim = await asyncio.to_thread(answers.redeem, path, request.match_info.get("token") or "")
+        if claim.outcome == answers.UNKNOWN:
+            return _error(web, "That button isn't one this bot sent.", 404)
+        if claim.outcome == answers.SPENT:
+            return _error(web, "That button has already been answered.", 410)
+        target, choice = claim.target or {}, claim.choice or ""
+        try:
+            if target.get("kind") == answers.ROOM:
+                # A room member's approval is the Host's to resolve, and its call can block on the
+                # waiting turn, so it runs on a worker thread; a refusal keeps its own status.
+                await asyncio.to_thread(answers.answer_room, target, choice, home_of(path))
+            elif target.get("kind") == answers.RUN:
+                # A run's approval is answered on the loop, where its status and its stream live.
+                if not answers.answer_run(target.get("run_id") or "", choice):
+                    return _error(web, "That approval isn't waiting any more.", 409)
+            else:
+                return _error(web, "That button isn't one this bot sent.", 404)
+        except (answers.AnswerError, rooms.RoomError) as refused:
+            return _error(web, str(refused), refused.status)
+        return web.json_response({"object": "gots.push.answer", "answered": True, "choice": choice})
 
     async def push_mute(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -2601,6 +2633,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             held = await asyncio.to_thread(ntfy.set_target, store_path(), body)
         except push.PushError as exc:
             return _error(web, str(exc), 400)
+        # A phone that chose ntfy reaches this bot at the same address it dialled here, which is
+        # where an approval's buttons post back to; see `push.base_url`.
+        await asyncio.to_thread(push.set_base, store_path(), push.base_url(request, "/push/ntfy"))
         return web.json_response(ntfy.public(held))
 
     async def push_ntfy_remove(request: "web.Request") -> "web.Response":
@@ -2976,6 +3011,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/push/ntfy", push_ntfy_read)
     app.router.add_post(f"{PREFIX}/push/ntfy", push_ntfy_write)
     app.router.add_post(f"{PREFIX}/push/ntfy/remove", push_ntfy_remove)
+    # A button's own link (answers.py): the one route outside `unauthorized()`, POST alone, so a
+    # read of it spends nothing. Every route gains its /p/<profile> twin with the rest.
+    app.router.add_post(f"{PREFIX}/push/answer/{{token}}", push_answer)
     app.router.add_post(f"{PREFIX}/runs/{{run_id}}/clarify", answer_clarify)
     async def get_speech(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
