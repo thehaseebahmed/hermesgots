@@ -2267,16 +2267,18 @@ class RoomPushes(unittest.TestCase):
         rooms._cursors.clear()
         rooms._noted.clear()
         self.told = []
+        self.bodies = []
+        self.answers = []
+
+        def note(kind, session_id, path=None, title=None, body=None, answer=None):
+            self.told.append((kind, session_id, title))
+            self.bodies.append(body)
+            self.answers.append(answer)
+            return True
+
         patches = [
             mock.patch.object(push, "reachable", lambda path: True),
-            mock.patch.object(
-                push,
-                "notify",
-                lambda kind, session_id, path=None, title=None: self.told.append(
-                    (kind, session_id, title)
-                )
-                or True,
-            ),
+            mock.patch.object(push, "notify", note),
         ]
         for one in patches:
             one.start()
@@ -2397,11 +2399,99 @@ class RoomPushes(unittest.TestCase):
             rooms._pass(SimpleNamespace())
         self.assertEqual(len(self.told), 1, "the loop the server runs is the pass itself")
 
+    def test_a_rooms_approval_notice_names_the_request_the_tray_answers(self):
+        # G7: the notice's two buttons settle the one approval the room found first, so the target
+        # rides with the push that carries them.
+        self.assertEqual(self.check(self.host(waiting=True)), 1)
+        self.assertEqual(
+            self.answers,
+            [
+                {
+                    "kind": "room",
+                    "room_id": "room-1",
+                    "member_id": "m1",
+                    "task_id": "dtask:1",
+                    "generation": 3,
+                    "request_id": "approval-1",
+                }
+            ],
+            "the Host's own request, generation and member: what `groups.approve` resolves",
+        )
+
+    def test_a_rooms_question_offers_no_button(self):
+        self.check(self.host())
+        rooms.hold_question("room-1", "m2", "srq-1", [QUESTION])
+        self.assertEqual(self.check(self.host(events=[event(1, "message.user", USER, {"text": "go"})])), 1)
+        self.assertEqual(
+            self.answers[-1], None, "a question is answered by opening the room, not from the tray"
+        )
+
     def test_a_question_the_hook_held_is_a_wait(self):
         host = self.host()
         rooms.hold_question("room-1", "m2", "srq-1", [QUESTION])
         self.assertEqual(self.check(host), 1)
         self.assertEqual(self.told, [("room_input", "room-1", "Planning")])
+
+    def test_two_new_waits_are_two_notices_each_naming_its_own(self):
+        """A room that starts waiting on two things is told twice, once per wait.
+
+        The notice is built from the first wait the room has not announced — not from the first
+        wait it holds — and what a notice names is what is marked told, so the second wait is still
+        news the next pass can announce in its own words. Marking every wait because one notice
+        named one of them would silence the other for as long as the room waits.
+        """
+        host = self.host(waiting=True)
+        # Both waits arrive before a pass: the approval, then a member's question.
+        rooms.hold_question("room-1", "m2", "srq-1", [QUESTION])
+        self.assertEqual(self.check(host), 1, "one notice says one wait")
+        self.assertEqual(
+            self.bodies,
+            ["Clear the build\n\nrm -rf build"],
+            "the approval, which is the first wait the room holds",
+        )
+        self.assertEqual(self.check(host), 1, "the other wait is still one the user hasn't heard")
+        self.assertEqual(
+            self.bodies[1],
+            "Which database?",
+            "and it is said in its own words, not the approval's again",
+        )
+        self.assertIsNone(self.answers[-1], "a question carries no button")
+        self.assertEqual(self.check(host), 0, "both waits are announced, so the room is quiet")
+
+    def test_a_second_wait_is_announced_in_its_own_words(self):
+        host = self.host(waiting=True)
+        self.assertEqual(self.check(host), 1, "the approval")
+        rooms.hold_question("room-1", "m2", "srq-1", [QUESTION])
+        self.assertEqual(self.check(host), 1, "a wait the room has never announced is news")
+        self.assertEqual(
+            self.bodies,
+            ["Clear the build\n\nrm -rf build", "Which database?"],
+            "the notice names the new wait, not the one it already told",
+        )
+
+    def test_a_rooms_body_is_the_waits_own_words(self):
+        host = self.host(waiting=True)
+        self.assertEqual(self.check(host), 1)
+        self.assertEqual(
+            self.bodies,
+            ["Clear the build\n\nrm -rf build"],
+            "the words the room's own card draws, under the room's name",
+        )
+
+    def test_a_question_and_a_mention_are_worded_by_their_own_words(self):
+        self.assertEqual(
+            rooms._wait_body({"kind": "question", "questions": [QUESTION]}),
+            "Which database?",
+            "a room's question is the question alone, as a chat's is",
+        )
+        self.assertEqual(
+            rooms._wait_body({"kind": "ask", "text": "That one is  yours,\n@user."}),
+            "That one is yours, @user.",
+            "and a member's words addressed to the user are the sentence they answer",
+        )
+        self.assertIsNone(
+            rooms._wait_body({"kind": "question", "questions": []}), "a wait with no words says nothing"
+        )
 
     def test_the_answer_arms_the_room_for_the_next_wait(self):
         host = self.host()

@@ -68,12 +68,17 @@ jobs:
           path: .hermes
           # The internals span the tools, gateway, agent, hermes_cli and tui_gateway packages (the
           # last holds the rooms contract, the gateway client and its discovery), not just tools.
+          # `session_rules` words a transcript — a summary's markers and an inline image's line live
+          # there now — and `persistence` is where the admission ledger moved; a sparse checkout that
+          # leaves either out reports a module that merely moved as one that is gone.
           sparse-checkout: |
             tools
             gateway
             agent
             hermes_cli
             tui_gateway
+            session_rules
+            persistence
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"

@@ -8,6 +8,7 @@ Run: python3 -m unittest plugin.tests.test_ntfy -v
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 import tempfile
@@ -17,6 +18,7 @@ from pathlib import Path
 from unittest import mock
 
 from plugin import link, ntfy, push
+from plugin.notice import Action, Notice
 from plugin.store import db_path
 
 
@@ -164,13 +166,100 @@ class Message(unittest.TestCase):
         self.assertEqual(ntfy.UNTITLED, dict(re.findall(r'(\w+): "([^"]*)"', untitled)))
 
 
+# The app's own origin, as `push.subscribe` keeps it, and an approval's two buttons.
+APP = "https://gots.example"
+ONCE = "https://bot.example/api/plugins/gots/push/answer/once-1"
+DENY = "https://bot.example/api/plugins/gots/push/answer/deny-1"
+
+
+class OnThePhone(Env):
+    """What rides with the words: the buttons, and the badged picture of the bot.
+
+    Both are the app's own — the picture is served from where the app lives — so a profile that has
+    never heard where its app lives says neither, and its message is only its words.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.env["NTFY_TOKEN"] = "tk_abc"
+        ntfy.set_target(self.path, {**TARGET, "categories": ["chat_input"]})
+        self.requests = []
+        answering = mock.patch.object(ntfy.urllib.request, "urlopen", self.answer)
+        answering.start()
+        self.addCleanup(answering.stop)
+
+    def answer(self, request, timeout):
+        self.requests.append(request)
+
+        class Answer:
+            status = 200
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+        return Answer()
+
+    def sent(self, notice):
+        """The headers a publish of this notice carries, by name in lower case as HTTP reads them."""
+        ntfy.deliver(self.path, "approval", "chat_input", "gots-1", notice)
+        self.assertTrue(self.requests, "a message was published")
+        return {name.lower(): value for name, value in self.requests[-1].header_items()}
+
+    def test_the_buttons_and_the_badged_picture_ride_with_the_message(self):
+        push.set_web(self.path, APP)
+        push.set_bot(self.path, "nova")
+        notice = Notice(title="Fix the build", actions=(Action("Allow once", ONCE), Action("Deny", DENY)))
+        headers = self.sent(notice)
+        self.assertEqual(headers["x-icon"], f"{APP}/bots/nova/notify.png")
+        self.assertEqual(
+            json.loads(headers["x-actions"]),
+            [
+                {"action": "http", "label": "Allow once", "url": ONCE, "method": "POST", "clear": True},
+                {"action": "http", "label": "Deny", "url": DENY, "method": "POST", "clear": True},
+            ],
+            "each button is an http action: a press posts the link and clears the row",
+        )
+        body = json.loads(self.requests[-1].data)
+        self.assertNotIn("actions", body, "a button is not a word: it rides in a header, not the JSON")
+        self.assertEqual(body["title"], "Fix the build")
+
+    def test_buttons_ride_even_where_the_picture_cannot(self):
+        """A phone that chose ntfy never posts `push`, so nothing names the app's origin.
+
+        Its buttons are minted all the same — the address they post to is the host's, which the
+        phone dialled — so the message carries them and leaves off only the picture it has no
+        origin for. Dropping the buttons with the picture left the transport for an APK without
+        Firebase unable to answer an approval at all.
+        """
+        push.set_web(self.path, "mailto:bot@example.com")
+        self.assertIsNone(push.web(self.path), "only an http or https origin is the app's own")
+        notice = Notice(title="Fix the build", actions=(Action("Allow once", ONCE), Action("Deny", DENY)))
+        headers = self.sent(notice)
+        self.assertNotIn("x-icon", headers, "there is no origin to name the badged picture at")
+        self.assertEqual(
+            [one["label"] for one in json.loads(headers["x-actions"])],
+            ["Allow once", "Deny"],
+            "but the buttons post to the host the phone dialled, and are carried",
+        )
+        self.assertEqual(json.loads(self.requests[-1].data)["title"], "Fix the build")
+
+    def test_a_notice_with_no_buttons_and_no_picture_carries_neither(self):
+        push.set_web(self.path, None)
+        headers = self.sent(Notice(title="Fix the build"))
+        self.assertNotIn("x-icon", headers)
+        self.assertNotIn("x-actions", headers)
+
+
 class Deliver(Env):
     def setUp(self):
         super().setUp()
         self.env["NTFY_TOKEN"] = "tk_abc"
         self.sent = []
         self.publishing = mock.patch.object(
-            ntfy, "publish", lambda held, body: self.sent.append((held, body)) or 200
+            ntfy, "publish", lambda held, body, extra=None: self.sent.append((held, body)) or 200
         )
         self.publishing.start()
         self.publish_on = True
@@ -230,7 +319,7 @@ class BothTransports(Env):
     def test_a_push_goes_to_ntfy_and_the_registry_is_told_to_skip_that_phone(self):
         ntfy.set_target(self.path, {**TARGET, "categories": ["chat_input"]})
         published, relayed = [], []
-        with mock.patch.object(ntfy, "publish", lambda held, body: published.append(body) or 200), \
+        with mock.patch.object(ntfy, "publish", lambda held, body, extra=None: published.append(body) or 200), \
             mock.patch.object(link, "load_state", lambda home: {"token": "mh_x", "site": "https://app.example"}), \
             mock.patch.object(link, "call", lambda site, method, route, token=None, body=None: relayed.append(body) or {"sent": 0}):
             push._deliver(self.path, "question", "chat_input", "gots-1", {"title": "A chat"})

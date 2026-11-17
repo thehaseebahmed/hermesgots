@@ -42,7 +42,7 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
 
-from . import attachments, chats, config_keys, events, link, media, push, ticker
+from . import answers, attachments, chats, config_keys, events, link, media, notice, push, ticker
 from .store import db_path
 
 logger = logging.getLogger(__name__)
@@ -1582,40 +1582,43 @@ def offered(home: Any = None) -> Tuple[List[str], Optional[List[str]]]:
 # -- The watcher --------------------------------------------------------------
 
 
-def _asking_seq(rows: List[Dict[str, Any]]) -> Optional[int]:
-    """The sequence of the member's words that end addressed to the user, or None while none do.
+def _asking(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The member's words that end addressed to the user, with the sequence they sit at, or None
+    while none do.
 
     An approval is the Host's pending action and a question is held here, but a round that settles on
     the user is only in the log, so it is read there — by the rule the room's screen reads it with
     (`app/src/lib/room-log.ts`): the last message decides, a member's mention asks, and the user's own
     words answer it.
     """
-    asking: Optional[int] = None
+    asking: Optional[Dict[str, Any]] = None
     for row in sorted(rows, key=lambda one: one["seq"]):
         if row["kind"] == "message.user":
             asking = None
         elif row["kind"] == "message.member":
-            asking = row["seq"] if MENTION.search(row.get("text") or "") else None
+            asking = row if MENTION.search(row.get("text") or "") else None
     return asking
 
 
-def _wait_ids(room_id: str, declared: Tuple[str, ...], home: Any, deadline: float) -> Set[str]:
-    """What this room waits on the user for, each wait by its own id.
+def _waits(room_id: str, declared: Tuple[str, ...], home: Any, deadline: float) -> List[Dict[str, Any]]:
+    """What this room waits on the user for, each wait by its own id and in the words its card draws.
 
     The id is what makes a wait a wait: an approval's request, a question's id and the sequence of a
     reply addressed to the user are all never reused, so a room that is answered and asks again is a
-    new set, and a wait that is answered while another is still pending is the same one.
+    new set, and a wait that is answered while another is still pending is the same one. The words
+    ride along because the notification says the one it found first, and reading them here costs no
+    second ask of the Host.
     """
     found = call("groups.state", {"room_id": room_id}, timeout=_spare(deadline), home=home)
-    found_ids: Set[str] = set()
+    waits: List[Dict[str, Any]] = []
     for one in waiting(found.get("driver_status"), declared, room_id):
         named = one.get("requestId") if one.get("kind") == "approval" else one.get("questionId")
         if isinstance(named, str) and named:
-            found_ids.add(f"{one['kind']}:{named}")
+            waits.append({**one, "id": f"{one['kind']}:{named}"})
     room = found.get("room") if isinstance(found.get("room"), dict) else {}
     reached = room.get("latest_seq")
     if type(reached) is not int or reached <= 0:
-        return found_ids
+        return waits
     page = call(
         "groups.log",
         {"room_id": room_id, "since_seq": max(0, reached - ASK_WINDOW)},
@@ -1623,10 +1626,29 @@ def _wait_ids(room_id: str, declared: Tuple[str, ...], home: Any, deadline: floa
         home=home,
     )
     rows = [one for one in (_event(raw) for raw in page.get("events") or ()) if one]
-    seq = _asking_seq(rows)
-    if seq is not None:
-        found_ids.add(f"ask:{seq}")
-    return found_ids
+    asking = _asking(rows)
+    if asking is not None:
+        waits.append({"id": f"ask:{asking['seq']}", "kind": "ask", "text": asking.get("text")})
+    return waits
+
+
+def _wait_body(wait: Dict[str, Any]) -> Optional[str]:
+    """What a room's notification says: the wait it found first, as that wait's own card draws it.
+
+    An approval is the card it will be answered on, a question is the question alone, and a member's
+    words addressed to the user are the sentence the user answers. None leaves the kind its own line.
+    """
+    kind = wait.get("kind")
+    if kind == "approval":
+        return notice.approval_body(wait.get("description"), wait.get("command"))
+    if kind == "question":
+        asked = wait.get("questions")
+        first = asked[0] if isinstance(asked, list) and asked else {}
+        return notice.question_body(first.get("question") if isinstance(first, dict) else None)
+    if kind == "ask":
+        said = wait.get("text")
+        return notice.flatten(said) if isinstance(said, str) else None
+    return None
 
 
 def _answered(room_id: str, home: Any) -> None:
@@ -1709,23 +1731,39 @@ def check(hermes_home: Path) -> int:
             return
         alive.add(room_id)
         try:
-            ids = _wait_ids(room_id, declared, hermes_home, deadline)
+            waits = _waits(room_id, declared, hermes_home, deadline)
         except RoomError:
             complete = False
             return
         key = (str(hermes_home), room_id)
         with _waiting_lock:
             told = set(_waiting_rooms.get(key, ()))
-        if ids - told:
+        # The waits this room holds that the user hasn't been told about, in the order `waiting`
+        # lists them: a notice says the first of those, never one it has already announced.
+        fresh = [one for one in waits if one["id"] not in told]
+        ids = {one["id"] for one in waits}
+        named = None
+        if fresh:
+            named = fresh[0]
             name = room.get("name") if isinstance(room.get("name"), str) else None
             # A push the throttle or a quiet Host dropped is one the user hasn't heard: the waits stay
-            # unannounced, and the next pass is still the transition it pushes.
-            if not push.notify("room_input", room_id, path=path, title=name):
+            # unannounced, and the next pass is still the transition it pushes. The wait it names is
+            # also what the notice's two buttons would settle, where that wait is an approval (G7).
+            if not push.notify(
+                "room_input",
+                room_id,
+                path=path,
+                title=name,
+                body=_wait_body(named),
+                answer=answers.room_target(room_id, named),
+            ):
                 return
             pushed += 1
         with _waiting_lock:
             if ids:
-                _waiting_rooms[key] = told | ids
+                # Only what the notice named is marked told, so a wait it did not say — another one
+                # the same pass found — is still news the next pass can announce in its own words.
+                _waiting_rooms[key] = told | ({named["id"]} if named else set())
             else:
                 _waiting_rooms.pop(key, None)
 

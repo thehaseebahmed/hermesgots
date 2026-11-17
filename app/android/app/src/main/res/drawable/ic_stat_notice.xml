@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The status bar's icon: a speech bubble with three dots cut out of it, white and nothing else.
+
+  Android draws a notification's small icon as a mask — one colour, with the shape's alpha kept and
+  its colours thrown away — so the app's launcher icon, which is a picture, would arrive as a black
+  square. One path, filled even-odd, so the dots are holes in the bubble rather than their own discs.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M12,3.2C7.03,3.2 3,6.78 3,11.2c0,2.36 1.19,4.47 3.06,5.88L5,21l4.35,-2.11c0.84,0.35 1.72,0.51 2.65,0.51 4.97,0 9,-3.58 9,-8s-4.03,-8 -9,-8zM8.2,12.6a1.4,1.4 0 1,1 0,-2.8 1.4,1.4 0 0,1 0,2.8zM12,12.6a1.4,1.4 0 1,1 0,-2.8 1.4,1.4 0 0,1 0,2.8zM15.8,12.6a1.4,1.4 0 1,1 0,-2.8 1.4,1.4 0 0,1 0,2.8z" />
+</vector>

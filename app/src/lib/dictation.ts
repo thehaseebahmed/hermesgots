@@ -35,6 +35,7 @@ import {
   type DictationInfo,
   type HermesConfig,
 } from "@/lib/hermes"
+import { onChanges } from "@/lib/live"
 import { usePoll } from "@/lib/poll"
 import { quietly } from "@/lib/report"
 import { randomId } from "@/lib/utils"
@@ -45,12 +46,22 @@ const { subscribe, notify } = createSignal()
 
 const infoKey = connectionKey
 
+// The write that asked for the read on hand, per connection: a read begun under an older one says
+// what the host held before that write and must not land on top of the answer that replaced it.
+const generations = new Map<string, number>()
+const generationOf = (key: string) => generations.get(key) ?? 0
+
 async function readDictationInfo(config: HermesConfig, force = false) {
   const key = infoKey(config)
   const hit = infos.get(key)
   if (!force && hit && Date.now() - hit.at < DICTATION_INFO_MS) return
+  const generation = generationOf(key)
   const info = await getDictationInfo(config).catch(() => undefined)
-  // A check that fails keeps the last answer, so the mic doesn't flicker on a bad connection.
+  if (generation !== generationOf(key)) return
+  // A check that fails keeps the last answer, so the mic doesn't flicker on a bad connection — but a
+  // forced read leaves the clock where it was, since re-stamping a failure would hold the answer
+  // from before the write that asked for it for another five minutes (ADR 0164).
+  if (!info && force) return
   const known = info ?? infos.get(key)?.info
   infos.set(key, { at: Date.now(), info: known })
   notify()
@@ -113,6 +124,17 @@ export function primeDictationInfo(config: HermesConfig) {
   void readDictationInfo(config)
 }
 
+/**
+ * Asks the bot's host how a take is heard rather than answering from the read on hand: this is a
+ * write's own follow-up, and the write moved what the host holds. The answer on hand stands until
+ * this one lands, so a mic that was there is not taken away for the length of a request (ADR 0164).
+ */
+export function refreshDictationInfo(config: HermesConfig) {
+  const key = infoKey(config)
+  generations.set(key, generationOf(key) + 1)
+  void readDictationInfo(config, true)
+}
+
 /** The host's Confirm bound for a bot, and a reason to read again when that answer lands. */
 export function useDictationWaitMs(config?: HermesConfig) {
   const key = config && config.apiKey && config.baseUrl ? infoKey(config) : ""
@@ -128,8 +150,17 @@ export function useDictationInfo(config: HermesConfig) {
     active: Boolean(key),
     onShow: false,
   })
+  // A setting written somewhere else — another phone, the CLI — is news the host's stream carries,
+  // and the answer drawn here is kept for five minutes: a frame that names settings asks again now,
+  // so a switch flipped on another device moves this mic without waiting the read out (ADR 0164).
+  useEffect(() => {
+    if (!key) return
+    return onChanges("settings", (changed) => {
+      if (changed === key) refreshDictationInfo({ baseUrl, apiKey })
+    })
+  }, [key, baseUrl, apiKey])
   const recheck = useCallback(() => {
-    if (key) void readDictationInfo({ baseUrl, apiKey }, true)
+    if (key) refreshDictationInfo({ baseUrl, apiKey })
   }, [key, baseUrl, apiKey])
   return key ? { ...state, recheck } : null
 }

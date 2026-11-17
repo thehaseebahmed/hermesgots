@@ -4,7 +4,8 @@ A phone built without Firebase, or one whose user would rather not go through it
 notifications from the ntfy app instead, and ``deliver`` publishes there whenever ``push.notify`` has
 news. The plugin publishes itself — ntfy needs no key that can't live on a host, so nothing goes
 through the registry — and what it says is what a push says: the title of what it is about and one
-sentence of what happened, never what was asked.
+sentence of what happened, never what was asked. A notice that carries an approval's buttons or this
+bot's own picture says those too, as the two headers ntfy draws under the message.
 
 **The server and the token are Hermes's own.** Hermes's ntfy platform reads ``NTFY_SERVER_URL``
 (``https://ntfy.sh`` where unset) and ``NTFY_TOKEN`` (a bearer token, or ``user:pass`` for Basic) from
@@ -39,6 +40,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from . import link
+from .notice import UNTITLED, WORDS, Notice, carried
 from .store import connect, home_of
 
 logger = logging.getLogger(__name__)
@@ -57,43 +59,6 @@ TOPIC = re.compile(r"^[-_A-Za-z0-9]{1,64}$")
 TOKEN = re.compile(r"^[\x21-\x7e]{1,512}$")
 DEVICE = re.compile(r"^[A-Za-z0-9-]{1,64}$")
 DEFAULT_PRIORITY = 3
-
-# What happened, under the title of what it happened in. `app/netlify/lib/fcm.ts` and
-# `app/public/push-sw.js` say the same; `tests/test_ntfy.py` fails when these drift from them.
-WORDS = {
-    "approval": "Waiting for your approval",
-    "question": "You have a question waiting",
-    "plan": "The plan is ready for your review",
-    "run_done": "You have a new reply",
-    "run_failed": "The run stopped with an error",
-    "pr_checks": "Checks are failing on the pull request",
-    "pr_merged": "Your pull request was merged",
-    "clone_failed": "This project couldn't be set up",
-    "routine_failed": "The last run failed",
-    "research_brief": "The brief is ready for your review",
-    "research_scope": "The scope is ready for your approval",
-    "research_done": "Your research is ready",
-    "research_failed": "The mission stopped with an error",
-    "afk_pr": "A task's pull request is ready to review",
-    "routine_message": "A bot has a message",
-    "meeting_done": "Your meeting notes are ready",
-    "meeting_failed": "Meeting notes failed",
-    "room_input": "A room is waiting on you",
-}
-
-# When nothing names what the news is about.
-UNTITLED = {
-    "routine_failed": "A routine",
-    "routine_message": "A bot",
-    "clone_failed": "A project",
-    "research_brief": "A research mission",
-    "research_scope": "A research mission",
-    "research_done": "A research mission",
-    "research_failed": "A research mission",
-    "meeting_done": "A meeting",
-    "meeting_failed": "A meeting",
-    "room_input": "A room",
-}
 
 
 def _error(message: str) -> Exception:
@@ -318,21 +283,91 @@ def click(kind: str, session_id: str) -> str:
 
 
 def message(
-    held: Dict[str, Any], kind: str, category: str, session_id: str, extra: Optional[Dict[str, str]] = None
+    held: Dict[str, Any], kind: str, category: str, session_id: str, notice: Optional[Notice] = None
 ) -> Dict[str, Any]:
-    """The JSON a publish posts to the server's root."""
-    title = ((extra or {}).get("title") or "").strip() or UNTITLED.get(kind) or "Gots"
+    """The JSON a publish posts to the server's root: the notice's title over its body, with the
+    kind's own line standing in where the notice names no words.
+
+    Only words ride here: an approval's buttons are a header (``headers``), since a button is not a
+    sentence.
+    """
+    title = ((notice or {}).get("title") or "").strip() or UNTITLED.get(kind) or "Gots"
+    words = ((notice or {}).get("body") or "").strip() or WORDS.get(kind, "Waiting for you")
     priorities = held.get("priorities") if isinstance(held.get("priorities"), dict) else {}
     sequence = hashlib.sha256(f"{category}:{session_id}".encode()).digest()[:18]
-    return {
+    body = {
         "topic": held["topic"],
         "title": title,
-        "message": WORDS.get(kind, "Waiting for you"),
+        "message": words,
         "priority": priorities.get(category, DEFAULT_PRIORITY),
         "click": click(kind, session_id),
         # A newer message of the same category about the same thing replaces one still showing.
         "sequence_id": base64.urlsafe_b64encode(sequence).rstrip(b"=").decode(),
     }
+    return body
+
+
+# ntfy's own headers for a message's extras: the buttons to draw under it, and the picture it wears.
+# ntfy fetches the picture itself, so it is a URL the phone's server can reach, and the buttons are
+# posted by the phone's ntfy app — neither is a page's request, so no CORS list has a say.
+ACTIONS = "X-Actions"
+ICON = "X-Icon"
+
+
+def buttons(notice: Optional[Notice]) -> Optional[str]:
+    """An approval's two buttons as ntfy's ``X-Actions``: an ``http`` action each.
+
+    A press posts the link the notice minted and clears the row it came from, so the notification
+    answers the waiting run and leaves the tray in one gesture.
+    """
+    actions = carried(notice).get("actions") or []
+    if not actions:
+        return None
+    return json.dumps(
+        [
+            {
+                "action": "http",
+                "label": one["label"],
+                "url": one["url"],
+                "method": "POST",
+                "clear": True,
+            }
+            for one in actions
+        ],
+        separators=(",", ":"),
+    )
+
+
+def icon(origin: Optional[str], bot: Optional[str]) -> Optional[str]:
+    """The badged picture of this profile's bot, at the app's own origin, or None while either is
+    unknown.
+
+    The badge is the app's own file (``build-badges.mjs``), so it is named where the app lives rather
+    than at the host, which may be a tunnel or a LAN name that a phone's ntfy server can't reach.
+    """
+    if not origin or not bot:
+        return None
+    return f"{origin}/bots/{bot}/notify.png"
+
+
+def headers(
+    origin: Optional[str], bot: Optional[str], notice: Optional[Notice] = None
+) -> Dict[str, str]:
+    """What a publish carries beside its words: the buttons, and the picture where it can be named.
+
+    The buttons are the notice's own — an approval's links post to the host the phone dialled, and
+    that address is known wherever they were minted at all — so they ride whichever way the picture
+    goes. The picture is the app's own file at the origin a browser subscription named, and a phone
+    that chose ntfy never subscribes: it is left off on its own, never taking the buttons with it.
+    """
+    extra: Dict[str, str] = {}
+    actions = buttons(notice)
+    if actions:
+        extra[ACTIONS] = actions
+    picture = icon(origin, bot)
+    if picture:
+        extra[ICON] = picture
+    return extra
 
 
 def auth_header(token: str) -> Dict[str, str]:
@@ -346,12 +381,15 @@ def auth_header(token: str) -> Dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def publish(held: Dict[str, Any], body: Dict[str, Any]) -> Optional[int]:
-    """One message to the topic. The server's status, or None if it didn't answer."""
+def publish(
+    held: Dict[str, Any], body: Dict[str, Any], extra: Optional[Dict[str, str]] = None
+) -> Optional[int]:
+    """One message to the topic, with the extras a phone draws under it. The server's status, or None
+    if it didn't answer."""
     request = urllib.request.Request(
         held["server"] + "/",
         data=json.dumps(body, separators=(",", ":")).encode(),
-        headers={**auth_header(held["token"]), "Content-Type": "application/json"},
+        headers={**auth_header(held["token"]), "Content-Type": "application/json", **(extra or {})},
         method="POST",
     )
     try:
@@ -368,7 +406,7 @@ def deliver(
     kind: str,
     category: str,
     session_id: str,
-    extra: Optional[Dict[str, str]] = None,
+    notice: Optional[Notice] = None,
     on_screen: Optional[List[str]] = None,
 ) -> Optional[int]:
     """Publishes the news if this profile has a target that asked for its category. A topic reaches
@@ -377,10 +415,18 @@ def deliver(
     held = target(path)
     if not held or not wants(held, category):
         return None
+    from .push import bot as bot_of, web as web_of
+
     chosen = [d for d in held.get("devices") or [] if isinstance(d, str)]
     if chosen and all(device in (on_screen or []) for device in chosen):
         return None
-    status = publish(held, message(held, kind, category, session_id, extra))
+    status = publish(
+        held,
+        message(held, kind, category, session_id, notice),
+        # The notice already carries the bot whose picture it wears; the store answers for a caller
+        # that handed one without it.
+        headers(web_of(path), carried(notice).get("bot") or bot_of(path), notice),
+    )
     if status is None or status >= 300:
         # 401 and 403 are the token; the app's own switch is where it is put right.
         logger.warning("gots: ntfy at %s answered %s", urllib.parse.urlsplit(held["server"]).netloc, status)
