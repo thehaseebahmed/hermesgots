@@ -75,13 +75,55 @@ test("a record this build does not know is today's list, and resolving it writes
 })
 
 test("the rows a record does not name follow it in catalogue order", () => {
-  // A record written before Research shipped: the rows it names stand first, and the feature the
-  // build added afterwards still draws rather than shipping invisible.
+  // A record written before Research shipped: the rows it names stand in its order, and every row it
+  // does not name stands after the catalogue row it follows — Code, Canvas and Research behind
+  // Projects, the pin behind Meetings, since a pin follows the rows the table draws.
   const record = { version: 1, order: ["meetings", "projects"], hidden: [] }
   assert.deepEqual(
     resting(record, [PIN]),
-    ["meetings", "projects", "code", "canvas", "research", "canvas:p1"],
-    "the named rows, then the rest in the catalogue's order, the pin at the foot",
+    ["meetings", "canvas:p1", "projects", "code", "canvas", "research"],
+    "each row the record does not name takes the place the catalogue gives it",
+  )
+})
+
+test("a row this build added takes its place between the two it was added between", () => {
+  // A build that ships a feature between Code and Canvas, over a record written before it existed:
+  // the record names every other row, and the new one stands where the catalogue puts it rather than
+  // being filed at the foot, which is what would ship a feature in the wrong place.
+  const rows = sidebarRows([])
+  rows.splice(2, 0, {
+    kind: "feature",
+    id: "search",
+    label: "Search",
+    address: "/search",
+    lab: null,
+    end: false,
+  })
+  const record = {
+    version: 1,
+    order: ["projects", "code", "canvas", "research", "meetings"],
+    hidden: [],
+  }
+  assert.deepEqual(
+    restingSidebarRows(rows, record).map((row) => row.id),
+    ["projects", "code", "search", "canvas", "research", "meetings"],
+    "the new row sits between the row it follows in the catalogue and the one that follows it",
+  )
+})
+
+test("a pin the record does not name lands after the pin before it", () => {
+  // The reader moved their first pin to the top of the sidebar; the second, pinned since the record
+  // was written, lands under it — after the row it follows in the catalogue — rather than at the foot.
+  const pins = [PIN, { id: "p2", title: "Another timetable" }]
+  const record = {
+    version: 1,
+    order: ["canvas:p1", "projects", "code", "canvas", "research", "meetings"],
+    hidden: [],
+  }
+  assert.deepEqual(
+    resting(record, pins),
+    ["canvas:p1", "canvas:p2", "projects", "code", "canvas", "research", "meetings"],
+    "the pin follows the pin it follows in the catalogue",
   )
 })
 

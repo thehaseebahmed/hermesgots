@@ -223,7 +223,8 @@ test("Collapse leaves the mode before it collapses", async () => {
 
 /**
  * The record the account carries: Meetings first, Research put away. One reader's arrangement, as a
- * device that has heard nothing but this record would draw it — the pin the host holds at its foot.
+ * device that has heard nothing but this record would draw it — the pin the host holds standing after
+ * Meetings, the row it follows in the catalogue (a rule with no exception for a pin).
  */
 const ORDERED = {
   version: 1,
@@ -308,8 +309,8 @@ test("a record written on one device draws the same rows on the next", async () 
     )
     assert.deepEqual(
       addresses(),
-      ["/meetings", "/projects", "/code", "/canvas", "/canvas/p1"],
-      "Meetings first, Research put away, the pin at the foot",
+      ["/meetings", "/canvas/p1", "/projects", "/code", "/canvas"],
+      "Meetings first, Research put away, the unnamed pin after the row it follows",
     )
   })
 
@@ -332,7 +333,7 @@ test("a record written on one device draws the same rows on the next", async () 
     )
     assert.deepEqual(
       addresses(),
-      ["/meetings", "/projects", "/code", "/canvas", "/canvas/p1"],
+      ["/meetings", "/canvas/p1", "/projects", "/code", "/canvas"],
       "and the next device draws the same sidebar from it",
     )
   })

@@ -110,12 +110,14 @@ function readableRecord(record: SidebarLayoutRecord | undefined, known: Map<stri
 /**
  * Every known row in the order the account holds it, each saying whether the reader put it away.
  *
- * The order is the record's, then every known row it does not name in catalogue order, so a feature
- * added to the table still draws; an id in the record that no row carries is dropped, so a retired
- * feature leaves no dead place. Nothing here asks a row's lab switch: a row a switch has taken away
- * is still a row this build knows, which is what keeps its id — and the place the reader gave it —
- * through an edit made while the switch was off (`SIDEBAR_FEATURES` reports the gate rather than
- * applying it for this reason).
+ * The order is the record's, with every known row it does not name inserted after the nearest row
+ * before it in the catalogue that is already placed — or at the front, where none is — so a feature
+ * added to the table takes the place the table gives it and a new pin lands after the pin before it,
+ * rather than being filed at the foot of a list the reader did not arrange. An id in the record that
+ * no row carries is dropped, so a retired feature leaves no dead place. Nothing here asks a row's lab
+ * switch: a row a switch has taken away is still a row this build knows, which is what keeps its id —
+ * and the place the reader gave it — through an edit made while the switch was off
+ * (`SIDEBAR_FEATURES` reports the gate rather than applying it for this reason).
  */
 function placedRows<Pin extends SidebarPin>(
   rows: readonly SidebarLayoutRow<Pin>[],
@@ -126,10 +128,21 @@ function placedRows<Pin extends SidebarPin>(
   const named = (readable?.order ?? []).filter((id) => byId.has(id))
   const namedSet = new Set(named)
   const hidden = new Set((readable?.hidden ?? []).filter((id) => byId.has(id)))
-  return [
-    ...named.map((id) => byId.get(id)!),
-    ...rows.filter((row) => !namedSet.has(row.id)),
-  ].map((row): SidebarPlacedRow<Pin> => ({ row, hidden: hidden.has(row.id) }))
+  const placed = named.map((id) => byId.get(id)!)
+  for (const row of rows) {
+    if (namedSet.has(row.id)) continue
+    // Walk back through the catalogue to the nearest row already placed and stand after it — rows
+    // this pass inserted count, so neighbours keep their order — or at the front where none is.
+    let at = 0
+    for (let index = rows.indexOf(row) - 1; index >= 0; index -= 1) {
+      const found = placed.indexOf(rows[index])
+      if (found === -1) continue
+      at = found + 1
+      break
+    }
+    placed.splice(at, 0, row)
+  }
+  return placed.map((row): SidebarPlacedRow<Pin> => ({ row, hidden: hidden.has(row.id) }))
 }
 
 /**
