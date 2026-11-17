@@ -440,6 +440,11 @@ export const FLOWS = {
     about:
       "The sidebar shrinks to an icon rail at 1024px and stays collapsed; phones have no button",
   },
+  "sidebar-edit": {
+    script: "e2e/sidebar-edit.mjs",
+    about:
+      "The sidebar's edit mode arranged by the pointer: a row dragged by its grip past its neighbour at 1024px and dropped, the order read back off the nav and again after a reload, and the same drag with a finger in the 390px drawer",
+  },
   research: {
     script: "e2e/research.mjs",
     about: "A research mission from question to guide, another format, and a citation's source",

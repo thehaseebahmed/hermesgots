@@ -22,6 +22,26 @@
       "rules": {
         "react/only-export-components": "off"
       }
+    },
+    {
+      "files": [
+        "src/lib/sidebar-layout.ts"
+      ],
+      "rules": {
+        "no-restricted-imports": [
+          "error",
+          {
+            "patterns": [
+              {
+                "group": [
+                  "*"
+                ],
+                "message": "sidebar-layout.ts holds no JSX and imports nothing: scripts/test-sidebar-layout.mjs loads it through Node's type stripping, which resolves no path alias. Pass what a row needs in as data instead."
+              }
+            ]
+          }
+        ]
+      }
     }
   ]
 }
