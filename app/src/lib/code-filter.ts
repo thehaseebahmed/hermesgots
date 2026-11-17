@@ -33,5 +33,6 @@ export function emptyLine(filter: CodeFilter): string {
   if (filter === "afk") return "No AFK sessions."
   if (filter === "resolved") return "No resolved sessions."
   if (filter === "discarded") return "No discarded sessions."
+  if (filter === "all") return "No open sessions."
   return "No sessions match."
 }

@@ -38,5 +38,6 @@ test("an empty pill says which one", () => {
   assert.match(emptyLine("afk"), /AFK/)
   assert.match(emptyLine("resolved"), /resolved/)
   assert.match(emptyLine("discarded"), /discarded/)
-  assert.equal(emptyLine("all"), "No sessions match.")
+  assert.equal(emptyLine("all"), "No open sessions.")
+  assert.equal(emptyLine({ project: "k1" }), "No sessions match.")
 })
