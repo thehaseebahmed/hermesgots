@@ -184,6 +184,13 @@ test("an open-ended question is its own answer, with no choices to pick", async 
   )
 })
 
+/** A form as the card hands one back: a choice, a typed answer, and a pick on the last page. */
+const filled = {
+  q0: { choices: ["staging"], other: "", usingOther: false },
+  q1: { choices: [], other: "rename it", usingOther: true },
+  q2: { choices: ["Product"], other: "", usingOther: false },
+}
+
 const threeAsked: ClarifyQuestion[] = [
   { id: "q0", question: "Which environment?", choices: ["staging", "production"] },
   { id: "q1", question: "What should the change be called?" },
@@ -389,6 +396,104 @@ test("a host that asks one question at a time takes the whole form, sending each
       "and the last as soon as it is asked",
     )
   })
+})
+
+test("a card drawn again takes up the form it gave for the call, and answers the next question with no tap", async () => {
+  // A host asks a call's questions one at a time, and the card holds its place for a moment between
+  // two: a host slower than that has the card drawn again. The form it took for the call is handed
+  // back by the screen drawing it, so the answers given ahead arrive as the host asks, not one per
+  // visit — the reader's form, still filled in, on the page the host is waiting on.
+  answered()
+  await mount(
+    <QuestionCard
+      message={message(threeAsked)}
+      askedId="q1"
+      taken={{ form: filled, sent: "prompt-0" }}
+      onAnswer={async (given) => {
+        answers.push(given)
+      }}
+    />,
+    async () => {
+      pagesRow()
+      await settle()
+      assert.match(text(), /2 of 3/, "the card opens on the question the host asks")
+      assert.deepEqual(answers, [{ q1: "rename it" }], "and answers it from the form with no tap")
+      assert.equal(
+        (find("textarea") as HTMLTextAreaElement).value,
+        "rename it",
+        "the form it gave is still filled in",
+      )
+      assert.equal(button("Next")?.disabled, true, "and nothing can be sent while it drains")
+    },
+  )
+})
+
+test("the card takes up a form that already answered the question the host asks without sending again", async () => {
+  answered()
+  await mount(
+    <QuestionCard
+      message={message(threeAsked)}
+      askedId="q1"
+      taken={{ form: filled, sent: "q1" }}
+      onAnswer={async (given) => {
+        answers.push(given)
+      }}
+    />,
+    async () => {
+      pagesRow()
+      await settle()
+      assert.deepEqual(answers, [], "the question this form already answered is not answered twice")
+      assert.equal(button("Next")?.disabled, true, "the form stays taken, as it was")
+    },
+  )
+})
+
+test("a lone question takes up no form, even where the host names it", async () => {
+  answered()
+  await mount(
+    <QuestionCard
+      message={message([{ id: "q0", question: "Which environment?", choices: ["staging"] }])}
+      askedId="q0"
+      taken={{ form: filled, sent: "prompt-9" }}
+      onAnswer={async (given) => {
+        answers.push(given)
+      }}
+    />,
+    async () => {
+      await settle()
+      assert.deepEqual(answers, [], "a lone question asks its own answer")
+      assert.equal(pressed("staging"), "false", "and the form is as the reader left it")
+      assert.equal(button("Send")?.disabled, true, "with nothing to send until it is answered")
+    },
+  )
+})
+
+test("a form with no page for the question the host asks is let go, not left holding the card", async () => {
+  // A call whose ask was read differently has ids the form never saw: the card gives the question back
+  // to the reader rather than skipping it in their name — and rather than sitting with every control
+  // disabled while the form waits for a page that is not coming.
+  answered()
+  await mount(
+    <QuestionCard
+      message={message(threeAsked)}
+      askedId="q2"
+      taken={{ form: { q0: filled.q0 }, sent: "prompt-0" }}
+      onAnswer={async (given) => {
+        answers.push(given)
+      }}
+    />,
+    async () => {
+      pagesRow()
+      await settle()
+      assert.deepEqual(answers, [], "nothing is sent for a question the form has no answer for")
+      assert.match(text(), /3 of 3/, "the card stays on the question the host asks")
+      assert.equal(pressed("Product"), "false", "with nothing picked on it")
+      assert.equal(button("Product")?.disabled, false, "and the reader can answer it themselves")
+      await click(button("Product"))
+      assert.equal(pressed("Product"), "true", "which they do")
+      assert.equal(button("Send")?.disabled, false, "and the form is theirs to send again")
+    },
+  )
 })
 
 test("an answer the host refuses stops the drain on the asked page, with the rest still filled", async () => {
