@@ -172,8 +172,9 @@ export function actionsOf(value: unknown): PushAction[] {
     if (!one || typeof one !== "object") continue
     const { label, url } = one as Partial<PushAction>
     if (typeof label !== "string" || !label.trim()) continue
-    if (typeof url !== "string" || !/^https?:\/\/[^\s]+$/.test(url.trim())) continue
-    kept.push({ label: label.trim().slice(0, 40), url: url.trim().slice(0, 512) })
+    const link = pictureOf(url)
+    if (!link) continue
+    kept.push({ label: label.trim().slice(0, 40), url: link })
   }
   return kept
 }
