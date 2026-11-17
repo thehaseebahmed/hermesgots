@@ -22,12 +22,11 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
-import time
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
 from .notice import Action
-from .store import connect
+from .store import connect, now_ms
 
 # The two ways a tray can answer an approval. The row holds which one a token is, so this tuple is the
 # whole vocabulary: a press cannot ask for a third.
@@ -63,11 +62,6 @@ class Claim(NamedTuple):
     outcome: str
     choice: Optional[str] = None
     target: Optional[Dict[str, Any]] = None
-
-
-def _now() -> int:
-    """The store's clock, in the milliseconds every row here is stamped with."""
-    return int(time.time() * 1000)
 
 
 def digest(token: str) -> str:
@@ -116,7 +110,7 @@ def mint(
     """
     if not isinstance(target, dict) or not base or not seconds:
         return ()
-    now = _now()
+    now = now_ms()
     expires = now + seconds * 1000
     carried = json.dumps(target, separators=(",", ":"))
     conn = connect(path)
@@ -154,7 +148,7 @@ def redeem(path: Path, token: Any) -> Claim:
     """
     if not isinstance(token, str) or not token:
         return Claim(UNKNOWN)
-    now = _now()
+    now = now_ms()
     key = digest(token)
     conn = connect(path)
     try:

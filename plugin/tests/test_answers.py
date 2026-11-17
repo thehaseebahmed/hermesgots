@@ -218,7 +218,7 @@ class AnsweredOnce(Tray):
         once, _ = self.buttons()
         # A tray entry that has gone: the token lived as long as the push that carried it.
         later = int(time.time() * 1000) + (push.TTL_SECONDS + 1) * 1000
-        with mock.patch.object(answers, "_now", lambda: later):
+        with mock.patch.object(answers, "now_ms", lambda: later):
             answer = self.press(self.token_of(once))
         self.assertEqual(answer["status"], 410)
         self.assertEqual(self.resolved, [])
@@ -408,7 +408,7 @@ class OnTheWire(unittest.TestCase):
         answers.redeem(self.path, once.url.rsplit("/", 1)[-1])
         self.assertEqual(len(tokens(self.path)), 2, "one spent, one still pressable")
         later = (int(time.time()) + push.TTL_SECONDS + 1) * 1000
-        with mock.patch.object(answers, "_now", lambda: later):
+        with mock.patch.object(answers, "now_ms", lambda: later):
             answers.mint(self.path, answers.run_target("run_2", "gots-2"), BASE, push.TTL_SECONDS)
         kept = tokens(self.path)
         self.assertEqual(len(kept), 2, "a press cannot grow the table: each mint prunes the last")
