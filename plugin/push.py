@@ -56,6 +56,7 @@ from .notice import (
     Notice,
     carried,
     category_of,
+    flatten,
 )
 from .store import connect, current_path, home_of
 
@@ -576,12 +577,10 @@ def session_title(path: Path, session_id: str) -> Optional[str]:
 
 
 def _short(text: Optional[str]) -> Optional[str]:
+    """A title at a tray's bound, and nothing at all for no words."""
     if not isinstance(text, str):
         return None
-    text = " ".join(text.split())
-    if len(text) > TITLE_MAX:
-        text = text[: TITLE_MAX - 1].rstrip() + "…"
-    return text or None
+    return flatten(text, TITLE_MAX) or None
 
 
 def muted(path: Path, kind: str, session_id: str) -> bool:

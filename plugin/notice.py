@@ -78,14 +78,20 @@ def carried(notice: Any) -> Dict[str, Any]:
 BODY_MAX = 200
 
 
-def _cut(text: str) -> str:
-    """Text at a body's bound, saying it was cut with the same ellipsis a paragraph ends on."""
-    return text[: BODY_MAX - 1].rstrip() + "…" if len(text) > BODY_MAX else text
+def _cut(text: str, limit: int = BODY_MAX) -> str:
+    """Text at a bound, saying it was cut with the same ellipsis a paragraph ends on."""
+    return text[: limit - 1].rstrip() + "…" if len(text) > limit else text
 
 
-def flatten(text: str) -> str:
-    """Text as a body carries it: its runs of whitespace made one space, then cut at ``BODY_MAX``."""
-    return _cut(" ".join(text.split()))
+def one_line(text: str) -> str:
+    """Text as a notice carries it on one line: its runs of whitespace made one space."""
+    return " ".join(text.split())
+
+
+def flatten(text: str, limit: int = BODY_MAX) -> str:
+    """Text as a body carries it: one line, then cut at ``limit`` — a body's bound unless a title
+    asks for its own."""
+    return _cut(one_line(text), limit)
 
 
 # A run of blank lines in a command: two or more blank lines are one, since a tray has no room for
@@ -110,7 +116,7 @@ def approval_body(description: Optional[str], command: Optional[str]) -> Optiona
     with — with no backticks and no fence, since a tray shows plain text. Nothing said answers
     None, which leaves the kind its own line.
     """
-    said = flatten(description) if isinstance(description, str) and description.strip() else None
+    said = one_line(description) if isinstance(description, str) and description.strip() else None
     script = _command_lines(command) if isinstance(command, str) else None
     parts = [part for part in (said, script) if part]
     return _cut("\n\n".join(parts)) if parts else None
