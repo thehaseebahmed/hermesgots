@@ -2016,9 +2016,12 @@ export async function adoptAppearance(
   const known: Partial<Record<keyof Appearance, unknown>> = {}
   for (const field of APPEARANCE_FIELDS) {
     const next = value[field]
-    const fallback: unknown = DEFAULT_SETTINGS[field]
-    const shape = fallback === undefined ? "boolean" : typeof fallback
-    if (typeof next === shape) known[field] = next
+    const shape = typeof DEFAULT_SETTINGS[field]
+    // `typeof` calls `null` and an array an object, so a member whose default is a record is held to
+    // an object that is neither: a layout another build wrote as `[]` is no record this one reads.
+    const shaped =
+      typeof next === shape && (shape !== "object" || (next !== null && !Array.isArray(next)))
+    if (shaped) known[field] = next
   }
   // `known` holds the values whose shape was just checked against the default, which is what the
   // appearance record's own type says of them.

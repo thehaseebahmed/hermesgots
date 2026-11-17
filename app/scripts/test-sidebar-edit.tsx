@@ -19,6 +19,7 @@ import { syncedAppearance } from "@/lib/sync"
 
 import {
   Path,
+  PINNED_CANVAS,
   atWidth,
   botProfile,
   click,
@@ -30,6 +31,7 @@ import {
   mount,
   path,
   seedSettings,
+  servePinnedCanvases,
   settle,
   until,
   withToasts,
@@ -38,41 +40,13 @@ import {
 
 const bot = botProfile("bot-main", { id: "bot-1", name: "Mainly" })
 
-/**
- * The canvas the reader pinned to the sidebar, as its bot's plugin lists it: the row's mark, its
- * title and its clock — no page, since a pin is a row and not an open.
- */
-const PINNED = {
-  id: "p1",
-  title: "A pinned timetable",
-  session_id: "gots-chat-p1",
-  chat_id: "chat-p1",
-  version: 2,
-  pinned: true,
-  archived: false,
-  at: 20,
-  created_at: 1,
-  tools: [],
-}
-
-/** The bot's plugin, as far as the sidebar's pins are read: its features, and the list it holds. */
-function servePinned() {
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = new URL(String(input instanceof Request ? input.url : input))
-    if (url.pathname.endsWith("/info")) return json({ version: "0.114.0", features: ["canvas"] })
-    if (url.pathname.endsWith("/canvases"))
-      return json({ object: "gots.canvases", canvases: [PINNED] })
-    return json({ error: { message: "no route" } }, 404)
-  }) as unknown as typeof fetch
-}
-
 /** A device with one bot, every lab switch on, and the canvas the reader pinned on its sidebar. */
 async function seed() {
   await seedSettings({ activeProfileId: bot.id, meetings: true, appearanceAt: 0 })
   await db.profiles.clear()
   await db.profiles.put(bot)
   await db.conversations.clear()
-  servePinned()
+  servePinnedCanvases()
 }
 
 const sidebar = () => (
@@ -507,8 +481,8 @@ function serveUnpin(answer: UnpinAnswer, hold?: Promise<void>) {
     const method = (init?.method ?? "GET").toUpperCase()
     if (url.pathname.endsWith("/info")) return json({ version: "0.114.0", features: ["canvas"] })
     if (url.pathname.endsWith("/canvases") && method === "GET")
-      return json({ object: "gots.canvases", canvases: [PINNED] })
-    if (url.pathname.endsWith(`/canvases/${PINNED.id}`) && method === "POST") {
+      return json({ object: "gots.canvases", canvases: [PINNED_CANVAS] })
+    if (url.pathname.endsWith(`/canvases/${PINNED_CANVAS.id}`) && method === "POST") {
       posts.push({ body: JSON.parse(String(init?.body ?? "{}")) })
       // The first write is the one a case can hold open, so the control's held state is a state a
       // reader can be standing in rather than a race the answer always wins.
@@ -516,7 +490,7 @@ function serveUnpin(answer: UnpinAnswer, hold?: Promise<void>) {
       if (answer === "refused" && posts.length === 1)
         return json({ error: { message: REFUSED_WORDS } }, 409)
       if (answer === "silent") throw new DOMException("The operation timed out.", "TimeoutError")
-      return json({ canvas: { ...PINNED, pinned: false, at: 21 } })
+      return json({ canvas: { ...PINNED_CANVAS, pinned: false, at: 21 } })
     }
     return json({ error: { message: "no route" } }, 404)
   }) as unknown as typeof fetch
@@ -637,7 +611,7 @@ test("an unpin the host refuses keeps the row, in the host's words", async () =>
         before.filter((id) => id !== "canvas:p1"),
         "the row leaves the mode, every other row where it stood",
       )
-      assert.equal(pinnedIds.includes(PINNED.id), false, "and the store's pinned list is shorter")
+      assert.equal(pinnedIds.includes(PINNED_CANVAS.id), false, "and the store's pinned list is shorter")
       stored = await db.settings.get("settings")
       assert.deepEqual(stored?.sidebarLayout, DEFAULT_SIDEBAR_LAYOUT, "still no layout write")
     })
@@ -692,7 +666,7 @@ test("an unpin the host refuses keeps the row, in the host's words", async () =>
   await mount(sidebarAndStore(), async () => {
     await openMode()
     await until(async () => Boolean(pinRow()), "the pin's row")
-    await until(async () => pinnedIds.includes(PINNED.id), "the store holding the pin")
+    await until(async () => pinnedIds.includes(PINNED_CANVAS.id), "the store holding the pin")
     const before = rowIds()
 
     await click(unpinControl())
@@ -702,7 +676,7 @@ test("an unpin the host refuses keeps the row, in the host's words", async () =>
       before.filter((id) => id !== "canvas:p1"),
       "the row gone from the mode, every other row standing",
     )
-    assert.equal(pinnedIds.includes(PINNED.id), false, "the store's pinned list, one shorter")
+    assert.equal(pinnedIds.includes(PINNED_CANVAS.id), false, "the store's pinned list, one shorter")
     assert.equal(answered.length, 1, "one write for one press")
     assert.deepEqual(answered[0].body, { pinned: false }, "the unpin, and nothing else")
     const stored = await db.settings.get("settings")
@@ -843,7 +817,7 @@ test("Reset asks first and leaves every pin alone", async () => {
     // Reset is the layout's and never a pin's: no request went anywhere about a canvas, the store
     // still holds the pin, and the resting sidebar still draws it.
     assert.equal(posts.length, 0, "no request about any canvas")
-    assert.deepEqual(pinnedIds, [PINNED.id], "the store still holds the pin")
+    assert.deepEqual(pinnedIds, [PINNED_CANVAS.id], "the store still holds the pin")
     await click(doneButton())
     await until(async () => Boolean(editButton()), "the switch at rest")
     assert.deepEqual(

@@ -1,5 +1,5 @@
 import { useLiveQuery } from "dexie-react-hooks"
-import { useRef, useState } from "react"
+import { useCallback, useRef, useState } from "react"
 import { Link, matchPath, NavLink, useLocation, type NavLinkProps } from "react-router"
 import {
   BellOffIcon,
@@ -34,15 +34,14 @@ import { useMeetingsEnabled } from "@/lib/meetings"
 import { plainPress, pressOpeningRoot, useNav } from "@/lib/nav"
 import {
   DEFAULT_SIDEBAR_LAYOUT,
-  isDefaultLayout,
   move,
   moveTo,
-  restingSidebarRows,
-  sidebarModeRows,
+  sidebarPlacement,
   sidebarRows,
   withHidden,
   type SidebarLab,
   type SidebarLayoutRow,
+  type SidebarPinRow,
 } from "@/lib/sidebar-layout"
 import { useSidebarLayout } from "@/lib/sidebar"
 import { useSyncState } from "@/lib/sync"
@@ -63,7 +62,7 @@ const railClass = ({ isActive }: { isActive: boolean }) =>
   )
 
 /** A pinned canvas's row, as the table files it: the one row whose mark is the canvas's own. */
-type PinRow = Extract<SidebarLayoutRow<Canvas>, { kind: "pin" }>
+type PinRow = SidebarPinRow<Canvas>
 
 /**
  * A sidebar destination: top-level, so it opens as the only entry and back leaves the app.
@@ -411,21 +410,24 @@ export function ConversationList({
   const known = sidebarRows(pinned)
   const drawn = (row: SidebarLayoutRow<Canvas>) => row.lab === null || gates[row.lab]
   const [layout, saveLayout] = useSidebarLayout()
-  const rows = restingSidebarRows(known, layout).filter(drawn)
-  const editRows = sidebarModeRows(known, layout).filter(({ row }) => drawn(row))
-  // A record already reading as today's list has nothing for the foot's Reset to clear, so the mode
-  // holds that control rather than asking a question with no answer in it.
-  const atDefault = isDefaultLayout(known, layout)
+  // One placement a render, and the three answers drawn from it: the rows at rest, the mode's rows and
+  // whether the record already reads as today's list — which is what holds the foot's Reset while
+  // there is nothing to clear. The gate decides what is drawn, never where a row stands.
+  const { resting, mode, atDefault } = sidebarPlacement(known, layout)
+  const rows = resting.filter(drawn)
+  const editRows = mode.filter(({ row }) => drawn(row))
 
   // The mode is this component's own state and never a stored setting: a reload must not land a
   // reader in a mode where a row press navigates nowhere. The switch's ref is what the mode gives the
   // focus back to.
   const [editing, setEditing] = useState(false)
   const editButton = useRef<HTMLButtonElement>(null)
-  const leaveEdit = () => {
+  // Held as one function for the sidebar's whole life: the mode answers Escape on the document, and a
+  // fresh `onLeave` every render would re-register that listener on every one.
+  const leaveEdit = useCallback(() => {
     setEditing(false)
     editButton.current?.focus()
-  }
+  }, [])
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -486,7 +488,7 @@ export function ConversationList({
               // placement rather than off the rows the mode drew: a row a lab switch has taken off the
               // screen still holds its place, so a drop below it lands below it, not one place early.
               onDrop={(id, onto) => {
-                const at = sidebarModeRows(known, layout).findIndex(({ row }) => row.id === onto)
+                const at = mode.findIndex(({ row }) => row.id === onto)
                 if (at !== -1) saveLayout(moveTo(id, at, layout, known))
               }}
               // A pin is the host's record, not the account's arrangement: the write goes to the

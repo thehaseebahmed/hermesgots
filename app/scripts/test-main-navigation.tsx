@@ -45,6 +45,7 @@ import {
   nav,
   path,
   seedSettings,
+  servePinnedCanvases,
   until,
 } from "./component-kit.tsx"
 
@@ -400,34 +401,6 @@ test("the sidebar marks the lab features with the pill, and its own screens with
   )
 })
 
-/**
- * The canvas the reader pinned to the sidebar, as the bot's plugin lists it: the row's mark, its
- * title, and the record's clock — no page, since a pin is a row and not an open.
- */
-const PINNED = {
-  id: "p1",
-  title: "A pinned timetable",
-  session_id: "gots-chat-p1",
-  chat_id: "chat-p1",
-  version: 2,
-  pinned: true,
-  archived: false,
-  at: 20,
-  created_at: 1,
-  tools: [],
-}
-
-/** The bot's plugin, as far as the sidebar's pins are read: its features, and the list it holds. */
-function servePinned() {
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = new URL(String(input instanceof Request ? input.url : input))
-    if (url.pathname.endsWith("/info")) return json({ version: "0.114.0", features: ["canvas"] })
-    if (url.pathname.endsWith("/canvases"))
-      return json({ object: "gots.canvases", canvases: [PINNED] })
-    return json({ error: { message: "no route" } }, 404)
-  }) as unknown as typeof fetch
-}
-
 /** The sidebar's rows, in the order it draws them. */
 const mainRows = () => findAll('nav[aria-label="Main"] a')
 
@@ -439,7 +412,7 @@ const rowName = (row: Element) => (row.textContent ?? "").replace("Labs", "").tr
 
 test("the sidebar draws today's rows, in today's order, with today's labels", async () => {
   await seed([], { meetings: true })
-  servePinned()
+  servePinnedCanvases()
   await mount(
     <MemoryRouter initialEntries={["/"]}>
       <ConversationList />

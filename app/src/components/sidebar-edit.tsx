@@ -39,6 +39,7 @@ import type {
   SidebarLayoutRow,
   SidebarMove,
   SidebarPin,
+  SidebarPinRow,
   SidebarPlacedRow,
 } from "@/lib/sidebar-layout"
 import { cn } from "@/lib/utils"
@@ -92,7 +93,7 @@ const RESET_CONTROL = cn(
  * the name no width at all, and a name is what a reader arranging the list reads. The word stays in
  * the row for a reader who hears the list, and the resting row still draws the pill.
  */
-export function SidebarRowBody<Pin extends SidebarPin & { mark?: string }>({
+export function SidebarRowBody<Pin extends SidebarPin>({
   row,
   collapsed = false,
   mode = false,
@@ -140,9 +141,6 @@ function landingIndex(bottoms: readonly number[], y: number) {
   return over === -1 ? bottoms.length - 1 : over
 }
 
-/** A pin's row, as the table files it: the one row that lets its canvas go. */
-type PinRow<Pin extends SidebarPin> = Extract<SidebarLayoutRow<Pin>, { kind: "pin" }>
-
 /** The row a reader is carrying, and the place it would land. */
 type Drag = { id: string; label: string; at: number }
 
@@ -174,7 +172,7 @@ interface RowWiring {
  * the row's own contents stand on. `foot` is what a row has to say under that line — a refusal is the
  * row's, so the row draws it rather than a notice beside the list.
  */
-function RowShell<Pin extends SidebarPin & { mark?: string }>({
+function RowShell<Pin extends SidebarPin>({
   row,
   hidden,
   index,
@@ -189,25 +187,24 @@ function RowShell<Pin extends SidebarPin & { mark?: string }>({
   foot?: ReactNode
   children: ReactNode
 }) {
+  // Read once, since the attributes and the paint are the same two answers: the row the reader holds,
+  // and the row standing in the place it would take — which is never the carried row itself.
+  const carrying = drag?.id === row.id
+  const landsHere = drag !== null && drag.at === index && !carrying
   return (
     <div
       data-sidebar-row={row.id}
       data-hidden={hidden ? "" : undefined}
       data-canvas-pinned={row.kind === "pin" ? "" : undefined}
-      data-dragging={drag?.id === row.id ? "" : undefined}
-      // The place the carried row would take: the row standing in it is marked, and the row the
-      // reader holds is never marked for itself.
-      data-drop-at={drag && drag.at === index && drag.id !== row.id ? "" : undefined}
+      data-dragging={carrying ? "" : undefined}
+      data-drop-at={landsHere ? "" : undefined}
       className={cn(
         "flex min-h-11 flex-col rounded-2xl px-3 text-sm",
         hidden && "text-muted-foreground",
         // The lifted row takes the muted surface rather than a shadow: depth is the order of
         // surfaces and one hairline, and a card never floats (DESIGN.md).
-        drag?.id === row.id && "relative z-10 bg-muted opacity-60",
-        drag &&
-          drag.at === index &&
-          drag.id !== row.id &&
-          "bg-primary/10 ring-2 ring-primary/40 ring-inset",
+        carrying && "relative z-10 bg-muted opacity-60",
+        landsHere && "bg-primary/10 ring-2 ring-primary/40 ring-inset",
       )}
     >
       <div className="flex min-h-11 items-center gap-2">{children}</div>
@@ -242,31 +239,22 @@ function RowGrip({ grip }: { grip: Grip }) {
 }
 
 /** A row's two places to go, named for the row they move and held rather than absent at either end. */
-function RowMoves({
-  id,
-  label,
-  index,
-  count,
-  keepControl,
-  onMoveUp,
-  onMoveDown,
+function RowMoves<Pin extends SidebarPin>({
+  row,
+  wiring,
 }: {
-  id: string
-  label: string
-  index: number
-  count: number
-  keepControl: RowWiring["keepControl"]
-  onMoveUp: () => void
-  onMoveDown: () => void
+  row: SidebarLayoutRow<Pin>
+  wiring: RowWiring
 }) {
+  const { index, count, keepControl, onMoveUp, onMoveDown } = wiring
   return (
     <div className="ml-auto flex shrink-0 items-center gap-0.5">
       <button
         type="button"
-        ref={keepControl(`${id}:-1`)}
+        ref={keepControl(`${row.id}:-1`)}
         // Named for its row and the place it goes, since "Move up" alone says nothing about which of
         // the list's rows it moves.
-        aria-label={`Move ${label} up`}
+        aria-label={`Move ${row.label} up`}
         // Held rather than absent at the ends, so a row's controls never come and go under the reader
         // as the list changes.
         disabled={index === 0}
@@ -277,8 +265,8 @@ function RowMoves({
       </button>
       <button
         type="button"
-        ref={keepControl(`${id}:1`)}
-        aria-label={`Move ${label} down`}
+        ref={keepControl(`${row.id}:1`)}
+        aria-label={`Move ${row.label} down`}
         disabled={index === count - 1}
         onClick={onMoveDown}
         className={MOVE_CONTROL}
@@ -290,36 +278,23 @@ function RowMoves({
 }
 
 /** One feature's row: its name, its places to go, and the press that puts it away or brings it back. */
-function FeatureModeRow<Pin extends SidebarPin & { mark?: string }>({
+function FeatureModeRow<Pin extends SidebarPin>({
   row,
-  hidden,
-  index,
-  count,
-  drag,
-  grip,
-  keepControl,
-  onMoveUp,
-  onMoveDown,
+  wiring,
   onSetHidden,
-}: RowWiring & {
+}: {
   row: SidebarLayoutRow<Pin>
+  wiring: RowWiring
   onSetHidden: (hidden: boolean) => void
 }) {
+  const { hidden } = wiring
   return (
-    <RowShell row={row} hidden={hidden} index={index} drag={drag}>
-      <RowGrip grip={grip} />
+    <RowShell row={row} hidden={hidden} index={wiring.index} drag={wiring.drag}>
+      <RowGrip grip={wiring.grip} />
       <SidebarRowBody row={row} mode />
       {/* The eye reads the muted row; a reader who hears the list needs the word. */}
       {hidden && <span className="sr-only">Hidden</span>}
-      <RowMoves
-        id={row.id}
-        label={row.label}
-        index={index}
-        count={count}
-        keepControl={keepControl}
-        onMoveUp={onMoveUp}
-        onMoveDown={onMoveDown}
-      />
+      <RowMoves row={row} wiring={wiring} />
       <button
         type="button"
         // A name that says what the press does, rather than a pressed state a reader has to work
@@ -346,22 +321,17 @@ function FeatureModeRow<Pin extends SidebarPin & { mark?: string }>({
  * drawn anywhere but where the press was made is gone before the reader looking there finds it
  * (`confirm-destructive.tsx`'s reason).
  */
-function PinModeRow<Pin extends SidebarPin & { mark?: string }>({
+function PinModeRow<Pin extends SidebarPin>({
   row,
-  hidden,
-  index,
-  count,
-  drag,
-  grip,
-  keepControl,
-  onMoveUp,
-  onMoveDown,
+  wiring,
   onUnpin,
-}: RowWiring & {
-  row: PinRow<Pin>
+}: {
+  row: SidebarPinRow<Pin>
+  wiring: RowWiring
   /** Unpins one canvas on its host, answering when the host has — or refusing in its words. */
   onUnpin: (canvasId: string) => Promise<void>
 }) {
+  const { hidden } = wiring
   const [writing, setWriting] = useState(false)
   // A pin's refusal is the pin's: two canvases failing at once are two sentences, each under its row.
   const refusal = useRefusal(row.pin.id)
@@ -389,21 +359,13 @@ function PinModeRow<Pin extends SidebarPin & { mark?: string }>({
     <RowShell
       row={row}
       hidden={hidden}
-      index={index}
-      drag={drag}
+      index={wiring.index}
+      drag={wiring.drag}
       foot={<Refusal hold={refusal} className="mb-1" />}
     >
-      <RowGrip grip={grip} />
+      <RowGrip grip={wiring.grip} />
       <SidebarRowBody row={row} mode />
-      <RowMoves
-        id={row.id}
-        label={row.label}
-        index={index}
-        count={count}
-        keepControl={keepControl}
-        onMoveUp={onMoveUp}
-        onMoveDown={onMoveDown}
-      />
+      <RowMoves row={row} wiring={wiring} />
       <button
         type="button"
         data-sidebar-unpin=""
@@ -444,7 +406,7 @@ function PinModeRow<Pin extends SidebarPin & { mark?: string }>({
  * arrangement: "Reset to default", which asks the app's one question first and, answered, writes the
  * default record. It never asks anything of a canvas, so every pin stays where its host put it.
  */
-export function SidebarEdit<Pin extends SidebarPin & { mark?: string }>({
+export function SidebarEdit<Pin extends SidebarPin>({
   rows,
   atDefault,
   onLeave,
@@ -548,6 +510,13 @@ export function SidebarEdit<Pin extends SidebarPin & { mark?: string }>({
     else controls.current.delete(control)
   }
 
+  /**
+   * Where a row went, said in the count the reader sees: the rows the mode draws, which is the list
+   * they are arranging. A move and a drop are one sentence, so they cannot come to say it differently.
+   */
+  const say = (label: string, at: number) =>
+    setSaid(`${label} moved to ${at + 1} of ${rows.length}`)
+
   const moveRow = (row: SidebarLayoutRow<Pin>, direction: SidebarMove) => {
     const from = rows.findIndex((placed) => placed.row.id === row.id)
     const to = from + direction
@@ -555,8 +524,7 @@ export function SidebarEdit<Pin extends SidebarPin & { mark?: string }>({
     if (to < 0 || to >= rows.length) return
     handBack.current = { control: `${row.id}:${direction}`, id: row.id, from }
     onMove(row.id, direction)
-    // Said in the count the reader sees: the rows the mode draws, which is the list they are arranging.
-    setSaid(`${row.label} moved to ${to + 1} of ${rows.length}`)
+    say(row.label, to)
   }
 
   /** The foot of every row as the list stands, measured in one pass so no two are a reflow apart. */
@@ -613,7 +581,7 @@ export function SidebarEdit<Pin extends SidebarPin & { mark?: string }>({
     const onto = inside ? rows[drop.at] : undefined
     if (!onto || onto.row.id === drop.id) return
     onDrop(drop.id, onto.row.id)
-    setSaid(`${drop.label} moved to ${drop.at + 1} of ${rows.length}`)
+    say(drop.label, drop.at)
   }
 
   /** The browser took the gesture back — a call, a second finger, a scroll it kept: nothing written. */
@@ -649,12 +617,12 @@ export function SidebarEdit<Pin extends SidebarPin & { mark?: string }>({
           onMoveDown: () => moveRow(row, 1),
         }
         return row.kind === "pin" ? (
-          <PinModeRow key={row.id} row={row} {...wiring} onUnpin={onUnpin} />
+          <PinModeRow key={row.id} row={row} wiring={wiring} onUnpin={onUnpin} />
         ) : (
           <FeatureModeRow
             key={row.id}
             row={row}
-            {...wiring}
+            wiring={wiring}
             onSetHidden={(next) => onSetHidden(row.id, next)}
           />
         )
