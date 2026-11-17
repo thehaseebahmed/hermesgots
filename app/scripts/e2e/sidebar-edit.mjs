@@ -80,7 +80,7 @@ await flow(
       0,
       "a sidebar at rest draws no grip",
     )
-    // The column is reserved on every row in both states: at rest it is empty, 20px of a row that
+    // The column is reserved on every row in both states: at rest it is empty, 12px of a row that
     // would otherwise start its mark where a name wanted it.
     assert.equal(
       await page.locator('[data-sidebar-row="projects"] [data-sidebar-gutter]').count(),
@@ -88,7 +88,7 @@ await flow(
       "and the column every row starts with is kept, empty, at rest",
     )
     const leading = await leadingOf(page.locator('[data-sidebar-row="projects"]'))
-    assert.equal(leading.column, 20, `the column is 20px wide (${leading.column})`)
+    assert.equal(leading.column, 12, `the column is 12px wide (${leading.column})`)
     // One grid: a bot's face begins where a feature's mark does, in the same sidebar, at rest.
     const botFace = await leadingOf(page.getByRole("link", { name: "Test bot" }).first())
     assert.equal(
@@ -106,12 +106,16 @@ await flow(
       "the mode opens into the column the resting row kept: the same mark, at the same x, in a row of the same height",
     )
     assert.equal(
-      await page.locator('[data-sidebar-row="projects"] [data-sidebar-gutter] [data-sidebar-grip]').count(),
+      await page
+        .locator('[data-sidebar-row="projects"] [data-sidebar-gutter] [data-sidebar-grip]')
+        .count(),
       1,
       "with the grip standing in the resting row's empty column",
     )
     assert.equal(
-      await page.locator('[data-sidebar-row="projects"] [data-sidebar-gutter]').getAttribute("aria-hidden"),
+      await page
+        .locator('[data-sidebar-row="projects"] [data-sidebar-gutter]')
+        .getAttribute("aria-hidden"),
       null,
       "and the column audible, since the grip it holds is a control a keyboard reaches",
     )
@@ -247,7 +251,7 @@ await flow(
     // mid-animation is the animation's, not the row's.
     await settled(page)
     const leading = await leadingOf(page.locator('[data-sidebar-row="projects"]'))
-    assert.equal(leading.column, 20, `the column is 20px wide at 390px too (${leading.column})`)
+    assert.equal(leading.column, 12, `the column is 12px wide at 390px too (${leading.column})`)
 
     const before = await openMode(page)
     await shot("editing")

@@ -47,7 +47,7 @@ import { reasonText, useWaitingSessions, type WaitingReason } from "@/lib/waitin
 
 const rowClass = ({ isActive }: { isActive: boolean }) =>
   cn(
-    "flex min-h-11 items-center gap-3 rounded-2xl px-3 text-sm transition-colors hover:bg-muted",
+    "flex min-h-11 items-center gap-2 rounded-2xl px-3 text-sm transition-colors hover:bg-muted",
     isActive && "bg-muted font-medium",
   )
 

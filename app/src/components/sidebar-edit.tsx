@@ -161,7 +161,7 @@ function RowShell<Pin extends SidebarPin>({
     >
       <div
         {...press}
-        className="flex min-h-11 cursor-grab items-center gap-3 active:cursor-grabbing"
+        className="flex min-h-11 cursor-grab items-center gap-2 active:cursor-grabbing"
       >
         {children}
       </div>
@@ -176,7 +176,11 @@ function RowShell<Pin extends SidebarPin>({
  * glyph is what says so — while ArrowUp and ArrowDown, with this holding the focus, move the row a
  * drawn place through the rule the drop commits through. It is a real tab stop, named for its row — a
  * control that reorders a list is a control a keyboard must be able to reach and a screen reader must
- * be able to hear — and it is 20px wide and 44px tall, the column's own box.
+ * be able to hear — and it is 12px wide and 44px tall, the column's own box.
+ *
+ * 12px is no finger's width, so the box's pointer area is widened without widening the box: the
+ * `after` overlay reaches 8px either side — the whole of the gap a mark stands in, and no further, so
+ * a finger that meant the name still scrolls the drawer — while the column keeps the layout's 12px.
  *
  * `touch-action` is the column's rather than the row's (see `RowGutter`): a finger on the glyph starts
  * a drag, and a finger anywhere else on the row still scrolls the list and swipes the drawer.
@@ -197,9 +201,9 @@ function RowHandle<Pin extends SidebarPin>({
         aria-label={`Reorder ${row.label}`}
         data-sidebar-grip=""
         onKeyDown={onKeyDown}
-        className="flex h-11 w-5 shrink-0 items-center justify-center rounded-2xl text-muted-foreground hover:text-foreground"
+        className="relative flex h-11 w-3 shrink-0 items-center justify-center rounded-2xl text-muted-foreground after:absolute after:-inset-x-2 after:inset-y-0 after:content-[''] hover:text-foreground"
       >
-        <GripVerticalIcon className="size-3.5" />
+        <GripVerticalIcon className="size-3" />
       </button>
     </RowGutter>
   )

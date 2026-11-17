@@ -277,11 +277,7 @@ test("a hidden row leaves the sidebar and stays in the mode, muted", async () =>
     )
     assert.equal(wordsOf(eye), "", "and no visible word: the icon is the whole of it")
     assert.equal(eye?.classList.contains("size-11"), true, "in the 44px box a thumb gets")
-    assert.equal(
-      row()?.hasAttribute("data-hidden"),
-      true,
-      "the row in the mode says it is hidden",
-    )
+    assert.equal(row()?.hasAttribute("data-hidden"), true, "the row in the mode says it is hidden")
     assert.equal(
       row()?.classList.contains("text-muted-foreground"),
       true,
@@ -341,15 +337,19 @@ test("a row moves by its grip's keys, and the order is the account's", async () 
     await click(editButton())
     await until(async () => Boolean(group()), "the mode")
 
-    // Every row's order is reached through its own handle: one 20px column of the row's own height,
+    // Every row's order is reached through its own handle: one 12px column of the row's own height,
     // named for the row it moves and a tab stop rather than a mouse's secret.
     const grip = gripOf("meetings")
     assert.ok(grip, "Meetings' own grip")
     assert.equal(grip.getAttribute("aria-label"), "Reorder Meetings", "named for the row it moves")
-    assert.equal(grip.classList.contains("w-5"), true, "the column's 20px")
+    assert.equal(grip.classList.contains("w-3"), true, "the column's 12px")
     assert.equal(grip.classList.contains("h-11"), true, "and the 44px a thumb's press needs")
     assert.equal(grip.hasAttribute("aria-hidden"), false, "a control a screen reader must hear")
-    assert.equal(grip.getAttribute("tabindex"), null, "and a tab stop, which is how a key reaches it")
+    assert.equal(
+      grip.getAttribute("tabindex"),
+      null,
+      "and a tab stop, which is how a key reaches it",
+    )
 
     // One arrow, one place up — said in the live region, and the grip keeps the focus so the next
     // press is the next place.
@@ -419,7 +419,7 @@ test("a row moves by its grip's keys, and the order is the account's", async () 
   })
 })
 
-test("a row's grip is the mode's alone, and it is the 20px column's handle", async () => {
+test("a row's grip is the mode's alone, and it is the 12px column's handle", async () => {
   await seed()
   await mount(sidebar(), async () => {
     await until(async () => Boolean(find('a[href="/projects"]')), "the nav")
@@ -432,22 +432,40 @@ test("a row's grip is the mode's alone, and it is the 20px column's handle", asy
     assert.equal(grips.length, 6, "every row above the boundary carries one, the pin included")
     const grip = find('[data-sidebar-row="projects"] [data-sidebar-grip]')
     assert.ok(grip, "the grip stands inside the row it reorders")
-    assert.equal(grip.classList.contains("w-5"), true, "it is 20px wide, the column's own width")
-    assert.equal(grip.classList.contains("h-11"), true, "and 44px tall, the box a thumb's press needs")
+    assert.equal(grip.classList.contains("w-3"), true, "it is 12px wide, the column's own width")
+    assert.equal(
+      grip.classList.contains("h-11"),
+      true,
+      "and 44px tall, the box a thumb's press needs",
+    )
     assert.equal(
       grip.classList.contains("size-11"),
       false,
       "not the wide box it used to stand in, which took the room a name wanted",
     )
     assert.equal(
-      grip.querySelector("svg")?.classList.contains("size-3.5"),
+      grip.querySelector("svg")?.classList.contains("size-3"),
       true,
       "holding a small glyph rather than a plate",
+    )
+    // 12px is narrower than a finger, so the box widens its pointer area with an overlay rather than
+    // with layout: the `after` reaches into the gap on both sides and no further, so the column costs
+    // the row 12px and a thumb still finds it.
+    assert.equal(grip.classList.contains("relative"), true, "the box the overlay is placed against")
+    assert.equal(grip.classList.contains("after:absolute"), true, "an overlay, outside the flow")
+    assert.equal(
+      grip.classList.contains("after:-inset-x-2"),
+      true,
+      "reaching 8px either side — the gap a mark stands in, and the name's own press left alone",
     )
     // The gesture belongs to the whole row, and the column is what a finger may start it from: the
     // `touch-action` that keeps the drawer's scroll and swipe out of the drag is the column's alone.
     const column = find('[data-sidebar-row="projects"] [data-sidebar-gutter]')
-    assert.equal(column?.classList.contains("touch-none"), true, "the column keeps the touch for itself")
+    assert.equal(
+      column?.classList.contains("touch-none"),
+      true,
+      "the column keeps the touch for itself",
+    )
     assert.equal(
       modeRow("projects")?.classList.contains("touch-none"),
       false,
@@ -455,7 +473,11 @@ test("a row's grip is the mode's alone, and it is the 20px column's handle", asy
     )
     // And it is the keyboard's way in too, so it is a tab stop a name reaches rather than a mouse's
     // secret: the mode's rows carry no second control that moves them.
-    assert.equal(grip.getAttribute("tabindex"), null, "no `tabindex`: a tab stop like any other control")
+    assert.equal(
+      grip.getAttribute("tabindex"),
+      null,
+      "no `tabindex`: a tab stop like any other control",
+    )
     assert.equal(grip.getAttribute("aria-hidden"), null, "nothing hides it from a screen reader")
     assert.equal(grip.getAttribute("aria-label"), "Reorder Projects", "and it is named for its row")
     assert.equal(
@@ -497,18 +519,19 @@ async function seedWaitingSession() {
 }
 
 /**
- * The column every sidebar row starts with, in both states and for every kind of row: 20px of it,
+ * The column every sidebar row starts with, in both states and for every kind of row: 12px of it,
  * down the row's whole height, empty at rest and holding the mode's grip while the reader is
  * arranging. A feature's mark, a pinned canvas's mark, a waiting session's warning and a bot's face
  * all begin in the same place — so opening the mode moves no mark, and no kind of row stands further
  * in than another.
  *
  * A DOM without layout cannot measure pixels, so this holds the arithmetic's parts: one column on
- * every row, the row's first child, 20px wide and stretching to the row's own height, with the row's
- * 12px padding and 12px gap around it in both states. The sweep measures the boxes (ADR 0019), and
- * does, at 1024px and again in the drawer.
+ * every row, the row's first child, 12px wide and stretching to the row's own height, with the row's
+ * 12px padding and its 8px gap around it in both states — the mark starting 32px in, the least the
+ * row can spend on a column it keeps for the grip. The sweep measures the boxes (ADR 0019), and does,
+ * at 1024px and again in the drawer.
  */
-test("every row, in both states and every kind, starts with the 20px column", async () => {
+test("every row, in both states and every kind, starts with the 12px column", async () => {
   await seed()
   serveWaiting()
   await seedWaitingSession()
@@ -534,7 +557,7 @@ test("every row, in both states and every kind, starts with the 20px column", as
       const column = columnOf(row)
       assert.ok(column, `${what} starts with the column`)
       assert.equal(find(row)?.firstElementChild, column, `and the ${what} starts with nothing else`)
-      assert.equal(column.classList.contains("w-5"), true, "20px of it")
+      assert.equal(column.classList.contains("w-3"), true, "12px of it")
       assert.equal(column.classList.contains("shrink-0"), true, "which no name squeezes")
       assert.equal(
         column.classList.contains("self-stretch"),
@@ -545,9 +568,9 @@ test("every row, in both states and every kind, starts with the 20px column", as
       assert.equal(column.firstElementChild, null, "and empty: nothing is drawn in it at rest")
       assert.equal(column.classList.contains("touch-none"), false, "with no touch-action at rest")
       assert.equal(
-        find(row)?.classList.contains("gap-3"),
+        find(row)?.classList.contains("gap-2"),
         true,
-        "beside 12px of padding and a 12px gap — the arithmetic the mark stands on",
+        "beside 12px of padding and an 8px gap — the arithmetic the mark stands on",
       )
     }
     assert.equal(
@@ -569,7 +592,7 @@ test("every row, in both states and every kind, starts with the 20px column", as
     await click(editButton())
     await until(async () => Boolean(group()), "the mode")
     const modeColumn = columnOf('[data-sidebar-row="projects"]')
-    assert.equal(modeColumn?.classList.contains("w-5"), true, "the mode's row keeps the same 20px")
+    assert.equal(modeColumn?.classList.contains("w-3"), true, "the mode's row keeps the same 12px")
     assert.equal(
       modeColumn?.firstElementChild?.hasAttribute("data-sidebar-grip"),
       true,
@@ -589,6 +612,11 @@ test("every row, in both states and every kind, starts with the 20px column", as
       modeRow("projects")?.firstElementChild?.firstElementChild,
       modeColumn,
       "the row's own line starts with it here too",
+    )
+    assert.equal(
+      modeRow("projects")?.firstElementChild?.classList.contains("gap-2"),
+      true,
+      "and the line spends 8px on the gap beside it, as the resting row does",
     )
     assert.equal(
       findAll("[data-sidebar-gutter] [data-sidebar-grip]").length,
@@ -663,7 +691,11 @@ test("a press anywhere on a row starts the drag, but a press on a control in it 
     assert.equal(lifted("projects"), false, "and a press let go of leaves the row standing")
 
     await sendPointer(find('button[aria-label="Hide Projects"]'), "pointerdown")
-    assert.equal(lifted("projects"), false, "a press on the eye starts no drag: it is the eye's press")
+    assert.equal(
+      lifted("projects"),
+      false,
+      "a press on the eye starts no drag: it is the eye's press",
+    )
     await sendPointer(find('[data-sidebar-row="canvas:p1"] [data-sidebar-unpin]'), "pointerdown")
     assert.equal(lifted("canvas:p1"), false, "nor does a press on the unpin")
 
@@ -673,7 +705,11 @@ test("a press anywhere on a row starts the drag, but a press on a control in it 
       false,
       "a finger on a row's name leaves the row to the drawer's scroll and swipe",
     )
-    await sendPointer(find('[data-sidebar-row="code"] [data-sidebar-gutter]'), "pointerdown", "touch")
+    await sendPointer(
+      find('[data-sidebar-row="code"] [data-sidebar-gutter]'),
+      "pointerdown",
+      "touch",
+    )
     assert.equal(lifted("code"), true, "while a finger on the column takes the gesture")
     await sendPointer(lineOf("code"), "pointercancel")
   })
@@ -1333,7 +1369,11 @@ test("Reset asks first and leaves every pin alone", async () => {
     // its words beside it, in the neutral colour rather than the destructive one.
     const reset = resetControl()
     assert.ok(reset, "the mode's own Reset to default")
-    assert.equal(reset.getAttribute("data-slot"), "button", "the app's own button, not a bare press")
+    assert.equal(
+      reset.getAttribute("data-slot"),
+      "button",
+      "the app's own button, not a bare press",
+    )
     assert.equal(wordsOf(reset), "Reset to default", "worded for what it does")
     assert.equal(
       reset.querySelector("svg")?.classList.contains("lucide-rotate-ccw"),
@@ -1550,7 +1590,7 @@ test(
         const row = find('[data-sidebar-row="projects"]')
         assert.equal(row?.classList.contains("min-h-11"), true, "the row keeps its resting height")
         assert.equal(
-          find("[data-sidebar-grip]")?.classList.contains("w-5"),
+          find("[data-sidebar-grip]")?.classList.contains("w-3"),
           true,
           "the grip is the narrow column's handle",
         )

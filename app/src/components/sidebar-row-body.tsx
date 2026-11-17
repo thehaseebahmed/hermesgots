@@ -33,8 +33,9 @@ const FEATURE_ICONS: Record<SidebarFeatureId, typeof FolderKanbanIcon> = {
 }
 
 /**
- * The narrow column every sidebar row starts with, in either state: 20px of it, down the row's whole
- * height, empty at rest and holding the mode's grip while the reader is arranging.
+ * The narrow column every sidebar row starts with, in either state: 12px of it — a hairline, since a
+ * column is only a place for the mode's grip to stand and a mark does not want the room — down the
+ * row's whole height, empty at rest and holding the grip while the reader is arranging.
  *
  * Kept on every row — a feature, a pinned canvas, a session waiting on the reader, a bot — so that a
  * mark or a face starts at the same x whatever kind of row it is and whether the mode is open or shut.
@@ -51,7 +52,7 @@ export function RowGutter({ children }: { children?: ReactNode }) {
       // inside a hidden element is a control no one can hear.
       aria-hidden={children ? undefined : true}
       className={cn(
-        "flex w-5 shrink-0 items-center justify-center self-stretch",
+        "flex w-3 shrink-0 items-center justify-center self-stretch",
         children && "touch-none",
       )}
     >
