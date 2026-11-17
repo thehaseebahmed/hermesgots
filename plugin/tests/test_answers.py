@@ -249,6 +249,44 @@ class AnsweredOnce(Tray):
             route(self.app, ANSWER, "GET")
 
 
+class APressThatSettlesNothing(Tray):
+    """A press whose answer never lands answered nothing: the button is pressable again (G5).
+
+    The row is claimed before anything settles, so two presses cannot both answer. A dispatch that
+    then fails — a Host that timed out, a 5xx — must give the claim back, or the reader is told
+    "already answered" about a wait that is still waiting.
+    """
+
+    def test_a_press_that_settles_nothing_is_not_spent(self) -> None:
+        _, deny = self.buttons(answers.room_target("room-1", ROOM_WAIT))
+        token = self.token_of(deny)
+
+        def refused(name: str, params: Dict[str, Any], **kwargs: Any) -> Dict[str, Any]:
+            raise rooms.RoomError("The host didn't answer in time.", 502)
+
+        with mock.patch.object(rooms, "call", refused), mock.patch.object(rooms, "_answered"):
+            self.assertEqual(
+                self.press(token)["status"], 502, "the Host's own refusal, in its own words"
+            )
+        settled: List[Dict[str, Any]] = []
+        with mock.patch.object(
+            rooms, "call", lambda name, params, **kw: settled.append(params) or {"approved": True}
+        ), mock.patch.object(rooms, "_answered"):
+            self.assertEqual(
+                self.press(token)["status"], 200, "nothing was answered, so the same button answers"
+            )
+        self.assertEqual([one["choice"] for one in settled], ["deny"], "and it still means Deny")
+
+    def test_an_answer_that_finds_nothing_waiting_is_still_spent(self) -> None:
+        # Not a failure: the wait the button was minted for is over, which is what a spent token
+        # means. Only a settling that raised gives its claim back.
+        once, _ = self.buttons()
+        self.book._run_statuses["run_1"] = {"status": "completed", "session_id": "gots-1"}
+        token = self.token_of(once)
+        self.assertEqual(self.press(token)["status"], 409, "nothing is waiting on that run")
+        self.assertEqual(self.press(token)["status"], 410, "and the token is spent all the same")
+
+
 class ARoomsApproval(Tray):
     """G7: a room member's approval is answered from the tray, the same way."""
 

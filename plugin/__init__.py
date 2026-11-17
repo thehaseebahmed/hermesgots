@@ -2584,7 +2584,16 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # link preview that fetches the URL therefore spends no button, which is the point of it. The
         # token is never logged: nothing here says it, and `_error`'s words never carry it.
         path = store_path()
-        claim = await asyncio.to_thread(answers.redeem, path, request.match_info.get("token") or "")
+        token = request.match_info.get("token") or ""
+
+        async def give_back() -> None:
+            """A settling that failed answered nothing, so the press is given back to be made again."""
+            try:
+                await asyncio.to_thread(answers.release, path, token)
+            except Exception:
+                logger.debug("gots: couldn't give a button back", exc_info=True)
+
+        claim = await asyncio.to_thread(answers.redeem, path, token)
         if claim.outcome == answers.UNKNOWN:
             return _error(web, "That button isn't one this bot sent.", 404)
         if claim.outcome == answers.SPENT:
@@ -2598,11 +2607,16 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             elif target.get("kind") == answers.RUN:
                 # A run's approval is answered on the loop, where its status and its stream live.
                 if not answers.answer_run(target.get("run_id") or "", choice):
+                    # Nothing waiting is the wait's own end, not a failure: the token stays spent.
                     return _error(web, "That approval isn't waiting any more.", 409)
             else:
                 return _error(web, "That button isn't one this bot sent.", 404)
         except (answers.AnswerError, rooms.RoomError) as refused:
+            await give_back()
             return _error(web, str(refused), refused.status)
+        except Exception:
+            await give_back()
+            raise
         return web.json_response({"object": "gots.push.answer", "answered": True, "choice": choice})
 
     async def push_mute(request: "web.Request") -> "web.Response":

@@ -173,6 +173,29 @@ def redeem(path: Path, token: Any) -> Claim:
     return Claim(ANSWERED, row[0], target)
 
 
+def release(path: Path, token: Any) -> None:
+    """Gives one press's claim back, for a settling that failed: the button is pressable again.
+
+    A press claims its row before anything settles — that is what stops two presses both answering
+    — so a dispatch that then raises (a Host that timed out, a 5xx, anything that is not an answer)
+    has answered nothing. Left spent, the row would tell the reader "already answered" about a wait
+    that is still waiting.
+
+    Only a failure gives it back. An answer of "nothing is waiting" is the correct end of a spent
+    token, and so is one that landed: nothing here is called for either.
+    """
+    if not isinstance(token, str) or not token or not path.exists():
+        return
+    conn = connect(path)
+    try:
+        conn.execute(
+            "UPDATE answer_tokens SET used_at = NULL WHERE token = ? AND used_at IS NOT NULL",
+            (digest(token),),
+        )
+    finally:
+        conn.close()
+
+
 def answer_run(run_id: str, choice: str) -> int:
     """Settles a run's approval: Hermes's queue resolved, and the run's clients told.
 
