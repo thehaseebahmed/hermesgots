@@ -9,7 +9,7 @@ import {
   useState,
 } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router"
+import { Navigate, useLocation, useNavigate, useParams } from "react-router"
 
 import {
   CATCH_UP_MS,
@@ -37,9 +37,9 @@ import { useBotLabels } from "@/lib/use-bot-labels"
 import { useBreakReminderEligibility } from "@/components/break-reminder-context"
 import { ApprovalCard } from "@/components/chat/approval-card"
 import { ChatHeader } from "@/components/chat/chat-header"
-import { ChatSettings, ChatTitlePress } from "@/components/chat/chat-settings"
-import { SideChatsButton } from "@/components/chat/side-chats-button"
-import { ContextRing, UsageSheet } from "@/components/chat/usage-sheet"
+import { useChatBar } from "@/components/chat/chat-bar"
+import { ChatSettings } from "@/components/chat/chat-settings"
+import { UsageSheet } from "@/components/chat/usage-sheet"
 import { CODE_FACE, CodeFaceProvider } from "@/components/chat/code-face"
 import {
   ChatActions,
@@ -146,9 +146,8 @@ import { ChatBody } from "@/chat-next/chat-body"
 import { isUnsent } from "@/chat-next/unsent"
 import { useSessionLeave } from "@/components/chat/session-leave"
 import { chatFlow } from "@/lib/chat-flow"
-import { hasStarted, MAIN_TITLE } from "@/lib/chat-list"
+import { hasStarted } from "@/lib/chat-list"
 import { drawsMain, useChatLayout } from "@/lib/chat-layout"
-import { botPath } from "@/lib/bot-tabs"
 import { useChatLead } from "@/lib/chat-lead"
 
 export { SETUP_COPY } from "@/components/chat/empty-states"
@@ -184,26 +183,6 @@ function PendingChat() {
       <ChatHeader title="" showBot={false} />
       <div className="flex-1" />
     </>
-  )
-}
-
-/**
- * Main's title block, as the press onto the page a bot is configured on (G13): the bot itself, not a
- * chat a reader made, so there is nothing behind its title to edit — the press leads to the bot's own
- * settings page, which is where the sidebar's Settings row opens, and no Edit sheet follows it. The
- * words stay the app's own (`MAIN_TITLE`), since the record's title is the host's.
- */
-function MainTitle({ botId }: { botId: string }) {
-  return (
-    <Link
-      to={botPath(botId)}
-      // The block answers the press too (`onTitlePress`), so a thumb on the line under the words lands
-      // as one on them does. Only the link's own press is left to the link, so one press is one step.
-      onClick={(event) => event.stopPropagation()}
-      className="flex min-h-11 w-full min-w-0 items-center text-left outline-none"
-    >
-      <span className="min-w-0 truncate">{MAIN_TITLE}</span>
-    </Link>
   )
 }
 
@@ -399,7 +378,6 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
   const ready = Boolean(chat && bot && chat.id === id)
   const { state: address } = useLocation()
   const { root, up } = useNav()
-  const navigate = useNavigate()
   const xl = useXLarge()
   const wide = useWide()
   // A session is a place in a project: it sits under Code, unless it is drawn beside Code's list,
@@ -475,6 +453,16 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
   // own chat has no menu — its title opens the sheet, and its context stands in the bar as the ring,
   // at every width, because the sheet no longer carries it (ADR 0153). Main is no chat's settings at
   // all: the ring becomes the way to its side chats, and no usage sheet is mounted to open.
+  const bar = useChatBar({
+    main,
+    botId: chat && bot && bot.baseUrl.trim() ? bot.id : undefined,
+    title: unstarted ? "" : (chat?.title ?? ""),
+    editable,
+    open: settingsOpen,
+    usage,
+    onOpenUsage: () => setUsageOpen(true),
+    onEdit: () => setSettingsOpen(true),
+  })
   const actions =
     chat && bot && session ? (
       <ChatActions
@@ -487,11 +475,7 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
         onDeleted={() => up("/code")}
       />
     ) : chat && bot && bot.baseUrl.trim() ? (
-      main ? (
-        <SideChatsButton profileId={bot.id} />
-      ) : (
-        <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
-      )
+      bar.actions
     ) : undefined
   return (
     <div
@@ -505,25 +489,8 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
       {chat && bot && ready ? (
         <>
           <ChatHeader
-            // A session not started has no title yet, and its bot is the big one in the middle.
-            title={
-              unstarted ? (
-                ""
-              ) : session ? (
-                chat.title
-              ) : main ? (
-                <MainTitle botId={bot.id} />
-              ) : (
-                <ChatTitlePress title={chat.title} open={settingsOpen} />
-              )
-            }
-            onTitlePress={
-              main
-                ? () => navigate(botPath(bot.id))
-                : editable
-                  ? () => setSettingsOpen(true)
-                  : undefined
-            }
+            title={bar.title}
+            onTitlePress={bar.onTitlePress}
             // The header never follows the reply: what the thread is doing is drawn in the thread.
             subtitle={
               awayLine(away, online) ??
@@ -1107,6 +1074,24 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
       refusal.refuse(failed(error, "Couldn't send your message.")),
     )
 
+  // A session is a place in a project, so it is centred; a chat's own face reads from the left.
+  const centered = Boolean(session)
+  // Nothing started has no title yet, and its bot is the big one in the middle. A chat gone from this
+  // device draws no title: it is never drawn as a new one, and a header standing empty is the honest
+  // answer.
+  const headerTitle = gone ? "" : unstarted ? "" : (conversation?.title ?? NEW_CHAT_TITLE)
+  // A bot's own chat is edited from its bar; a session and a chat this device cannot draw are not.
+  const editable = Boolean(conversation) && !session && !unstarted && !gone
+  const bar = useChatBar({
+    main,
+    botId: conversation && configured ? conversation.profileId : undefined,
+    title: headerTitle,
+    editable,
+    open: settingsOpen,
+    usage,
+    onOpenUsage: () => setUsageOpen(true),
+    onEdit: () => setSettingsOpen(true),
+  })
   // A session keeps the bar's menu; a bot's own chat opens its sheet from the title and keeps its
   // context in the bar as the ring, at every width (ADR 0153).
   const actions =
@@ -1121,28 +1106,9 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
         onDeleted={() => up("/code")}
       />
     ) : conversation && configured ? (
-      main ? (
-        <SideChatsButton profileId={conversation.profileId} />
-      ) : (
-        <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
-      )
+      bar.actions
     ) : undefined
 
-  // A session is a place in a project, so it is centred; a chat's own face reads from the left.
-  const centered = Boolean(session)
-  // Nothing started has no title yet, and its bot is the big one in the middle. A chat gone from this
-  // device draws no title: it is never drawn as a new one, and a header standing empty is the honest
-  // answer. Main is titled with the app's own word for it, never the host's — on the new UX's layout;
-  // the flat list draws it under the title the host gave it, as it does every row.
-  const headerTitle = gone
-    ? ""
-    : unstarted
-      ? ""
-      : main
-        ? MAIN_TITLE
-        : (conversation?.title ?? NEW_CHAT_TITLE)
-  // A bot's own chat is edited from its bar; a session and a chat this device cannot draw are not.
-  const editable = Boolean(conversation) && !session && !unstarted && !gone
   let subtitle: string | undefined
   if (!unstarted)
     subtitle = session
@@ -1157,22 +1123,8 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
   const frame = ready ? (
     <>
       <ChatHeader
-        title={
-          main && profile ? (
-            <MainTitle botId={profile.id} />
-          ) : editable && conversation ? (
-            <ChatTitlePress title={headerTitle} open={settingsOpen} />
-          ) : (
-            headerTitle
-          )
-        }
-        onTitlePress={
-          main && profile
-            ? () => navigate(botPath(profile.id))
-            : editable
-              ? () => setSettingsOpen(true)
-              : undefined
-        }
+        title={bar.title}
+        onTitlePress={bar.onTitlePress}
         subtitle={subtitle}
         botId={profile?.botId}
         muted={Boolean(conversation?.muted || profile?.muted)}
