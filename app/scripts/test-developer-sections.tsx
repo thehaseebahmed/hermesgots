@@ -10,7 +10,9 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
 
-import { adoptAppearance, db, getSettings } from "@/lib/db"
+import { adoptAppearance, db, DEFAULT_SETTINGS, getSettings } from "@/lib/db"
+import type { SidebarLayoutRecord } from "@/lib/sidebar-layout"
+import { syncedAppearance } from "@/lib/sync"
 import { DeveloperSettings, SettingsPage } from "@/routes/settings"
 import {
   Path,
@@ -164,4 +166,27 @@ test("unlocking Developer says nothing in passing", async () => {
       assert.deepEqual(said, [], "and nothing said for it: the Developer row appearing is the word")
     })
   })
+})
+
+test("a member whose shape this build knows is kept, and one it does not is dropped", async () => {
+  await seedSettings({ steerByDefault: false, breakReminders: false })
+  const layout: SidebarLayoutRecord = {
+    version: 1,
+    hidden: ["code"],
+    order: ["meetings", "projects", "code", "canvas", "research"],
+  }
+  // The record another device wrote: a switch, a string where a switch belongs, and the layout.
+  const pulled = syncedAppearance({
+    ...DEFAULT_SETTINGS,
+    appearanceAt: 7,
+    steerByDefault: true,
+    breakReminders: true,
+    sidebarLayout: layout,
+  })
+  await adoptAppearance({ ...pulled.appearance.value, breakReminders: "yes" }, pulled.appearance.at)
+  const adopted = await getSettings()
+  assert.equal(adopted.steerByDefault, true, "a switch whose shape this build knows is kept")
+  assert.equal(adopted.breakReminders, false, "and a value shaped like no switch is dropped")
+  assert.deepEqual(adopted.sidebarLayout, layout, "the layout comes through the round trip equal")
+  assert.equal(adopted.appearanceAt, 7, "with the appearance clock moved")
 })

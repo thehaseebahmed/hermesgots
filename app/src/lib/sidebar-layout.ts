@@ -28,6 +28,22 @@ export const SIDEBAR_FEATURES = [
 /** The features this build knows, by the id each row is filed under. */
 export type SidebarFeatureId = (typeof SIDEBAR_FEATURES)[number]["id"]
 
+/**
+ * The sidebar's arrangement, as the account carries it: the rows the reader put away, and the rows
+ * above the boundary in the order they are drawn.
+ */
+export interface SidebarLayoutRecord {
+  /** The shape's own number, so a build whose shape differs can tell a record it does not know. */
+  version: 1
+  /** The rows the reader put away, by id. */
+  hidden: string[]
+  /** Every row above the boundary in its drawn order, a pinned canvas as `canvas:<id>`. */
+  order: string[]
+}
+
+/** Today's arrangement: nothing hidden, and the order the table draws. */
+export const DEFAULT_SIDEBAR_LAYOUT: SidebarLayoutRecord = { version: 1, hidden: [], order: [] }
+
 /** What a row needs of a pinned canvas: the id it is filed under, and the title it is drawn with. */
 export interface SidebarPin {
   id: string

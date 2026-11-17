@@ -14,6 +14,7 @@ import { mediaKeyPrefix } from "@/lib/media-key"
 import { forgetRead } from "@/lib/read-marks"
 import type { Compaction, ModelChange, ProviderUsage, Skill, Tidied } from "@/lib/hermes"
 import type { PromptEntry } from "@/lib/prompt-library"
+import { DEFAULT_SIDEBAR_LAYOUT, type SidebarLayoutRecord } from "@/lib/sidebar-layout"
 import type { SpeechSettings } from "@/lib/speech"
 import type { ReasoningRun } from "@/lib/thinking"
 import { randomId } from "@/lib/utils"
@@ -38,6 +39,11 @@ export interface Settings {
   breakReminders?: boolean
   /** Alt+1 to Alt+9 start a new chat with the bot added in that place. Off by default. */
   navShortcuts?: boolean
+  /**
+   * The sidebar's arrangement — the rows put away and the order they are drawn — which follows the
+   * account like the switches above. The empty record is today's sidebar (`sidebar-layout.ts`).
+   */
+  sidebarLayout?: SidebarLayoutRecord
   /**
    * Enter sends the message instead of starting a new line; off by default, and then Ctrl+Enter
    * sends. Local, and never in `APPEARANCE_FIELDS`: it describes this device's keyboard, so a phone
@@ -131,16 +137,21 @@ export interface Settings {
 }
 
 /**
- * The Appearance section's switches, which follow the account; the colour mode isn't one of them,
- * since next-themes keeps it on the device. Sync carries them as the `settings` document's
- * `appearance` record and the fingerprint watches them, so this list is the one place that says
- * which fields that record holds. A device switch the account carries without being an Appearance
- * one — Developer's **Chat threads** — rides a record of its own instead, so its clock is its own
- * (ADR 0120).
+ * The Appearance fields, which follow the account: the three switches and the sidebar's layout.
+ * The colour mode isn't one of them, since next-themes keeps it on the device. Sync carries them as
+ * the `settings` document's `appearance` record and the fingerprint watches them, so this list is
+ * the one place that says which fields that record holds. A device switch the account carries
+ * without being an Appearance one — Developer's **Chat threads** — rides a record of its own
+ * instead, so its clock is its own (ADR 0120).
  */
-export const APPEARANCE_FIELDS = ["steerByDefault", "breakReminders", "navShortcuts"] as const
+export const APPEARANCE_FIELDS = [
+  "steerByDefault",
+  "breakReminders",
+  "navShortcuts",
+  "sidebarLayout",
+] as const
 
-/** Those switches as sync reads them, present rather than optional, so a read needs no fallback. */
+/** Those fields as sync reads them, present rather than optional, so a read needs no fallback. */
 export type Appearance = Required<Pick<Settings, (typeof APPEARANCE_FIELDS)[number]>>
 
 /** A Hermes profile Gots can talk to. Its Gots plugin registers it (see `registry.ts`). */
@@ -966,15 +977,17 @@ export interface CachedSkills {
 }
 
 /**
- * A default for every switch that has one, so reading one never needs a fallback. `APPEARANCE_FIELDS`
- * is what says which of them the account carries; this record is only what a device starts from —
- * which is why the one switch that stays on the device is named here beside them and absent there.
+ * A default for every appearance field and switch that has one, so reading one never needs a
+ * fallback. `APPEARANCE_FIELDS` is what says which of them the account carries; this record is only
+ * what a device starts from — which is why the one switch that stays on the device is named here
+ * beside them and absent there.
  */
 export const DEFAULT_SETTINGS: Settings & Appearance & Required<Pick<Settings, "sendOnEnter">> = {
   id: "settings",
   steerByDefault: false,
   breakReminders: true,
   navShortcuts: false,
+  sidebarLayout: DEFAULT_SIDEBAR_LAYOUT,
   sendOnEnter: false,
   labs: true,
   canvas: true,
@@ -1954,7 +1967,7 @@ export async function saveSettings(patch: Partial<Omit<Settings, "id">>) {
   })
 }
 
-/** Saves an appearance switch; the clock moves so sync carries the change to the account's devices. */
+/** Saves an appearance field; the clock moves so sync carries the change to the account's devices. */
 export async function saveAppearance(patch: Partial<Appearance>) {
   await saveSettings({ ...patch, appearanceAt: Date.now() })
 }
@@ -1990,19 +2003,26 @@ export async function forgetChatFilter(profileId: string) {
 
 /**
  * Takes the appearance record another device wrote, clock and all, so this one doesn't push it back.
- * A record can name a switch this build doesn't have — one that was retired, or one from a newer
+ * A record can name a member this build doesn't have — one that was retired, or one from a newer
  * build — and writing that name back would put a field nothing reads in this device's settings row.
+ * A member is kept only where its value has the shape this build's default for it has: a switch is a
+ * boolean, the sidebar's layout a record. What a record's own version or ids mean is the layout
+ * rule's to say, not this path's, and a field with no default is a switch, as all of them were.
  */
 export async function adoptAppearance(
   value: Partial<Record<keyof Appearance, unknown>>,
   at: number,
 ) {
-  const known: Partial<Appearance> = {}
+  const known: Partial<Record<keyof Appearance, unknown>> = {}
   for (const field of APPEARANCE_FIELDS) {
-    const on = value[field]
-    if (typeof on === "boolean") known[field] = on
+    const next = value[field]
+    const fallback: unknown = DEFAULT_SETTINGS[field]
+    const shape = fallback === undefined ? "boolean" : typeof fallback
+    if (typeof next === shape) known[field] = next
   }
-  await saveSettings({ ...known, appearanceAt: at })
+  // `known` holds the values whose shape was just checked against the default, which is what the
+  // appearance record's own type says of them.
+  await saveSettings({ ...(known as Partial<Appearance>), appearanceAt: at })
 }
 
 export async function listProfiles() {

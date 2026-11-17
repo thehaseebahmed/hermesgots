@@ -27,7 +27,6 @@ import { hasPluginFeature, mergeChatList } from "@/lib/hermes"
 import { adoptDraft, carriesSavedDraft, draftKey } from "@/lib/drafts"
 import { adoptSessionMode } from "@/lib/workspace"
 import {
-  APPEARANCE_FIELDS,
   DEFAULT_PROFILE,
   DEFAULT_SETTINGS,
   adoptAppearance,
@@ -49,6 +48,7 @@ import { mergeDocs, type Doc, type Entry } from "@/lib/merge"
 import { syncRegistry } from "@/lib/registry"
 import { seatingBots } from "@/lib/rooms"
 import { markResume } from "@/lib/resume-trace"
+import { DEFAULT_SIDEBAR_LAYOUT } from "@/lib/sidebar-layout"
 import {
   generateDataKey,
   hasPasskeys,
@@ -68,9 +68,9 @@ import {
 } from "@/lib/vault"
 
 /**
- * Syncs bots, the appearance switches and the chat list (titles, Hermes session ids and context
+ * Syncs bots, the appearance record and the chat list (titles, Hermes session ids and context
  * use, not messages). Bots come from the registry and the sealed `bots` document; the Appearance
- * section's switches from the `settings` document, which every device merges on `appearanceAt`;
+ * fields from the `settings` document, which every device merges on `appearanceAt`;
  * each bot's chat list lives with the Gots plugin on its own Hermes server. Everything sent to
  * Netlify is sealed with the account's data key, and each document's associated data names its
  * owner and slot, so the server can't swap one document for another.
@@ -570,7 +570,7 @@ async function syncPrompts(key: CryptoKey) {
 }
 
 /**
- * The `settings` document's one record: the Appearance switches as `APPEARANCE_FIELDS` names them, by
+ * The `settings` document's one record: the Appearance fields as `APPEARANCE_FIELDS` names them, by
  * hand, so adding one to that list fails to compile here. Nothing else on this device's settings row
  * is in it — a pill, a sort, a keyboard answer is how this device is read, not a fact about the
  * account (ADR 0078, ADR 0145) — and that naming is what keeps them here: a field nothing names
@@ -581,10 +581,10 @@ async function syncPrompts(key: CryptoKey) {
  * It is the document's only record now: a device still running a build with the retired chat threads
  * record writes it beside this one, and this build neither reads nor re-adopts it. Exported for the
  * case that reads the record without unsealing a document, since it is the one place the list of
- * fields that cross devices is spelled.
+ * fields that cross devices is spelled — sync's fingerprint reads it for the same reason.
  */
 export function syncedAppearance(settings: Settings): Doc<Appearance> {
-  const { appearanceAt, steerByDefault, breakReminders, navShortcuts } = settings
+  const { appearanceAt, steerByDefault, breakReminders, navShortcuts, sidebarLayout } = settings
   return {
     appearance: {
       at: appearanceAt ?? 0,
@@ -592,6 +592,7 @@ export function syncedAppearance(settings: Settings): Doc<Appearance> {
         steerByDefault: steerByDefault ?? DEFAULT_SETTINGS.steerByDefault,
         breakReminders: breakReminders ?? DEFAULT_SETTINGS.breakReminders,
         navShortcuts: navShortcuts ?? DEFAULT_SETTINGS.navShortcuts,
+        sidebarLayout: sidebarLayout ?? DEFAULT_SIDEBAR_LAYOUT,
       },
     },
   }
@@ -802,7 +803,9 @@ async function fingerprint() {
     getSettings(),
   ])
   const bots = profiles.map((p) => `${p.id}@${p.updatedAt}`).join(",")
-  const appearance = APPEARANCE_FIELDS.map((field) => `${settings[field] ? 1 : 0}`).join("")
+  // The appearance clause is the record this device would write, not a list of fields read as bits:
+  // one place says what crosses devices, so a member named there cannot be flattened to `1` here.
+  const appearance = JSON.stringify(syncedAppearance(settings).appearance.value)
   return `${bots}|${count}@${newest?.changedAt ?? 0}|${tombstones}|${settings.onboarded}|${appearance}@${settings.appearanceAt ?? 0}|prompts@${settings.promptsAt ?? 0}`
 }
 
