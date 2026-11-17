@@ -69,7 +69,8 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     (("tools/process_registry_notifications.py",), "heartbeat #"),
     (("tools/process_registry_notifications.py",), "background processes completed."),
     # The function that names a committed photo's copy in the row; the app's hints are pinned to it.
-    (("agent/session_persistence.py",), "_image_marker"),
+    # It moved out of `session_persistence.py` into the rules module that words a transcript.
+    (("session_rules/turns.py", "agent/session_persistence.py"), "_image_marker"),
     # The caps on what a plugin may add to the system prompt as a section, and on the host's own
     # context files. A section past the first is dropped whole at render — the reason
     # plugin/openui.py refuses to register one — and SOUL.md past the third is truncated head and
@@ -80,10 +81,32 @@ ANCHORS: Tuple[Tuple[Tuple[str, ...], str], ...] = (
     (("agent/prompt_builder.py",), "CONTEXT_FILE_MAX_CHARS = 20_000"),
     # The queue Hermes keeps for a session, as `plugin/pending.py` reads it: the ledger's own reader,
     # the fence that holds a paused FIFO, the owner path that clears it, and the restore that puts an
-    # API chat back in front of its authority before one is cleared (ADR 0108).
-    (("hermes_state_runtime.py",), "def list_session_admissions"),
-    (("hermes_state_runtime.py",), "status IN ('queued','started','unknown')"),
-    (("hermes_state_runtime.py",), "def get_session_admission"),
+    # API chat back in front of its authority before one is cleared (ADR 0108). The admission store
+    # moved out of `hermes_state_runtime.py` into the persistence package's authority.
+    (
+        (
+            "persistence/sqlite/authority/_admission_store.py",
+            "persistence/sqlite/authority/admissions.py",
+            "hermes_state_runtime.py",
+        ),
+        "def list_session_admissions",
+    ),
+    (
+        (
+            "persistence/sqlite/authority/_admission_store.py",
+            "persistence/sqlite/authority/admissions.py",
+            "hermes_state_runtime.py",
+        ),
+        "status IN ('queued','started','unknown')",
+    ),
+    (
+        (
+            "persistence/sqlite/authority/_admission_store.py",
+            "persistence/sqlite/authority/admissions.py",
+            "hermes_state_runtime.py",
+        ),
+        "def get_session_admission",
+    ),
     (("gateway/session_authority.py",), "async def resolve_unknown_as_owner"),
     (("gateway/session_api.py",), "def restore_api_session"),
     (("gateway/session_authorities.py",), "def authority_for_home"),
@@ -169,6 +192,15 @@ RELOAD_REL = "agent/conversation_compression.py"
 SUMMARY_REL = "agent/context_compressor.py"
 MEDIA_REL = "gateway/session_api_media.py"
 PLACEHOLDER_REL = "agent/session_persistence.py"
+
+# Hermes has moved two of these modules once already, and a checkout on either side of the move has to
+# answer: the rules module is where the summary's own markers and the inline image's line live now,
+# and the older module still carries them on a host that predates the move. Each value is read from the
+# first of these that holds it, so neither side answers "not found" for a module that merely moved.
+MOVED: Dict[str, Tuple[str, ...]] = {
+    SUMMARY_REL: ("session_rules/turns.py", SUMMARY_REL),
+    PLACEHOLDER_REL: ("session_rules/turns.py", PLACEHOLDER_REL),
+}
 
 CONSTANTS: Tuple[Tuple[str, str, str, str], ...] = (
     (FOOTER_REL, "INTERNAL_NOTIFICATION_FOOTER", "footer", "the machine-provenance footer"),
@@ -476,6 +508,25 @@ def main(argv: List[str]) -> int:
     def sourced(rel: str) -> Optional[str]:
         return None if absent((rel,)) else read(hermes / rel)
 
+    def derive_any(key: str, rels: Tuple[str, ...], reader, what: str) -> None:
+        """A value read from the first of ``rels`` that carries it, and the file it came from.
+
+        The same module is not always at the same path — Hermes moved the summary's markers and the
+        inline image's line into `session_rules/turns.py` — so a value is looked for where it lives
+        now and where it lived before, and the group is reported missing only when neither answers.
+        """
+        for rel in rels:
+            source = read(hermes / rel)
+            if source is None:
+                continue
+            value = reader(source)
+            if value is not None:
+                derived[key] = (value, rel)
+                return
+        if absent(rels):
+            return  # already reported as a missing file
+        failures.append(f"hermes:{' or '.join(rels)}: {what} not found")
+
     # The Hermes side: the internals, then the text.
     for rels, literal in ANCHORS:
         if absent(rels):
@@ -517,7 +568,12 @@ def main(argv: List[str]) -> int:
     derive("batch", NOTICE_REL, notice, _batch_header, "the batch header")
     derive("mark", NOTICE_REL, notice, _status_mark, "the Status line's truncation mark")
     for rel, name, key, what in CONSTANTS:
-        derive(key, rel, sourced(rel), lambda src, name=name: _constant(src, name), what)
+        derive_any(
+            key,
+            MOVED.get(rel, (rel,)),
+            lambda src, name=name: _constant(src, name),
+            what,
+        )
     derive(
         "reloadBody",
         RELOAD_REL,
@@ -540,17 +596,15 @@ def main(argv: List[str]) -> int:
         lambda src: _joined(src, "'[Image attached: "),
         "the line naming a photo's address",
     )
-    derive(
+    derive_any(
         "placeholder",
-        PLACEHOLDER_REL,
-        sourced(PLACEHOLDER_REL),
+        MOVED[PLACEHOLDER_REL],
         lambda src: _joined(src, '"[screenshot]"'),
         "the line an inline image leaves in a row",
     )
-    derive(
+    derive_any(
         "details",
-        PLACEHOLDER_REL,
-        sourced(PLACEHOLDER_REL),
+        MOVED[PLACEHOLDER_REL],
         _screenshot_details,
         "the details an inline image's placeholder may carry",
     )
