@@ -4341,6 +4341,7 @@ http
           "cleanup_level",
           "hearing_prompt",
           "stt_settings",
+          "stt_keys",
           "afk",
           "afk_switch",
           "afk_prompt",
@@ -5989,6 +5990,20 @@ http
     if (PLUGIN && !profile && req.method === "DELETE" && dictationCancel) {
       const removed = dictationTakes.delete(decodeURIComponent(dictationCancel[1]))
       return json(res, 200, { object: "gots.dictation_cancelled", removed })
+    }
+    const sttKey = /^\/api\/plugins\/gots\/stt\/key(?:\/([^/]+))?$/.exec(url.pathname)
+    if (PLUGIN && !profile && sttKey) {
+      const body = req.method === "POST" ? await readBody(req).catch(() => ({})) : {}
+      const name = decodeURIComponent(sttKey[1] ?? String(body?.provider ?? ""))
+      if (!STT_PROVIDERS.includes(name))
+        return json(res, 400, { error: { message: `${name || "No provider"} takes no API key from this page.` } })
+      if (req.method === "POST") {
+        if (typeof body.key !== "string" || !body.key.trim())
+          return json(res, 400, { error: { message: "A key can't be empty." } })
+        STT_KEYS_SET.add(name)
+      } else if (req.method === "DELETE") STT_KEYS_SET.delete(name)
+      else return json(res, 405, {})
+      return json(res, 200, { object: "gots.stt", stt: sttReading() })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/stt") {
       if (req.method === "POST") {

@@ -759,3 +759,80 @@ class SttWriteTest(TempStore):
 if __name__ == "__main__":
     unittest.main()
 
+
+
+class SttKeyTest(TempStore):
+    """A provider's API key, written and removed through Hermes's own credential lifecycle."""
+
+    def _lifecycle(self, host):
+        saved, removed = [], []
+        module = types.ModuleType("hermes_cli.credential_lifecycle")
+
+        def save(variable, value):
+            saved.append((variable, value))
+            host.keys[variable] = value
+
+        def remove(variable):
+            removed.append(variable)
+            host.keys.pop(variable, None)
+
+        module.save_provider_env_credential = save
+        module.remove_provider_env_credential = remove
+        common = types.ModuleType("hermes_cli.web_routers._common")
+        common.is_redacted_credential_preview = lambda key: key.startswith("***")
+        patch = mock.patch.dict(
+            sys.modules,
+            {
+                "hermes_cli.credential_lifecycle": module,
+                "hermes_cli.web_routers": types.ModuleType("hermes_cli.web_routers"),
+                "hermes_cli.web_routers._common": common,
+            },
+        )
+        patch.start()
+        self.addCleanup(patch.stop)
+        return saved, removed
+
+    def test_a_key_is_written_to_the_providers_variable_and_the_block_says_set(self) -> None:
+        with SttHost({}) as host:
+            saved, _ = self._lifecycle(host)
+            block = speech.write_key(self.config, "elevenlabs", "  sk-secret  ")
+        self.assertEqual(saved, [("ELEVENLABS_API_KEY", "sk-secret")], "trimmed, to its own variable")
+        rows = {row["name"]: row for row in block["providers"]}
+        self.assertIs(rows["elevenlabs"]["key_set"], True)
+        self.assertNotIn("sk-secret", json.dumps(block), "the key is never answered back")
+
+    def test_a_key_is_removed_and_the_block_says_not_set(self) -> None:
+        with SttHost({}, keys={"GROQ_API_KEY": "k"}) as host:
+            _, removed = self._lifecycle(host)
+            block = speech.remove_key(self.config, "groq")
+        self.assertEqual(removed, ["GROQ_API_KEY"])
+        rows = {row["name"]: row for row in block["providers"]}
+        self.assertIs(rows["groq"]["key_set"], False)
+
+    def test_a_mask_an_empty_key_and_an_unknown_provider_write_nothing(self) -> None:
+        with SttHost({}) as host:
+            saved, removed = self._lifecycle(host)
+            for provider, key in (("groq", "***"), ("groq", "  "), ("mine", "k"), ("local", "k")):
+                with self.assertRaises(ValueError, msg=(provider, key)):
+                    speech.write_key(self.config, provider, key)
+            with self.assertRaises(ValueError):
+                speech.remove_key(self.config, "mine")
+        self.assertEqual((saved, removed), ([], []))
+
+    def test_a_host_without_the_lifecycle_is_an_import_error(self) -> None:
+        with SttHost({}):
+            with mock.patch.dict(sys.modules, {"hermes_cli.credential_lifecycle": None}):
+                with self.assertRaises(ImportError):
+                    speech.write_key(self.config, "groq", "k")
+
+
+class SttKeysAvailableTest(TempStore):
+    def test_the_feature_needs_the_settings_and_the_lifecycle(self) -> None:
+        module = types.ModuleType("hermes_cli.credential_lifecycle")
+        module.save_provider_env_credential = lambda variable, value: {}
+        with SttHost({}):
+            with mock.patch.dict(sys.modules, {"hermes_cli.credential_lifecycle": module}):
+                self.assertTrue(speech.keys_available())
+            with mock.patch.dict(sys.modules, {"hermes_cli.credential_lifecycle": None}):
+                self.assertFalse(speech.keys_available())
+        self.assertFalse(speech.keys_available(), "no settings, no key row")

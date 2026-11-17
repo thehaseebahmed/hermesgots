@@ -8,6 +8,8 @@ import {
   HermesError,
   probeSpeechSettings,
   setSpeechSettings,
+  removeSttKey,
+  setSttKey,
   setSttSetting,
 } from "@/lib/hermes"
 import { usePluginFeatureAnswers } from "@/lib/features"
@@ -25,7 +27,12 @@ import {
   type SpeechPatch,
   type SpeechSettings,
 } from "@/lib/speech"
-import { STT_SETTINGS, type SttValue } from "@/lib/stt-settings"
+import {
+  STT_KEYS,
+  STT_SETTINGS,
+  type SttSettings as SttSettingsBlock,
+  type SttValue,
+} from "@/lib/stt-settings"
 
 type Server = { baseUrl: string; apiKey: string }
 
@@ -110,6 +117,7 @@ export function useSpeech(profile?: Server | null) {
     {
       speech: SPEECH_MODEL,
       stt: STT_SETTINGS,
+      keys: STT_KEYS,
       levels: CLEANUP_LEVELS_FEATURE,
       hearing: HEARING_PROMPT_FEATURE,
       probe: SPEECH_PROBE_FEATURE,
@@ -117,6 +125,7 @@ export function useSpeech(profile?: Server | null) {
   )
   const supported = features.speech === "yes"
   const sttSupport = features.stt === "yes"
+  const keysSupport = features.keys === "yes"
   // A plugin older than the four levels refuses both writes, so the page doesn't offer them at all.
   const levelsSupport = features.levels === "yes"
   const hearingSupport = features.hearing === "yes"
@@ -214,6 +223,18 @@ export function useSpeech(profile?: Server | null) {
     [save, settled, state, key, baseUrl, apiKey],
   )
 
+  /** The host's fresh `stt` block, kept on the page and on this device: the next open draws it. */
+  const landStt = useCallback(
+    async (stt: SttSettingsBlock) => {
+      const merged = state?.settings ? { ...state.settings, stt } : undefined
+      if (merged) {
+        setState({ key, settings: merged })
+        await keepSpeech({ baseUrl, apiKey }, merged)
+      }
+    },
+    [state, key, baseUrl, apiKey],
+  )
+
   /** One speech setting, written on its own: the host answers the whole block it now holds. */
   const writeStt = useCallback(
     async (setting: string, value: SttValue) => {
@@ -224,11 +245,7 @@ export function useSpeech(profile?: Server | null) {
       if (!stt) return false
       // The host's answer is the block it now holds, so the copy this device keeps moves with it:
       // the next open draws the write rather than the answer before it.
-      const merged = state?.settings ? { ...state.settings, stt } : undefined
-      if (merged) {
-        setState({ key, settings: merged })
-        await keepSpeech({ baseUrl, apiKey }, merged)
-      }
+      await landStt(stt)
       // Who hears a take is not in the `stt` block this answers with, so a provider pick is followed
       // by the read that names it: the page greys Cleanup on that route, and must not keep saying the
       // provider the bot has just left (ADR 0132).
@@ -240,7 +257,23 @@ export function useSpeech(profile?: Server | null) {
       }
       return true
     },
-    [save, state, key, baseUrl, apiKey],
+    [save, settled, landStt, key, baseUrl, apiKey],
+  )
+
+  /** A provider's API key, set (a string) or removed (`null`); the answer is the block it leaves. */
+  const writeKey = useCallback(
+    async (provider: string, secret: string | null) => {
+      if (!settled) return false
+      const stt = await save(() =>
+        secret === null
+          ? removeSttKey({ baseUrl, apiKey }, provider, AbortSignal.timeout(WRITE_TIMEOUT_MS))
+          : setSttKey({ baseUrl, apiKey }, provider, secret, AbortSignal.timeout(WRITE_TIMEOUT_MS)),
+      )
+      if (!stt) return false
+      await landStt(stt)
+      return true
+    },
+    [save, settled, landStt, baseUrl, apiKey],
   )
 
   /**
@@ -259,10 +292,7 @@ export function useSpeech(profile?: Server | null) {
     setMeasuring(key)
     setMeasureProblem(undefined)
     try {
-      const settings = await probeSpeech(
-        { baseUrl, apiKey },
-        AbortSignal.timeout(PROBE_TIMEOUT_MS),
-      )
+      const settings = await probeSpeech({ baseUrl, apiKey }, AbortSignal.timeout(PROBE_TIMEOUT_MS))
       setState({ key, settings: keepStt(settings, state?.settings) })
     } catch (error) {
       // Only an answer that came back is the host's to say: a status means it refused, and its own
@@ -319,5 +349,8 @@ export function useSpeech(profile?: Server | null) {
     chooseLevel: (level: CleanupLevel) => write({ cleanup_level: level }),
     setHearing: (sent: boolean) => write({ hearing_prompt: sent }),
     writeStt,
+    /** Whether the host takes a provider's API key from this page. */
+    keys: supported && sttSupport && keysSupport,
+    writeKey,
   }
 }

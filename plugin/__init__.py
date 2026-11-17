@@ -726,6 +726,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # advertised only where this host's Hermes declares those defaults, so a host
                     # that doesn't keeps the one speech row it already draws.
                     *(["stt_settings"] if await asyncio.to_thread(speech.stt_available) else []),
+                    # A provider's API key, written from the same page (speech.py): needs the
+                    # settings above and Hermes's credential lifecycle.
+                    *(["stt_keys"] if await asyncio.to_thread(speech.keys_available) else []),
                     "usage",
                     "research",
                     "research_followup",
@@ -3130,6 +3133,64 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         failed="The host couldn't save the speech setting",
     )
     app.router.add_post(f"{PREFIX}/stt", set_stt)
+
+    # A speech provider's API key (speech.py): written and removed through Hermes's credential
+    # lifecycle, and answered as the stt block, in which a key is only ever `key_set`. The key is
+    # neither logged nor echoed, and this route's 502 is the plugin's sentence, since the host's own
+    # could hold the value.
+    def stt_key_route(*, needs_body: bool, failed: str, logged: str, unavailable: str):
+        async def handler(request: "web.Request") -> "web.Response":
+            denied = unauthorized(request)
+            if denied is not None:
+                return denied
+            given: Dict[str, Any] = {}
+            if needs_body:
+                given = await json_body(request) or {}
+                if not isinstance(given.get("provider"), str) or not isinstance(
+                    given.get("key"), str
+                ):
+                    return _error(web, "Body needs a provider and a key.", 400)
+            provider = given.get("provider") or str(request.match_info.get("provider") or "")
+            config_path = host_config_path()
+            scope = profile_scope()
+
+            def run() -> Dict[str, Any]:
+                with scope():
+                    if needs_body:
+                        return speech.write_key(config_path, provider, given["key"])
+                    return speech.remove_key(config_path, provider)
+
+            try:
+                payload = await asyncio.to_thread(run)
+            except ValueError as error:
+                return _error(web, str(error), 400)
+            except ImportError:
+                return _error(web, unavailable, 501)
+            except Exception:
+                logger.warning(logged, exc_info=True)
+                return _error(web, failed, 502)
+            return web.json_response({"object": "gots.stt", "stt": payload})
+
+        return handler
+
+    app.router.add_post(
+        f"{PREFIX}/stt/key",
+        stt_key_route(
+            needs_body=True,
+            failed="The host couldn't save the key.",
+            logged="gots: couldn't write a speech provider's key",
+            unavailable="This Hermes version can't write an API key from here.",
+        ),
+    )
+    app.router.add_delete(
+        f"{PREFIX}/stt/key/{{provider}}",
+        stt_key_route(
+            needs_body=False,
+            failed="The host couldn't remove the key.",
+            logged="gots: couldn't remove a speech provider's key",
+            unavailable="This Hermes version can't remove an API key from here.",
+        ),
+    )
 
     def keyed_settings_read(
         *,
