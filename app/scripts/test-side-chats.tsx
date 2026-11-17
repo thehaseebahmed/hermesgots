@@ -2,10 +2,11 @@
  * A bot's Side Chat List: the screen one press from Main, at the bot's list address. Its bar leads
  * back to Main, says "Sidechats" over the bot and the count of what stands in it, and trails the
  * routines control; its pills are the five this screen holds — no Routines, since a run is not a
- * conversation of the bot's — and the rows stand under one "Side Chats" heading, pins first, ordered
- * by when each chat last moved at all (a chat the reader has just written in is the one they are in).
- * At the split width the bot's Main stands above them with a Home glyph, since it is the chat drawn
- * beside the list; at one pane there is no row for it, because the screen is a list of side chats.
+ * conversation of the bot's — and the rows run pins first, ordered by when each chat last moved at
+ * all (a chat the reader has just written in is the one they are in). At the split width the bot's
+ * Main stands above them with a Home glyph, under a separator and a "Side Chats" heading, since it is
+ * the chat drawn beside the list; at one pane there is no row for it and no heading over the rows,
+ * because the screen is a list of side chats and its own bar already names it.
  *
  * The rows, the subtitle's count and Main's badge all read one rule (`sideChats`), so an archived
  * side chat leaves the rows and the count and stands under the Archived pill, where the badge that
@@ -126,9 +127,10 @@ const pair = () => (
   </MemoryRouter>
 )
 
-/** The side chats the list draws, in the order it draws them. */
+/** The side chats the list draws, in the order it draws them — read off the rows, since the heading
+ * that names them draws only where Main stands above them. */
 const rowIds = () =>
-  findAll('section[aria-label="Side Chats"] ul a[href^="/c/"]').map((row) =>
+  findAll('[data-slot="chat-rows"] a[href^="/c/"]').map((row) =>
     (row.getAttribute("href") ?? "").slice(3),
   )
 /** Main's own row, drawn above the rows at the split width and nowhere else. */
@@ -231,7 +233,7 @@ test("the pills are the five this list holds: no Routines, and a stored Routines
 })
 
 test(
-  "at one pane there is no Main row, and at the split width Main stands above a separator",
+  "at one pane there is no Main row and no heading over the rows, and at the split width Main stands above a separator",
   atWidth(390, async () => {
     await seed([
       { id: MAIN, title: "Bot Chat", main: true, at: 10, said: [{ content: "Morning", at: 10 }] },
@@ -246,6 +248,12 @@ test(
       assert.ok(
         missing(`[data-slot="main-separator"]`),
         "and nothing separates a row it does not draw",
+      )
+      // The heading names the divider between Main and its chats: over a list that holds nothing
+      // but side chats it separates nothing, and the bar's own line already names the screen.
+      assert.ok(
+        missing('section[aria-label="Side Chats"] h2'),
+        "and no Side Chats heading over rows it does not divide",
       )
     })
   }),
@@ -275,6 +283,10 @@ test(
         separator!.compareDocumentPosition(heading()!) & Node.DOCUMENT_POSITION_FOLLOWING,
         "and above the rows it divides the screen from",
       )
+      // The heading is the divider's own name, so it draws with the row it divides here and nowhere
+      // else — over a Main-less list it separated nothing.
+      assert.equal(wordsOf(heading()).includes("Side Chats"), true, "the rows are named")
+      assert.equal(wordsOf(heading()).includes("1"), true, "with the count of the rows they draw")
       await click(mainRow())
       await until(async () => path() === `/c/${MAIN}`, "the chat the row opens")
     })
@@ -339,7 +351,7 @@ test(
   }),
 )
 
-test("the rows stand under one Side Chats heading, pinned first and the rest by the latest word", async () => {
+test("the rows run pinned first and the rest by the latest word", async () => {
   const at = Date.now() - 120_000
   await seed([
     { id: "old", title: "An old chat", at, said: [{ content: "The first word", at }] },
@@ -365,8 +377,6 @@ test("the rows stand under one Side Chats heading, pinned first and the rest by 
   ])
   await mount(screen(), async () => {
     await until(async () => rowIds().length === 4, "the bot's side chats")
-    assert.equal(wordsOf(heading()).includes("Side Chats"), true, "one group, named")
-    assert.equal(wordsOf(heading()).includes("4"), true, "with the count of the rows it draws")
     assert.deepEqual(rowIds(), ["held", "new", "middle", "old"], "the pin first, then the newest")
     assert.ok(
       find(`a[href="/c/held"] svg.lucide-pin`),

@@ -197,11 +197,14 @@ export function ChatList({
 
         {shown.length > 0 &&
           (group ? (
-            <ItemGroup group={{ label: group, items: shown }}>
+            // The rows wear the same slot whether or not a heading names them.
+            <ItemGroup group={{ label: group, items: shown }} listSlot="chat-rows">
               {shown.map(draw)}
             </ItemGroup>
           ) : (
-            <ul className="flex flex-col">{shown.map(draw)}</ul>
+            <ul data-slot="chat-rows" className="flex flex-col">
+              {shown.map(draw)}
+            </ul>
           ))}
       </div>
 
