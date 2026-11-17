@@ -376,12 +376,19 @@ test("Delete asks first, and takes the chat away only when answered", async () =
   })
 })
 
-test("a project session keeps its menu: its settings are not a chat's", async () => {
+test("a project session's header opens the sheet that held its menu, and has no menu", async () => {
   await seed({ projectId: "p-1", title: "A session" })
   globalThis.fetch = async () => json({})
   await mount(screen(), async () => {
-    await until(async () => Boolean(find('[aria-label="Chat options"]')), "the session's menu")
-    assert.ok(missing("[data-chat-settings-open]"), "and no title that opens a chat's settings")
+    await until(async () => Boolean(titlePress()), "the session's bar")
+    assert.equal(findAll('[aria-label="Chat options"]').length, 0, "no menu beside the title")
+    await click(titlePress())
+    await until(async () => Boolean(findText("[role=dialog]", "Edit session")), "the session's settings")
+    assert.ok(find("[data-session-resolve]"), "Resolve")
+    assert.ok(find("[data-session-discard]"), "Discard")
+    assert.ok(find("[data-chat-pin]"), "Pin")
+    assert.ok(findText("button", "Delete session"), "Delete")
+    assert.equal(missing("[data-chat-archive]"), true, "a session is discarded, never archived")
   })
 })
 

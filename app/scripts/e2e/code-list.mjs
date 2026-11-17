@@ -350,8 +350,8 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   const pinSession = async (label) => {
     await page.locator("li").filter({ hasText: "Overflow 0" }).locator("a").first().click()
     await page.waitForURL("**/c/cl-overflow-0", { timeout: 10_000 })
-    await page.getByRole("button", { name: "Chat options" }).click()
-    await page.getByRole("menuitem", { name: label, exact: true }).click()
+    await page.locator("[data-chat-settings-open]").click()
+    await page.getByRole("switch", { name: label, exact: true }).click()
     await page.goto(`${app}/code`)
   }
 
