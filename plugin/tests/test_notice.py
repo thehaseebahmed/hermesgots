@@ -199,6 +199,19 @@ class TheRegistrysBound(unittest.TestCase):
         self.assertIsNotNone(found, "the registry still bounds a detail's body")
         self.assertEqual(int(found.group(1)), notice.BODY_MAX)
 
+    def test_the_phone_holds_the_notice_as_long_as_the_push(self):
+        """A button lives as long as the tray entry it rode on, and Android is told by the message."""
+        message = (
+            Path(__file__).resolve().parents[2] / "app" / "netlify" / "lib" / "fcm.ts"
+        ).read_text(encoding="utf-8")
+        found = re.search(r'ttl: "(\d+)s"', message)
+        self.assertIsNotNone(found, "the message still carries the notice's lifetime")
+        self.assertEqual(
+            int(found.group(1)),
+            push.TTL_SECONDS,
+            "the tray entry outlives its buttons, or dies before them",
+        )
+
 
 class Bodies(unittest.TestCase):
     """What a run's notification says: G3 the reply's last paragraph, G4 the run's error, G2 a hold.
