@@ -201,10 +201,12 @@ def answer_room(target: Dict[str, Any], choice: str, home: Any = None) -> Dict[s
     """
     from . import rooms
 
-    fields = ("room_id", "member_id", "task_id", "generation", "request_id")
-    values = [target.get(field) for field in fields]
-    if not all(isinstance(value, str) and value for value in values[:3] + values[4:]):
+    # The fields the button names, by the names `rooms.approve` takes them under: a field this build
+    # doesn't know is a refusal rather than a call with the wrong one in its place.
+    fields = ("room_id", "member_id", "task_id", "request_id")
+    found: Dict[str, Any] = {field: target.get(field) for field in fields}
+    if not all(isinstance(found[field], str) and found[field] for field in fields):
         raise AnswerError("That button doesn't name the approval it answers.", 404)
-    if type(values[3]) is not int:
+    if type(target.get("generation")) is not int:
         raise AnswerError("That button doesn't name the approval it answers.", 404)
-    return rooms.approve(*values, choice, home=home)
+    return rooms.approve(**found, generation=target["generation"], choice=choice, home=home)
