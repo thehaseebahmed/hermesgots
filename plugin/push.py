@@ -417,17 +417,19 @@ def notify(
     session_id: Optional[str],
     path: Optional[Path] = None,
     title: Optional[str] = None,
+    body: Optional[str] = None,
 ) -> None:
     """Something a device should hear about. ``session_id`` is the session it is about, or for the
     kinds that aren't about one the routine's job id (``routine_failed``), the project's id
     (``clone_failed``), the research mission's id (``research_*``) or the room's id
     (``room_input``); it only picks what a tap opens. ``title`` names what it is about when that
-    isn't a session (whose chat title is looked up). A kind about a session (``SESSION_KINDS``) is
-    only pushed for a session that is one of the app's chats, or one a chat record names; another
-    surface's session is no device's news. Answers whether a push will be sent — a device exists that
-    asked for this category, and one of this kind for this id wasn't told a moment ago — so a caller
-    that remembers what it has told the user doesn't remember a push that was dropped. Never raises:
-    it runs inside Hermes's hooks."""
+    isn't a session (whose chat title is looked up), and ``body`` is what it says where a kind's own
+    line is not the news — a finished run's paragraph, a failed one's error. A kind about a session
+    (``SESSION_KINDS``) is only pushed for a session that is one of the app's chats, or one a chat
+    record names; another surface's session is no device's news. Answers whether a push will be
+    sent — a device exists that asked for this category, and one of this kind for this id wasn't
+    told a moment ago — so a caller that remembers what it has told the user doesn't remember a
+    push that was dropped. Never raises: it runs inside Hermes's hooks."""
     try:
         if kind not in KINDS or not session_id:
             return False
@@ -447,7 +449,7 @@ def notify(
         if not reachable(path):
             return False
         threading.Thread(
-            target=_run, args=(path, kind, session_id, title), name="gots-push", daemon=True
+            target=_run, args=(path, kind, session_id, title, body), name="gots-push", daemon=True
         ).start()
         return True
     except Exception:
@@ -580,14 +582,16 @@ def _project_session(path: Path, session_id: str) -> bool:
     return bool(sessions.record_for(path, home_of(path), session_id))
 
 
-def _run(path: Path, kind: str, session_id: str, title: Optional[str] = None) -> None:
+def _run(
+    path: Path, kind: str, session_id: str, title: Optional[str] = None, body: Optional[str] = None
+) -> None:
     try:
         if muted(path, kind, session_id):
             return
         project = kind in SESSION_KINDS and _project_session(path, session_id)
         if kind in SESSION_KINDS and not title:
             title = session_title(path, session_id)
-        notice = Notice(title=_short(title), bot=bot(path))
+        notice = Notice(title=_short(title), body=body, bot=bot(path))
         _deliver(path, kind, category_of(kind, project), session_id, notice)
     except Exception:
         logger.debug("gots: a push failed", exc_info=True)

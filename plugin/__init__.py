@@ -4150,6 +4150,8 @@ def register(ctx) -> None:
         register_hook("on_session_end", failures.after_run)
         # After the hooks above, so a turn's plan is pending by the time its end is announced.
         register_hook("pre_llm_call", alerts.turn_started)
+        # The reply a run gives, kept until its news is told or held (alerts.py).
+        register_hook("post_llm_call", alerts.after_llm)
         register_hook("on_session_end", alerts.turn_finished)
         register_hook("pre_llm_call", events.on_turn_start)
         register_hook("post_api_request", events.on_model_call)

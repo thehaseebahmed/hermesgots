@@ -11,6 +11,7 @@ that silences it, the sentence it says and what a title falls back to when nothi
 
 from __future__ import annotations
 
+import re
 from typing import Dict, Iterable, NamedTuple, Optional, Tuple
 
 
@@ -53,6 +54,35 @@ class Notice(dict):
     @property
     def bot(self) -> Optional[str]:
         return self.get("bot")
+
+
+# What a body carries: the paragraph a reply ends on, on one line. The registry cuts a detail's
+# body at this too (`app/netlify/lib/registry.ts`), so a phone that goes through Firebase shows the
+# words a browser and ntfy do rather than a second cut of its own.
+BODY_MAX = 200
+
+
+def flatten(text: str) -> str:
+    """Text as a body carries it: its runs of whitespace made one space, then cut at ``BODY_MAX``."""
+    line = " ".join(text.split())
+    if len(line) > BODY_MAX:
+        line = line[: BODY_MAX - 1].rstrip() + "…"
+    return line
+
+
+def paragraph_of(text: Optional[str]) -> Optional[str]:
+    """What a reply's notice says: its last paragraph, flattened and cut, or None with no words.
+
+    A reply ends on the words the reader sees last, so that is what tells them the run is done: the
+    paragraphs are separated by a blank line, and the one after the last of them is the body. A
+    heading over a table, a list of files touched — none of it is the sentence worth a tray, so
+    nothing above the last blank line rides. Nothing to say answers None, which leaves the kind its
+    own line.
+    """
+    if not isinstance(text, str):
+        return None
+    paragraphs = [part for part in re.split(r"\n[ \t]*\n", text) if part.strip()]
+    return flatten(paragraphs[-1]) if paragraphs else None
 
 
 class Kind(NamedTuple):

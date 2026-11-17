@@ -343,7 +343,7 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
         typeof value === "string" && value.trim() ? value.trim().slice(0, max) : undefined
       const detail = {
         title: text(input?.title, 120),
-        body: text(input?.body, 120),
+        body: text(input?.body, 200),
         stage: text(input?.stage, 32),
       }
       // The gap rides the host's own record, which this route already reads to learn whose push it

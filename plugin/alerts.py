@@ -14,9 +14,9 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
-from . import push, sessions
+from . import failures, notice, push, sessions
 from .store import db_path
 
 logger = logging.getLogger(__name__)
@@ -30,10 +30,14 @@ ROUTINE_FRESH_S = 30 * 60
 
 _lock = threading.Lock()
 _started: Dict[str, float] = {}
+# The reply each session's run last gave, kept from `post_llm_call` until the run's news is told or
+# held: the words a finished run's notification carries. Like `_started`, in memory and bounded.
+_replies: Dict[str, str] = {}
 # A finished run whose session still had subagents at work, kept until they are gone: session id ->
-# when its news started waiting. In memory, like `_started`: a restart loses this and the turn
-# clock the same turn was judged against, so neither half outlives the process alone.
-_held: Dict[str, float] = {}
+# when its news started waiting, and the words its turn ended on. In memory, like `_started`: a
+# restart loses this and the turn clock the same turn was judged against, so neither half outlives
+# the process alone.
+_held: Dict[str, Tuple[float, Optional[str]]] = {}
 
 
 def _text(value: Any) -> Optional[str]:
@@ -41,7 +45,13 @@ def _text(value: Any) -> Optional[str]:
 
 
 def turn_started(**kwargs: Any) -> None:
-    """``pre_llm_call``: when a session's turn began (the hook fires per model call, so the first)."""
+    """``pre_llm_call``: when a session's turn began (the hook fires per model call, so the first).
+
+    A turn that starts on a session whose news is still held is that run going on, not ending: a
+    subagent's wake resumes the conversation, and a user who writes again is looking at the chat.
+    The hold is dropped rather than told — the run that is now running will say what it did when it
+    ends — so nothing announces a run that is working again.
+    """
     session_id = _text(kwargs.get("session_id"))
     if not session_id or kwargs.get("platform") != "api_server":
         return
@@ -49,43 +59,76 @@ def turn_started(**kwargs: Any) -> None:
         if len(_started) > 512:
             _started.clear()
         _started.setdefault(session_id, time.monotonic())
+        dropped = _held.pop(session_id, None)
+    if dropped is not None:
+        logger.debug("gots: %s started again, so its held news is the turn before's", session_id)
+
+
+def after_llm(**kwargs: Any) -> None:
+    """``post_llm_call``: keeps the reply the run gave, so its notice can say what it said.
+
+    The text is the answer the user was shown, kept per session and overwritten by each model call
+    of the turn, so the run's own end reads the last one. ``turn_finished`` takes it: a run told at
+    once carries it into the notice, a run held over its subagents carries it with the hold.
+    Nothing is read back from the transcript afterwards, which a compressed or restarted session
+    would have moved on from.
+    """
+    try:
+        session_id = _text(kwargs.get("session_id"))
+        said = kwargs.get("assistant_response")
+        if not session_id or not isinstance(said, str) or not said.strip():
+            return
+        with _lock:
+            if len(_replies) > 512:
+                _replies.clear()
+            _replies[session_id] = said
+    except Exception:
+        logger.debug("gots: couldn't keep a reply", exc_info=True)
 
 
 def _working(home: Path, session_id: str) -> bool:
-    """Whether the session still has a subagent at work — the other half of a finished run.
+    """Whether the session still has work of its own — the other half of a finished run.
 
-    ``delegation.live_sessions`` is what ``runs/live`` reports to the app, so a push and every
-    screen the app draws read one answer rather than each deciding what "finished" means. A
-    delegation outlives the turn that dispatches it, and the turn's own end says nothing about
-    it. A read that fails says nothing either, and holds nothing back.
+    ``delegation.live_sessions`` is what ``runs/live`` reports to the app, and
+    ``delegation.waking_sessions`` is the map beside it: a finished subagent whose wake run is still
+    owed. Between the one ending and its wake turn starting there is a moment with no live run and
+    no running subagent, and that moment is not the conversation at rest — a notification then
+    would say the run was over just as the bot resumes it. Both maps are keyed by the chat's root
+    session, and one read each answers every session the app draws, so a push and every screen read
+    one answer rather than each deciding what "finished" means. A read that fails says nothing
+    either, and holds nothing back.
     """
     from . import delegation
 
     try:
         root = sessions.chat_session(home, session_id)
-        return delegation.live_sessions(home).get(root, 0) > 0
+        return (
+            delegation.live_sessions(home).get(root, 0) > 0
+            or delegation.waking_sessions(home).get(root, 0) > 0
+        )
     except Exception:
         logger.debug("gots: couldn't tell whether %s still works", session_id, exc_info=True)
         return False
 
 
-def _hold(session_id: str) -> None:
-    """Keeps a finished run's news until the subagents it left are gone, bounded like `_started`."""
+def _hold(session_id: str, body: Optional[str]) -> None:
+    """Keeps a finished run's news — and its words — until its subagents are gone, bounded."""
     with _lock:
         if len(_held) > 512:
             _held.clear()
-        _held[session_id] = time.monotonic()
+        _held[session_id] = (time.monotonic(), body)
 
 
 def tell_finished(path: Path, home: Path) -> int:
     """Tells the runs held at their turn's end that have really finished; how many went.
 
-    A run finishes when it has ended and no subagent it left at work still runs, so a turn that
-    ended over live subagents parked its ``run_done`` here rather than telling the user the run
-    was over while it still worked. Asked where a turn ends — a wake, or the user's own next
-    turn — and from the every-few-minutes pass, which is the answer when nothing else ends a turn
-    of that session: the conversation can be left waiting on the user with the subagents long
-    since gone.
+    A run finishes when it has ended and no work it left still runs — no subagent, and no wake run
+    still owed — so a turn that ended over live subagents parked its ``run_done`` here rather than
+    telling the user the run was over while it still worked. The words the turn ended on were
+    parked with it, since the reply is not read back later. Asked where a turn ends — a wake, or the
+    user's own next turn — and from the every-few-minutes pass, which is the answer when nothing
+    else ends a turn of that session: the conversation can be left waiting on the user with the
+    subagents long since gone.
     """
     with _lock:
         held = list(_held)
@@ -94,8 +137,11 @@ def tell_finished(path: Path, home: Path) -> int:
         if _working(home, session_id):
             continue
         with _lock:
-            _held.pop(session_id, None)
-        push.notify("run_done", session_id, path)
+            entry = _held.pop(session_id, None)
+        if entry is None:
+            # Another look told it between the two reads; one notice is the point.
+            continue
+        push.notify("run_done", session_id, path, body=entry[1])
         told += 1
     return told
 
@@ -108,6 +154,9 @@ def turn_finished(**kwargs: Any) -> None:
             return
         with _lock:
             started = _started.pop(session_id, None)
+            # Released here whichever way the turn went: a reply is only ever news of the run it
+            # was said in, and one kept past its own end would be the next turn's lie.
+            said = _replies.pop(session_id, None)
         stopped = sessions.outcome(**kwargs)
         path, home = sessions._paths()
         record = sessions.record_for(path, home, session_id) if path.exists() else None
@@ -118,7 +167,7 @@ def turn_finished(**kwargs: Any) -> None:
         # A turn's end is where an earlier held run can have finished: its subagents may be gone.
         tell_finished(path, home)
         if stopped.failed:
-            push.notify("run_failed", session_id, path)
+            push.notify("run_failed", session_id, path, body=_failed_body(path, session_id))
         elif (
             stopped.finished
             and started is not None
@@ -128,13 +177,33 @@ def turn_finished(**kwargs: Any) -> None:
         ):
             # The turn ended, but the run may not have: subagents this turn left at work carry it
             # on, and the run finishes only when they are gone. Their absence is what the news
-            # waits for, so it goes then rather than now.
+            # waits for, so it goes then rather than now — with the words this turn ended on, kept
+            # beside it, since nothing reads a reply back once the turn is over.
+            body = notice.paragraph_of(said)
             if _working(home, session_id):
-                _hold(session_id)
+                _hold(session_id, body)
             else:
-                push.notify("run_done", session_id, path)
+                push.notify("run_done", session_id, path, body=body)
     except Exception:
         logger.debug("gots: couldn't tell a turn's end", exc_info=True)
+
+
+def _failed_body(path: Path, session_id: str) -> Optional[str]:
+    """What a failed run ended with, as a notice says it: the error ``failures.after_run`` kept.
+
+    That hook is registered before this one, so the row it wrote is this turn's failure. A run that
+    failed with nothing worth saying — Hermes's own wordless notice — says None, and keeps the
+    kind's line.
+    """
+    try:
+        found = failures.read(path, session_id)
+    except Exception:
+        logger.debug("gots: couldn't read what %s failed of", session_id, exc_info=True)
+        return None
+    said = _text((found or {}).get("text"))
+    if not said:
+        return None
+    return notice.flatten(said) or None
 
 
 def _finished_recently(row: Dict[str, Any], now: float) -> bool:
