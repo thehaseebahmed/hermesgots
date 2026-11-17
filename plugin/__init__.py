@@ -478,14 +478,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 await asyncio.to_thread(closes.resume, served)
         except Exception:
             logger.debug("gots: couldn't resume the session closes", exc_info=True)
-        # And a routine delivery an older plugin queued is published as its run's row rather than
+        # And a routine delivery an older plugin queued is published as its run's marker rather than
         # lost at the upgrade; see platform_gots.py.
         await platform_gots.resume(link.served_homes(adapter))
-        # Every home this process serves is given the channel a bare `deliver: gots` resolves to.
-        # `register` names the profile it was loaded into; a multiplexed host serves more than one,
-        # and each profile's cron reads its own file, so the rest are named here where the adapter
-        # that knows them is in hand (see platform_gots.name_channel).
-        platform_gots.name_channel(link.served_homes(adapter))
         # A chat an older plugin relabelled is un-runnable until these rows are repaired; see
         # sessions.heal_sources.
         failed = await repair_labelled_sources(link.served_homes(adapter))

@@ -384,8 +384,7 @@ def default_url(home: Path, state: Dict[str, Any]) -> str:
 def set_env(home: Path, key: str, value: str) -> None:
     """Writes one line into a profile's ``.env``, replacing what the file held for that key.
 
-    The writer linking uses for the lines Gots needs to reach a profile, and the one the platform
-    adapter uses for its home channel (`platform_gots.name_channel`).
+    The writer linking uses for the lines Gots needs to reach a profile.
     """
     try:
         from hermes_cli.config import get_env_path, save_env_value

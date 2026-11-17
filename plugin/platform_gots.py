@@ -1,4 +1,4 @@
-"""A routine's delivery is a row of the bot's chat list: one per run (G4).
+"""A routine's delivery is a marker in the bot's Main chat: one per run.
 
 Gots is a **delivery platform**, the shape ntfy already has: registered with ``ctx.register_platform``,
 outbound only, with a ``standalone_sender_fn`` for a scheduler running without a gateway. Hermes's own
@@ -7,14 +7,16 @@ cron path already carries the text, retries it, and honours ``[SILENT]``, ``deli
 something the app lists.
 
 ``gots`` is the only channel a routine delivers to, and a ref is a **channel** rather than an address:
-whatever target a stored job named is handed over and ignored, so a job stored with
-``deliver: gots:main`` keeps delivering although this plugin has no chats to address.
+whatever target a stored job named is handed over and ignored, so every stored ``gots…`` ref keeps
+delivering. New routines are given ``gots:main``, which Hermes resolves without any home channel, so
+nothing is written to a profile's ``.env`` and nothing has to be configured.
 
 Nothing is written into a transcript. The run already wrote its own answer, in a session of its own,
 so the delivery publishes one chat record — ``routine-<job>-<run>`` — carrying the routine's name, the
-run's session as the chat's session, the answer's first line and the delivery's time. Opening the row
-opens the run's transcript; a second delivery of the same execution finds the record and writes
-nothing, and a record the reader deleted is still a record, so a replay doesn't resurrect it.
+run's session as the chat's session, how long the run took, the answer's first line and the
+delivery's time. The app draws that record as a marker in the bot's Main, and opening it opens the
+run's transcript; a second delivery of the same execution finds the record and writes nothing, and a
+record the reader deleted is still a record, so a replay doesn't resurrect it.
 
 Nothing here imports Hermes at module load: the plugin has to import cleanly outside a host, so the
 adapter's base class and the run ledger are reached at call time.
@@ -27,21 +29,23 @@ import logging
 import re
 import sqlite3
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from . import chats, link, push
-from .store import connect, current_path, db_path, home_of
+from . import chats, push
+from .store import connect, current_path, db_path
 
 logger = logging.getLogger(__name__)
 
 NAME = "gots"
 LABEL = "Gots"
-# The home channel a bare `deliver: gots` resolves to, written into the profile's `.env` at register
-# (`link.set_env`): Hermes resolves a platform's cron target through this var, and a bare `gots` has no
-# legal target without one. Its value is the channel itself — a ref names no address here.
+# The name Hermes keys a platform's cron home channel by. Registering it is what makes `gots` a known
+# delivery platform; nothing sets it, so it is never written to a `.env` and a bare `deliver: gots` is
+# not a target a routine is given — `DELIVER` is.
 HOME_ENV_VAR = "GOTS_HOME_CHANNEL"
-HOME_CHANNEL = NAME
+# What a new routine's `deliver` is: an explicit ref, which Hermes resolves with no home channel.
+DELIVER = f"{NAME}:main"
 # The push a delivery sends, and the kind the registry and the app know it by.
 KIND = "routine_message"
 SECTION = "gots_routines"
@@ -138,6 +142,41 @@ def run_session(job_id: str) -> Optional[str]:
         _let_go(db)
 
 
+def _instant(text: Any) -> Optional[float]:
+    """A ledger time as epoch seconds: Hermes's clock, which carries no offset, is the host's own."""
+    if not isinstance(text, str) or not text.strip():
+        return None
+    try:
+        return datetime.fromisoformat(text.strip()).astimezone().timestamp()
+    except ValueError:
+        return None
+
+
+def run_ms(job_id: str, now: Optional[float] = None) -> Optional[int]:
+    """How long the job's newest run took, in ms, or None when the ledger can't say.
+
+    A delivery can land before the ledger writes the run's end, so a run with a start and no end ran
+    until now. A start the ledger doesn't hold is no duration at all, and the marker then says only
+    that the routine ran.
+    """
+    try:
+        from cron.executions import list_executions
+
+        rows = list_executions(job_id=job_id, limit=1) or []
+    except Exception:
+        logger.debug("gots: couldn't read the ledger for %s", job_id, exc_info=True)
+        return None
+    row = rows[0] if rows else None
+    if not isinstance(row, dict):
+        return None
+    began = _instant(row.get("started_at"))
+    if began is None:
+        return None
+    ended = _instant(row.get("finished_at"))
+    ended = (time.time() if now is None else now) if ended is None else ended
+    return max(0, int((ended - began) * 1000))
+
+
 def _job_name(job_id: str) -> Optional[str]:
     """The routine's own name, for a delivery Hermes didn't wrap one into."""
     try:
@@ -186,6 +225,7 @@ def publish(
     title: str,
     text: str,
     at: Optional[int] = None,
+    duration_ms: Optional[int] = None,
 ) -> Optional[str]:
     """Publishes the row one run gets, or None when that run already has one.
 
@@ -207,6 +247,9 @@ def publish(
         "routine": True,
         "line": first_line(text),
     }
+    if duration_ms is not None:
+        # What the marker in Main says the run took; absent where the ledger couldn't say.
+        value["durationMs"] = int(duration_ms)
     chats.merge(path, {row_id: {"at": now, "value": value}})
     return row_id
 
@@ -252,7 +295,14 @@ def deliver(
         )
         return {"success": True, "message_id": None}
     path = current_path()
-    row_id = publish(path, job_id=job_id, run_session=run, title=routine_name(job_id, title), text=text)
+    row_id = publish(
+        path,
+        job_id=job_id,
+        run_session=run,
+        title=routine_name(job_id, title),
+        text=text,
+        duration_ms=run_ms(job_id),
+    )
     if row_id is None:
         # The same execution delivered twice publishes one row (a retry, or a mirrored replay), and a
         # retry is not news: nothing is announced the second time.
@@ -490,32 +540,8 @@ def adapter_factory(config: Any) -> Any:
     return cls(config=config, platform=Platform(NAME))
 
 
-def name_channel(homes: Iterable[Path]) -> List[Path]:
-    """Writes the home channel a bare ``deliver: gots`` resolves to into each home's ``.env``.
-
-    A host may serve several profiles (`link.served_homes`), and each profile's cron resolves the
-    channel out of its own file: a line written into one home leaves every other profile's bare
-    ``gots`` with no legal target, which is the write this exists for. The writer is the one linking
-    already uses, so the file keeps the shape link leaves in it.
-
-    Answers the homes whose file couldn't be written. A profile that refuses the line keeps working
-    for every job that names a target — only a bare ``gots`` is refused by Hermes — so one unreadable
-    file is a warning naming it rather than a write that gives up on the rest.
-    """
-    failed: List[Path] = []
-    for home in homes:
-        try:
-            link.set_env(Path(home), HOME_ENV_VAR, HOME_CHANNEL)
-        except Exception:
-            logger.warning(
-                "gots: couldn't write %s to %s", HOME_ENV_VAR, Path(home) / ".env", exc_info=True
-            )
-            failed.append(Path(home))
-    return failed
-
-
 def register(ctx: Any) -> bool:
-    """Registers Gots as a delivery platform, and makes a bare `deliver: gots` a legal target."""
+    """Registers Gots as a delivery platform: a routine addressed `gots:main` is delivered to it."""
     register_platform = getattr(ctx, "register_platform", None)
     if not callable(register_platform):
         logger.warning("gots: this Hermes version can't add a delivery platform; routines stay local")
@@ -546,25 +572,15 @@ def register(ctx: Any) -> bool:
     except Exception:
         logger.warning("gots: this Hermes refused the Gots platform; routines stay local", exc_info=True)
         return False
-    # A bare `deliver: gots` has no legal target without a home channel, so registering the platform
-    # is when the profile it is loaded into is given one. The homes this process serves past its own
-    # are named where the adapter is in hand (`_wire_api_server`).
-    failed = name_channel([home_of(current_path())])
-    if failed:
-        logger.warning(
-            "gots: %s is missing from %s, so a bare `deliver: gots` is refused there",
-            HOME_ENV_VAR,
-            ", ".join(str(home) for home in failed),
-        )
-    logger.info("gots: a routine delivers to %s, and its run is a row of this bot's chats", NAME)
+    logger.info("gots: a routine delivers to %s, and its run is a marker in this bot's Main", NAME)
     return True
 
 
 PROMPT = (
     "## Routines deliver to Gots\n\n"
-    "When you create a routine with `cronjob`, pass `deliver: gots`. Each run then arrives in this "
-    "bot's chats as a row of its own — the run's transcript, under the routine's name — and the user "
-    "can read it there. `gots` is the only channel: a routine left on `local`, or pointed at another "
+    "When you create a routine with `cronjob`, pass `deliver: gots:main`. Each run then "
+    "leaves a marker in this bot's Main chat, naming the routine and how long it ran, and the user "
+    "can open the run from it. `gots` is the only channel: a routine left on `local`, or pointed at another "
     "platform, finishes where the user will not read it. This applies to every routine you make in "
     "this chat.\n"
 )
@@ -632,7 +648,7 @@ def _fill_deliver(kwargs: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     deliver = args.get("deliver")
     fill: Dict[str, Any] = {}
     if not (isinstance(deliver, str) and deliver.strip()):
-        fill["deliver"] = NAME
+        fill["deliver"] = DELIVER
         deliver = fill["deliver"]
     targets = [part.strip().lower() for part in str(deliver).split(",") if part.strip()]
     if targets and all(part == NAME or part.startswith(f"{NAME}:") for part in targets):

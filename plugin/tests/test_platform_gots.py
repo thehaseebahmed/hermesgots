@@ -156,35 +156,12 @@ class RoutineRow(unittest.TestCase):
         self.assertTrue(callable(registered["target_ref_syntax_fn"]))
         self.assertIsNone(registered.get("parse_target_ref_fn"))
 
-    def test_register_names_the_channel_a_bare_delivery_resolves_to(self):
+    def test_registering_writes_nothing_to_the_profiles_env(self):
+        # The channel needs no configuration: a routine is addressed `gots:main`, which Hermes
+        # resolves without a home channel, so no `.env` line is written, in any home.
         platform_gots.register(mock.Mock())
-        env = (self.home / ".env").read_text(encoding="utf-8")
-        self.assertIn("GOTS_HOME_CHANNEL=gots", env)
-
-    def test_the_channel_is_named_in_every_home_it_is_given(self):
-        # A multiplexed host serves more than the profile it was launched as, and each home has its
-        # own `.env`: a line written into one leaves every other profile's bare `gots` with no legal
-        # target (`link.served_homes`, the list the wiring pass and `resume` both publish for).
-        others = [Path(tempfile.mkdtemp()), Path(tempfile.mkdtemp())]
-        failed = platform_gots.name_channel([self.home, *others])
-        self.assertEqual(failed, [])
-        for home in (self.home, *others):
-            self.assertIn("GOTS_HOME_CHANNEL=gots", (home / ".env").read_text(encoding="utf-8"))
-
-    def test_a_home_that_refuses_the_line_is_reported_and_the_rest_are_named(self):
-        # A file that can't be written is not a reason to leave every other profile without a
-        # channel, and it is not something to swallow either: the caller is told which homes missed
-        # it, and the log names the file.
-        broken = Path(tempfile.mkdtemp())
-        (broken / ".env").mkdir()
-        other = Path(tempfile.mkdtemp())
-        with self.assertLogs("plugin.platform_gots", level="WARNING") as logs:
-            failed = platform_gots.name_channel([broken, other])
-        self.assertEqual(failed, [broken], "the home that refused it is answered, not dropped")
-        self.assertIn("GOTS_HOME_CHANNEL=gots", (other / ".env").read_text(encoding="utf-8"))
-        self.assertTrue(
-            any("GOTS_HOME_CHANNEL" in line for line in logs.output), "and the file is named"
-        )
+        self.assertFalse((self.home / ".env").exists())
+        self.assertFalse(hasattr(platform_gots, "name_channel"))
 
     def test_the_adapter_cannot_promise_a_turn(self):
         adapter = platform_gots.adapter_factory(mock.Mock())
@@ -373,10 +350,37 @@ class RoutineRow(unittest.TestCase):
         self._deliver(metadata={"job_id": JOB, "notify": True})
         self.assertEqual(self.pushes, [], "a retry is not news")
 
+    # -- how long the run took --------------------------------------------
+    def _ledger(self, rows):
+        executions = types.ModuleType("cron.executions")
+        executions.list_executions = lambda job_id=None, limit=20: rows
+        patch = mock.patch.dict(sys.modules, {"cron.executions": executions})
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    def test_the_record_carries_how_long_the_run_took(self):
+        self._runs()
+        self._ledger([{"started_at": "2026-11-17T09:00:00", "finished_at": "2026-11-17T09:02:05"}])
+        self._deliver()
+        self.assertEqual(self._one()["durationMs"], 125_000)
+
+    def test_a_run_the_ledger_has_not_ended_ran_until_now(self):
+        self._ledger([{"started_at": "2026-11-17T09:00:00", "finished_at": None}])
+        began = platform_gots._instant("2026-11-17T09:00:00")
+        self.assertEqual(platform_gots.run_ms(JOB, now=began + 30), 30_000)
+
+    def test_a_run_the_ledger_cannot_time_has_no_duration(self):
+        self._runs()
+        self._ledger([])
+        self._deliver()
+        self.assertNotIn("durationMs", self._one())
+        self._ledger([{"started_at": "not a time"}])
+        self.assertIsNone(platform_gots.run_ms(JOB))
+
     # -- the model is told, and the default is filled ---------------------
     def test_the_section_says_a_routine_delivers_to_gots(self):
-        self.assertIn("deliver: gots", platform_gots.PROMPT)
-        self.assertNotIn("gots:main", platform_gots.PROMPT)
+        self.assertIn("deliver: gots:main", platform_gots.PROMPT)
+        self.assertIn("marker", platform_gots.PROMPT)
 
     def _asked_in_a_chat(self):
         """A chat of this bot's, as the directive reads one: the record names its session."""
@@ -392,7 +396,7 @@ class RoutineRow(unittest.TestCase):
             session_id="gots-asked-here",
             args={"action": "create", "prompt": "watch"},
         )
-        self.assertEqual(filled, {"action": "modify", "args": {"deliver": "gots", "attach_to_session": False}})
+        self.assertEqual(filled, {"action": "modify", "args": {"deliver": "gots:main", "attach_to_session": False}})
         kept = platform_gots.fill_deliver(
             tool_name="cronjob",
             session_id="gots-asked-here",
