@@ -43,18 +43,6 @@ class Notice(dict):
         )
         self.actions: Tuple[Action, ...] = tuple(actions)
 
-    @property
-    def title(self) -> Optional[str]:
-        return self.get("title")
-
-    @property
-    def body(self) -> Optional[str]:
-        return self.get("body")
-
-    @property
-    def bot(self) -> Optional[str]:
-        return self.get("bot")
-
     def payload(self) -> Dict[str, Any]:
         """The notice as a transport carries it: its fields, and its buttons where it has any.
 

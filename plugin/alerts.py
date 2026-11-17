@@ -14,7 +14,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 from . import failures, notice, push, sessions
 from .store import db_path
@@ -34,10 +34,10 @@ _started: Dict[str, float] = {}
 # held: the words a finished run's notification carries. Like `_started`, in memory and bounded.
 _replies: Dict[str, str] = {}
 # A finished run whose session still had subagents at work, kept until they are gone: session id ->
-# when its news started waiting, and the words its turn ended on. In memory, like `_started`: a
-# restart loses this and the turn clock the same turn was judged against, so neither half outlives
-# the process alone.
-_held: Dict[str, Tuple[float, Optional[str]]] = {}
+# the words its turn ended on, or None for a turn that ended without any. In memory, like
+# `_started`: a restart loses this and the turn clock the same turn was judged against, so neither
+# half outlives the process alone.
+_held: Dict[str, Optional[str]] = {}
 
 
 def _text(value: Any) -> Optional[str]:
@@ -116,7 +116,7 @@ def _hold(session_id: str, body: Optional[str]) -> None:
     with _lock:
         if len(_held) > 512:
             _held.clear()
-        _held[session_id] = (time.monotonic(), body)
+        _held[session_id] = body
 
 
 def tell_finished(path: Path, home: Path) -> int:
@@ -137,11 +137,11 @@ def tell_finished(path: Path, home: Path) -> int:
         if _working(home, session_id):
             continue
         with _lock:
-            entry = _held.pop(session_id, None)
-        if entry is None:
-            # Another look told it between the two reads; one notice is the point.
-            continue
-        push.notify("run_done", session_id, path, body=entry[1])
+            if session_id not in _held:
+                # Another look told it between the two reads; one notice is the point.
+                continue
+            words = _held.pop(session_id)
+        push.notify("run_done", session_id, path, body=words)
         told += 1
     return told
 

@@ -49,7 +49,6 @@ from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from . import answers, link, ntfy
 from .notice import (
     CATEGORIES,
-    INPUT_KINDS,
     KINDS,
     LEGACY_CATEGORIES,
     SESSION_KINDS,
