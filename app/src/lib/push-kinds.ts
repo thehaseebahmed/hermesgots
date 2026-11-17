@@ -18,9 +18,6 @@ export type PushCategory =
   | "code_input"
   | "code_run_failed"
   | "code_run_done"
-  | "code_pr_checks"
-  | "code_pr_merged"
-  | "code_afk_pr"
   | "code_setup_failed"
   | "routine_failed"
   | "routine_message"
@@ -73,27 +70,6 @@ export const PUSH_CATEGORIES: PushCategoryInfo[] = [
   { id: "code_run_failed", feature: "code", title: "Run failed", on: true, importance: 3 },
   { id: "code_run_done", feature: "code", title: "Run finished", on: false, importance: 3 },
   {
-    id: "code_pr_checks",
-    feature: "code",
-    title: "Pull request checks failing",
-    on: true,
-    importance: 3,
-  },
-  {
-    id: "code_pr_merged",
-    feature: "code",
-    title: "Pull request merged",
-    on: false,
-    importance: 2,
-  },
-  {
-    id: "code_afk_pr",
-    feature: "code",
-    title: "Pull request ready to review",
-    on: true,
-    importance: 3,
-  },
-  {
     id: "code_setup_failed",
     feature: "code",
     title: "Project setup failed",
@@ -136,7 +112,7 @@ export function wantedCategories(prefs: PushPrefs | undefined) {
 
 /**
  * The categories this device can reach, and so the channels it gets: Meetings' two exist only once
- * that experiment is on, the other sixteen always.
+ * that experiment is on, the other thirteen always.
  */
 export function reachableCategories(meetings?: boolean) {
   return PUSH_CATEGORIES.filter((category) => category.feature !== "meetings" || Boolean(meetings))

@@ -1,10 +1,9 @@
 """News worth a push while the app is closed, beyond a session that waits on the user (``push.py``).
 
-A run that finished or failed, a pull request whose checks fail, and a routine that failed come from
-here (a merged pull request is told by ``merges.py``, a project that couldn't be set up by
-``clones.py`` and ``repos.py``). Each is its own kind of push, so a device picks which it wants. Most
-come from hooks; the pull requests and routines are looked up every few minutes, because nothing in
-Hermes tells the plugin when GitHub or the scheduler moves.
+A run that finished or failed, and a routine that failed come from here (a merged pull request is
+resolved by ``merges.py``, a project that couldn't be set up by ``clones.py`` and ``repos.py``). Each
+is its own kind of push, so a device picks which it wants. Most come from hooks; the routines are
+looked up every few minutes, because nothing in Hermes tells the plugin when the scheduler moves.
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from . import github, merges, push, sessions
+from . import push, sessions
 from .store import db_path
 
 logger = logging.getLogger(__name__)
@@ -25,8 +24,6 @@ logger = logging.getLogger(__name__)
 INTERVAL_S = 300
 # A run shorter than this finished while the user was most likely still looking.
 RUN_DONE_MIN_S = 60
-# A pull request's checks are watched while its session was touched this recently.
-PR_WINDOW_MS = 7 * 24 * 3600 * 1000
 # A routine run that failed longer ago than this is history, not news (the first pass after an
 # update would otherwise push every old failure).
 ROUTINE_FRESH_S = 30 * 60
@@ -176,32 +173,9 @@ def check_routines(path: Path, now: Optional[float] = None) -> int:
     return told
 
 
-def check_pull_requests(path: Path, home: Path, now: int) -> int:
-    """Pushes the open pull requests of the open project sessions whose checks have started failing.
-    A pull request that stops failing (a rerun, a fix) can fail, and be told, again. Returns how many."""
-    told = 0
-    for _chat, _entry, _value, session_id, record in merges.open_sessions(
-        path, home, now, window=PR_WINDOW_MS
-    ):
-        for repo in record["repos"]:
-            if not repo.get("branch") or not repo.get("repo_root"):
-                continue
-            pr = github.pull_request(home, repo["repo_root"], repo["branch"])
-            if not pr:
-                continue
-            key = f"pr_checks:{session_id}:{pr['repo']}#{pr['number']}"
-            if pr["state"] in ("open", "draft") and pr["checks"] == "failure":
-                if push.once(path, key):
-                    push.notify("pr_checks", session_id, path)
-                    told += 1
-            else:
-                push.clear(path, key)
-    return told
-
-
 def check(hermes_home: Path, now: Optional[int] = None) -> None:
-    """One pass: the runs that have finished with their subagents, then routines, then pull
-    requests. Nothing is looked up when no device could be told."""
+    """One pass: the runs that have finished with their subagents, then routines. Nothing is looked
+    up when no device could be told."""
     path = db_path(hermes_home)
     if not path.exists() or not push.reachable(path):
         return
@@ -209,7 +183,6 @@ def check(hermes_home: Path, now: Optional[int] = None) -> None:
     for look in (
         lambda: tell_finished(path, hermes_home),
         lambda: check_routines(path, now / 1000),
-        lambda: check_pull_requests(path, hermes_home, now),
     ):
         try:
             look()
