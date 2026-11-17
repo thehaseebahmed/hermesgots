@@ -192,6 +192,26 @@ test("the bar leads back to Main, names the screen over the bot's count, and tra
   })
 })
 
+test("a bot whose Main was never minted leads with the drawer, not a step back to nowhere", async () => {
+  // Main is Hermes's to mint, and a host that would not leaves this list where the bot's address
+  // opens: the app's first entry. The leading slot is then the app's own door, since a way back would
+  // lead to a chat that is not there.
+  await seed([
+    { id: "trip", title: "Trip to Lisbon", at: 300, said: [{ content: "Booked", at: 300 }] },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length > 0, "the bot's side chats")
+    assert.ok(
+      missing('button[aria-label="Back to Main"]'),
+      "nothing leads back to a Main that isn't there",
+    )
+    assert.ok(
+      find('button[aria-label="Open conversations"]'),
+      "the app's own door leads in its place",
+    )
+  })
+})
+
 test("the pills are the five this list holds: no Routines, and a stored Routines reads as All", async () => {
   await seed([
     { id: "trip", title: "Trip to Lisbon", at: 300, said: [{ content: "Booked", at: 300 }] },
@@ -298,7 +318,11 @@ test(
           mainRow()?.querySelector("[data-unread]"),
           "the dot the arrival in it earns, as every row of this list wears one",
         )
-        assert.equal(wordsOf(mainRow()).includes("Main"), true, "at the app's word, never the host's")
+        assert.equal(
+          wordsOf(mainRow()).includes("Main"),
+          true,
+          "at the app's word, never the host's",
+        )
         assert.ok(
           missing(`[data-unread] a[href="/c/trip"], a[href="/c/trip"] [data-unread]`),
           "and the chat this device has read wears none",

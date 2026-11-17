@@ -3,11 +3,16 @@
  * (`/b/<bot>/sidechats`).
  *
  * It is the shared list screen (`components/chat/chat-list.tsx`) with this screen's own words and
- * pills: the way back to Main leading, "Sidechats" over the bot and how many side chats it has, the
- * routines control trailing, and five pills — All, Unread, Archived, Chats and Rooms — because a
- * routine's run is the routines page's row, not a conversation of the bot's (G11). At the split width
- * the bot's **Main** stands above the rows with a Home glyph, since Main is the chat drawn beside
- * this list; at one pane there is no row for it, because this screen is what Main is not.
+ * pills: the way back to Main leading where there is a Main to go back to, "Sidechats" over the bot
+ * and how many side chats it has, the routines control trailing, and five pills — All, Unread,
+ * Archived, Chats and Rooms — because a routine's run is the routines page's row, not a conversation
+ * of the bot's (G11). At the split width the bot's **Main** stands above the rows with a Home glyph,
+ * since Main is the chat drawn beside this list; at one pane there is no row for it, because this
+ * screen is what Main is not.
+ *
+ * A bot whose Main was never minted opens here — the bot's address, where this list is the app's
+ * first entry — and the bar leads with the app's own drawer instead of a step back to a chat that is
+ * not there.
  *
  * At the split width the list is the lane and this address draws Main in the item lane beside it — the
  * two panes hold one pair of screens, the same pair a picked side chat opens beside (`useBotChatsPane`
@@ -30,12 +35,7 @@ import { RoutinesButton } from "@/components/chat/routines-button"
 import { labelOf } from "@/lib/bot-name"
 import { botChatsPath, botMainPath } from "@/lib/bot-tabs"
 import { useBotRows } from "@/lib/chat-rows"
-import {
-  CHAT_FILTERS,
-  shownSideChats,
-  sideChats,
-  type ChatListRow,
-} from "@/lib/chat-list"
+import { CHAT_FILTERS, shownSideChats, sideChats, type ChatListRow } from "@/lib/chat-list"
 import { saveChatFilter, type Profile } from "@/lib/db"
 import { useChatFilter } from "@/lib/use-chat-filter"
 import { useNav } from "@/lib/nav"
@@ -116,7 +116,7 @@ function SideChatsList({
   return (
     <ChatList
       bot={bot}
-      leading={<BackButton label="Back to Main" onClick={ontoMain} floating />}
+      leading={main ? <BackButton label="Back to Main" onClick={ontoMain} floating /> : undefined}
       title="Sidechats"
       subtitle={`${labelOf(labels, bot)} · ${count} ${count === 1 ? "side chat" : "side chats"}`}
       actions={<RoutinesButton profileId={bot.id} />}
@@ -127,13 +127,7 @@ function SideChatsList({
       onBack={!beside && main ? ontoMain : undefined}
       above={
         split && main ? (
-          <MainRow
-            row={main}
-            now={now}
-            bot={bot}
-            replace={Boolean(beside)}
-            selected={selected}
-          />
+          <MainRow row={main} now={now} bot={bot} replace={Boolean(beside)} selected={selected} />
         ) : undefined
       }
       group="Side Chats"
