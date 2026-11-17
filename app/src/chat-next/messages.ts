@@ -147,6 +147,14 @@ function rowsOf(
       steers.push({
         id: `${id}-s${steers.length}`,
         text: part.text,
+        ...(part.files?.length
+          ? {
+              files: part.files.map((file, at): Attachment => ({
+                id: `${id}-s${steers.length}-f${at}`,
+                ...file,
+              })),
+            }
+          : {}),
         contentOffset: content.length,
         toolsBefore: tools.length,
         at: createdAt,

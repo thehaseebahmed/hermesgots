@@ -19,7 +19,7 @@ import { conversationsOf, db, getSettings, listProfiles, type Profile } from "@/
 import { getPluginInfo, type PluginInfo } from "@/lib/hermes"
 import { isNative } from "@/lib/platform"
 import { resumeTrace } from "@/lib/resume-trace"
-import { legacyChatOn } from "@/lib/legacy-chat"
+import { chatLayout } from "@/lib/chat-layout"
 import { MIN_PLUGIN_VERSION } from "@/lib/version"
 
 /** The newest chats each bot's state names, so a busy bot can't make the dump unbounded. */
@@ -68,7 +68,7 @@ export async function readDeviceDiagnostics(): Promise<DiagDevice> {
     route: window.location.pathname,
     schema: db.verno,
     developer: Boolean(settings?.developer),
-    botThreads: !legacyChatOn(settings),
+    layout: chatLayout(settings),
     ...(trace ? { resume: diagResume(trace) } : {}),
     bots,
   }

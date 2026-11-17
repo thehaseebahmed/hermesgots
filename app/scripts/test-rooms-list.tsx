@@ -6,8 +6,9 @@
  *
  * A room's row is the chat list's own: it stands among a bot's chats by its last activity, its pin
  * lifts it above a newer chat, and it says the room needs the user — naming the member who asked —
- * until the device has drawn what asks, which is the room's own screen opening. The legacy layout,
- * whose Recents is the only list it has, keeps a Rooms section of its own for the same rows.
+ * until the device has drawn what asks, which is the room's own screen opening. The cases read that
+ * row in a bot's list, which is the only place a room stands now that the sidebar draws no chats
+ * (ADR 0162): the Side Chat List and the flat list alike draw it among their rows.
  *
  * The record is the plugin's answer, not a document: the fake below answers `GET`/`POST /chats` the
  * way the plugin does, projecting the room beside whatever the device sent, and one read of the
@@ -22,13 +23,13 @@ import { ConversationList } from "@/components/conversation-list"
 import { RoomChat } from "@/components/room/room-chat"
 import { BotChatsPage } from "@/routes/bot-chats"
 import { chatOwner } from "@/lib/chat-owner"
-import { db, chatTombstones, type Profile } from "@/lib/db"
+import { setPinned } from "@/lib/chat-marks"
+import { db, chatTombstones, writeRoomRow, type Profile } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
+import { forgetPluginAnswer } from "@/lib/hermes"
 import { connectionKey, noteChange } from "@/lib/live"
-import { syncNow } from "@/lib/sync"
-import { useLegacyChat } from "@/lib/legacy-chat"
+import { syncChatsOf, syncNow } from "@/lib/sync"
 import { pressBack } from "@/lib/native"
-import { useBotChatsPane } from "@/lib/pane"
 
 import {
   Path,
@@ -164,24 +165,61 @@ const roomRead = (since?: number) => {
 }
 
 let merges = 0
+/**
+ * The features the Host's plugin advertises. `room_marks` is the one a room's pin travels behind
+ * (ADR 0157): without it the plugin can store a record but not lay it over the room it names, so the
+ * app posts none and the pin stays on the device that made it, exactly as ADR 0121 has it.
+ */
+let features = ["draft_text"]
+/** The four fields a room's mark record carries. */
+interface Marks {
+  pinned: boolean
+  pinnedAt: number
+  archived: boolean
+  marksAt: number
+}
+/** The mark records the Host's chat store holds, by the room's own id: every one the app posted. */
+let stored: Record<string, Marks> = {}
+/** The chat lists the app posted, so what a room's record says is read where it is written. */
+let posts: Record<string, { at: number; value?: { roomMarks?: Marks } }>[] = []
 
 globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = new URL(String(input))
   const body = init?.body ? JSON.parse(String(init.body)) : undefined
   if (url.pathname.endsWith("/capabilities")) return json({ features: {} })
-  if (url.pathname.endsWith("/plugins/gots/info")) return json({ features: ["draft_text"] })
+  if (url.pathname.endsWith("/plugins/gots/info")) return json({ features })
   if (url.pathname.endsWith(`/plugins/gots/rooms/${ROOM}`))
     return json(
       roomRead(url.searchParams.has("since") ? Number(url.searchParams.get("since")) : undefined),
     )
   if (url.pathname.endsWith("/plugins/gots/chats")) {
     merges += 1
-    // The plugin's own answer: what the device sent, and the Host's rooms built fresh on every read.
+    const sent = (body?.chats ?? {}) as Record<
+      string,
+      { at: number; value?: { roomMarks?: Marks } }
+    >
+    posts.push(sent)
+    // The store keeps a mark record by its own clock and never answers one as a chat: it is laid over
+    // the room it names instead, which is the plugin's own rule (ADR 0157).
+    for (const [id, entry] of Object.entries(sent)) {
+      const held = entry?.value?.roomMarks
+      if (held && entry.at > (stored[id]?.marksAt ?? -1)) stored[id] = held
+    }
+    const chats = Object.fromEntries(
+      Object.entries(sent).filter(([, entry]) => !entry?.value?.roomMarks),
+    )
+    const held = stored[ROOM]
+    // The plugin's own answer: what the device sent, and the Host's rooms built fresh on every read,
+    // with the marks this store holds laid over the room they belong to.
     return json({
       object: "gots.chats",
       chats: {
-        ...(body?.chats ?? {}),
-        [ROOM]: retired ? { at: moved.at + 60_000, deleted: true } : record(),
+        ...chats,
+        [ROOM]: retired
+          ? { at: moved.at + 60_000, deleted: true }
+          : held
+            ? { ...record(), value: { ...record().value, ...held } }
+            : record(),
       },
     })
   }
@@ -197,17 +235,26 @@ db.conversations.hook("deleting", () => void writes.rows++)
 async function fresh({
   chats = false,
   ask = false,
-  layout = "legacy",
-}: { chats?: boolean; ask?: boolean; layout?: "legacy" | "bots" } = {}) {
+  marks = false,
+}: {
+  chats?: boolean
+  ask?: boolean
+  marks?: boolean
+} = {}) {
   moved.at = LAST_AT
   moved.title = "Planning"
   retired = false
   split = false
   log = ask ? asks() : []
-  await seedSettings({
-    onboarded: true,
-    legacyChat: layout === "legacy",
-  })
+  features = marks ? ["draft_text", "room_marks"] : ["draft_text"]
+  // What a connection's plugin answered is remembered for the page, so a test of a Host that
+  // advertises another feature list has to forget the last one (component-kit's `connection`).
+  forgetPluginAnswer(bots[0])
+  stored = {}
+  posts = []
+  // A room's row is a row of a bot's list, and the list these cases read is the flat layout's — the
+  // one the Developer switch draws (ADR 0162), which holds every row the old sidebar bands did.
+  await seedSettings({ onboarded: true, legacyChat: true })
   await db.profiles.clear()
   await db.profiles.bulkPut(bots)
   await db.conversations.clear()
@@ -246,10 +293,25 @@ async function merged() {
 const owner = (row: Parameters<typeof chatOwner>[0]) =>
   chatOwner(row, new Map(bots.map((bot) => [bot.id, bot])))
 
-const screen = (entry: string) => (
-  <MemoryRouter initialEntries={[entry]}>
+/** The sidebar itself, for the case that says what it no longer draws. */
+const sidebar = () => (
+  <MemoryRouter initialEntries={["/"]}>
     <Path />
     <ConversationList />
+  </MemoryRouter>
+)
+
+/**
+ * The list these rows stand in: the room's answerer's, which is one of its members and not the bot
+ * that carried the record. Its rows are the chats and the rooms the roster seats, in one order.
+ */
+const screen = (bot = CODER) => (
+  <MemoryRouter initialEntries={[`/b/${bot}`]}>
+    <Path />
+    <Routes>
+      <Route path="b/:profileId" element={<BotChatsPage />} />
+      <Route path="c/:id" element={<p data-chat />} />
+    </Routes>
   </MemoryRouter>
 )
 
@@ -266,6 +328,12 @@ const roomScreen = () => (
 const band = (name: string) =>
   findAll(`[data-band="${name}"] a[href^="/c/"]`).map((row) => row.getAttribute("href"))
 
+/** A room's row saying it needs the reader: its line in the warning tone a list's rows wear. */
+const asksOn = (href: string) => {
+  const line = find(`${href} [data-slot="row-line"]`)
+  return Boolean(line && (line.getAttribute("class") ?? "").includes("text-warning"))
+}
+
 /** A bot's list, at the address the sidebar's row for that bot takes. */
 const listScreen = (profileId: string) => (
   <MemoryRouter initialEntries={[`/b/${profileId}`]}>
@@ -280,6 +348,9 @@ const listScreen = (profileId: string) => (
 /** The rows one bot's list drew, by the chat each leads to, in the order it drew them. */
 const listRows = () =>
   findAll('ul a[href^="/c/"]').map((row) => (row.getAttribute("href") ?? "").slice(3))
+
+/** The sheet's Pin switch, by the row it is drawn in. */
+const pinSwitch = () => find("[data-chat-pin] [role=switch]")
 
 test("a room's record merged onto a fresh device is one row, carried by one bot", async () => {
   await fresh()
@@ -305,20 +376,6 @@ test("a room's record merged onto a fresh device is one row, carried by one bot"
     CODER,
     "the bot that answers is one of its members, not the bot that carried the record",
   )
-})
-
-test("Recents draws the room once, with its name, its members and its last activity", async () => {
-  await fresh()
-  await merged()
-  await mount(screen("/"), async () => {
-    await until(async () => Boolean(find(`a[href="/c/${ROOM}"]`)), "the room's row")
-    const rows = findAll(`a[href="/c/${ROOM}"]`)
-    assert.equal(rows.length, 1, "one row for the room")
-    const text = rows[0].textContent ?? ""
-    assert.ok(text.includes("Planning"), `the room's name, in "${text}"`)
-    assert.ok(text.includes("Coder"), `its members, in "${text}"`)
-    assert.ok(text.includes(formatRelative(LAST_AT, Date.now())), `its last activity, in "${text}"`)
-  })
 })
 
 test("a second merge of an unchanged record writes nothing", async () => {
@@ -349,34 +406,6 @@ test("a record that moved is written, and the row takes the Host's newer words",
   const row = await db.conversations.get(ROOM)
   assert.equal(row?.changedAt, moved.at, "on the Host's clock")
 })
-
-test(
-  "a room's address opens no bot's pane: it is its own screen's",
-  atWidth(1400, async () => {
-    await fresh()
-    await merged()
-    await mount(
-      <MemoryRouter initialEntries={[`/c/${ROOM}`]}>
-        <Path />
-        <Pane />
-      </MemoryRouter>,
-      async () => {
-        await until(async () => find("[data-pane]") !== null, "the pane's answer")
-        await settle()
-        assert.equal(
-          find("[data-pane]")?.textContent,
-          "null",
-          "a room is its own screen, so no bot's list stands beside it",
-        )
-      },
-    )
-  }),
-)
-
-function Pane() {
-  const pane = useBotChatsPane(useLegacyChat() === false)
-  return <span data-pane>{JSON.stringify(pane ? { bot: pane.profileId } : null)}</span>
-}
 
 test("a room the Host disbands leaves the device that merged it", async () => {
   await fresh()
@@ -414,10 +443,10 @@ test("a room follows the Host though the bot that first carried it is turned off
   )
 })
 
-test("the bot layout's sidebar draws no room: a room is a row of the bots' lists", async () => {
-  await fresh({ layout: "bots" })
+test("the sidebar draws no room: a room is a row of the bots' lists", async () => {
+  await fresh()
   await merged()
-  await mount(screen("/"), async () => {
+  await mount(sidebar(), async () => {
     await until(async () => Boolean(find("#bots-heading")), "the bots")
     absent('[data-band="rooms"]', "the sidebar has no Rooms section")
     absent(`a[href="/c/${ROOM}"]`, "and draws no room of its own")
@@ -426,7 +455,7 @@ test("the bot layout's sidebar draws no room: a room is a row of the bots' lists
 })
 
 test("a room draws in the list of every bot it seats, and in no other bot's", async () => {
-  await fresh({ layout: "bots" })
+  await fresh()
   await merged()
   // The roster seats coder and writer; the bot that carried the record is neither of them.
   for (const [bot, seats] of [
@@ -453,7 +482,7 @@ test("a room draws in the list of every bot it seats, and in no other bot's", as
 })
 
 test("a room's row says the last message received in it, and names its members on the mark", async () => {
-  await fresh({ layout: "bots", ask: true })
+  await fresh({ ask: true })
   // The log ends on a member's reply that asks nobody: a round still going, not a wait on the reader.
   log = [
     { seq: 1, eventId: "e1", kind: "message.user", text: "Who takes the release?" },
@@ -492,7 +521,7 @@ test("a room's row says the last message received in it, and names its members o
 })
 
 test("a room's pin lifts it above a newer chat in a bot's list", async () => {
-  await fresh({ layout: "bots" })
+  await fresh()
   await merged()
   // A chat of the writer's, newer than the room's own last activity.
   await db.conversations.put({
@@ -524,7 +553,7 @@ test("a room's pin lifts it above a newer chat in a bot's list", async () => {
 })
 
 test("a room that needs the reader says so on its row in a bot's list", async () => {
-  await fresh({ ask: true, layout: "bots" })
+  await fresh({ ask: true })
   await merged()
   await mount(listScreen(CODER), async () => {
     await until(async () => Boolean(find(`a[href="/c/${ROOM}"]`)), "the room's row")
@@ -535,92 +564,12 @@ test("a room that needs the reader says so on its row in a bot's list", async ()
   })
 })
 
-test("Rooms lists the rooms by their last activity, and Recents holds none of them", async () => {
-  await fresh({ chats: true })
-  // A second room, older than the first, written straight to the device: the section orders rooms by
-  // their own clocks, whatever the Host's record says (ADR 0127).
-  await db.conversations.put({
-    id: "room-older",
-    profileId: CARRIER,
-    title: "Standup",
-    room: { id: "room-older", members: [] },
-    createdAt: LAST_AT - 600_000,
-    updatedAt: LAST_AT - 600_000,
-    changedAt: LAST_AT - 600_000,
-  })
-  await merged()
-  await mount(screen("/"), async () => {
-    // Both bands are waited for whole: the two lists settle on their own, and a runner that is slower
-    // than this one would otherwise read an empty band as the answer (ADR 0127).
-    await until(async () => band("rooms").length === 2, "both rooms")
-    await until(async () => band("recents").length === 2, "both chats")
-    assert.deepEqual(
-      band("rooms"),
-      [`/c/${ROOM}`, "/c/room-older"],
-      "the newest room first, and the older one under it",
-    )
-    assert.deepEqual(
-      band("recents"),
-      [`/c/${CHAT_NEWER}`, `/c/${CHAT_OLDER}`],
-      "and the chat list holds chats alone",
-    )
-  })
-})
-
-test("a pinned room stands at the top of Rooms, whatever its age", async () => {
-  await fresh({ chats: true })
-  await merged()
-  // A room newer than the pinned one, so the pin is the only thing that can put the older one first.
-  await db.conversations.put({
-    id: "room-newer",
-    profileId: CARRIER,
-    title: "Standup",
-    room: { id: "room-newer", members: [] },
-    createdAt: LAST_AT + 600_000,
-    updatedAt: LAST_AT + 600_000,
-    changedAt: LAST_AT + 600_000,
-  })
-  // A room's record carries no pin — the Host's room has none (ADR 0116) — so the pin is this
-  // device's own, and the merge that follows must not take it away.
-  await db.conversations.update(ROOM, { pinned: true })
-  await syncNow()
-  await settle()
-  assert.equal((await db.conversations.get(ROOM))?.pinned, true, "the room's own pin stands")
-  await mount(screen("/"), async () => {
-    await until(async () => band("rooms").length === 2, "both rooms")
-    assert.equal(band("rooms")[0], `/c/${ROOM}`, "the pin lifts the room above a newer one")
-    assert.ok(
-      !band("recents").includes(`/c/${ROOM}`),
-      "and a room is never drawn twice, in two lists",
-    )
-  })
-})
-
-test("a pinned chat is lifted into the pinned band, and a room stays in Rooms", async () => {
-  await fresh({ chats: true })
-  await db.conversations.update(CHAT_OLDER, { pinned: true })
-  await merged()
-  await mount(screen("/"), async () => {
-    await until(async () => band("pinned").includes(`/c/${CHAT_OLDER}`), "the pinned chat")
-    assert.deepEqual(band("pinned"), [`/c/${CHAT_OLDER}`], "the pin lifts the chat alone")
-    assert.deepEqual(
-      band("recents"),
-      [`/c/${CHAT_NEWER}`],
-      "Recents holds what is left of the chats",
-    )
-    assert.deepEqual(band("rooms"), [`/c/${ROOM}`], "and the room is its own section's row")
-  })
-})
-
 test("the room's needs-you mark stands on its row, and clears when the room is opened", async () => {
   await fresh({ ask: true })
   await merged()
-  await mount(screen("/"), async () => {
-    await until(
-      async () => find(`a[href="/c/${ROOM}"] [data-needs-you]`) !== null,
-      "the room's needs-you mark",
-    )
-    const mark = find(`a[href="/c/${ROOM}"] [data-needs-you]`)
+  await mount(screen(), async () => {
+    await until(async () => asksOn(`a[href="/c/${ROOM}"]`), "the room's needs-you mark")
+    const mark = find(`a[href="/c/${ROOM}"]`)
     assert.match(
       mark?.closest("a")?.textContent ?? "",
       /Coder needs you/,
@@ -635,10 +584,10 @@ test("the room's needs-you mark stands on its row, and clears when the room is o
       "the device's mark of what it drew",
     )
   })
-  await mount(screen("/"), async () => {
-    await until(async () => band("rooms").includes(`/c/${ROOM}`), "the room's row")
+  await mount(screen(), async () => {
+    await until(async () => listRows().includes(ROOM), "the room's row")
     await until(
-      async () => missing(`a[href="/c/${ROOM}"] [data-needs-you]`),
+      async () => !asksOn(`a[href="/c/${ROOM}"]`),
       "a room open on this device no longer needs the user",
       CLEARS_MS,
     )
@@ -646,11 +595,11 @@ test("the room's needs-you mark stands on its row, and clears when the room is o
 })
 
 test("a room opened from a bot's list leads back to that list, by its control and by back", async () => {
-  // A room is a row of every bot's list it seats, and the shell lays no bot list beside a room — it
-  // is no bot's chat (`listsAsChat`), so `useBotChatsPane` answers nothing for it at any width. The
-  // room's screen is therefore a screen the list pushed wherever it is opened from, and without a
-  // control of its own the only way out would be Android's hardware back.
-  await fresh({ chats: true, layout: "bots" })
+  // A room's screen is a screen the list pushed wherever it is opened from, and without a control of
+  // its own the only way out would be Android's hardware back: its bar leads to the list whose row it
+  // was picked from, which the link's `state.bot` names. Under the flat layout that list is the bot's
+  // own address, since that is where the layout's one list stands (ADR 0162).
+  await fresh({ chats: true })
   await merged()
   const roomFromList = () => (
     <MemoryRouter initialEntries={[{ pathname: `/c/${ROOM}`, state: { bot: CODER } }]}>
@@ -690,11 +639,8 @@ test("a room opened from a bot's list leads back to that list, by its control an
 test("a room whose row moved is read again, and its mark follows the Host", async () => {
   await fresh({ ask: true })
   await merged()
-  await mount(screen("/"), async () => {
-    await until(
-      async () => find(`a[href="/c/${ROOM}"] [data-needs-you]`) !== null,
-      "the room's needs-you mark",
-    )
+  await mount(screen(), async () => {
+    await until(async () => asksOn(`a[href="/c/${ROOM}"]`), "the room's needs-you mark")
     // The user answers in the room on another device: the Host says the room moved, and its log
     // holds the user's words last — which ask for nobody.
     log = [...asks(), { seq: 3, eventId: "e3", kind: "message.user", text: "Coder, you take it." }]
@@ -702,7 +648,7 @@ test("a room whose row moved is read again, and its mark follows the Host", asyn
     await syncNow()
     await settle()
     await until(
-      async () => missing(`a[href="/c/${ROOM}"] [data-needs-you]`),
+      async () => !asksOn(`a[href="/c/${ROOM}"]`),
       "an answered room's row says nothing",
       CLEARS_MS,
     )
@@ -717,29 +663,23 @@ test("a room's page is read on to its newest reply, not left at the first page",
   await fresh({ ask: true })
   split = true
   await merged()
-  await mount(screen("/"), async () => {
-    await until(
-      async () => find(`a[href="/c/${ROOM}"] [data-needs-you]`) !== null,
-      "the mark the second page carries",
-    )
+  await mount(screen(), async () => {
+    await until(async () => asksOn(`a[href="/c/${ROOM}"]`), "the mark the second page carries")
   })
 })
 
 test("the Host saying a room moved marks its row though the record never moved", async () => {
   await fresh()
   await merged()
-  await mount(screen("/"), async () => {
-    await until(async () => band("rooms").includes(`/c/${ROOM}`), "the room's row")
+  await mount(screen(), async () => {
+    await until(async () => listRows().includes(ROOM), "the room's row")
     // The list has read the room and found nothing; the member's reply lands while the record's own
     // clock stands still, so only the change stream can tell the row.
     const opened = Date.now()
     while (Date.now() - opened < 1_100) await new Promise((done) => setTimeout(done, 50))
     log = asks()
     await act(async () => noteChange(connectionKey(bots[1]), "room"))
-    await until(
-      async () => find(`a[href="/c/${ROOM}"] [data-needs-you]`) !== null,
-      "the mark the change stream carried",
-    )
+    await until(async () => asksOn(`a[href="/c/${ROOM}"]`), "the mark the change stream carried")
   })
 })
 
@@ -772,7 +712,7 @@ test("a room's row draws its members' pictures, four at most, and counts the res
     changedAt: LAST_AT,
   })
   await settle()
-  await mount(screen("/"), async () => {
+  await mount(screen("bot-one"), async () => {
     await until(async () => Boolean(find("[data-room-faces]")), "the room's faces")
     const faces = findAll("[data-room-faces] img")
     assert.equal(faces.length, 4, "four pictures, and no more")
@@ -790,39 +730,251 @@ test("a room's row draws its members' pictures, four at most, and counts the res
   })
 })
 
-test("Rooms ranks a room by the list's own rule, and offers no order of its own", async () => {
-  await fresh()
-  const named = [
-    { id: "room-zebra", title: "Zebra", at: LAST_AT + 30_000 },
-    { id: "room-alpha", title: "Alpha", at: LAST_AT + 10_000 },
-    { id: "room-mid", title: "Middle", at: LAST_AT + 20_000 },
-  ]
+/**
+ * A list that has spent its five: five started chats of one bot's, each pinned — what `pinsOf` counts
+ * as a list's whole room.
+ */
+async function seedPinnedList(profileId: string, at: number) {
   await db.conversations.bulkPut(
-    named.map(({ id, title, at }) => ({
-      id,
-      profileId: CARRIER,
-      title,
-      room: { id, members: [] },
-      createdAt: at - 1_000,
-      updatedAt: at,
-      changedAt: at,
+    [0, 1, 2, 3, 4].map((i) => ({
+      id: `w-pin-${i}`,
+      profileId,
+      title: `A pinned chat ${i}`,
+      hermesSessionId: `gots-w-pin-${i}`,
+      createdAt: at - 1_000 - i,
+      updatedAt: at - i,
+      changedAt: at - i,
+      pinned: true,
+      pinnedAt: at - i,
     })),
   )
-  await settle()
-  await mount(screen("/"), async () => {
-    await until(async () => band("rooms").length === 3, "all three rooms")
-    assert.deepEqual(
-      band("rooms"),
-      ["/c/room-zebra", "/c/room-mid", "/c/room-alpha"],
-      "newest first, as every list here ranks a row — a room has no order of its own to keep",
+}
+
+/**
+ * A room lists in every bot its roster seats, and the same pin spends a slot in each of those lists:
+ * so a pin is written only where every one of them has room, and the writer — not only the switch the
+ * sheet draws — is what refuses it. A list's own pins are the chats it draws and the rooms it seats,
+ * counted as `pinSwitchOf` counts them.
+ */
+test("a room's pin is refused unless every list that seats it has room", async () => {
+  await fresh({ marks: true })
+  await merged()
+  const at = LAST_AT - 60_000
+  // The writer's list, one of the two that seat the room, has spent its five.
+  await seedPinnedList(WRITER, at)
+  assert.equal(
+    await setPinned(ROOM, true),
+    false,
+    "a pin that would spend a slot the writer's list hasn't got is refused",
+  )
+  const refused = await db.conversations.get(ROOM)
+  assert.notEqual(refused?.pinned, true, "and nothing is written: the room stays unpinned")
+  assert.deepEqual(stored, {}, "with no record posted for a mark it never made")
+  // One slot freed in the list that was full, and the same press lands in every list it is drawn in.
+  await db.conversations.update("w-pin-0", { pinned: undefined, pinnedAt: undefined })
+  assert.equal(await setPinned(ROOM, true), true, "every list that seats the room has room now")
+  assert.equal((await db.conversations.get(ROOM))?.pinned, true, "so the room is pinned")
+  // The pass the pin fired is read to its end, so nothing of this room outlives the test that made it.
+  await until(async () => Boolean(stored[ROOM]), "the mark to reach the Host's store")
+})
+
+/**
+ * The room's sheet counts the list it was opened from (`usePinsInList`), and a room is drawn in every
+ * list that seats it: where another of those lists has spent its five, the switch looks turnable and
+ * the writer is still right to refuse. Nothing is written, the switch stays off, and the row says why
+ * rather than failing silently under a switch that flipped.
+ */
+test("a room's sheet says its pin was refused where another list that seats it is full", async () => {
+  await fresh({ marks: true })
+  await merged()
+  // The writer's list is full; the carrier's, whose list the room is opened from, has room — so only
+  // the writer's count can refuse this press.
+  await seedPinnedList(WRITER, LAST_AT - 60_000)
+  await mount(roomScreen(), async () => {
+    await until(async () => Boolean(find("[data-chat-settings-open]")), "the room's bar")
+    await click(find("[data-chat-settings-open]"))
+    await until(async () => Boolean(findText("[role=dialog]", "Edit room")), "its sheet")
+    await until(async () => Boolean(pinSwitch()), "its pin")
+    assert.equal(pinSwitch()?.getAttribute("aria-checked"), "false", "the room starts unpinned")
+    await click(pinSwitch())
+    await until(
+      async () => Boolean(find("[data-chat-pin-refused]")),
+      "the sheet saying the pin was refused",
     )
-    absent('[aria-label^="Sort rooms"]', "and no control offers it one")
+    assert.ok(
+      findText(
+        "[data-chat-pin]",
+        "Not pinned — one of the lists this room is in already holds five.",
+      ),
+      "in the sheet's own words",
+    )
+    assert.notEqual((await db.conversations.get(ROOM))?.pinned, true, "and nothing was written")
+    assert.equal(pinSwitch()?.getAttribute("aria-checked"), "false", "the switch stays off")
   })
-  // A pin is still lifted above the rest, as a chat's is.
-  await db.conversations.update("room-zebra", { pinned: true })
+})
+
+/**
+ * The Host's room has no field to keep a pin or an archive in (ADR 0121), so a room's marks are the
+ * reader's, carried as one record of their own in the Host's chat store under the room's id and laid
+ * over the room where it is projected (ADR 0157). The record is written at the clock of the mark and
+ * carries both booleans spelled, since a projection cannot say "no opinion" about a mark.
+ */
+test("a room's pin posts one record of marks to every bot that seats it, and no chat's field", async () => {
+  await fresh({ marks: true })
+  await merged()
+  const before = posts.length
+  await setPinned(ROOM, true)
+  await until(async () => posts.length >= before + 2, "a record from each bot that seats the room")
+  const row = await db.conversations.get(ROOM)
+  assert.ok(row?.roomMarksAt, "the press is stamped on the row, in a clock of its own")
+  assert.equal(row?.changedAt, moved.at, "and the room's own clock stays the Host's")
+  const sent = posts
+    .slice(before)
+    .map((one) => one[ROOM])
+    .filter(Boolean)
+  assert.equal(
+    posts.length - before,
+    sent.length,
+    "the room is asked of every bot whose roster seats it, and of no bot whose doesn't",
+  )
+  assert.ok(sent.length >= 2, "the two of the Host's bots the roster seats")
+  for (const entry of sent) {
+    assert.deepEqual(
+      Object.keys(entry.value ?? {}),
+      ["roomMarks"],
+      "a room's record carries nothing of a chat's",
+    )
+    const held = entry.value!.roomMarks!
+    assert.equal(held.pinned, true, "the pin")
+    assert.equal(held.archived, false, "and the archive spelled, though this device said nothing")
+    assert.equal(typeof held.pinnedAt, "number", "when the pin was made")
+    assert.ok(held.pinnedAt > 0)
+    assert.equal(held.marksAt, row?.roomMarksAt, "the clock of the mark, as the row holds it")
+    assert.equal(entry.at, held.marksAt, "the record is written at the clock of the mark")
+  }
+  for (const one of posts)
+    if (one[ROOM]) assert.ok(one[ROOM].value?.roomMarks, "a room is never carried back as a chat")
+})
+
+test("a room pinned here draws pinned on a device that has only the store's record", async () => {
+  await fresh({ marks: true })
+  await merged()
+  await setPinned(ROOM, true)
+  await until(async () => Boolean(stored[ROOM]), "the record to reach the Host's store")
+  // A device that never made the mark: its row is the Host's room alone.
+  await db.conversations.update(ROOM, {
+    pinned: undefined,
+    pinnedAt: undefined,
+    archived: undefined,
+    roomMarksAt: undefined,
+  })
+  assert.notEqual((await db.conversations.get(ROOM))?.pinned, true, "the mark is gone from the row")
+  // One bot of the room's roster, and only its own list is merged: the record the store holds is
+  // what the mark comes back through, which is the whole point of it being there.
+  await syncChatsOf([WRITER])
   await settle()
-  await mount(screen("/"), async () => {
-    await until(async () => band("rooms")[0] === "/c/room-zebra", "the pinned room first")
-    assert.equal(band("rooms").length, 3, "with the other two under it")
-  })
+  await until(
+    async () => (await db.conversations.get(ROOM))?.pinned === true,
+    "the mark to land from the store",
+  )
+  const row = await db.conversations.get(ROOM)
+  assert.equal(row?.roomMarksAt, stored[ROOM].marksAt, "all four marks land together")
+  assert.equal(row?.pinnedAt, stored[ROOM].pinnedAt)
+  assert.equal(row?.archived, false)
+  assert.equal(row?.changedAt, moved.at, "on the Host's own clock")
+  assert.equal(row?.title, "Planning", "the Host's name")
+  assert.deepEqual(row?.room, record().value.room, "and its roster")
+})
+
+test("a mark record lands all four marks, and the Host's clock, name and roster stay its own", async () => {
+  await fresh({ marks: true })
+  await merged()
+  const host = await db.conversations.get(ROOM)
+  const at = Date.now() - 1_000
+  await writeRoomRow(
+    ROOM,
+    { at: moved.at, value: { pinned: true, pinnedAt: at, archived: false, marksAt: at } },
+    CARRIER,
+  )
+  const row = await db.conversations.get(ROOM)
+  assert.equal(row?.pinned, true, "the pin")
+  assert.equal(row?.pinnedAt, at, "and when it was made")
+  assert.equal(row?.archived, false, "the archive, spelled as the record spells it")
+  assert.equal(row?.roomMarksAt, at, "and the clock the marks were made at")
+  assert.equal(row?.changedAt, moved.at, "while the row's own clock stays the Host's")
+  assert.equal(row?.title, "Planning", "and its name the Host's")
+  assert.equal(row?.updatedAt, moved.at, "and its last activity")
+  assert.deepEqual(row?.room, host?.room, "and its roster")
+})
+
+test("a newer mark record lands, an older one changes nothing, and the same one twice writes nothing", async () => {
+  await fresh({ marks: true })
+  await merged()
+  const first = Date.now() - 2_000
+  await writeRoomRow(
+    ROOM,
+    { at: moved.at, value: { pinned: true, pinnedAt: first, archived: false, marksAt: first } },
+    CARRIER,
+  )
+  assert.equal((await db.conversations.get(ROOM))?.pinned, true, "a mark the row has none of lands")
+  // A record that left the Host before this row's marks were made says nothing about them.
+  await writeRoomRow(
+    ROOM,
+    { at: moved.at, value: { pinned: false, pinnedAt: 0, archived: true, marksAt: first - 1 } },
+    CARRIER,
+  )
+  const stale = await db.conversations.get(ROOM)
+  assert.equal(stale?.pinned, true, "an older record leaves the row's pin alone")
+  assert.notEqual(stale?.archived, true, "and its archive with it")
+  assert.equal(stale?.roomMarksAt, first, "the row keeps the clock it had")
+  const second = first + 1_000
+  const before = writes.rows
+  await writeRoomRow(
+    ROOM,
+    { at: moved.at, value: { pinned: false, pinnedAt: 0, archived: true, marksAt: second } },
+    CARRIER,
+  )
+  assert.equal(writes.rows - before, 1, "a newer record is written once")
+  const archived = await db.conversations.get(ROOM)
+  assert.equal(archived?.archived, true, "and it lands all four marks together")
+  assert.notEqual(archived?.pinned, true, "the pin it spells off with them")
+  assert.equal(archived?.roomMarksAt, second)
+  // The projection a merge answers names the marks the row already holds: nothing is written again.
+  const quiet = writes.rows
+  await writeRoomRow(
+    ROOM,
+    { at: moved.at, value: { pinned: false, pinnedAt: 0, archived: true, marksAt: second } },
+    CARRIER,
+  )
+  assert.equal(writes.rows, quiet, "a projection naming the same marks writes nothing")
+})
+
+test("a plugin without room_marks is posted nothing, and the room's pin stays here", async () => {
+  await fresh()
+  await merged()
+  await setPinned(ROOM, true)
+  await settle()
+  await syncNow()
+  await settle()
+  assert.equal((await db.conversations.get(ROOM))?.pinned, true, "the device keeps its own pin")
+  assert.deepEqual(stored, {}, "and the Host's store holds no mark")
+  for (const one of posts) assert.equal(one[ROOM], undefined, "nothing is posted for a room")
+})
+
+test("a room the Host disbands leaves though this device pinned it after that", async () => {
+  await fresh({ marks: true })
+  await merged()
+  await setPinned(ROOM, true)
+  await until(async () => Boolean(stored[ROOM]), "the record to reach the Host's store")
+  // The bot that carried the record is turned off, so every merge from here is one of the room's own
+  // seats — and each of those carries the mark as well. The Host disbanded the room before the pin was
+  // made here, and this device had not heard: the deletion's own clock is the older of the two, and a
+  // mark must not out-rank a room being gone. One that did would shadow the deletion on every merge
+  // and stand a row here for a room nothing owns.
+  await db.profiles.update(CARRIER, { disabled: true })
+  retired = true
+  await syncNow()
+  await settle()
+  await until(async () => !(await db.conversations.get(ROOM)), "the room to leave")
+  assert.deepEqual(await chatTombstones(), [], "the Host said so, so nothing is pushed back")
 })

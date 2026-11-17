@@ -108,7 +108,7 @@ const device = () => ({
   route: "/c/main-bot-1",
   schema: 25,
   developer: true,
-  botThreads: true,
+  layout: "flat",
   bots: [],
 })
 

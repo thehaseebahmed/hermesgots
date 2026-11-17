@@ -120,7 +120,7 @@ test("/settings/developer holds the progress reminders switch, not Labs", async 
     )
     assert.equal(Boolean(switchOf(MEETINGS)), false, "Meetings has moved to Labs")
     assert.equal(Boolean(switchOf(GENUI)), false, "and GenUI with it")
-    assert.ok(findText("label", "Enable legacy chat UX"), "its own switches stayed")
+    assert.ok(findText("label", "Flat chat list"), "its own switches stayed")
   })
 })
 

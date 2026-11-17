@@ -4,9 +4,9 @@ import { MemoryRouter, Route, Routes } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
 import { db } from "@/lib/db"
-import { forgetRead, markRead } from "@/lib/read-marks"
 import { BotChatsPage } from "@/routes/bot-chats"
 import { ChatPage } from "@/routes/chat"
+import { SideChatsPage } from "@/routes/side-chats"
 import {
   atWidth,
   botProfile,
@@ -23,6 +23,7 @@ import {
   path,
   seedSettings,
   settle,
+  spyAnimate,
   until,
 } from "./component-kit.tsx"
 
@@ -38,23 +39,31 @@ const CHATS = [
  * A bot of two chats and a project session: settings answering the bot-first layout, and one message
  * in each chat, which is what a row's line and its time are read from.
  */
-async function seed({ collapsed = false } = {}) {
-  await seedSettings({ activeProfileId: bot.id, sidebarCollapsed: collapsed })
+async function seed({ collapsed = false, main = true, flat = false } = {}) {
+  // The switch is the flat layout's (ADR 0162): every case here is the new UX's pair of panes unless
+  // it says otherwise.
+  await seedSettings({
+    activeProfileId: bot.id,
+    sidebarCollapsed: collapsed,
+    ...(flat ? { legacyChat: true } : {}),
+  })
   await db.profiles.clear()
   await db.profiles.put(bot)
   await db.messages.clear()
   await db.conversations.clear()
-  await db.conversations.put({
-    id: MAIN,
-    profileId: bot.id,
-    title: "Main",
-    titleEdited: true,
-    main: true,
-    hermesSessionId: `gots-${MAIN}`,
-    createdAt: 1,
-    updatedAt: 1,
-    changedAt: 0,
-  })
+  if (main) {
+    await db.conversations.put({
+      id: MAIN,
+      profileId: bot.id,
+      title: "Main",
+      titleEdited: true,
+      main: true,
+      hermesSessionId: `gots-${MAIN}`,
+      createdAt: 1,
+      updatedAt: 1,
+      changedAt: 0,
+    })
+  }
   await db.conversations.bulkPut([
     ...CHATS.map((chat) => ({
       id: chat.id,
@@ -77,8 +86,8 @@ async function seed({ collapsed = false } = {}) {
       changedAt: 6,
     },
   ])
-  await db.messages.bulkPut(
-    CHATS.map((chat) => ({
+  await db.messages.bulkPut([
+    ...CHATS.map((chat) => ({
       id: `${chat.id}-said`,
       conversationId: chat.id,
       role: "user" as const,
@@ -86,13 +95,22 @@ async function seed({ collapsed = false } = {}) {
       status: "done" as const,
       createdAt: chat.at - 1,
     })),
-  )
+    // A word in Main, so the chat the list stands beside draws a thread rather than a blank.
+    {
+      id: `${MAIN}-said`,
+      conversationId: MAIN,
+      role: "assistant" as const,
+      content: "Main, said",
+      status: "done" as const,
+      createdAt: 2,
+    },
+  ])
   globalThis.fetch = async () => json({})
 }
 
 /**
- * The shell over the two addresses a bot has: its own list, and a chat of it. A chat is one
- * address for every screen — a bot's chat, a project session, a canvas — so which pane it opens is
+ * The shell over the two addresses the new UX has: a bot's Side Chat List and a chat of it. A chat is
+ * one address for every screen — a bot's chat, a project session, a canvas — so which pane it opens is
  * the shell's to decide and this test's to read.
  */
 const screen = (entry: string | { pathname: string; state?: unknown }) => (
@@ -101,9 +119,25 @@ const screen = (entry: string | { pathname: string; state?: unknown }) => (
     <Nav />
     <Routes>
       <Route element={<AppShell />}>
-        <Route path="b/:profileId" element={<BotChatsPage />} />
+        <Route path="b/:profileId/sidechats" element={<SideChatsPage />} />
         <Route path="c/:id" element={<ChatPage slot="route" />} />
       </Route>
+    </Routes>
+  </MemoryRouter>
+)
+
+/**
+ * The flat layout's own screen, mounted with no shell: it is the list the switch turns back on, and at
+ * the split width it is the item lane's empty state the screen draws where the shell would put it. Its
+ * address is the bot's own, which is why these two cases seed the switch.
+ */
+const flatList = () => (
+  <MemoryRouter initialEntries={[`/b/${bot.id}`]}>
+    <Path />
+    <Nav />
+    <Routes>
+      <Route path="b/:profileId" element={<BotChatsPage />} />
+      <Route path="c/:id" element={<ChatPage slot="route" />} />
     </Routes>
   </MemoryRouter>
 )
@@ -124,12 +158,20 @@ const laneClass = () => find('[data-slot="list-lane"]')?.getAttribute("class") ?
 const LANE = '[data-slot="list-lane"]'
 const CHAT_BESIDE = '[data-slot="item-lane"] [data-slot="chat-pane"]'
 const BACK_TO_BOT = 'button[aria-label="Back to Mainly"]'
-const LIST_CONTROL = 'a[aria-label="Chats with Mainly"]'
+/** Main's control in its bar: the Side Chat List, offered only where that list is not on screen. */
+const SIDE_CHATS_CONTROL = 'a[aria-label="Side chats"]'
 const DRAWER = 'button[aria-label="Open conversations"]'
 const OPEN_ROW = '[data-slot="list-lane"] ul a[aria-current="page"]'
+/** Main's own row in the Side Chat List, above the side chats at the split width. */
+const MAIN_ROW = '[data-slot="main-row"] a[href^="/c/"]'
+/** The side chats the list draws, in the order it draws them. */
+const sideRows = () =>
+  findAll('section[aria-label="Side Chats"] ul a[href^="/c/"]').map(
+    (row) => row.getAttribute("href") ?? "",
+  )
 
 test(
-  "a bot's list keeps its 412px lane beside the chat it opened, on a laptop",
+  "a chat opened cold draws the Side Chat List beside it, in its 412px lane",
   laptop(async () => {
     localStorage.clear()
     await seed()
@@ -137,13 +179,21 @@ test(
       await until(async () => titles().includes("Alpha"), "the chat's own header")
       assert.equal(missing(LANE), false, "the shell keeps the bot's list on screen")
       assert.match(laneClass(), /\bw-103\b/, "at the 412px lane every list of the app's keeps")
+      assert.ok(titles().includes("Sidechats"), "the lane is the Side Chat List, not the flat one")
+      assert.equal(
+        missing('[data-slot="bot-chats-empty"]'),
+        true,
+        "and draws none of the flat list's empty item lane",
+      )
       assert.deepEqual(
-        listRows().sort(),
-        [
-          `/c/${MAIN}`,
-          ...CHATS.map((chat) => `/c/${chat.id}`),
-        ].sort(),
-        "every one of the bot's chats is a row of it",
+        sideRows().sort(),
+        CHATS.map((chat) => `/c/${chat.id}`).sort(),
+        "its side chats are its rows",
+      )
+      assert.equal(
+        find(MAIN_ROW)?.getAttribute("href"),
+        `/c/${MAIN}`,
+        "with Main above them, the chat the pane does not hold",
       )
       assert.equal(
         findAll('[data-slot="list-lane"] [data-slot="chat-pane"]').length,
@@ -177,12 +227,20 @@ test(
     await mount(screen("/c/c-b"), async () => {
       await until(async () => titles().includes("Beta"), "the chat's own header")
       assert.match(laneClass(), /\bw-103\b/, "the list keeps the 412px lane a rail leaves room for")
-      assert.equal(openRow()?.getAttribute("href"), "/c/c-b", "and marks the chat the address names")
+      assert.equal(
+        openRow()?.getAttribute("href"),
+        "/c/c-b",
+        "and marks the chat the address names",
+      )
       assert.ok(
         find(`[data-slot="header-leading"] ${BACK_TO_BOT}`),
         "the chat leads with its way back, the list beside it or not",
       )
-      assert.equal(missing(LIST_CONTROL), true, "and no way to it in the bar: it stands on screen beside")
+      assert.equal(
+        missing(SIDE_CHATS_CONTROL),
+        true,
+        "and no way to it in the bar: it stands on screen beside",
+      )
     })
   }),
 )
@@ -232,7 +290,11 @@ test(
     await seed()
     await mount(screen("/c/c-a"), async () => {
       await until(async () => titles().includes("Alpha"), "the chat's own header")
-      assert.equal(missing(LIST_CONTROL), true, "no separate control opens the bot's chats from the bar")
+      assert.equal(
+        missing(SIDE_CHATS_CONTROL),
+        true,
+        "no separate control opens the bot's chats from the bar",
+      )
       assert.deepEqual(
         findAll('[data-slot="header-actions"] a, [data-slot="header-actions"] button').map(
           (node) => node.getAttribute("aria-label")?.split(",")[0],
@@ -253,35 +315,41 @@ test(
   }),
 )
 
+/**
+ * The flat layout's list address keeps the state it has always had: the item lane beside the list says
+ * nothing is open, and marks no chat. The new UX draws Main beside its list at an address of its own.
+ */
 test(
-  "a bot's own screen opens with nothing selected beside the list",
+  'the flat list\'s own address keeps its "No chat selected" lane',
   laptop(async () => {
     localStorage.clear()
-    await seed()
-    await mount(screen(`/b/${bot.id}`), async () => {
-      await until(async () => listRows().length === CHATS.length + 1, "the bot's chats in its list")
-      assert.equal(missing(CHAT_BESIDE), true, "no chat is drawn beside the list")
-      assert.equal(missing(OPEN_ROW), true, "and no row is marked open")
-      assert.equal(
-        missing('[data-slot="bot-chats-empty"]'),
-        false,
-        "the lane beside the list says there is nothing open in it",
+    await seed({ flat: true })
+    await mount(flatList(), async () => {
+      await until(
+        async () => missing('[data-slot="bot-chats-empty"]') === false,
+        "the item lane's empty state",
       )
+      assert.equal(missing(CHAT_BESIDE), true, "no chat is drawn beside the list")
+      assert.equal(missing(LANE), true, "and no lane is opened for a chat that is not there")
+      assert.equal(missing(OPEN_ROW), true, "with no row marked open")
     })
   }),
 )
 
 /**
- * The lane beside the list, with nothing open in it, says so properly: a chat's mark on one line and
- * the words under it on the next, both standing centred in the lane the state fills (F5).
+ * The lane beside the flat list, with nothing open in it, says so properly: a chat's mark on one line
+ * and the words under it on the next, both standing centred in the lane the state fills (F5).
  */
 test(
   "the item pane says what is not there",
   laptop(async () => {
     localStorage.clear()
-    await seed()
-    await mount(screen(`/b/${bot.id}`), async () => {
-      await until(async () => listRows().length === CHATS.length + 1, "the bot's chats in its list")
+    await seed({ flat: true })
+    await mount(flatList(), async () => {
+      await until(
+        async () => missing('[data-slot="bot-chats-empty"]') === false,
+        "the item lane's empty state",
+      )
       const empty = find('[data-slot="bot-chats-empty"]')
       assert.ok(empty, "the lane beside the list says there is nothing open in it")
       const mark = empty?.querySelector("svg")
@@ -314,10 +382,7 @@ test(
     localStorage.clear()
     await seed()
     await mount(screen("/c/c-a"), async () => {
-      await until(
-        async () => openRow()?.getAttribute("href") === "/c/c-a",
-        "the open chat's row",
-      )
+      await until(async () => openRow()?.getAttribute("href") === "/c/c-a", "the open chat's row")
       await click(find('[data-slot="list-lane"] ul a[href="/c/c-b"]'))
       await until(async () => path() === "/c/c-b", "the address to name the chat")
       await until(
@@ -347,7 +412,11 @@ test(
       )
       await click(find('[data-slot="list-lane"] ul a[href="/c/c-b"]'))
       await until(async () => path() === "/c/c-b", "the row's own chat")
-      assert.equal(nav(), "REPLACE:/c/c-b", "the row takes the item's place rather than stacking a second")
+      assert.equal(
+        nav(),
+        "REPLACE:/c/c-b",
+        "the row takes the item's place rather than stacking a second",
+      )
       assert.equal(missing(CHAT_BESIDE), false, "the new conversation stands beside the same list")
       assert.equal(openRow()?.getAttribute("href"), "/c/c-b", "with its row the one marked open")
     })
@@ -407,7 +476,7 @@ test(
       )
       assert.equal(openRow()?.getAttribute("href"), "/c/room-1", "the row the pane holds")
       assert.equal(missing(CHAT_BESIDE), false, "and the room drawn in the pane beside it")
-      assert.equal(missing(LIST_CONTROL), true, "no bar control repeats the list beside it")
+      assert.equal(missing(SIDE_CHATS_CONTROL), true, "no bar control repeats the list beside it")
       assert.equal(
         findAll('[data-slot="item-lane"] [data-slot="header-row"] [role="img"]').length,
         0,
@@ -430,8 +499,11 @@ test(
     await db.profiles.put(other)
     await mount(screen({ pathname: `/c/${CHATS[0].id}`, state: { bot: other.id } }), async () => {
       await until(() => listRows().length > 0, "the list beside the chat")
-      assert.equal(missing(`[data-slot="list-lane"] a[href="/c/${CHATS[1].id}"]`), false,
-        "the owning bot's list, not the one the link named")
+      assert.equal(
+        missing(`[data-slot="list-lane"] a[href="/c/${CHATS[1].id}"]`),
+        false,
+        "the owning bot's list, not the one the link named",
+      )
       assert.equal(
         findAll("p").some((node) => node.textContent === "No chats yet."),
         false,
@@ -468,24 +540,209 @@ test(
 )
 
 /**
- * The bot is named once on a screen: its list's bar carries its face, and the chat beside that list
- * does not repeat it (ADR 0153).
+ * The bot is named once on the pair of panes: the Side Chat List's line names it, and the chat beside
+ * that list repeats neither its face nor its name (ADR 0153).
  */
 test(
-  "the bot's face is drawn once, in the list's bar, not again in the chat's",
+  "the Side Chat List names the bot once, and the chat beside it repeats no face",
   laptop(async () => {
     localStorage.clear()
     await seed()
     await mount(screen("/c/c-a"), async () => {
       await until(async () => titles().includes("Alpha"), "the chat's own header")
-      assert.ok(
-        find('[data-slot="list-lane"] [data-slot="header-row"] [role="img"]'),
-        "the list's bar carries the bot's face",
+      assert.match(
+        find('[data-slot="list-lane"] [data-slot="header-line"]')?.textContent ?? "",
+        /Mainly/,
+        "the list's line names the bot",
       )
       assert.equal(
         findAll('[data-slot="item-lane"] [data-slot="header-row"] [role="img"]').length,
         0,
         "and the chat beside it repeats no face",
+      )
+    })
+  }),
+)
+
+/**
+ * The bot's list address draws the pair the new UX is made of (G6): the Side Chat List in the lane and
+ * the bot's **Main** in the item lane beside it — not the list twice, and nowhere the flat layout's
+ * "No chat selected". Main is a chat with an id of its own that no rung of the address spells out, so
+ * the item lane is drawn by the screen at that address for the chat the pane names.
+ */
+test(
+  "the list's own address draws the Side Chat List in the lane and Main in the item lane",
+  laptop(async () => {
+    localStorage.clear()
+    await seed()
+    await mount(screen(`/b/${bot.id}/sidechats`), async () => {
+      await until(async () => titles().includes("Sidechats"), "the list in the lane")
+      await until(async () => titles().includes("Main"), "Main in the item lane")
+      assert.equal(
+        path(),
+        `/b/${bot.id}/sidechats`,
+        "the address the reader gave it, rewritten for nobody",
+      )
+      assert.equal(missing(LANE), false, "the list keeps its lane")
+      assert.match(laneClass(), /\bw-103\b/, "at the 412px the app's lists keep")
+      assert.deepEqual(
+        [...titles()].sort(),
+        ["Main", "Sidechats"],
+        "one list and one chat: the list in the lane, Main beside it",
+      )
+      assert.equal(
+        findAll('[data-slot="list-lane"] [data-slot="chat-pane"]').length,
+        0,
+        "and no chat in the list's lane",
+      )
+      assert.equal(missing(CHAT_BESIDE), false, "Main stands in the item lane")
+      assert.equal(
+        find(CHAT_BESIDE)?.querySelector('[data-slot="header-title"]')?.textContent?.trim(),
+        "Main",
+        "as the bot's own conversation",
+      )
+      assert.equal(
+        find('[data-slot="main-row"] a[aria-current="page"]')?.getAttribute("href"),
+        `/c/${MAIN}`,
+        "with Main's row marked as the chat the pane holds",
+      )
+      assert.equal(
+        findAll("p").some((node) => node.textContent?.trim() === "No chat selected"),
+        false,
+        "and no state for nothing being open: Main is open",
+      )
+      assert.deepEqual(
+        sideRows().sort(),
+        CHATS.map((chat) => `/c/${chat.id}`).sort(),
+        "the side chats stand under it, as the list's rows",
+      )
+    })
+  }),
+)
+
+/**
+ * A side chat picked from the list is a sibling of Main rather than a step above it: it takes the item
+ * lane, its own row the one marked, and the way back lands the list again — where Main stands beside
+ * it, since the list's address is what it draws. No transition plays over the pair: the pane names the
+ * bot's one screen for the list and for every chat of it.
+ */
+test(
+  "a picked side chat takes the item lane, its row marked, and back is the list",
+  laptop(async () => {
+    localStorage.clear()
+    await seed()
+    await mount(screen(`/b/${bot.id}/sidechats`), async () => {
+      await until(async () => titles().includes("Main"), "Main beside the list")
+      const spy = spyAnimate()
+      try {
+        await click(find(`[data-slot="list-lane"] ul a[href="/c/c-b"]`))
+        await until(async () => path() === "/c/c-b", "the chat's own address")
+        await until(async () => titles().includes("Beta"), "the chat's header")
+        await settle()
+      } finally {
+        spy.restore()
+      }
+      assert.equal(
+        spy.onScreen().length,
+        0,
+        "the pair never re-animates: the list and its chats are one screen",
+      )
+      assert.equal(missing(CHAT_BESIDE), false, "the chat stands in the item lane")
+      assert.equal(
+        openRow()?.getAttribute("href"),
+        "/c/c-b",
+        "the row of the chat the pane holds is the one marked",
+      )
+      assert.equal(missing(LANE), false, "and the list keeps its lane beside it")
+
+      await click(find(`[data-slot="header-leading"] ${BACK_TO_BOT}`))
+      await until(async () => path() === `/b/${bot.id}/sidechats`, "the list the chat stands in")
+      await until(async () => titles().includes("Main"), "Main standing beside the list again")
+      assert.equal(
+        find('[data-slot="main-row"] a[aria-current="page"]')?.getAttribute("href"),
+        `/c/${MAIN}`,
+        "with Main the chat the pane holds, one rung under the list",
+      )
+      assert.equal(openRow()?.getAttribute("href"), `/c/${MAIN}`, "and the row the list marks")
+    })
+  }),
+)
+
+/**
+ * Nothing is remembered: the list's address is Main's, whatever the pane held when it was last open —
+ * a picked side chat, a side chat opened cold, the list left behind a chat. A fresh mount reads the
+ * bot's Main rather than a stored pick.
+ */
+test(
+  "a fresh mount at the list's address is Main, whatever was open before",
+  laptop(async () => {
+    localStorage.clear()
+    await seed()
+    await mount(screen("/c/c-b"), async () => {
+      await until(
+        async () => openRow()?.getAttribute("href") === "/c/c-b",
+        "the side chat open beside the list",
+      )
+    })
+    await mount(screen(`/b/${bot.id}/sidechats`), async () => {
+      await until(async () => titles().includes("Main"), "Main in the item lane")
+      assert.equal(
+        openRow()?.getAttribute("href"),
+        `/c/${MAIN}`,
+        "Main is the chat beside the list, not the one left open there",
+      )
+      assert.equal(
+        titles().includes("Beta"),
+        false,
+        "and no memory of the chat the last visit held",
+      )
+      assert.equal(missing(CHAT_BESIDE), false, "Main drawn in the item lane, as on any visit")
+    })
+  }),
+)
+
+/**
+ * One pane holds the list alone: the split width is what puts Main beside it, so a phone's list address
+ * draws no Main row and no item lane. Nothing of the second pane is left standing empty.
+ */
+test(
+  "a phone's list address is the list alone, with no Main row",
+  atWidth(390, async () => {
+    localStorage.clear()
+    await seed()
+    await mount(screen(`/b/${bot.id}/sidechats`), async () => {
+      await until(async () => titles().includes("Sidechats"), "the list, whole")
+      assert.equal(missing(LANE), true, "no lane: the list is the screen")
+      assert.equal(missing(CHAT_BESIDE), true, "and no chat stands beside it")
+      assert.equal(missing('[data-slot="main-row"]'), true, "with no row for Main")
+      assert.deepEqual(
+        sideRows().sort(),
+        CHATS.map((chat) => `/c/${chat.id}`).sort(),
+        "the side chats are the rows, as at the split width",
+      )
+    })
+  }),
+)
+
+/**
+ * A bot whose Main this device does not hold — a host no plugin has published one for — keeps its list
+ * standing whole rather than beside a blank: the lane opens only where there is a chat to put in the
+ * second pane.
+ */
+test(
+  "a bot with no Main keeps its list whole at the split width, beside no blank",
+  laptop(async () => {
+    localStorage.clear()
+    await seed({ main: false })
+    await mount(screen(`/b/${bot.id}/sidechats`), async () => {
+      await until(async () => titles().includes("Sidechats"), "the list")
+      assert.match(laneClass(), /\bw-full\b/, "the list takes the whole width")
+      assert.equal(missing(CHAT_BESIDE), true, "with nothing drawn beside it")
+      assert.equal(findAll('[data-slot="header-title"]').length, 1, "one list, not one per pane")
+      assert.equal(
+        missing('[data-slot="main-row"]'),
+        true,
+        "and no Main row for a Main there is none of",
       )
     })
   }),

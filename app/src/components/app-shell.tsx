@@ -17,8 +17,9 @@ import { CrashBoundary } from "@/components/crash-screen"
 import { KeyboardShortcuts } from "@/components/keyboard-shortcuts"
 import { DrawerContext } from "@/components/drawer-context"
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
-import { botChatsPath } from "@/lib/bot-tabs"
 import { useBubbleMirror, useBubbleTakeaways } from "@/lib/bubble"
+import { listPathOf } from "@/lib/chat-lead"
+import { useChatLayout } from "@/lib/chat-layout"
 import { useForgetOpenCanvas } from "@/lib/canvas-open"
 import { prefersReducedMotion, useLarge, useWide } from "@/lib/media"
 import { depth } from "@/lib/nav"
@@ -31,7 +32,6 @@ import {
 } from "@/lib/pane"
 import { setMenuOpener } from "@/lib/native"
 import { useSidebarCollapsed } from "@/lib/sidebar"
-import { useLegacyChat } from "@/lib/legacy-chat"
 import { cn } from "@/lib/utils"
 import { onChatSwap, type HoldSlot } from "@/lib/chat-hold"
 import { PaneTransition } from "@/components/pane-transition"
@@ -70,6 +70,9 @@ const ResearchPane = lazy(() =>
 const CodePane = lazy(() => import("@/routes/code").then((m) => ({ default: m.CodePane })))
 const ProjectsPane = lazy(() =>
   import("@/routes/projects").then((m) => ({ default: m.ProjectsPane })),
+)
+const SideChatsPane = lazy(() =>
+  import("@/routes/side-chats").then((m) => ({ default: m.SideChatsPane })),
 )
 const BotChatsPane = lazy(() =>
   import("@/routes/bot-chats").then((m) => ({ default: m.BotChatsPane })),
@@ -202,13 +205,14 @@ export function AppShell({ children }: { children?: ReactNode }) {
   // press at the app's edge offers nothing rather than a sheet over a list that is already there.
   useEffect(() => (wide ? undefined : setMenuOpener(openDrawer)), [openDrawer, wide])
   const [collapsed, toggleCollapsed] = useSidebarCollapsed()
+  const layout = useChatLayout()
   const { pathname } = useLocation()
   useForgetOpenCanvas(pathname)
   const main = useRef<HTMLElement>(null)
   // Code is asked first: a session's address is a chat's too, and the pane it belongs to is Code's
   // list, never the list of the bot that happens to hold its record (ADR 0115).
   const code = useCodePane()
-  const bot = useBotChatsPane(useLegacyChat() === false)
+  const bot = useBotChatsPane()
   const projects = useProjectsPane()
   const meetings = useMeetingsPane()
   const research = useResearchPane()
@@ -219,12 +223,15 @@ export function AppShell({ children }: { children?: ReactNode }) {
         itemKey: code.selected,
         node: <CodePane pane={code} />,
       }
-    : bot
+    : bot && layout
       ? {
-          screen: botChatsPath(bot.profileId),
+          // The layout names its own list, through the one rule that says which address that is: the
+          // new UX's stands at the bot's side-chat address, and the flat list's is the bot's own, so
+          // the pane's identity is where a reader sees that list.
+          screen: listPathOf(layout, bot.profileId),
           open: bot.open,
           itemKey: bot.selected,
-          node: <BotChatsPane pane={bot} />,
+          node: layout === "flat" ? <BotChatsPane pane={bot} /> : <SideChatsPane pane={bot} />,
         }
       : projects
         ? {

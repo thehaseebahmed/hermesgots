@@ -37,7 +37,13 @@ async function drive({ page, profileId, send, newChat, lastReply, until, shot })
     "the reply to finish",
   )
   // The row is the host's record, and this device reads its chats when the app starts: the list is
-  // reached by its own address, the way a reader finds it after closing the app.
+  // reached by its own address, the way a reader finds it after closing the app. It is the flat list,
+  // which draws a routine's delivery among its rows — the side-chat list leaves runs to the routines
+  // page (ADR 0161) — so the Developer switch is turned on first (ADR 0162).
+  await page.evaluate(async () => {
+    const { saveSettings } = await import("/src/lib/db.ts")
+    await saveSettings({ legacyChat: true })
+  })
   await page.goto(`${app}/b/${profileId}`)
   await until(async () => (await page.locator(ROW).count()) > 0, 30_000, "the routine's row")
   const row = page.locator(ROW).first()

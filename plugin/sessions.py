@@ -17,6 +17,7 @@ Markdown file under the project's ``plans/`` folder, named after the session bra
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -760,7 +761,7 @@ def _open_state_for_write(home: Path) -> Optional[sqlite3.Connection]:
     try:
         return sqlite3.connect(f"{state.as_uri()}?mode=rw", uri=True, timeout=2, isolation_level=None)
     except sqlite3.Error:
-        logger.warning("gots: couldn't open %s to repair session labels", state, exc_info=True)
+        logger.warning("gots: couldn't open %s to write to it", state, exc_info=True)
         return None
 
 
@@ -855,8 +856,243 @@ def _forks(row: Any) -> bool:
     return isinstance(config, dict) and any(config.get(marker) for marker in _FORK_MARKERS)
 
 
+# Why an archive write could not be made, in the words the app is answered with. The flag is
+# Hermes's own, so a store that can't hold it is no archive at all, and the app keeps its own mark.
+NO_STORE = "no store"
+NO_ARCHIVE_FLAG = "no archive flag"
+NO_SESSION = "no session"
+
+# Hermes's own lineage selector (``_LINEAGE_CTE_SQL``), from a session forward: a child whose parent
+# was written by a compaction continues the conversation, and Hermes lists a chat by its newest row.
+# So a chat archives as one unit — the whole chain takes the flag — and an old compression segment is
+# never the row that hides the chat (Hermes's `sessions archive` flips the lineage the same way).
+_ARCHIVE_LINEAGE_SQL = """
+    WITH RECURSIVE lineage(id) AS (
+        SELECT ?
+        UNION
+        SELECT child.id
+          FROM lineage
+          JOIN sessions parent ON parent.id = lineage.id
+          JOIN sessions child ON child.parent_session_id = parent.id
+         WHERE parent.end_reason = 'compression'
+    )
+    UPDATE sessions SET archived = ? WHERE id IN (SELECT id FROM lineage)
+"""
+
+
+def set_archived(home: Path, session_id: str, archived: bool) -> Optional[str]:
+    """Sets Hermes's own archive flag on a chat's session, or says why it couldn't.
+
+    Archive is Hermes's feature, not Gots's: this is the flag that takes a session out of
+    ``hermes sessions list`` and ``/resume`` and the Desktop's own list, so writing it here is what
+    makes the two surfaces agree. The chat's first session is resolved first (``chat_session``), and
+    the write then runs on from it to the live tip — a compacted conversation archives as a unit,
+    and the row Hermes lists is the tip, never an old compression segment.
+
+    One column, and nothing else: an older store's schema is not ours to migrate. A profile with no
+    store, a store whose schema has no ``archived`` column (or no ``sessions`` table), and an id the
+    store has never seen each answer a short reason instead of raising — a route that says ``host:
+    false`` is how the app learns to keep its own mark (ADR 0159).
+    """
+    session_id = chat_session(home, session_id)
+    conn = _open_state_for_write(home)
+    if conn is None:
+        return NO_STORE
+    try:
+        with closing(conn):
+            # ``total_changes`` and not the cursor's ``rowcount``: a ``WITH … UPDATE`` answers -1
+            # there, and the rows a write changed is the whole of what says whether the store holds
+            # this session at all.
+            before = conn.total_changes
+            conn.execute(_ARCHIVE_LINEAGE_SQL, (session_id, 1 if archived else 0))
+            written = conn.total_changes - before
+    except sqlite3.OperationalError:
+        # No ``sessions`` table, no ``archived`` column, or a schema without the lineage's own
+        # columns: this store can't carry the flag.
+        logger.debug("gots: %s can't hold an archive flag", home / "state.db", exc_info=True)
+        return NO_ARCHIVE_FLAG
+    except sqlite3.Error:
+        logger.warning("gots: couldn't set a session's archive in %s", home / "state.db", exc_info=True)
+        return NO_STORE
+    return None if written else NO_SESSION
+
+
+class ListState(NamedTuple):
+    """What one list answer reads out of a profile's ``state.db``.
+
+    Hermes's archive flag for every session the store holds, and the row it calls its Bot Chat — what
+    ``chats.carrying_archive`` and ``chats.carrying_main`` lay over the answer. Both come off one pass
+    in one connection: the flags used to cost a scan of their own and the title a second one after it.
+    """
+
+    archived: Dict[str, bool]
+    bot_chat: Optional[Dict[str, Any]]
+
+
+# The columns one pass can use, in the order it asks for them: every session's id and title, the
+# archive Hermes holds for it, and what dates and hides the one row titled as the Bot Chat. A store
+# from before any of them answers the ones it has rather than failing the read.
+_LIST_COLUMNS = ("id", "title", "archived", "started_at", "hidden")
+
+
+def list_state(home: Path) -> ListState:
+    """Hermes's archive flags and its Bot Chat, read together in one pass over this profile's store.
+
+    One read for one list answer, and both readings ride it: an archive made on the Dashboard hides
+    the row in Gots and an unarchive there brings it back (ADR 0159), and the row titled ``"Bot
+    Chat"`` is Main (ADR 0160). Empty and None where this Hermes has no store, no ``sessions`` table,
+    no ``archived`` column or no such row — a host that can't say keeps every row as the device holds
+    it, and names no Main for the projection to fall back from.
+
+    Read-only, and never retitles anything: a store another writer holds answers nothing.
+    """
+    conn = _open_state(home)
+    if conn is None:
+        return ListState({}, None)
+    try:
+        with closing(conn):
+            # Which columns this store has, asked of the statement it compiles rather than of PRAGMA:
+            # `LIMIT 0` reads no row at all, so the schema costs one prepared statement.
+            columns = {held[0] for held in conn.execute("SELECT * FROM sessions LIMIT 0").description}
+            if "id" not in columns:
+                return ListState({}, None)
+            asked = [name for name in _LIST_COLUMNS if name in columns]
+            rows = conn.execute(f"SELECT {', '.join(asked)} FROM sessions").fetchall()
+    except sqlite3.Error:
+        logger.debug("gots: couldn't read %s's list state", home / "state.db", exc_info=True)
+        return ListState({}, None)
+    archived = (
+        {row["id"]: bool(row["archived"]) for row in rows} if "archived" in columns else {}
+    )
+    return ListState(archived, _bot_chat_row(rows, columns))
+
+
+def _bot_chat_row(rows: List[sqlite3.Row], columns: Set[str]) -> Optional[Dict[str, Any]]:
+    """The canonical Bot Chat among one pass's rows: the earliest row titled so that is not archived.
+
+    Hermes titles one conversation per profile this way and lists a chat by its newest row, so the
+    earliest is the one the others compacted from — the id Main is, and the id an ancestry is walked
+    to for a turn in Main (``is_chat``). Both questions ask this one rule, which is why neither needs
+    a schema of its own. A store from before ``archived`` answers as unarchived, which is all it can
+    say; one from before ``started_at`` dates the chat at zero.
+    """
+    if "title" not in columns:
+        return None
+    candidates = [
+        row
+        for row in rows
+        if row["id"]
+        and row["title"] == chats.BOT_CHAT_TITLE
+        and ("archived" not in columns or not row["archived"])
+    ]
+    if not candidates:
+        return None
+    dated = "started_at" in columns
+    row = min(candidates, key=lambda held: float(held["started_at"] or 0)) if dated else candidates[0]
+    return {
+        "id": row["id"],
+        "hidden": bool(row["hidden"]) if "hidden" in columns else False,
+        "at": int(float(row["started_at"] or 0) * 1000) if dated else 0,
+    }
+
+
+def bot_chat(home: Path) -> Optional[Dict[str, Any]]:
+    """The profile's canonical Bot Chat: the unarchived session Hermes keeps titled ``"Bot Chat"``.
+
+    Main is that conversation (Bot Mode's, shared with the Desktop), so it is read out of the one
+    store that holds it rather than invented: ``{"id", "hidden", "at"}`` — the session, whether
+    Hermes holds it hidden (its own canonical chat is), and when it began in the app's millis, which
+    is the clock a record minted for it carries — or None where this profile has none.
+
+    None is an answer, not a failure: no store, no ``sessions`` table, no row titled so, and a row
+    that has been **archived** — which is a retired Bot Chat, not a Main to draw, since the reader
+    put it away on the Dashboard and G2 forbids an archived Main.
+
+    It is ``list_state``'s own answer (one pass, kept in one place), so the route that refuses to
+    archive Main and the projection that lays it over the list cannot disagree about which row it is.
+    """
+    return list_state(home).bot_chat
+
+
+def _session_actor() -> Optional[type]:
+    """The session actor Hermes's own creation is handed, under the name that host gives it.
+
+    ``gateway.session_contract`` held this class as ``Principal`` and calls it ``SessionActor`` now:
+    the fields never moved — ``subject``, ``profile_id``, ``capabilities``, ``transport_id``, in that
+    order — so this is a name to find, not a shape to guess. None where the host names neither, which
+    is a Hermes this plugin cannot mint on.
+    """
+    from gateway import session_contract
+
+    for name in ("SessionActor", "Principal"):
+        found = getattr(session_contract, name, None)
+        if isinstance(found, type):
+            return found
+    return None
+
+
+async def mint_bot_chat(home: Path) -> Optional[str]:
+    """Asks the gateway to mint this profile's canonical Bot Chat, and answers its session.
+
+    The chat is Hermes's, so Hermes makes it: this is the gateway's own creation
+    (``gateway.session_bot._create_bot_chat``), the call the Desktop's Bots roster and a Bot Mode
+    delivery make — a local session the gateway's FIFO owns, never a row of this plugin's making.
+    That creation looks the title up under the authority's titled-create lock before it writes, so a
+    "Bot Chat" another surface already holds is *deferred to*: it mints nothing, answers nothing, and
+    this plugin neither retitles it nor fights the title. `sessions.title` is the identity of the
+    canonical chat, and a squatter is how a profile ends up with a bot whose chat never resolves.
+
+    A host that cannot answer answers None, plainly: no API server wired, no authority serving this
+    home, no such call (a Hermes from before it), or a refusal (an owner draining, a store that would
+    not take it). That is the capability answer the caller falls back on, never an exception across a
+    list read. Nothing here spends a turn: the creation writes the row and stops.
+    """
+    owner = _bot_chat_authority(home)
+    if owner is None:
+        return None
+    try:
+        from gateway.session_bot import _create_bot_chat
+        from gateway.session_runtime_workers import track_mutation
+    except ImportError:
+        logger.debug("gots: this Hermes has no Bot Chat creation to ask")
+        return None
+    actor_class = _session_actor()
+    if actor_class is None:
+        logger.debug("gots: this Hermes names no session actor to hand that creation")
+        return None
+    actor = actor_class(
+        "gots-main",
+        owner.profile_id,
+        frozenset({"session:create", "session:read", "session:submit"}),
+        "gots-main",
+    )
+    try:
+        open_for_work = getattr(owner, "_require_admission_open", None)
+        if callable(open_for_work):
+            open_for_work()
+        ref = await asyncio.shield(track_mutation(owner, _create_bot_chat(owner, actor)))
+    except Exception:
+        logger.debug("gots: this host wouldn't mint a Bot Chat", exc_info=True)
+        return None
+    session_id = getattr(ref, "session_id", None)
+    return session_id if isinstance(session_id, str) and session_id else None
+
+
+def _bot_chat_authority(home: Path) -> Any:
+    """The session authority serving this profile, or None — the one lookup the mint needs.
+
+    The same resolver ``pending.authority`` makes: the API server the plugin is wired into holds the
+    gateway runner, and the runner answers which authority owns this home (a multiplexed gateway
+    serves several). One copy because a host seam that moves should have one place to move it.
+    """
+    from . import pending
+
+    return pending.authority(adapter, home)
+
+
 def is_chat(home: Path, session_id: str) -> bool:
-    """Whether a session is a Gots chat's: the app minted its id, or one of its ancestors'.
+    """Whether a session is a Gots chat's: the app minted its id, one of its ancestors' — or it is
+    a turn in the profile's own Main.
 
     An app-minted id is answered before the store is opened, so the common path — every call in a
     Gots chat's own session — costs no read; only an id with no ``ID_PREFIXES`` prefix is walked.
@@ -866,13 +1102,24 @@ def is_chat(home: Path, session_id: str) -> bool:
     honours its mute, and ``alerts.turn_finished`` counts its subagents as the chat's own work. A
     delegation child of a session the app never minted is still nobody's.
 
+    Main is the profile's canonical Bot Chat (``bot_chat``), which Hermes made and so carries no
+    prefix of the app's: a turn there is the bot's own news like any other chat's (G2), and a
+    compaction of it or a subagent forked off it reaches it on the same ancestry this already walks.
+    That question is asked only after the prefix search came up empty, of ``_bot_chat_row`` — the one
+    rule ``bot_chat`` itself answers with — over the rows of that ancestry, so no predicate is written
+    out again here and a store from before a column (`archived` came after the Bot Chat did) answers
+    Main rather than raising: as a bare ``archived = 0`` it failed closed, and every turn in Main went
+    unpushed. An archived Bot Chat, a retired Main, is no Bot Chat there, exactly as it is no Main to
+    draw.
+
     One read-only query over the whole ancestry, bounded by ``COMPRESSION_DEPTH``, on a connection
     that waits no longer than ``LINEAGE_TIMEOUT_S``: this is asked inside Hermes's hooks, on a
     push's thread, so a store another writer holds has to answer quickly or not at all.
 
     False when the store can't answer — missing, empty, corrupt or locked — as well as when no row
-    on the ancestry carries an ``ID_PREFIXES`` prefix. Fail closed: a push for another surface's
-    session is a nuisance, while one for a session that isn't a chat's is the leak this stops.
+    on the ancestry carries an ``ID_PREFIXES`` prefix and none of them is the profile's Bot Chat.
+    Fail closed: a push for another surface's session is a nuisance, while one for a session that
+    isn't a chat's is the leak this stops.
     """
     if session_id.startswith(ID_PREFIXES):
         return True
@@ -894,10 +1141,27 @@ def is_chat(home: Path, session_id: str) -> bool:
                    SELECT id, depth FROM lineage ORDER BY depth""",
                 (session_id, COMPRESSION_DEPTH),
             ).fetchall()
+            ids = [row["id"] for row in rows if isinstance(row["id"], str)]
+            if any(one.startswith(ID_PREFIXES) for one in ids):
+                return True
+            if not ids:
+                return False
+            # Which columns this store has, asked of the statement it compiles: one prepared
+            # statement, no row read, and the same read `list_state` makes of its own store.
+            columns = {held[0] for held in conn.execute("SELECT * FROM sessions LIMIT 0").description}
+            asked = [name for name in _LIST_COLUMNS if name in columns]
+            walked = conn.execute(
+                "SELECT %s FROM sessions WHERE id IN (%s)"
+                % (", ".join(asked), ", ".join("?" * len(ids))),
+                ids,
+            ).fetchall()
     except sqlite3.Error:
         logger.debug("gots: couldn't read a session's ancestry", exc_info=True)
         return False
-    return any(row["id"].startswith(ID_PREFIXES) for row in rows if isinstance(row["id"], str))
+    # Main's rule, not a copy of it: `bot_chat` answers off this very function, so a column the store
+    # lacks is one both readings skip together, and a Bot Chat an ancestry holds is Main however the
+    # store spells its archive.
+    return _bot_chat_row(walked, columns) is not None
 
 
 def live_runs(

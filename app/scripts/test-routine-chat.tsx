@@ -1,10 +1,12 @@
 /**
- * A routine's row opens its run, read-only (G4): the chat screen's picker sends a row carrying the
+ * A routine's row opens its run, read-only: the chat screen's picker sends a row carrying the
  * plugin's routine marker to a screen of its own before either chat screen claims it — the run's
  * transcript, under the header naming the routine, with the composer's place saying why nothing can
- * be sent there and the way back to the bot's list. A run the host no longer holds, and one that
- * couldn't be read at all, each say so rather than spinning; and a chat that isn't a routine's is
- * still drawn by the chat screen, with its composer.
+ * be sent there and the way back to the bot's list. Its bar keeps the context ring and draws no `…`:
+ * the press on its title opens the one Edit sheet, holding the run's name, its mute, its pin, its
+ * archive and its delete, which are the reader's own on a run they did not start. A run the host no
+ * longer holds, and one that couldn't be read at all, each say so rather than spinning; and a chat
+ * that isn't a routine's is still drawn by the chat screen, with its composer.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -21,6 +23,7 @@ import {
   click,
   find,
   findAll,
+  findText,
   json,
   missing,
   mount,
@@ -116,7 +119,8 @@ const screen = (entry = `/c/${rowOf()}`) => (
     <Path />
     <Routes>
       <Route path="c/:id" element={<ChatPage slot="route" />} />
-      <Route path="b/:profileId" element={<p data-list />} />
+      {/* A run's way back is its bot's list, which has an address of its own. */}
+      <Route path="b/:profileId/sidechats" element={<p data-list />} />
     </Routes>
   </MemoryRouter>
 )
@@ -168,6 +172,40 @@ test("a routine's row opens its run read-only, under the header naming it", asyn
   })
 })
 
+test("the run's bar keeps the ring and draws no options button, and its title opens the sheet with its name, its mute, its pin, its archive and its delete", async () => {
+  ownRun("bar")
+  host()
+  await seed()
+  await mount(screen(), async () => {
+    await until(async () => drew(ANSWER), "the run's own transcript")
+    assert.equal(
+      findAll('[aria-label="Chat options"]').length,
+      0,
+      "no menu in the run's bar: what it held is the sheet its title opens",
+    )
+    assert.equal(
+      findAll('[data-slot="header-actions"] button[aria-label^="Context"]').length,
+      1,
+      "and its context, as the ring the bar keeps",
+    )
+    await click(find("[data-chat-settings-open]"))
+    await until(async () => Boolean(findText("[role=dialog]", "Edit chat")), "the run's sheet")
+    assert.equal(
+      (find("[data-chat-name]") as HTMLInputElement | null)?.value,
+      TITLE,
+      "its name, as the field it is typed in",
+    )
+    assert.equal(
+      findAll("[role=switch]").length,
+      2,
+      "its mute and its pin, as the switches of one card",
+    )
+    await until(async () => Boolean(find("[data-chat-pin]")), "its pin")
+    await until(async () => Boolean(find("[data-chat-archive]")), "its archive")
+    assert.ok(findText("button", "Delete chat"), "and the one control that ends it")
+  })
+})
+
 test("the way back is the bot's list, not the chat the run was opened from", async () => {
   ownRun("back")
   host()
@@ -184,7 +222,7 @@ test("the way back is the bot's list, not the chat the run was opened from", asy
     )
     assert.equal(missing('[aria-label="Open conversations"]'), true, "with no drawer beside it")
     await click(back)
-    await until(async () => path() === `/b/${bot.id}`, "the bot's list")
+    await until(async () => path() === `/b/${bot.id}/sidechats`, "the bot's list")
     absent("[data-slot=routine-note]", "and the run's screen is what was left")
   })
 })

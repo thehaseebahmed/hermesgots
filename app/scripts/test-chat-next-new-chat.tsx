@@ -23,6 +23,7 @@ import {
   findAll,
   json,
   missing,
+  paste,
   mount,
   seedChats,
   settle,
@@ -96,13 +97,14 @@ const blankScreen = (
 )
 
 test("a new chat opens on chat-next's blank surface and writes no record", async () => {
+  // A new chat belongs to the bot whose list started it, so the surface draws no picker of bots over
+  // its composer: the bot is the one the address was opened from (ADR 0161).
   await seedChats([], { bots: [bot], legacyChat: true })
   anySession()
   await mount(blankScreen, async () => {
     await until(() => Boolean(find("[data-blank]")), "chat-next's blank surface")
     assert.ok(find('[data-blank] [role="img"]'), "the bot's face")
     assert.ok(composerField(), "the app's own composer")
-    assert.ok(find('button[aria-label^="Bot:"]'), "the picker, in the legacy layout")
     assert.equal(findAll('[data-slot="message"]').length, 0, "an empty thread")
     assert.equal(await db.conversations.count(), 0, "no record is written on mount")
     assert.ok(nav().startsWith("POP:/"), "and the address stays the new chat's")
@@ -163,6 +165,29 @@ test("the blank surface's first send makes the chat and the thread sends it as i
   })
 })
 
+test("a new chat's first message draws its photo as the thread sends it", async () => {
+  await seedChats([], { bots: [bot], legacyChat: true })
+  const host = anySession({ plugin: true, uploads: true })
+  await mount(blankScreen, async () => {
+    await until(() => Boolean(find("[data-blank]")), "the blank surface")
+    await paste([new File([new Uint8Array(24)], "photo.png", { type: "image/png" })])
+    await type(composerField(), "what is in this photo?")
+    await click(find('button[aria-label="Send"]'))
+    await until(
+      () =>
+        Boolean(find('[data-chat-next] [data-slot="message"] button[aria-label="Open photo.png"]')),
+      "the photo's cell, on the message the thread drew",
+    )
+    const [chat] = await db.conversations.toArray()
+    assert.equal(host.hostFor(chat.hermesSessionId).saved.length, 1, "from the file the host saved")
+    assert.equal(
+      await db.messages.count(),
+      0,
+      "and the surface wrote no message of its own: the thread that opens is the one that sends it",
+    )
+  })
+})
+
 test("a blank chat's first send makes a chat of the bot's", async () => {
   await seedChats([], { bots: [bot] })
   const host = anySession()
@@ -198,7 +223,6 @@ test("a keyless bot keeps the current screen and writes nothing", async () => {
     )
     assert.ok(missing("[data-blank]"), "and no blank surface")
     assert.ok(missing("[data-chat-next]"), "nothing of chat-next is drawn")
-    assert.ok(find('button[aria-label^="Bot:"]'), "the picker it keeps")
     assert.equal(await db.conversations.count(), 0, "no record for a bot that cannot be called")
   })
 })

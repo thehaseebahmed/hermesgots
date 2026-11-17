@@ -4,12 +4,12 @@ import { useLiveQuery } from "dexie-react-hooks"
 
 import { Bot } from "@/components/bot"
 import { ChatHeader } from "@/components/chat/chat-header"
+import { ChatSettings, ChatTitlePress } from "@/components/chat/chat-settings"
 import { Composer } from "@/components/chat/composer"
 import { Markdown } from "@/components/chat/markdown"
 import { SystemLine } from "@/components/chat/system-line"
 import { UserBubble } from "@/components/chat/user-bubble"
 import { RoomWaiting } from "@/components/room/room-waiting"
-import { RoomActions } from "@/components/room/room-actions"
 import { RoomRowMedia } from "@/components/room/room-media"
 import { Banner } from "@/components/banner"
 import { Bubble, BubbleContent } from "@/components/ui/bubble"
@@ -26,7 +26,6 @@ import { ROOM_MAX_ATTACHMENTS } from "@/lib/attachment-caps"
 import { chatOwner } from "@/lib/chat-owner"
 import { serverConfig } from "@/lib/connection"
 import { usePluginFeatureOn } from "@/lib/features"
-import { useLegacyChat } from "@/lib/legacy-chat"
 import { useChatLead } from "@/lib/chat-lead"
 import { useNav } from "@/lib/nav"
 import { useBotChatsPane } from "@/lib/pane"
@@ -75,15 +74,14 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
   const { root } = useNav()
   const location = useLocation()
   const navigate = useNavigate()
-  const legacy = useLegacyChat()
   // The bot's list this room is a row of: the one the row was opened from, as its link says in the
   // address's state, else the bot that carries the room onto this device. A room is no bot's chat
-  // (`listsAsChat`), so the shell seats its pane from that state alone — and the legacy layout, where
-  // no bot has a list, is asked too, so a room is never drawn beside a list that isn't there.
+  // (`listsAsChat`), so the shell seats its pane from that state alone; whether a bot has a list at
+  // all is the lead's to say, since that is the layout's answer rather than the address's.
   const carrier = (location.state as { bot?: string } | null)?.bot ?? chat?.profileId
   const lead = useChatLead({
     bot: carrier,
-    beside: Boolean(useBotChatsPane(legacy === false)),
+    beside: Boolean(useBotChatsPane()),
   })
   // A room's row going while the room is open — a disband on another device, or a merge landing
   // first — leaves to the list: the chat screen's own "gone" state would draw an empty chat for a
@@ -144,16 +142,21 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
   // The row is the Host's own record — a write's answer or the projection — so it is read first: a
   // rename the user just made is on the row before the room's next read names it (ADR 0123).
   const name = chat?.title || live.name || "Room"
+  // The press the room's name answers opens the one Edit sheet: its name and its disband through the
+  // Host, its pin and its archive as the reader's own marks, carried to it as a record of their own
+  // (ADR 0157). The bar carries no menu of its own and no context ring either, since a room runs no
+  // model call of its own (ADR 0153).
+  const [settingsOpen, setSettingsOpen] = useState(false)
 
   return (
     <div data-slot="chat-pane" data-pane={slot} className="relative flex min-h-0 flex-1 flex-col">
       <ChatHeader
-        title={name}
+        title={<ChatTitlePress title={name} open={settingsOpen} />}
+        onTitlePress={() => setSettingsOpen(true)}
         subtitle={chat?.room ? roomMembersLine({ ...chat.room, members: live.members }) : undefined}
         botId={answerer?.botId}
         // The bot's list beside this room already names the bot with its face.
         showBot={!lead.besideList}
-        actions={<RoomActions roomId={id} name={name} answerer={answerer} />}
         leading={lead.leading}
       />
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">
@@ -247,6 +250,17 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
           />
         }
       />
+      {chat && (
+        <ChatSettings
+          chat={chat}
+          // The cap is counted over the list this room is a row of, which is the one the row was
+          // opened from where the address says, else the bot that carried it here.
+          profileId={carrier ?? chat.profileId}
+          answerer={answerer}
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+        />
+      )}
     </div>
   )
 }

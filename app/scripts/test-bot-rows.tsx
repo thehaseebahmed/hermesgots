@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from "react-router"
 import { ConversationList } from "@/components/conversation-list"
 import { db, type Profile } from "@/lib/db"
 import { markRead, readMark } from "@/lib/read-marks"
+import { formatRelative } from "@/lib/relative"
 import { ChatPage } from "@/routes/chat"
 import {
   absent,
@@ -13,7 +14,9 @@ import {
   click,
   find,
   findAll,
+  findText,
   json,
+  missing,
   mount,
   Path,
   path,
@@ -27,15 +30,38 @@ const bot = botProfile("bot-rows", { id: "bot-1", name: "Mainly" })
 const MAIN = "main-bot-1"
 
 /**
- * One bot with Main, a thread of its own and a coding session, and nothing else in the device. The
- * thread's own clock is `thread.at`, so a case can put its activity either side of a read mark.
+ * The device a case starts from: the one bot on it and nothing else — no chat, no draft, no message —
+ * with the app's switches as the case wants them and a host that answers nothing.
  */
-async function seed(thread: { id: string; at: number; sessionAt?: number }, patch: Partial<Profile> = {}) {
-  await seedSettings({ developer: true, activeProfileId: bot.id })
+async function reset({
+  patch = {},
+  legacy = false,
+}: {
+  patch?: Partial<Profile>
+  legacy?: boolean
+} = {}) {
+  await seedSettings({
+    developer: true,
+    ...(legacy ? { legacyChat: true } : {}),
+    activeProfileId: bot.id,
+  })
   await db.profiles.clear()
   await db.profiles.put({ ...bot, ...patch })
   await db.messages.clear()
+  await db.drafts.clear()
   await db.conversations.clear()
+  globalThis.fetch = async () => json({})
+}
+
+/**
+ * One bot with Main, a thread of its own and a coding session, and nothing else in the device. The
+ * thread's own clock is `thread.at`, so a case can put its activity either side of a read mark.
+ */
+async function seed(
+  thread: { id: string; at: number; sessionAt?: number },
+  patch: Partial<Profile> = {},
+) {
+  await reset({ patch })
   await db.conversations.bulkPut([
     {
       id: MAIN,
@@ -67,7 +93,6 @@ async function seed(thread: { id: string; at: number; sessionAt?: number }, patc
       changedAt: 3,
     },
   ])
-  globalThis.fetch = async () => json({})
 }
 
 /** The bot's own row: the one the sidebar's bot list draws, by the address it leads to. */
@@ -76,7 +101,8 @@ const botRow = () => find(`a[href="/b/${bot.id}"]`)
 const selected = (row: Element | null) => Boolean(row?.className.split(/\s+/).includes("bg-muted"))
 /** The row's unread mark, as the list draws it. */
 const dotted = (row: Element | null) => Boolean(row?.querySelector("[data-unread]"))
-const stateOf = (row: Element | null) => row?.querySelector('[data-slot="bot-state"]')?.textContent ?? null
+const stateOf = (row: Element | null) =>
+  row?.querySelector('[data-slot="bot-state"]')?.textContent ?? null
 
 /** The sidebar over a screen, so a case can open a chat by the row that leads to it. */
 const screen = (entry: string, also?: { to: string }) => (
@@ -135,6 +161,69 @@ test("a bot with something newer than this device's mark says how many, and dots
   })
 })
 
+test("the sidebar's preview and count skip an unstarted chat", async () => {
+  // A chat nothing has been said in is no row of the bot's list (ADR 0158), and the sidebar's line about
+  // the bot is read off that list: its age is the newest chat the list draws, and its count is what this
+  // device has not read of them. A record the New chat press minted — newer than everything, and empty —
+  // is neither, or a bot would say "now" and count a chat nobody has opened.
+  const DAY = 86_400_000
+  const at = Date.now() - 40 * DAY
+  await seed({ id: "said-thread", at })
+  const minted = Date.now()
+  await db.conversations.put({
+    id: "unstarted",
+    profileId: bot.id,
+    title: "New chat",
+    hermesSessionId: "gots-unstarted",
+    createdAt: minted,
+    updatedAt: minted,
+    changedAt: minted,
+  })
+  markRead("said-thread", at - 1)
+  markRead("unstarted", 1)
+  await mount(screen("/"), async () => {
+    await until(
+      async () => stateOf(botRow()) === "1 unread",
+      "the row to count the chat that was spoken in, and only it",
+    )
+    assert.ok(
+      wordsOf(botRow()).includes(formatRelative(at, Date.now())),
+      "and to be aged by that chat, not by the empty record newer than it",
+    )
+  })
+})
+
+test("an archived chat is neither the sidebar's preview of its bot nor part of its count", async () => {
+  // An archived row is the Archived pill's alone, and a bot's row leads to a list whose All is the
+  // rows nobody archived: the row's mark cannot be news its list would never draw, and its clock
+  // cannot be the bot's age.
+  const DAY = 86_400_000
+  const at = Date.now() - 30 * DAY
+  await seed({ id: "kept-thread", at })
+  await db.conversations.put({
+    id: "set-aside",
+    profileId: bot.id,
+    title: "Set aside",
+    hermesSessionId: "gots-set-aside",
+    createdAt: at + 1,
+    updatedAt: Date.now(),
+    changedAt: at + 1,
+    archived: true,
+  })
+  markRead("kept-thread", at - 1)
+  markRead("set-aside", 1)
+  await mount(screen("/"), async () => {
+    await until(
+      async () => stateOf(botRow()) === "1 unread",
+      "the row to count the chat that was spoken in, and only it",
+    )
+    assert.ok(
+      wordsOf(botRow()).includes(formatRelative(at, Date.now())),
+      "and to be aged by that chat, not by the record the reader put away",
+    )
+  })
+})
+
 test("a quiet bot's row says its host is checking in", async () => {
   await seed({ id: "quiet-online", at: 2 }, { hostId: "host-1", seenAt: Date.now() })
   await mount(screen("/"), async () => {
@@ -157,7 +246,10 @@ test("a quiet bot's row says Not seen yet until its host has answered once", asy
   // row never falls silent and never calls a bot it cannot place Offline.
   await seed({ id: "quiet-unseen", at: 2 }, { hostId: "host-1" })
   await mount(screen("/"), async () => {
-    await until(async () => stateOf(botRow()) === "Not seen yet", "the row to say nothing has answered")
+    await until(
+      async () => stateOf(botRow()) === "Not seen yet",
+      "the row to say nothing has answered",
+    )
     assert.equal(dotted(botRow()), false, "and nothing unread draws no mark")
   })
 })
@@ -216,8 +308,42 @@ test("a room its roster seats counts toward the bot's unread", async () => {
   })
   markRead("room-1", 100)
   await mount(screen("/"), async () => {
-    await until(async () => stateOf(botRow()) === "1 unread", "the room to count as one conversation")
+    await until(
+      async () => stateOf(botRow()) === "1 unread",
+      "the room to count as one conversation",
+    )
     assert.equal(dotted(botRow()), true, "with the mark that says so")
+  })
+})
+
+test("an archived room is counted toward no bot's unread", async () => {
+  await seed(
+    { id: "room-quiet-thread", at: 2 },
+    { hostId: "host-1", seenAt: Date.now(), hermesProfile: "main" },
+  )
+  // A room lists in every bot its roster seats (ADR 0115), and an archived one is the Archived
+  // pill's alone in each of them: the mark on it is no news on a bot's row.
+  const carrier = { ...bot, id: "bot-2", name: "Other", hermesProfile: "other" }
+  await db.profiles.put(carrier)
+  await db.conversations.put({
+    id: "room-set-aside",
+    profileId: carrier.id,
+    title: "A room set aside",
+    hermesSessionId: "room-set-aside",
+    room: {
+      id: "room-set-aside",
+      members: [{ memberId: "m1", profile: "main", handle: "main", displayName: "Mainly" }],
+    },
+    roomNeeds: { at: 600 },
+    archived: true,
+    createdAt: 5,
+    updatedAt: 600,
+    changedAt: 600,
+  })
+  markRead("room-set-aside", 100)
+  await mount(screen("/"), async () => {
+    await until(async () => stateOf(botRow()) === "Online", "a row with nothing unread on it")
+    assert.equal(dotted(botRow()), false, "and no mark")
   })
 })
 
@@ -239,7 +365,11 @@ test("a bot never opened on this device draws no dot, as Code's rows don't", asy
   await seed({ id: "unmarked-thread", at: 500 })
   await mount(screen("/"), async () => {
     await until(async () => Boolean(botRow()), "the bot's row")
-    assert.equal(dotted(botRow()), false, "a device that never read the thread has no mark to be past")
+    assert.equal(
+      dotted(botRow()),
+      false,
+      "a device that never read the thread has no mark to be past",
+    )
   })
 })
 
@@ -267,72 +397,64 @@ test("opening the thread writes its mark, and the row's dot clears", async () =>
 test("a thread's render writes its mark, which is the moment the row measures against", async () => {
   await seed({ id: "mark-thread", at: 777 })
   await mount(chatScreen("mark-thread"), async () => {
-    await until(async () => readMark("mark-thread") === 777, "the mark the thread's own render wrote")
+    await until(
+      async () => readMark("mark-thread") === 777,
+      "the mark the thread's own render wrote",
+    )
   })
 })
 
-test("the bot layout's sidebar has no Routines row, and the legacy one keeps its own", async () => {
-  // The bot layout reaches a bot's routines from that bot's list, so a sidebar row there would open
-  // a screen the list already offers. The legacy layout has no bot list at all: with the row gone
-  // too, the Developer switch would leave its reader with no way to their routines.
-  await seed({ id: "routines-thread", at: 2 })
-  await mount(screen("/"), async () => {
-    await until(async () => Boolean(botRow()), "the bot's row")
-    absent('a[href="/routines"]', "the bot layout opens routines from the bot's list")
-  })
-  await seedSettings({ developer: true, legacyChat: true, activeProfileId: bot.id })
-  await mount(screen("/"), async () => {
-    await until(async () => Boolean(find('a[href="/routines"]')), "the legacy sidebar's routines row")
-    assert.equal(wordsOf(find('a[href="/routines"]')), "Routines", "named as the screen it opens")
-  })
+test("no layout draws Recents, a Rooms section, a routines row or New chat", async () => {
+  // The sidebar is the app's screens and its bots (ADR 0161). The Recents list, its bands, the Rooms
+  // section only it drew, its routines row and its New chat button left with the layout that held
+  // them (ADR 0162), so neither setting can draw one: a chat is started from the list it belongs to,
+  // and a room is a row of every list whose roster seats it.
+  for (const legacy of [false, true]) {
+    await seed({ id: `sidebar-${legacy}`, at: 2 })
+    await seedSettings({
+      developer: true,
+      ...(legacy ? { legacyChat: true } : {}),
+      activeProfileId: bot.id,
+    })
+    await mount(
+      <MemoryRouter initialEntries={["/"]}>
+        <ConversationList />
+      </MemoryRouter>,
+      async () => {
+        await until(async () => Boolean(botRow()), "the bot's row")
+        assert.equal(missing('[aria-labelledby="recents-heading"]'), true, "no Recents list")
+        assert.equal(findAll("[data-band]").length, 0, "and no band of one")
+        assert.equal(missing('a[href="/routines"]'), true, "no routines row")
+        assert.equal(missing('button[aria-label="New chat"]'), true, "and no New chat button")
+        assert.equal(missing('[data-slot="new-room"]'), true, "nor a Rooms section's New room")
+        assert.equal(findAll("h2").filter((one) => wordsOf(one) === "Rooms").length, 0, "nor Rooms")
+      },
+    )
+  }
 })
 
-test("with the switch off the sidebar lists chats, and no bot row is drawn", async () => {
-  // The legacy layout is the opt-out now (`legacyChat`), not the bots layout's on-switch (#110).
-  await seedSettings({ developer: true, legacyChat: true, activeProfileId: bot.id })
-  await db.profiles.clear()
-  await db.profiles.put(bot)
-  await db.conversations.clear()
-  await db.messages.clear()
-  globalThis.fetch = async () => json({})
-  await mount(screen("/"), async () => {
-    await until(async () => findAll("nav").length > 0, "the sidebar")
-    // `absent`, not `assert.equal` against null: a DOM element compared to null builds a diff of the
-    // whole element, and a run that should have said one sentence instead ate the machine.
-    absent(`a[href="/b/${bot.id}"]`, "no bots layout, no bot row")
+test("a flat-layout chat is offered Archive, since that layout has the pill too", async () => {
+  // Both layouts draw the Archived pill, so neither has a row a press could not bring back: the
+  // sheet's Archive and its way back are drawn wherever a chat's sheet is.
+  await reset({ legacy: true })
+  await db.conversations.put({
+    id: "flat-kept",
+    profileId: bot.id,
+    title: "Kept",
+    hermesSessionId: "gots-flat-kept",
+    createdAt: 1,
+    updatedAt: 2,
+    changedAt: 2,
   })
-})
-
-test("a bot turned off in Gots takes its chats out of Recents", async () => {
-  const gone = botProfile("bot-gone", { id: "bot-2", name: "Gone", disabled: true })
-  await seedSettings({ developer: true, legacyChat: true, activeProfileId: bot.id })
-  await db.profiles.clear()
-  await db.profiles.bulkPut([bot, gone])
-  await db.messages.clear()
-  await db.conversations.clear()
-  await db.conversations.bulkPut([
-    {
-      id: "kept",
-      profileId: bot.id,
-      title: "Kept",
-      hermesSessionId: "gots-kept",
-      createdAt: 1,
-      updatedAt: 2,
-      changedAt: 1,
-    },
-    {
-      id: "off",
-      profileId: gone.id,
-      title: "Turned off",
-      hermesSessionId: "gots-off",
-      createdAt: 2,
-      updatedAt: 3,
-      changedAt: 2,
-    },
-  ])
-  globalThis.fetch = async () => json({})
-  await mount(screen("/"), async () => {
-    await until(async () => Boolean(find('a[href="/c/kept"]')), "the kept chat's row")
-    absent('a[href="/c/off"]', "a turned-off bot's row is not in Recents")
+  await mount(screen("/c/flat-kept"), async () => {
+    await until(async () => Boolean(find("[data-chat-settings-open]")), "the chat's bar")
+    await click(find("[data-chat-settings-open]"))
+    await until(async () => Boolean(find("[data-chat-archive]")), "the sheet's archive")
+    assert.equal(wordsOf(find("[data-chat-archive]")), "Archive", "naming what the press does")
+    await click(find("[data-chat-archive]"))
+    await until(
+      async () => (await db.conversations.get("flat-kept"))?.archived === true,
+      "the mark it wrote",
+    )
   })
 })

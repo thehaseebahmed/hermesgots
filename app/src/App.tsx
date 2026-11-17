@@ -4,17 +4,21 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { Navigate, Route, Routes, useParams } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
-import { botChatsPath } from "@/lib/bot-tabs"
+import { botMainPath } from "@/lib/bot-tabs"
+import { useBotMain } from "@/lib/chat-rows"
 import { getActiveProfile } from "@/lib/db"
 import { warmCatalog } from "@/lib/models"
 import { useShareReceiver } from "@/lib/share"
 import { toHex } from "@/lib/theme"
-import { useLegacyChat } from "@/lib/legacy-chat"
+import { useChatLayout } from "@/lib/chat-layout"
 import { NewRoomScreen } from "@/components/room/new-room-screen"
 import { ChatPage } from "@/routes/chat"
 import { SetupGate } from "@/routes/setup"
 
 // Only a chat is on the startup path; every other screen loads when it's first opened.
+const SideChatsPage = lazy(() =>
+  import("@/routes/side-chats").then((m) => ({ default: m.SideChatsPage })),
+)
 const BotChatsPage = lazy(() =>
   import("@/routes/bot-chats").then((m) => ({ default: m.BotChatsPage })),
 )
@@ -33,12 +37,8 @@ const MeetingPage = lazy(() =>
   import("@/routes/meetings").then((m) => ({ default: m.MeetingPage })),
 )
 const TopicPage = lazy(() => import("@/routes/meetings").then((m) => ({ default: m.TopicPage })))
-const CanvasGate = lazy(() =>
-  import("@/routes/canvas").then((m) => ({ default: m.CanvasGate })),
-)
-const CanvasPage = lazy(() =>
-  import("@/routes/canvas").then((m) => ({ default: m.CanvasPage })),
-)
+const CanvasGate = lazy(() => import("@/routes/canvas").then((m) => ({ default: m.CanvasGate })))
+const CanvasPage = lazy(() => import("@/routes/canvas").then((m) => ({ default: m.CanvasPage })))
 const CanvasView = lazy(() => import("@/routes/canvas").then((m) => ({ default: m.CanvasView })))
 const CanvasEdit = lazy(() => import("@/routes/canvas").then((m) => ({ default: m.CanvasEdit })))
 const ResearchPage = lazy(() =>
@@ -80,15 +80,59 @@ function ThemeColor() {
   return null
 }
 
-/** Home is the selected bot's screen: the list of its chats, at the bot's own address. */
+/**
+ * Home is the selected bot's screen: its entry, which is where the bot opens — its **Main** in the new
+ * UX, its one list under the flat layout. Both layouts reach the same address, and the address is
+ * what decides which screen that is.
+ */
 export function Home() {
-  const legacy = useLegacyChat()
-  const active = useLiveQuery(
-    async () => (legacy === false ? ((await getActiveProfile()) ?? null) : null),
-    [legacy],
-  )
-  if (legacy === undefined || (legacy === false && active === undefined)) return null
-  return active ? <Navigate to={botChatsPath(active.id)} replace /> : <ChatPage slot="route" />
+  const active = useLiveQuery(async () => (await getActiveProfile()) ?? null, [])
+  if (active === undefined) return null
+  return active ? <Navigate to={botMainPath(active.id)} replace /> : <ChatPage slot="route" />
+}
+
+/**
+ * A bot's entry. In the new UX it is a doorway rather than a screen: it lands on the bot's **Main**
+ * chat, taking that chat's address in this entry's place so that back from Main is the app rather than
+ * this address again, and the entry is tagged with the bot it is a chat of, so the shell keeps the
+ * list's lane while the row loads.
+ *
+ * A bot whose Main this device does not hold — a host that publishes none yet — keeps its Side Chat
+ * List where the address stands rather than drawing a blank, and the answer is still out on the first
+ * read, so nothing is drawn until it lands. Nothing is ever made here: the plugin is Main's only
+ * writer.
+ *
+ * Under the flat layout this address is the bot's one list (ADR 0162): the reader who turned the
+ * switch on lands exactly where that layout left them, and Main is a row of it like any other.
+ */
+function BotMain() {
+  const { profileId } = useParams()
+  const layout = useChatLayout()
+  if (!profileId) return <Navigate to="/" replace />
+  if (layout === undefined) return null
+  if (layout === "flat") return <BotChatsPage />
+  return <BotMainOrList profileId={profileId} />
+}
+
+/** The new UX's entry: Main, or the Side Chat List where this device holds no Main for the bot. */
+function BotMainOrList({ profileId }: { profileId: string }) {
+  const main = useBotMain(profileId)
+  if (main === undefined) return null
+  if (!main) return <SideChatsPage />
+  return <Navigate to={`/c/${main}`} replace state={{ bot: profileId }} />
+}
+
+/**
+ * A bot's side-chat address. It draws the Side Chat List in the new UX; under the flat layout that
+ * list does not exist, so the address is the bot's own, where that layout's one list stands.
+ */
+function SideChatsRoute() {
+  const { profileId } = useParams()
+  const layout = useChatLayout()
+  if (layout === undefined) return null
+  if (!profileId) return <Navigate to="/" replace />
+  if (layout === "flat") return <Navigate to={botMainPath(profileId)} replace />
+  return <SideChatsPage />
 }
 
 /** A project's old address, from before projects had a place of their own. */
@@ -110,7 +154,9 @@ export function AppRoutes() {
     <Routes>
       <Route element={<AppShell />}>
         <Route index element={<Home />} />
-        <Route path="b/:profileId" element={<BotChatsPage />} />
+        {/* A bot's entry opens on its Main; its list has an address of its own. */}
+        <Route path="b/:profileId" element={<BotMain />} />
+        <Route path="b/:profileId/sidechats" element={<SideChatsRoute />} />
         <Route path="b/:profileId/routines" element={<RoutinesPage />} />
         <Route path="c/:id" element={<ChatPage slot="route" />} />
         {/* A room that does not exist yet: its first send makes it (ADR 0125). */}

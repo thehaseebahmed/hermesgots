@@ -70,7 +70,7 @@ test("the device state names a bot's chats and its host's answers, with no secre
   await seed()
   globalThis.fetch = async () => json({ version: "0.99.0", features: ["queue", "pending"] })
   const device = await readDeviceDiagnostics()
-  assert.equal(device.botThreads, true, "nothing stored means the bot-first layout")
+  assert.equal(device.layout, "sides", "nothing stored means the new UX, Main with its side chats")
   assert.equal(device.developer, true)
   const found = device.bots.find((one) => one.id === bot.id)
   assert.ok(found, "the bot is in the dump")
@@ -88,7 +88,7 @@ test("the dump reports the layout the device is on, not the switch's stored key"
   await seed({ legacyChat: true })
   globalThis.fetch = async () => json({ version: "0.99.0", features: ["queue"] })
   const device = await readDeviceDiagnostics()
-  assert.equal(device.botThreads, false, "the legacy layout is reported as bot threads off")
+  assert.equal(device.layout, "flat", "the switch on is reported as the flat list")
   assert.equal("legacyChat" in device, false, "and the switch itself never rides along")
 })
 

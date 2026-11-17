@@ -15,8 +15,9 @@ the registry and Firebase see the title, never what was asked.
 A device that has the app open (it holds an ``events`` stream) is skipped: it already knows. A
 session another surface started is no device's news at all: a push about a session goes only when
 that session, or an ancestor of it, is one of the app's chats — the chat compression moved it
-onto, and the chat a subagent forked it off, are both the chat's news — or when a chat record names
-it, which is how a routine's run is the app's news.
+onto, and the chat a subagent forked it off, are both the chat's news — or is the profile's own
+Bot Chat, which is the bot's Main, or carries a chat record, which is how a routine's run is the
+app's news.
 Everything here is best effort and runs on its own thread, so a slow push service never holds up
 Hermes.
 """
@@ -464,12 +465,14 @@ def clear(path: Path, key: str) -> None:
 
 
 def _gots_chat(path: Path, session_id: str) -> bool:
-    """Whether a session is one of this app's: one it minted (or an ancestor it minted), or one a
-    chat record names.
+    """Whether a session is one of this app's: one it minted (or an ancestor it minted), the
+    profile's own Main, or one a chat record names.
 
-    ``sessions.is_chat`` answers the ids the app made; a routine's run wrote in a session of its own,
+    ``sessions.is_chat`` answers the ids the app made and the profile's canonical Bot Chat — which
+    is Main, so a reply there is the bot's own news; a routine's run wrote in a session of its own,
     which the app never minted, and the chat record its delivery published names it — that record is
-    what makes the run the app's news. An id with neither is another surface's and nobody's news.
+    what makes the run the app's news. An id with none of the three is another surface's and
+    nobody's news.
     """
     from . import chats, sessions
 

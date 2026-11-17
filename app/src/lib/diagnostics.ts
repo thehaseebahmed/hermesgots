@@ -1,4 +1,5 @@
 import type { Conversation, Profile } from "@/lib/db"
+import type { ChatLayout } from "./chat-layout.ts"
 import { RESUME_STAGES, type ResumeStage, type ResumeTrace } from "./resume-trace.ts"
 
 /**
@@ -53,8 +54,8 @@ export interface DiagDevice {
   /** The Dexie schema version this device is on. */
   schema: number
   developer: boolean
-  /** Whether the bot-chats layout is the one this device draws: false under the legacy switch. */
-  botThreads: boolean
+  /** The chat layout this device draws, by the name `lib/chat-layout.ts` gives it. */
+  layout: ChatLayout
   /** The latest return to the foreground, timed; absent before this launch's first one. */
   resume?: DiagResume
   bots: DiagBot[]

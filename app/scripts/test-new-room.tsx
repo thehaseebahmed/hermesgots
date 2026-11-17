@@ -249,7 +249,7 @@ const openedFrom = (bot: Profile) => (
     <Path />
     <Routes>
       <Route path="/new-room" element={<NewRoomScreen slot="route" />} />
-      <Route path="/b/:profileId" element={<p data-list />} />
+      <Route path="/b/:profileId/sidechats" element={<p data-list />} />
     </Routes>
   </MemoryRouter>
 )
@@ -340,7 +340,7 @@ test("a blank room opened from a bot's list leads back to it", async () => {
       "and draws no drawer beside a bar that leads back",
     )
     await click(back)
-    await until(async () => where() === `/b/${bots[0].id}`, "the bot's list")
+    await until(async () => where() === `/b/${bots[0].id}/sidechats`, "the bot's list")
     assert.ok(find("[data-list]"), "and the picker is what was left")
   })
 })

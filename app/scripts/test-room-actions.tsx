@@ -1,10 +1,15 @@
 /**
- * A room's own menu: Rename and Disband in the room's header, and nothing of a chat's (ADR 0122).
+ * A room's bar, and the sheet the press on its name opens (ADR 0153, ADR 0122): a room draws no `…`,
+ * and the one Edit sheet the app's conversations share is a room's own — its name through
+ * `renameRoomTo`, its disband through `disbandRoomNow`, both only where the Host advertises
+ * `rooms_write`, and its pin and its archive, which are the reader's own marks rather than the
+ * Host's.
  *
- * Both writes go to the Host and come back as the room's record, so the header and the sidebar row take
- * the Host's own name and the row leaves this device as the Host's deletion (ADR 0123). A refusal keeps
- * the room as it was, in the Host's words; a Host that cannot write draws no menu at all; a room whose
- * row goes while it is open leaves to the list rather than falling to a chat's "gone" screen.
+ * Both writes go to the Host and come back as the room's record, so the header and the sidebar row
+ * take the Host's own name and the row leaves this device as the Host's deletion (ADR 0123). A
+ * refusal keeps the room as it was, in the Host's words, under the field that asked for the name; a
+ * room whose row goes while it is open leaves to the list rather than falling to a chat's "gone"
+ * screen.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -15,18 +20,23 @@ import { ChatPage } from "@/routes/chat"
 import { db, type Profile } from "@/lib/db"
 import {
   Path,
+  absentText,
   botProfile,
   click,
   find,
   findAll,
+  findText,
   json,
+  leave,
   missing,
   mount,
   seedSettings,
   settle,
+  shutSheet,
   text,
   type,
   until,
+  wordsOf,
 } from "./component-kit.tsx"
 
 const ROOM = "room-1"
@@ -104,7 +114,9 @@ async function fresh(host: string) {
     baseUrl: `http://${host}/v1`,
     hermesProfile: "default",
   })
-  await seedSettings({ onboarded: true, legacyChat: true })
+  // The layout the Archived pill belongs to, since it is the only way back to an archived row: a room
+  // in the legacy bands has no archive to offer, and this file reads the sheet that layout draws.
+  await seedSettings({ onboarded: true, legacyChat: false })
   await db.profiles.clear()
   await db.profiles.bulkPut([bot])
   await db.conversations.clear()
@@ -132,20 +144,47 @@ const screen = () => (
 )
 const where = () => find("[data-path]")?.textContent
 
-async function openMenu() {
-  await until(async () => Boolean(find('[aria-label="Room options"]')), "the room's options")
-  await click(find('[aria-label="Room options"]'))
-  await until(async () => (document.body.textContent ?? "").includes("Rename"), "the menu's items")
+/** The room's name, as the one press its bar answers with. */
+const titlePress = () => find("[data-chat-settings-open]")
+/** The sheet the press opens, by the name it wears. */
+const sheet = () => findText("[role=dialog]", "Edit room")
+/** The sheet's name field: where a room's rename is typed. */
+const nameField = () => find("[data-chat-name]")
+/** A button by its whole words, which is how the sheet's rows and a question's actions read. */
+const button = (label: string) =>
+  findAll("button").find((one) => one.textContent?.trim() === label) ?? null
+
+/** The room's bar, and the sheet its name opens. */
+async function openSheet() {
+  await until(async () => Boolean(titlePress()), "the room's bar")
+  await click(titlePress())
+  await until(async () => Boolean(sheet()), "the room's sheet")
 }
+
+test("the room's bar draws no options button, and the press on its name opens Rename and Disband", async () => {
+  await fresh(OPEN)
+  await mount(screen(), async () => {
+    await until(async () => text().includes("Planning"), "the room")
+    assert.ok(missing('[aria-label="Room options"]'), "no menu in the room's bar")
+    assert.equal(
+      findAll('[data-slot="header-actions"] button').length,
+      0,
+      "and no context ring: a room runs no model call of its own",
+    )
+    await openSheet()
+    assert.equal(nameField()?.tagName, "INPUT", "its name, as the field it is typed in")
+    assert.equal((nameField() as HTMLInputElement).value, "Planning", "holding the name it wears")
+    assert.ok(findText("button", "Disband room"), "its disband, as the one control that ends it")
+    absentText("button", "Delete chat")
+  })
+})
 
 test("a rename is one event under the id the app minted, and the header takes the Host's name", async () => {
   await fresh(OPEN)
   await mount(screen(), async () => {
-    await openMenu()
-    await click(findAll('[role="menuitem"]').find((one) => one.textContent?.includes("Rename")) ?? null)
-    await until(async () => Boolean(find('input[aria-label="Room name"]')), "the rename dialog")
-    await type(find('input[aria-label="Room name"]'), "Planning 2")
-    await click(findAll("button").find((one) => one.textContent?.trim() === "Save") ?? null)
+    await openSheet()
+    await type(nameField(), "Planning 2")
+    await leave(nameField())
 
     await until(async () => posted.length > 0, "the rename to be posted")
     const [{ path, body }] = posted
@@ -153,7 +192,10 @@ test("a rename is one event under the id the app minted, and the header takes th
     assert.equal(body.name, "Planning 2")
     assert.equal(typeof body.event_id, "string", "one event under an id the app minted")
 
-    await until(async () => text().includes("Planning 2"), "the new name on the screen")
+    await until(
+      async () => wordsOf(find("[data-slot=header-title]")) === "Planning 2",
+      "the new name on the bar",
+    )
     assert.equal((await db.conversations.get(ROOM))?.title, "Planning 2", "and on the row")
   })
 })
@@ -161,35 +203,39 @@ test("a rename is one event under the id the app minted, and the header takes th
 test("a refusal keeps the room as it was, in the Host's words", async () => {
   await fresh(OPEN)
   await mount(screen(), async () => {
-    await openMenu()
-    await click(findAll('[role="menuitem"]').find((one) => one.textContent?.includes("Rename")) ?? null)
-    await until(async () => Boolean(find('input[aria-label="Room name"]')), "the rename dialog")
-    await type(find('input[aria-label="Room name"]'), REFUSED_NAME)
-    await click(findAll("button").find((one) => one.textContent?.trim() === "Save") ?? null)
+    await openSheet()
+    await type(nameField(), REFUSED_NAME)
+    await leave(nameField())
 
     await until(async () => text().includes(REFUSAL), "the Host's refusal")
     assert.equal((await db.conversations.get(ROOM))?.title, "Planning", "the room keeps its name")
     assert.equal(held.name, "Planning")
+    // The words were about the name that was refused: typing another takes them away.
+    await type(nameField(), "Planning 2")
+    assert.equal(text().includes(REFUSAL), false, "and the refusal goes as the reader types again")
   })
 })
 
-test("a host that cannot write draws no menu", async () => {
+test("a Host that cannot write rooms draws no Name and no Disband, but draws Pin and Archive", async () => {
   await fresh(CLOSED)
   await mount(screen(), async () => {
     await until(async () => text().includes("Planning"), "the room")
-    await settle()
-    assert.ok(missing('[aria-label="Room options"]'), "no menu for a Host that cannot write")
+    await openSheet()
+    assert.ok(missing("[data-chat-name]"), "no name: its Host cannot write one")
+    absentText("button", "Disband room")
+    await until(async () => Boolean(find("[data-chat-pin]")), "its pin, a mark of the reader's own")
+    await until(async () => Boolean(find("[data-chat-archive]")), "and its archive, which is too")
   })
 })
 
 test("disband asks first, and the room's row goes as the Host's deletion", async () => {
   await fresh(OPEN)
   await mount(screen(), async () => {
-    await openMenu()
-    await click(findAll('[role="menuitem"]').find((one) => one.textContent?.includes("Disband")) ?? null)
+    await openSheet()
+    await click(button("Disband room"))
     await until(async () => text().includes("Disband this room?"), "the question")
     assert.equal(held.gone, false, "nothing happens until it is answered")
-    await click(findAll("button").find((one) => one.textContent?.trim() === "Disband") ?? null)
+    await click(button("Disband"))
 
     await until(async () => posted.some((one) => one.path.endsWith("/disband")), "the disband")
     const sent = posted.find((one) => one.path.endsWith("/disband"))
@@ -213,10 +259,10 @@ test("a refused disband says why, and the room stays", async () => {
   await fresh(OPEN)
   held.refuseDisband = true
   await mount(screen(), async () => {
-    await openMenu()
-    await click(findAll('[role="menuitem"]').find((one) => one.textContent?.includes("Disband")) ?? null)
+    await openSheet()
+    await click(button("Disband room"))
     await until(async () => text().includes("Disband this room?"), "the question")
-    await click(findAll("button").find((one) => one.textContent?.trim() === "Disband") ?? null)
+    await click(button("Disband"))
 
     await until(async () => text().includes(NO_DISBAND), "the Host's refusal")
     assert.ok((await db.conversations.get(ROOM))?.room, "the room is still on this device")
@@ -228,21 +274,40 @@ test("a retried rename is the same event, and a retried disband the same stop", 
   await fresh(OPEN)
   held.refuseRenameOnce = true
   await mount(screen(), async () => {
-    await openMenu()
-    await click(findAll('[role="menuitem"]').find((one) => one.textContent?.includes("Rename")) ?? null)
-    await until(async () => Boolean(find('input[aria-label="Room name"]')), "the rename dialog")
-    await type(find('input[aria-label="Room name"]'), "Planning 2")
-    const save = () => findAll("button").find((one) => one.textContent?.trim() === "Save") ?? null
-    await click(save())
+    await openSheet()
+    await type(nameField(), "Planning 2")
+    await leave(nameField())
     await until(async () => text().includes("still settling"), "the Host's first refusal")
-    await click(save())
+    // The same name again: a dropped answer is not a name the Host refused.
+    await type(nameField(), "Planning 2")
+    await leave(nameField())
 
     await until(async () => posted.length === 2, "the second attempt")
     assert.equal(
       posted[0].body.event_id,
       posted[1].body.event_id,
-      "a retry is the same rename, because the event id is the attempt's",
+      "a retry is the same rename, because the event id is the opening's",
     )
+  })
+})
+
+test("a rename asked again in a new opening is a new event, not the one before it", async () => {
+  await fresh(OPEN)
+  await mount(screen(), async () => {
+    await openSheet()
+    await type(nameField(), "Planning 2")
+    await leave(nameField())
+    await until(async () => posted.length === 1, "the first rename")
+    // The sheet closed and opened again: the question is a new one, and so is its id. A Host that
+    // keeps the first id would take the second name for the first one replayed.
+    await shutSheet(sheet)
+    await openSheet()
+    await type(nameField(), "Planning 3")
+    await leave(nameField())
+
+    await until(async () => posted.length === 2, "the second rename")
+    assert.notEqual(posted[1].body.event_id, posted[0].body.event_id, "a new opening, a new event")
+    assert.equal(posted[1].body.name, "Planning 3")
   })
 })
 

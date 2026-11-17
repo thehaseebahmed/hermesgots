@@ -1,7 +1,9 @@
 /**
  * A bot's Main as the record keeps it now (G1): a chat like any other, with two things of its own —
  * it cannot be deleted from this device, and it is titled with its own name rather than its bot's.
- * Nothing makes one any more, so nothing here asks for one to be made.
+ * Nothing makes one any more, so nothing here asks for one to be made. Its title is Hermes's, and its
+ * bar opens no Edit sheet at all: the press leads to the bot's settings page, so there is no name to
+ * write over it and nothing to delete (G2, G13, `chat-settings.tsx`).
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -12,7 +14,6 @@ import { db, deleteConversation, type Conversation } from "@/lib/db"
 
 import {
   botProfile,
-  click,
   find,
   findText,
   json,
@@ -65,7 +66,7 @@ test("a Main is titled with its own name, not its bot's", async () => {
   )
 })
 
-test("Main has no Delete, in its settings or in the data layer", async () => {
+test("Main has no Delete, and no name to write, in its settings", async () => {
   await seed()
   globalThis.fetch = async () => json({})
   await mount(
@@ -75,11 +76,13 @@ test("Main has no Delete, in its settings or in the data layer", async () => {
       </Routes>
     </MemoryRouter>,
     async () => {
-      await until(async () => Boolean(find("[data-chat-settings-open]")), "the bar's title")
-      await click(find("[data-chat-settings-open]"))
-      await settle()
-      assert.ok(find("[data-chat-name]"), "the chat's own settings opened")
-      assert.ok(!findText("button", "Delete chat"), "with no way to delete a Main among them")
+      await until(async () => Boolean(find('[data-slot="header-title"]')), "the bar's title")
+      // Main's title answers with the bot's settings page, not a sheet (G3, G13): there is nothing
+      // here to write a name into, and nothing to delete.
+      assert.ok(!find("[data-chat-settings-open]"), "no press that opens an Edit sheet")
+      assert.ok(!find("[role=dialog]"), "and nothing opened in its place")
+      assert.ok(!find("[data-chat-name]"), "with no field to write over the host's title")
+      assert.ok(!findText("button", "Delete chat"), "and no way to delete a Main among them")
     },
   )
   await deleteConversation(MAIN.id)

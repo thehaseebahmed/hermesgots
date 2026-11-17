@@ -7,6 +7,7 @@ import { modelOf, wantsPin } from "@/lib/model-pick"
 import { readRequest } from "@/lib/request-text"
 import { quietly } from "@/lib/report"
 import { openerFor, pinFromHost, pinModel, titleFrom, uploadAttachments } from "@/lib/send-turn"
+import { sentFileOf, type SentFile } from "./fold"
 
 import { tell } from "@/lib/tell"
 import { ensureSessionWorkspace } from "@/lib/workspace"
@@ -118,7 +119,7 @@ export async function queueTurn(chatId: string, text: string, attachments: Attac
       run: turn.body,
     })
     turn.settled(true)
-    return { item, config, session }
+    return { item, config, session, sent }
   } catch (error) {
     turn.settled(false)
     throw error
@@ -128,19 +129,21 @@ export async function queueTurn(chatId: string, text: string, attachments: Attac
 /**
  * Steers the running reply the way the current screen does: queued first, then steered by the
  * plugin, so a steer Hermes refuses or hands back unread stays queued rather than lost. Answers
- * whether the reply took it, which is when the thread may draw it.
+ * whether the reply took it, which is when the thread may draw it, and the files it carried as the
+ * host saved them.
  */
 export async function steerTurn(
   chatId: string,
   text: string,
   attachments: Attachment[],
-): Promise<boolean> {
-  const { item, config, session } = await queueTurn(chatId, text, attachments)
+): Promise<{ took: boolean; files: SentFile[] }> {
+  const { item, config, session, sent } = await queueTurn(chatId, text, attachments)
+  const files = sent.map(sentFileOf)
   try {
     await queueAction(config, session, item.id, "steer")
-    return true
+    return { took: true, files }
   } catch {
     tell.error("Couldn't steer this reply, so it's queued.")
-    return false
+    return { took: false, files }
   }
 }

@@ -57,7 +57,7 @@ export interface Settings {
   /**
    * The layout the app drew before a bot's screen became the list of its chats: Recents in the
    * sidebar and a New chat screen. Local and off by default; on is the opt-out, read by
-   * `useLegacyChat` in `legacy-chat.ts`.
+   * `chatLayout` in `chat-layout.ts`.
    */
   legacyChat?: boolean
   /**
@@ -305,10 +305,23 @@ export interface Conversation {
   /** Its pushes are muted. Synced through the chat list, which is where the plugin reads it. */
   muted?: boolean
   /**
-   * Held above the Code list's status groups (ADR 0103). Synced through the chat record; a session
-   * that is not pinned carries no field.
+   * Held above the Code list's status groups (ADR 0103), and at the top of a bot's own list, in the
+   * order `pinnedAt` gives. Synced through the chat record; a session that is not pinned carries no
+   * field.
    */
   pinned?: boolean
+  /**
+   * When the reader pinned it, which is the order the pinned group is drawn in — the earliest pin on
+   * top, the last at its bottom. Synced beside `pinned`; a pin written before the app kept a clock
+   * carries none and reads as the earliest, so nothing stored is migrated to gain one.
+   */
+  pinnedAt?: number
+  /**
+   * Archived by the reader: out of every pill but Archived, and out of every band, count and search
+   * until it is unarchived. Synced like `pinned`, and archiving takes the pin with it in the same
+   * write, so no pin is left behind the pill where no list could turn it off (`chat-marks.ts`).
+   */
+  archived?: boolean
   /** The bot's Main thread: its permanent chat, which can't be deleted or discarded. Synced. */
   main?: boolean
   /** Permission mode. The plugin holds it live; the user's saved pick also travels in the chat record. */
@@ -357,6 +370,19 @@ export interface Conversation {
    * Local only, and only a room carries it.
    */
   roomSeenSeq?: number
+  /**
+   * When the reader last pinned or archived this **room**, on this device's clock. A room's marks are
+   * the reader's and the Host's room has no field for them (ADR 0121), so they travel as a record of
+   * their own in the Host's chat store, and this is the clock that record is written at and merged
+   * by: one whose mark clock does not beat the row's leaves its marks alone (ADR 0157).
+   *
+   * The row names it for the record that carries it — every other field of a row says which record it
+   * belongs to as well — while the wire inside that record calls the same clock `marksAt`
+   * (`RoomRecordValue`, and `RoomMarks` in `sync.ts`). It is no chat's field — it rides only the
+   * record the app posts, and is not in `CHAT_FIELDS` — and only a room carries it, since a chat's
+   * marks ride its own record, on `changedAt`.
+   */
+  roomMarksAt?: number
 }
 
 /**
@@ -605,6 +631,8 @@ export interface Attachment {
 export interface Steer {
   id: string
   text: string
+  /** The files it was sent with, where it carried any. */
+  files?: Attachment[]
   /** Where in the reply's text it was sent, so it sits there in the thread. */
   contentOffset: number
   /** Calls drawn above it, as a compaction's seam counts them; absent before the app kept one. */
@@ -995,6 +1023,13 @@ export interface SessionState {
   live?: LiveTurn
   /** What the turns this device watched cost, by the id of the row that opened each. */
   stats?: Record<string, MessageStats>
+  /**
+   * What a run this device followed failed with, by the id of the row that opened the turn: the
+   * host's own account of it — a provider refusing the key, a usage limit reached — which its
+   * transcript notice does not carry. Kept on the device so a thread reopened on this one still
+   * reads why the turn failed.
+   */
+  failures?: Record<string, string>
   /** What the plugin holds for the session, as it last listed it. */
   queue?: { items: Queued[]; paused: boolean }
   /** Messages a send could not get to the host, kept until one is sent again or taken back. */
@@ -1845,6 +1880,32 @@ db.version(49).upgrade((tx) =>
 )
 
 /**
+ * v50: a Main this build does not publish. Main is the host's canonical Bot Chat now, resolved and laid
+ * over the list answers by the plugin, so a record an older build wrote under a `main-*` id is no Main
+ * at all — the flag it carries is cleared, and the record stays as an ordinary side chat with its
+ * history. Only ids of that shape lose the flag: a Main this build holds is keyed by its bot and the
+ * session (`chats.main_id` in the plugin), which a device that has crossed this upgrade holds without
+ * ever running it again — and one that crosses it late is told again by the projection, which dates the
+ * flag past the record it lays it on whenever the store's copy does not carry it yet (ADR 0160).
+ *
+ * Nothing else about these records moves: they keep their title, their messages, their marks and their
+ * drafts, and one that the host's Bot Chat has since replaced is simply a conversation of the bot's.
+ */
+db.version(50).upgrade((tx) =>
+  tx
+    .table("conversations")
+    .filter(
+      (conversation: Record<string, unknown>) =>
+        typeof conversation.id === "string" &&
+        conversation.id.startsWith("main-") &&
+        "main" in conversation,
+    )
+    .modify((conversation: Record<string, unknown>) => {
+      delete conversation.main
+    }),
+)
+
+/**
  * How many rows of one room's log this device keeps: the page a reader can scroll back through.
  * A room's log lives on its Host and is read by sequence, so a page is what a screen needs and no
  * more — without a bound, every fold and every read mark would pay for the room's whole history.
@@ -2122,6 +2183,19 @@ export function conversationsOf(profileId: string) {
 }
 
 /**
+ * The record one bot's list draws as its **Main**: the chat the plugin flags, read off the bot's own
+ * chats. Nothing where the bot has none, which is a device that has never met a plugin publishing one —
+ * so no screen mints one here. Asked by everything that has to draw the chat a bot's list stands
+ * beside: Main's own address, the pane that keeps that list on screen, and the read a badge counts
+ * from (`mainChatOf` is the one query under `useBotMain`).
+ */
+export function mainChatOf(profileId: string) {
+  return conversationsOf(profileId)
+    .filter((chat) => Boolean(chat.main))
+    .first()
+}
+
+/**
  * The title a chat wears until something is said in it: what a new one is made with, and what a
  * list that names one reads as "nothing said here yet" — so a menu offering sessions to tag leaves
  * these out rather than listing three rows all called the same thing.
@@ -2201,26 +2275,66 @@ export interface RoomRecord {
   deleted?: boolean
   /** The profiles a create added to the making profile's roster to seat its picks (ADR 0129). */
   seated?: string[]
-  value?: {
-    title?: string
-    createdAt?: number
-    updatedAt?: number
-    room?: Room
-  }
+  value?: RoomRecordValue
+}
+
+/**
+ * One room record's value, as the wire spells it: the Host's own fields, and — laid over them where
+ * the plugin projects the room rather than written into the Host's room, which has no field for
+ * either — the reader's marks and the clock they were last written at (ADR 0121, ADR 0157). All four
+ * marks are the record's to name, and they land together.
+ *
+ * This is the record's shape and not the row's: `writeRoomRow` maps it onto `Conversation`, whose own
+ * field for the clock is `roomMarksAt` — a row's field says which record carries it, and the wire
+ * keeps the name the plugin reads.
+ */
+export interface RoomRecordValue {
+  title?: string
+  createdAt?: number
+  updatedAt?: number
+  room?: Room
+  pinned?: boolean
+  pinnedAt?: number
+  archived?: boolean
+  /** The clock the marks were made at, as the plugin's `roomMarks` names it; the row's `roomMarksAt`. */
+  marksAt?: number
 }
 
 /** The fields a room's record is allowed to say; every other field on the row is this device's. */
-const ROOM_FIELDS = ["title", "createdAt", "updatedAt", "room"] as const
+const ROOM_FIELDS = [
+  "title",
+  "createdAt",
+  "updatedAt",
+  "room",
+] as const satisfies readonly (keyof Conversation)[]
+
+/**
+ * The fields a room's marks are, as the row names them and as the record names them — the reader's
+ * pin and the clock it is ordered by, the reader's archive, and the clock all of them were last
+ * written at, which the two sides spell differently (`roomMarksAt` on the row, `marksAt` on the wire).
+ *
+ * The two sides part only at the clock — the row keeps it as `roomMarksAt` and the wire names it
+ * `marksAt` — so the pairing is stated once here rather than guessed at where the patch is built: a
+ * fifth mark cannot be added to one side and missed by the other, and neither side is reached by a
+ * cast.
+ */
+const MARK_FIELDS = [
+  ["pinned", "pinned"],
+  ["pinnedAt", "pinnedAt"],
+  ["archived", "archived"],
+  ["roomMarksAt", "marksAt"],
+] as const satisfies readonly (readonly [keyof Conversation, keyof RoomRecordValue])[]
 
 /**
  * One room's row, written from the record the plugin projects or a write answers (ADR 0123).
  *
- * A room's record carries the Host's own clock, its name and its roster, and nothing else: no chat's
- * field is its to say, so the row keeps this device's own — its pin (ADR 0121), what its log this
- * device holds ends asking for, and the newest sequence it has drawn. A record that is a deletion is
- * the Host's disband arriving (ADR 0116), so the row and the room's page go with it, and no chat
- * tombstone is written: a room is never carried as a chat, so a tombstone would push a deletion for a
- * row the plugin's store never had.
+ * A room's record carries the Host's own clock, its name and its roster, and — where the reader
+ * marked the room — its pin and its archive, which the plugin lays over the room rather than storing
+ * on it (ADR 0157). No chat's field is the record's to say, so the row keeps this device's own: what
+ * its log this device holds ends asking for, and the newest sequence it has drawn. A record that is a
+ * deletion is the Host's disband arriving (ADR 0116), so the row and the room's page go with it, and no
+ * chat tombstone is written: a room is never carried as a chat, so a tombstone would push a deletion
+ * for a row the plugin's store never had.
  *
  * One writer, because two would drift: the chat-list merge and a lifecycle write's answer are the same
  * record, so they must leave the same row.
@@ -2238,16 +2352,28 @@ export async function writeRoomRow(id: string, record: RoomRecord, profileId: st
   // An empty roster is not a roster either — a Host that answers no members has said nothing about
   // them, and writing `[]` over the seats would cost the room its answering bot (ADR 0115).
   const rosterless = Boolean(existing?.room) && !value.room?.members.length
-  const named = ROOM_FIELDS.filter(
-    (field) => value[field] !== undefined && !(field === "room" && rosterless),
-  )
-  const patch = Object.fromEntries(named.map((field) => [field, value[field]]))
+  const patch: Partial<Conversation> = {}
+  const written: (keyof Conversation)[] = []
+  for (const field of ROOM_FIELDS) {
+    if (value[field] === undefined) continue
+    if (field === "room" && rosterless) continue
+    Object.assign(patch, { [field]: value[field] })
+    written.push(field)
+  }
+  // A room's marks are compared by their own clock rather than by the record's: the projection is
+  // cached, so one that left the Host before the reader's own mark was made says nothing about it, and
+  // one naming marks this row already holds is the reader's own record come back.
+  if (value.marksAt !== undefined && value.marksAt > (existing?.roomMarksAt ?? 0))
+    for (const [field, wire] of MARK_FIELDS) {
+      Object.assign(patch, { [field]: value[wire] })
+      written.push(field)
+    }
   // A room is projected unchanged on every read: writing it again would wake every live query over a
-  // chat list for news that nothing happened.
+  // chat list for news that nothing happened — and its marks are echoed back the same way.
   const same =
     existing !== undefined &&
     existing.changedAt === record.at &&
-    named.every((field) => equal(existing[field], patch[field]))
+    written.every((field) => equal(existing[field], patch[field]))
   if (same) return
   await db.transaction("rw", db.conversations, db.tombstones, async () => {
     await db.conversations.put({
