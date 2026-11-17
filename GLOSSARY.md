@@ -232,20 +232,43 @@ have room to say what the bot is instead (ADR 0151).
 _Avoid_: heartbeat, online status, availability
 
 **Chat**:
-A bot's own conversation with you — where the app is: a bot's address lands in its chat, so the chat,
-not a list of them, is the screen the app opens on and the one a reload keeps the reader in. A bot's
-list holds every chat it has, so an older conversation is as reachable as the newest, and a chat's bar
-carries the way to that list; a room and a routine's run are rows of the same list rather than chats,
-since one is shared with the bot's other members and the other is nobody's conversation. Main is a
-chat like any other: no mark, one place in the order, and the one chat that cannot be deleted.
-_Avoid_: thread, Main, bot chat, "the bot's screen"
+A bot's own conversation with you, and one of the conversations that bot has. A bot's address opens on
+its **Main**, and every other conversation of the bot's — its chats and the rooms its roster seats —
+stands on its **Side chat list**, one press away, which a chat's bar leads back to. A room and a
+routine's run are not chats: one is shared with the bot's other members, and the other is the
+routines page's row.
+_Avoid_: thread, bot chat, "the bot's screen"
+
+**Main**:
+The one permanent conversation a bot has, and what its address opens on. The bot's host keeps it as its
+own **Bot Chat**, and the plugin publishes that session as the bot's one record flagged Main, minting
+one through the bot's gateway where the host has none and following the host's again if it names
+another. It is never renamable, archivable or deletable, it reads no context usage, and its title is a
+press onto the bot's settings page. Every other chat of the bot's is a **Side chat**; the app draws
+"Main" over whatever title the host gave it.
+_Avoid_: bot chat, home chat, default chat, root conversation
+
+**Side chat**:
+A chat or a room of a bot's that is neither its **Main** nor a routine's run. It is what the **Side
+chat list** holds, and all Main's control counts when any of them is unread. A project session is
+Code's and never a side chat, and a run is the routines page's row.
+_Avoid_: thread, conversation, sub-chat, secondary chat
+
+**Side chat list**:
+The screen of a bot's side chats, one press from Main at `/b/<bot>/sidechats`: the way back to Main
+leading it, the bot and how many side chats it has under the title "Sidechats", the routines control
+trailing, and five pills — All, Unread, Archived, Chats and Rooms. It orders by when each chat last
+moved at all, so the one the reader has just written in is the one they are in. At the two-pane width it
+stands in the lane with Main beside it, Main's row above the rest under a Home glyph; at one pane it is
+the whole screen.
+_Avoid_: chat list, index, sidebar list, bot chats
 
 **Blank chat**:
-A chat-next chat with no record yet: the bot's face, an empty thread and the composer, whose first send makes the chat and hands the message to the thread that draws it (ADR 0111). It is the legacy layout's New chat as much as the bot layout's, and its first send makes the chat either way.
+A chat-next chat with no record yet: the bot's face, an empty thread and the composer, whose first send makes the chat and hands the message to the thread that draws it (ADR 0111). A list's New chat opens one, and its first send makes the chat.
 _Avoid_: new chat screen, draft chat, empty chat
 
 **Unstarted chat**:
-A chat's record nothing has been said in: its clock never moved past the one it was made at, and it holds no saved draft, no unsent text and no message. A New chat press mints one, because the screen it opens needs an address. It is no row of any list until it starts — not the bot's, not the sidebar's count, not the legacy bands — and it starts with the first word sent, or with the first draft or half-typed line kept in it. Nothing is deleted and no screen closes while it waits (ADR 0158).
+A chat's record nothing has been said in: its clock never moved past the one it was made at, and it holds no saved draft, no unsent text and no message. A New chat press mints one, because the screen it opens needs an address. It is no row of any list until it starts — not a bot's list's, not the sidebar's count — and it starts with the first word sent, or with the first draft or half-typed line kept in it. Nothing is deleted and no screen closes while it waits (ADR 0158).
 _Avoid_: empty chat, new chat, phantom chat
 
 **Steer**:
@@ -457,7 +480,7 @@ The mark Gots leaves on a task it has claimed.
 _Avoid_: claimed, in-progress, assigned, taken
 
 **Bar**:
-A child screen's top bar: the leading control, the title, the line under it, the actions and the slot a screen pins with it, drawn by one component in two forms — floating over a thread, pinned in a list's scroll flow. Its leading control is the app's menu only on a bot's list, which is where the app is; every screen opened off that list — a chat, a room, a routine's run, the routines page, a new room's picker — leads with its way back to it instead, and a project session with "Back to Code". One slot, one of the two, never both. Every icon control on it is a frosted outline circle.
+A child screen's top bar: the leading control, the title, the line under it, the actions and the slot a screen pins with it, drawn by one component in two forms — floating over a thread, pinned in a list's scroll flow. Its leading control is the app's menu only on a bot's **Main**, which is where the app is; every screen opened off it — a **Side chat list**, and a chat, a room, a routine's run, the routines page and a new room's picker one rung further down — leads with its way back to the bot's Main instead, and a project session with "Back to Code". One slot, one of the two, never both. Every icon control on it is a frosted outline circle.
 _Avoid_: topbar, navbar, toolbar, app bar, header
 
 **Foot**:
@@ -465,7 +488,7 @@ The bar of floating controls a list keeps at the foot of its scroll, above the s
 _Avoid_: bottom bar, FAB row, dock
 
 **Filter**:
-One of the pills that narrow a list. A bot's chat list wears All, Unread, Archived, Chats, Rooms and Routines in the **bar** under its title row — under the search where there is one — and the one pressed is remembered on this device, with All what a device that never chose opens on; Chats is a row that is neither a room nor a routine's run, Unread is the same mark this device's read dot reads, and Archived is the one pill a row the reader put away is kept by, so All's own list is the rows nobody archived. A bot's **Skills tab** wears All and its **skill categories** instead, drawn in the tab's own flow rather than pinned to a header, forgotten when the tab is left, and each one holding at least one skill by construction — so the tab's only "nothing here" is the search's. Either way a filter only narrows and never re-orders.
+One of the pills that narrow a list. A bot's list wears them in the **bar** under its title row — under the search where there is one — and the one pressed is remembered on this device, with All what a device that never chose opens on; Chats is a row that is neither a room nor a routine's run, Unread is the same mark this device's read dot reads, and Archived is the one pill a row the reader put away is kept by, so All's own list is the rows nobody archived. The **Side chat list** wears All, Unread, Archived, Chats and Rooms — a run is no side chat, so the Routines pill would draw what that screen has already left out — while the **flat chat list** wears all six. A bot's **Skills tab** wears All and its **skill categories** instead, drawn in the tab's own flow rather than pinned to a header, forgotten when the tab is left, and each one holding at least one skill by construction — so the tab's only "nothing here" is the search's. Either way a filter only narrows and never re-orders.
 _Avoid_: tab, segment, tag
 
 **Tell**:
@@ -669,9 +692,12 @@ _Avoid_: heard on the host, local mode, offline mode, on-device
 A setting that is Gots's own — the app, the device or the Gots plugin's own host values — rather than a knob on the bot's Hermes. Settings are grouped by this split.
 _Avoid_: app setting, local setting, device setting
 
-**Legacy chat UX**:
-The Developer setting that restores the old chat-list sidebar, drawing Recents instead of the bots, with a Rooms section of its own (ADR 0110). A bot's chats are the layout otherwise, on every device.
-_Avoid_: old layout, classic mode, bot threads off
+**Flat chat list**:
+The Developer setting that draws every chat a bot has as one list at its own address, its routines'
+runs among the rows and the six pills — All, Unread, Archived, Chats, Rooms and Routines — and no
+**Main** (ADR 0162). Off on every device, where a bot opens on its Main and its chats are a screen
+away; on, the bot's address is that list, and the side-chat address lands it.
+_Avoid_: legacy chat UX, old layout, classic mode, bot threads
 
 **Hermes setting**:
 A setting of the bot's Hermes itself: the same knob the Hermes Dashboard shows, named as Hermes names it. The General page is the Dashboard's own Config > General tab mirrored, so its rows are whatever that host's schema holds and its cards are the sections the host files them under — a key Hermes adds later is a row without an app release.
