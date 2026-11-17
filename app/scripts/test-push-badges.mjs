@@ -22,6 +22,7 @@ import {
   badgePath,
   botIds,
   checkBadges,
+  coverageOf,
   drawableName,
   drawablePath,
   photoPath,
@@ -95,23 +96,60 @@ test("the badge is the bot's photo, filled to the square", () => {
   }
 })
 
-test("the icon is laid in the bottom-right corner, over the photo", () => {
+test("the icon is laid in the bottom-right corner, rounded, over the photo", () => {
   for (const id of botIds()) {
     const picture = photo(id)
     const badge = decode(readFileSync(badgePath(id)))
     let redrawn = 0
     for (let y = 0; y < MARK; y++) {
       for (let x = 0; x < MARK; x++) {
-        const [sx, sy] = sourceOf(icon, x, y, MARK, MARK)
-        assert.deepEqual(
-          at(badge, MARK_AT + x, MARK_AT + y),
-          at(icon, sx, sy),
-          `${id}'s corner (${MARK_AT + x}, ${MARK_AT + y}) is the icon's (${sx}, ${sy})`,
-        )
+        const pixel = at(badge, MARK_AT + x, MARK_AT + y)
+        const where = `${id}'s corner (${MARK_AT + x}, ${MARK_AT + y})`
+        const cover = coverageOf(x, y)
+        if (cover === 1) {
+          // Well inside the mark: the icon's own pixel, as it is scaled.
+          const [sx, sy] = sourceOf(icon, x, y, MARK, MARK)
+          assert.deepEqual(pixel, at(icon, sx, sy), `${where} is the icon's (${sx}, ${sy})`)
+        } else if (cover === 0) {
+          // Outside it — the four corners of its box — the photo is what shows, which is what makes
+          // the mark read as the app's rounded icon rather than a square pasted over the picture.
+          const [sx, sy] = sourceOf(picture, MARK_AT + x, MARK_AT + y, SIZE, SIZE)
+          assert.deepEqual(pixel, at(picture, sx, sy), `${where} is the photo's (${sx}, ${sy}), the mark being rounded`)
+        }
+        // Between the two the pixel is the edge, blended; its value is the next case's business.
         if (!isScaled(badge, picture, MARK_AT + x, MARK_AT + y)) redrawn++
       }
     }
     assert.ok(redrawn > (MARK * MARK) / 2, `${id}'s corner is drawn over the photo (${redrawn} of ${MARK * MARK} pixels)`)
+  }
+})
+
+test("the mark's own corners are cut round, the way the app's icon is drawn", () => {
+  // Read off the photo rather than the generator's mask, so a mark drawn square fails here.
+  for (const id of botIds()) {
+    const picture = photo(id)
+    const badge = decode(readFileSync(badgePath(id)))
+    for (const [x, y] of [
+      [0, 0],
+      [MARK - 1, 0],
+      [0, MARK - 1],
+      [MARK - 1, MARK - 1],
+    ]) {
+      const [sx, sy] = sourceOf(picture, MARK_AT + x, MARK_AT + y, SIZE, SIZE)
+      assert.deepEqual(
+        at(badge, MARK_AT + x, MARK_AT + y),
+        at(picture, sx, sy),
+        `${id}'s mark corner (${x}, ${y}) shows the photo, not the icon`,
+      )
+    }
+    // And the mark is still there: its middle is the icon's middle.
+    const middle = Math.floor(MARK / 2)
+    const [sx, sy] = sourceOf(icon, middle, middle, MARK, MARK)
+    assert.deepEqual(
+      at(badge, MARK_AT + middle, MARK_AT + middle),
+      at(icon, sx, sy),
+      `${id}'s mark carries the icon at its middle`,
+    )
   }
 })
 

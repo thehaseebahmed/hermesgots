@@ -29,6 +29,30 @@ export const MARK = 72
 /** The pixels of photo left showing between the icon and the badge's edge. */
 export const INSET = 8
 
+/**
+ * The corner radius of the mark, as a share of its side: the roundness a phone's launcher gives the
+ * app's own icon, so the mark reads as that icon set into the photo rather than a square pasted over
+ * it. A fifth of the side is where Android's mask and iOS's sit against each other.
+ */
+export const RADIUS = Math.round(MARK * 0.22)
+
+/**
+ * How much of the mark's pixel at (x, y) the rounded square covers: 1 well inside it, 0 well outside,
+ * and the fraction between where the edge crosses the pixel, so a corner is drawn smooth rather than
+ * stepped. The signed distance to a rounded rectangle is the one rule; half a pixel either side of the
+ * edge is the feather.
+ */
+export function coverageOf(x, y) {
+  const half = MARK / 2
+  // The pixel's own centre, measured from the mark's middle.
+  const dx = Math.abs(x + 0.5 - half) - (half - RADIUS)
+  const dy = Math.abs(y + 0.5 - half) - (half - RADIUS)
+  const outside = Math.hypot(Math.max(dx, 0), Math.max(dy, 0))
+  const inside = Math.min(Math.max(dx, dy), 0)
+  const distance = outside + inside - RADIUS
+  return Math.min(Math.max(0.5 - distance, 0), 1)
+}
+
 /** Where the bot pictures are, and the icon whose mark each badge wears. */
 export const BOTS = fileURLToPath(new URL("../public/bots/", import.meta.url))
 export const ICON = fileURLToPath(new URL("../public/pwa-192x192.png", import.meta.url))
@@ -67,8 +91,9 @@ export function botIds() {
 
 /**
  * The badge itself: the photo scaled to fill the square, with the icon scaled to `MARK` and drawn
- * over it `INSET` from the right and bottom edges. Source-over, so an icon carrying transparent
- * corners would sit on the photo rather than cut a hole in it.
+ * over it `INSET` from the right and bottom edges, rounded at `RADIUS` so it wears the shape the
+ * app's own icon is drawn at. Source-over with that coverage as its alpha, so the mark's corners are
+ * the photo showing through rather than a square pasted onto it.
  *
  * @param {{ width: number, height: number, data: Uint8Array }} photo
  * @param {{ width: number, height: number, data: Uint8Array }} icon
@@ -81,7 +106,8 @@ export function badgeOf(photo, icon) {
   for (let y = 0; y < MARK; y++) {
     for (let x = 0; x < MARK; x++) {
       const from = (y * MARK + x) * 4
-      const alpha = mark.data[from + 3] / 255
+      const alpha = (mark.data[from + 3] / 255) * coverageOf(x, y)
+      if (alpha === 0) continue
       const to = ((y + at) * SIZE + (x + at)) * 4
       for (let channel = 0; channel < 3; channel++)
         badge.data[to + channel] = Math.round(mark.data[from + channel] * alpha + badge.data[to + channel] * (1 - alpha))
