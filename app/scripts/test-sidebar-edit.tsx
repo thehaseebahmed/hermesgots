@@ -715,7 +715,8 @@ const pinRow = () => find('[data-sidebar-row="canvas:p1"]')
 const unpinControl = () => find('[data-sidebar-row="canvas:p1"] [data-sidebar-unpin]')
 /** What a row's refusal says, and it is drawn by the row it was made in. */
 const refusalInRow = () => pinRow()?.querySelector('[role="alert"]') ?? null
-const rowIds = () => findAll("[data-sidebar-row]").map((row) => row.getAttribute("data-sidebar-row"))
+const rowIds = () =>
+  findAll("[data-sidebar-row]").map((row) => row.getAttribute("data-sidebar-row"))
 
 /** Opens the mode over a sidebar whose rows have arrived. */
 async function openMode() {
@@ -752,7 +753,11 @@ test("an unpin the host refuses keeps the row, in the host's words", async () =>
         "Unpinning A pinned timetable",
         "the name saying the same",
       )
-      assert.equal(unpinControl()?.hasAttribute("disabled"), true, "and held while the write is out")
+      assert.equal(
+        unpinControl()?.hasAttribute("disabled"),
+        true,
+        "and held while the write is out",
+      )
       assert.equal(
         pinRow()?.querySelector('[data-slot="spinner"], [role="progressbar"]'),
         null,
@@ -801,7 +806,11 @@ test("an unpin the host refuses keeps the row, in the host's words", async () =>
         before.filter((id) => id !== "canvas:p1"),
         "the row leaves the mode, every other row where it stood",
       )
-      assert.equal(pinnedIds.includes(PINNED_CANVAS.id), false, "and the store's pinned list is shorter")
+      assert.equal(
+        pinnedIds.includes(PINNED_CANVAS.id),
+        false,
+        "and the store's pinned list is shorter",
+      )
       stored = await db.settings.get("settings")
       assert.deepEqual(stored?.sidebarLayout, DEFAULT_SIDEBAR_LAYOUT, "still no layout write")
     })
@@ -842,7 +851,11 @@ test("an unpin the host refuses keeps the row, in the host's words", async () =>
       )
       assert.deepEqual(rowIds(), before, "the row in its place")
       assert.deepEqual(silent[0]?.body, { pinned: false }, "the write was the unpin, asked once")
-      assert.deepEqual(said, [], "and nothing said in passing: the row's words are drawn where it was")
+      assert.deepEqual(
+        said,
+        [],
+        "and nothing said in passing: the row's words are drawn where it was",
+      )
       const stored = await db.settings.get("settings")
       assert.deepEqual(stored?.sidebarLayout, DEFAULT_SIDEBAR_LAYOUT, "and no layout write")
     })
@@ -866,7 +879,11 @@ test("an unpin the host refuses keeps the row, in the host's words", async () =>
       before.filter((id) => id !== "canvas:p1"),
       "the row gone from the mode, every other row standing",
     )
-    assert.equal(pinnedIds.includes(PINNED_CANVAS.id), false, "the store's pinned list, one shorter")
+    assert.equal(
+      pinnedIds.includes(PINNED_CANVAS.id),
+      false,
+      "the store's pinned list, one shorter",
+    )
     assert.equal(answered.length, 1, "one write for one press")
     assert.deepEqual(answered[0].body, { pinned: false }, "the unpin, and nothing else")
     const stored = await db.settings.get("settings")
@@ -985,7 +1002,12 @@ const inQuestion = (label: string) => findText('[role="alertdialog"] button', la
 
 test("Reset asks first and leaves every pin alone", async () => {
   await seed()
-  await seedSettings({ activeProfileId: bot.id, meetings: true, sidebarLayout: ARRANGED, appearanceAt: 0 })
+  await seedSettings({
+    activeProfileId: bot.id,
+    meetings: true,
+    sidebarLayout: ARRANGED,
+    appearanceAt: 0,
+  })
   // A host that would answer an unpin, so a request about a canvas would be seen rather than refused.
   const posts = serveUnpin("unpinned")
   pinnedIds = []

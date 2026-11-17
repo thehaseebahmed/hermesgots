@@ -73,7 +73,11 @@ test("an empty record is today's list", () => {
 test("a record that reads as today's list says Reset has nothing to clear", () => {
   // What the mode holds its foot control on: today's rows in today's order, and nothing put away.
   for (const record of [undefined, DEFAULT_SIDEBAR_LAYOUT, { version: 1, order: [], hidden: [] }]) {
-    assert.equal(isDefaultLayout(sidebarRows([]), record), true, "no record, an empty one, the default")
+    assert.equal(
+      isDefaultLayout(sidebarRows([]), record),
+      true,
+      "no record, an empty one, the default",
+    )
   }
   // A record that names every row is today's list too, so a write of today's order is not a change.
   assert.equal(
@@ -82,7 +86,11 @@ test("a record that reads as today's list says Reset has nothing to clear", () =
     "the whole catalogue, named in the catalogue's own order",
   )
   assert.equal(
-    isDefaultLayout(sidebarRows([]), { version: 1, order: ["meetings", ...TODAY.slice(0, -1)], hidden: [] }),
+    isDefaultLayout(sidebarRows([]), {
+      version: 1,
+      order: ["meetings", ...TODAY.slice(0, -1)],
+      hidden: [],
+    }),
     false,
     "another order is an arrangement to clear",
   )
@@ -428,7 +436,10 @@ test("a record this build cannot read is today's list, and never a throw", () =>
   assert.equal(isSidebarLayoutRecord(newer), true, "a record, in a shape this build does not read")
   assert.deepEqual(resting(newer), TODAY, "today's list, since its number is not this build's")
   assert.deepEqual(putAway(newer), [], "and none of what it put away is hidden here")
-  assert.equal(JSON.stringify(newer), JSON.stringify({ version: 2, order: TODAY, hidden: ["code"] }))
+  assert.equal(
+    JSON.stringify(newer),
+    JSON.stringify({ version: 2, order: TODAY, hidden: ["code"] }),
+  )
   // The shapes that are records, so this is a test of the shape and not of `false`.
   assert.equal(isSidebarLayoutRecord(DEFAULT_SIDEBAR_LAYOUT), true, "the default is a record")
   assert.equal(

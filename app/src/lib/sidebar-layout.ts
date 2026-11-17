@@ -132,7 +132,10 @@ export interface SidebarPlacedRow<Pin extends SidebarPin = SidebarPin> {
  * never written, so a newer build's arrangement survives this one. Nothing here throws: the sidebar is
  * mounted on every route, and a value the account kept is no reason for the app to draw no nav.
  */
-function readableRecord(record: unknown, known: Map<string, unknown>): SidebarLayoutRecord | undefined {
+function readableRecord(
+  record: unknown,
+  known: Map<string, unknown>,
+): SidebarLayoutRecord | undefined {
   // The number is this build's to read, and the shape test has said the lists are its two — so what is
   // left to ask is whether the record is one this build knows and whether it names a row it draws.
   if (!isSidebarLayoutRecord(record) || record.version !== 1) return undefined

@@ -21,12 +21,7 @@ import { Separator } from "@/components/ui/separator"
 import { botMainPath } from "@/lib/bot-tabs"
 import { stateLine } from "@/lib/bot-chrome"
 import { closeCanvas, useCanvasOpened } from "@/lib/canvas-open"
-import {
-  updateCanvas,
-  useCanvasEnabled,
-  usePinnedCanvases,
-  type Canvas,
-} from "@/lib/canvases"
+import { updateCanvas, useCanvasEnabled, usePinnedCanvases, type Canvas } from "@/lib/canvases"
 import { chatOwner } from "@/lib/chat-owner"
 import { db } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
