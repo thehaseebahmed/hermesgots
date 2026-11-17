@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- GoTrue sends the tokens back to the referring page when it is on this site. -->
+    <meta name="referrer" content="same-origin" />
+    <title>Gots</title>
+    <link rel="icon" type="image/png" href="/favicon.png" />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --background: #ffffff;
+        --foreground: #16161a;
+        --muted: #6b6b76;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --background: #111111;
+          --foreground: #f4f4f5;
+          --muted: #a1a1aa;
+        }
+      }
+      body {
+        margin: 0;
+        min-height: 100dvh;
+        display: grid;
+        place-items: center;
+        padding: env(safe-area-inset-top) 16px env(safe-area-inset-bottom);
+        box-sizing: border-box;
+        background: var(--background);
+        color: var(--foreground);
+        font-family: system-ui, sans-serif;
+        text-align: center;
+      }
+      img {
+        width: 96px;
+        height: 96px;
+      }
+      p {
+        color: var(--muted);
+      }
+      [hidden] {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="/favicon.png" alt="" />
+      <p id="error" hidden></p>
+    </main>
+    <script>
+      // The website is its own site, so it can't sign in with this site's Identity itself. It sends
+      // the reader here with ?return=<its page>; this page signs in with GitHub and hands the access
+      // token back in the return page's fragment. Only the website's own pages may be returned to,
+      // or any link could have a reader's token sent wherever it named.
+      const KEY = "gots-website-return"
+      const local = location.hostname === "localhost" || location.hostname === "127.0.0.1"
+      function allowed(raw) {
+        try {
+          const url = new URL(raw)
+          if (url.origin === "https://hermesgots.dev") return url.origin + url.pathname
+          if (local && (url.hostname === "localhost" || url.hostname === "127.0.0.1")) {
+            return url.origin + url.pathname
+          }
+        } catch {}
+        return null
+      }
+      function fail(message) {
+        const error = document.getElementById("error")
+        error.textContent = message
+        error.hidden = false
+      }
+      function stored() {
+        try {
+          const value = localStorage.getItem(KEY)
+          localStorage.removeItem(KEY)
+          return value
+        } catch {
+          return null
+        }
+      }
+
+      const params = new URLSearchParams(location.hash.slice(1))
+      const back = new URLSearchParams(location.search).get("return")
+      if (params.get("access_token")) {
+        const target = allowed(stored() || "")
+        history.replaceState(null, "", location.pathname)
+        if (!target) {
+          fail("Signed in, but there is no page to go back to.")
+        } else {
+          const out = new URLSearchParams({
+            access_token: params.get("access_token"),
+            expires_in: params.get("expires_in") || "3600",
+          })
+          location.replace(target + "#" + out.toString())
+        }
+      } else if (params.get("error")) {
+        fail(params.get("error_description") || params.get("error"))
+      } else if (!allowed(back || "")) {
+        fail("This sign-in only returns to hermesgots.dev.")
+      } else {
+        try {
+          localStorage.setItem(KEY, back)
+        } catch {}
+        location.replace("/.netlify/identity/authorize?provider=github")
+      }
+    </script>
+  </body>
+</html>
