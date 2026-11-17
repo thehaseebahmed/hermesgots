@@ -6,11 +6,13 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
-import { act, useState } from "react"
+import { act, useEffect, useState } from "react"
 import { MemoryRouter } from "react-router"
 
 import { ConversationList } from "@/components/conversation-list"
+import { CANVAS_UNREACHABLE, useCanvasStore } from "@/lib/canvases"
 import { adoptAppearance, db, getSettings } from "@/lib/db"
+import { DEFAULT_SIDEBAR_LAYOUT } from "@/lib/sidebar-layout"
 import { syncedAppearance } from "@/lib/sync"
 
 import {
@@ -26,6 +28,7 @@ import {
   seedSettings,
   settle,
   until,
+  withToasts,
   wordsOf,
 } from "./component-kit.tsx"
 
@@ -82,7 +85,8 @@ const doneButton = () => find('button[aria-label="Done editing sidebar"]')
 /** The mode itself: the group the sidebar's own state opens. */
 const group = () => find('[role="group"][aria-label="Sidebar layout"]')
 /** A row's own words, before the control the mode puts beside them. */
-const labelOf = (row: Element | null) => wordsOf(row).replace(/(?:Hide|Show)$/, "")
+const labelOf = (row: Element | null) =>
+  wordsOf(row).replace(/(?:Hide|Show|Unpin|Unpinning|Try again)$/, "")
 /** A row's move control, named for the row it moves and the place it goes. */
 const moveControl = (label: string, direction: "up" | "down") =>
   find(`button[aria-label="Move ${label} ${direction}"]`)
@@ -156,7 +160,11 @@ test("the header's button is the mode's switch", async () => {
     )
     const pinned = find('[data-sidebar-row="canvas:p1"]')
     assert.equal(pinned?.hasAttribute("data-canvas-pinned"), true, "the pin keeps its mark")
-    assert.equal(wordsOf(pinned), "A pinned timetable", "and the canvas's own title")
+    assert.equal(
+      labelOf(pinned),
+      "A pinned timetable",
+      "and the canvas's own title, its one control beside it",
+    )
     await click(row)
     assert.equal(path(), "/", "a row pressed in the mode navigates nowhere")
     await click(doneButton())
@@ -473,5 +481,231 @@ test("a collapsed sidebar draws no edit button, and an expanded one draws it", a
       "false",
       "a sidebar that is not collapsed draws it, resting",
     )
+  })
+})
+
+/**
+ * The three ways a host answers an unpin: it refuses in its own words, it never answers at all, or it
+ * answers the record with the pin taken off. A request that never lands is answered here the way the
+ * client's own timeout answers it — a `TimeoutError` off `fetch` (`request` in `hermes.ts` rethrows
+ * one, and `withHost` turns it into the unreachable refusal) — so a case about a host gone quiet
+ * proves the same thing without sitting on the fifteen seconds a real timer would take.
+ */
+type UnpinAnswer = "refused" | "silent" | "unpinned"
+
+const REFUSED_WORDS = "The host won't let this pin go while its bot is busy."
+
+function serveUnpin(answer: UnpinAnswer, hold?: Promise<void>) {
+  /** Every write the mode made, in the order it made it. */
+  const posts: { body: unknown }[] = []
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input))
+    const method = (init?.method ?? "GET").toUpperCase()
+    if (url.pathname.endsWith("/info")) return json({ version: "0.114.0", features: ["canvas"] })
+    if (url.pathname.endsWith("/canvases") && method === "GET")
+      return json({ object: "gots.canvases", canvases: [PINNED] })
+    if (url.pathname.endsWith(`/canvases/${PINNED.id}`) && method === "POST") {
+      posts.push({ body: JSON.parse(String(init?.body ?? "{}")) })
+      // The first write is the one a case can hold open, so the control's held state is a state a
+      // reader can be standing in rather than a race the answer always wins.
+      if (hold && posts.length === 1) await hold
+      if (answer === "refused" && posts.length === 1)
+        return json({ error: { message: REFUSED_WORDS } }, 409)
+      if (answer === "silent") throw new DOMException("The operation timed out.", "TimeoutError")
+      return json({ canvas: { ...PINNED, pinned: false, at: 21 } })
+    }
+    return json({ error: { message: "no route" } }, 404)
+  }) as unknown as typeof fetch
+  return posts
+}
+
+/** The store's own pinned list, drawn beside the sidebar so a case reads what the write left. */
+let pinnedIds: string[] = []
+function StorePins() {
+  const { pinned } = useCanvasStore()
+  // Read after the commit rather than during the render: what a case asks is what the store held
+  // once the row it drew had landed.
+  useEffect(() => {
+    pinnedIds = pinned.map((canvas) => canvas.id)
+  }, [pinned])
+  return null
+}
+
+/** The sidebar with the store's pinned list beside it, for a case that reads both. */
+const sidebarAndStore = () => (
+  <MemoryRouter initialEntries={["/"]}>
+    <Path />
+    <ConversationList />
+    <StorePins />
+  </MemoryRouter>
+)
+
+/** The pin's row in the mode. */
+const pinRow = () => find('[data-sidebar-row="canvas:p1"]')
+/** The one control a pin carries, named for the canvas it lets go. */
+const unpinControl = () => find('[data-sidebar-row="canvas:p1"] [data-sidebar-unpin]')
+/** What a row's refusal says, and it is drawn by the row it was made in. */
+const refusalInRow = () => pinRow()?.querySelector('[role="alert"]') ?? null
+/** The rows the mode draws, in the order it draws them. */
+const rowIds = () => findAll("[data-sidebar-row]").map((row) => row.getAttribute("data-sidebar-row"))
+
+/** Opens the mode over a sidebar whose rows have arrived. */
+async function openMode() {
+  await until(async () => Boolean(find('a[href="/projects"]')), "the nav")
+  await click(editButton())
+  await until(async () => Boolean(group()), "the mode")
+}
+
+test("an unpin the host refuses keeps the row, in the host's words", async () => {
+  // A host that says no: the row stays exactly where it stood, the host's sentence under it, and the
+  // control one press from asking again — no spinner, and nothing said in passing where the reader
+  // is not looking.
+  let release = () => {}
+  const held = new Promise<void>((done) => (release = done))
+  await seed()
+  const posts = serveUnpin("refused", held)
+  await mount(sidebarAndStore(), async () => {
+    await openMode()
+    await until(async () => Boolean(pinRow()), "the pin's row")
+    const before = rowIds()
+    assert.equal(wordsOf(unpinControl()), "Unpin", "the control, named for the canvas it lets go")
+    assert.equal(
+      unpinControl()?.getAttribute("aria-label"),
+      "Unpin A pinned timetable",
+      "and named for its canvas rather than its place",
+    )
+
+    await withToasts(async (said) => {
+      await click(unpinControl())
+      // The press holds that one control and leaves the row exactly where it was.
+      assert.equal(wordsOf(unpinControl()), "Unpinning", "the control saying what it is doing")
+      assert.equal(
+        unpinControl()?.getAttribute("aria-label"),
+        "Unpinning A pinned timetable",
+        "the name saying the same",
+      )
+      assert.equal(unpinControl()?.hasAttribute("disabled"), true, "and held while the write is out")
+      assert.equal(
+        pinRow()?.querySelector('[data-slot="spinner"], [role="progressbar"]'),
+        null,
+        "no spinner of its own, which would outlive the answer anyway",
+      )
+      assert.deepEqual(rowIds(), before, "the row exactly where it stood")
+      assert.equal(posts.length, 1, "one write out")
+      assert.deepEqual(posts[0].body, { pinned: false }, "and it is the unpin, nothing more")
+
+      // The host's answer.
+      release()
+      // Let the answer land inside the test's own act, so the row's render is not an update the
+      // harness has to warn about.
+      await settle()
+      await until(async () => wordsOf(refusalInRow()).length > 0, "the host's refusal")
+      assert.equal(wordsOf(refusalInRow()), REFUSED_WORDS, "in the host's own words")
+      assert.equal(
+        refusalInRow()?.closest("[data-sidebar-row]")?.getAttribute("data-sidebar-row"),
+        "canvas:p1",
+        "drawn by the row the press was made in, not at the top of the list",
+      )
+      assert.equal(wordsOf(unpinControl()), "Try again", "the control, one press from asking again")
+      assert.equal(
+        unpinControl()?.getAttribute("aria-label"),
+        "Try again: unpin A pinned timetable",
+        "named for what the press does",
+      )
+      assert.equal(unpinControl()?.hasAttribute("disabled"), false, "and pressable")
+      assert.deepEqual(rowIds(), before, "the row still exactly where it stood")
+      assert.equal(pinRow()?.hasAttribute("data-hidden"), false, "and not put away")
+      assert.deepEqual(said, [], "nothing said in passing: the refusal stands where it was made")
+
+      // A canvas's write is the host's record and no part of the layout: the account's arrangement is
+      // where it was, and its clock has not moved.
+      let stored = await db.settings.get("settings")
+      assert.deepEqual(stored?.sidebarLayout, DEFAULT_SIDEBAR_LAYOUT, "the layout record untouched")
+      assert.equal(stored?.appearanceAt, 0, "nor the appearance clock it rides")
+
+      // Try again is the same write, and an answer then folds the host's record into the store.
+      await click(unpinControl())
+      await until(async () => posts.length === 2, "the second write")
+      assert.deepEqual(posts[1].body, { pinned: false }, "the same unpin asked again")
+      await until(async () => missing('[data-sidebar-row="canvas:p1"]'), "the answered record")
+      assert.deepEqual(
+        rowIds(),
+        before.filter((id) => id !== "canvas:p1"),
+        "the row leaves the mode, every other row where it stood",
+      )
+      assert.equal(pinnedIds.includes(PINNED.id), false, "and the store's pinned list is shorter")
+      stored = await db.settings.get("settings")
+      assert.deepEqual(stored?.sidebarLayout, DEFAULT_SIDEBAR_LAYOUT, "still no layout write")
+    })
+  })
+
+  // A host that never answers: the client gives up its own way, and that refusal is the row's too —
+  // at once here, since a `TimeoutError` is what fifteen seconds of silence would end in.
+  await seed()
+  const silent = serveUnpin("silent")
+  await mount(sidebarAndStore(), async () => {
+    await openMode()
+    await until(async () => Boolean(pinRow()), "the pin's row")
+    const before = rowIds()
+    await click(unpinControl())
+    await until(
+      async () => wordsOf(refusalInRow()) === CANVAS_UNREACHABLE,
+      "the client's own unreachable refusal",
+    )
+    assert.equal(
+      wordsOf(refusalInRow()),
+      CANVAS_UNREACHABLE,
+      "the client's words, since the host sent none",
+    )
+    assert.equal(
+      refusalInRow()?.closest("[data-sidebar-row]")?.getAttribute("data-sidebar-row"),
+      "canvas:p1",
+      "under the row, where the press was made",
+    )
+    assert.equal(wordsOf(unpinControl()), "Try again", "and no spinner left where the answer is")
+    assert.equal(
+      pinRow()?.querySelector('[data-slot="spinner"], [role="progressbar"], [role="status"]'),
+      null,
+      "nothing of it spinning still",
+    )
+    assert.deepEqual(rowIds(), before, "the row in its place")
+    assert.deepEqual(silent[0]?.body, { pinned: false }, "the write was the unpin, asked once")
+    const stored = await db.settings.get("settings")
+    assert.deepEqual(stored?.sidebarLayout, DEFAULT_SIDEBAR_LAYOUT, "and no layout write")
+  })
+
+  // A host that answers the record: the row leaves the sidebar because the store's pinned list is
+  // read, and nothing about the layout record moved to make it so.
+  await seed()
+  const answered = serveUnpin("unpinned")
+  pinnedIds = []
+  await mount(sidebarAndStore(), async () => {
+    await openMode()
+    await until(async () => Boolean(pinRow()), "the pin's row")
+    await until(async () => pinnedIds.includes(PINNED.id), "the store holding the pin")
+    const before = rowIds()
+
+    await click(unpinControl())
+    await until(async () => missing('[data-sidebar-row="canvas:p1"]'), "the row leaving the mode")
+    assert.deepEqual(
+      rowIds(),
+      before.filter((id) => id !== "canvas:p1"),
+      "the row gone from the mode, every other row standing",
+    )
+    assert.equal(pinnedIds.includes(PINNED.id), false, "the store's pinned list, one shorter")
+    assert.equal(answered.length, 1, "one write for one press")
+    assert.deepEqual(answered[0].body, { pinned: false }, "the unpin, and nothing else")
+    const stored = await db.settings.get("settings")
+    assert.deepEqual(
+      stored?.sidebarLayout,
+      DEFAULT_SIDEBAR_LAYOUT,
+      "no `sidebarLayout` write on a canvas's success",
+    )
+    assert.equal(stored?.appearanceAt, 0, "nor a move of the appearance clock")
+
+    // And the resting sidebar draws no row for it, since it reads the same store.
+    await click(doneButton())
+    await until(async () => Boolean(editButton()), "the switch at rest")
+    assert.equal(missing('nav[aria-label="Main"] a[href="/canvas/p1"]'), true, "the pin's row gone")
   })
 })

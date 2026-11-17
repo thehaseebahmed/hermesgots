@@ -21,7 +21,12 @@ import { Separator } from "@/components/ui/separator"
 import { botMainPath } from "@/lib/bot-tabs"
 import { stateLine } from "@/lib/bot-chrome"
 import { closeCanvas, useCanvasOpened } from "@/lib/canvas-open"
-import { useCanvasEnabled, usePinnedCanvases, type Canvas } from "@/lib/canvases"
+import {
+  updateCanvas,
+  useCanvasEnabled,
+  usePinnedCanvases,
+  type Canvas,
+} from "@/lib/canvases"
 import { chatOwner } from "@/lib/chat-owner"
 import { db } from "@/lib/db"
 import { formatRelative } from "@/lib/format"
@@ -478,6 +483,10 @@ export function ConversationList({
                 const at = sidebarModeRows(known, layout).findIndex(({ row }) => row.id === onto)
                 if (at !== -1) saveLayout(moveTo(id, at, layout, known))
               }}
+              // A pin is the host's record, not the account's arrangement: the write goes to the
+              // canvas's own bot, and its answer folds into the store the sidebar's pins are read from.
+              // The layout record is not touched either way.
+              onUnpin={(canvasId) => updateCanvas(canvasId, { pinned: false })}
             />
           ) : (
             rows.map((row) => (
