@@ -832,7 +832,7 @@ const STEER_ROW = (id: number): Row =>
 test("a steer the host took stands in the reply at once, and its own row does not draw it twice", () => {
   let state = play([{ event: "message.delta", delta: "Working.", seq: 1 } as RunEvent])
   assert.deepEqual(steers(state), [], "nothing steered yet")
-  state = reduce(state, { type: "steered", text: "please slow down" })
+  state = reduce(state, { type: "steer-drawn", send: "s1", text: "please slow down" })
   assert.deepEqual(
     steers(state),
     ["please slow down"],
@@ -850,6 +850,52 @@ test("a steer the host took stands in the reply at once, and its own row does no
   assert.deepEqual(steers(state), ["please slow down"], "the row is that same steer, not a second one")
 })
 
+test("a steer the host refused comes back out of the reply, and nothing of it stands there", () => {
+  let state = play([{ event: "message.delta", delta: "Working.", seq: 1 } as RunEvent])
+  state = reduce(state, { type: "steer-drawn", send: "s1", text: "please slow down" })
+  assert.deepEqual(steers(state), ["please slow down"], "drawn the moment it was sent")
+  state = reduce(state, { type: "unsteered", send: "s1" })
+  assert.deepEqual(steers(state), [], "and gone once the host says it never reached the agent")
+})
+
+test("the host's files settle the part, and an answer for a reply that moved adds nothing", () => {
+  let state = play([{ event: "message.delta", delta: "Working.", seq: 1 } as RunEvent])
+  state = reduce(state, { type: "steer-drawn", send: "s1", text: "please slow down" })
+  const files = [{ name: "notes.txt", type: "text/plain", size: 5, image: false, path: "/h/n" }]
+  const settled = reduce(state, { type: "steer-settled", send: "s1", files })
+  assert.deepEqual(steers(settled), ["please slow down"], "one steer")
+  assert.deepEqual(
+    settled.live?.turn.parts.filter((part) => part.kind === "steer")[0].files,
+    files,
+    "carrying the file the host saved",
+  )
+  const next = reduce(state, { type: "sent", send: "t2", user: "next", at: 2 })
+  assert.equal(
+    reduce(next, { type: "steer-settled", send: "s1", files }),
+    next,
+    "a part the reply no longer holds takes no answer",
+  )
+})
+
+test("a steer sent while a rejoined run replays stands on the copy the replay draws", () => {
+  const ROWS: Row[] = [
+    { id: 1, role: "user", content: "go" },
+    { id: 2, role: "assistant", content: "Working." },
+  ]
+  let state = reduce(initial, { type: "transcript", rows: ROWS })
+  state = reduce(state, { type: "attach", run: "r" })
+  assert.notEqual(state.live?.replay, undefined, "the run is replaying its own events")
+  state = reduce(state, { type: "steer-drawn", send: "s1", text: "please slow down" })
+  assert.deepEqual(steers(state), ["please slow down"], "and the words stand without waiting for it")
+  // The replay catches up with the copy it was joined from.
+  state = reduce(state, {
+    type: "run",
+    event: { event: "message.delta", delta: "More words.", seq: 1 } as RunEvent,
+  })
+  assert.equal(state.live?.replay, undefined, "the replay is over")
+  assert.deepEqual(steers(state), ["please slow down"], "and the steer is drawn once, not twice")
+})
+
 test("a steer is drawn from the transcript alone when this page draws no reply", () => {
   const held = reduce(initial, {
     type: "transcript",
@@ -860,7 +906,7 @@ test("a steer is drawn from the transcript alone when this page draws no reply",
     ],
   })
   const before = threadTurns(held).at(-1)!.parts
-  const after = threadTurns(reduce(held, { type: "steered", text: "please slow down" })).at(-1)!.parts
+  const after = threadTurns(reduce(held, { type: "steer-drawn", send: "s1", text: "please slow down" })).at(-1)!.parts
   assert.deepEqual(after, before, "with no live turn there is nothing to draw it on")
   assert.deepEqual(
     after.flatMap((part) => (part.kind === "steer" ? [part.text] : [])),

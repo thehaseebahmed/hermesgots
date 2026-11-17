@@ -2,7 +2,6 @@ import { Fragment, Suspense, lazy, memo, useMemo, type ReactNode } from "react"
 import {
   AlertCircleIcon,
   ClockIcon,
-  CornerDownRightIcon,
   RotateCcwIcon,
   SendHorizontalIcon,
   XIcon,
@@ -361,10 +360,6 @@ function SteerBubble({
           <SentAttachments conversationId={conversationId} attachments={attachments} dim />
         ) : null}
         <UserBubble>{said}</UserBubble>
-        <div className="flex items-center gap-1 px-1 text-xs text-muted-foreground">
-          <CornerDownRightIcon className="size-3.5" />
-          Steered
-        </div>
       </MessageContent>
     </MessageRow>
   )

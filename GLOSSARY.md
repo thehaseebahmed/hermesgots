@@ -274,7 +274,7 @@ A chat's record nothing has been said in: its clock never moved past the one it 
 _Avoid_: empty chat, new chat, phantom chat
 
 **Steer**:
-A message the user sends into a run already under way, drawn where it reached the agent: the user's own bubble, splitting the reply's work at that point, with "Steered" muted under it. The words are the user's, so the bubble is theirs; the caption is the one thing saying they arrived mid-run rather than as a new message.
+A message the user sends into a run already under way, drawn where it reached the agent: the user's own bubble, splitting the reply's work at that point, bare. The words are the user's, so the bubble is theirs, and nothing marks it as having arrived mid-run: the place in the reply is what says so. Where this device is drawing the reply, it is drawn at the press rather than when the host takes it, and taken back out if the host never took it — a reply this page is not drawing shows it when the transcript's row lands; the queue draws a message that never reached the agent at all.
 _Avoid_: interrupt, injection, mid-run message
 
 **Share sheet**:

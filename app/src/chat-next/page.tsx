@@ -107,7 +107,7 @@ import {
   type Waiting,
 } from "./state"
 import { readRows, storeFor } from "./store"
-import type { PreparedTurn } from "./turn"
+import type { PreparedTurn, SteerAnswer } from "./turn"
 
 /** The questions a finished `clarify` call got answered, each as "<question> → <answer>". */
 function answered(call: ToolCall): string[] {
@@ -260,9 +260,8 @@ const TurnView = memo(
             )
           if (part.kind === "steer")
             return (
-              <div key={at} data-steer className="ml-auto w-fit max-w-[85%] space-y-1 text-right">
+              <div key={at} data-steer className="ml-auto w-fit max-w-[85%] text-right">
                 <UserBubble>{part.text}</UserBubble>
-                <p className="text-xs text-muted-foreground">Steered</p>
               </div>
             )
           if (part.kind === "reminder") return <ReminderRow key={at} reminder={part} />
@@ -735,12 +734,9 @@ interface ThreadOptions {
   queueTurn?: (text: string, attachments: Attachment[]) => Promise<void>
   /**
    * Steers the running reply through the plugin's queue; without it, nothing can be steered. Answers
-   * whether the reply took it, which is when the thread may draw it.
+   * whether the reply took it, which settles the part the thread drew at the press.
    */
-  steerTurn?: (
-    text: string,
-    attachments: Attachment[],
-  ) => Promise<{ took: boolean; files: SentFile[] }>
+  steerTurn?: (text: string, attachments: Attachment[]) => Promise<SteerAnswer>
   /**
    * Called once the thread has read the host (`opened`), each time a turn has ended (`turn`), and
    * when the page comes back to the foreground and has caught up (`returned`): where the app reads
@@ -1729,10 +1725,27 @@ export function ChatNextThread({
 
   async function steerMessage(text: string, attachments: Attachment[]) {
     if (!steerTurn) throw new Error("This reply can't be steered.")
-    // A steer the host took stands in the reply at once: its transcript row lands only when the run
-    // reads it. One it refused stays queued, and the queue row is what draws it.
-    const steered = await steerTurn(text, attachments)
-    if (steered.took) dispatch({ type: "steered", text, files: steered.files })
+    // The message stands in the reply the moment it goes, with the files it carries: the queue post,
+    // the steer and the save of those files are all round trips, and the reader's own words are not
+    // something to wait for. The host's answer then settles that part — with the files as it saved
+    // them, each naming a path the agent can open — or takes it back out, since the queue draws a
+    // steer it never took. Whether there is a reply to draw on at all is `withSteer`'s own rule.
+    const send = randomId()
+    dispatch({
+      type: "steer-drawn",
+      send,
+      text,
+      ...(attachments.length ? { files: attachments.map(sentFileOf) } : {}),
+    })
+    let answer: SteerAnswer
+    try {
+      answer = await steerTurn(text, attachments)
+    } catch (error) {
+      dispatch({ type: "unsteered", send })
+      throw error
+    }
+    if (answer.took) dispatch({ type: "steer-settled", send, files: answer.files })
+    else dispatch({ type: "unsteered", send })
     void catchUp()
   }
 

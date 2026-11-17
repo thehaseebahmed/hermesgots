@@ -131,7 +131,7 @@ jobs:
           [ -z "$ANDROID_KEY_ALIAS" ] && missing+=(ANDROID_KEY_ALIAS)
           [ -z "$ANDROID_KEY_PASSWORD" ] && missing+=(ANDROID_KEY_PASSWORD)
           if [ ${#missing[@]} -gt 0 ]; then
-            echo "::error::A release needs these secrets, which aren't set: ${missing[*]} (see the README's Android app section)"
+            echo "::error::A release needs these secrets, which aren't set: ${missing[*]} (see the README's Getting Started section)"
             exit 1
           fi
 

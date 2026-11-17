@@ -21,6 +21,12 @@ export interface PreparedTurn {
   settled: (reached: boolean) => void
 }
 
+/** What a steer answered: whether the host took it, and the files it carries as the host saved them. */
+export interface SteerAnswer {
+  took: boolean
+  files: SentFile[]
+}
+
 /**
  * Builds a chat's next turn the way every send does (ADR 0065): the model fixed at the chat's first
  * send, its attachments saved on the host, the message with a marker per file and each photo
@@ -129,14 +135,14 @@ export async function queueTurn(chatId: string, text: string, attachments: Attac
 /**
  * Steers the running reply the way the current screen does: queued first, then steered by the
  * plugin, so a steer Hermes refuses or hands back unread stays queued rather than lost. Answers
- * whether the reply took it, which is when the thread may draw it, and the files it carried as the
- * host saved them.
+ * whether the reply took it, which settles the part the thread drew at the press, and the files it
+ * carried as the host saved them.
  */
 export async function steerTurn(
   chatId: string,
   text: string,
   attachments: Attachment[],
-): Promise<{ took: boolean; files: SentFile[] }> {
+): Promise<SteerAnswer> {
   const { item, config, session, sent } = await queueTurn(chatId, text, attachments)
   const files = sent.map(sentFileOf)
   try {
