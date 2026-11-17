@@ -1,5 +1,13 @@
 import { useState } from "react"
-import { ArchiveIcon, BellOffIcon, PinIcon } from "lucide-react"
+import {
+  ArchiveIcon,
+  ArchiveXIcon,
+  BellOffIcon,
+  CheckIcon,
+  GitForkIcon,
+  PinIcon,
+  RotateCcwIcon,
+} from "lucide-react"
 
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
@@ -19,21 +27,39 @@ import { usePluginFeatureOn } from "@/lib/features"
 import { setThreadMuted } from "@/lib/push"
 import { disbandRoomNow, renameRoomTo } from "@/lib/room-writes"
 import { stopMessage } from "@/lib/chat"
+import { quietly } from "@/lib/report"
+import { closeSessionWork } from "@/lib/workspace"
 import { randomId } from "@/lib/utils"
+
+const CLOSE_WORDS =
+  "Its run stops and the host closes the session's work now: its worktrees are removed, unless one has uncommitted or unpushed changes, and its pull request is closed and its branch deleted on GitHub."
 
 /**
  * A chat's bar's title as the press that opens its settings (ADR 0153): the header's `onTitlePress`
  * answers the whole block, and this button is what a reader, a tab stop and a keyboard press, its
  * own clicks bubbling to that block.
  */
-export function ChatTitlePress({ title, open }: { title: string; open: boolean }) {
+export function ChatTitlePress({
+  title,
+  open,
+  centered = false,
+}: {
+  title: string
+  open: boolean
+  /** A session's bar is centred, so its title is too. */
+  centered?: boolean
+}) {
   return (
     <button
       type="button"
       aria-haspopup="dialog"
       aria-expanded={open}
       data-chat-settings-open
-      className="flex min-h-11 w-full min-w-0 items-center text-left outline-none"
+      className={
+        centered
+          ? "flex w-full min-w-0 items-center justify-center outline-none"
+          : "flex w-full min-w-0 items-center text-left outline-none"
+      }
     >
       <span className="min-w-0 truncate">{title}</span>
     </button>
@@ -97,9 +123,9 @@ function PinRow({ chat, profileId }: { chat: Conversation; profileId: string }) 
  * and its archive are still the reader's own marks, drawn on any Host. A **run** keeps the name and the
  * mute a chat has, and a chat keeps everything else. A bot's **Main** keeps its mute alone: its title is
  * the Host's, its place is permanent, and nothing on any surface renames, pins, archives or deletes it
- * (G2). A project session keeps its `…`, whose resolve,
- * discard and delete are not a chat's settings, and the bot's own mute and delete stay on its settings
- * page.
+ * (G2). A project session is edited here too, on `code`: the repositories it works in,
+ * and its own resolve, discard and delete beside the name, mute and pin; it is never archived, since
+ * discarding is its way of being put away. The bot's own mute and delete stay on its settings page.
  */
 export function ChatSettings({
   chat,
@@ -108,8 +134,17 @@ export function ChatSettings({
   open,
   onOpenChange,
   onDeleted,
+  code,
 }: {
   chat: Conversation
+  /**
+   * What a project session adds to the sheet: the bot it works as (the host that closes its work),
+   * every repository it works in. Its context stays in the bar's ring. Absent for a chat.
+   */
+  code?: {
+    profile: Profile
+    repos: readonly string[]
+  }
   /**
    * The bot's list the pin cap is counted over: the profile this chat is a row of, defaulting to the
    * one the record names. A room lists in every bot its roster seats, so a screen that opened the
@@ -138,7 +173,14 @@ export function ChatSettings({
   const canWrite = usePluginFeatureOn(answerer, "rooms_write")
   const roomHost = room && canWrite && answerer ? answerer : undefined
   const [deleting, setDeleting] = useState(false)
+  const [discarding, setDiscarding] = useState(false)
   const [disbanding, setDisbanding] = useState(false)
+  /** Asks the host to close the session, and moves on: the close runs there (ADR 0080). */
+  const closeSession = () => {
+    if (!code) return
+    stopMessage(chat.id)
+    void closeSessionWork(chat, code.profile).catch(quietly("Closing a session"))
+  }
   // One id per opening of each question: a name saved again after a dropped answer is the same
   // rename, and a Disband the same stop, which is the whole of what makes a retry safe (ADR 0123).
   // A question is opened by the sheet it is asked in, so both are let go when that closes and the
@@ -194,7 +236,7 @@ export function ChatSettings({
             control takes the focus — over a sheet the reader only just opened. */}
         <PopupContent initialFocus={false}>
           <PopupHeader className="pb-2">
-            <PopupTitle>{room ? "Edit room" : "Edit chat"}</PopupTitle>
+            <PopupTitle>{room ? "Edit room" : code ? "Edit session" : "Edit chat"}</PopupTitle>
           </PopupHeader>
           <div className="flex flex-col gap-6 px-4 pb-4 sm:px-6">
             {/* A room's name is its Host's, so the field waits for a Host that can write one; a chat's
@@ -233,6 +275,21 @@ export function ChatSettings({
                 )}
               </div>
             )}
+            {code && code.repos.length > 0 && (
+              <section data-session-repos className="flex flex-col gap-2">
+                <h3 className="px-1 text-sm font-medium">
+                  {code.repos.length === 1 ? "Repository" : "Repositories"}
+                </h3>
+                <Group>
+                  {code.repos.map((name) => (
+                    <div key={name} className="flex min-h-14 items-center gap-4 bg-muted px-5 py-3">
+                      <GitForkIcon className="size-5 shrink-0" />
+                      <span className="min-w-0 flex-1 truncate text-base">{name}</span>
+                    </div>
+                  ))}
+                </Group>
+              </section>
+            )}
             <Group>
               {/* A room has no mute: it runs no model call of its own, so nothing pushes for it. */}
               {!room && (
@@ -248,10 +305,56 @@ export function ChatSettings({
               {/* The pin row is a component of its own, so the reads behind its cap are mounted with
                   the sheet and shut with it: a conversation screen would otherwise read every room's
                   row and its Host's log for a count nobody asked for. */}
-              {open && <PinRow chat={chat} profileId={profileId ?? chat.profileId} />}
+              {open && !code && <PinRow chat={chat} profileId={profileId ?? chat.profileId} />}
+              {code && (
+                <SwitchRow
+                  id="chat-pin"
+                  data-chat-pin
+                  icon={PinIcon}
+                  title="Pin"
+                  checked={Boolean(chat.pinned)}
+                  onCheckedChange={(checked) =>
+                    void updateConversation(chat.id, { pinned: checked ? true : undefined }).catch(
+                      quietly("Pinning a session"),
+                    )
+                  }
+                />
+              )}
             </Group>
             <div className="flex flex-col gap-2">
-              {mayArchive(chat) && (
+              {code && !chat.discardedAt && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  data-session-resolve
+                  className="h-11 rounded-full"
+                  onClick={() =>
+                    void updateConversation(chat.id, {
+                      resolvedAt: chat.resolvedAt ? undefined : Date.now(),
+                    }).catch(quietly("Resolving a session"))
+                  }
+                >
+                  {chat.resolvedAt ? (
+                    <RotateCcwIcon data-icon="inline-start" />
+                  ) : (
+                    <CheckIcon data-icon="inline-start" />
+                  )}
+                  {chat.resolvedAt ? "Reopen" : "Resolve"}
+                </Button>
+              )}
+              {code && !chat.discardedAt && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  data-session-discard
+                  className="h-11 rounded-full"
+                  onClick={() => setDiscarding(true)}
+                >
+                  <ArchiveXIcon data-icon="inline-start" />
+                  Discard
+                </Button>
+              )}
+              {!code && mayArchive(chat) && (
                 <Button
                   type="button"
                   variant="outline"
@@ -275,7 +378,9 @@ export function ChatSettings({
                 </DestructiveButton>
               )}
               {!room && !main && (
-                <DestructiveButton onClick={() => setDeleting(true)}>Delete chat</DestructiveButton>
+                <DestructiveButton onClick={() => setDeleting(true)}>
+                  {code ? "Delete session" : "Delete chat"}
+                </DestructiveButton>
               )}
             </div>
           </div>
@@ -297,13 +402,35 @@ export function ChatSettings({
         <ConfirmDestructive
           open={deleting}
           onOpenChange={setDeleting}
-          title="Delete this chat?"
-          description="It's removed from this device. Hermes keeps its own copy of the session."
+          title={code ? "Delete this session?" : "Delete this chat?"}
+          description={
+            code
+              ? CLOSE_WORDS +
+                " It's removed from the app; Hermes keeps its own copy of the session."
+              : "It's removed from this device. Hermes keeps its own copy of the session."
+          }
           confirmLabel="Delete"
           onConfirm={async () => {
-            stopMessage(chat.id)
+            // The row goes now, not when the host has finished: it is already closed, and the close
+            // reports a kept worktree or a refusal when it ends (ADR 0080).
+            if (code) closeSession()
+            else stopMessage(chat.id)
             await deleteConversation(chat.id)
             onDeleted?.()
+          }}
+        />
+      )}
+
+      {code && (
+        <ConfirmDestructive
+          open={discarding}
+          onOpenChange={setDiscarding}
+          title="Discard this session?"
+          description={CLOSE_WORDS + " The session moves to Discarded meanwhile."}
+          confirmLabel="Discard"
+          onConfirm={async () => {
+            closeSession()
+            await updateConversation(chat.id, { discardedAt: Date.now() })
           }}
         />
       )}
