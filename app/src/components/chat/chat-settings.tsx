@@ -431,7 +431,8 @@ export function ChatSettings({
           title={code ? "Delete this session?" : "Delete this chat?"}
           description={
             code
-              ? CLOSE_WORDS + " It's removed from the app; Hermes keeps its own copy of the session."
+              ? CLOSE_WORDS +
+                " It's removed from the app; Hermes keeps its own copy of the session."
               : "It's removed from this device. Hermes keeps its own copy of the session."
           }
           confirmLabel="Delete"

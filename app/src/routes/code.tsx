@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   ArchiveXIcon,
   CheckIcon,
@@ -7,13 +7,13 @@ import {
   GitPullRequestArrowIcon,
   LockIcon,
   PlusIcon,
-  SearchIcon,
 } from "lucide-react"
 import { Navigate, useNavigate } from "react-router"
 
 import { prLabel, prLook } from "@/components/chat/pr-look"
 import { ChatHeader } from "@/components/chat/chat-header"
-import { ItemGroup, ItemRow, pinnedLine } from "@/components/item-list"
+import { ItemRow, pinnedLine } from "@/components/item-list"
+import { CHATS_SEARCH_FIELD_ID, ListFoot } from "@/components/list-foot"
 import { SearchField } from "@/components/search-field"
 import { NewSessionPopup, type SessionTarget } from "@/components/new-session"
 import { SortMenu } from "@/components/sort-menu"
@@ -38,7 +38,8 @@ import {
 import { useDraft } from "@/lib/drafts"
 import { formatRelative } from "@/lib/format"
 import type { HermesProject } from "@/lib/hermes"
-import { codeGroupOf, codeGroups, codeOrder } from "@/lib/item-groups"
+import { codeOrder } from "@/lib/item-groups"
+import { useXLarge } from "@/lib/media"
 import { useAnyChange } from "@/lib/live"
 import { useNav } from "@/lib/nav"
 import { itemToOpen, useCodePane, type FeaturePane } from "@/lib/pane"
@@ -69,7 +70,6 @@ import { type Sort, type SortKey } from "@/lib/sort"
 import { useStoredSort } from "@/lib/use-sort"
 
 const DAY_MS = 86_400_000
-const SEARCH_FIELD_ID = "code-search"
 const LAST_PROJECT = "gots:last-session-project"
 
 /** Asks the list to open the New session sheet, from the empty pane beside it. */
@@ -153,9 +153,8 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const changes = useAnyChange("projects")
   const marks = useReadMarks()
   const [query, setQuery] = useState("")
-  const [searching, setSearching] = useState(false)
-  const field = useRef<HTMLInputElement>(null)
-  const searchToggle = useRef<HTMLButtonElement>(null)
+  // From the laptop width up the bar holds the search and the foot draws none, as a bot's chat list does.
+  const wide = useXLarge()
   const [chip, setChip] = useState<string>()
   const [starting, setStarting] = useState(false)
   const [sort, setSort] = useCodeSort()
@@ -238,29 +237,15 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   )
   const showChips = rows.length > 0 && chips.length > 1
   const filtering = Boolean(query.trim() || chip)
+  // One flat band in the order the sort menu says, what the reader pinned first: a session's state
+  // is on its row, as a chat's is on the bot's list.
   const shown = useMemo(() => {
     const inProject = rows.filter((r) => !chip || r.key === chip)
-    return filterByFuzzy([...inProject].sort(order), query, (r) => [
-      r.c.title,
-      r.project?.name,
-      r.c.worktree?.branch,
-    ])
+    const ordered = [...inProject].sort(
+      (a, b) => Number(Boolean(b.c.pinned)) - Number(Boolean(a.c.pinned)) || order(a, b),
+    )
+    return filterByFuzzy(ordered, query, (r) => [r.c.title, r.project?.name, r.c.worktree?.branch])
   }, [rows, chip, query, order])
-  // What waits on the user first, then working, idle and closed — deterministic, not a live
-  // timestamp chasing itself.
-  const grouped = useMemo(
-    () =>
-      filtering
-        ? undefined
-        : codeGroups(
-            shown,
-            (r) => codeGroupOf(r.state),
-            order,
-            (r) => Boolean(r.c.pinned),
-          ),
-    [shown, order, filtering],
-  )
-  const flat = filtering ? shown : undefined
 
   const targets: SessionTarget[] = [...projects.entries()]
     // A project with no repository has nowhere for a session to work, so it isn't offered.
@@ -275,16 +260,6 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const initial = chip ?? lastProject()
 
   useEffect(() => newSessionAsked.subscribe(() => setStarting(true)), [])
-
-  const openSearch = () => {
-    setSearching(true)
-    window.requestAnimationFrame(() => field.current?.focus())
-  }
-  const closeSearch = () => {
-    setSearching(false)
-    setQuery("")
-    window.requestAnimationFrame(() => searchToggle.current?.focus())
-  }
 
   const start = async ({ key, profile, project }: SessionTarget) => {
     const conversation = await createConversation(profile.id, {
@@ -319,58 +294,30 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   )
 
   return (
-    <div
-      className="flex min-h-0 flex-1 flex-col overflow-y-auto"
-      style={
-        {
-          "--list-header-pt": "max(0.75rem, env(safe-area-inset-top))",
-          "--list-header-h": "calc(var(--list-header-pt) + 3.5rem)",
-        } as CSSProperties
-      }
-    >
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <ChatHeader
         pinned
         heading
         showBot={false}
         title="Code"
         actions={
-          <>
-            <Button
-              ref={searchToggle}
-              variant="ghost"
-              size="icon-lg"
-              className="size-11 rounded-full text-muted-foreground"
-              onClick={() => (searching ? closeSearch() : openSearch())}
-              aria-label="Search"
-              aria-expanded={searching}
-              aria-controls={searching ? SEARCH_FIELD_ID : undefined}
-              data-search-toggle
-            >
-              <SearchIcon />
-            </Button>
-            <SortMenu by="sessions" options={CODE_SORTS} value={sort} onSort={setSort} compact />
-          </>
+          <SortMenu by="sessions" options={CODE_SORTS} value={sort} onSort={setSort} compact />
         }
-      />
-
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
-        {(searching || showChips) && (
-          <div className="flex flex-col gap-3">
-            {searching && (
-              <SearchField
-                id={SEARCH_FIELD_ID}
-                value={query}
-                onChange={(next) => (next ? setQuery(next) : closeSearch())}
-                label="Search sessions"
-                inputRef={field}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") closeSearch()
-                }}
-              />
-            )}
-            {showChips && (
-              <div className="flex min-h-11 items-center">
-                <ChipRow label="Projects" className="min-w-0 flex-1">
+        // The project chips are pinned with the bar in the pill slot, and the search stands with them
+        // from the laptop width up, as a bot's chat list has it (ADR 0145).
+        below={
+          wide || showChips ? (
+            <div className="flex flex-col gap-2">
+              {wide && (
+                <SearchField
+                  id={CHATS_SEARCH_FIELD_ID}
+                  value={query}
+                  onChange={setQuery}
+                  label="Search sessions"
+                />
+              )}
+              {showChips && (
+                <ChipRow label="Projects">
                   <Chip active={!chip} onClick={() => setChip(undefined)}>
                     All
                   </Chip>
@@ -384,11 +331,13 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
                     </Chip>
                   ))}
                 </ChipRow>
-              </div>
-            )}
-          </div>
-        )}
+              )}
+            </div>
+          ) : undefined
+        }
+      />
 
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
         {sessions && rows.length === 0 && (
           <p className="py-8 text-center text-sm text-muted-foreground">No sessions yet.</p>
         )}
@@ -400,7 +349,7 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
                 variant="outline"
                 className="h-11 rounded-full"
                 onClick={() => {
-                  closeSearch()
+                  setQuery("")
                   setChip(undefined)
                 }}
               >
@@ -410,29 +359,21 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
           </div>
         )}
 
-        {flat ? (
-          <ul className="flex flex-col">{flat.map(draw)}</ul>
-        ) : (
-          grouped?.map((group) => (
-            <ItemGroup key={group.key} group={group} sticky>
-              {group.items.map(draw)}
-            </ItemGroup>
-          ))
+        {shown.length > 0 && (
+          <ul data-slot="session-rows" className="flex flex-col">
+            {shown.map(draw)}
+          </ul>
         )}
       </div>
 
-      <div className="pointer-events-none sticky bottom-0 z-20 mt-auto bg-gradient-to-t from-background via-background/90 to-transparent px-4 pt-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <div className="mx-auto flex w-full max-w-2xl justify-end">
-          <Button
-            data-toast-above
-            size="lg"
-            className="pointer-events-auto h-12 rounded-full px-5 shadow-lg"
-            onClick={() => setStarting(true)}
-          >
-            <PlusIcon /> New session
-          </Button>
-        </div>
-      </div>
+      <ListFoot
+        searchable={!wide}
+        query={query}
+        onQueryChange={setQuery}
+        onNew={() => setStarting(true)}
+        newLabel="New session"
+        searchLabel="Search sessions"
+      />
       <NewSessionPopup
         open={starting}
         onOpenChange={setStarting}

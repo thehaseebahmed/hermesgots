@@ -19,7 +19,6 @@ import {
   sessionState,
   threadState,
 } from "../src/lib/session-work.ts"
-import { codeGroupOf } from "../src/lib/item-groups.ts"
 import { pr } from "./fixtures/pr.ts"
 
 const session = (facts = {}) => ({
@@ -194,8 +193,11 @@ test("a session nothing runs and no pull request opens is idle", () => {
 })
 
 
-// The Code list's membership, as the screen wires it: the claim read as the group it lands in.
-const group = (...claim) => codeGroupOf(sessionGroup(...claim).state)
+// A session's claim read as the state it lands in, Resolved and Discarded counted as closed.
+const group = (...claim) => {
+  const { state } = sessionGroup(...claim)
+  return state === "resolved" || state === "discarded" ? "closed" : state
+}
 
 test("a session with a run in flight is Working, so it never reaches Waiting for You", () => {
   assert.equal(

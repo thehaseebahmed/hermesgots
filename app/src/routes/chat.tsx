@@ -41,11 +41,7 @@ import { useChatBar } from "@/components/chat/chat-bar"
 import { ChatSettings } from "@/components/chat/chat-settings"
 import { ContextRing, UsageSheet } from "@/components/chat/usage-sheet"
 import { CODE_FACE, CodeFaceProvider } from "@/components/chat/code-face"
-import {
-  LimitNotice,
-  useChatSurface,
-  useChatUsage,
-} from "@/components/chat/chat-actions"
+import { LimitNotice, useChatSurface, useChatUsage } from "@/components/chat/chat-actions"
 import { FollowAfterApproval, FollowOnSend } from "@/components/chat/follow"
 import { useFirstRows } from "@/components/chat/first-rows"
 import { Composer } from "@/components/chat/composer"

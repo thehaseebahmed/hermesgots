@@ -1,40 +1,18 @@
-// The Code list arranged by session state: the four groups in their fixed order under headings with
-// their counts, empty groups absent until a session gives one, Closed collapsed and holding Resolved
-// and Discarded told apart by their icons, the sort menu choosing Title A–Z and remembering it over a
-// reload, the project chips reading as their names' words alone at 44px, in a row set to scroll
-// sideways with no bar, and a search dropping the headers for one flat list in that same order.
-// Then the unread dot — the geometry no DOM without layout can prove: its corner on the round icon,
-// absent until this device has read the row (no mark, nothing to be newer than), written by the
-// thread rendering when it is opened, and back when activity lands while the list sits open — and
-// the sticky heading's tuck under the header, the same geometry's other half. The whole of it
-// then runs again at a phone's width in the dark and at a tablet's in the light, where a header
-// row that wrapped would move the headings.
+// The Code list drawn as a bot's chat list is: one flat band of rows with no state headings, what the
+// reader pinned first, the sort menu choosing Title A–Z and remembering it over a reload, the project
+// chips in the bar's pill slot reading as their names' words at 44px, a search that stands in the
+// foot below a laptop's width, and the round `+` that starts a session. Then the unread dot — the
+// geometry no DOM without layout can prove: its corner on the round icon, absent until this device
+// has read the row, written by the thread rendering when it is opened, and back when activity lands
+// while the list sits open. The whole of it then runs again at a phone's width in the dark and at a
+// tablet's in the light.
 import { app, assert, flow, pass } from "./lib.mjs"
 
 const PROJECT = "p_1a2b3c4d"
-const ORDER = ["Waiting for You", "Working", "Idle", "Closed"]
-const BAND = "Pinned"
+const HEADINGS = ["Waiting for You", "Working", "Idle", "Closed"]
 
-const group = (page, label) => page.getByRole("region", { name: label, exact: true })
-
-const list = (page) =>
-  page
-    .locator("div.overflow-y-auto")
-    .filter({ has: page.getByRole("heading", { name: "Code", exact: true }) })
-
-/** Every heading the list draws, unfiltered: a group this file does not name must fail the sweep. */
-const headings = (page) =>
-  list(page)
-    .locator("section[aria-label]")
-    .evaluateAll((sections) => sections.map((one) => one.getAttribute("aria-label") ?? ""))
-
-const pinMark = (scope) => scope.locator('svg[aria-label="Pinned"]')
-
-const countIn = async (page, label) => {
-  const span = group(page, label).locator("h2 span").first()
-  return (await span.count()) ? await span.innerText() : null
-}
-
+const rows = (page) => page.locator('[data-slot="session-rows"] li')
+const titles = (page) => rows(page).allTextContents()
 const dotsIn = (row) => row.locator("[data-unread]").count()
 
 /** Through the store's own writer, so the list re-draws on the mark. */
@@ -50,216 +28,67 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
     { id: "cl-checks", title: "Checks in flight", projectId: PROJECT, createdAt: now - 5_000, updatedAt: now,
       prs: [{ repo: "acme/gots", number: 7, title: "A change", state: "open", checks: "pending",
         url: "https://example.test/7", at: now }] },
-    { id: "cl-working", title: "Working turn", projectId: PROJECT, createdAt: now - 4_000, updatedAt: now - 1_000 },
     { id: "cl-idle", title: "At rest", projectId: PROJECT, createdAt: now - 3_000, updatedAt: now - 2_000 },
     { id: "cl-idle2", title: "Another idle", projectId: PROJECT, createdAt: now - 2_000, updatedAt: now - 3_000 },
     { id: "cl-resolved", title: "Finished work", projectId: PROJECT, createdAt: now - 1_500, updatedAt: now - 4_000,
       resolvedAt: now },
-    { id: "cl-discarded", title: "Dropped work", projectId: PROJECT, createdAt: now - 1_000, updatedAt: now - 5_000,
-      discardedAt: now },
+    { id: "cl-pinned", title: "Held at the top", projectId: PROJECT, createdAt: now - 9_000, updatedAt: now - 9_000,
+      pinned: true },
   ])
 
   await page.goto(`${app}/code`)
-  await until(async () => (await group(page, "Waiting for You").count()) > 0, 20_000, "the waiting group")
-
-  assert.deepEqual(await headings(page), ["Waiting for You", "Idle", "Closed"],
-    "the three groups with sessions, in order; Working has none, so it has no heading")
-  assert.equal(await countIn(page, "Waiting for You"), "1", "the waiting count")
-  assert.equal(await countIn(page, "Idle"), "3", "the idle count — the session with no message yet")
-  assert.equal(await countIn(page, "Closed"), "2", "the closed count")
-  pass("groups run Waiting for You, Idle, Closed with their counts, and the empty one stays hidden")
-
-  await page.evaluate(async () => {
-    const { db } = await import("/src/lib/db.ts")
-    const at = Date.now()
-    await db.messages.put({
-      id: "cl-work-msg",
-      conversationId: "cl-working",
-      role: "assistant",
-      content: "Working on it.",
-      status: "streaming",
-      createdAt: at,
-    })
-    await db.conversations.update("cl-working", { updatedAt: at })
-  })
-  await until(async () => (await group(page, "Working").count()) > 0, 15_000, "the working group")
-  assert.deepEqual(await headings(page), ORDER, "all four, in their fixed order")
-  assert.equal(await countIn(page, "Working"), "1", "the working count")
-  assert.equal(await countIn(page, "Idle"), "2", "the idle count, one session the fewer")
-  pass("a running session sits in Working, whatever the clock says, and the empty heading appears")
-
-  // A closed row can still dot: read before its own resolve moved the activity it measures against,
-  // so the store this device holds is written through the app's own writer and the list re-draws.
-  await seedMark(page, "cl-resolved", Date.now() - 30_000)
-  const closed = group(page, "Closed")
-  assert.equal(await closed.getByText("Finished work").isVisible(), false, "Closed starts collapsed")
-  await closed.locator("h2 button").click()
-  await until(async () => (await closed.getByText("Finished work").isVisible()), 5_000, "Closed to open")
-  const glyph = async (row) =>
-    (await row.locator("span.size-10 svg").first().getAttribute("class")) ?? ""
-  const finished = closed.locator("li").filter({ hasText: "Finished work" })
-  const dropped = closed.locator("li").filter({ hasText: "Dropped work" })
-  assert.ok((await glyph(finished)).includes("lucide-check"), "Resolved wears the check")
-  assert.ok((await glyph(dropped)).includes("lucide-archive-x"), "Discarded wears the archive")
-  await until(async () => (await dotsIn(finished)) === 1, 5_000,
-    "a closed row read before its resolve is dotted")
-  assert.equal(await dotsIn(dropped), 0, "and one this device never opened is not")
-  await shot("closed")
-  pass("Closed collapses by default and holds Resolved and Discarded under their own icons")
+  await until(async () => (await rows(page).count()) === 5, 20_000, "the rows")
+  const text = await page.locator("main, body").first().innerText()
+  for (const heading of HEADINGS)
+    assert.ok(!text.includes(heading), `no "${heading}" heading groups the rows`)
+  assert.ok((await titles(page))[0].includes("Held at the top"), "what the reader pinned leads the band")
+  pass("one flat band, no state headings, the pinned session first")
 
   const sortButton = () => page.getByRole("button", { name: /^Sort sessions by/ })
-  assert.equal(
-    await sortButton().locator("svg").count(),
-    1,
-    "the sort trigger carries one sign",
-  )
-  assert.equal(
-    (await sortButton().innerText()).trim(),
-    "",
-    "and no word beside it: in the header it is a sign, like the search",
-  )
-  const barBox = await page.locator("header").first().boundingBox()
-  const trigger = await sortButton().boundingBox()
-  const toggleBox = await page.locator("button[data-search-toggle]").boundingBox()
-  assert.ok(barBox && trigger && toggleBox, "the header, the sort and the search toggle measured")
-  assert.ok(
-    trigger.y >= barBox.y && trigger.y + trigger.height <= barBox.y + barBox.height,
-    "both stand in the header row",
-  )
-  assert.ok(
-    trigger.x >= toggleBox.x + toggleBox.width,
-    "the sort follows the search, left to right",
-  )
-  assert.ok(
-    Math.abs(trigger.x - (toggleBox.x + toggleBox.width) - 8) < 2,
-    "at the header's own gap from it",
-  )
-  assert.ok(
-    trigger.x + trigger.width <= barBox.x + barBox.width,
-    "and the pair ends on the header's right edge",
-  )
-  assert.equal(
-    await page.locator('[data-slot="sort-dock"]').count(),
-    0,
-    "and nothing pins a dock of its own beside the projects",
-  )
   await sortButton().click()
   await page.getByText("Sort by").waitFor()
   await page.getByRole("menuitem", { name: "Title" }).click()
   await until(async () => {
-    const titles = await group(page, "Idle").locator("li").allTextContents()
-    return titles[0]?.includes("Another idle") && titles[1]?.includes("At rest")
-  }, 5_000, "the idle group in title order")
-  assert.match(await sortButton().getAttribute("aria-label") ?? "",
-    /Title, ascending/, "the row's own arrow says which way it reads")
+    const all = await titles(page)
+    return all[0]?.includes("Held at the top") && all[1]?.includes("Another idle") && all[2]?.includes("At rest")
+  }, 5_000, "the rows in title order under the pin")
+  assert.match(await sortButton().getAttribute("aria-label") ?? "", /Title, ascending/)
   await shot("sorted")
-  pass("the sort menu orders each group by title and says which way it reads")
-
   await sortButton().click()
   await page.getByRole("menuitem", { name: /Title/ }).click()
-  await until(async () => {
-    const titles = await group(page, "Idle").locator("li").allTextContents()
-    return titles.at(-1)?.includes("Another idle") && titles[0]?.includes("At rest")
-  }, 5_000, "the idle group turned round")
-  assert.match(await sortButton().getAttribute("aria-label") ?? "", /Title, descending/,
-    "the same key, the opposite arrow")
-  await shot("sorted-desc")
-  pass("picking the chosen sort again flips its arrow instead of choosing it twice")
+  await until(async () => (await sortButton().getAttribute("aria-label") ?? "").includes("descending"), 5_000,
+    "the arrow turned round")
+  pass("the sort menu orders the flat band, pins first, and flips its arrow when chosen again")
 
-  // The chips come from `readProjects`, a read that lands after the screen draws, so the row is waited
-  // for the way every other surface in this flow is.
-  const chipRow = page.locator("[aria-label=Projects]")
-  const chips = chipRow.locator("button")
-  await until(async () => (await chips.count()) > 2, 10_000, "the project chips")
+  // The chips come from `readProjects`, a read that lands after the screen draws.
+  const chips = page.locator("[aria-label=Projects] button")
+  await until(async () => (await chips.count()) > 1, 10_000, "the project chips")
   const faces = await chips.evaluateAll((ones) =>
-    ones.map((one) => ({
-      name: (one.textContent ?? "").trim(),
-      glyphs: one.querySelectorAll("svg").length,
-      height: Math.round(one.getBoundingClientRect().height),
-      pressed: one.getAttribute("aria-pressed"),
-    })),
+    ones.map((one) => ({ glyphs: one.querySelectorAll("svg").length, height: Math.round(one.getBoundingClientRect().height) })),
   )
-  assert.deepEqual(
-    faces.filter((one) => one.glyphs > 0).map((one) => one.name),
-    [],
-    "the project chips carry no icon",
-  )
-  assert.deepEqual(
-    faces.filter((one) => one.height !== 44).map((one) => one.name),
-    [],
-    "and each keeps the 44px its thumb needs",
-  )
-  assert.equal(faces[0].name, "All", "the row still opens with All first")
-  assert.equal(faces[0].pressed, "true", "and it is the one pressed, so no project filters yet")
-  const row = await chipRow.evaluate((el) => {
-    const style = getComputedStyle(el)
-    return { overflow: style.overflowX, scrollbar: style.scrollbarWidth }
-  })
-  assert.equal(row.overflow, "auto", "the row is set to scroll sideways rather than wrap")
-  assert.equal(row.scrollbar, "none", "and to draw no scrollbar for it")
-  pass("the project chips are their names' words, 44px tall, in a row set to scroll with no bar")
+  assert.ok(faces.every((one) => one.glyphs === 0 && one.height === 44), "words alone, 44px tall")
+  const bar = await page.locator("header").first().boundingBox()
+  const chipRow = await page.locator("[aria-label=Projects]").boundingBox()
+  assert.ok(bar && chipRow && chipRow.y >= bar.y, "the chips stand in the bar's pill slot")
+  pass("the project chips are pinned with the bar, as the chat list's pills are")
 
-  // The list's own search button, not the sidebar's: the header's carries `data-search-toggle`.
-  await page.locator("button[data-search-toggle]").click()
+  // The search is the foot's below a laptop's width and the bar's from it; either way one field.
+  const circle = page.locator('[data-slot="list-foot"] [aria-label^="Search"]')
+  if (await circle.count()) await circle.first().click()
   const search = page.getByLabel("Search sessions")
   await search.waitFor()
-  const fieldBox = await search.boundingBox()
-  const headBox = await page.locator("header").first().boundingBox()
-  const chipsBox = await page.locator("[aria-label=Projects]").boundingBox()
-  assert.ok(fieldBox && headBox && chipsBox, "the field, the header and the chip row measured")
-  assert.ok(
-    fieldBox.y >= headBox.y + headBox.height - 2,
-    "the field stands under the title's bar",
-  )
-  assert.ok(
-    chipsBox.y >= fieldBox.y + fieldBox.height,
-    "and the project chips still run under it",
-  )
-  assert.equal(
-    await page.getByRole("heading", { name: "Code", exact: true }).isVisible(),
-    true,
-    "with the title still in its bar, never replaced by the field",
-  )
-  const toggle = page.locator("button[data-search-toggle]")
-  assert.equal(await toggle.getAttribute("aria-expanded"), "true", "the search reads as expanded")
-  assert.equal(
-    await toggle.locator("svg.lucide-search").count(),
-    1,
-    "and wears the search sign it wore closed",
-  )
-  assert.equal(
-    await toggle.getAttribute("aria-controls"),
-    await search.getAttribute("id"),
-    "naming the field it opened",
-  )
-  await search.fill("work")
-  await until(async () => (await group(page, "Idle").count()) === 0, 5_000, "the headers to drop")
-  for (const label of ORDER) assert.equal(await group(page, label).count(), 0, `no ${label} while filtering`)
-  const flat = await page.locator('a[href^="/c/"]').evaluateAll((links) =>
-    links.map((link) => link.textContent ?? "").filter((text) => /Dropped work|Finished work|Working turn/.test(text)),
-  )
-  assert.equal(flat.length, 3, "the three sessions the search finds")
-  assert.ok(flat[0]?.includes("Working turn") && flat[1]?.includes("Finished work") &&
-    flat[2]?.includes("Dropped work"),
-    "flat, every hit at the same rank so the chosen order still runs")
-  await toggle.click()
-  await until(async () => (await group(page, "Idle").count()) > 0, 5_000, "the headers back")
-  assert.equal(await toggle.getAttribute("aria-expanded"), "false", "the icon reads as shut again")
-  assert.equal(await page.getByLabel("Search sessions").count(), 0, "with the field gone")
-  assert.equal(
-    await page.evaluate(() => document.activeElement?.hasAttribute("data-search-toggle")),
-    true,
-    "and the focus back on the button that closed it, rather than on the body",
-  )
-  assert.equal(await page.getByRole("heading", { name: "Code", exact: true }).isVisible(), true,
-    "the title is back")
-  pass("a search opens from the header, drops the group headers and closes back to the title")
+  await search.fill("rest")
+  await until(async () => (await rows(page).count()) === 1, 5_000, "the search to narrow the band")
+  assert.equal(await page.getByLabel("Search sessions").count(), 1, "one field, never two")
+  await search.fill("")
+  await until(async () => (await rows(page).count()) === 5, 5_000, "the band back")
+  pass("a search narrows the same flat band, from the foot or the bar")
 
-  // The dot's own row: an idle session with nothing new in it, read once so that its mark can age.
-  // Opening the thread is what writes the mark, and the store it writes is where that is proved —
-  // the list has changed route, so counting its dots here would count nothing at all.
-  const idleRows = group(page, "Idle")
-  const target = idleRows.locator("li").filter({ hasText: "Another idle" })
+  assert.equal(await page.getByRole("button", { name: "New session" }).count(), 1, "the foot's round +")
+  await shot("foot")
+
+  // The dot's own row: read once so that its mark can age. Opening the thread writes the mark.
+  const target = rows(page).filter({ hasText: "Another idle" })
   await target.locator("a").first().click()
   await page.waitForURL("**/c/cl-idle2", { timeout: 10_000 })
   await until(async () => {
@@ -269,128 +98,29 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
     }, "cl-idle2")
     return at > 0
   }, 5_000, "the mark the thread's own render wrote")
-
-  // A thread on screen keeps re-marking its own activity, so the next row is opened to hold the
-  // pane while this one's activity lands past the mark it has.
-  await idleRows.locator("li").filter({ hasText: "At rest" }).locator("a").first().click()
+  // A thread on screen keeps re-marking its own activity, so the next row is opened to hold the pane.
+  await rows(page).filter({ hasText: "At rest" }).locator("a").first().click()
   await page.waitForURL("**/c/cl-idle", { timeout: 10_000 })
-
   await page.evaluate(async () => {
     const { db } = await import("/src/lib/db.ts")
     await db.conversations.update("cl-idle2", { updatedAt: Date.now() })
   })
-  await until(async () => (await dotsIn(target)) === 1, 10_000,
-    "the dot once activity lands past the mark")
+  await until(async () => (await dotsIn(target)) === 1, 10_000, "the dot once activity lands past the mark")
   const dotBox = await target.locator("[data-unread]").boundingBox()
   const iconBox = await target.locator("span.size-10").boundingBox()
   assert.ok(dotBox && iconBox, "both boxes measured")
-  assert.ok(dotBox.x + dotBox.width / 2 > iconBox.x + iconBox.width / 2,
-    "the dot is on the icon's right half")
-  assert.ok(dotBox.y + dotBox.height / 2 < iconBox.y + iconBox.height / 2,
-    "the dot is on the icon's top half")
-  assert.ok(dotBox.x + dotBox.width <= iconBox.x + iconBox.width + 6, "and hugs its right edge")
-  assert.ok(dotBox.y >= iconBox.y - 6, "and its top edge")
-  await shot("dot")
-
+  assert.ok(dotBox.x + dotBox.width / 2 > iconBox.x + iconBox.width / 2, "the dot is on the icon's right half")
+  assert.ok(dotBox.y + dotBox.height / 2 < iconBox.y + iconBox.height / 2, "and its top half")
   await target.locator("a").first().click()
   await page.waitForURL("**/c/cl-idle2", { timeout: 10_000 })
-  await until(async () => (await dotsIn(target)) === 0, 5_000,
-    "the dot to clear once the thread renders")
+  await until(async () => (await dotsIn(target)) === 0, 5_000, "the dot to clear once the thread renders")
   pass("the dot sits at the icon's corner, needs a mark to be against, clears when read and returns with new activity")
 
-  // The seeded streaming message does not outlive the reload — the app reconciles it against
-  // the host — so this leg runs last.
   await page.reload()
-  await until(async () => (await group(page, "Idle").count()) > 0, 20_000, "the list after a reload")
-  assert.match(await sortButton().getAttribute("aria-label") ?? "",
-    /Title, descending/, "this device remembers the sort, arrow and all")
-  const reloaded = await group(page, "Idle").locator("li").allTextContents()
-  assert.ok(
-    reloaded.findIndex((one) => one.includes("At rest")) <
-      reloaded.findIndex((one) => one.includes("Another idle")),
-    "and the rows still run by it: Z to A, so At rest stands above Another idle",
-  )
-  assert.equal(await closed.getByText("Finished work").isVisible(), false, "Closed is folded again")
-  pass("the sort choice is kept on this device and the groups come back folded after a reload")
-
-  await page.evaluate(async (projectId) => {
-    const { db } = await import("/src/lib/db.ts")
-    const profile = await db.profiles.toCollection().first()
-    const at = Date.now()
-    for (let i = 0; i < 12; i++) {
-      await db.conversations.put({
-        id: `cl-overflow-${i}`,
-        profileId: profile.id,
-        projectId,
-        title: `Overflow ${i}`,
-        hermesSessionId: `cl-overflow-${i}-hermes`,
-        createdAt: at - 60_000 + i,
-        updatedAt: at - 60_000 + i,
-        changedAt: at,
-        draftAt: at,
-      })
-    }
-  }, PROJECT)
-  await page.reload()
-  await until(async () => (await page.getByText("Overflow 0").isVisible()), 20_000, "the taller list")
-  const scroller = list(page)
-  assert.equal(await scroller.count(), 1, "the list's own scroll container")
-  assert.ok(await scroller.evaluate((el) => el.scrollHeight > el.clientHeight + 50),
-    "the seeded rows make the list taller than its pane")
-  await scroller.evaluate((el) => { el.scrollTop = 400 })
-  const headerBox = await scroller.locator("header").first().boundingBox()
-  const headingBox = await group(page, "Idle").locator("h2").boundingBox()
-  assert.ok(headerBox && headingBox, "the header and a heading measured")
-  assert.ok(headingBox.y >= headerBox.y + headerBox.height - 2,
-    `a scrolled heading (${Math.round(headingBox.y)}px) stops beneath the header (${Math.round(headerBox.y + headerBox.height)}px)`)
-  assert.ok(headingBox.y < headerBox.y + headerBox.height + 60, "and tucks right under it")
-  await shot("sticky")
-  pass("a group heading sticks beneath the list's header once the list scrolls")
-
-  const pinSession = async (label) => {
-    await page.locator("li").filter({ hasText: "Overflow 0" }).locator("a").first().click()
-    await page.waitForURL("**/c/cl-overflow-0", { timeout: 10_000 })
-    await page.locator("[data-chat-settings-open]").click()
-    await page.getByRole("switch", { name: label, exact: true }).click()
-    await page.goto(`${app}/code`)
-  }
-
-  await pinSession("Pin")
-  await until(async () => (await group(page, BAND).count()) > 0, 15_000, "the pinned band")
-  assert.equal((await headings(page))[0], BAND, "the band draws above the four")
-  assert.equal(await countIn(page, BAND), "1", "holding the one session pinned")
-  assert.equal(await group(page, BAND).getByText("Overflow 0").count(), 1,
-    "the session stands in the band")
-  assert.equal(await group(page, "Idle").getByText("Overflow 0").count(), 0,
-    "and is not drawn in its own group as well")
-  assert.equal(await pinMark(group(page, BAND)).count(), 1, "the row carries the pin's own mark")
-  await shot("pinned")
-
-  await page.locator("button[data-search-toggle]").click()
-  const again = page.getByLabel("Search sessions")
-  await again.waitFor()
-  await again.fill("Overflow")
-  await until(async () => (await group(page, BAND).count()) === 0, 5_000, "the band to drop while filtering")
-  const hit = page.locator('a[href="/c/cl-overflow-0"]')
-  assert.equal(await hit.count(), 1, "the pinned session is still among the flat results")
-  assert.equal(await pinMark(hit).count(), 1,
-    "and still says it is pinned where the band is not drawn")
-  await again.fill("")
-  await until(async () => (await group(page, BAND).count()) > 0, 5_000, "the band back with the headers")
-
-  await pinSession("Unpin")
-  // The end state is waited for, not the band's absence: an absence is also true of a page that has
-  // not drawn yet, and Idle already holds rows before the click lands.
-  await until(
-    async () =>
-      (await group(page, BAND).count()) === 0 &&
-      (await group(page, "Idle").getByText("Overflow 0").count()) === 1,
-    15_000,
-    "the band to go and the row back in Idle",
-  )
-  assert.equal(await group(page, "Idle").getByText("Overflow 0").count(), 1,
-    "the session is back in the group its state puts it in")
-  pass("a pinned session stands in a band above the four, marked, leaves its group, drops with the headers while filtering, and returns on unpin")
+  await until(async () => (await rows(page).count()) === 5, 20_000, "the list after a reload")
+  assert.match(await sortButton().getAttribute("aria-label") ?? "", /Title, descending/,
+    "this device remembers the sort, arrow and all")
+  pass("the sort choice is kept on this device over a reload")
 })
 
 const VARIANTS = [
@@ -407,87 +137,34 @@ for (const [width, dark] of VARIANTS) {
         { id: "clv-checks", title: "Checks in flight", projectId: PROJECT, createdAt: now - 5_000,
           updatedAt: now, prs: [{ repo: "acme/gots", number: 9, title: "A change", state: "open",
             checks: "pending", url: "https://example.test/9", at: now }] },
-        { id: "clv-working", title: "Working turn", projectId: PROJECT, createdAt: now - 4_000,
-          updatedAt: now - 1_000 },
         ...Array.from({ length: 8 }, (_, i) => ({
           id: `clv-idle-${i}`,
           title: `At rest ${i}`,
           projectId: PROJECT,
-          createdAt: now - 3_000 + i,
+          createdAt: now - 9_000 + i,
           updatedAt: now - 3_000 - i,
         })),
-        { id: "clv-closed", title: "Finished work", projectId: PROJECT, createdAt: now - 500,
+        { id: "clv-closed", title: "Finished work", projectId: PROJECT, createdAt: now - 6_500,
           updatedAt: now - 6_000, resolvedAt: now },
-        { id: "clv-pinned", title: "Held at the top", projectId: PROJECT, createdAt: now - 7_000,
+        { id: "clv-pinned", title: "Held at the top", projectId: PROJECT, createdAt: now - 8_000,
           updatedAt: now - 7_000, pinned: true },
       ])
-
       await page.goto(`${app}/code`)
-      await until(async () => (await group(page, "Waiting for You").count()) > 0, 20_000,
-        `the waiting group at ${look}`)
-      // One row carries a mark older than its own activity: the dot measures against a mark, so
-      // this device's store is written through the app's own writer and the list re-draws on it
-      // (ADR 0056).
+      await until(async () => (await rows(page).count()) >= 10, 20_000, `the rows at ${look}`)
       await seedMark(page, "clv-idle-3", Date.now() - 60_000)
-      await page.evaluate(async () => {
-        const { db } = await import("/src/lib/db.ts")
-        const at = Date.now()
-        await db.messages.put({
-          id: "clv-work-msg",
-          conversationId: "clv-working",
-          role: "assistant",
-          content: "Working on it.",
-          status: "streaming",
-          createdAt: at,
-        })
-        await db.conversations.update("clv-working", { updatedAt: at })
-      })
-      await until(async () => (await group(page, "Working").count()) > 0, 15_000,
-        `the working group at ${look}`)
-
-      // The seed carries one pinned session, so the band is drawn at this width and must stand first.
-      assert.deepEqual(await headings(page), [BAND, ...ORDER],
-        `the band above the four, in that order, at ${look}`)
-      assert.equal(await group(page, BAND).getByText("Held at the top").count(), 1,
-        `the pinned row stands in the band at ${look}`)
-      assert.equal(await group(page, "Idle").getByText("Held at the top").count(), 0,
-        `and is not left in Idle at ${look}`)
-      // The flow's own setup leaves idle and closed sessions of its own, so only Waiting and
-      // Working are exact; the other two hold those plus this seed's own.
-      for (const label of ["Waiting for You", "Working"])
-        assert.equal(await countIn(page, label), "1", `${label} at ${look}`)
-      assert.ok(Number(await countIn(page, "Idle")) >= 8, `Idle holds the rest at ${look}`)
-      assert.ok(Number(await countIn(page, "Closed")) >= 1, `Closed holds its own at ${look}`)
-      const tone = await group(page, "Waiting for You")
-        .locator("li")
-        .first()
-        .locator("span.size-10")
-        .getAttribute("class")
-      assert.ok(tone?.includes("bg-warning/15"), `the waiting row is yellow at ${look}`)
-      const idle = group(page, "Idle").locator("li")
-      const rest0 = idle.filter({ hasText: "At rest 0" })
-      const rest3 = idle.filter({ hasText: "At rest 3" })
-      await rest0.waitFor()
-      await until(async () => (await dotsIn(rest3)) === 1, 5_000,
-        `a row read before its activity is dotted at ${look}`)
-      assert.equal(await dotsIn(rest0), 0, `an unopened row carries no dot at ${look}`)
-
-      // The header row has to hold its published height at this width: scroll the list, and the
-      // stuck heading still stops beneath the header instead of under it.
-      const scroller = list(page)
-      assert.ok(await scroller.evaluate((el) => el.scrollHeight > el.clientHeight + 50),
-        `the list is taller than its pane at ${look}`)
-      // The frame is taken before the scroll, so it shows the top of the list — the band and the
-      // headings as they arrive — rather than wherever the tuck test left the scroller.
+      assert.ok((await titles(page))[0].includes("Held at the top"), `the pin leads at ${look}`)
+      const waiting = rows(page).filter({ hasText: "Checks in flight" }).locator("span.size-10").first()
+      assert.ok((await waiting.getAttribute("class"))?.includes("bg-warning/15"), `the waiting row is yellow at ${look}`)
+      const rest3 = rows(page).filter({ hasText: "At rest 3" })
+      await until(async () => (await dotsIn(rest3)) === 1, 5_000, `a row read before its activity is dotted at ${look}`)
+      assert.equal(await dotsIn(rows(page).filter({ hasText: "At rest 0" })), 0, `an unopened row carries no dot at ${look}`)
+      // The foot keeps its place in the flow, so the last row ends above it rather than behind it.
+      const foot = await page.locator('[data-slot="list-foot"]').boundingBox()
+      const last = await rows(page).last().boundingBox()
+      assert.ok(foot && last, "the foot and the last row measured")
+      await rows(page).last().scrollIntoViewIfNeeded()
       await shot(`code-list-${width}${dark ? "-dark" : ""}`)
-      await scroller.evaluate((el) => { el.scrollTop = 300 })
-      const headerBox = await scroller.locator("header").first().boundingBox()
-      const headingBox = await group(page, "Idle").locator("h2").boundingBox()
-      assert.ok(headerBox && headingBox, "the header and a heading measured")
-      assert.ok(headingBox.y >= headerBox.y + headerBox.height - 2,
-        `the stuck heading stops beneath the header at ${look}`)
-
-      pass(`at ${look}: the groups, the yellow wait, the dot and the heading's tuck`)
+      pass(`at ${look}: the flat band, the yellow wait, the dot and the foot`)
     },
     { viewport: { width, height: width < 768 ? 844 : 900 }, dark },
   )

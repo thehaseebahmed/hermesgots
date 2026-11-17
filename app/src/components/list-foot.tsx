@@ -44,21 +44,31 @@ export function ListFoot({
   onQueryChange,
   onNewChat,
   onNewRoom,
+  onNew,
+  newLabel = "New",
+  searchLabel = "Search chats",
 }: {
-  canMakeRoom: boolean
+  canMakeRoom?: boolean
   /** Whether the search is this bar's to offer: from the laptop width up the bar's own field holds it. */
   searchable: boolean
   /** The words the list is narrowed by. The foot holds whether its field is up; the screen holds what
    * the field asked for, since the rows are the screen's. */
   query: string
   onQueryChange: (query: string) => void
-  onNewChat: () => void
-  onNewRoom: () => void
+  onNewChat?: () => void
+  onNewRoom?: () => void
+  /**
+   * A list with one thing to start (Code's sessions) gives the button that one action: it opens no
+   * picks, and `newLabel` names it.
+   */
+  onNew?: () => void
+  newLabel?: string
+  searchLabel?: string
 }) {
   // One value, three states: the foot shows the search, the picks, or neither — never two of them,
   // and no pair of booleans that could both be true (ADR 0141).
   const [surface, setSurface] = useState<"closed" | "picks" | "search">("closed")
-  const open = surface === "picks"
+  const open = surface === "picks" && !onNew
   const searching = searchable && surface === "search"
   // The exit is one quiet fade, played while the pills are already inert: the class is what starts it,
   // and it is taken off again once it has run.
@@ -69,7 +79,7 @@ export function ListFoot({
     setSurface("closed")
     window.requestAnimationFrame(() => newToggle.current?.focus())
   }
-  const togglePicks = () => (open ? closePicks() : setSurface("picks"))
+  const togglePicks = () => (onNew ? onNew() : open ? closePicks() : setSurface("picks"))
   // Putting the field away is all this does: `FootSearch` returns the focus to the circle and lets the
   // words go, so closing by Escape and closing by this button are one path.
   const closeSearch = () => setSurface("closed")
@@ -116,7 +126,7 @@ export function ListFoot({
             onClose={closeSearch}
             query={query}
             onQueryChange={onQueryChange}
-            label="Search chats"
+            label={searchLabel}
             fieldId={CHATS_SEARCH_FIELD_ID}
           />
         )}
@@ -135,45 +145,47 @@ export function ListFoot({
               onClick={closePicks}
             />
           )}
-          <div
-            id={PICKS_ID}
-            data-picks
-            data-toast-above={open || undefined}
-            aria-hidden={!open}
-            inert={!open}
-            className={cn(
-              "t-stagger pointer-events-auto absolute right-0 bottom-full z-10 mb-2 flex flex-col items-end gap-2",
-              open && "is-shown",
-              hiding && "is-hiding",
-            )}
-          >
-            {canMakeRoom && (
+          {!onNew && (
+            <div
+              id={PICKS_ID}
+              data-picks
+              data-toast-above={open || undefined}
+              aria-hidden={!open}
+              inert={!open}
+              className={cn(
+                "t-stagger pointer-events-auto absolute right-0 bottom-full z-10 mb-2 flex flex-col items-end gap-2",
+                open && "is-shown",
+                hiding && "is-hiding",
+              )}
+            >
+              {canMakeRoom && (
+                <button
+                  type="button"
+                  aria-label="New room"
+                  onClick={() => {
+                    closePicks()
+                    onNewRoom?.()
+                  }}
+                  className="t-stagger-line t-stagger-line--2 inline-flex h-11 items-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-medium whitespace-nowrap shadow-lg outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <UsersIcon aria-hidden className="size-5 text-muted-foreground" />
+                  New room
+                </button>
+              )}
               <button
                 type="button"
-                aria-label="New room"
+                aria-label="New chat"
                 onClick={() => {
                   closePicks()
-                  onNewRoom()
+                  onNewChat?.()
                 }}
-                className="t-stagger-line t-stagger-line--2 inline-flex h-11 items-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-medium whitespace-nowrap shadow-lg outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
+                className="t-stagger-line inline-flex h-11 items-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-medium whitespace-nowrap shadow-lg outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <UsersIcon aria-hidden className="size-5 text-muted-foreground" />
-                New room
+                <MessageCircleIcon aria-hidden className="size-5 text-muted-foreground" />
+                New chat
               </button>
-            )}
-            <button
-              type="button"
-              aria-label="New chat"
-              onClick={() => {
-                closePicks()
-                onNewChat()
-              }}
-              className="t-stagger-line inline-flex h-11 items-center gap-2 rounded-full border border-border bg-background px-4 text-sm font-medium whitespace-nowrap shadow-lg outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <MessageCircleIcon aria-hidden className="size-5 text-muted-foreground" />
-              New chat
-            </button>
-          </div>
+            </div>
+          )}
           <Button
             ref={newToggle}
             data-toast-above
@@ -185,9 +197,9 @@ export function ListFoot({
               searching ? "bg-muted text-foreground shadow-none hover:bg-muted/80" : "shadow-lg",
             )}
             onClick={() => (searching ? closeSearch() : togglePicks())}
-            aria-label={searching ? "Close search" : open ? "Close" : "New"}
-            aria-expanded={searching ? undefined : open}
-            aria-controls={searching ? undefined : PICKS_ID}
+            aria-label={searching ? "Close search" : open ? "Close" : newLabel}
+            aria-expanded={searching || onNew ? undefined : open}
+            aria-controls={searching || onNew ? undefined : PICKS_ID}
           >
             {/* transitions-dev's icon swap: both faces in one cell, the state picks which shows. */}
             <span aria-hidden className="t-icon-swap" data-state={searching || open ? "b" : "a"}>

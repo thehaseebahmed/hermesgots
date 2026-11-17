@@ -8,12 +8,7 @@ import { useWide } from "@/lib/media"
 import { chosenOf } from "@/lib/model-pick"
 import { useNow } from "@/lib/threads"
 import { contextWindow } from "@/lib/context"
-import {
-  db,
-  type Conversation,
-  type ModelChoice,
-  type Profile,
-} from "@/lib/db"
+import { db, type Conversation, type ModelChoice, type Profile } from "@/lib/db"
 import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
 import { syncContextWindow, useModelCatalog } from "@/lib/models"
 import {

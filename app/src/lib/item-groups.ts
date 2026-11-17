@@ -1,4 +1,3 @@
-import type { SessionState } from "@/lib/session-work"
 import type { CodeSort } from "@/lib/db"
 import { byName } from "./compare.ts"
 import { withDir, type Sort } from "./sort.ts"
@@ -25,7 +24,7 @@ const DAY_MS = 86_400_000
  * sequence when a list brings one. The dated lists and Code's four are this fold over their own
  * vocabulary, so the anatomy (fixed order, empties gone) lives once.
  */
-function groupsOf<T, K extends ItemGroupKey | CodeGroupKey>(
+function groupsOf<T, K extends ItemGroupKey>(
   items: T[],
   labels: Record<K, string>,
   keyOf: (item: T) => K,
@@ -74,61 +73,17 @@ export function itemGroups<T>(
   return groupsOf(items, LABELS, of, undefined, DONE_FOLDED)
 }
 
-/** The Code list's four groups, in the order they always run: what waits on the user first. */
-const CODE_LABELS = {
-  waiting: "Waiting for You",
-  working: "Working",
-  idle: "Idle",
-  closed: "Closed",
-} as const
-
-export type CodeGroupKey = keyof typeof CODE_LABELS
-
-const PINNED_LABEL = "Pinned" as const
-
 export interface ListGroup<T = unknown> {
   /**
-   * What the group is, where the list's vocabulary says: a dated or Code group, a list's pins or its
+   * What the group is, where the list's vocabulary says: a dated group, a list's pins or its
    * archived band. A list that words one group of its own — the Side Chat List's — names no key, since
    * nothing narrows or folds by it.
    */
-  key?: ItemGroupKey | CodeGroupKey | "pinned" | "archived"
+  key?: ItemGroupKey | "pinned" | "archived"
   label: string
   items: T[]
   /** Drawn closed until the reader asks: what a list is done with, or put out of the way. */
   folded?: boolean
-}
-
-/**
- * Which of the four a session's state puts it in: Resolved and Discarded share Closed, told apart
- * by their icon rather than by headings of their own. Waiting, Working and Idle pass through as
- * they are — the claim that won is already in the state (`sessionGroup`).
- */
-export function codeGroupOf(state: SessionState): CodeGroupKey {
-  return state === "resolved" || state === "discarded" ? "closed" : state
-}
-
-/**
- * The Code list's groups: the four in their fixed order, empty ones left out, each run by `order`
- * (created, newest first, unless the sort-by dropdown says otherwise). Each group is sorted on its
- * own, so one group's sessions never reach into another's.
- *
- * `pinned` lifts the rows it names into the band above the four, dropped when nothing is pinned;
- * those rows leave the group their claim would have put them in (ADR 0103).
- */
-export function codeGroups<T>(
-  items: T[],
-  group: (item: T) => CodeGroupKey,
-  order: (a: T, b: T) => number,
-  pinned?: (item: T) => boolean,
-): ListGroup<T>[] {
-  const held: T[] = []
-  const rest: T[] = []
-  for (const item of items) (pinned?.(item) ? held : rest).push(item)
-  return [
-    ...(held.length ? [{ key: "pinned" as const, label: PINNED_LABEL, items: held.sort(order) }] : []),
-    ...groupsOf(rest, CODE_LABELS, group, order, DONE_FOLDED),
-  ]
 }
 
 /**

@@ -24,10 +24,10 @@
 No flow crosses layers.
 
 ## Steps
-1. **Code list on the shared shell.** Goals: G1. After: none. Layers: Code list screen, list shell and foot, item grouping. Check: component test that Code renders flat rows under pills, with the foot's `+` opening the New session pick and the search in the foot below 1280px; red then green.
+1. **Code list on the shared shell.** Goals: G1. After: none. Layers: Code list screen, list shell and foot, item grouping. Check: component test that Code renders flat rows under pills, with the foot's `+` opening the New session pick and the search in the foot below 1280px; red then green. Done.
 2. **Session header and sheet.** Goals: G2, G3. After: none. Layers: chat header and sheet, both chat screens. Check: component test that a session's centred header, unchanged, opens the sheet holding Context, Resolve/Reopen, Discard and Delete, and that no `Chat options` menu exists; red then green. Done.
 3. **Repo line.** Goals: G2. After: none. Layers: repo line rule, chat screens. Check: `test-repo-line` asserts `Bot · owner/repo +2 more` for three repos at phone, tablet and laptop widths and the bare name for one; red then green. Done.
-4. **Gates and docs.** Goals: G1, G2, G3. After: 1, 2, 3. Layers: all above. Check: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, plus `pnpm e2e` for any flow naming the removed menu or groups; AGENTS.md rows updated.
+4. **Gates and docs.** Goals: G1, G2, G3. After: 1, 2, 3. Layers: all above. Check: `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, plus `pnpm e2e` for any flow naming the removed menu or groups; AGENTS.md rows updated. Done.
 
 ## Decisions
 - **Foot is the shared `ListFoot`.** Made by the user (Q1), because they picked it.
