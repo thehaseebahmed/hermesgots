@@ -18,17 +18,35 @@ data class Notice(
     val channel: String,
     val title: String,
     val body: String,
-    /** The badged picture at the app's own origin, an http(s) address or nothing. */
+    /** The bot's plain picture at the app's own origin, an http(s) address or nothing. */
     val icon: String?,
     /** The drawable the APK ships for the bot, for a phone that can't fetch [icon]. */
     val bundled: String?,
     val actions: List<NoticeAction>,
+    /** The chat the notice is about, as the plugin found it: what the conversation is keyed by. */
+    val chat: String? = null,
 ) {
+    /**
+     * A notice about a chat is drawn as that chat's conversation — the bot as its Person, a
+     * long-lived shortcut per chat — which is what puts it in Android's Conversations section, with the
+     * bot's face on the left and the app's badge on it. Anything else keeps the plain entry.
+     */
+    val conversation: Boolean get() = chat != null
+
+    /** The chat's long-lived shortcut: one per chat, so a newer notice about it reuses the same one. */
+    val shortcut: String? get() = chat?.let { "chat:$it" }
+
+    /** A conversation already wears the face as its Person; a large icon would draw it twice. */
+    val largeIcon: Boolean get() = !conversation
+
     companion object {
         /** A message naming no channel at all still has to name one on Android 8 and later. */
         const val FALLBACK_CHANNEL = "gots"
 
         private const val ACTION_LIMIT = 2
+
+        /** A chat's id as the plugin keeps them and the registry bounds them (`chatId` in `fcm.ts`). */
+        private val CHAT = Regex("^[A-Za-z0-9._-]{1,256}$")
 
         /**
          * The notice a message carries, or null for one with nothing to say: the filter the service is
@@ -55,7 +73,19 @@ data class Notice(
                 // underscore since a resource name carries none.
                 bundled = data[KEY_BOT]?.takeIf { it.isNotBlank() }?.let { "bot_" + it.replace('-', '_') },
                 actions = actionsOf(data[KEY_ACTIONS]),
+                chat = data[KEY_CHAT]?.trim()?.takeIf { CHAT.matches(it) },
             )
+        }
+
+        /**
+         * Where a face of [side] pixels sits in an adaptive icon: an adaptive icon is 108 units with
+         * the inner 72 the part every launcher's mask keeps, so the canvas is half as large again and
+         * the face is inset a sixth of it on every side, drawn whole.
+         */
+        fun adaptiveFace(side: Int): AdaptiveFace {
+            // 72 + 2 × 18 = 108: a quarter of the face on each edge, rounded up so it is never cut.
+            val inset = (side + 3) / 4
+            return AdaptiveFace(side + 2 * inset, inset)
         }
 
         /** Whether an address is one the phone may fetch or post: http(s), and nothing else. */
@@ -94,8 +124,12 @@ data class Notice(
         private const val KEY_CHANNEL = "channel"
         private const val KEY_TAG = "tag"
         private const val KEY_ACTIONS = "actions"
+        private const val KEY_CHAT = "chat"
     }
 }
+
+/** A face laid in an adaptive icon: the square canvas's [side], and the [inset] on each edge. */
+data class AdaptiveFace(val side: Int, val inset: Int)
 
 /** One button a notice carries: what it says, and the link a press posts. */
 data class NoticeAction(val label: String, val url: String)

@@ -314,9 +314,10 @@ def _relay(path: Path, kind: str, category: str, session_id: str, notice: Notice
     conversation = notice.conversation if isinstance(notice, Notice) else {}
     # The phone draws the notice itself (a notification payload is Android's to draw, and its drawing
     # can carry no button), so it is told whose picture to wear and where that picture is: the app's
-    # own file, at the origin its subscription named (`build-badges.mjs` cuts it, and the browser's
-    # tray and ntfy read the same bytes), never the host's address, which may be a tunnel.
-    picture = ntfy.icon(web(path), fields.get("bot"))
+    # own file, at the origin its subscription named, never the host's address, which may be a
+    # tunnel. It is the bot's plain face rather than the badge the browser's tray and ntfy wear:
+    # Android badges a conversation's picture with the app's icon itself.
+    picture = face(web(path), fields.get("bot"))
     answer = None
     for attempt in range(RELAY_TRIES):
         try:
@@ -347,6 +348,14 @@ def _relay(path: Path, kind: str, category: str, session_id: str, notice: Notice
             return
     if isinstance(answer, dict) and not answer.get("sent") and answer.get("failed"):
         logger.warning("gots: the registry couldn't deliver the push (%s)", answer)
+
+
+def face(origin: Optional[str], bot: Optional[str]) -> Optional[str]:
+    """This profile's bot's own picture, unbadged, at the app's own origin, or None while either is
+    unknown: what the Android tray wears (``ntfy.icon`` is the badged one, for trays that can't)."""
+    if not origin or not bot:
+        return None
+    return f"{origin}/bots/{bot}/happy.png"
 
 
 def reachable(path: Path) -> bool:
@@ -536,18 +545,24 @@ def _lineage(path: Path, session_id: str) -> List[str]:
     return found
 
 
-def _chat(path: Path, session_id: str) -> Optional[Dict[str, Any]]:
-    """The chat list record of this session's chat, as the app last synced it."""
+def _chat_entry(path: Path, session_id: str) -> Optional[Tuple[str, Dict[str, Any]]]:
+    """This session's chat as the app last synced it: its id and its chat list record."""
     from . import chats
 
     ids = set(_lineage(path, session_id))
-    for entry in chats.read(path).values():
+    for chat_id, entry in chats.read(path).items():
         value = entry.get("value")
         if entry.get("deleted") or not isinstance(value, dict):
             continue
         if value.get("hermesSessionId") in ids:
-            return value
+            return chat_id, value
     return None
+
+
+def _chat(path: Path, session_id: str) -> Optional[Dict[str, Any]]:
+    """The chat list record of this session's chat, as the app last synced it."""
+    found = _chat_entry(path, session_id)
+    return found[1] if found else None
 
 
 def thread_muted(path: Path, session_id: str) -> bool:
@@ -572,9 +587,12 @@ def _hermes_title(path: Path, session_id: str) -> Optional[str]:
     return None
 
 
-def session_title(path: Path, session_id: str) -> Optional[str]:
-    """What the user calls the session's chat: the app's title (renames included), else Hermes's."""
-    chat = _chat(path, session_id)
+def session_title(path: Path, session_id: str, chat: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """What the user calls the session's chat: the app's title (renames included), else Hermes's.
+
+    ``chat`` is that chat's record where the caller has already found it.
+    """
+    chat = chat if chat is not None else _chat(path, session_id)
     title = chat.get("title") if chat else None
     if isinstance(title, str) and title.strip():
         return title
@@ -625,9 +643,23 @@ def _notice(
 ) -> Notice:
     """The whole notice one piece of news makes: its words, its bot, its buttons and the part only
     the Android tray draws, built in one place so every transport is handed the same value."""
-    if kind in SESSION_KINDS and not title:
-        title = session_title(path, session_id)
-    return Notice(title=_short(title), body=body, bot=bot(path), actions=_buttons(path, answer))
+    conversation: Dict[str, Any] = {}
+    if kind in SESSION_KINDS:
+        # The chat the news is about, found through the lineage the title already walks: the phone
+        # keys its conversation entry and its shortcut by it, and can't find it from a session that
+        # compression moved on.
+        found = _chat_entry(path, session_id)
+        if found:
+            conversation["chat"] = found[0]
+        if not title:
+            title = session_title(path, session_id, found[1] if found else None)
+    return Notice(
+        title=_short(title),
+        body=body,
+        bot=bot(path),
+        actions=_buttons(path, answer),
+        conversation=conversation,
+    )
 
 
 def _buttons(path: Path, answer: Optional[Dict[str, Any]]) -> Tuple[Action, ...]:

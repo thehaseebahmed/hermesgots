@@ -77,12 +77,14 @@ export interface PushAction {
 export interface PushDetail {
   title?: string
   body?: string
-  /** The badged picture to draw, at the app's own origin (`build-badges.mjs`). */
+  /** The bot's plain picture to draw, at the app's own origin; Android badges it itself. */
   icon?: string
   /** Whose picture it is, so a phone that can't fetch it falls back to the badge the APK ships. */
   bot?: string
   /** The buttons a tray may draw: an approval's two, and no other kind's. */
   actions?: PushAction[]
+  /** The chat the notice is about, which the phone keys its conversation entry by. */
+  chat?: string
 }
 
 export interface FcmSender {
@@ -157,6 +159,15 @@ export function pictureOf(value: unknown) {
 export function botId(value: unknown) {
   const one = typeof value === "string" ? value.trim() : ""
   return /^[a-z0-9-]{1,32}$/.test(one) ? one : undefined
+}
+
+/**
+ * A chat's id as the plugin keeps them (`MAX_ID_LENGTH` in `plugin/chats.py`, and the characters a
+ * chat's address carries), which a phone names a shortcut and its read mark by.
+ */
+export function chatId(value: unknown) {
+  const one = typeof value === "string" ? value.trim() : ""
+  return /^[A-Za-z0-9._-]{1,256}$/.test(one) ? one : undefined
 }
 
 /**
@@ -263,8 +274,8 @@ async function accessToken(account: ServiceAccount, cache: { token?: string; exp
  *
  * A `notification` payload is drawn by Android itself, while the app is closed and with no code of
  * ours running — and Android's own drawing has no room for a button. So the message carries the
- * notice instead and the app draws it (`GotsMessagingService`): the title and body, the badged
- * picture, the category's channel, the tag a newer notice of the same thing replaces, and the two
+ * notice instead and the app draws it (`GotsMessagingService`): the title and body, the bot's
+ * picture, the chat it is about, the category's channel, the tag a newer notice of the same thing replaces, and the two
  * links an approval carries as JSON, since a data value can be nothing but a string.
  */
 export function message(
@@ -278,6 +289,7 @@ export function message(
   const actions = actionsOf(detail.actions)
   const face = botId(detail.bot)
   const icon = pictureOf(detail.icon)
+  const chat = chatId(detail.chat)
   return {
     message: {
       token,
@@ -295,6 +307,7 @@ export function message(
         ...(face ? { bot: face } : {}),
         ...(icon ? { icon } : {}),
         ...(actions.length ? { actions: JSON.stringify(actions) } : {}),
+        ...(chat ? { chat } : {}),
       },
       android: { priority: "HIGH", ttl: "600s" },
     },

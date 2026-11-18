@@ -20,7 +20,7 @@ import { memoryStore } from "./netlify-store.mjs"
 
 const ONCE = "https://bot.example/api/plugins/gots/push/answer/once-1"
 const DENY = "https://bot.example/api/plugins/gots/push/answer/deny-1"
-const ICON = "https://hermesgots.dev/bots/nova/notify.png"
+const ICON = "https://hermesgots.dev/bots/nova/happy.png"
 
 /** An approval's notice as the plugin relays it: the chat's name, the card's body, the two links. */
 const approval = {
@@ -121,7 +121,7 @@ test("the body a plugin sent is what the phone shows, over the table's line", ()
 
 test("the badged picture and both links ride in the message", () => {
   const { data } = message("t", "approval", "chat_input", "gots-1", approval).message
-  assert.equal(data.icon, ICON, "the one image web push, ntfy and Android all wear")
+  assert.equal(data.icon, ICON, "the bot's plain face, which Android badges itself")
   assert.equal(data.bot, "nova", "so a phone that can't fetch it falls back to the badge it ships")
   assert.deepEqual(
     JSON.parse(data.actions),
@@ -203,6 +203,28 @@ test("the registry bounds a notice and drops what isn't a picture or a link", as
       { label: "Deny", url: DENY },
     ],
     "at most two, each a label and an http(s) link, in the order they were sent",
+  )
+})
+
+test("the registry forwards a chat id and drops one that isn't an id", async () => {
+  // An approval, which every device takes; every session kind with a chat names it alike.
+  const notice = { kind: "approval", category: "chat_input", session_id: "gots-1", title: "Trip" }
+  const kept = await relay(await setup(), { ...notice, chat: " 6b0f2c1e-9a4d-4c3b-8e2f-1a2b3c4d5e6f " })
+  assert.equal(kept.detail.chat, "6b0f2c1e-9a4d-4c3b-8e2f-1a2b3c4d5e6f", "the chat the phone keys its entry by")
+  assert.equal(
+    message("t", "run_done", "chat_run_done", "gots-1", kept.detail).message.data.chat,
+    "6b0f2c1e-9a4d-4c3b-8e2f-1a2b3c4d5e6f",
+    "and it rides the message to the phone",
+  )
+  for (const chat of ["../../etc", "a b", "x".repeat(257), 42, ""]) {
+    const { status, detail } = await relay(await setup(), { ...notice, chat })
+    assert.equal(status, 200, "a chat that isn't an id costs the notice nothing")
+    assert.equal(detail.chat, undefined, `${JSON.stringify(chat)} is no chat id`)
+  }
+  assert.equal(
+    message("t", "run_done", "chat_run_done", "gots-1").message.data.chat,
+    undefined,
+    "a notice about no chat names none",
   )
 })
 

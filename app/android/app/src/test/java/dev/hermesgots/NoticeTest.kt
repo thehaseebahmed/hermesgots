@@ -1,8 +1,10 @@
 package dev.hermesgots
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class NoticeTest {
@@ -82,7 +84,7 @@ class NoticeTest {
 
     @Test
     fun thePictureIsAnHttpAddressOrNone() {
-        assertEquals("https://app.example/bots/nova/notify.png", read("title" to "t", "icon" to "https://app.example/bots/nova/notify.png")!!.icon)
+        assertEquals("https://app.example/bots/nova/happy.png", read("title" to "t", "icon" to "https://app.example/bots/nova/happy.png")!!.icon)
         assertEquals("http://lan.example/n.png", read("title" to "t", "icon" to "http://lan.example/n.png")!!.icon)
         assertNull(read("title" to "t", "icon" to "file:///sdcard/x.png")!!.icon)
         assertNull(read("title" to "t")!!.icon)
@@ -95,6 +97,38 @@ class NoticeTest {
         assertNull(read("title" to "t", "bot" to " ")!!.bundled)
         assertNull(read("title" to "t")!!.bundled)
         assertNotNull(read("title" to "t", "bot" to "pip")!!.bundled)
+    }
+
+    @Test
+    fun aMessageNamingAChatIsAConversation() {
+        val notice = read("title" to "Trip", "body" to "Booked.", "chat" to " 6b0f2c1e-9a4d ")!!
+        assertEquals("6b0f2c1e-9a4d", notice.chat)
+        assertEquals("chat:6b0f2c1e-9a4d", notice.shortcut)
+        assertTrue("drawn as a conversation", notice.conversation)
+        // The bot is the conversation's Person, which Android draws on the left with the app's badge:
+        // a large icon beside it would be the same face twice.
+        assertFalse("no large icon on a conversation", notice.largeIcon)
+    }
+
+    @Test
+    fun aMessageNamingNoChatKeepsTodaysEntryWithTheFaceAsItsLargeIcon() {
+        for (chat in listOf(null, "", "  ", "../../etc", "a b", "x".repeat(257))) {
+            val pairs = listOfNotNull("title" to "Research", chat?.let { "chat" to it })
+            val notice = read(*pairs.toTypedArray())!!
+            assertNull("$chat is no chat", notice.chat)
+            assertNull(notice.shortcut)
+            assertFalse(notice.conversation)
+            assertTrue("the plain face is the large icon", notice.largeIcon)
+        }
+    }
+
+    @Test
+    fun aFaceIsPaddedIntoTheAdaptiveSafeZone() {
+        // An adaptive icon is 108 units with its inner 72 the part every mask keeps, so a face drawn
+        // whole sits in the middle two thirds of a canvas half as large again.
+        assertEquals(AdaptiveFace(side = 288, inset = 48), Notice.adaptiveFace(192))
+        assertEquals(AdaptiveFace(side = 384, inset = 64), Notice.adaptiveFace(256))
+        assertEquals(AdaptiveFace(side = 3, inset = 1), Notice.adaptiveFace(1))
     }
 
     private companion object {

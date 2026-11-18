@@ -10,6 +10,7 @@ import {
   PUSH_CATEGORIES,
   PUSH_KINDS,
   actionsOf,
+  chatId,
   botId,
   categoryOf,
   pictureOf,
@@ -359,6 +360,8 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
         icon: pictureOf(input?.icon),
         actions: actionsOf(input?.actions),
       }
+      const chat = chatId(input?.chat)
+      if (chat) detail.chat = chat
       // The gap rides the host's own record, which this route already reads to learn whose push it
       // is: one read-modify-write on its etag, instead of a key of its own beside it. A record that
       // is there and unmodified is the gap refusing the push.

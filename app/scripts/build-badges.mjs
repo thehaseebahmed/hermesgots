@@ -1,15 +1,15 @@
 /**
  * The badge a notification wears: each bot's own photo, filling a 192-square, with the Gots app icon
- * laid in its bottom-right corner the way a messaging app marks a sender's avatar as its own. One
- * image per bot, cut once — the browser's tray, ntfy's `X-Icon` and Android's large icon all read
- * these bytes, so a notification looks the same wherever it is drawn.
+ * laid in its bottom-right corner the way a messaging app marks a sender's avatar as its own. The
+ * browser's tray and ntfy's `X-Icon` read these bytes; Android's tray wears the plain face instead,
+ * since it badges a conversation's picture with the app's icon itself.
  *
- *   node scripts/build-badges.mjs           # write both copies of every bot's badge
+ *   node scripts/build-badges.mjs           # write every bot's badge and its plain face
  *   node scripts/build-badges.mjs --check   # render in memory, compare, exit 1 on a difference
  *
- * One image, cut once and shipped in two places: `public/bots/<id>/notify.png` is the one the
- * browser's tray and ntfy's `X-Icon` fetch, and `android/app/src/main/res/drawable-nodpi/bot_<id>.png`
- * is the copy the APK carries, so a phone that can't reach the picture still draws the same badge.
+ * Two images per bot: `public/bots/<id>/notify.png` is the badge the browser's tray and ntfy's
+ * `X-Icon` fetch, and `android/app/src/main/res/drawable-nodpi/bot_<id>.png` is the plain face the
+ * APK carries, so a phone that can't reach `happy.png` still draws the bot.
  * Nothing leaves this machine and nothing else is written. The same photo and icon encode to the
  * same bytes every run (`lib/png.mjs`), which is what lets `--check` and `scripts/test-push-badges.mjs`
  * call a committed badge current rather than assume it.
@@ -64,14 +64,14 @@ const APP = fileURLToPath(new URL("..", import.meta.url))
 export const photoPath = (id) => join(BOTS, id, "happy.png")
 export const badgePath = (id) => join(BOTS, id, "notify.png")
 
-/** The APK's copy of the same badge: a drawable the service falls back to when it can't fetch one. */
+/** The APK's copy of the bot's plain face: a drawable the service falls back to when it can't fetch one. */
 export const DRAWABLES = fileURLToPath(
   new URL("../android/app/src/main/res/drawable-nodpi/", import.meta.url),
 )
 
 /**
  * That copy's file name. A resource name carries no hyphen (`[a-z0-9_]`), so a bot id's is written
- * with an underscore — `GotsMessagingService` looks the same name up the same way.
+ * with an underscore — `Notice.kt` looks the same name up the same way.
  */
 export const drawableName = (id) => `bot_${id.replace(/-/g, "_")}.png`
 export const drawablePath = (id) => join(DRAWABLES, drawableName(id))
@@ -131,6 +131,18 @@ export function badgeBytes(id, read = readFileSync) {
 }
 
 /**
+ * One bot's plain face as PNG bytes: the photo filling the same square, with no mark on it. The APK
+ * draws this, since Android badges a conversation's picture with the app's own icon itself.
+ *
+ * @param {string} id
+ * @param {(path: string) => Uint8Array} [read]
+ * @returns {Buffer}
+ */
+export function faceBytes(id, read = readFileSync) {
+  return encode(scale(decode(read(photoPath(id))), SIZE, SIZE))
+}
+
+/**
  * Every bot's badge against what is on disk: nothing when they all match, and one entry naming the
  * bot, its file and what is wrong with it otherwise — a missing file, or bytes that are not the ones
  * this script renders from today's photo and icon.
@@ -141,8 +153,10 @@ export function badgeBytes(id, read = readFileSync) {
 export function checkBadges(read = readFileSync) {
   const stale = []
   for (const id of botIds()) {
-    const want = badgeBytes(id, read)
-    for (const path of [badgePath(id), drawablePath(id)]) {
+    for (const [path, want] of [
+      [badgePath(id), badgeBytes(id, read)],
+      [drawablePath(id), faceBytes(id, read)],
+    ]) {
       let have = null
       try {
         have = read(path)
@@ -157,13 +171,12 @@ export function checkBadges(read = readFileSync) {
   return stale
 }
 
-/** Write every badge, both copies. Answers the paths written, in bot order. */
+/** Write every bot's badge and its plain face. Answers the paths written, in bot order. */
 export function writeBadges() {
   mkdirSync(DRAWABLES, { recursive: true })
   return botIds().flatMap((id) => {
-    const bytes = badgeBytes(id)
-    // Rendered once and written twice, so the two copies can never be two different pictures.
-    for (const path of [badgePath(id), drawablePath(id)]) writeFileSync(path, bytes)
+    writeFileSync(badgePath(id), badgeBytes(id))
+    writeFileSync(drawablePath(id), faceBytes(id))
     return [badgePath(id), drawablePath(id)]
   })
 }
@@ -172,7 +185,7 @@ function main(argv) {
   if (argv.length === 1 && argv[0] === "--check") {
     const stale = checkBadges()
     for (const { path, why } of stale) console.error(`${relative(APP, path)} ${why}`)
-    if (!stale.length) console.log(`every bot's badge is current (${botIds().length})`)
+    if (!stale.length) console.log(`every bot's badge and face is current (${botIds().length})`)
     return stale.length ? 1 : 0
   }
   if (argv.length) {
