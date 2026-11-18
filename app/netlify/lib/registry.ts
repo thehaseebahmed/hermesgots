@@ -363,11 +363,12 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
       }
       const chat = chatId(input?.chat)
       if (chat) detail.chat = chat
-      // A reply's link is posted by the phone like a button's, so it is an http(s) address or nothing.
+      // A reply's link is posted by the phone like a button's, so it is an http(s) address or
+      // nothing.
       const reply = pictureOf(input?.reply)
       if (reply) detail.reply = reply
-      // Mark as read is the plugin's word, so it is a boolean or nothing, and the moment it covers a
-      // whole number of milliseconds.
+      // Mark as read is the plugin's word, so it is a boolean or nothing, and the moment it covers
+      // a whole number of milliseconds.
       if (input?.read === true) detail.read = true
       const at = momentOf(input?.at)
       if (at) detail.at = at

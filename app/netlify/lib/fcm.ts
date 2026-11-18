@@ -286,8 +286,9 @@ async function accessToken(account: ServiceAccount, cache: { token?: string; exp
  * A `notification` payload is drawn by Android itself, while the app is closed and with no code of
  * ours running — and Android's own drawing has no room for a button. So the message carries the
  * notice instead and the app draws it (`GotsMessagingService`): the title and body, the bot's
- * picture, the chat it is about, the link its Reply posts to and whether it offers Mark as read, the category's channel, the tag a newer notice of the same thing replaces, and the two
- * links an approval carries as JSON, since a data value can be nothing but a string.
+ * picture, the chat it is about, the link its Reply posts to and whether it offers Mark as read,
+ * the category's channel, the tag a newer notice of the same thing replaces, and the two links an
+ * approval carries as JSON, since a data value can be nothing but a string.
  */
 export function message(
   token: string,
