@@ -154,9 +154,10 @@ export function pushText(kind: PushKind, detail: PushDetail = {}) {
 
 /**
  * An http(s) address, and nothing else: what it is handed comes from a plugin, and a phone will
- * open whatever it is told to — a notice's picture, or a button's link (`actionsOf`).
+ * fetch or post whatever it is told to — a notice's picture, a button's link (`actionsOf`) and
+ * the link a Reply posts to are all held to this one rule.
  */
-export function pictureOf(value: unknown) {
+export function httpLink(value: unknown) {
   const one = typeof value === "string" ? value.trim() : ""
   return /^https?:\/\/[^\s]+$/.test(one) ? one.slice(0, 512) : undefined
 }
@@ -194,7 +195,7 @@ export function actionsOf(value: unknown): PushAction[] {
     if (!one || typeof one !== "object") continue
     const { label, url } = one as Partial<PushAction>
     if (typeof label !== "string" || !label.trim()) continue
-    const link = pictureOf(url)
+    const link = httpLink(url)
     if (!link) continue
     kept.push({ label: label.trim().slice(0, 40), url: link })
   }
@@ -300,9 +301,9 @@ export function message(
   const { title, body } = pushText(kind, detail)
   const actions = actionsOf(detail.actions)
   const face = botId(detail.bot)
-  const icon = pictureOf(detail.icon)
+  const icon = httpLink(detail.icon)
   const chat = chatId(detail.chat)
-  const reply = pictureOf(detail.reply)
+  const reply = httpLink(detail.reply)
   const at = momentOf(detail.at)
   return {
     message: {

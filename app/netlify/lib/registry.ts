@@ -14,7 +14,7 @@ import {
   momentOf,
   botId,
   categoryOf,
-  pictureOf,
+  httpLink,
   type FcmSender,
   type PushCategory,
   type PushDetail,
@@ -358,14 +358,14 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
         title: text(input?.title, 120),
         body: text(input?.body, 800),
         bot: botId(input?.bot),
-        icon: pictureOf(input?.icon),
+        icon: httpLink(input?.icon),
         actions: actionsOf(input?.actions),
       }
       const chat = chatId(input?.chat)
       if (chat) detail.chat = chat
       // A reply's link is posted by the phone like a button's, so it is an http(s) address or
       // nothing.
-      const reply = pictureOf(input?.reply)
+      const reply = httpLink(input?.reply)
       if (reply) detail.reply = reply
       // Mark as read is the plugin's word, so it is a boolean or nothing, and the moment it covers
       // a whole number of milliseconds.
