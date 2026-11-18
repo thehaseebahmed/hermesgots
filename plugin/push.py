@@ -310,6 +310,8 @@ def _relay(path: Path, kind: str, category: str, session_id: str, notice: Notice
     if not state.get("token") or state.get("revoked") or not state.get("site"):
         return
     fields = carried(notice)
+    # The chat it is about and the buttons that act on it: only the phone's own tray can draw them.
+    conversation = notice.conversation if isinstance(notice, Notice) else {}
     # The phone draws the notice itself (a notification payload is Android's to draw, and its drawing
     # can carry no button), so it is told whose picture to wear and where that picture is: the app's
     # own file, at the origin its subscription named (`build-badges.mjs` cuts it, and the browser's
@@ -330,6 +332,7 @@ def _relay(path: Path, kind: str, category: str, session_id: str, notice: Notice
                     # A device that chose ntfy is told there, so a token it left on file stays quiet.
                     "skip": list(dict.fromkeys(_on_screen_devices(path) + ntfy.devices(path)))[:50],
                     **fields,
+                    **conversation,
                     **({"icon": picture} if picture else {}),
                 },
             )
@@ -606,14 +609,25 @@ def _run(
         if muted(path, kind, session_id):
             return
         project = kind in SESSION_KINDS and _project_session(path, session_id)
-        if kind in SESSION_KINDS and not title:
-            title = session_title(path, session_id)
-        notice = Notice(
-            title=_short(title), body=body, bot=bot(path), actions=_buttons(path, answer)
-        )
+        notice = _notice(path, kind, session_id, title, body, answer)
         _deliver(path, kind, category_of(kind, project), session_id, notice)
     except Exception:
         logger.debug("gots: a push failed", exc_info=True)
+
+
+def _notice(
+    path: Path,
+    kind: str,
+    session_id: str,
+    title: Optional[str],
+    body: Optional[str],
+    answer: Optional[Dict[str, Any]],
+) -> Notice:
+    """The whole notice one piece of news makes: its words, its bot, its buttons and the part only
+    the Android tray draws, built in one place so every transport is handed the same value."""
+    if kind in SESSION_KINDS and not title:
+        title = session_title(path, session_id)
+    return Notice(title=_short(title), body=body, bot=bot(path), actions=_buttons(path, answer))
 
 
 def _buttons(path: Path, answer: Optional[Dict[str, Any]]) -> Tuple[Action, ...]:
