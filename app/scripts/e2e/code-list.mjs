@@ -37,7 +37,7 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   ])
 
   await page.goto(`${app}/code`)
-  await until(async () => (await rows(page).count()) === 5, 20_000, "the rows")
+  await until(async () => (await rows(page).count()) === 4, 20_000, "the open rows")
   const text = await page.locator("main, body").first().innerText()
   for (const heading of HEADINGS)
     assert.ok(!text.includes(heading), `no "${heading}" heading groups the rows`)
@@ -61,14 +61,14 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   pass("the sort menu orders the flat band, pins first, and flips its arrow when chosen again")
 
   // The chips come from `readProjects`, a read that lands after the screen draws.
-  const chips = page.locator("[aria-label=Projects] button")
+  const chips = page.locator('[aria-label="Filter sessions"] button')
   await until(async () => (await chips.count()) > 1, 10_000, "the project chips")
   const faces = await chips.evaluateAll((ones) =>
     ones.map((one) => ({ glyphs: one.querySelectorAll("svg").length, height: Math.round(one.getBoundingClientRect().height) })),
   )
   assert.ok(faces.every((one) => one.glyphs === 0 && one.height === 44), "words alone, 44px tall")
   const bar = await page.locator("header").first().boundingBox()
-  const chipRow = await page.locator("[aria-label=Projects]").boundingBox()
+  const chipRow = await page.locator('[aria-label="Filter sessions"]').boundingBox()
   assert.ok(bar && chipRow && chipRow.y >= bar.y, "the chips stand in the bar's pill slot")
   pass("the project chips are pinned with the bar, as the chat list's pills are")
 
@@ -81,7 +81,7 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   await until(async () => (await rows(page).count()) === 1, 5_000, "the search to narrow the band")
   assert.equal(await page.getByLabel("Search sessions").count(), 1, "one field, never two")
   await search.fill("")
-  await until(async () => (await rows(page).count()) === 5, 5_000, "the band back")
+  await until(async () => (await rows(page).count()) === 4, 5_000, "the band back")
   pass("a search narrows the same flat band, from the foot or the bar")
 
   assert.equal(await page.getByRole("button", { name: "New session" }).count(), 1, "the foot's round +")
@@ -117,7 +117,7 @@ await flow("code-list", async ({ page, seed, shot, until }) => {
   pass("the dot sits at the icon's corner, needs a mark to be against, clears when read and returns with new activity")
 
   await page.reload()
-  await until(async () => (await rows(page).count()) === 5, 20_000, "the list after a reload")
+  await until(async () => (await rows(page).count()) === 4, 20_000, "the list after a reload")
   assert.match(await sortButton().getAttribute("aria-label") ?? "", /Title, descending/,
     "this device remembers the sort, arrow and all")
   pass("the sort choice is kept on this device over a reload")
