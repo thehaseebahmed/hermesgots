@@ -69,6 +69,8 @@ export function ModelPicker({
     if (!(await refreshModelInfo(profile))) tell.error("Couldn't refresh this bot's models.")
     setRefreshing(false)
   }
+  // Nothing to ask without a bot to ask for.
+  const ask: Refresh | undefined = profile ? { busy: refreshing, run: refresh } : undefined
   // The cached models.dev catalog, live: each row's facts repaint when a refresh lands.
   const catalog = useModelCatalog()
   // The cached BenchLM overall rankings, live: each row's score repaints when a refresh lands.
@@ -120,9 +122,7 @@ export function ModelPicker({
         isChosen={isChosen}
         onChoose={onChoose}
         onBack={() => setOpenSlug(undefined)}
-        busy={refreshing}
-        onRefresh={refresh}
-        profile={profile}
+        refresh={ask}
       />
     )
 
@@ -132,32 +132,24 @@ export function ModelPicker({
 
   return (
     <>
-      {/* The header keeps the padding its form gives it: a drawer's own close button sits at its
-          right, and the room for it is `pr-14`, which a class here would override. */}
       {header && (
-        <PopupHeader className="flex-row items-center gap-2 pl-2 text-left">
-          <div className="min-w-0 flex-1">
-            <PopupTitle className="justify-start text-left">
-              {drilled ? drilled.name : "Select Model"}
-            </PopupTitle>
-          </div>
-          {/* Only the picker's own layer carries it: a provider's sheet stacked over this one has
-              a header of its own, and two of them would ask the host twice for one thing. */}
-          {!opened && (
-            <RefreshModelsButton busy={refreshing} onRefresh={refresh} profile={profile} />
-          )}
-        </PopupHeader>
+        <PickerHeader
+          title={drilled ? drilled.name : "Select Model"}
+          // Only the picker's own layer carries it: a provider's sheet stacked over this one has a
+          // header of its own, and two of them would ask the host twice for one thing.
+          refresh={opened ? undefined : ask}
+        />
       )}
       <div className="flex flex-col gap-5 px-6 pt-2 text-[15px]">
         {(total > 8 || flat) && (
           <div className="flex items-center gap-2">
             {total > 8 && (
               <SearchField
-              value={query}
-              onChange={setQuery}
-              label={drilled ? `Search ${drilled.name}` : "Search models"}
-              className="min-w-0 flex-1"
-            />
+                value={query}
+                onChange={setQuery}
+                label={drilled ? `Search ${drilled.name}` : "Search models"}
+                className="min-w-0 flex-1"
+              />
             )}
             {/* Only a flat list sorts: the providers list stays A to Z, so it shows no menu. */}
             {flat && <ModelSortMenu sort={sort} onSort={setSort} />}
@@ -233,9 +225,7 @@ export function ModelPicker({
               rankings={rankings}
               isChosen={isChosen}
               onChoose={onChoose}
-              busy={refreshing}
-              onRefresh={refresh}
-              profile={profile}
+              refresh={ask}
             />
           </PopupContent>
         </Popup>
@@ -252,9 +242,7 @@ function ProviderModels({
   isChosen,
   onChoose,
   onBack,
-  busy,
-  onRefresh,
-  profile,
+  refresh,
 }: {
   provider: ModelProvider
   catalog: Catalog | undefined
@@ -263,11 +251,8 @@ function ProviderModels({
   onChoose: (choice: ModelChoice | undefined) => void
   /** Back to the providers, where the models take the picker's place rather than stack on it. */
   onBack?: () => void
-  /** Whether a refresh this picker asked for is still out, so its buttons all say so. */
-  busy: boolean
-  onRefresh: () => void
-  /** The bot whose host is asked again; without one the header carries no refresh. */
-  profile?: Profile | null
+  /** The host's models read again; without one the header carries no refresh. */
+  refresh?: Refresh
 }) {
   const [query, setQuery] = useState("")
   const [sort, setSort] = useState<Sort<ModelSort>>(() => defaultSort(MODEL_SORTS))
@@ -286,27 +271,7 @@ function ProviderModels({
   }, [provider, query, sort, catalog])
   return (
     <>
-      {/* The back control, the title and the refresh share one row so the three line up: an
-          absolutely placed control beside a centred title leaves the title off the sheet's middle
-          and the control sitting low. The header keeps the padding its form gives it, so a drawer's
-          own close button at its right keeps the room it was given. */}
-      <PopupHeader className="flex-row items-center gap-2 pl-2 text-left">
-        {onBack && (
-          <Button
-            variant="ghost"
-            size="icon-lg"
-            className="size-11 shrink-0"
-            aria-label="All providers"
-            onClick={onBack}
-          >
-            <ArrowLeftIcon />
-          </Button>
-        )}
-        <div className="min-w-0 flex-1">
-          <PopupTitle className="justify-start text-left">{provider.name}</PopupTitle>
-        </div>
-        <RefreshModelsButton busy={busy} onRefresh={onRefresh} profile={profile} />
-      </PopupHeader>
+      <PickerHeader title={provider.name} onBack={onBack} refresh={refresh} />
       <div className="flex flex-col gap-5 px-6 pt-2 text-[15px]">
         <div className="flex items-center gap-2">
           <SearchField
@@ -338,31 +303,61 @@ function ProviderModels({
 }
 
 /**
- * A header's refresh: it asks the host to read its models again, which is a host-wide call, and
- * holds the press while that is out. Nothing is drawn where the picker holds no bot to ask for.
+ * The one ask a header's refresh makes: whether it is still out, and the press that sends it. It
+ * asks the host to read its models again, which is a host-wide call, so one picker holds a single
+ * ask for both of its headers and a second press waits on the first.
  */
-function RefreshModelsButton({
-  busy,
-  onRefresh,
-  profile,
-}: {
+interface Refresh {
   busy: boolean
-  onRefresh: () => void
-  /** The bot whose host is asked again; without one there is nothing to refresh. */
-  profile?: Profile | null
+  run: () => void
+}
+
+/**
+ * A sheet header the picker and a provider's own models both draw: the title at the left with the
+ * back control before it where there is one, and the refresh at its right, all in one row so the
+ * three line up. The header keeps the padding its form gives it, so a drawer's own close button at
+ * its right keeps the room it was given — `pr-14`, which a class here would override.
+ */
+function PickerHeader({
+  title,
+  onBack,
+  refresh,
+}: {
+  title: string
+  /** Back to the providers, where the models take the picker's place rather than stack on it. */
+  onBack?: () => void
+  /** The host's models read again; without one the header carries no refresh. */
+  refresh?: Refresh
 }) {
-  if (!profile) return null
   return (
-    <Button
-      variant="ghost"
-      size="icon-lg"
-      className="size-11 shrink-0"
-      aria-label="Refresh models"
-      disabled={busy}
-      onClick={onRefresh}
-    >
-      {busy ? <Spinner /> : <RefreshCwIcon />}
-    </Button>
+    <PopupHeader className="flex-row items-center gap-2 pl-2 text-left">
+      {onBack && (
+        <Button
+          variant="ghost"
+          size="icon-lg"
+          className="size-11 shrink-0"
+          aria-label="All providers"
+          onClick={onBack}
+        >
+          <ArrowLeftIcon />
+        </Button>
+      )}
+      <div className="min-w-0 flex-1">
+        <PopupTitle className="justify-start text-left">{title}</PopupTitle>
+      </div>
+      {refresh && (
+        <Button
+          variant="ghost"
+          size="icon-lg"
+          className="size-11 shrink-0"
+          aria-label="Refresh models"
+          disabled={refresh.busy}
+          onClick={refresh.run}
+        >
+          {refresh.busy ? <Spinner /> : <RefreshCwIcon />}
+        </Button>
+      )}
+    </PopupHeader>
   )
 }
 
