@@ -306,9 +306,8 @@ def _on_screen_devices(path: Path) -> List[str]:
 
 def _relay(path: Path, kind: str, category: str, session_id: str, notice: Notice) -> None:
     """Asks the registry to push to the account's Android installs, if this profile is linked."""
-    home = home_of(path)
-    state = link.load_state(home)
-    if not state.get("token") or state.get("revoked") or not state.get("site"):
+    state = _link_state(path)
+    if state is None:
         return
     fields = carried(notice)
     # The chat it is about and the buttons that act on it: only the phone's own tray can draw them.
@@ -369,9 +368,16 @@ def reachable(path: Path) -> bool:
     return bool(_rows(path)) or ntfy.target(path) is not None or _linked(path)
 
 
-def _linked(path: Path) -> bool:
+def _link_state(path: Path) -> Optional[Dict[str, Any]]:
+    """The profile's registry link, or None where it is unlinked, revoked or names no site."""
     state = link.load_state(home_of(path))
-    return bool(state.get("token") and not state.get("revoked") and state.get("site"))
+    if not state.get("token") or state.get("revoked") or not state.get("site"):
+        return None
+    return state
+
+
+def _linked(path: Path) -> bool:
+    return _link_state(path) is not None
 
 
 def _deliver(path: Path, kind: str, category: str, session_id: str, notice: Optional[Notice] = None) -> None:
