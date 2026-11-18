@@ -21,7 +21,7 @@ import { botChatsPath, botMainPath } from "@/lib/bot-tabs"
 import { drawsMain, useChatLayout, type ChatLayout } from "@/lib/chat-layout"
 import { useNav } from "@/lib/nav"
 import { setBackGuard } from "@/lib/native"
-import { useSplit } from "@/lib/pane"
+import { useBotChatsPane } from "@/lib/pane"
 import { useBotLabels } from "@/lib/use-bot-labels"
 
 /** What the control says where this device cannot name the bot whose list it lands. */
@@ -49,7 +49,7 @@ export function useChatLead({
    * opens, so there is no list behind it and no control onto one.
    */
   main?: boolean
-  /** Whether that list is on screen beside this one; the split width's answer by default. */
+  /** Whether that list is on screen beside this one; by default, whether the shell draws its lane. */
   beside?: boolean
   /** A project session under Code leads back to Code rather than to any list. */
   underCode?: boolean
@@ -57,7 +57,7 @@ export function useChatLead({
   leave?: () => void
 }) {
   const layout = useChatLayout()
-  const split = useSplit()
+  const pane = useBotChatsPane()
   const { up } = useNav()
   // The label this device's lists give that bot, so a bot whose namesake answers elsewhere is told
   // apart in this control too (ADR 0149). Read off the one map every list draws from rather than from
@@ -70,7 +70,7 @@ export function useChatLead({
   // draws; a device whose settings have not answered draws the control once they do.
   const onMain = drawsMain(layout, main)
   const list = bot && !onMain && layout ? listPathOf(layout, bot) : undefined
-  const besideList = (beside ?? split) && Boolean(list)
+  const besideList = (beside ?? Boolean(pane?.open && pane.profileId === bot)) && Boolean(list)
   const ontoList = useCallback(() => {
     if (list) up(list)
   }, [list, up])
@@ -97,7 +97,9 @@ export function useChatLead({
   const words = named ? `Back to ${named}` : UNNAMED
   const leading = underCode ? (
     <BackButton label="Back to Code" onClick={() => void leave?.()} floating />
-  ) : list ? (
+  ) : list && !besideList ? (
+    // A screen the list stands beside is the list's open item, not a step off it: the row is how the
+    // reader moves on, so the bar offers no way back or out of it.
     <BackButton label={words} onClick={ontoList} floating />
   ) : undefined
   return {
@@ -107,7 +109,10 @@ export function useChatLead({
     list,
     /** Steps back onto that list, which is what a room's and a run's control answers with. */
     ontoList,
-    /** The bar's leading control: the way back onto that list, or to Code for a session under it. */
+    /**
+     * The bar's leading control: the way back onto that list where it is not beside this screen, or
+     * to Code for a session under it.
+     */
     leading,
   }
 }

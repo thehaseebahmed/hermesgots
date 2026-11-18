@@ -210,14 +210,10 @@ test(
         "/c/c-a",
         "the row of the chat on screen is the one the list marks open",
       )
-      assert.ok(
-        find(`[data-slot="header-leading"] ${BACK_TO_BOT}`),
-        "and the chat's bar leads with its way back to the bot's list",
-      )
       assert.equal(
-        missing(`[data-slot="header-actions"] ${BACK_TO_BOT}`),
+        missing(BACK_TO_BOT),
         true,
-        "which the corner does not carry",
+        "and the chat's bar has no way back to the list already beside it",
       )
     })
   }),
@@ -236,9 +232,10 @@ test(
         "/c/c-b",
         "and marks the chat the address names",
       )
-      assert.ok(
-        find(`[data-slot="header-leading"] ${BACK_TO_BOT}`),
-        "the chat leads with its way back, the list beside it or not",
+      assert.equal(
+        missing(BACK_TO_BOT),
+        true,
+        "the chat has no way back to the list beside it",
       )
       assert.equal(
         missing(SIDE_CHATS_CONTROL),
@@ -659,13 +656,13 @@ test(
       )
       assert.equal(missing(LANE), false, "and the list keeps its lane beside it")
 
-      await click(find(`[data-slot="header-leading"] ${BACK_TO_BOT}`))
-      await until(async () => path() === `/b/${bot.id}/sidechats`, "the list the chat stands in")
+      await click(find(MAIN_ROW))
+      await until(async () => path() === `/c/${MAIN}`, "Main, from its row in the list")
       await until(async () => titles().includes("Main"), "Main standing beside the list again")
       assert.equal(
         find('[data-slot="main-row"] a[aria-current="page"]')?.getAttribute("href"),
         `/c/${MAIN}`,
-        "with Main the chat the pane holds, one rung under the list",
+        "with Main the chat the pane holds",
       )
       assert.equal(openRow()?.getAttribute("href"), `/c/${MAIN}`, "and the row the list marks")
     })

@@ -4,6 +4,7 @@
 - **G1** In the two-pane view I can see the Main chat row and the separators above my side chats, not only the side chats.
 - **G2** In the two-pane view the list's header is the Main header of the one-pane view: the bot's face and name (opening its settings), not "Sidechats" with a back arrow.
 - **G4** In the two-pane view Main's own bar drops its Side Chats control, since the list already stands beside it.
+- **G5** In the two-pane view a chat opened beside its list has no way to go back or close it; the top-left button is gone.
 - **G3** On the sidebar the unread mark is the Unread Chats dot: one blue dot on the bot's head, expanded or collapsed.
 
 ## Non-goals
@@ -17,6 +18,7 @@
 | Chat-list sync (`sync.ts`, `merge.ts`) | affected | G1 | `scripts/test-main-upgrade.tsx` |
 | Side Chat List screen (`routes/side-chats.tsx`) | changed | G2 | `scripts/test-side-chats.tsx` |
 | Sidebar bot rows (`conversation-list.tsx`) | changed | G3 | a sidebar component test |
+| Chat lead (`chat-lead.tsx`), routines page | changed | G5 | `scripts/test-bot-chats-pane.tsx` |
 | Chat bar (`chat-bar.tsx`) | changed | G4 | `scripts/test-bot-chats-pane.tsx` |
 
 ## Flows
@@ -45,6 +47,8 @@ sequenceDiagram
 
 5. **Main's bar beside its list carries no Side Chats control.** Goals: G4. After: 3. Layers: Chat bar. Check: in `test-bot-chats-pane.tsx` at the split width, Main beside the list has no `side-chats-button`, while one pane still has it. Red, then green. Already true before this work: `SideChatsButton` draws nothing at the split width, and `test-bot-chats-pane.tsx` asserts it ("no bar control repeats the list beside it"), so no code changed. Done.
 
+6. **A chat beside its list draws no way back.** Goals: G5. After: 3. Layers: Chat lead, routines page. `useChatLead` reads whether the shell really draws the bot's list lane, not just the width, and leads with nothing there; the routines page keeps its way back. Check: `test-bot-chats-pane.tsx` at 1440px and at 1024px with the rail asserts no "Back to <bot>" beside the list, red then green; phone and 1024px-with-sidebar keep it. Done.
+
 ## Decisions
 - **Confirmed cause: the Dexie v50 upgrade.** Its filter is `id.startsWith("main-")`, but the plugin keys today's Mains `main-<bot>-<session>`, so the upgrade stripped them too. Its comment's promise that "the projection re-tells it" does not hold. The host's stored copy already carries the flag, so `carrying_main` keeps its clock. `mergeDocs` pulls only a strictly newer record, and the plugin's `merge` keeps only a strictly newer one, so the device and the host stay at one clock forever. Proved on a probe test that replays a v49 device holding `main-default-local-520cce5e` with `main: true` and runs the upgrade: `main` came out `undefined`, and `mergeDocs` against the host's flagged copy at the same clock returned `pull = []`. The user's device state agrees: all 8 bots hold a `main-*` "Bot Chat" record and none carries `main`.
 - **Refuted: a pill or search hides the row.** Main is taken from the unfiltered rows.
@@ -52,6 +56,7 @@ sequenceDiagram
 - **Refuted: the width.** At 1440px every entry (launch, side chat cold, Main cold, the sidebar row) drew `main-row` and `main-separator` with fixture data. The user confirmed they are on the wide view (Q1).
 - **Repair by rewinding the clock, not re-flagging on the device.** Made by the agent. The device can't tell which `main-*` record is Main (bot `zero` holds two). The host's projection is the one authority, so the device lets the host's record win. A retired Main still comes back unflagged, because the host strips the flag with a newer clock.
 - **Lane bar: bot face and name, plus routines.** Made by the user (Q2).
+- **No back control on a chat beside its list; Main stays the default beside it.** Made by the user (follow-up after review; the No chat selected default was withdrawn).
 - **Hide Main's Side Chats control in two panes.** Made by the user (Q extra).
 - **Sidebar: blue dot on the head, always; keep the "N unread" words.** Made by the user (Q3).
 
