@@ -66,10 +66,14 @@ export function ModelPicker({
   const refresh = async () => {
     if (!profile || refreshing) return
     setRefreshing(true)
-    if (!(await refreshModelInfo(profile))) tell.error("Couldn't refresh this bot's models.")
-    setRefreshing(false)
+    // Released on every path out: a press that threw would otherwise leave the refresh disabled
+    // for as long as the picker stands.
+    try {
+      if (!(await refreshModelInfo(profile))) tell.error("Couldn't refresh this bot's models.")
+    } finally {
+      setRefreshing(false)
+    }
   }
-  // Nothing to ask without a bot to ask for.
   const ask: Refresh | undefined = profile ? { busy: refreshing, run: refresh } : undefined
   // The cached models.dev catalog, live: each row's facts repaint when a refresh lands.
   const catalog = useModelCatalog()
@@ -354,7 +358,7 @@ function PickerHeader({
         <Button
           variant="ghost"
           size="icon-lg"
-          className="size-11 shrink-0"
+          className="mr-2 size-11 shrink-0"
           aria-label="Refresh models"
           disabled={refresh.busy}
           onClick={refresh.run}
