@@ -101,6 +101,13 @@ const botRow = () => find(`a[href="/b/${bot.id}"]`)
 const selected = (row: Element | null) => Boolean(row?.className.split(/\s+/).includes("bg-muted"))
 /** The row's unread mark, as the list draws it. */
 const dotted = (row: Element | null) => Boolean(row?.querySelector("[data-unread]"))
+/** A row's unread mark is the list rows' own dot: one, blue, on the bot's head. */
+function assertHeadDot(row: Element | null) {
+  const dots = row?.querySelectorAll("[data-unread]") ?? []
+  assert.equal(dots.length, 1, "one dot a row")
+  assert.ok(dots[0].parentElement?.querySelector("img"), "on the bot's head")
+  assert.ok(dots[0].classList.contains("bg-info"), "in the blue an unread chat's row wears")
+}
 const stateOf = (row: Element | null) =>
   row?.querySelector('[data-slot="bot-state"]')?.textContent ?? null
 
@@ -153,6 +160,7 @@ test("a bot with something newer than this device's mark says how many, and dots
   await mount(screen("/"), async () => {
     await until(async () => stateOf(botRow()) === "2 unread", "the row to count both of them")
     assert.equal(dotted(botRow()), true, "a thread read before its last turn is news")
+    assertHeadDot(botRow())
     assert.equal(
       find("[data-unread]")?.getAttribute("aria-hidden"),
       "true",
@@ -275,6 +283,7 @@ test("the collapsed rail marks unread on the avatar, where no line says it", asy
     </MemoryRouter>,
     async () => {
       await until(async () => dotted(botRow()), "the rail's mark")
+      assertHeadDot(botRow())
       assert.equal(stateOf(botRow()), null, "a rail draws no line under the name")
       assert.ok(botRow()?.textContent?.includes("New activity"), "so the words say it instead")
     },

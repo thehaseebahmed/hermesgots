@@ -1936,6 +1936,25 @@ db.version(50).upgrade((tx) =>
 )
 
 /**
+ * v51: the Mains v50 stripped by mistake. The plugin keys today's Main `main-<bot>-<session>`, an id
+ * v50's filter matched too, and the host's copy still carries the flag at the record's own clock — so
+ * no merge ever pulled it back (a merge takes only a strictly newer record, on both sides). Every
+ * `main-*` record without the flag has its change clock rewound, so the host's copy wins the next
+ * merge and says which record is Main: the device cannot, since a bot can hold more than one.
+ */
+db.version(51).upgrade((tx) =>
+  tx
+    .table("conversations")
+    .filter(
+      (conversation: Record<string, unknown>) =>
+        typeof conversation.id === "string" &&
+        conversation.id.startsWith("main-") &&
+        !conversation.main,
+    )
+    .modify({ changedAt: 0 }),
+)
+
+/**
  * How many rows of one room's log this device keeps: the page a reader can scroll back through.
  * A room's log lives on its Host and is read by sequence, so a page is what a screen needs and no
  * more — without a bound, every fold and every read mark would pay for the room's whole history.

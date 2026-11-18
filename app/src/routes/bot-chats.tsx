@@ -1,11 +1,11 @@
 import { MessageCircleIcon } from "lucide-react"
-import { Link, Navigate, useParams } from "react-router"
+import { Navigate, useParams } from "react-router"
 
-import { Bot } from "@/components/bot"
+import { BotTitle } from "@/components/chat/bot-title"
 import { ChatList } from "@/components/chat/chat-list"
 import { RoutinesButton } from "@/components/chat/routines-button"
 import { EmptyPane } from "@/components/empty-pane"
-import { botMainPath, botPath } from "@/lib/bot-tabs"
+import { botMainPath } from "@/lib/bot-tabs"
 import { labelOf } from "@/lib/bot-name"
 import { CHAT_FILTERS } from "@/lib/chat-list"
 import { useChatLayout } from "@/lib/chat-layout"
@@ -79,17 +79,7 @@ function BotChatsList({
   return (
     <ChatList
       bot={bot}
-      title={
-        <Link
-          to={botPath(bot.id)}
-          className="-ml-2 flex min-h-11 min-w-0 items-center gap-2 rounded-full px-2 outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <span aria-hidden className="shrink-0">
-            <Bot id={bot.botId} className="size-9" />
-          </span>
-          <span className="truncate">{labelOf(labels, bot)}</span>
-        </Link>
-      }
+      title={<BotTitle botId={bot.id} face={bot.botId} label={labelOf(labels, bot)} />}
       actions={<RoutinesButton profileId={bot.id} />}
       pills={CHAT_FILTERS}
       filter={filter}

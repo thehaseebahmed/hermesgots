@@ -178,7 +178,12 @@ test(
       await until(async () => titles().includes("Alpha"), "the chat's own header")
       assert.equal(missing(LANE), false, "the shell keeps the bot's list on screen")
       assert.match(laneClass(), /\bw-103\b/, "at the 412px lane every list of the app's keeps")
-      assert.ok(titles().includes("Sidechats"), "the lane is the Side Chat List, not the flat one")
+      assert.ok(titles().includes("Mainly"), "the lane wears the bot's bar")
+      assert.equal(
+        missing('[data-slot="main-row"]'),
+        false,
+        "over the Side Chat List, Main above it, not the flat one",
+      )
       assert.equal(
         missing('[data-slot="bot-chats-empty"]'),
         true,
@@ -550,9 +555,9 @@ test(
     await mount(screen("/c/c-a"), async () => {
       await until(async () => titles().includes("Alpha"), "the chat's own header")
       assert.match(
-        find('[data-slot="list-lane"] [data-slot="header-line"]')?.textContent ?? "",
+        find('[data-slot="list-lane"] [data-slot="header-title"]')?.textContent ?? "",
         /Mainly/,
-        "the list's line names the bot",
+        "the list's bar names the bot",
       )
       assert.equal(
         findAll('[data-slot="item-lane"] [data-slot="header-row"] [role="img"]').length,
@@ -575,7 +580,7 @@ test(
     localStorage.clear()
     await seed()
     await mount(screen(`/b/${bot.id}/sidechats`), async () => {
-      await until(async () => titles().includes("Sidechats"), "the list in the lane")
+      await until(async () => titles().includes("Mainly"), "the list in the lane")
       await until(async () => titles().includes("Main"), "Main in the item lane")
       assert.equal(
         path(),
@@ -586,7 +591,7 @@ test(
       assert.match(laneClass(), /\bw-103\b/, "at the 412px the app's lists keep")
       assert.deepEqual(
         [...titles()].sort(),
-        ["Main", "Sidechats"],
+        ["Main", "Mainly"],
         "one list and one chat: the list in the lane, Main beside it",
       )
       assert.equal(
