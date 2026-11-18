@@ -35,7 +35,6 @@ object NoticeDrawer {
         }
     }
 
-    /** Takes an answered entry out of the tray. */
     fun clear(context: Context, tag: String) {
         runCatching { NotificationManagerCompat.from(context).cancel(tag, NOTICE_ID) }
     }
