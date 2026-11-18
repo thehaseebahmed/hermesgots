@@ -135,8 +135,8 @@ jobs:
           echo "ANDROID_VERSION_CODE=${{ github.run_number }}" >> "$GITHUB_ENV"
           echo "ANDROID_VERSION_NAME=$(node -p 'require("./package.json").version')-$sha" >> "$GITHUB_ENV"
 
-      # One Gradle invocation for both: a daemon-less run pays its startup and configuration cost
-      # each time, so the static check and the packaging build share one.
+      # One Gradle invocation for all of it: a daemon-less run pays its startup and configuration cost
+      # each time, so the unit tests, the static check and the packaging build share one.
       - name: Gradle checks
         working-directory: app/android
         env:
@@ -147,8 +147,9 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           # A pull request touching only the app's TypeScript is checked, not packaged; anything on
-          # main is packaged, because that is the build Firebase distributes to testers.
-          tasks=lintDebug
+          # main is packaged, because that is the build Firebase distributes to testers. The JVM unit
+          # tests (the tray's notice model, `src/test/java`) run on every one.
+          tasks="testDebugUnitTest lintDebug"
           if [ "$EVENT" = "push" ] || [ "$NATIVE_CHANGED" = "true" ]; then
             tasks="$tasks assembleDebug"
             if [ -n "$KEYSTORE_BASE64" ]; then

@@ -3,7 +3,6 @@ package dev.hermesgots
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import androidx.core.app.NotificationManagerCompat
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -29,7 +28,7 @@ class NoticeAnswerReceiver : BroadcastReceiver() {
         val url = intent.getStringExtra(EXTRA_URL).orEmpty()
         // Only a link is ever posted. The registry keeps an http(s) address and drops anything else
         // (`actionsOf` in `app/netlify/lib/fcm.ts`); this is the same rule, kept where it is used.
-        if (!url.startsWith("https://") && !url.startsWith("http://")) return
+        if (!Notice.isLink(url)) return
         val tag = intent.getStringExtra(EXTRA_TAG)
         val pending = goAsync()
         thread {
@@ -38,7 +37,7 @@ class NoticeAnswerReceiver : BroadcastReceiver() {
             } finally {
                 // The row has been answered, whatever the network said: a notice that waits for a
                 // retry is one the reader has to clear twice.
-                if (tag != null) clear(context, tag)
+                if (tag != null) NoticeDrawer.clear(context, tag)
                 pending.finish()
             }
         }
@@ -74,13 +73,6 @@ class NoticeAnswerReceiver : BroadcastReceiver() {
             // No INTERNET permission — nothing can be done about that from here.
         } finally {
             runCatching { connection.disconnect() }
-        }
-    }
-
-    /** Takes the answered row out of the tray: the tag it was posted under, and the id every entry uses. */
-    private fun clear(context: Context, tag: String) {
-        runCatching {
-            NotificationManagerCompat.from(context).cancel(tag, GotsMessagingService.NOTICE_ID)
         }
     }
 
