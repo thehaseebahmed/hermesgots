@@ -70,7 +70,10 @@ export function useChatLead({
   // draws; a device whose settings have not answered draws the control once they do.
   const onMain = drawsMain(layout, main)
   const list = bot && !onMain && layout ? listPathOf(layout, bot) : undefined
-  const besideList = (beside ?? Boolean(pane?.open && pane.profileId === bot)) && Boolean(list)
+  // Main names no list, but its bot's list can still stand beside it: there it is drawn as a side chat
+  // is, without the face the list's own bar already wears.
+  const besideList =
+    (beside ?? Boolean(pane?.open && pane.profileId === bot)) && (Boolean(list) || onMain)
   const ontoList = useCallback(() => {
     if (list) up(list)
   }, [list, up])

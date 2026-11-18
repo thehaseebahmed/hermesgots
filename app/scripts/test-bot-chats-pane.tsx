@@ -565,6 +565,22 @@ test(
   }),
 )
 
+test(
+  "Main beside its list is drawn as a side chat is: its title, and no face",
+  laptop(async () => {
+    localStorage.clear()
+    await seed()
+    await mount(screen(`/b/${bot.id}/sidechats`), async () => {
+      await until(async () => titles().includes("Main"), "Main in the item lane")
+      assert.equal(
+        findAll('[data-slot="item-lane"] [data-slot="header-row"] [role="img"]').length,
+        0,
+        "Main's bar repeats no face beside the list that wears it",
+      )
+    })
+  }),
+)
+
 /**
  * The bot's list address draws the pair the new UX is made of (G6): the Side Chat List in the lane and
  * the bot's **Main** in the item lane beside it — not the list twice, and nowhere the flat layout's
