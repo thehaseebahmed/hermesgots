@@ -590,6 +590,14 @@ _Avoid_: HTML preview, web view, document, site
 The files an agent made, kept in a project's own tree and listed by folder — the tab a project opens them from, and the outputs a session filed. A tap opens the file the way a thread does: in the **Previewer** from a **Signed URL**, with the folder's other files it draws behind it so the reader can step through them, or handed to the platform where the Previewer can't draw it. Each of those files is signed when it is looked at, never the folder up front.
 _Avoid_: outputs folder, artifacts, files tab, downloads
 
+**Conversation notice**:
+An Android notice about one chat, drawn by Android as that chat's conversation: the bot's plain face as the sender with the app's icon badged on it, filed under Conversations through a long-lived shortcut per chat. A notice about anything else stays a plain entry.
+_Avoid_: messaging notification, chat notification, large-icon notice
+
+**Reply link**:
+The one-shot link a finished or failed run's conversation notice carries for its inline Reply. Pressing it queues the typed text as a turn on that chat, built by the host, so a reply goes with the app closed. It lives a day, is spent once, and is withdrawn when no phone received the notice.
+_Avoid_: reply token, quick reply, reply URL
+
 **Signed URL**:
 The address a bot's host mints for one file — a signature over its path, the profile and a few minutes of expiry — which the app draws every photo, clip and recording from, and a file's row opens. It stands in for the bot's key, which an `<img>` or a `<video>` can't send. It is asked for once per file and kept only while the expiry it names is worth drawing from: a page outlives the minutes a signature lives for, so another is minted when one runs out.
 _Avoid_: media link, token URL, blob URL, download link
