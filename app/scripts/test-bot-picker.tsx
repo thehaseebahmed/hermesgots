@@ -236,6 +236,11 @@ test("a host with one provider draws its models once, and its sheet is put away 
         "each model is one row, not one in each of two layers",
       )
       assert.equal(rows("deepseek-v4-flash").length, 1, "and so is the host's other model")
+      assert.match(
+        layers()[0].querySelector('[data-slot="sheet-title"]')?.className ?? "",
+        /text-center/,
+        "the provider's name is centred over its models, not left of them",
+      )
       // The sheet's own close, the ordinary way out: with a second layer standing over the list,
       // pressing it only clears the provider the reader opened and the stacked sheet opens again.
       await click(document.querySelector('button[aria-label="Close"]'))
@@ -332,17 +337,18 @@ function modelsHost({
 }
 
 const pill = () => document.querySelector('button[aria-label^="Model: "]')
-const refresh = () => find('[aria-label="Refresh models"]')
+/** The refresh at the foot of the list, named by what it does rather than by an icon. */
+const refresh = () => findAll("button").find((one) => wordsOf(one) === "Refresh Models") ?? null
 /** The header of the layer standing in front, which over the picker's own is a provider's sheet. */
 const frontHeader = () =>
   findAll("[data-popup-form]").at(-1)?.querySelector('[data-slot="sheet-header"]') ?? null
 
 /**
- * A header's refresh reaches a one-provider host's models on the five surfaces that pass
+ * The refresh reaches a one-provider host's models on the five surfaces that pass
  * `header={false}` too: with one provider there is nothing to choose between, so the picker drills
- * into it and its models stand under a header of their own — the one carrying the refresh.
+ * into it, and the refresh stands at the foot of its models wherever the surface puts them.
  */
-test("a one-provider host's own header carries the refresh where the surface draws no header", async () => {
+test("a one-provider host's models carry the refresh where the surface draws no header", async () => {
   modelsHost()
   await mount(
     <OpenedPicker>
@@ -361,11 +367,11 @@ test("a one-provider host's own header carries the refresh where the surface dra
       />
     </OpenedPicker>,
     async () => {
-      await until(async () => Boolean(refresh()), "the header's refresh")
+      await until(async () => Boolean(refresh()), "the refresh at the foot of the list")
       assert.equal(
-        wordsOf(frontHeader()?.querySelector('[data-slot="sheet-title"]') ?? null),
-        "Anthropic",
-        "the header names the provider whose models it heads",
+        frontHeader(),
+        null,
+        "the surface draws no header of its own, and the picker draws none over the models either",
       )
     },
   )
@@ -374,8 +380,8 @@ test("a one-provider host's own header carries the refresh where the surface dra
 /**
  * A refresh that shrinks the host to one provider while a provider's sheet stands over the picker
  * must not leave that sheet standing over a second copy of the same models: with one provider there
- * is nothing to choose between, so the picker drills into it and its models are drawn once — and
- * the header over them is the one carrying the refresh.
+ * is nothing to choose between, so the picker drills into it and its models are drawn once — with
+ * the refresh at their foot, on the one layer left.
  */
 test("a refresh that leaves one provider draws its models once, with the refresh to hand", async () => {
   modelsHost({
@@ -390,7 +396,7 @@ test("a refresh that leaves one provider draws its models once, with the refresh
     async () => {
       await until(async () => Boolean(pill()), "the composer's model pill")
       await click(pill())
-      await until(async () => Boolean(refresh()), "the picker's own header")
+      await until(async () => Boolean(refresh()), "the picker's own layer")
       // Drill into one provider, so its models stand as a sheet over the picker's own.
       await click(findAll("button").find((one) => wordsOf(one).startsWith("Anthropic")) ?? null)
       await until(async () => Boolean(frontHeader()), "the provider's own sheet")
@@ -405,7 +411,7 @@ test("a refresh that leaves one provider draws its models once, with the refresh
         "Anthropic",
         "one header names the survivor",
       )
-      assert.ok(refresh(), "the refresh is to hand on the header over the models")
+      assert.ok(refresh(), "the refresh is to hand at the foot of the models")
       assert.equal(
         findAll("li").filter((row) => wordsOf(row).includes("claude-sonnet-4-6")).length,
         1,
@@ -415,14 +421,14 @@ test("a refresh that leaves one provider draws its models once, with the refresh
   )
 })
 
-test("a header's refresh reads the host's models again, and the list repaints with them", async () => {
+test("the foot's refresh reads the host's models again, and the list repaints with them", async () => {
   const host = modelsHost({ added: "claude-opus-4-5" })
   await mount(
     <ModelMenu profile={botProfile("refresh-host.test")} onChoose={() => {}} />,
     async () => {
       await until(async () => Boolean(pill()), "the composer's model pill")
       await click(pill())
-      await until(async () => Boolean(refresh()), "the picker's own header")
+      await until(async () => Boolean(refresh()), "the picker's own layer")
       assert.equal(host.reads(), 1, "the host's list was read once, for the models on screen")
       await click(refresh())
       await until(async () => text().includes("claude-opus-4-5"), "the model the host added")
@@ -435,7 +441,7 @@ test("a header's refresh reads the host's models again, and the list repaints wi
   )
 })
 
-test("a provider's header carries the refresh too", async () => {
+test("a provider's list carries the refresh too", async () => {
   modelsHost({
     providers: [
       { slug: "anthropic", name: "Anthropic", models: ["claude-sonnet-4-6"] },
@@ -447,13 +453,10 @@ test("a provider's header carries the refresh too", async () => {
     async () => {
       await until(async () => Boolean(pill()), "the composer's model pill")
       await click(pill())
-      await until(async () => Boolean(refresh()), "the picker's own header")
+      await until(async () => Boolean(refresh()), "the picker's own layer")
       await click(findAll("button").find((one) => wordsOf(one).startsWith("Anthropic")) ?? null)
       await until(async () => Boolean(frontHeader()), "the provider's own sheet")
-      assert.ok(
-        frontHeader()?.querySelector('[aria-label="Refresh models"]'),
-        "the provider's header carries the refresh at its right",
-      )
+      assert.ok(refresh(), "the provider's list carries the refresh at its foot")
       assert.equal(
         wordsOf(frontHeader()?.querySelector('[data-slot="sheet-title"]') ?? null),
         "Anthropic",
@@ -493,7 +496,7 @@ test("a read still out when a refresh lands doesn't answer after it", async () =
     )
   }
   await mount(<Reading />, async () => {
-    await until(async () => Boolean(refresh()), "the picker's own header")
+    await until(async () => Boolean(refresh()), "the picker's own layer")
     // The first read is still out: what the refresh answers is the answer the cache comes to hold.
     await click(refresh())
     await until(async () => text().includes("claude-opus-4-5"), "the model the host added")
@@ -526,7 +529,7 @@ test("a refresh's re-read doesn't ask the host for a second full probe", async (
     async () => {
       await until(async () => Boolean(pill()), "the composer's model pill")
       await click(pill())
-      await until(async () => Boolean(refresh()), "the picker's own header")
+      await until(async () => Boolean(refresh()), "the picker's own layer")
       // The throttle's window has lapsed since the host was last probed in full.
       const real = Date.now
       Date.now = () => real() + 11 * 60_000
@@ -561,7 +564,7 @@ test("a host that doesn't answer keeps the list and says so", async () => {
       async () => {
         await until(async () => Boolean(pill()), "the composer's model pill")
         await click(pill())
-        await until(async () => Boolean(refresh()), "the picker's own header")
+        await until(async () => Boolean(refresh()), "the picker's own layer")
         const reads = host.reads()
         await click(refresh())
         await until(async () => said.length > 0, "the sentence")

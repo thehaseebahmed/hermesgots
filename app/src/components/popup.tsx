@@ -77,13 +77,14 @@ export function Popup({
  * a control of the header's own passes `text-left`.
  */
 export function PopupTitle({ className, ...props }: ComponentProps<typeof SheetTitle>) {
-  const classes = cn(
-    "cn-font-heading max-w-full justify-center truncate text-center text-base font-medium text-foreground",
-    className,
-  )
-  // A menu's heading starts where its rows do, as it sits beside the button it opened from.
-  if (usePopupForm() === "menu")
-    return <Popover.Title {...props} className={cn(classes, "justify-start text-left")} />
+  const base =
+    "cn-font-heading max-w-full justify-center truncate text-center text-base font-medium text-foreground"
+  // A menu's heading starts where its rows do, as it sits beside the button it opened from. A
+  // header that says otherwise — one whose name belongs in the middle — passes it, and wins: the
+  // form's habit is a default, not a rule a caller cannot overrule.
+  const menu = usePopupForm() === "menu" ? "justify-start text-left" : undefined
+  const classes = cn(base, menu, className)
+  if (menu) return <Popover.Title {...props} className={classes} />
   return <SheetTitle className={classes} {...props} />
 }
 export function PopupDescription(props: ComponentProps<typeof SheetDescription>) {

@@ -87,9 +87,6 @@ export function ModelPicker({
   // A host with one provider has nothing to choose between, so its models show at once.
   const drilled = sorted.length === 1 ? sorted[0] : opened
   const total = (drilled ? [drilled] : sorted).reduce((n, p) => n + p.models.length, 0)
-  // A one-provider host is drilled into, so its models stand under a header even where the surface
-  // around the picker draws none of its own; that header is the one carrying the refresh.
-  const showsHeader = header || Boolean(drilled)
   // Only ones the host still offers, so a recent pick never sends a model it dropped.
   const recentOffered = recent.filter((r) =>
     providers.some((p) => p.slug === r.provider && p.models.includes(r.model)),
@@ -141,14 +138,7 @@ export function ModelPicker({
 
   return (
     <>
-      {showsHeader && (
-        <PickerHeader
-          title={drilled ? drilled.name : "Select Model"}
-          // Only the picker's own layer carries it: a provider's sheet stacked over this one has a
-          // header of its own, and two of them would ask the host twice for one thing.
-          refresh={opened ? undefined : ask}
-        />
-      )}
+      {header && <PickerHeader title={drilled ? drilled.name : "Select Model"} />}
       <div className="flex flex-col gap-5 px-6 pt-2 text-[15px]">
         {(total > 8 || flat) && (
           <div className="flex items-center gap-2">
@@ -222,6 +212,9 @@ export function ModelPicker({
         {query && !groups.length && (
           <p className="px-1 text-sm text-muted-foreground">No models match.</p>
         )}
+        {/* Only the picker's own layer carries it: a provider's sheet stacked over this one has a
+            foot of its own, and two of them would ask the host twice for one thing. */}
+        <RefreshModels refresh={opened ? undefined : ask} />
       </div>
       {/* A provider the reader opened shows its models as a sheet stacked on this one, dismissed
           back to it; it renders inside this sheet's tree so Base UI registers the nesting. */}
@@ -280,7 +273,7 @@ function ProviderModels({
   }, [provider, query, sort, catalog])
   return (
     <>
-      <PickerHeader title={provider.name} onBack={onBack} refresh={refresh} />
+      <PickerHeader title={provider.name} onBack={onBack} />
       <div className="flex flex-col gap-5 px-6 pt-2 text-[15px]">
         <div className="flex items-center gap-2">
           <SearchField
@@ -306,15 +299,16 @@ function ProviderModels({
         ) : (
           <p className="px-1 text-sm text-muted-foreground">No models match.</p>
         )}
+        <RefreshModels refresh={refresh} />
       </div>
     </>
   )
 }
 
 /**
- * The one ask a header's refresh makes: whether it is still out, and the press that sends it. It
- * asks the host to read its models again, which is a host-wide call, so one picker holds a single
- * ask for both of its headers and a second press waits on the first.
+ * The one ask a refresh makes: whether it is still out, and the press that sends it. It asks the
+ * host to read its models again, which is a host-wide call, so one picker holds a single ask for
+ * every view of its list and a second press waits on the first.
  */
 interface Refresh {
   busy: boolean
@@ -322,25 +316,38 @@ interface Refresh {
 }
 
 /**
- * A sheet header the picker and a provider's own models both draw: the title at the left with the
- * back control before it where there is one, and the refresh at its right, all in one row so the
- * three line up. The header keeps the padding its form gives it, so a drawer's own close button at
- * its right keeps the room it was given — `pr-14`, which a class here would override.
+ * The host's models read again, at the foot of the list. A button rather than a header's icon: it
+ * says what it does where a reader has finished reading the list, and it keeps a drawer's own close
+ * button the room at the header's right that the form gave it. It sits at the end of the list
+ * rather than stuck to the foot of the sheet: a host with many providers scrolls, and a control
+ * pinned there would cover the row it stands over.
  */
-function PickerHeader({
-  title,
-  onBack,
-  refresh,
-}: {
-  title: string
-  /** Back to the providers, where the models take the picker's place rather than stack on it. */
-  onBack?: () => void
-  /** The host's models read again; without one the header carries no refresh. */
-  refresh?: Refresh
-}) {
+function RefreshModels({ refresh }: { refresh?: Refresh }) {
+  if (!refresh) return null
   return (
-    <PopupHeader className="flex-row items-center gap-2 pl-2 text-left">
-      {onBack && (
+    <Button
+      variant="outline"
+      size="lg"
+      className="w-full"
+      disabled={refresh.busy}
+      onClick={refresh.run}
+    >
+      {refresh.busy ? <Spinner /> : <RefreshCwIcon />}
+      Refresh Models
+    </Button>
+  )
+}
+
+/**
+ * A sheet header the picker and a provider's own models both draw: the name in the middle of the
+ * row, with a back control before it where there is one. The header keeps the padding its form
+ * gives it, so a drawer's own close button at its right keeps the room it was given — `pr-14`,
+ * which a class here would override.
+ */
+function PickerHeader({ title, onBack }: { title: string; onBack?: () => void }) {
+  return (
+    <PopupHeader className="flex-row items-center gap-2 pl-2">
+      {onBack ? (
         <Button
           variant="ghost"
           size="icon-lg"
@@ -350,22 +357,13 @@ function PickerHeader({
         >
           <ArrowLeftIcon />
         </Button>
+      ) : (
+        // The room a back control takes at the left is matched at the right, so the name sits over
+        // the middle of the list rather than beside the control that leads out of it.
+        <span className="size-11 shrink-0" aria-hidden />
       )}
-      <div className="min-w-0 flex-1">
-        <PopupTitle className="justify-start text-left">{title}</PopupTitle>
-      </div>
-      {refresh && (
-        <Button
-          variant="ghost"
-          size="icon-lg"
-          className="mr-2 size-11 shrink-0"
-          aria-label="Refresh models"
-          disabled={refresh.busy}
-          onClick={refresh.run}
-        >
-          {refresh.busy ? <Spinner /> : <RefreshCwIcon />}
-        </Button>
-      )}
+      <PopupTitle className="justify-center text-center">{title}</PopupTitle>
+      <span className="size-11 shrink-0" aria-hidden />
     </PopupHeader>
   )
 }
