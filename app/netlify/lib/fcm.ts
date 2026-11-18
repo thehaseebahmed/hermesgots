@@ -167,15 +167,15 @@ export function botId(value: unknown) {
   return /^[a-z0-9-]{1,32}$/.test(one) ? one : undefined
 }
 
-/**
- * A chat's id as the plugin keeps them (`MAX_ID_LENGTH` in `plugin/chats.py`, and the characters a
- * chat's address carries), which a phone names a shortcut and its read mark by.
- */
 /** A moment as the plugin sends one: a whole, positive number of milliseconds, or nothing. */
 export function momentOf(value: unknown) {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined
 }
 
+/**
+ * A chat's id as the plugin keeps them (`MAX_ID_LENGTH` in `plugin/chats.py`, and the characters a
+ * chat's address carries), which a phone names a shortcut and its read mark by.
+ */
 export function chatId(value: unknown) {
   const one = typeof value === "string" ? value.trim() : ""
   return /^[A-Za-z0-9._-]{1,256}$/.test(one) ? one : undefined

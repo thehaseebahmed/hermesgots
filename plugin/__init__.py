@@ -2661,7 +2661,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 session_id, text, chats.choice(chat), prompt_builder.run_instructions(record)
             )
             item = await asyncio.to_thread(
-                outbox.add, path, session_id, _request_profile(), text, [], run, True
+                outbox.add, path, session_id, _request_profile(), text, [], run, resumed=True
             )
         except Exception:
             # Nothing landed, so the link is given back to be pressed again.

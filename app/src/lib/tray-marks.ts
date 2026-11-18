@@ -7,6 +7,7 @@
 import { liveQuery, type Subscription } from "dexie"
 
 import { db, isReply, newestMessage } from "@/lib/db"
+import { quietly } from "@/lib/report"
 import { heldReads, markRead, onHeldReads, readThrough, releaseHeld } from "@/lib/read-marks"
 import { drainTrayReads, heldMark, type HeldClocks } from "@/lib/tray-reads"
 
@@ -23,9 +24,13 @@ async function clocksOf(chats: readonly string[]): Promise<Record<string, HeldCl
       newestMessage(chat, isReply),
     ])
     clocks[chat] = {
-      ...(reply ? { at: reply.createdAt } : {}),
       ...(record ? { updatedAt: record.updatedAt } : {}),
-      ...(reply ? { newest: { hermesAt: reply.hermesAt, createdAt: reply.createdAt } } : {}),
+      ...(reply
+        ? {
+            at: reply.createdAt,
+            newest: { hermesAt: reply.hermesAt, createdAt: reply.createdAt },
+          }
+        : {}),
     }
   }
   return clocks
@@ -57,7 +62,7 @@ export function followHeldReads(): () => void {
           else if (answer.mark) markRead(chat, answer.mark)
         }
       },
-      error: () => {},
+      error: quietly("following a tray's held reads"),
     })
   }
   let last = Object.keys(heldReads()).join("\n")

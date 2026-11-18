@@ -6349,9 +6349,6 @@ http
       }
       return json(res, 200, { object: "gots.runs", sessions, run_ids, waiting, waking })
     }
-    // Dev only: POST { delay } is how long runs/live keeps naming an owed wake before the mock
-    // posts the wake turn — the plugin's sweep and post, held open long enough for a flow to watch
-    // the window. 0 (the default) posts at once, as the mock always did.
     // Dev only: POST { session_id } mints the reply link a finished run's tray entry would carry, so
     // the reply route can be tried by hand with curl.
     if (url.pathname === "/__mock/push-reply" && req.method === "POST") {
@@ -6361,6 +6358,9 @@ http
       pushReplies.set(token, { sessionId })
       return json(res, 200, { url: `http://localhost:${PORT}/api/plugins/gots/push/reply/${token}` })
     }
+    // Dev only: POST { delay } is how long runs/live keeps naming an owed wake before the mock
+    // posts the wake turn — the plugin's sweep and post, held open long enough for a flow to watch
+    // the window. 0 (the default) posts at once, as the mock always did.
     if (url.pathname === "/__mock/wake" && req.method === "POST") {
       const { delay = 0 } = await readBody(req)
       wakeDelayMs = Number(delay) || 0

@@ -623,7 +623,6 @@ async function syncNative() {
   soonCategories(fcm.device, () => readPhone(push))
 }
 
-/** On launch and whenever the app returns, a rotated token or a new sign-in is told to the registry. */
 /** The tray's own plugin, as `MainActivity` registers it: the Mark as read presses it queued. */
 const TRAY_PLUGIN = "Tray"
 
@@ -639,6 +638,7 @@ async function trayReads(): Promise<unknown> {
   return (await Tray.takeReads()).reads
 }
 
+/** On launch and whenever the app returns, a rotated token or a new sign-in is told to the registry. */
 function startNative() {
   const pass = () => {
     void syncNative().catch(() => {})
