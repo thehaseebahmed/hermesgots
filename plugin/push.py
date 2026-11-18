@@ -346,9 +346,13 @@ def _relay(path: Path, kind: str, category: str, session_id: str, notice: Notice
                 continue
             # 503: the site has no Firebase key. Not worth a retry.
             logger.warning("gots: the registry wouldn't push (%s)", error)
-            return
+            break
     if isinstance(answer, dict) and not answer.get("sent") and answer.get("failed"):
         logger.warning("gots: the registry couldn't deliver the push (%s)", answer)
+    if not (isinstance(answer, dict) and answer.get("sent")):
+        # A reply link is minted for the relay alone, so one the relay put on no phone — every
+        # device on screen or not wanting the category, or a push that never went — is withdrawn.
+        answers.withdraw(path, conversation.get("reply"))
 
 
 def face(origin: Optional[str], bot: Optional[str]) -> Optional[str]:

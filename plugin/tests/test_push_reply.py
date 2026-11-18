@@ -197,6 +197,30 @@ class WhoGetsOne(Tray):
         self.assertIsNone(self.reply_of())
         self.assertEqual(reply_rows(self.path), [], "a credential nobody can press is never minted")
 
+    def relay(self, answer: Any) -> None:
+        """One finished run told through the relay, the registry answering ``answer`` (or raising it)."""
+
+        def call(*args: Any, **kwargs: Any) -> Any:
+            if isinstance(answer, Exception):
+                raise answer
+            return answer
+
+        with mock.patch.object(link, "call", call), mock.patch.object(push, "_rows", lambda path: []):
+            push._run(self.path, "run_done", "gots-1", body="Booked.")
+
+    def test_a_relay_no_phone_received_leaves_no_live_reply_link(self) -> None:
+        # Every device skipped as on screen, or none that wants the category: the registry sent none.
+        self.relay({"sent": 0, "failed": 0, "skipped": 1, "muted": 0})
+        self.assertEqual(reply_rows(self.path), [], "a link no phone holds is given back")
+
+    def test_a_relay_that_failed_leaves_no_live_reply_link(self) -> None:
+        self.relay(link.LinkError("Push isn't set up on this site", 503))
+        self.assertEqual(reply_rows(self.path), [])
+
+    def test_a_relay_a_phone_received_keeps_its_reply_link(self) -> None:
+        self.relay({"sent": 1, "failed": 0, "skipped": 0, "muted": 0})
+        self.assertEqual(len(reply_rows(self.path)), 1, "the phone that got it can still press it")
+
     def test_a_closed_chat_mints_no_reply(self) -> None:
         chats.merge(
             self.path,

@@ -222,6 +222,25 @@ def reply_link(path: Path, session_id: str, chat_id: str, base: Optional[str]) -
     return f"{base}{REPLY_PATH}{issue(path, REPLY, target, REPLY_SECONDS)}"
 
 
+def withdraw(path: Path, link: Any) -> None:
+    """Takes back a link that was minted and never pressed, because nothing carried it to a phone.
+
+    Unlike ``release``, which gives a spent press back, this ends an unspent one: a reply link the
+    relay delivered to no device is a live credential nobody can press, which is the one thing a
+    link must never be.
+    """
+    if not isinstance(link, str) or not link or not path.exists():
+        return
+    token = link.rsplit("/", 1)[-1]
+    conn = connect(path)
+    try:
+        conn.execute(
+            "DELETE FROM answer_tokens WHERE token = ? AND used_at IS NULL", (digest(token),)
+        )
+    finally:
+        conn.close()
+
+
 def redeem_reply(path: Path, token: Any) -> Claim:
     """Claims a reply link: it answers a reply, and nothing an approval's button could."""
     return claim(path, token, (REPLY,))
