@@ -7,7 +7,7 @@ import { SortMenu } from "@/components/sort-menu"
 import { defaultSort, type Sort } from "@/lib/sort"
 import { PickGroup, PickRow } from "@/components/pick-row"
 import { SearchField } from "@/components/search-field"
-import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { CentredTitle, Popup, PopupContent, PopupHeader } from "@/components/popup"
 import { usePopupForm } from "@/lib/popup-form"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
@@ -339,7 +339,7 @@ function RefreshModels({ refresh }: { refresh?: Refresh }) {
 }
 
 /**
- * A sheet header the picker and a provider's own models both draw: the name in the middle of the
+ * A sheet header the picker and a provider's own models both draw: the name over the middle of the
  * row, with a back control before it where there is one. The header keeps the padding its form
  * gives it, so a drawer's own close button at its right keeps the room it was given — `pr-14`,
  * which a class here would override.
@@ -358,12 +358,14 @@ function PickerHeader({ title, onBack }: { title: string; onBack?: () => void })
           <ArrowLeftIcon />
         </Button>
       ) : (
-        // The room a back control takes at the left is matched at the right, so the name sits over
-        // the middle of the list rather than beside the control that leads out of it.
+        // The room a back control takes, so the header keeps its height with none.
         <span className="size-11 shrink-0" aria-hidden />
       )}
-      <PopupTitle className="justify-center text-center">{title}</PopupTitle>
-      <span className="size-11 shrink-0" aria-hidden />
+      {/* The name is laid over the middle of the header rather than in the row of controls beside
+          it: a drawer's close button takes 44px at the right and a back control the same at the
+          left, but the padding either side of them is not the same, so a name left in that row
+          sits off centre however it is padded. */}
+      <CentredTitle>{title}</CentredTitle>
     </PopupHeader>
   )
 }
