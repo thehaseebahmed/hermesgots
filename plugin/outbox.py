@@ -24,8 +24,8 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import events, ticker
-from .store import connect, db_path
+from . import chats, events, link, ticker
+from .store import connect, db_path, home_of
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +93,23 @@ def clean_body(session_id: str, body: Any) -> Dict[str, Any]:
     run = {key: body[key] for key in ("model", "provider", "instructions", "input") if key in body}
     run["session_id"] = session_id
     return run
+
+
+def turn_body(
+    session_id: str,
+    text: str,
+    pinned: Optional[Dict[str, str]],
+    instructions: Optional[str] = None,
+) -> Dict[str, Any]:
+    """A run the plugin itself builds for a session: the text as the message, on the model the
+    session is pinned to, told ``instructions`` where there are any."""
+    run: Dict[str, Any] = {
+        "input": [{"role": "user", "content": text}],
+        **chats.pin_fields(pinned),
+    }
+    if instructions:
+        run["instructions"] = instructions
+    return clean_body(session_id, run)
 
 
 def clean_files(files: Any) -> List[Dict[str, Any]]:
@@ -431,6 +448,14 @@ def _key(adapter: Any, profile: Optional[str]) -> str:
     return ""
 
 
+def _dispatch_authorization(adapter: Any, profile: Optional[str], path: Path) -> Optional[str]:
+    # A profile no app request has reached yet has no key here, and the adapter's own is the launch
+    # profile's: the home's own .env is this bot's key, as a wake posts with.
+    if _key(adapter, profile):
+        return None
+    return link.authorization(home_of(path))
+
+
 async def post(adapter: Any, profile: Optional[str], path: str, body: Dict[str, Any],
                authorization: Optional[str] = None, idempotency_key: Optional[str] = None) -> Dict[str, Any]:
     """POSTs to this API server as the profile's own client would."""
@@ -566,7 +591,12 @@ async def tick(adapter: Any, session_id: str, profile: Optional[str], path: Path
         return
     try:
         started = await post(
-            adapter, profile, "/v1/runs", json.loads(row["body"]), idempotency_key=row["id"]
+            adapter,
+            profile,
+            "/v1/runs",
+            json.loads(row["body"]),
+            authorization=_dispatch_authorization(adapter, profile, path),
+            idempotency_key=row["id"],
         )
     except StartError as error:
         logger.warning("gots: couldn't start the queued turn for %s: %s", session_id, error)
