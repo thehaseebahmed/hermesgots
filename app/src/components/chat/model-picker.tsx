@@ -81,6 +81,9 @@ export function ModelPicker({
   // A host with one provider has nothing to choose between, so its models show at once.
   const drilled = sorted.length === 1 ? sorted[0] : opened
   const total = (drilled ? [drilled] : sorted).reduce((n, p) => n + p.models.length, 0)
+  // A one-provider host is drilled into, so its models stand under a header even where the surface
+  // around the picker draws none of its own; that header is the one carrying the refresh.
+  const showsHeader = header || Boolean(drilled)
   // Only ones the host still offers, so a recent pick never sends a model it dropped.
   const recentOffered = recent.filter((r) =>
     providers.some((p) => p.slug === r.provider && p.models.includes(r.model)),
@@ -132,7 +135,7 @@ export function ModelPicker({
 
   return (
     <>
-      {header && (
+      {showsHeader && (
         <PickerHeader
           title={drilled ? drilled.name : "Select Model"}
           // Only the picker's own layer carries it: a provider's sheet stacked over this one has a

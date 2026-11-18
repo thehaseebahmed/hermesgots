@@ -295,6 +295,40 @@ const refresh = () => find('[aria-label="Refresh models"]')
 const frontHeader = () =>
   findAll("[data-popup-form]").at(-1)?.querySelector('[data-slot="sheet-header"]') ?? null
 
+/**
+ * A header's refresh reaches a one-provider host's models on the five surfaces that pass
+ * `header={false}` too: with one provider there is nothing to choose between, so the picker drills
+ * into it and its models stand under a header of their own — the one carrying the refresh.
+ */
+test("a one-provider host's own header carries the refresh where the surface draws no header", async () => {
+  modelsHost()
+  await mount(
+    <OpenedPicker>
+      <ModelPicker
+        header={false}
+        profile={botProfile("one-provider-header.test")}
+        providers={[
+          {
+            slug: "anthropic",
+            name: "Anthropic",
+            models: ["claude-sonnet-4-6", "deepseek-v4-flash"],
+          },
+        ]}
+        fallback={{ label: "Default" }}
+        onChoose={() => {}}
+      />
+    </OpenedPicker>,
+    async () => {
+      await until(async () => Boolean(refresh()), "the header's refresh")
+      assert.equal(
+        wordsOf(frontHeader()?.querySelector('[data-slot="sheet-title"]') ?? null),
+        "Anthropic",
+        "the header names the provider whose models it heads",
+      )
+    },
+  )
+})
+
 test("a header's refresh reads the host's models again, and the list repaints with them", async () => {
   const host = modelsHost({ added: "claude-opus-4-5" })
   await mount(
