@@ -77,6 +77,22 @@ export function modelInfoFor({ baseUrl, apiKey }: Server) {
   return entry.info
 }
 
+/**
+ * Asks the host to read its models again and drops what this connection had cached, so every picker
+ * of the bot reads the new answer. A host that refused, or never answered, keeps the cache:
+ * dropping it would only make every picker ask again for an answer this one could not get.
+ */
+export async function refreshModelInfo(profile: Server): Promise<boolean> {
+  const info = await getModelInfo(profile, { refresh: true })
+  if (!info) return false
+  forget(profile)
+  // This read just probed every endpoint, so the re-read the forget causes is stamped against
+  // probing again: a host whose custom endpoint still comes back empty would otherwise be asked
+  // for a second full probe for an answer this one has already been and got.
+  refreshed.set(connectionKey(profile), Date.now())
+  return true
+}
+
 /** The host's model and the models it's configured for, shared by every picker on its server. */
 export function useModelInfo(profile?: (Server & { id?: string }) | null) {
   const baseUrl = profile?.baseUrl ?? ""
@@ -95,9 +111,15 @@ export function useModelInfo(profile?: (Server & { id?: string }) | null) {
   useEffect(() => {
     if (!baseUrl) return
     let cancelled = false
-    const entry = modelInfoFor({ baseUrl, apiKey })
-    void entry.then(async (info) => {
-      if (!cancelled) setState({ key, info })
+    // `modelInfoFor` answers with the entry's read, so the entry is known by the read it holds.
+    const read = modelInfoFor({ baseUrl, apiKey })
+    void read.then(async (info) => {
+      // A read that was still out when a refresh landed answers afterwards with the list the
+      // refresh just replaced: the entry it came from is no longer this connection's, so it is
+      // not an answer to anything any more — not for the list on screen, and not for the bot's
+      // remembered host model.
+      if (cancelled || cache.get(key)?.info !== read) return
+      setState({ key, info })
       await rememberHostModel(profileId, info)
     })
     return () => {

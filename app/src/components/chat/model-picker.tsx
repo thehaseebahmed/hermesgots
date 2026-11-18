@@ -1,18 +1,13 @@
 import { useMemo, useRef, useState } from "react"
 import { BrainIcon, EyeIcon, type LucideIcon } from "lucide-react"
-import {
-  ArrowLeftIcon,
-  ChevronDownIcon,
-  PlusIcon,
-  XIcon,
-} from "lucide-react"
+import { ArrowLeftIcon, ChevronDownIcon, PlusIcon, RefreshCwIcon, XIcon } from "lucide-react"
 
 import { MODEL_SORTS, sortByFacts, type ModelSort } from "@/components/chat/model-sort"
 import { SortMenu } from "@/components/sort-menu"
 import { defaultSort, type Sort } from "@/lib/sort"
 import { PickGroup, PickRow } from "@/components/pick-row"
 import { SearchField } from "@/components/search-field"
-import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { CentredTitle, Popup, PopupContent, PopupHeader } from "@/components/popup"
 import { usePopupForm } from "@/lib/popup-form"
 import { Button } from "@/components/ui/button"
 import { Field, FieldDescription, FieldLabel } from "@/components/ui/field"
@@ -23,7 +18,14 @@ import { MAX_FALLBACKS, withFallback } from "@/lib/fallback-list"
 import { useFallbackModels } from "@/lib/fallbacks"
 import { formatTokens } from "@/lib/format"
 import type { ModelProvider } from "@/lib/hermes"
-import { botModel, fullModel, hostChoice, shortModel, useModelInfo } from "@/lib/model-info"
+import {
+  botModel,
+  fullModel,
+  hostChoice,
+  refreshModelInfo,
+  shortModel,
+  useModelInfo,
+} from "@/lib/model-info"
 import { MAX_COST_TIER, modelFacts, useModelCatalog, type Catalog } from "@/lib/models"
 import { overallScoreOf, useOverallRankings, type RankingsData } from "@/lib/rankings"
 import { tell } from "@/lib/tell"
@@ -41,6 +43,7 @@ export function ModelPicker({
   choice,
   onChoose,
   header = true,
+  profile,
 }: {
   providers: ModelProvider[]
   /** The row that clears the choice: its label and the model it runs. */
@@ -51,17 +54,38 @@ export function ModelPicker({
   onChoose: (choice: ModelChoice | undefined) => void
   /** Whether the picker draws its own sheet header; a card or a dialog already says the title. */
   header?: boolean
+  /** The bot whose host is asked again for its models; without one there is nothing to refresh. */
+  profile?: Profile | null
 }) {
   const [query, setQuery] = useState("")
   const [openSlug, setOpenSlug] = useState<string>()
   const [sort, setSort] = useState<Sort<ModelSort>>(() => defaultSort(MODEL_SORTS))
+  // The one refresh both headers share: a press in either is the same ask to the host, so a second
+  // cannot be sent while the first is still out.
+  const [refreshing, setRefreshing] = useState(false)
+  const refresh = async () => {
+    if (!profile || refreshing) return
+    setRefreshing(true)
+    // Released on every path out: a press that threw would otherwise leave the refresh disabled
+    // for as long as the picker stands.
+    try {
+      if (!(await refreshModelInfo(profile))) tell.error("Couldn't refresh this bot's models.")
+    } finally {
+      setRefreshing(false)
+    }
+  }
+  const ask: Refresh | undefined = profile ? { busy: refreshing, run: refresh } : undefined
   // The cached models.dev catalog, live: each row's facts repaint when a refresh lands.
   const catalog = useModelCatalog()
   // The cached BenchLM overall rankings, live: each row's score repaints when a refresh lands.
   const rankings = useOverallRankings()
   const sorted = useMemo(() => sortProviders(providers), [providers])
+  // The provider the reader opened, which is the one that stacks its own sheet over the picker —
+  // but only where there is more than one to choose between: a host with one provider has its
+  // models drawn at once, and a sheet left over `openSlug` would draw them a second time.
+  const opened = sorted.length > 1 ? sorted.find((p) => p.slug === openSlug) : undefined
   // A host with one provider has nothing to choose between, so its models show at once.
-  const drilled = sorted.length === 1 ? sorted[0] : sorted.find((p) => p.slug === openSlug)
+  const drilled = sorted.length === 1 ? sorted[0] : opened
   const total = (drilled ? [drilled] : sorted).reduce((n, p) => n + p.models.length, 0)
   // Only ones the host still offers, so a recent pick never sends a model it dropped.
   const recentOffered = recent.filter((r) =>
@@ -104,6 +128,7 @@ export function ModelPicker({
         isChosen={isChosen}
         onChoose={onChoose}
         onBack={() => setOpenSlug(undefined)}
+        refresh={ask}
       />
     )
 
@@ -113,21 +138,17 @@ export function ModelPicker({
 
   return (
     <>
-      {header && (
-        <PopupHeader>
-          <PopupTitle>{drilled ? drilled.name : "Select Model"}</PopupTitle>
-        </PopupHeader>
-      )}
+      {header && <PickerHeader title={drilled ? drilled.name : "Select Model"} />}
       <div className="flex flex-col gap-5 px-6 pt-2 text-[15px]">
         {(total > 8 || flat) && (
           <div className="flex items-center gap-2">
             {total > 8 && (
               <SearchField
-              value={query}
-              onChange={setQuery}
-              label={drilled ? `Search ${drilled.name}` : "Search models"}
-              className="min-w-0 flex-1"
-            />
+                value={query}
+                onChange={setQuery}
+                label={drilled ? `Search ${drilled.name}` : "Search models"}
+                className="min-w-0 flex-1"
+              />
             )}
             {/* Only a flat list sorts: the providers list stays A to Z, so it shows no menu. */}
             {flat && <ModelSortMenu sort={sort} onSort={setSort} />}
@@ -191,18 +212,22 @@ export function ModelPicker({
         {query && !groups.length && (
           <p className="px-1 text-sm text-muted-foreground">No models match.</p>
         )}
+        {/* Only the picker's own layer carries it: a provider's sheet stacked over this one has a
+            foot of its own, and two of them would ask the host twice for one thing. */}
+        <RefreshModels refresh={opened ? undefined : ask} />
       </div>
-      {/* A provider's models open as a sheet stacked on this one, dismissed back to it; it
-          renders inside this sheet's tree so Base UI registers the nesting. */}
-      {drilled && form !== "menu" && (
+      {/* A provider the reader opened shows its models as a sheet stacked on this one, dismissed
+          back to it; it renders inside this sheet's tree so Base UI registers the nesting. */}
+      {opened && form !== "menu" && (
         <Popup open onOpenChange={(next) => !next && setOpenSlug(undefined)}>
           <PopupContent initialFocus={false} fixedHeight={PICKER_HEIGHT}>
             <ProviderModels
-              provider={drilled}
+              provider={opened}
               catalog={catalog}
               rankings={rankings}
               isChosen={isChosen}
               onChoose={onChoose}
+              refresh={ask}
             />
           </PopupContent>
         </Popup>
@@ -219,6 +244,7 @@ function ProviderModels({
   isChosen,
   onChoose,
   onBack,
+  refresh,
 }: {
   provider: ModelProvider
   catalog: Catalog | undefined
@@ -227,6 +253,8 @@ function ProviderModels({
   onChoose: (choice: ModelChoice | undefined) => void
   /** Back to the providers, where the models take the picker's place rather than stack on it. */
   onBack?: () => void
+  /** The host's models read again; without one the header carries no refresh. */
+  refresh?: Refresh
 }) {
   const [query, setQuery] = useState("")
   const [sort, setSort] = useState<Sort<ModelSort>>(() => defaultSort(MODEL_SORTS))
@@ -245,20 +273,7 @@ function ProviderModels({
   }, [provider, query, sort, catalog])
   return (
     <>
-      <PopupHeader className={cn(onBack && "pl-16")}>
-        {onBack && (
-          <Button
-            variant="ghost"
-            size="icon-lg"
-            className="absolute top-1.5 left-2 size-11"
-            aria-label="All providers"
-            onClick={onBack}
-          >
-            <ArrowLeftIcon />
-          </Button>
-        )}
-        <PopupTitle>{provider.name}</PopupTitle>
-      </PopupHeader>
+      <PickerHeader title={provider.name} onBack={onBack} />
       <div className="flex flex-col gap-5 px-6 pt-2 text-[15px]">
         <div className="flex items-center gap-2">
           <SearchField
@@ -284,8 +299,74 @@ function ProviderModels({
         ) : (
           <p className="px-1 text-sm text-muted-foreground">No models match.</p>
         )}
+        <RefreshModels refresh={refresh} />
       </div>
     </>
+  )
+}
+
+/**
+ * The one ask a refresh makes: whether it is still out, and the press that sends it. It asks the
+ * host to read its models again, which is a host-wide call, so one picker holds a single ask for
+ * every view of its list and a second press waits on the first.
+ */
+interface Refresh {
+  busy: boolean
+  run: () => void
+}
+
+/**
+ * The host's models read again, at the foot of the list. A button rather than a header's icon: it
+ * says what it does where a reader has finished reading the list, and it keeps a drawer's own close
+ * button the room at the header's right that the form gave it. It sits at the end of the list
+ * rather than stuck to the foot of the sheet: a host with many providers scrolls, and a control
+ * pinned there would cover the row it stands over.
+ */
+function RefreshModels({ refresh }: { refresh?: Refresh }) {
+  if (!refresh) return null
+  return (
+    <Button
+      variant="outline"
+      size="lg"
+      className="w-full"
+      disabled={refresh.busy}
+      onClick={refresh.run}
+    >
+      {refresh.busy ? <Spinner /> : <RefreshCwIcon />}
+      Refresh Models
+    </Button>
+  )
+}
+
+/**
+ * A sheet header the picker and a provider's own models both draw: the name over the middle of the
+ * row, with a back control before it where there is one. The header keeps the padding its form
+ * gives it, so a drawer's own close button at its right keeps the room it was given — `pr-14`,
+ * which a class here would override.
+ */
+function PickerHeader({ title, onBack }: { title: string; onBack?: () => void }) {
+  return (
+    <PopupHeader className="flex-row items-center gap-2 pl-2">
+      {onBack ? (
+        <Button
+          variant="ghost"
+          size="icon-lg"
+          className="size-11 shrink-0"
+          aria-label="All providers"
+          onClick={onBack}
+        >
+          <ArrowLeftIcon />
+        </Button>
+      ) : (
+        // The room a back control takes, so the header keeps its height with none.
+        <span className="size-11 shrink-0" aria-hidden />
+      )}
+      {/* The name is laid over the middle of the header rather than in the row of controls beside
+          it: a drawer's close button takes 44px at the right and a back control the same at the
+          left, but the padding either side of them is not the same, so a name left in that row
+          sits off centre however it is padded. */}
+      <CentredTitle>{title}</CentredTitle>
+    </PopupHeader>
   )
 }
 
@@ -483,6 +564,7 @@ export function ModelMenu({
               if (next && profile) void rememberModel(profile.id, next)
               setOpen(false)
             }}
+            profile={profile}
           />
         </PopupContent>
       </Popup>
@@ -548,6 +630,7 @@ export function DefaultModelSetting({
               if (next) void rememberModel(profile.id, next)
               setOpen(false)
             }}
+            profile={profile}
           />
         </PopupContent>
       </Popup>
@@ -647,6 +730,7 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
               if (next) void rememberModel(profile.id, next)
               setOpen(undefined)
             }}
+            profile={profile}
           />
         </PopupContent>
       </Popup>
