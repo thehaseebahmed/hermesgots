@@ -376,12 +376,42 @@ test("Delete asks first, and takes the chat away only when answered", async () =
   })
 })
 
-test("a project session keeps its menu: its settings are not a chat's", async () => {
-  await seed({ projectId: "p-1", title: "A session" })
+test("a project session's header opens the sheet that held its menu, and has no menu", async () => {
+  await seed({
+    projectId: "p-1",
+    title: "A session",
+    updatedAt: 11,
+    worktree: {
+      branch: "gots/x",
+      repos: [
+        { name: "gots/app", branch: "gots/x" },
+        { name: "gots/docs", branch: "gots/x" },
+        { name: "gots/site", branch: "gots/x" },
+      ],
+      instructions: "",
+    },
+  })
   globalThis.fetch = async () => json({})
   await mount(screen(), async () => {
-    await until(async () => Boolean(find('[aria-label="Chat options"]')), "the session's menu")
-    assert.ok(missing("[data-chat-settings-open]"), "and no title that opens a chat's settings")
+    await until(async () => Boolean(titlePress()), "the session's bar")
+    assert.equal(findAll('[aria-label="Chat options"]').length, 0, "no menu beside the title")
+    await until(
+      async () => (document.body.textContent ?? "").includes("app +2 more"),
+      "the header to name the first repository and count the rest",
+    )
+    await click(titlePress())
+    await until(async () => Boolean(findText("[role=dialog]", "Edit session")), "the session's settings")
+    assert.deepEqual(
+      [...findAll("[data-session-repos] span.truncate")].map((row) => row.textContent),
+      ["gots/app", "gots/docs", "gots/site"],
+      "the sheet lists every repository",
+    )
+    assert.equal(missing("[data-session-context]"), true, "context stays in the header's ring")
+    assert.ok(find("[data-session-resolve]"), "Resolve")
+    assert.ok(find("[data-session-discard]"), "Discard")
+    assert.ok(find("[data-chat-pin]"), "Pin")
+    assert.ok(findText("button", "Delete session"), "Delete")
+    assert.equal(missing("[data-chat-archive]"), true, "a session is discarded, never archived")
   })
 })
 

@@ -2,12 +2,15 @@ import { useCallback, useEffect, useState } from "react"
 
 import { connectionKey } from "@/lib/connection"
 import { db } from "@/lib/db"
+import { refreshDictationInfo } from "@/lib/dictation"
 import { PROBE_TIMEOUT_MS, READ_TIMEOUT_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import {
   getSpeechSettings,
   HermesError,
   probeSpeechSettings,
   setSpeechSettings,
+  removeSttKey,
+  setSttKey,
   setSttSetting,
 } from "@/lib/hermes"
 import { usePluginFeatureAnswers } from "@/lib/features"
@@ -25,12 +28,25 @@ import {
   type SpeechPatch,
   type SpeechSettings,
 } from "@/lib/speech"
-import { STT_SETTINGS, type SttValue } from "@/lib/stt-settings"
+import {
+  STT_KEYS,
+  STT_SETTINGS,
+  type SttSettings as SttSettingsBlock,
+  type SttValue,
+} from "@/lib/stt-settings"
 
 type Server = { baseUrl: string; apiKey: string }
 
 /** What a screen says where a bot's host never answered its speech read. */
 export const READ_FAILED = "Couldn't read this bot's host."
+
+/**
+ * The speech settings the host's own answer about whether it can hear a take is made of: the
+ * master switch, and the provider it resolves (`dictation.info()` in the plugin reads those two and
+ * the model each names). The rest of the page tunes a take's decode or its tidying, so a write of
+ * one leaves the composer's mic where it is (ADR 0164).
+ */
+const HEARD_KEYS = new Set(["stt.enabled", "stt.provider"])
 
 /** The last speech answer a bot's host gave this device, or nothing where it never read one. */
 export async function cachedSpeech(key: string): Promise<SpeechSettings | undefined> {
@@ -110,6 +126,7 @@ export function useSpeech(profile?: Server | null) {
     {
       speech: SPEECH_MODEL,
       stt: STT_SETTINGS,
+      keys: STT_KEYS,
       levels: CLEANUP_LEVELS_FEATURE,
       hearing: HEARING_PROMPT_FEATURE,
       probe: SPEECH_PROBE_FEATURE,
@@ -117,6 +134,7 @@ export function useSpeech(profile?: Server | null) {
   )
   const supported = features.speech === "yes"
   const sttSupport = features.stt === "yes"
+  const keysSupport = features.keys === "yes"
   // A plugin older than the four levels refuses both writes, so the page doesn't offer them at all.
   const levelsSupport = features.levels === "yes"
   const hearingSupport = features.hearing === "yes"
@@ -214,6 +232,18 @@ export function useSpeech(profile?: Server | null) {
     [save, settled, state, key, baseUrl, apiKey],
   )
 
+  /** The host's fresh `stt` block, kept on the page and on this device: the next open draws it. */
+  const landStt = useCallback(
+    async (stt: SttSettingsBlock) => {
+      const merged = state?.settings ? { ...state.settings, stt } : undefined
+      if (merged) {
+        setState({ key, settings: merged })
+        await keepSpeech({ baseUrl, apiKey }, merged)
+      }
+    },
+    [state, key, baseUrl, apiKey],
+  )
+
   /** One speech setting, written on its own: the host answers the whole block it now holds. */
   const writeStt = useCallback(
     async (setting: string, value: SttValue) => {
@@ -224,11 +254,12 @@ export function useSpeech(profile?: Server | null) {
       if (!stt) return false
       // The host's answer is the block it now holds, so the copy this device keeps moves with it:
       // the next open draws the write rather than the answer before it.
-      const merged = state?.settings ? { ...state.settings, stt } : undefined
-      if (merged) {
-        setState({ key, settings: merged })
-        await keepSpeech({ baseUrl, apiKey }, merged)
-      }
+      await landStt(stt)
+      // The write is this device's own, so the mic follows the switch now rather than at the next
+      // read's turn — the answer it is drawn from is one this device keeps for five minutes (ADR
+      // 0164). Only a key that answer is made of can move it; the rest tune a take's decode or its
+      // tidying and leave the composer where it is.
+      if (HEARD_KEYS.has(setting)) refreshDictationInfo({ baseUrl, apiKey })
       // Who hears a take is not in the `stt` block this answers with, so a provider pick is followed
       // by the read that names it: the page greys Cleanup on that route, and must not keep saying the
       // provider the bot has just left (ADR 0132).
@@ -240,7 +271,23 @@ export function useSpeech(profile?: Server | null) {
       }
       return true
     },
-    [save, state, key, baseUrl, apiKey],
+    [save, settled, landStt, key, baseUrl, apiKey],
+  )
+
+  /** A provider's API key, set (a string) or removed (`null`); the answer is the block it leaves. */
+  const writeKey = useCallback(
+    async (provider: string, secret: string | null) => {
+      if (!settled) return false
+      const stt = await save(() =>
+        secret === null
+          ? removeSttKey({ baseUrl, apiKey }, provider, AbortSignal.timeout(WRITE_TIMEOUT_MS))
+          : setSttKey({ baseUrl, apiKey }, provider, secret, AbortSignal.timeout(WRITE_TIMEOUT_MS)),
+      )
+      if (!stt) return false
+      await landStt(stt)
+      return true
+    },
+    [save, settled, landStt, baseUrl, apiKey],
   )
 
   /**
@@ -259,10 +306,7 @@ export function useSpeech(profile?: Server | null) {
     setMeasuring(key)
     setMeasureProblem(undefined)
     try {
-      const settings = await probeSpeech(
-        { baseUrl, apiKey },
-        AbortSignal.timeout(PROBE_TIMEOUT_MS),
-      )
+      const settings = await probeSpeech({ baseUrl, apiKey }, AbortSignal.timeout(PROBE_TIMEOUT_MS))
       setState({ key, settings: keepStt(settings, state?.settings) })
     } catch (error) {
       // Only an answer that came back is the host's to say: a status means it refused, and its own
@@ -319,5 +363,7 @@ export function useSpeech(profile?: Server | null) {
     chooseLevel: (level: CleanupLevel) => write({ cleanup_level: level }),
     setHearing: (sent: boolean) => write({ hearing_prompt: sent }),
     writeStt,
+    keys: supported && sttSupport && keysSupport,
+    writeKey,
   }
 }

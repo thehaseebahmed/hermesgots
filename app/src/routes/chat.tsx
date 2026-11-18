@@ -31,7 +31,7 @@ import { noteFailure, quietly } from "@/lib/report"
 import { awayLine } from "@/lib/away"
 import { useOnline } from "@/lib/online"
 import { labelOf } from "@/lib/bot-name"
-import { repoCap, sessionSubtitle } from "@/lib/repo-line"
+import { sessionSubtitle } from "@/lib/repo-line"
 import { Refusal } from "@/components/banner"
 import { useBotLabels } from "@/lib/use-bot-labels"
 import { useBreakReminderEligibility } from "@/components/break-reminder-context"
@@ -39,14 +39,9 @@ import { ApprovalCard } from "@/components/chat/approval-card"
 import { ChatHeader } from "@/components/chat/chat-header"
 import { useChatBar } from "@/components/chat/chat-bar"
 import { ChatSettings } from "@/components/chat/chat-settings"
-import { UsageSheet } from "@/components/chat/usage-sheet"
+import { ContextRing, UsageSheet } from "@/components/chat/usage-sheet"
 import { CODE_FACE, CodeFaceProvider } from "@/components/chat/code-face"
-import {
-  ChatActions,
-  LimitNotice,
-  useChatSurface,
-  useChatUsage,
-} from "@/components/chat/chat-actions"
+import { LimitNotice, useChatSurface, useChatUsage } from "@/components/chat/chat-actions"
 import { FollowAfterApproval, FollowOnSend } from "@/components/chat/follow"
 import { useFirstRows } from "@/components/chat/first-rows"
 import { Composer } from "@/components/chat/composer"
@@ -116,7 +111,6 @@ import { tell } from "@/lib/tell"
 import { useLiveRun, useLiveSubagents } from "@/lib/waiting"
 import { runFinished } from "@/lib/session-work"
 import { usePoll } from "@/lib/poll"
-import { useXLarge, useWide } from "@/lib/media"
 import { useCodePane, useRememberOpened } from "@/lib/pane"
 import { markRead } from "@/lib/read-marks"
 import { useDismissChatPushes } from "@/lib/push"
@@ -378,8 +372,6 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
   const ready = Boolean(chat && bot && chat.id === id)
   const { state: address } = useLocation()
   const { root, up } = useNav()
-  const xl = useXLarge()
-  const wide = useWide()
   // A session is a place in a project: it sits under Code, unless it is drawn beside Code's list,
   // and a session nothing was sent in isn't kept.
   const session = chat?.projectId ? chat : undefined
@@ -447,12 +439,11 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
   )
   const [away, setAway] = useState(false)
   const online = useOnline()
-  // A bot's own chat is edited from its bar; a session and a chat not yet started are not.
-  const editable = Boolean(chat) && !session
-  // A session keeps the bar's menu: resolve, discard and its delete are not a chat's settings. A bot's
-  // own chat has no menu — its title opens the sheet, and its context stands in the bar as the ring,
-  // at every width, because the sheet no longer carries it (ADR 0153). Main is no chat's settings at
-  // all: the ring becomes the way to its side chats, and no usage sheet is mounted to open.
+  // A chat is edited from its bar, and so is a session; a chat not yet started is not.
+  const editable = Boolean(chat) && !(session && unstarted)
+  // Nothing here has a menu: a title opens the sheet. A bot's own chat keeps its context in the bar as
+  // the ring at every width (ADR 0153); a session's bar keeps it as the ring too. Main is no chat's settings at all: the ring becomes the way to its side
+  // chats, and no usage sheet is mounted to open.
   const bar = useChatBar({
     main,
     botId: chat && bot && bot.baseUrl.trim() ? bot.id : undefined,
@@ -462,18 +453,13 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
     usage,
     onOpenUsage: () => setUsageOpen(true),
     onEdit: () => setSettingsOpen(true),
+    centered: Boolean(session),
   })
   const actions =
     chat && bot && session ? (
-      <ChatActions
-        chat={chat}
-        profile={bot}
-        session={session}
-        wide={wide}
-        usage={usage}
-        onUsageOpenChange={setUsageOpen}
-        onDeleted={() => up("/code")}
-      />
+      bot.baseUrl.trim() ? (
+        <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
+      ) : undefined
     ) : chat && bot && bot.baseUrl.trim() ? (
       bar.actions
     ) : undefined
@@ -498,7 +484,6 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
                 ? sessionSubtitle({
                     botName: labelOf(labels, bot),
                     names: sessionRepos.map((repo) => repo.name),
-                    cap: repoCap({ wide, xlarge: xl }),
                   })
                 : undefined)
             }
@@ -523,7 +508,15 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
               chat={chat}
               open={settingsOpen}
               onOpenChange={setSettingsOpen}
-              onDeleted={() => root("/")}
+              onDeleted={() => (session ? up("/code") : root("/"))}
+              code={
+                session
+                  ? {
+                      profile: bot,
+                      repos: sessionRepos.map((repo) => repo.name),
+                    }
+                  : undefined
+              }
             />
           )}
           {!main && (
@@ -1016,8 +1009,6 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
 
   // A session opens beside Code's list where there's room, and is then a top-level screen with
   // nothing to go back to.
-  const xl = useXLarge()
-  const wide = useWide()
   const beside = Boolean(useCodePane()) && Boolean(session)
   useRememberOpened("code", session?.id)
   const {
@@ -1081,7 +1072,7 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
   // answer.
   const headerTitle = gone ? "" : unstarted ? "" : (conversation?.title ?? NEW_CHAT_TITLE)
   // A bot's own chat is edited from its bar; a session and a chat this device cannot draw are not.
-  const editable = Boolean(conversation) && !session && !unstarted && !gone
+  const editable = Boolean(conversation) && !unstarted && !gone
   const bar = useChatBar({
     main,
     botId: conversation && configured ? conversation.profileId : undefined,
@@ -1091,20 +1082,15 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
     usage,
     onOpenUsage: () => setUsageOpen(true),
     onEdit: () => setSettingsOpen(true),
+    centered: Boolean(session),
   })
-  // A session keeps the bar's menu; a bot's own chat opens its sheet from the title and keeps its
-  // context in the bar as the ring, at every width (ADR 0153).
+  // Every chat opens its sheet from the title. A bot's own chat keeps its context in the bar as the
+  // ring at every width (ADR 0153); a session's bar keeps it as the ring too.
   const actions =
     conversation && session ? (
-      <ChatActions
-        chat={conversation}
-        profile={profile}
-        session={session}
-        wide={wide}
-        usage={usage}
-        onUsageOpenChange={setUsageOpen}
-        onDeleted={() => up("/code")}
-      />
+      configured ? (
+        <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
+      ) : undefined
     ) : conversation && configured ? (
       bar.actions
     ) : undefined
@@ -1116,7 +1102,6 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
           activity,
           botName: profile ? labelOf(labels, profile) : undefined,
           names: sessionRepos.map((repo) => repo.name),
-          cap: repoCap({ wide, xlarge: xl }),
         })
       : activity
 
@@ -1389,7 +1374,15 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
           chat={conversation}
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
-          onDeleted={() => root("/")}
+          onDeleted={() => (session ? up("/code") : root("/"))}
+          code={
+            session && profile
+              ? {
+                  profile,
+                  repos: sessionRepos.map((repo) => repo.name),
+                }
+              : undefined
+          }
         />
       )}
       {session && (

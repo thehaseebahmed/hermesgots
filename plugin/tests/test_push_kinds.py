@@ -53,19 +53,13 @@ class Categories(unittest.TestCase):
         self.assertIsNone(push.clean_categories(None))
         self.assertEqual(push.clean_categories([]), [])
 
-    def test_an_afk_task_pull_request_has_a_category_of_its_own(self):
-        self.assertEqual(push.category_of("afk_pr"), "code_afk_pr")
-        self.assertEqual(push.category_of("afk_pr", project=True), "code_afk_pr")
-        self.assertIn("code_afk_pr", push.CATEGORIES)
-        self.assertIn("afk_pr", push.SESSION_KINDS, "it names the session it is about")
-
     def test_a_kind_belongs_to_the_feature_of_its_session(self):
         self.assertEqual(push.category_of("question"), "chat_input")
         self.assertEqual(push.category_of("question", project=True), "code_input")
         self.assertEqual(push.category_of("plan"), "code_input")
         self.assertEqual(push.category_of("run_failed"), "chat_run_failed")
         self.assertEqual(push.category_of("run_done", project=True), "code_run_done")
-        self.assertEqual(push.category_of("pr_checks"), "code_pr_checks")
+        self.assertEqual(push.category_of("run_done"), "chat_run_done")
         self.assertEqual(push.category_of("clone_failed"), "code_setup_failed")
         self.assertEqual(push.category_of("routine_failed"), "routine_failed")
         self.assertEqual(push.category_of("research_brief"), "research_input")
@@ -703,4 +697,40 @@ class OnScreen(unittest.TestCase):
                     }
                 ],
                 "the phone whose app is open is the one the registry leaves out",
+            )
+
+    def test_the_relay_tells_the_registry_which_bot_and_picture_it_is(self):
+        # A phone draws the notice itself — a notification payload can carry no button — so it is
+        # told the bot whose picture to wear, where that picture is, and the buttons to draw.
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "gots.db"
+            bodies = []
+            state = {"token": "token", "site": "https://app.example"}
+
+            def call(site, method, route, **kwargs):
+                bodies.append(kwargs.get("body"))
+                return {}
+
+            push.set_bot(path, "nova")
+            push.set_web(path, "https://hermesgots.dev")
+            notice = push.Notice(
+                title="Fix the build",
+                body="rm -rf ./build",
+                bot="nova",
+                actions=(push.Action("Allow once", "https://bot.example/once"),),
+            )
+            with mock.patch.object(push.link, "load_state", lambda home: state), mock.patch.object(
+                push.link, "call", call
+            ):
+                push._relay(path, "approval", "chat_input", "gots-1", notice)
+            self.assertEqual(bodies[0]["bot"], "nova", "the phone's entry wears this bot's picture")
+            self.assertEqual(
+                bodies[0]["icon"],
+                "https://hermesgots.dev/bots/nova/notify.png",
+                "the app's own file, the one the browser's tray and ntfy read",
+            )
+            self.assertEqual(
+                bodies[0]["actions"],
+                [{"label": "Allow once", "url": "https://bot.example/once"}],
+                "the button a press posts back",
             )

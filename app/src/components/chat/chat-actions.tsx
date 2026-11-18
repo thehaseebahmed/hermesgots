@@ -1,48 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from "react"
-import {
-  ArchiveXIcon,
-  BellIcon,
-  BellOffIcon,
-  CheckIcon,
-  EllipsisIcon,
-  PencilIcon,
-  PinIcon,
-  RotateCcwIcon,
-  Trash2Icon,
-  XIcon,
-} from "lucide-react"
-import { Banner } from "@/components/banner"
-import { ConfirmDestructive } from "@/components/confirm-destructive"
-import { RenameDialog } from "@/components/chat/rename-dialog"
-import {
-  ContextIcon,
-  ContextPercent,
-  ContextRing,
-  type ContextUsage,
-} from "@/components/chat/usage-sheet"
+import { useEffect, useMemo, useRef } from "react"
+import { XIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
+import { Banner } from "@/components/banner"
+import type { ContextUsage } from "@/components/chat/usage-sheet"
 import { summaryKeyOf, summaryRowsOfKey } from "@/lib/compaction-seam"
-import { HEADER_BUTTON } from "@/lib/layout"
 import { useWide } from "@/lib/media"
 import { chosenOf } from "@/lib/model-pick"
 import { useNow } from "@/lib/threads"
-import { stopMessage } from "@/lib/chat"
 import { contextWindow } from "@/lib/context"
-import {
-  db,
-  deleteConversation,
-  updateConversation,
-  type Conversation,
-  type ModelChoice,
-  type Profile,
-} from "@/lib/db"
+import { db, type Conversation, type ModelChoice, type Profile } from "@/lib/db"
 import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
 import { syncContextWindow, useModelCatalog } from "@/lib/models"
 import {
@@ -52,9 +18,7 @@ import {
   refreshProviderUsage,
   resetsInText,
 } from "@/lib/provider-usage"
-import { setThreadMuted } from "@/lib/push"
 import { quietly } from "@/lib/report"
-import { closeSessionWork } from "@/lib/workspace"
 
 /**
  * What a chat's header and the box above its composer say about its context and its provider's
@@ -217,168 +181,5 @@ export function LimitNotice({
         )}
       </div>
     </Banner>
-  )
-}
-
-export function ChatActions({
-  chat,
-  profile,
-  session,
-  wide,
-  usage,
-  onUsageOpenChange,
-  onDeleted,
-}: {
-  chat: Conversation
-  profile?: Profile | null
-  /** The chat as a project session, where it is one. */
-  session?: Conversation
-  wide: boolean
-  usage: ContextUsage
-  /** Opens the usage sheet, which the limit banner above the composer opens too. */
-  onUsageOpenChange: (open: boolean) => void
-  /** Where to go once the chat is gone. */
-  onDeleted: () => void
-}) {
-  const configured = Boolean(profile?.baseUrl.trim())
-  const [renaming, setRenaming] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const [discarding, setDiscarding] = useState(false)
-
-  /** Asks the host to close the session, and moves on: the close runs there (ADR 0080). */
-  const closeSession = () => {
-    if (!session || !profile) return
-    stopMessage(session.id)
-    void closeSessionWork(session, profile).catch(quietly("Closing a session"))
-  }
-
-  return (
-    <>
-      <div className="flex items-center gap-2">
-        {wide && configured && (
-          <ContextRing usage={usage} onClick={() => onUsageOpenChange(true)} />
-        )}
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                variant="outline"
-                size="icon-lg"
-                className={HEADER_BUTTON}
-                aria-label="Chat options"
-              />
-            }
-          >
-            <EllipsisIcon />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="min-w-44">
-            {configured && !wide && (
-              <>
-                <DropdownMenuItem onClick={() => onUsageOpenChange(true)}>
-                  <ContextIcon usage={usage} />
-                  Context
-                  <ContextPercent usage={usage} />
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-              </>
-            )}
-            <DropdownMenuItem onClick={() => setRenaming(true)}>
-              <PencilIcon />
-              {session ? "Edit" : "Rename"}
-            </DropdownMenuItem>
-            {session && (
-              <DropdownMenuItem
-                onClick={() =>
-                  void updateConversation(session.id, {
-                    pinned: session.pinned ? undefined : true,
-                  }).catch(quietly("Pinning a session"))
-                }
-              >
-                <PinIcon />
-                {session.pinned ? "Unpin" : "Pin"}
-              </DropdownMenuItem>
-            )}
-            <DropdownMenuItem onClick={() => void setThreadMuted(chat.id, !chat.muted)}>
-              {chat.muted ? <BellIcon /> : <BellOffIcon />}
-              {chat.muted ? "Unmute notifications" : "Mute notifications"}
-            </DropdownMenuItem>
-            {session &&
-              !session.discardedAt &&
-              (session.resolvedAt ? (
-                <DropdownMenuItem
-                  onClick={() => updateConversation(session.id, { resolvedAt: undefined })}
-                >
-                  <RotateCcwIcon />
-                  Reopen
-                </DropdownMenuItem>
-              ) : (
-                <DropdownMenuItem
-                  onClick={() => updateConversation(session.id, { resolvedAt: Date.now() })}
-                >
-                  <CheckIcon />
-                  Resolve
-                </DropdownMenuItem>
-              ))}
-            {!chat.main && (
-              <>
-                <DropdownMenuSeparator />
-                {session && !session.discardedAt && (
-                  <DropdownMenuItem onClick={() => setDiscarding(true)}>
-                    <ArchiveXIcon />
-                    Discard
-                  </DropdownMenuItem>
-                )}
-                <DropdownMenuItem variant="destructive" onClick={() => setDeleting(true)}>
-                  <Trash2Icon />
-                  Delete
-                </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-
-      <RenameDialog
-        open={renaming}
-        onOpenChange={setRenaming}
-        title={session ? "Edit session" : "Rename chat"}
-        fieldLabel="Chat title"
-        value={chat.title}
-        onSave={(name) => updateConversation(chat.id, { title: name, titleEdited: true })}
-      />
-
-      <ConfirmDestructive
-        open={deleting}
-        onOpenChange={setDeleting}
-        title={session ? "Delete this session?" : "Delete this chat?"}
-        description={
-          session
-            ? "Its run stops and the host closes the session's work now: its worktrees are removed, unless one has uncommitted or unpushed changes, and its pull request is closed and its branch deleted on GitHub. It's removed from the app; Hermes keeps its own copy of the session."
-            : "It's removed from this device. Hermes keeps its own copy of the session."
-        }
-        confirmLabel="Delete"
-        onConfirm={async () => {
-          if (session) closeSession()
-          else stopMessage(chat.id)
-          // The row goes now, not when the host has finished: it is already closed, and the close
-          // reports a kept worktree or a refusal when it ends (ADR 0080).
-          await deleteConversation(chat.id)
-          onDeleted()
-        }}
-      />
-
-      <ConfirmDestructive
-        open={discarding}
-        onOpenChange={setDiscarding}
-        title="Discard this session?"
-        description="Its run stops and the host closes the session's work now: its worktrees are removed, unless one has uncommitted or unpushed changes, and its pull request is closed and its branch deleted on GitHub. The session moves to Discarded meanwhile."
-        confirmLabel="Discard"
-        onConfirm={async () => {
-          if (!session) return
-          closeSession()
-          await updateConversation(session.id, { discardedAt: Date.now() })
-        }}
-      />
-    </>
   )
 }

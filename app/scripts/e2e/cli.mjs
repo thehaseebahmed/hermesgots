@@ -114,7 +114,7 @@ export const FLOWS = {
   "code-list": {
     script: "e2e/code-list.mjs",
     about:
-      "The Code list grouped by session state: four headed groups with counts and Closed collapsed, the sort menu kept on the device as a key and an arrow that a second tap flips, a search opened from the header's own button and closing back to the title, one flat list under it, and the unread dot at the icon's corner — absent until this device has read the row, then cleared by reading it again",
+      "The Code list drawn as a bot's chat list is: one flat band with the pinned session first, the sort menu kept on the device as a key and an arrow that a second tap flips, the project chips in the bar's pill slot, one search from the foot or the bar, the foot's round +, and the unread dot at the icon's corner — absent until this device has read the row, then cleared by reading it again",
   },
   "approval-missed": {
     script: "e2e/approval-missed.mjs",
@@ -439,6 +439,11 @@ export const FLOWS = {
     script: "e2e/sidebar-collapse.mjs",
     about:
       "The sidebar shrinks to an icon rail at 1024px and stays collapsed; phones have no button",
+  },
+  "sidebar-edit": {
+    script: "e2e/sidebar-edit.mjs",
+    about:
+      "The sidebar's edit mode arranged by the pointer: a row dragged by its grip past its neighbour at 1024px and dropped, the order read back off the nav and again after a reload, and the same drag with a finger in the 390px drawer",
   },
   research: {
     script: "e2e/research.mjs",

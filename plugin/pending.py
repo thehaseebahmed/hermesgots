@@ -21,7 +21,7 @@ import importlib
 import logging
 from contextlib import nullcontext
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +37,14 @@ WIRE_TEXT = 400
 # What this route needs from Hermes, module by module — the read AND the restore. `available` reads
 # the list, so a host missing one advertises no feature rather than answering an empty queue it
 # never looked at.
-BUILT_INS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
-    ("hermes_state_runtime", ("get_session_admission", "list_session_admissions")),
+#
+# The ledger's own readers moved: Hermes 0.23 took them out of the top-level module and into the
+# persistence package's authority, whose private module is what carries them now. A host on either
+# side of that move is a host to serve, so the entry names both homes, newest first, and the first
+# that imports is the one asked.
+LEDGER = ("persistence.sqlite.authority._admission_store", "hermes_state_runtime")
+BUILT_INS: Tuple[Tuple[Union[str, Tuple[str, ...]], Tuple[str, ...]], ...] = (
+    (LEDGER, ("get_session_admission", "list_session_admissions")),
     ("gateway.session_authorities", ("authority_for_home", "owner_scope")),
     ("gateway.session_contract", ("SessionRef",)),
     ("gateway.session_api", ("restore_api_session",)),
@@ -57,20 +63,39 @@ class PendingError(Exception):
         self.status = status
 
 
+def _ledger() -> Any:
+    """The module holding the ledger's own readers on this host, or a refusal naming the absence.
+
+    Same two homes ``BUILT_INS`` names: whichever of them imports is the one asked, and a host with
+    neither is one this route can't speak for.
+    """
+    for module in LEDGER:
+        try:
+            return importlib.import_module(module)
+        except ImportError:
+            continue
+    raise PendingError("This Hermes can't read a session's queue.", 501)
+
+
 def available() -> Optional[str]:
     """Why this Hermes can't be asked, or ``None`` where it can.
 
     A host missing any of these would either answer "nothing is waiting" about a session it never
     read — the claim the app draws a card from — or draw a card whose only control can never work.
     """
-    for module, names in BUILT_INS:
-        try:
-            found = importlib.import_module(module)
-        except ImportError as error:
-            return f"This Hermes has no session admission ledger ({error})."
+    for modules, names in BUILT_INS:
+        found, tried = None, []
+        for module in (modules if isinstance(modules, tuple) else (modules,)):
+            try:
+                found = importlib.import_module(module)
+                break
+            except ImportError as error:
+                tried.append(str(error))
+        if found is None:
+            return f"This Hermes has no session admission ledger ({'; '.join(tried)})."
         for name in names:
             if not hasattr(found, name):
-                return f"This Hermes's session ledger has moved ({module}.{name})."
+                return f"This Hermes's session ledger has moved ({found.__name__}.{name})."
     module, holder, method = OWNER_PATH
     try:
         defined = getattr(importlib.import_module(module), holder, None)
@@ -169,10 +194,9 @@ def read(owner: Any, session_id: str) -> Dict[str, Any]:
     """A session's pending rows, read from the ledger beside the authority that owns them."""
     if owner is None:
         raise PendingError("This Hermes can't read a session's queue.", 501)
-    from hermes_state_runtime import list_session_admissions
-
+    ledger = _ledger()
     try:
-        rows = list_session_admissions(owner.db, session_id=session_id)
+        rows = ledger.list_session_admissions(owner.db, session_id=session_id)
     except Exception:
         logger.warning("gots: couldn't read the pending rows for %s", session_id, exc_info=True)
         raise PendingError("The host couldn't read this session's queue.", 502)
@@ -213,11 +237,11 @@ async def discard(owner: Any, session_id: str, admission_id: str) -> Dict[str, A
     if owner is None:
         raise PendingError("This Hermes can't discard a lost turn.", 501)
     from gateway.session_contract import SessionRef
-    from hermes_state_runtime import get_session_admission
 
     resolve = getattr(owner, "resolve_unknown_as_owner", None)
     if not callable(resolve):
         raise PendingError("This Hermes can't discard a lost turn.", 501)
+    get_session_admission = _ledger().get_session_admission
     try:
         row = await asyncio.to_thread(get_session_admission, owner.db, admission_id=admission_id)
     except Exception:

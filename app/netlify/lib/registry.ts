@@ -9,9 +9,13 @@ import {
   LEGACY_CATEGORIES,
   PUSH_CATEGORIES,
   PUSH_KINDS,
+  actionsOf,
+  botId,
   categoryOf,
+  pictureOf,
   type FcmSender,
   type PushCategory,
+  type PushDetail,
   type PushKind,
 } from "./fcm.ts"
 
@@ -341,9 +345,19 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
       if (!ctx.fcm) return error("Push isn't set up on this site", 503)
       const text = (value: unknown, max: number) =>
         typeof value === "string" && value.trim() ? value.trim().slice(0, max) : undefined
-      const detail = {
+      // What a phone draws, and only what it can: its words, whose picture it wears, and the two
+      // links an approval carries. Everything here was written by the plugin, so all of it is
+      // bounded and none of it is trusted — a picture or a button is an http(s) address or it is
+      // nothing, and a notice with more than two buttons gives a tray the first two.
+      // The body's bound is the plugin's own (`notice.APPROVAL_MAX` in `plugin/notice.py`, which a
+      // plugin test holds this number to): the longest body it sends is an approval's command, and
+      // a cut here would be a second cut of words a reader approves.
+      const detail: PushDetail = {
         title: text(input?.title, 120),
-        stage: text(input?.stage, 32),
+        body: text(input?.body, 800),
+        bot: botId(input?.bot),
+        icon: pictureOf(input?.icon),
+        actions: actionsOf(input?.actions),
       }
       // The gap rides the host's own record, which this route already reads to learn whose push it
       // is: one read-modify-write on its etag, instead of a key of its own beside it. A record that

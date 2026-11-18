@@ -28,6 +28,7 @@ from urllib.parse import quote
 from . import (
     afk,
     alerts,
+    answers,
     approvals,
     attachments,
     canvases,
@@ -82,7 +83,7 @@ from . import (
     todos,
     usage,
 )
-from .store import current_path
+from .store import current_path, home_of
 
 logger = logging.getLogger(__name__)
 
@@ -524,6 +525,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if title_db is not None:
             # The reader hands back its task, so the shutdown below cancels it with the rest.
             tasks.append(stream.watch_titles(store_path(), title_db, home))
+        # Whether this host can hear a take decides whether the app offers a mic, and a device keeps
+        # that answer for five minutes: the plugin's own writes note a change as they make it, and
+        # this watches the file for the ones made by the CLI or another Hermes; see stream.py
+        # (ADR 0164).
+        tasks.append(stream.watch_config(store_path(), home))
         yield
         for task in tasks:
             task.cancel()
@@ -726,6 +732,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # advertised only where this host's Hermes declares those defaults, so a host
                     # that doesn't keeps the one speech row it already draws.
                     *(["stt_settings"] if await asyncio.to_thread(speech.stt_available) else []),
+                    # A provider's API key, written from the same page (speech.py): needs the
+                    # settings above and Hermes's credential lifecycle.
+                    *(["stt_keys"] if await asyncio.to_thread(speech.keys_available) else []),
                     "usage",
                     "research",
                     "research_followup",
@@ -2481,6 +2490,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         denied = unauthorized(request)
         if denied is not None:
             return denied
+        # Every screen polls this route, and the Android app calls nothing else a button could be
+        # minted from — its WebView has no Push API, so it never posts `push`. The address it dialled
+        # is kept here, which is where an approval's two buttons post back to (see `push.base_url`).
+        dialled = push.base_url(request, "/runs/live")
+        if dialled:
+            await asyncio.to_thread(push.set_base, store_path(), dialled)
         owned = owned_runs(request)
         # On the loop thread, like store_path.
         home = hermes_home()
@@ -2562,7 +2577,55 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             await asyncio.to_thread(push.subscribe, store_path(), body)
         except push.PushError as exc:
             return _error(web, str(exc), 400)
+        # Where this app dialled this bot, kept for the buttons an approval's notice carries: a host
+        # behind a tunnel or on a LAN name doesn't know its own address, the phone does.
+        await asyncio.to_thread(push.set_base, store_path(), push.base_url(request, "/push"))
+        # And where the app itself lives — the `subject` it subscribed with — since the picture a
+        # notification wears is the app's own file, served from there and not from the host.
+        await asyncio.to_thread(push.set_web, store_path(), body.get("subject"))
         return web.json_response({"object": "gots.push", "subscribed": True})
+
+    async def push_answer(request: "web.Request") -> "web.Response":
+        # The one route with no key of the account's: the token in the path is the credential, which
+        # is what makes an approval answerable from a notification with the app closed. It is
+        # registered as a POST and nothing else, so aiohttp answers a read of the link with 405 — a
+        # link preview that fetches the URL therefore spends no button, which is the point of it. The
+        # token is never logged: nothing here says it, and `_error`'s words never carry it.
+        path = store_path()
+        token = request.match_info.get("token") or ""
+
+        async def give_back() -> None:
+            """A settling that failed answered nothing, so the press is given back to be made again."""
+            try:
+                await asyncio.to_thread(answers.release, path, token)
+            except Exception:
+                logger.debug("gots: couldn't give a button back", exc_info=True)
+
+        claim = await asyncio.to_thread(answers.redeem, path, token)
+        if claim.outcome == answers.UNKNOWN:
+            return _error(web, "That button isn't one this bot sent.", 404)
+        if claim.outcome == answers.SPENT:
+            return _error(web, "That button has already been answered.", 410)
+        target, choice = claim.target or {}, claim.choice or ""
+        try:
+            if target.get("kind") == answers.ROOM:
+                # A room member's approval is the Host's to resolve, and its call can block on the
+                # waiting turn, so it runs on a worker thread; a refusal keeps its own status.
+                await asyncio.to_thread(answers.answer_room, target, choice, home_of(path))
+            elif target.get("kind") == answers.RUN:
+                # A run's approval is answered on the loop, where its status and its stream live.
+                if not answers.answer_run(target.get("run_id") or "", choice):
+                    # Nothing waiting is the wait's own end, not a failure: the token stays spent.
+                    return _error(web, "That approval isn't waiting any more.", 409)
+            else:
+                return _error(web, "That button isn't one this bot sent.", 404)
+        except (answers.AnswerError, rooms.RoomError) as refused:
+            await give_back()
+            return _error(web, str(refused), refused.status)
+        except Exception:
+            await give_back()
+            raise
+        return web.json_response({"object": "gots.push.answer", "answered": True, "choice": choice})
 
     async def push_mute(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -2579,6 +2642,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         await asyncio.to_thread(push.set_bot_muted, store_path(), muted)
         if character:
             await asyncio.to_thread(push.set_bot, store_path(), character)
+        # Another route the native app really calls, and it says where it reached this bot as it
+        # does so: a phone that never subscribes still has an address its buttons post back to.
+        dialled = push.base_url(request, "/push/mute")
+        if dialled:
+            await asyncio.to_thread(push.set_base, store_path(), dialled)
         return web.json_response({"object": "gots.push", "muted": muted})
 
     async def push_ntfy_read(request: "web.Request") -> "web.Response":
@@ -2601,6 +2669,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             held = await asyncio.to_thread(ntfy.set_target, store_path(), body)
         except push.PushError as exc:
             return _error(web, str(exc), 400)
+        # A phone that chose ntfy reaches this bot at the same address it dialled here, which is
+        # where an approval's buttons post back to; see `push.base_url`.
+        await asyncio.to_thread(push.set_base, store_path(), push.base_url(request, "/push/ntfy"))
         return web.json_response(ntfy.public(held))
 
     async def push_ntfy_remove(request: "web.Request") -> "web.Response":
@@ -2976,6 +3047,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/push/ntfy", push_ntfy_read)
     app.router.add_post(f"{PREFIX}/push/ntfy", push_ntfy_write)
     app.router.add_post(f"{PREFIX}/push/ntfy/remove", push_ntfy_remove)
+    # A button's own link (answers.py): the one route outside `unauthorized()`, POST alone, so a
+    # read of it spends nothing. Every route gains its /p/<profile> twin with the rest.
+    app.router.add_post(f"{PREFIX}/push/answer/{{token}}", push_answer)
     app.router.add_post(f"{PREFIX}/runs/{{run_id}}/clarify", answer_clarify)
     async def get_speech(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -3117,6 +3191,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             except Exception as error:
                 logger.warning(failed, exc_info=True)
                 return _error(web, f"{failed}: {error}", 502)
+            # What this write changed is drawn on devices this one will never touch — the mic in
+            # another phone's composer, which keeps its answer for five minutes — so the write is
+            # noted for them, the way a title is (ADR 0164). Not throttled: two settings written a
+            # moment apart are two changes, and a device told to read only once would keep the state
+            # between them.
+            events.note("settings", path=store_path(), force=True)
             return web.json_response({"object": object_name, field: payload})
 
         return handler
@@ -3130,6 +3210,65 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         failed="The host couldn't save the speech setting",
     )
     app.router.add_post(f"{PREFIX}/stt", set_stt)
+
+    # A speech provider's API key (speech.py): written and removed through Hermes's credential
+    # lifecycle, and answered as the stt block, in which a key is only ever `key_set`. The key is
+    # neither logged nor echoed, and this route's 502 is the plugin's sentence, since the host's own
+    # could hold the value.
+    def stt_key_route(*, needs_body: bool, failed: str, logged: str, unavailable: str):
+        async def handler(request: "web.Request") -> "web.Response":
+            denied = unauthorized(request)
+            if denied is not None:
+                return denied
+            given: Dict[str, Any] = {}
+            if needs_body:
+                given = await json_body(request) or {}
+                if not isinstance(given.get("provider"), str) or not isinstance(
+                    given.get("key"), str
+                ):
+                    return _error(web, "Body needs a provider and a key.", 400)
+            provider = given.get("provider") or str(request.match_info.get("provider") or "")
+            config_path = host_config_path()
+            scope = profile_scope()
+
+            def run() -> Dict[str, Any]:
+                with scope():
+                    if needs_body:
+                        return speech.write_key(config_path, provider, given["key"])
+                    return speech.remove_key(config_path, provider)
+
+            try:
+                payload = await asyncio.to_thread(run)
+            except ValueError as error:
+                return _error(web, str(error), 400)
+            except ImportError:
+                return _error(web, unavailable, 501)
+            except Exception as error:
+                # The type alone: a traceback's message could carry the key.
+                logger.warning("%s (%s)", logged, type(error).__name__)
+                return _error(web, failed, 502)
+            return web.json_response({"object": "gots.stt", "stt": payload})
+
+        return handler
+
+    app.router.add_post(
+        f"{PREFIX}/stt/key",
+        stt_key_route(
+            needs_body=True,
+            failed="The host couldn't save the key.",
+            logged="gots: couldn't write a speech provider's key",
+            unavailable="This Hermes version can't write an API key from here.",
+        ),
+    )
+    app.router.add_delete(
+        f"{PREFIX}/stt/key/{{provider}}",
+        stt_key_route(
+            needs_body=False,
+            failed="The host couldn't remove the key.",
+            logged="gots: couldn't remove a speech provider's key",
+            unavailable="This Hermes version can't remove an API key from here.",
+        ),
+    )
 
     def keyed_settings_read(
         *,
@@ -4150,6 +4289,8 @@ def register(ctx) -> None:
         register_hook("on_session_end", failures.after_run)
         # After the hooks above, so a turn's plan is pending by the time its end is announced.
         register_hook("pre_llm_call", alerts.turn_started)
+        # The reply a run gives, kept until its news is told or held (alerts.py).
+        register_hook("post_llm_call", alerts.after_llm)
         register_hook("on_session_end", alerts.turn_finished)
         register_hook("pre_llm_call", events.on_turn_start)
         register_hook("post_api_request", events.on_model_call)

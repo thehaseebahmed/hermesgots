@@ -18,7 +18,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import events, push
+from . import events, notice, push
 
 logger = logging.getLogger(__name__)
 
@@ -236,7 +236,12 @@ class Asker:
         # The question is already pollable through run status; the push is an optimization.
         if stream is not None and loop is not None:
             _push(loop, stream, asked)
-        push.notify("question", getattr(agent, "session_id", None))
+        # The tray says the question itself, and only the first of them: what it offers is a tap
+        # into the app, not the choices and no button of its own.
+        asked_body = (
+            notice.question_body(pending.questions[0]["question"]) if pending.questions else None
+        )
+        push.notify("question", getattr(agent, "session_id", None), body=asked_body)
         try:
             outcome = _wait(pending, agent, adapter)
         finally:
@@ -251,12 +256,12 @@ class Asker:
             _set_status(adapter, run_id, "running", last_event="clarify.responded", clarify=None)
             if stream is not None and loop is not None:
                 _push(loop, stream, answered)
-        notice = None
+        outcome_note: Optional[str] = None
         if outcome == "timed_out":
-            notice = "The user didn't answer in time."
+            outcome_note = "The user didn't answer in time."
         elif outcome == "cancelled":
-            notice = "The user cancelled the question."
-        return pending.answers, outcome, notice
+            outcome_note = "The user cancelled the question."
+        return pending.answers, outcome, outcome_note
 
 
 def resolve(run_id: str, clarify_id: Any, answers: Any, outcome: Any) -> Optional[str]:

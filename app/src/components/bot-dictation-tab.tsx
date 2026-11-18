@@ -19,6 +19,7 @@ import {
   ValueRow,
 } from "@/components/settings-chrome"
 import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -109,8 +110,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
   // A detail takes the page's place at either width: below 1024px the route pushed it, and from
   // 1024px it is the pane the page would have drawn in. A provider's page is asked for first, since
   // it is the one detail whose address is two segments deep.
-  if (sub?.item)
-    return <ProviderPage block={block} speech={speech} name={sub.item} />
+  if (sub?.item) return <ProviderPage block={block} speech={speech} name={sub.item} />
   if (sub?.id === "vocabulary") return <VocabularyPage profile={profile} words={words} />
 
   // A bot this device has never read draws a loader where the rows would be, rather than a page
@@ -126,10 +126,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
   return (
     <div className="flex flex-col gap-4" data-bot-dictation>
       {speech.readProblem && (
-        <Banner
-          tone="error"
-          action={speech.retry && <Retry onRetry={speech.retry} />}
-        >
+        <Banner tone="error" action={speech.retry && <Retry onRetry={speech.retry} />}>
           {speech.readProblem}
         </Banner>
       )}
@@ -689,9 +686,34 @@ function ProviderPage({
   // A provider this host doesn't declare, or DeepInfra before it has said which models it can hear
   // with: the address is reachable by hand, so it says which of those it is.
   const declared = block?.providers.some((one) => one.name === name) ?? false
+  const keySet = block?.providers.find((one) => one.name === name)?.keySet
+  // A key row is only offered where the host takes one and says whether it holds one.
+  const keyed = speech.keys && keySet !== undefined && keySet !== null
+  const [keyOpen, setKeyOpen] = useState(false)
   return (
     <div className="flex flex-col gap-4" data-stt-provider={name}>
       <Group>
+        {keyed && (
+          <>
+            <ValueRow
+              title="API key"
+              value={keySet ? "Set" : ""}
+              muted={speech.stale}
+              disabled={speech.stale}
+              onClick={() => setKeyOpen(true)}
+              data-setting="stt-key"
+            />
+            {keyOpen && (
+              <KeyForm
+                label={providerLabel(name)}
+                held={Boolean(keySet)}
+                saving={speech.saving}
+                onWrite={(secret) => speech.writeKey(name, secret)}
+                onClose={() => setKeyOpen(false)}
+              />
+            )}
+          </>
+        )}
         {/* The address is reachable by hand, so a host that has not answered yet is waited for
             rather than answered for: nothing here says what this host declares until it has. */}
         {!block && speech.loading ? (
@@ -719,6 +741,75 @@ function ProviderPage({
         )}
       </Group>
     </div>
+  )
+}
+
+/**
+ * A provider's API key, typed masked. Write-only: the host never answers a key back, so the field
+ * starts empty and says nothing of what is held beyond the row's Set. Remove asks first.
+ */
+function KeyForm({
+  label,
+  held,
+  saving,
+  onWrite,
+  onClose,
+}: {
+  label: string
+  held: boolean
+  saving: boolean
+  onWrite: (secret: string | null) => Promise<boolean>
+  onClose: () => void
+}) {
+  const [draft, setDraft] = useState("")
+  const [asking, setAsking] = useState(false)
+  const ready = draft.trim().length > 0 && !saving
+  return (
+    <PickSurface open onOpenChange={(next) => !next && onClose()} title={`Edit ${label} key`}>
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(event) => {
+          event.preventDefault()
+          if (!ready) return
+          void onWrite(draft.trim()).then((ok) => ok && onClose())
+        }}
+      >
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="stt-key" className={fieldLabelClass}>
+            API key
+          </Label>
+          <Input
+            id="stt-key"
+            type="password"
+            className={fieldInputClass}
+            autoComplete="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            placeholder={held ? "Set a new key to replace it" : "Paste the key"}
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+          />
+        </div>
+        <FormActions
+          onCancel={onClose}
+          onReset={held ? () => setAsking(true) : undefined}
+          resetLabel="Remove"
+          destructive
+          disabled={!ready}
+          busy={saving}
+        />
+      </form>
+      <ConfirmDestructive
+        open={asking}
+        title={`Remove ${label}'s key?`}
+        description="Its key is deleted from this bot's Hermes, and this provider stops working until a new one is set."
+        confirmLabel="Remove"
+        onOpenChange={setAsking}
+        onConfirm={async () => {
+          if (await onWrite(null)) onClose()
+        }}
+      />
+    </PickSurface>
   )
 }
 
@@ -1036,8 +1127,7 @@ function ProbeNote({
     <p
       className={cn(
         "px-1 py-2 text-sm text-muted-foreground",
-        working &&
-          "pt-6 text-center motion-safe:animate-[work-pulse_1.8s_ease-in-out_infinite]",
+        working && "pt-6 text-center motion-safe:animate-[work-pulse_1.8s_ease-in-out_infinite]",
       )}
       data-speech-probe
     >

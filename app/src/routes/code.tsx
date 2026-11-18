@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   ArchiveXIcon,
   CheckIcon,
@@ -7,13 +7,12 @@ import {
   GitPullRequestArrowIcon,
   LockIcon,
   PlusIcon,
-  SearchIcon,
 } from "lucide-react"
 import { Navigate, useNavigate } from "react-router"
 
-import { prLabel, prLook } from "@/components/chat/pr-look"
 import { ChatHeader } from "@/components/chat/chat-header"
-import { ItemGroup, ItemRow, pinnedLine } from "@/components/item-list"
+import { ItemRow, pinnedLine } from "@/components/item-list"
+import { CHATS_SEARCH_FIELD_ID, ListFoot } from "@/components/list-foot"
 import { SearchField } from "@/components/search-field"
 import { NewSessionPopup, type SessionTarget } from "@/components/new-session"
 import { SortMenu } from "@/components/sort-menu"
@@ -28,17 +27,12 @@ import {
   useSessionFollowUps,
 } from "@/lib/code"
 import { connectionKey } from "@/lib/connection"
-import {
-  createConversation,
-  prIsLive,
-  type CodeSort,
-  type Conversation,
-  type Profile,
-} from "@/lib/db"
+import { createConversation, type CodeSort, type Conversation, type Profile } from "@/lib/db"
 import { useDraft } from "@/lib/drafts"
 import { formatRelative } from "@/lib/format"
 import type { HermesProject } from "@/lib/hermes"
-import { codeGroupOf, codeGroups, codeOrder } from "@/lib/item-groups"
+import { codeOrder } from "@/lib/item-groups"
+import { useXLarge } from "@/lib/media"
 import { useAnyChange } from "@/lib/live"
 import { useNav } from "@/lib/nav"
 import { itemToOpen, useCodePane, type FeaturePane } from "@/lib/pane"
@@ -64,12 +58,12 @@ import {
   type SessionState,
 } from "@/lib/session-work"
 import { useReadMarks } from "@/lib/read-marks"
+import { closedAs, emptyLine, keeps, type CodeFilter } from "@/lib/code-filter"
 import { filterByFuzzy } from "@/lib/fuzzy"
 import { type Sort, type SortKey } from "@/lib/sort"
 import { useStoredSort } from "@/lib/use-sort"
 
 const DAY_MS = 86_400_000
-const SEARCH_FIELD_ID = "code-search"
 const LAST_PROJECT = "gots:last-session-project"
 
 /** Asks the list to open the New session sheet, from the empty pane beside it. */
@@ -136,6 +130,14 @@ const CODE_SORTS: readonly SortKey<CodeSort>[] = [
   { key: "title", label: "Title", dir: "asc" },
 ]
 
+/** The pills before the projects', in the order the bar draws them. */
+const FILTERS: readonly { filter: "all" | "afk" | "resolved" | "discarded"; label: string }[] = [
+  { filter: "all", label: "All" },
+  { filter: "afk", label: "AFK" },
+  { filter: "resolved", label: "Resolved" },
+  { filter: "discarded", label: "Discarded" },
+]
+
 /** The Code list's order over each group, kept on this device (unset: created, newest first). */
 function useCodeSort(): [Sort<CodeSort>, (sort: Sort<CodeSort>) => void] {
   return useStoredSort(CODE_SORTS, ["codeSort", "codeSortDir"])
@@ -153,10 +155,9 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   const changes = useAnyChange("projects")
   const marks = useReadMarks()
   const [query, setQuery] = useState("")
-  const [searching, setSearching] = useState(false)
-  const field = useRef<HTMLInputElement>(null)
-  const searchToggle = useRef<HTMLButtonElement>(null)
-  const [chip, setChip] = useState<string>()
+  // From the laptop width up the bar holds the search and the foot draws none, as a bot's chat list does.
+  const wide = useXLarge()
+  const [filter, setFilter] = useState<CodeFilter>("all")
   const [starting, setStarting] = useState(false)
   const [sort, setSort] = useCodeSort()
 
@@ -224,7 +225,10 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
 
   // A chip for each project that has a session, or could start one.
   const chips = [...projects.entries()]
-    .filter(([key, { project }]) => !project.archived || rows.some((r) => r.key === key))
+    .filter(
+      ([key, { project }]) =>
+        !project.archived || rows.some((r) => r.key === key && !closedAs(r.c)),
+    )
     .sort((a, b) => a[1].project.name.localeCompare(b[1].project.name))
 
   const order = useMemo(
@@ -236,31 +240,18 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
       }),
     [sort.key, sort.dir],
   )
-  const showChips = rows.length > 0 && chips.length > 1
-  const filtering = Boolean(query.trim() || chip)
+  const showChips = rows.length > 0
+  const inProject = typeof filter === "object"
+  const filtering = Boolean(query.trim() || filter !== "all")
+  // One flat band in the order the sort menu says, what the reader pinned first: a session's state
+  // is on its row, as a chat's is on the bot's list.
   const shown = useMemo(() => {
-    const inProject = rows.filter((r) => !chip || r.key === chip)
-    return filterByFuzzy([...inProject].sort(order), query, (r) => [
-      r.c.title,
-      r.project?.name,
-      r.c.worktree?.branch,
-    ])
-  }, [rows, chip, query, order])
-  // What waits on the user first, then working, idle and closed — deterministic, not a live
-  // timestamp chasing itself.
-  const grouped = useMemo(
-    () =>
-      filtering
-        ? undefined
-        : codeGroups(
-            shown,
-            (r) => codeGroupOf(r.state),
-            order,
-            (r) => Boolean(r.c.pinned),
-          ),
-    [shown, order, filtering],
-  )
-  const flat = filtering ? shown : undefined
+    const kept = rows.filter((r) => keeps(filter, r))
+    const ordered = [...kept].sort(
+      (a, b) => Number(Boolean(b.c.pinned)) - Number(Boolean(a.c.pinned)) || order(a, b),
+    )
+    return filterByFuzzy(ordered, query, (r) => [r.c.title, r.project?.name, r.c.worktree?.branch])
+  }, [rows, filter, query, order])
 
   const targets: SessionTarget[] = [...projects.entries()]
     // A project with no repository has nowhere for a session to work, so it isn't offered.
@@ -272,19 +263,9 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
       blocked: profile.apiKey ? startBlocked(project) : "No API key",
     }))
     .sort((a, b) => a.project.name.localeCompare(b.project.name))
-  const initial = chip ?? lastProject()
+  const initial = inProject ? filter.project : lastProject()
 
   useEffect(() => newSessionAsked.subscribe(() => setStarting(true)), [])
-
-  const openSearch = () => {
-    setSearching(true)
-    window.requestAnimationFrame(() => field.current?.focus())
-  }
-  const closeSearch = () => {
-    setSearching(false)
-    setQuery("")
-    window.requestAnimationFrame(() => searchToggle.current?.focus())
-  }
 
   const start = async ({ key, profile, project }: SessionTarget) => {
     const conversation = await createConversation(profile.id, {
@@ -309,7 +290,7 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
       <SessionItem
         row={row}
         botId={profiles?.get(row.c.profileId)?.botId}
-        showProject={!chip}
+        showProject={!inProject}
         pane={pane}
         now={listed?.now ?? 0}
         waiting={waits[row.c.hermesSessionId]}
@@ -319,89 +300,70 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
   )
 
   return (
-    <div
-      className="flex min-h-0 flex-1 flex-col overflow-y-auto"
-      style={
-        {
-          "--list-header-pt": "max(0.75rem, env(safe-area-inset-top))",
-          "--list-header-h": "calc(var(--list-header-pt) + 3.5rem)",
-        } as CSSProperties
-      }
-    >
+    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
       <ChatHeader
         pinned
         heading
         showBot={false}
         title="Code"
         actions={
-          <>
-            <Button
-              ref={searchToggle}
-              variant="ghost"
-              size="icon-lg"
-              className="size-11 rounded-full text-muted-foreground"
-              onClick={() => (searching ? closeSearch() : openSearch())}
-              aria-label="Search"
-              aria-expanded={searching}
-              aria-controls={searching ? SEARCH_FIELD_ID : undefined}
-              data-search-toggle
-            >
-              <SearchIcon />
-            </Button>
-            <SortMenu by="sessions" options={CODE_SORTS} value={sort} onSort={setSort} compact />
-          </>
+          <SortMenu by="sessions" options={CODE_SORTS} value={sort} onSort={setSort} compact />
+        }
+        // The project chips are pinned with the bar in the pill slot, and the search stands with them
+        // from the laptop width up, as a bot's chat list has it (ADR 0145).
+        below={
+          wide || showChips ? (
+            <div className="flex flex-col gap-2">
+              {wide && (
+                <SearchField
+                  id={CHATS_SEARCH_FIELD_ID}
+                  value={query}
+                  onChange={setQuery}
+                  label="Search sessions"
+                />
+              )}
+              {showChips && (
+                <ChipRow label="Filter sessions">
+                  {FILTERS.map(({ filter: one, label }) => (
+                    <Chip key={one} active={filter === one} onClick={() => setFilter(one)}>
+                      {label}
+                    </Chip>
+                  ))}
+                  {chips.map(([key, { project }]) => {
+                    const active = inProject && filter.project === key
+                    return (
+                      <Chip
+                        key={key}
+                        active={active}
+                        onClick={() => setFilter(active ? "all" : { project: key })}
+                      >
+                        {project.name}
+                      </Chip>
+                    )
+                  })}
+                </ChipRow>
+              )}
+            </div>
+          ) : undefined
         }
       />
 
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
-        {(searching || showChips) && (
-          <div className="flex flex-col gap-3">
-            {searching && (
-              <SearchField
-                id={SEARCH_FIELD_ID}
-                value={query}
-                onChange={(next) => (next ? setQuery(next) : closeSearch())}
-                label="Search sessions"
-                inputRef={field}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") closeSearch()
-                }}
-              />
-            )}
-            {showChips && (
-              <div className="flex min-h-11 items-center">
-                <ChipRow label="Projects" className="min-w-0 flex-1">
-                  <Chip active={!chip} onClick={() => setChip(undefined)}>
-                    All
-                  </Chip>
-                  {chips.map(([key, { project }]) => (
-                    <Chip
-                      key={key}
-                      active={chip === key}
-                      onClick={() => setChip(chip === key ? undefined : key)}
-                    >
-                      {project.name}
-                    </Chip>
-                  ))}
-                </ChipRow>
-              </div>
-            )}
-          </div>
-        )}
-
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
         {sessions && rows.length === 0 && (
           <p className="py-8 text-center text-sm text-muted-foreground">No sessions yet.</p>
         )}
         {rows.length > 0 && shown.length === 0 && (
           <div className="flex flex-col items-center gap-3 py-8 text-center">
-            <p className="text-sm text-muted-foreground">No sessions match.</p>
+            <p className="text-sm text-muted-foreground">
+              {query.trim() ? "No sessions match." : emptyLine(filter)}
+            </p>
             {filtering && (
               <Button
                 variant="outline"
                 className="h-11 rounded-full"
                 onClick={() => {
-                  closeSearch()
-                  setChip(undefined)
+                  setQuery("")
+                  setFilter("all")
                 }}
               >
                 Show all
@@ -410,29 +372,21 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
           </div>
         )}
 
-        {flat ? (
-          <ul className="flex flex-col">{flat.map(draw)}</ul>
-        ) : (
-          grouped?.map((group) => (
-            <ItemGroup key={group.key} group={group} sticky>
-              {group.items.map(draw)}
-            </ItemGroup>
-          ))
+        {shown.length > 0 && (
+          <ul data-slot="session-rows" className="flex flex-col">
+            {shown.map(draw)}
+          </ul>
         )}
       </div>
 
-      <div className="pointer-events-none sticky bottom-0 z-20 mt-auto bg-gradient-to-t from-background via-background/90 to-transparent px-4 pt-6 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <div className="mx-auto flex w-full max-w-2xl justify-end">
-          <Button
-            data-toast-above
-            size="lg"
-            className="pointer-events-auto h-12 rounded-full px-5 shadow-lg"
-            onClick={() => setStarting(true)}
-          >
-            <PlusIcon /> New session
-          </Button>
-        </div>
-      </div>
+      <ListFoot
+        searchable={!wide}
+        query={query}
+        onQueryChange={setQuery}
+        onNew={() => setStarting(true)}
+        newLabel="New session"
+        searchLabel="Search sessions"
+      />
       <NewSessionPopup
         open={starting}
         onOpenChange={setStarting}
@@ -461,26 +415,6 @@ const names = new Intl.ListFormat(undefined, { type: "conjunction" })
 function formatWhen(at: number, now: number) {
   if (now - at < DAY_MS) return formatRelative(at, now)
   return new Date(at).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })
-}
-
-/**
- * `user/repo #27 · Open`, naming the repo when the session spans more than one. Only the live
- * pull requests show: a session keeps the ones it already finished, and its row is for what it
- * still has open — a session left with only finished ones shows its newest.
- */
-function prLine(session: Conversation) {
-  const all = session.prs ?? []
-  if (!all.length) return undefined
-  const live = all.filter(prIsLive)
-  const shown = live.length
-    ? live
-    : [all.reduce((newest, pr) => (pr.number > newest.number ? pr : newest))]
-  return shown
-    .map((pr) => {
-      const state = prLook(pr).label
-      return `${prLabel(pr, all)} · ${state[0].toUpperCase() + state.slice(1)}`
-    })
-    .join(", ")
 }
 
 function StateIcon({ state }: { state: SessionState }) {
@@ -534,7 +468,7 @@ export function SessionItem({
   const wait = state === "waiting" && waiting ? reasonText(waiting) : undefined
   const detail = removed.length
     ? `${names.format(removed)} removed`
-    : (wait ?? prLine(session) ?? session.worktree?.branch ?? draft)
+    : (wait ?? session.worktree?.branch ?? draft)
   const line = [showProject ? project?.name : undefined, detail].filter(Boolean).join(" · ")
   return (
     <ItemRow
@@ -548,7 +482,7 @@ export function SessionItem({
         )
       }
       tone={rowTone(session, row)}
-      unread={isUnread(activity, mark)}
+      unread={!closedAs(session) && isUnread(activity, mark)}
       botId={botId}
       title={session.title}
       badge={

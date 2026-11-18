@@ -360,6 +360,19 @@ def stt_available() -> bool:
         return False
 
 
+def keys_available() -> bool:
+    """Whether this host can write a provider's key from the page: the settings and the lifecycle."""
+    if not stt_available():
+        return False
+    try:
+        from hermes_cli import credential_lifecycle
+        from hermes_cli.web_routers import _common  # noqa: F401  (the mask rule write_key asks)
+
+        return callable(getattr(credential_lifecycle, "save_provider_env_credential", None))
+    except Exception:
+        return False
+
+
 def _provider_names(defaults: Dict[str, Any]) -> List[str]:
     """The providers whose settings this page draws: every block of settings but ``local``.
 
@@ -514,6 +527,52 @@ def set_stt_value(config_path: Path, key: Any, value: Any = None) -> None:
     names can't hold, before the file is touched.
     """
     config_keys.write(config_path, str(key), _checked(key, value))
+
+
+def _key_variable(provider: Any) -> str:
+    """The variable a provider's key lives in, or ValueError naming a provider with none."""
+    name = str(provider or "").strip()
+    variable = credentials.KEY_ENV.get(name)
+    if variable is None:
+        raise ValueError(f"{name or 'No provider'} takes no API key from this page.")
+    return variable
+
+
+def write_key(config_path: Path, provider: Any, key: Any) -> Dict[str, Any]:
+    """Writes one speech provider's API key and answers the page as it now reads.
+
+    The write is Hermes's credential lifecycle, as LLM Providers' is, so the config mirrors and the
+    credential pool agree with ``.env``. The key is trimmed once, a mask is refused on the host's own
+    rule, and the key is never logged, echoed or named in a refusal: the answer carries only
+    ``key_set``. ValueError for a mask, an empty key or a provider with no key; ImportError where
+    this host has no lifecycle, which the route answers with a 501.
+    """
+    from . import llm_providers
+
+    variable = _key_variable(provider)
+    typed = llm_providers._typed_key(key)
+    if not typed:
+        raise ValueError("A key can't be empty.")
+    # A line break would start a second `.env` entry, so a key holding one is no key.
+    if any(char in typed for char in "\r\n\0"):
+        raise ValueError("A key is one line.")
+    llm_providers._refuse_preview(typed)
+    from hermes_cli.credential_lifecycle import save_provider_env_credential
+
+    save_provider_env_credential(variable, typed)
+    return stt_settings(config_path)
+
+
+def remove_key(config_path: Path, provider: Any) -> Dict[str, Any]:
+    """Removes one speech provider's API key and answers the page as it now reads.
+
+    Idempotent, since the lifecycle's removal is: a key already absent is the same answer.
+    """
+    variable = _key_variable(provider)
+    from hermes_cli.credential_lifecycle import remove_provider_env_credential
+
+    remove_provider_env_credential(variable)
+    return stt_settings(config_path)
 
 
 def read_cleanup(path: Path) -> Optional[Dict[str, str]]:

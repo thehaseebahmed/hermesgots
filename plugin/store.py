@@ -61,7 +61,9 @@ logger = logging.getLogger(__name__)
 # marked draws the app's own frame.
 # 73 keeps what a chat's last failed turn ended with (`failures.py`, ADR 0157): one new table, one row
 # per session, replaced as each failure lands, so nothing already written has to move.
-SCHEMA_VERSION = 73
+# 74 keeps an approval's buttons (`answers.py`): one row per token, hashed, single-use and expiring
+# with the push that carried it. A new table alone, so nothing else reads differently.
+SCHEMA_VERSION = 74
 
 
 def data_dir(hermes_home: Path) -> Path:
@@ -1085,6 +1087,20 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    session_id TEXT PRIMARY KEY,
                    text TEXT NOT NULL,
                    at INTEGER NOT NULL
+               )"""
+        )
+        # v74: an approval's buttons (`answers.py`). `token` is the SHA-256 of what the tray was
+        # given — the token itself is never written — `choice` is what that button answers, `once` or
+        # `deny` and nothing else a press could ask for, `target` is the run's or the room member's
+        # approval it settles, as JSON, and `expires_at` is the push's own TTL. `used_at` is what makes
+        # a second press answer nothing; spent and expired rows are pruned as each approval mints.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS answer_tokens (
+                   token TEXT PRIMARY KEY,
+                   choice TEXT NOT NULL,
+                   target TEXT NOT NULL,
+                   expires_at INTEGER NOT NULL,
+                   used_at INTEGER
                )"""
         )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

@@ -44,6 +44,7 @@ export function useChatBar({
   usage,
   onOpenUsage,
   onEdit,
+  centered = false,
 }: {
   main: boolean
   /** The bot whose bar this is, where the screen has one armed to answer it. */
@@ -55,6 +56,8 @@ export function useChatBar({
   usage: Parameters<typeof ContextRing>[0]["usage"]
   onOpenUsage: () => void
   onEdit: () => void
+  /** A session's bar is centred, and its title with it. */
+  centered?: boolean
 }): { actions: ReactNode; title: ReactNode; onTitlePress: (() => void) | undefined } {
   const navigate = useNavigate()
   return {
@@ -72,7 +75,7 @@ export function useChatBar({
         MAIN_TITLE
       )
     ) : editable ? (
-      <ChatTitlePress title={title} open={open} />
+      <ChatTitlePress title={title} open={open} centered={centered} />
     ) : (
       title
     ),

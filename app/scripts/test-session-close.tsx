@@ -39,7 +39,7 @@ const conversation = (): Conversation =>
       instructions: "",
     },
     createdAt: 10,
-    updatedAt: 10,
+    updatedAt: 11,
     changedAt: 10,
     prs: [],
   }) as Conversation
@@ -94,8 +94,10 @@ test("a host that never answers leaves the discarded row where it was", async ()
   await seed()
   heldHost()
   await mount(screen, async () => {
-    await click(find('[aria-label="Chat options"]'))
-    await click(findText('[role="menuitem"]', "Discard"))
+    await until(async () => Boolean(find("[data-chat-settings-open]")), "the session's bar")
+    await click(find("[data-chat-settings-open]"))
+    await until(async () => Boolean(find("[data-session-discard]")), "the session's settings")
+    await click(find("[data-session-discard]"))
     await click(findText('[role="alertdialog"] button', "Discard"))
     await until(
       async () => Boolean((await db.conversations.get(CHAT))?.discardedAt),

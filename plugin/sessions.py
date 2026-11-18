@@ -1418,7 +1418,7 @@ def answer_waiting(session_id: str) -> int:
     if not isinstance(statuses, dict):
         return 0
     try:
-        from tools.approval import list_gateway_approvals, resolve_gateway_approval
+        from tools.approval import list_gateway_approvals
     except ImportError:
         return 0
     answered = 0
@@ -1429,11 +1429,8 @@ def answer_waiting(session_id: str) -> int:
             continue
         if any(entry.get("smart_denied") for entry in list_gateway_approvals(run_id)):
             continue
-        count = resolve_gateway_approval(run_id, "once", resolve_all=True)
         # Hermes's own route would tell the run's clients; this answer has to do it itself.
-        if count:
-            approvals.announce(run_id, "once")
-        answered += count
+        answered += approvals.resolve(run_id, "once")
     return answered
 
 

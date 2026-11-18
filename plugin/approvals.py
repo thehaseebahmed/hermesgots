@@ -70,6 +70,23 @@ def announce(run_id: str, choice: str) -> bool:
     return True
 
 
+def resolve(run_id: str, choice: str) -> int:
+    """Resolves the approval this run is waiting on and tells the run's clients, answering how many
+    requests were resolved.
+
+    Hermes's own route does both for an answer that comes through it. The other endings — an approval
+    answered from a notification's button, or for a session just switched to Auto — have to say so
+    themselves, or every client keeps showing the approval waiting. Raises ``ImportError`` where this
+    Hermes has no queue to resolve.
+    """
+    from tools.approval import resolve_gateway_approval
+
+    count = resolve_gateway_approval(run_id, choice, resolve_all=True)
+    if count:
+        announce(run_id, choice)
+    return count
+
+
 def _still_waiting(run_id: str) -> bool:
     """Whether another request of the run (a parallel tool's) still waits on the user."""
     try:

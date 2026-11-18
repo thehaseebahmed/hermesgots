@@ -85,7 +85,7 @@ test("a category's importance is its ntfy priority", () => {
   const priorities = ntfyPriorities(PUSH_CATEGORIES)
   assert.equal(priorities.chat_input, 4, "what waits on the user peeks")
   assert.equal(priorities.code_run_failed, 3)
-  assert.equal(priorities.code_pr_merged, 2, "and a merge stays silent")
+  assert.equal(priorities.research_done, 3, "and news that does not wait stays a sound")
   assert.equal(Object.keys(priorities).length, PUSH_CATEGORIES.length)
 })
 

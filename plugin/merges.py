@@ -3,8 +3,7 @@
 Every few minutes the plugin looks up the pull requests of the open project sessions in its chat
 list. When every repo's newest one is settled and at least one was merged, it sets the chat's
 ``resolvedAt`` with a newer change clock, so every device picks it up on its next sync. A merged
-pull request resolves its session once: a session the user reopens stays open until another merges, and
-says so with a push.
+pull request resolves its session once: a session the user reopens stays open until another merges.
 """
 
 from __future__ import annotations
@@ -15,7 +14,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Optional, Set, Tuple
 
-from . import chats, github, push, sessions
+from . import chats, github, sessions
 from .store import connect, db_path
 
 logger = logging.getLogger(__name__)
@@ -91,7 +90,6 @@ def check(hermes_home: Path, only: Optional[Set[str]] = None, now: Optional[int]
             continue
         _mark(path, session_id, new)
         resolved[chat_id] = {"at": max(now, entry["at"] + 1), "value": {**value, "resolvedAt": now}}
-        push.notify("pr_merged", session_id, path)
     if resolved:
         chats.merge(path, resolved)
     return len(resolved)

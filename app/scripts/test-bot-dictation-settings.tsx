@@ -47,7 +47,11 @@ test("the page draws every speech setting its host carries, in cards named for w
       ["Cleanup level", "Cleanup model"],
       "the level in play, then the model that does the tidying",
     )
-    assert.equal(findAll("[data-cleanup-level]").length, 0, "the levels themselves are the level row's sheet, not this page")
+    assert.equal(
+      findAll("[data-cleanup-level]").length,
+      0,
+      "the levels themselves are the level row's sheet, not this page",
+    )
     assert.deepEqual(
       titlesIn("Local"),
       [
@@ -293,6 +297,107 @@ test("a provider's page draws its own rows, and a pick writes that provider's ke
   })
 })
 
+test("a provider's page sets and removes its API key where the host takes one", async () => {
+  const calls = await seed(
+    "stt-provider-key",
+    ["dictation", "speech_model", "stt_settings", "stt_keys"],
+    {},
+    {
+      speech: speech({
+        stt: {
+          ...STT(),
+          providers: [
+            { name: "groq", key_set: false },
+            { name: "openai", key_set: false },
+            { name: "elevenlabs", key_set: false },
+          ],
+        },
+      }),
+      nextStt: {
+        ...STT(),
+        providers: [
+          { name: "groq", key_set: true },
+          { name: "openai", key_set: false },
+          { name: "elevenlabs", key_set: false },
+        ],
+      },
+    },
+  )
+  await mount(editor("/settings/bots/bot-1/speech-to-text/providers/groq"), async () => {
+    assert.equal(valueOf(row("stt-key")), "Not set", "the host holds no key for it")
+    await click(row("stt-key"))
+    const field = fieldIn("key") as HTMLInputElement
+    assert.equal(field.type, "password", "a key is typed masked")
+    await type(field, "  gsk-secret ")
+    await click(sheetButton("Save"))
+    await until(async () => valueOf(row("stt-key")) === "Set", "the row says Set")
+    const written = calls.find((call) => call.path.endsWith("/stt/key"))
+    assert.deepEqual(
+      written?.body,
+      { provider: "groq", key: "gsk-secret" },
+      "trimmed, for its provider",
+    )
+    assert.ok(!document.body.textContent?.includes("gsk-secret"), "the key is not drawn afterwards")
+  })
+})
+
+test("removing a provider's key asks first, then deletes it", async () => {
+  const gone = {
+    ...STT(),
+    providers: [
+      { name: "groq", key_set: false },
+      { name: "openai", key_set: false },
+      { name: "elevenlabs", key_set: false },
+    ],
+  }
+  const calls = await seed(
+    "stt-provider-key-remove",
+    ["dictation", "speech_model", "stt_settings", "stt_keys"],
+    {},
+    {
+      speech: speech({
+        stt: { ...gone, providers: [{ name: "groq", key_set: true }, ...gone.providers.slice(1)] },
+      }),
+      nextStt: gone,
+    },
+  )
+  await mount(editor("/settings/bots/bot-1/speech-to-text/providers/groq"), async () => {
+    assert.equal(valueOf(row("stt-key")), "Set")
+    await click(row("stt-key"))
+    await click(sheetButton("Remove"))
+    assert.ok(
+      !calls.some((call) => call.method === "DELETE"),
+      "nothing is deleted before the answer",
+    )
+    await until(
+      async () => Boolean(sheetButton("Remove") && findAll("[role=alertdialog]").length),
+      "the question",
+    )
+    const confirm = findAll("[role=alertdialog] button").find(
+      (one) => one.textContent?.trim() === "Remove",
+    )
+    assert.ok(confirm)
+    await click(confirm)
+    await until(async () => valueOf(row("stt-key")) === "Not set", "the row says Not set")
+    assert.ok(calls.some((call) => call.method === "DELETE" && call.path.endsWith("/stt/key/groq")))
+  })
+})
+
+test("a host that doesn't advertise stt_keys draws no key row", async () => {
+  await seed(
+    "stt-no-key",
+    ["dictation", "speech_model", "stt_settings"],
+    {},
+    {
+      speech: speech({ stt: STT() }),
+    },
+  )
+  await mount(editor("/settings/bots/bot-1/speech-to-text/providers/groq"), async () => {
+    await until(async () => Boolean(find('[data-stt-provider="groq"]')), "the provider's page")
+    assert.ok(missing('[data-setting="stt-key"]'), "nothing to type a key into")
+  })
+})
+
 /**
  * A provider's page is left the way General's one detail is: the screen's header takes the provider's
  * name and carries the back, so the page itself needs no footer of its own.
@@ -337,7 +442,10 @@ test("local's address is no page: it lands on the page whose Local card draws it
   await mount(editor("/settings/bots/bot-1/speech-to-text/providers/local"), async () => {
     await until(async () => Boolean(speechPage()), "the page, since local's settings are its card")
     assert.equal(here(), "/settings/bots/bot-1/speech-to-text", "at the page's own address")
-    assert.ok(missing("[data-stt-provider]"), "and no provider page claiming the app cannot draw what it draws below")
+    assert.ok(
+      missing("[data-stt-provider]"),
+      "and no provider page claiming the app cannot draw what it draws below",
+    )
   })
 })
 
