@@ -14,8 +14,8 @@ sealed class ReplyOutcome {
     /** Whether the entry keeps its Reply: only while the link is still unspent. */
     abstract val keepsReply: Boolean
 
-    /** The line the entry gains: what the reader sent, or why it went nowhere. */
-    abstract fun line(typed: String, words: ReplyWords): ReplyLine
+    /** The line the entry gains: what the reader sent, or why it went nowhere; none for no words. */
+    abstract fun line(typed: String, words: ReplyWords): ReplyLine?
 
     /** Queued on the chat's session: the reader's own words join the conversation, and the link is spent. */
     data object Sent : ReplyOutcome() {
@@ -40,7 +40,19 @@ sealed class ReplyOutcome {
         override fun line(typed: String, words: ReplyWords) = ReplyLine(fromReader = false, text = words.notSent)
     }
 
+    /**
+     * Nothing typed: nothing is posted, and the entry is posted again as it stands, Reply and all,
+     * since Android shows a spinner on a sent RemoteInput until the entry is.
+     */
+    data object Blank : ReplyOutcome() {
+        override val keepsReply = true
+        override fun line(typed: String, words: ReplyWords): ReplyLine? = null
+    }
+
     companion object {
+        /** The words a Reply carries, trimmed, or null where it carries none worth posting. */
+        fun typed(raw: CharSequence?): String? = raw?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+
         /** How much of the host's sentence an entry shows: one line of a tray entry, not a page. */
         const val REASON_LIMIT = 160
 

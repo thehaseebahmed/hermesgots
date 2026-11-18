@@ -18,6 +18,17 @@ class ReplyOutcomeTest {
     }
 
     @Test
+    fun aBlankReplyPostsNothingAndKeepsReply() {
+        for (typed in listOf(null, "", "   \n\t ")) {
+            assertEquals("'$typed' is no words", null, ReplyOutcome.typed(typed))
+        }
+        assertEquals("Try again", ReplyOutcome.typed("  Try again \n"))
+        // The entry is posted again all the same, so Android's spinner ends, with nothing added.
+        assertTrue(ReplyOutcome.Blank.keepsReply)
+        assertEquals(null, ReplyOutcome.Blank.line("", WORDS))
+    }
+
+    @Test
     fun aRefusedReplySaysWhyAndOffersNone() {
         for (status in listOf(404, 409, 410)) {
             val outcome = ReplyOutcome.of(status, refusal("That reply has already been sent."))
@@ -66,7 +77,7 @@ class ReplyOutcomeTest {
     fun theHostsWordsAreOneBoundedLine() {
         val long = "word ".repeat(100)
         val outcome = ReplyOutcome.of(409, refusal("That chat\\nis closed.  $long"))
-        val text = outcome.line("x", WORDS).text
+        val text = outcome.line("x", WORDS)!!.text
         assertFalse(text.contains('\n'))
         assertTrue(text.startsWith("Couldn't send — That chat is closed. word"))
         assertTrue(text.length <= "Couldn't send — ".length + ReplyOutcome.REASON_LIMIT)

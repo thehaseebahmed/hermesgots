@@ -43,8 +43,11 @@ class NoticeAnswerReceiver : BroadcastReceiver() {
         val tag = intent.getStringExtra(EXTRA_TAG)
         // A reply posts what was typed as `{text}` (`push_reply` in the plugin); a button posts nothing.
         val text = if (intent.action == ACTION_REPLY) {
-            RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_TEXT)
-                ?.toString()?.trim().orEmpty().ifEmpty { return }
+            ReplyOutcome.typed(RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_TEXT)) ?: run {
+                // Nothing to post, and the link stays unspent; the entry still ends its spinner.
+                if (tag != null) NoticeDrawer.replied(context, tag, null, ReplyOutcome.Blank.keepsReply)
+                return
+            }
         } else {
             null
         }
