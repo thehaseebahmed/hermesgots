@@ -36,7 +36,8 @@ import java.net.URL
  * face (`happy.png`, or the copy `app/scripts/build-badges.mjs` ships), the channel the app makes for
  * the category, the tag a newer notice about the same thing replaces, and the two buttons an
  * approval carries, each posting its own link through [NoticeAnswerReceiver] with the app closed, and
- * a chat's Reply, typed inline and posted to its own one-shot link the same way. A
+ * a chat's Reply, typed inline and posted to its own one-shot link the same way, and its Mark as
+ * read, which queues the press for the page and leaves the tray. A
  * notice about a chat is drawn as that chat's conversation, the bot its Person, so Android badges
  * the face with the app's icon itself; any other keeps the face as its large icon.
  *
@@ -101,6 +102,15 @@ class GotsMessagingService : FirebaseMessagingService() {
                     .addRemoteInput(typed)
                     .setAllowGeneratedReplies(false)
                     .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
+                    .build(),
+            )
+        }
+        val chat = notice.chat
+        if (notice.markAsRead && chat != null) {
+            builder.addAction(
+                NotificationCompat.Action.Builder(0, getString(R.string.notice_mark_read), readIntent(notice.tag, chat, notice.at))
+                    .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
+                    .setShowsUserInterface(false)
                     .build(),
             )
         }
@@ -174,6 +184,17 @@ class GotsMessagingService : FirebaseMessagingService() {
         }
         // Each button is its own broadcast, since a notification answered two ways is two links.
         return PendingIntent.getBroadcast(this, "$tag#$index".hashCode(), answer, pendingFlags())
+    }
+
+    /** Mark as read's broadcast: the chat whose read mark it moves, and the moment the notice covered. */
+    private fun readIntent(tag: String, chat: String, at: Long?): PendingIntent {
+        val read = Intent(this, NoticeAnswerReceiver::class.java).apply {
+            action = NoticeAnswerReceiver.ACTION_READ
+            putExtra(NoticeAnswerReceiver.EXTRA_TAG, tag)
+            putExtra(NoticeAnswerReceiver.EXTRA_CHAT, chat)
+            if (at != null) putExtra(NoticeAnswerReceiver.EXTRA_AT, at)
+        }
+        return PendingIntent.getBroadcast(this, "$tag#read".hashCode(), read, pendingFlags())
     }
 
     /**

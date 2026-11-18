@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { App } from "@capacitor/app"
+import { Capacitor, registerPlugin } from "@capacitor/core"
 import type { Importance } from "@capacitor/push-notifications"
 import { liveQuery } from "dexie"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -28,6 +29,8 @@ import { hasServer } from "@/lib/connection"
 import { connectionKey, reconnectLive } from "@/lib/live"
 import { isNative } from "@/lib/platform"
 import { quietly } from "@/lib/report"
+import { followHeldReads, takeTrayReads } from "@/lib/tray-marks"
+import { onReturn } from "@/lib/wake"
 import { callFunction, failure, functionUrl } from "@/lib/account"
 import {
   PUSH_CATEGORIES,
@@ -621,6 +624,21 @@ async function syncNative() {
 }
 
 /** On launch and whenever the app returns, a rotated token or a new sign-in is told to the registry. */
+/** The tray's own plugin, as `MainActivity` registers it: the Mark as read presses it queued. */
+const TRAY_PLUGIN = "Tray"
+
+interface TrayPlugin {
+  takeReads(): Promise<{ reads: unknown }>
+}
+
+const Tray = registerPlugin<TrayPlugin>(TRAY_PLUGIN)
+
+/** The presses the tray queued while the page wasn't running; an APK built before the plugin has none. */
+async function trayReads(): Promise<unknown> {
+  if (!Capacitor.isPluginAvailable(TRAY_PLUGIN)) return []
+  return (await Tray.takeReads()).reads
+}
+
 function startNative() {
   const pass = () => {
     void syncNative().catch(() => {})
@@ -628,6 +646,12 @@ function startNative() {
   }
   pass()
   void App.addListener("resume", pass)
+  // A Mark as read pressed with the app closed moves its chat's read mark here, at start and on
+  // every return, and the chats it holds read are followed while their rows catch up.
+  followHeldReads()
+  const reads = () => void takeTrayReads(trayReads)
+  reads()
+  onReturn(reads)
   // A bot linked or turned off after ntfy was switched on is handed the topic, or told to forget it.
   let timer: number | undefined
   liveQuery(() => db.profiles.toArray()).subscribe(() => {

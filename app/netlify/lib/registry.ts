@@ -11,6 +11,7 @@ import {
   PUSH_KINDS,
   actionsOf,
   chatId,
+  momentOf,
   botId,
   categoryOf,
   pictureOf,
@@ -365,6 +366,11 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
       // A reply's link is posted by the phone like a button's, so it is an http(s) address or nothing.
       const reply = pictureOf(input?.reply)
       if (reply) detail.reply = reply
+      // Mark as read is the plugin's word, so it is a boolean or nothing, and the moment it covers a
+      // whole number of milliseconds.
+      if (input?.read === true) detail.read = true
+      const at = momentOf(input?.at)
+      if (at) detail.at = at
       // The gap rides the host's own record, which this route already reads to learn whose push it
       // is: one read-modify-write on its etag, instead of a key of its own beside it. A record that
       // is there and unmodified is the gap refusing the push.

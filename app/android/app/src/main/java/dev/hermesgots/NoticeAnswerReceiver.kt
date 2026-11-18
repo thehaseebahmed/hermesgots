@@ -19,6 +19,7 @@ import kotlin.concurrent.thread
  * token's, so a press cannot ask for more than the one thing it was drawn for, and a second press of
  * the same link is refused by the host. A Reply is the same: its link is `push/reply/<token>`, and the
  * typed text is its body. The entry leaves the tray once the post is made, as an answered one does.
+ * Mark as read posts nothing: it queues the press for the page ([TrayReads]) and clears the entry.
  *
  * Not exported: the only intents that reach it are the ones [GotsMessagingService] built. The post
  * runs on a thread of its own and the receiver is held open until it finishes, since the app may be
@@ -27,6 +28,10 @@ import kotlin.concurrent.thread
 class NoticeAnswerReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action == ACTION_READ) {
+            markRead(context, intent)
+            return
+        }
         if (intent.action != ACTION_ANSWER && intent.action != ACTION_REPLY) return
         val url = intent.getStringExtra(EXTRA_URL).orEmpty()
         // Only a link is ever posted. The registry keeps an http(s) address and drops anything else
@@ -53,6 +58,21 @@ class NoticeAnswerReceiver : BroadcastReceiver() {
                 pending.finish()
             }
         }
+    }
+
+    /**
+     * Mark as read: the press is queued for the page, which holds the read marks, and the entry
+     * leaves the tray. Nothing is posted — a read mark is this device's alone — so it needs no network.
+     */
+    private fun markRead(context: Context, intent: Intent) {
+        val chat = intent.getStringExtra(EXTRA_CHAT)?.takeIf { it.isNotBlank() } ?: return
+        val through = if (intent.hasExtra(EXTRA_AT)) intent.getLongExtra(EXTRA_AT, 0L).takeIf { it > 0 } else null
+        val prefs = context.getSharedPreferences(TrayReads.PREFS, Context.MODE_PRIVATE)
+        synchronized(TrayReads) {
+            val stored = prefs.getString(TrayReads.KEY, null)
+            prefs.edit().putString(TrayReads.KEY, TrayReads.append(stored, chat, System.currentTimeMillis(), through)).apply()
+        }
+        intent.getStringExtra(EXTRA_TAG)?.let { NoticeDrawer.clear(context, it) }
     }
 
     /** One POST to the link, and no exception out of it: a dead network is a press that didn't land. */
@@ -99,7 +119,16 @@ class NoticeAnswerReceiver : BroadcastReceiver() {
         /** The RemoteInput key the typed reply is read under. */
         const val KEY_TEXT = "dev.hermesgots.push.TEXT"
 
-                /** The link a press posts. */
+        /** What [GotsMessagingService] marks a Mark as read's intent with: nothing is posted for it. */
+        const val ACTION_READ = "dev.hermesgots.push.READ"
+
+        /** The chat a Mark as read moves the read mark of. */
+        const val EXTRA_CHAT = "dev.hermesgots.push.CHAT"
+
+        /** The host's moment of the activity the notice reported, which a Mark as read covers. */
+        const val EXTRA_AT = "dev.hermesgots.push.AT"
+
+        /** The link a press posts. */
         const val EXTRA_URL = "dev.hermesgots.push.URL"
 
         /** The row to clear once it has been answered. */

@@ -252,6 +252,29 @@ test("the registry forwards a reply link and drops one that isn't http(s)", asyn
   )
 })
 
+test("the registry forwards read only as a boolean, with the moment it covers", async () => {
+  const AT = 1_763_456_000_000
+  const notice = { kind: "approval", category: "chat_input", session_id: "gots-1", title: "Trip" }
+  const kept = await relay(await setup(), { ...notice, chat: "chat-1", read: true, at: AT })
+  assert.equal(kept.detail.read, true, "Mark as read rides to the phone")
+  assert.equal(kept.detail.at, AT, "with the host's moment of the activity it covers")
+  const data = message("t", "run_done", "chat_run_done", "gots-1", kept.detail).message.data
+  assert.equal(data.read, "true", "a data message carries strings")
+  assert.equal(data.at, String(AT))
+  for (const read of ["true", 1, "yes", {}, null]) {
+    const { status, detail } = await relay(await setup(), { ...notice, chat: "chat-1", read, at: AT })
+    assert.equal(status, 200, "a read that isn't a boolean costs the notice nothing")
+    assert.equal(detail.read, undefined, `${JSON.stringify(read)} is no boolean`)
+  }
+  for (const at of ["1763456000000", -1, 0, 1.5, Number.MAX_VALUE, "x"]) {
+    const { detail } = await relay(await setup(), { ...notice, chat: "chat-1", read: true, at })
+    assert.equal(detail.at, undefined, `${JSON.stringify(at)} is no moment`)
+  }
+  const none = message("t", "run_done", "chat_run_done", "gots-1").message.data
+  assert.equal(none.read, undefined, "a notice with no read carries none")
+  assert.equal(none.at, undefined)
+})
+
 test("the dev mock answers a tray's button the way the plugin does", () => {
   // AGENTS.md requires the mock to serve what the app calls, and this one route no browser flow can
   // reach: nothing in the mock sends a push, so a press is driven from the source it serves. The

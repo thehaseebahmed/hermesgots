@@ -139,6 +139,20 @@ class NoticeTest {
     }
 
     @Test
+    fun aChatsNewsCarryingReadOffersMarkAsRead() {
+        val notice = read("title" to "Trip", "chat" to "chat-1", "read" to "true", "at" to "1763456000000")!!
+        assertTrue("a chat's news the plugin marked readable offers Mark as read", notice.markAsRead)
+        assertEquals(1763456000000L, notice.at)
+        // Only the plugin's word: anything but "true" is no Mark as read, and Mark as read moves a chat.
+        assertFalse(read("title" to "Trip", "chat" to "chat-1", "read" to "yes")!!.markAsRead)
+        assertFalse(read("title" to "Trip", "chat" to "chat-1")!!.markAsRead)
+        assertFalse(read("title" to "Trip", "read" to "true")!!.markAsRead)
+        for (at in listOf("-1", "0", "soon", "", "1.5")) {
+            assertNull("$at is no moment", read("title" to "Trip", "chat" to "chat-1", "at" to at)!!.at)
+        }
+    }
+
+    @Test
     fun aFaceIsPaddedIntoTheAdaptiveSafeZone() {
         // An adaptive icon is 108 units with its inner 72 the part every mask keeps, so a face drawn
         // whole sits in the middle two thirds of a canvas half as large again.

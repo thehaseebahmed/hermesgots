@@ -87,6 +87,10 @@ export interface PushDetail {
   chat?: string
   /** The one-shot link the tray's Reply posts its text to (`answers.reply_link` in the plugin). */
   reply?: string
+  /** Whether the tray offers Mark as read on it: the plugin's word, on a chat's news alone. */
+  read?: boolean
+  /** The host's moment (ms) of the activity the notice reports: what a Mark as read covers. */
+  at?: number
 }
 
 export interface FcmSender {
@@ -167,6 +171,11 @@ export function botId(value: unknown) {
  * A chat's id as the plugin keeps them (`MAX_ID_LENGTH` in `plugin/chats.py`, and the characters a
  * chat's address carries), which a phone names a shortcut and its read mark by.
  */
+/** A moment as the plugin sends one: a whole, positive number of milliseconds, or nothing. */
+export function momentOf(value: unknown) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined
+}
+
 export function chatId(value: unknown) {
   const one = typeof value === "string" ? value.trim() : ""
   return /^[A-Za-z0-9._-]{1,256}$/.test(one) ? one : undefined
@@ -277,7 +286,7 @@ async function accessToken(account: ServiceAccount, cache: { token?: string; exp
  * A `notification` payload is drawn by Android itself, while the app is closed and with no code of
  * ours running — and Android's own drawing has no room for a button. So the message carries the
  * notice instead and the app draws it (`GotsMessagingService`): the title and body, the bot's
- * picture, the chat it is about and the link its Reply posts to, the category's channel, the tag a newer notice of the same thing replaces, and the two
+ * picture, the chat it is about, the link its Reply posts to and whether it offers Mark as read, the category's channel, the tag a newer notice of the same thing replaces, and the two
  * links an approval carries as JSON, since a data value can be nothing but a string.
  */
 export function message(
@@ -293,6 +302,7 @@ export function message(
   const icon = pictureOf(detail.icon)
   const chat = chatId(detail.chat)
   const reply = pictureOf(detail.reply)
+  const at = momentOf(detail.at)
   return {
     message: {
       token,
@@ -312,6 +322,8 @@ export function message(
         ...(actions.length ? { actions: JSON.stringify(actions) } : {}),
         ...(chat ? { chat } : {}),
         ...(reply ? { reply } : {}),
+        ...(detail.read === true ? { read: "true" } : {}),
+        ...(at ? { at: String(at) } : {}),
       },
       android: { priority: "HIGH", ttl: "600s" },
     },

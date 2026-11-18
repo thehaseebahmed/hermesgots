@@ -652,6 +652,11 @@ def _notice(
         found = _chat_entry(path, session_id)
         if found:
             conversation["chat"] = found[0]
+            if KINDS_BY_NAME[kind].read:
+                # Mark as read covers the activity this notice reports, on the host's clock: the app
+                # holds the chat read through it, since a later sync can write a newer clock of its own.
+                conversation["read"] = True
+                conversation["at"] = int(time.time() * 1000)
             reply = _reply(path, kind, session_id, *found)
             if reply:
                 conversation["reply"] = reply

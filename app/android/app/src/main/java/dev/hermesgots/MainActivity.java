@@ -12,6 +12,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(NotificationSettingsPlugin.class);
         registerPlugin(ToastPlugin.class);
         registerPlugin(BubblePlugin.class);
+        registerPlugin(TrayPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

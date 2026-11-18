@@ -27,6 +27,10 @@ data class Notice(
     val chat: String? = null,
     /** The one-shot link a typed reply posts to (`answers.reply_link` in the plugin), http(s) or nothing. */
     val reply: String? = null,
+    /** Whether the plugin offers Mark as read on it: a chat's news the reader receives. */
+    val read: Boolean = false,
+    /** The host's moment (ms) of the activity the notice reports, which a Mark as read covers. */
+    val at: Long? = null,
 ) {
     /**
      * A notice about a chat is drawn as that chat's conversation — the bot as its Person, a
@@ -40,6 +44,9 @@ data class Notice(
 
     /** Reply, typed inline: a message in the chat the notice is about, so only a conversation has one. */
     val inlineReply: Boolean get() = conversation && reply != null
+
+    /** Mark as read moves a chat's read mark, so only a notice naming its chat offers it. */
+    val markAsRead: Boolean get() = conversation && read
 
     /** A conversation already wears the face as its Person; a large icon would draw it twice. */
     val largeIcon: Boolean get() = !conversation
@@ -80,6 +87,8 @@ data class Notice(
                 actions = actionsOf(data[KEY_ACTIONS]),
                 chat = data[KEY_CHAT]?.trim()?.takeIf { CHAT.matches(it) },
                 reply = data[KEY_REPLY]?.trim()?.takeIf(::isLink),
+                read = data[KEY_READ] == "true",
+                at = data[KEY_AT]?.trim()?.toLongOrNull()?.takeIf { it > 0 },
             )
         }
 
@@ -132,6 +141,8 @@ data class Notice(
         private const val KEY_ACTIONS = "actions"
         private const val KEY_CHAT = "chat"
         private const val KEY_REPLY = "reply"
+        private const val KEY_READ = "read"
+        private const val KEY_AT = "at"
     }
 }
 
