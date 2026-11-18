@@ -18,6 +18,11 @@ back. An approval's ``mint`` and ``redeem`` are those mechanics held to ``once``
 link minted for another purpose answers nothing at the approval's route, and an approval's at none
 other.
 
+A reply typed in the Android tray is the same mechanics for one more purpose: ``reply_link`` mints
+one link per chat's notice whose target is that chat and its session, living a day rather than the
+push's ten minutes since a tray entry outlives its push, and ``redeem_reply`` claims it only as a
+reply — so it queues one turn of text on that chat and answers no approval.
+
 Nothing here logs a token or writes one down: the address comes from the host the app dialled
 (``push.base``), a token is built into its button's link and kept only as its hash, and the route that
 redeems it never says it.
@@ -47,6 +52,15 @@ PATH = "/push/answer/"
 # What a target is: a run's approval, or one room member's.
 RUN = "run"
 ROOM = "room"
+
+# A reply typed in the Android tray: one link a notice carries, answering one turn of text on one
+# chat. Its own choice, so a reply link answers nothing at the approval's route and an approval's
+# nothing at the reply's.
+REPLY = "reply"
+REPLY_PATH = "/push/reply/"
+# A tray entry outlives the push that drew it (``push.TTL_SECONDS`` is how long the push service
+# holds it undelivered), and a reply is typed when the reader gets to it, so its link lives a day.
+REPLY_SECONDS = 24 * 3600
 
 # What a press found. ``ANSWERED`` is the one outcome that settles anything.
 ANSWERED = "answered"
@@ -194,6 +208,23 @@ def claim(path: Path, token: Any, allowed: Collection[str]) -> Claim:
 def redeem(path: Path, token: Any) -> Claim:
     """Claims an approval's button: a press answers ``once`` or ``deny``, and no third choice."""
     return claim(path, token, CHOICES)
+
+
+def reply_link(path: Path, session_id: str, chat_id: str, base: Optional[str]) -> Optional[str]:
+    """The one reply link a chat's notice carries: a turn of text on ``session_id``, for a day.
+
+    No address means no link, for the reason ``mint`` gives: a link nobody can reach is a
+    credential with nothing to show for it.
+    """
+    if not base or not session_id or not chat_id:
+        return None
+    target = {"kind": REPLY, "session_id": session_id, "chat": chat_id}
+    return f"{base}{REPLY_PATH}{issue(path, REPLY, target, REPLY_SECONDS)}"
+
+
+def redeem_reply(path: Path, token: Any) -> Claim:
+    """Claims a reply link: it answers a reply, and nothing an approval's button could."""
+    return claim(path, token, (REPLY,))
 
 
 def release(path: Path, token: Any) -> None:

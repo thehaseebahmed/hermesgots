@@ -228,6 +228,30 @@ test("the registry forwards a chat id and drops one that isn't an id", async () 
   )
 })
 
+test("the registry forwards a reply link and drops one that isn't http(s)", async () => {
+  const REPLY = "https://bot.example/api/plugins/gots/push/reply/r-1"
+  // The plugin decides which kinds carry one; the registry only bounds it, whatever the kind. An
+  // approval is the kind the device in `setup` takes.
+  const notice = { kind: "approval", category: "chat_input", session_id: "gots-1", title: "Trip" }
+  const kept = await relay(await setup(), { ...notice, chat: "chat-1", reply: ` ${REPLY} ` })
+  assert.equal(kept.detail.reply, REPLY, "the link the tray's Reply posts to")
+  assert.equal(
+    message("t", "run_done", "chat_run_done", "gots-1", kept.detail).message.data.reply,
+    REPLY,
+    "and it rides the message to the phone",
+  )
+  for (const reply of ["javascript:alert(1)", "file:///etc/passwd", "bot.example/reply", 42, ""]) {
+    const { status, detail } = await relay(await setup(), { ...notice, chat: "chat-1", reply })
+    assert.equal(status, 200, "a reply that isn't a link costs the notice nothing")
+    assert.equal(detail.reply, undefined, `${JSON.stringify(reply)} is no link`)
+  }
+  assert.equal(
+    message("t", "run_done", "chat_run_done", "gots-1").message.data.reply,
+    undefined,
+    "a notice with no reply carries none",
+  )
+})
+
 test("the dev mock answers a tray's button the way the plugin does", () => {
   // AGENTS.md requires the mock to serve what the app calls, and this one route no browser flow can
   // reach: nothing in the mock sends a push, so a press is driven from the source it serves. The
@@ -255,5 +279,34 @@ test("the dev mock answers a tray's button the way the plugin does", () => {
     mock,
     /const resolve = pendingApprovals\.get\(held\.runId\)/,
     "and it settles the run that minted the token, as `answers.answer_run` settles one through Hermes's queue",
+  )
+})
+
+test("the dev mock answers a reply the way the plugin does", () => {
+  // As with a button, nothing in the mock sends a push, so the route is held to the source it
+  // serves: the link it matches, the plugin's own words, and a reply queued as the user sending again.
+  const mock = readFileSync(new URL("./mock-hermes.mjs", import.meta.url), "utf8")
+  const plugin = readFileSync(new URL("../../plugin/__init__.py", import.meta.url), "utf8")
+  assert.ok(
+    mock.includes(String.raw`/^\/api\/plugins\/gots\/push\/reply\/([^/]+)$/`),
+    "the mock matches the link the tray's Reply posts to",
+  )
+  for (const said of [
+    "A reply needs some words.",
+    "That reply isn't one this bot sent.",
+    "That reply has already been sent.",
+  ]) {
+    assert.ok(plugin.includes(said), `the plugin answers a reply with "${said}"`)
+    assert.ok(mock.includes(said), `and the mock answers it the same way`)
+  }
+  assert.match(
+    mock,
+    /object: "gots\.push\.reply",\s*\n\s*queued: true/,
+    "a reply answers as the plugin's route does",
+  )
+  assert.match(
+    mock,
+    /queue\.resumedAt = Date\.now\(\)\s*\n\s*queue\.items\.push\(reply\)/,
+    "and it is the user sending again, so a paused queue goes",
   )
 })

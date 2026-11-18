@@ -25,6 +25,8 @@ data class Notice(
     val actions: List<NoticeAction>,
     /** The chat the notice is about, as the plugin found it: what the conversation is keyed by. */
     val chat: String? = null,
+    /** The one-shot link a typed reply posts to (`answers.reply_link` in the plugin), http(s) or nothing. */
+    val reply: String? = null,
 ) {
     /**
      * A notice about a chat is drawn as that chat's conversation — the bot as its Person, a
@@ -35,6 +37,9 @@ data class Notice(
 
     /** The chat's long-lived shortcut: one per chat, so a newer notice about it reuses the same one. */
     val shortcut: String? get() = chat?.let { "chat:$it" }
+
+    /** Reply, typed inline: a message in the chat the notice is about, so only a conversation has one. */
+    val inlineReply: Boolean get() = conversation && reply != null
 
     /** A conversation already wears the face as its Person; a large icon would draw it twice. */
     val largeIcon: Boolean get() = !conversation
@@ -74,6 +79,7 @@ data class Notice(
                 bundled = data[KEY_BOT]?.takeIf { it.isNotBlank() }?.let { "bot_" + it.replace('-', '_') },
                 actions = actionsOf(data[KEY_ACTIONS]),
                 chat = data[KEY_CHAT]?.trim()?.takeIf { CHAT.matches(it) },
+                reply = data[KEY_REPLY]?.trim()?.takeIf(::isLink),
             )
         }
 
@@ -125,6 +131,7 @@ data class Notice(
         private const val KEY_TAG = "tag"
         private const val KEY_ACTIONS = "actions"
         private const val KEY_CHAT = "chat"
+        private const val KEY_REPLY = "reply"
     }
 }
 

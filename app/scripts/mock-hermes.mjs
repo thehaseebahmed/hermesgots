@@ -198,6 +198,9 @@ const pendingApprovals = new Map()
 /** The buttons an approval's notice would carry, by token, so a press can be tried by hand
  *  (`plugin/answers.py`): the choice is the row's, since a token in a URL names nothing. */
 const pushAnswers = new Map()
+/** The reply links a run's notice would carry, by token (`answers.reply_link`): the session each
+ *  queues a turn on. Minted by hand with POST /__mock/push-reply, since nothing here sends a push. */
+const pushReplies = new Map()
 const pendingClarifies = new Map()
 /** Questions Hermes's own route is asked one at a time, by `prompt_id` (0.22.5 and newer). */
 const pendingPrompts = new Map()
@@ -4835,6 +4838,37 @@ http
         choice: held.choice,
       })
     }
+    const replyRoute = /^\/api\/plugins\/gots\/push\/reply\/([^/]+)$/.exec(url.pathname)
+    if (PLUGIN && !profile && req.method === "POST" && replyRoute) {
+      const { text } = await readBody(req)
+      // Read before the link is spent, as the plugin reads it.
+      if (typeof text !== "string" || !text.trim())
+        return json(res, 400, { error: { message: "A reply needs some words." } })
+      const held = pushReplies.get(decodeURIComponent(replyRoute[1]))
+      if (!held) return json(res, 404, { error: { message: "That reply isn't one this bot sent." } })
+      if (held.spent)
+        return json(res, 410, { error: { message: "That reply has already been sent." } })
+      held.spent = true
+      // A turn the plugin builds itself, queued as the user sending again (`outbox.add(resumed)`).
+      const queue = queueOf(held.sessionId)
+      queue.url ??= req.url
+      const reply = {
+        id: `q_${randomUUID().replace(/-/g, "").slice(0, 20)}`,
+        text,
+        attachments: [],
+        created_at: Date.now(),
+        body: { input: [{ role: "user", content: text }], session_id: held.sessionId },
+      }
+      queue.resumedAt = Date.now()
+      queue.items.push(reply)
+      noteEvent("session", held.sessionId)
+      setTimeout(() => pumpQueue(held.sessionId), 50)
+      return json(res, 200, {
+        object: "gots.push.reply",
+        queued: true,
+        item: reply.id,
+      })
+    }
     // ntfy: the mock keeps the bot's topic and stands in for Hermes's own NTFY_SERVER_URL and
     // NTFY_TOKEN, and publishes nothing (plugin/ntfy.py).
     if (PLUGIN && !profile && url.pathname.startsWith("/api/plugins/gots/push/ntfy")) {
@@ -6318,6 +6352,15 @@ http
     // Dev only: POST { delay } is how long runs/live keeps naming an owed wake before the mock
     // posts the wake turn — the plugin's sweep and post, held open long enough for a flow to watch
     // the window. 0 (the default) posts at once, as the mock always did.
+    // Dev only: POST { session_id } mints the reply link a finished run's tray entry would carry, so
+    // the reply route can be tried by hand with curl.
+    if (url.pathname === "/__mock/push-reply" && req.method === "POST") {
+      const { session_id: sessionId } = await readBody(req)
+      if (!sessionId) return json(res, 400, { error: { message: "session_id is required" } })
+      const token = randomBytes(32).toString("base64url")
+      pushReplies.set(token, { sessionId })
+      return json(res, 200, { url: `http://localhost:${PORT}/api/plugins/gots/push/reply/${token}` })
+    }
     if (url.pathname === "/__mock/wake" && req.method === "POST") {
       const { delay = 0 } = await readBody(req)
       wakeDelayMs = Number(delay) || 0

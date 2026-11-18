@@ -6,6 +6,7 @@
     <string name="custom_url_scheme">dev.hermesgots</string>
     <!-- The reader, as a conversation notification names them beside the bot. -->
     <string name="notice_you">You</string>
+    <string name="notice_reply">Reply</string>
     <string name="bubble_accessibility_summary">Puts the words a take heard into the text field another app has focused, and shows the Bubble while a keyboard is open.</string>
     <string name="bubble_accessibility_description">Gots listens through the Bubble and types what it heard into the field you are in. It reads two things and nothing else: the field you are in, when a take ends, and the list of windows on the phone, which is how it knows a keyboard is open.</string>
 </resources>

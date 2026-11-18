@@ -50,6 +50,7 @@ from . import answers, link, ntfy
 from .notice import (
     CATEGORIES,
     KINDS,
+    KINDS_BY_NAME,
     LEGACY_CATEGORIES,
     SESSION_KINDS,
     Action,
@@ -651,6 +652,9 @@ def _notice(
         found = _chat_entry(path, session_id)
         if found:
             conversation["chat"] = found[0]
+            reply = _reply(path, kind, session_id, *found)
+            if reply:
+                conversation["reply"] = reply
         if not title:
             title = session_title(path, session_id, found[1] if found else None)
     return Notice(
@@ -660,6 +664,24 @@ def _notice(
         actions=_buttons(path, answer),
         conversation=conversation,
     )
+
+
+def _reply(path: Path, kind: str, session_id: str, chat_id: str, chat: Dict[str, Any]) -> Optional[str]:
+    """The reply link a chat's notice carries, where a kind takes one and someone could press it.
+
+    Only the relay to Android draws a reply, so a profile not linked to the registry mints none —
+    a credential no transport carries is one nobody can press — and a chat the user is done with
+    takes none, since a turn queued there would reopen work they put away. The turn goes on the
+    session the chat names, which is the one its record keeps however compression moved it on.
+    """
+    if not KINDS_BY_NAME[kind].reply or not _linked(path):
+        return None
+    from . import chats
+
+    if chats.closed({"value": chat}):
+        return None
+    root = chat.get("hermesSessionId") if isinstance(chat.get("hermesSessionId"), str) else session_id
+    return answers.reply_link(path, root, chat_id, base(path))
 
 
 def _buttons(path: Path, answer: Optional[Dict[str, Any]]) -> Tuple[Action, ...]:

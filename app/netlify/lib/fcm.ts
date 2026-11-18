@@ -85,6 +85,8 @@ export interface PushDetail {
   actions?: PushAction[]
   /** The chat the notice is about, which the phone keys its conversation entry by. */
   chat?: string
+  /** The one-shot link the tray's Reply posts its text to (`answers.reply_link` in the plugin). */
+  reply?: string
 }
 
 export interface FcmSender {
@@ -275,7 +277,7 @@ async function accessToken(account: ServiceAccount, cache: { token?: string; exp
  * A `notification` payload is drawn by Android itself, while the app is closed and with no code of
  * ours running — and Android's own drawing has no room for a button. So the message carries the
  * notice instead and the app draws it (`GotsMessagingService`): the title and body, the bot's
- * picture, the chat it is about, the category's channel, the tag a newer notice of the same thing replaces, and the two
+ * picture, the chat it is about and the link its Reply posts to, the category's channel, the tag a newer notice of the same thing replaces, and the two
  * links an approval carries as JSON, since a data value can be nothing but a string.
  */
 export function message(
@@ -290,6 +292,7 @@ export function message(
   const face = botId(detail.bot)
   const icon = pictureOf(detail.icon)
   const chat = chatId(detail.chat)
+  const reply = pictureOf(detail.reply)
   return {
     message: {
       token,
@@ -308,6 +311,7 @@ export function message(
         ...(icon ? { icon } : {}),
         ...(actions.length ? { actions: JSON.stringify(actions) } : {}),
         ...(chat ? { chat } : {}),
+        ...(reply ? { reply } : {}),
       },
       android: { priority: "HIGH", ttl: "600s" },
     },

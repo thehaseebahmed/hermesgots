@@ -15,6 +15,7 @@ import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.Person
+import androidx.core.app.RemoteInput
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
@@ -34,7 +35,8 @@ import java.net.URL
  * Gots. So this service draws the entry: the notice's title and the body under it, the bot's plain
  * face (`happy.png`, or the copy `app/scripts/build-badges.mjs` ships), the channel the app makes for
  * the category, the tag a newer notice about the same thing replaces, and the two buttons an
- * approval carries, each posting its own link through [NoticeAnswerReceiver] with the app closed. A
+ * approval carries, each posting its own link through [NoticeAnswerReceiver] with the app closed, and
+ * a chat's Reply, typed inline and posted to its own one-shot link the same way. A
  * notice about a chat is drawn as that chat's conversation, the bot its Person, so Android badges
  * the face with the app's icon itself; any other keeps the face as its large icon.
  *
@@ -89,6 +91,19 @@ class GotsMessagingService : FirebaseMessagingService() {
             builder.setStyle(NotificationCompat.BigTextStyle().bigText(notice.body.ifEmpty { notice.title }))
         }
         if (notice.largeIcon && picture != null) builder.setLargeIcon(picture)
+        val reply = notice.reply
+        if (notice.inlineReply && reply != null) {
+            val typed = RemoteInput.Builder(NoticeAnswerReceiver.KEY_TEXT)
+                .setLabel(getString(R.string.notice_reply))
+                .build()
+            builder.addAction(
+                NotificationCompat.Action.Builder(0, getString(R.string.notice_reply), replyIntent(notice.tag, reply))
+                    .addRemoteInput(typed)
+                    .setAllowGeneratedReplies(false)
+                    .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
+                    .build(),
+            )
+        }
         for ((index, action) in notice.actions.withIndex()) {
             builder.addAction(
                 NotificationCompat.Action(0, action.label, answerIntent(notice.tag, index, action.url)),
@@ -159,6 +174,26 @@ class GotsMessagingService : FirebaseMessagingService() {
         }
         // Each button is its own broadcast, since a notification answered two ways is two links.
         return PendingIntent.getBroadcast(this, "$tag#$index".hashCode(), answer, pendingFlags())
+    }
+
+    /**
+     * Reply's broadcast, carrying the one link the typed text is posted to. A RemoteInput fills the
+     * intent in with what was typed, so this one intent is mutable where Android asks it to say so.
+     */
+    private fun replyIntent(tag: String, url: String): PendingIntent {
+        val reply = Intent(this, NoticeAnswerReceiver::class.java).apply {
+            action = NoticeAnswerReceiver.ACTION_REPLY
+            putExtra(NoticeAnswerReceiver.EXTRA_URL, url)
+            putExtra(NoticeAnswerReceiver.EXTRA_TAG, tag)
+        }
+        val mutable =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
+        return PendingIntent.getBroadcast(
+            this,
+            "$tag#reply".hashCode(),
+            reply,
+            mutable or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
     }
 
     private fun pendingFlags() = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT

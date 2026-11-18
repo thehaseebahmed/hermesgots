@@ -137,7 +137,10 @@ def add(
     text: str,
     attachments: List[Dict[str, Any]],
     body: Dict[str, Any],
+    resumed: bool = False,
 ) -> Dict[str, Any]:
+    """Queues one turn. ``resumed`` is the user sending again, as ``promote`` is: a queue a stopped
+    or failed run paused goes once this item is in."""
     if not isinstance(body.get("input"), list) or not body["input"]:
         raise ValueError("body.input must hold the message")
     if not isinstance(text, str) or len(text) > MAX_TEXT:
@@ -164,6 +167,10 @@ def add(
             ),
         )
         _remember_body(conn, session_id, profile, body)
+        if resumed:
+            conn.execute(
+                "UPDATE outbox_sessions SET resumed_at = ? WHERE session_id = ?", (now, session_id)
+            )
         conn.execute("COMMIT")
         return _item(conn.execute("SELECT * FROM outbox WHERE id = ?", (item_id,)).fetchone())
     finally:

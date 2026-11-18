@@ -2627,6 +2627,54 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             raise
         return web.json_response({"object": "gots.push.answer", "answered": True, "choice": choice})
 
+    async def push_reply(request: "web.Request") -> "web.Response":
+        # A reply typed in the Android tray, with the app closed. Like `push_answer`, the token in the
+        # path is the credential and no account key is asked for, and the route is a POST alone. The
+        # link answers a reply and nothing else (`answers.redeem_reply`), and it queues one turn the
+        # plugin builds itself, so the phone never holds the bot's key and the turn goes whatever
+        # the app is doing.
+        path = store_path()
+        token = request.match_info.get("token") or ""
+        body = await json_body(request)
+        text = body.get("text") if body else None
+        # Read before the link is spent, so a body the route can't take costs the reader nothing.
+        if not isinstance(text, str) or not text.strip():
+            return _error(web, "A reply needs some words.", 400)
+        if len(text) > outbox.MAX_TEXT:
+            return _error(web, "That reply is too long.", 400)
+        claim = await asyncio.to_thread(answers.redeem_reply, path, token)
+        if claim.outcome == answers.UNKNOWN:
+            return _error(web, "That reply isn't one this bot sent.", 404)
+        if claim.outcome == answers.SPENT:
+            return _error(web, "That reply has already been sent.", 410)
+        target = claim.target or {}
+        session_id, chat_id = target.get("session_id"), target.get("chat")
+        if not isinstance(session_id, str) or not isinstance(chat_id, str):
+            return _error(web, "That reply isn't one this bot sent.", 404)
+        try:
+            chat = await asyncio.to_thread(chats.one, path, chat_id)
+            if chat is None or chats.closed(chat):
+                # Closed since the notice was drawn: a turn there would reopen what the user put away.
+                return _error(web, "That chat is closed.", 409)
+            record = await asyncio.to_thread(sessions.record_for, path, home_of(path), session_id)
+            run = outbox.turn_body(
+                session_id, text, chats.choice(chat), prompt_builder.run_instructions(record)
+            )
+            item = await asyncio.to_thread(
+                outbox.add, path, session_id, _request_profile(), text, [], run, True
+            )
+        except Exception:
+            # Nothing landed, so the link is given back to be pressed again.
+            try:
+                await asyncio.to_thread(answers.release, path, token)
+            except Exception:
+                logger.debug("gots: couldn't give a reply link back", exc_info=True)
+            raise
+        # No key of the app's: the dispatcher posts with the home's own (`outbox._dispatch_authorization`).
+        outbox.watch(session_id, _request_profile(), path)
+        events.note("session", session_id, path, True)
+        return web.json_response({"object": "gots.push.reply", "queued": True, "item": item["id"]})
+
     async def push_mute(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -3050,6 +3098,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     # A button's own link (answers.py): the one route outside `unauthorized()`, POST alone, so a
     # read of it spends nothing. Every route gains its /p/<profile> twin with the rest.
     app.router.add_post(f"{PREFIX}/push/answer/{{token}}", push_answer)
+    # A reply typed in the tray: the same kind of link, redeemed only as a reply.
+    app.router.add_post(f"{PREFIX}/push/reply/{{token}}", push_reply)
     app.router.add_post(f"{PREFIX}/runs/{{run_id}}/clarify", answer_clarify)
     async def get_speech(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)

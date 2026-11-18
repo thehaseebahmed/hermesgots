@@ -123,6 +123,22 @@ class NoticeTest {
     }
 
     @Test
+    fun aMessageWithAReplyLinkDrawsAnInlineReply() {
+        val link = "https://bot.example/api/plugins/gots/push/reply/r-1"
+        val notice = read("title" to "Trip", "body" to "Booked.", "chat" to "chat-1", "reply" to " $link ")!!
+        assertEquals(link, notice.reply)
+        assertTrue("a chat's notice with a reply link offers Reply", notice.inlineReply)
+        for (reply in listOf("javascript:alert(1)", "bot.example/reply", "", "  ")) {
+            val bad = read("title" to "Trip", "chat" to "chat-1", "reply" to reply)!!
+            assertNull("$reply is no link", bad.reply)
+            assertFalse(bad.inlineReply)
+        }
+        // A reply is a message in a chat, so a notice naming no chat offers none, whatever it carries.
+        assertFalse(read("title" to "Trip", "reply" to link)!!.inlineReply)
+        assertFalse(read("title" to "Trip", "chat" to "chat-1")!!.inlineReply)
+    }
+
+    @Test
     fun aFaceIsPaddedIntoTheAdaptiveSafeZone() {
         // An adaptive icon is 108 units with its inner 72 the part every mask keeps, so a face drawn
         // whole sits in the middle two thirds of a canvas half as large again.

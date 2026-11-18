@@ -362,6 +362,9 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
       }
       const chat = chatId(input?.chat)
       if (chat) detail.chat = chat
+      // A reply's link is posted by the phone like a button's, so it is an http(s) address or nothing.
+      const reply = pictureOf(input?.reply)
+      if (reply) detail.reply = reply
       // The gap rides the host's own record, which this route already reads to learn whose push it
       // is: one read-modify-write on its etag, instead of a key of its own beside it. A record that
       // is there and unmodified is the gap refusing the push.
