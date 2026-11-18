@@ -294,6 +294,31 @@ test(
 )
 
 test(
+  "beside Main the list wears Main's own bar: the bot's face and name, opening its settings",
+  laptop(async () => {
+    await seed([
+      { id: MAIN, title: "Bot Chat", main: true, at: 10, said: [{ content: "Morning", at: 10 }] },
+      { id: "trip", title: "Trip to Lisbon", at: 300, said: [{ content: "Booked", at: 300 }] },
+    ])
+    await mount(pair(), async () => {
+      await until(async () => Boolean(mainRow()), "Main's row")
+      const bar = find('[data-slot="list-lane"] [data-slot="header-title"]')
+      assert.equal(wordsOf(bar).includes("Mainly"), true, "the bar names the bot")
+      assert.equal(wordsOf(bar).includes("Sidechats"), false, "and not the list")
+      assert.ok(
+        bar?.querySelector(`a[href="/settings/bots/${bot.id}"]`),
+        "its title opens the bot's settings, as Main's does",
+      )
+      assert.ok(
+        missing('[data-slot="list-lane"] button[aria-label="Back to Main"]'),
+        "and nothing leads back to a Main that stands beside it",
+      )
+      assert.ok(missing('[data-slot="list-lane"] [data-slot="header-line"]'), "nor counts the rows")
+    })
+  }),
+)
+
+test(
   "Main's row is the list's own row: its dot, and a press that takes the pane's place",
   laptop(async () => {
     // Main above the rows is a row of this list like the ones under it, so it wears the dot an unread
