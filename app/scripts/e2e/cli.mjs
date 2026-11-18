@@ -538,7 +538,7 @@ export const FLOWS = {
   "card-widths": {
     script: "e2e/card-widths.mjs",
     about:
-      "A chat's subagent card and waiting Question fill their pane with its gutter at 390 and 1024px and stop dead at the reading column's 672px box when the pane is wider, centred inside it, while message text keeps the 640px column the card then frames",
+      "A chat's reply text, subagent card and waiting Question start on its header's leading edge at 390, 1024, 1440 and 1920px and stop at the header's 672px box when the pane is wider, centred as the header is with the scrollbar balanced; and a bot's chat list rows start where its header does",
   },
   canvas: {
     script: "e2e/canvas.mjs",

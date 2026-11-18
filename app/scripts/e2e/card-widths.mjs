@@ -3,41 +3,49 @@
 import { app, assert, flow, pass, runId, settled } from "./lib.mjs"
 
 const GUTTER = 16
-const COLUMN_PX = 640
 const BOX_PX = 672
+// The pane from which the box caps with room for a balancing gutter each side: the box, its 16px
+// gutters and a thin scrollbar on both edges (`BALANCED` in message-scroller.tsx).
+const BALANCED_PX = 724
 const TOLERANCE = 1
 
 const VIEWPORT = "[data-slot=message-scroller-viewport]"
 const AGENT_CARD = '[data-slot="agent-card"]'
 const QUESTION = '[data-slot="composer-slot"] [data-slot="card"]'
 const TEXT = '[data-slot="markdown"]'
+const ROW_MARK = '[data-slot="row-mark"]'
 
 const facts = (page, selectors) =>
   page.evaluate((where) => {
     const viewport = document.querySelector(where.viewport)
-    const origin = viewport.getBoundingClientRect().left
-    const box = (selector) => {
-      const el = document.querySelector(selector)
+    const box = (el) => {
       if (!el) return null
       const rect = el.getBoundingClientRect()
-      return { width: Math.round(rect.width), left: Math.round(rect.left - origin) }
+      return { width: Math.round(rect.width), left: Math.round(rect.left) }
     }
     // A reply's text, not the user's own bubble: a bubble is w-fit around its words, and this rule
     // is about the reading column a reply stands on, which is the widest text block on the page.
-    const widest = (selector) => {
-      let best = null
-      for (const el of document.querySelectorAll(selector)) {
-        const rect = el.getBoundingClientRect()
-        if (!best || rect.width > best.width) best = { width: Math.round(rect.width), left: Math.round(rect.left - origin) }
-      }
-      return best
-    }
+    const widest = (selector) =>
+      box(
+        [...document.querySelectorAll(selector)].sort(
+          (a, b) => b.getBoundingClientRect().width - a.getBoundingClientRect().width,
+        )[0],
+      )
     return {
       pane: viewport.offsetWidth,
       thread: viewport.clientWidth,
-      card: box(where.card),
-      question: box(where.question),
+      header: box(rowOf(viewport)),
+      card: box(document.querySelector(where.card)),
+      question: box(document.querySelector(where.question)),
       text: widest(where.text),
+    }
+
+    // The chat's own header row: the one over the pane, not a list's beside it.
+    function rowOf(pane) {
+      const left = pane.getBoundingClientRect().left
+      return [...document.querySelectorAll('[data-slot="header-row"]')].find(
+        (row) => row.getBoundingClientRect().left >= left,
+      )
     }
   }, selectors)
 
@@ -50,7 +58,11 @@ await flow(
 
     await send("delegate this to someone")
     await until(
-      () => page.locator(AGENT_CARD).count().then((count) => count > 0),
+      () =>
+        page
+          .locator(AGENT_CARD)
+          .count()
+          .then((count) => count > 0),
       30_000,
       "the subagent's card to draw",
     )
@@ -66,7 +78,7 @@ await flow(
       .first()
       .waitFor({ timeout: 20_000 })
 
-    for (const width of [1024, 390, 1440]) {
+    for (const width of [1024, 390, 1440, 1920]) {
       await page.setViewportSize({ width, height: width < 768 ? 844 : 768 })
       // Both thread boxes are brought on screen before either is read, so neither reports the
       // placeholder size an off-screen content-visibility item keeps.
@@ -87,83 +99,92 @@ await flow(
         )
       // The composer slot keeps the gutters it already has: px-3 on a phone, sm:px-4 from 640px.
       const slot = width < 640 ? 12 : GUTTER
-      const fill = seen.thread - 2 * GUTTER
       const waiting = seen.pane - 2 * slot
-      const column = seen.thread > COLUMN_PX
-      // The rule: a card fills the box it is given, and stops at the reading column's box above
-      // that, centred in both cases.
-      const cardWidth = Math.min(fill, BOX_PX)
       const questionWidth = Math.min(waiting, BOX_PX)
+      assert.ok(seen.header, `the chat's header is on the page at ${where}`)
+      const header = seen.header
+      // Where the pane holds more than the box, the thread's scrollbar is balanced by a gutter on
+      // the other edge, so the column centres on the pane's own centre, as the header does.
+      const capped = seen.pane >= BALANCED_PX
+
+      assert.ok(seen.text, `a reply's text is on the page at ${where}`)
+      // Between the box's own width and the balanced one, the header caps while the thread still
+      // fills, so the two may part by up to half a classic scrollbar; an overlay scrollbar takes
+      // no width and they meet exactly.
+      const slack = capped ? TOLERANCE : Math.max(TOLERANCE, (seen.pane - seen.thread) / 2)
+      assert.ok(
+        Math.abs(seen.text.left - header.left) <= slack,
+        `a reply's text starts where the header does at ${where}, in a ${seen.pane}px pane (${seen.text.left}px against ${header.left}px)`,
+      )
+      assert.ok(
+        seen.text.width <= BOX_PX + TOLERANCE,
+        `a reply's text never passes the ${BOX_PX}px box at ${where} (${seen.text.width}px)`,
+      )
+      if (capped)
+        near(
+          seen.text.width,
+          header.width,
+          `and it is as wide as the header at ${where}, in a ${seen.pane}px pane`,
+        )
 
       assert.ok(seen.card, `the subagent's card is on the page at ${where}`)
-      assert.ok(
-        seen.card.width <= BOX_PX + TOLERANCE,
-        `the subagent's card never passes the reading column's box at ${where} (${seen.card.width}px in a ${seen.pane}px pane)`,
+      near(
+        seen.card.left,
+        seen.text.left,
+        `the subagent's card stands on the reply's edge at ${where}, in a ${seen.pane}px pane`,
       )
       near(
         seen.card.width,
-        cardWidth,
-        `the subagent's card fills the thread's box up to the ${BOX_PX}px cap at ${where}, a ${seen.pane}px pane less the scrollbar's ${seen.pane - seen.thread}px and the ${GUTTER}px gutter each side`,
-      )
-      near(
-        seen.card.left,
-        GUTTER + Math.round((fill - cardWidth) / 2),
-        `and its left edge sits on that gutter — or centres inside the cap on a wide pane — at ${where}, in a ${seen.pane}px pane`,
+        seen.text.width,
+        `and fills the same column at ${where}, in a ${seen.pane}px pane`,
       )
 
       assert.ok(seen.question, `the waiting Question is on the page at ${where}`)
-      assert.ok(
-        seen.question.width <= BOX_PX + TOLERANCE,
-        `the waiting Question never passes the reading column's box at ${where} (${seen.question.width}px in a ${seen.pane}px pane)`,
-      )
       near(
         seen.question.width,
         questionWidth,
         `the waiting Question fills the composer slot up to the ${BOX_PX}px cap at ${where}, ${slot}px gutter each side in a ${seen.pane}px pane`,
       )
-      near(
-        seen.question.left,
-        slot + Math.round((waiting - questionWidth) / 2),
-        `and its left edge sits on that slot's gutter — or centres inside the cap on a wide pane — at ${where}, in a ${seen.pane}px pane`,
-      )
-
-      assert.ok(seen.text, `a reply's text is on the page at ${where}`)
-      if (column) {
+      if (capped)
         near(
-          seen.text.width,
-          COLUMN_PX,
-          `message text keeps the ${COLUMN_PX}px reading column at ${where}, in a ${seen.pane}px pane`,
+          seen.question.left,
+          header.left,
+          `and lines up with the header where the box caps at ${where}, in a ${seen.pane}px pane`,
         )
-        near(
-          seen.text.left,
-          Math.round((seen.thread - COLUMN_PX) / 2),
-          `and the column is centred in the pane at ${where}, in a ${seen.pane}px pane`,
-        )
-        if (cardWidth === BOX_PX) {
-          // Where the cap binds, the card is the column's own box: the text's measure framed by the
-          // 16px gutter the box carries on either side of it.
-          near(
-            seen.card.width,
-            seen.text.width + 2 * GUTTER,
-            `the capped card is exactly the text column's box at ${where}, framed ${GUTTER}px each side of the text (${seen.card.width}px around ${seen.text.width}px, in a ${seen.pane}px pane)`,
-          )
-          near(
-            seen.card.left + GUTTER,
-            seen.text.left,
-            `so the card's edge lines up with the box the text sits in at ${where} (${seen.card.left}px + ${GUTTER}px against the text's ${seen.text.left}px, in a ${seen.pane}px pane)`,
-          )
-        }
-      } else {
-        near(
-          seen.text.width,
-          fill,
-          `message text fills the pane where it holds no column at ${where}, in a ${seen.pane}px pane`,
-        )
-      }
 
       const path = await shot(`at-${width}`)
       pass(
-        `${where}: card ${seen.card.width}px at ${seen.card.left}px${seen.card.width === BOX_PX ? ` (at the ${BOX_PX}px cap)` : ""}, question ${seen.question.width}px at ${seen.question.left}px, text ${seen.text.width}px at ${seen.text.left}px${column ? ` of the ${COLUMN_PX}px column` : ""}, in a ${seen.pane}px pane${path ? ` (${path})` : ""}`,
+        `${where}: header ${header.width}px at ${header.left}px, text ${seen.text.width}px at ${seen.text.left}px, card ${seen.card.width}px at ${seen.card.left}px, question ${seen.question.width}px at ${seen.question.left}px, in a ${seen.pane}px pane${path ? ` (${path})` : ""}`,
+      )
+    }
+
+    // A list screen draws the same column: its rows start where its header does.
+    const bot = await page.evaluate(async () => {
+      const { db } = await import("/src/lib/db.ts")
+      return (await db.profiles.toArray())[0].id
+    })
+    for (const width of [390, 1920]) {
+      await page.setViewportSize({ width, height: width < 768 ? 844 : 900 })
+      await page.goto(`${app}/b/${bot}/sidechats`)
+      await page.locator(ROW_MARK).first().waitFor()
+      await settled(page)
+      const list = await page.evaluate((mark) => {
+        const left = (el) => Math.round(el.getBoundingClientRect().left)
+        const marks = [...document.querySelectorAll(mark)]
+        const rows = [...document.querySelectorAll('[data-slot="header-row"]')]
+        const row = rows.sort((a, b) => left(b) - left(a))[0]
+        return {
+          header: left(row),
+          mark: Math.min(...marks.map(left).filter((x) => x >= left(row) - 1)),
+        }
+      }, ROW_MARK)
+      assert.ok(
+        Math.abs(list.mark - list.header) <= TOLERANCE,
+        `a bot's chat list's rows start where its header does at ${width}px (${list.mark}px against ${list.header}px)`,
+      )
+      const path = await shot(`list-at-${width}`)
+      pass(
+        `${width}px: list rows at ${list.mark}px under a header at ${list.header}px${path ? ` (${path})` : ""}`,
       )
     }
   },
