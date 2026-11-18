@@ -210,14 +210,10 @@ test(
         "/c/c-a",
         "the row of the chat on screen is the one the list marks open",
       )
-      assert.ok(
-        find(`[data-slot="header-leading"] ${BACK_TO_BOT}`),
-        "and the chat's bar leads with its way back to the bot's list",
-      )
       assert.equal(
-        missing(`[data-slot="header-actions"] ${BACK_TO_BOT}`),
+        missing(BACK_TO_BOT),
         true,
-        "which the corner does not carry",
+        "and the chat's bar has no way back to the list already beside it",
       )
     })
   }),
@@ -236,9 +232,10 @@ test(
         "/c/c-b",
         "and marks the chat the address names",
       )
-      assert.ok(
-        find(`[data-slot="header-leading"] ${BACK_TO_BOT}`),
-        "the chat leads with its way back, the list beside it or not",
+      assert.equal(
+        missing(BACK_TO_BOT),
+        true,
+        "the chat has no way back to the list beside it",
       )
       assert.equal(
         missing(SIDE_CHATS_CONTROL),
@@ -568,6 +565,22 @@ test(
   }),
 )
 
+test(
+  "Main beside its list is drawn as a side chat is: its title, and no face",
+  laptop(async () => {
+    localStorage.clear()
+    await seed()
+    await mount(screen(`/b/${bot.id}/sidechats`), async () => {
+      await until(async () => titles().includes("Main"), "Main in the item lane")
+      assert.equal(
+        findAll('[data-slot="item-lane"] [data-slot="header-row"] [role="img"]').length,
+        0,
+        "Main's bar repeats no face beside the list that wears it",
+      )
+    })
+  }),
+)
+
 /**
  * The bot's list address draws the pair the new UX is made of (G6): the Side Chat List in the lane and
  * the bot's **Main** in the item lane beside it — not the list twice, and nowhere the flat layout's
@@ -659,13 +672,13 @@ test(
       )
       assert.equal(missing(LANE), false, "and the list keeps its lane beside it")
 
-      await click(find(`[data-slot="header-leading"] ${BACK_TO_BOT}`))
-      await until(async () => path() === `/b/${bot.id}/sidechats`, "the list the chat stands in")
+      await click(find(MAIN_ROW))
+      await until(async () => path() === `/c/${MAIN}`, "Main, from its row in the list")
       await until(async () => titles().includes("Main"), "Main standing beside the list again")
       assert.equal(
         find('[data-slot="main-row"] a[aria-current="page"]')?.getAttribute("href"),
         `/c/${MAIN}`,
-        "with Main the chat the pane holds, one rung under the list",
+        "with Main the chat the pane holds",
       )
       assert.equal(openRow()?.getAttribute("href"), `/c/${MAIN}`, "and the row the list marks")
     })
