@@ -12,6 +12,12 @@ that answers nothing. ``redeem`` claims a row in one statement, so two presses r
 answer, and it answers what happened — the row it spent, a token this profile never minted, or one
 already spent or expired — which is what lets the route say 404 or 410 rather than pretend it answered.
 
+The mechanics are separate from that vocabulary: ``issue`` mints one link for a choice and a
+target, ``claim`` redeems one only within the choices its caller allows, and ``release`` gives one
+back. An approval's ``mint`` and ``redeem`` are those mechanics held to ``once`` and ``deny``, so a
+link minted for another purpose answers nothing at the approval's route, and an approval's at none
+other.
+
 Nothing here logs a token or writes one down: the address comes from the host the app dialled
 (``push.base``), a token is built into its button's link and kept only as its hash, and the route that
 redeems it never says it.
@@ -23,7 +29,7 @@ import hashlib
 import json
 import secrets
 from pathlib import Path
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, Collection, Dict, NamedTuple, Optional, Tuple
 
 from .notice import Action
 from .store import connect, now_ms
@@ -97,38 +103,45 @@ def room_target(room_id: Any, wait: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }
 
 
-def mint(
-    path: Path, target: Optional[Dict[str, Any]], base: Optional[str], seconds: int
-) -> Tuple[Action, ...]:
-    """The buttons one approval's notice carries: Allow once and Deny, and nothing else.
+def issue(path: Path, choice: str, target: Dict[str, Any], seconds: int) -> str:
+    """Mints one link: a token that answers ``choice`` for ``target``, once, for ``seconds``.
 
-    Each is a token of its own, kept hashed and expiring ``seconds`` from now — the push's own TTL, so
-    a button lives exactly as long as the tray entry that carries it. Spent and expired rows are
-    dropped here, which is the only place the table grows.
-
-    No address means no buttons at all: a button that cannot be pressed is worse than no button.
+    The token is returned once and kept only as its hash, so the caller builds it into the one link
+    it rides on and nothing else ever holds it. Spent and expired rows are dropped here, which is the
+    only place the table grows.
     """
-    if not isinstance(target, dict) or not base or not seconds:
-        return ()
     now = now_ms()
-    expires = now + seconds * 1000
-    carried = json.dumps(target, separators=(",", ":"))
+    token = secrets.token_urlsafe(32)
     conn = connect(path)
     try:
         conn.execute(
             "DELETE FROM answer_tokens WHERE expires_at <= ? OR used_at IS NOT NULL", (now,)
         )
-        actions: List[Action] = []
-        for choice in CHOICES:
-            token = secrets.token_urlsafe(32)
-            conn.execute(
-                "INSERT INTO answer_tokens (token, choice, target, expires_at) VALUES (?, ?, ?, ?)",
-                (digest(token), choice, carried, expires),
-            )
-            actions.append(Action(LABELS[choice], f"{base}{PATH}{token}"))
+        conn.execute(
+            "INSERT INTO answer_tokens (token, choice, target, expires_at) VALUES (?, ?, ?, ?)",
+            (digest(token), choice, json.dumps(target, separators=(",", ":")), now + seconds * 1000),
+        )
     finally:
         conn.close()
-    return tuple(actions)
+    return token
+
+
+def mint(
+    path: Path, target: Optional[Dict[str, Any]], base: Optional[str], seconds: int
+) -> Tuple[Action, ...]:
+    """The buttons one approval's notice carries: Allow once and Deny, and nothing else.
+
+    Each is a token of its own, expiring ``seconds`` from now — the push's own TTL, so a button lives
+    exactly as long as the tray entry that carries it.
+
+    No address means no buttons at all: a button that cannot be pressed is worse than no button.
+    """
+    if not isinstance(target, dict) or not base or not seconds:
+        return ()
+    return tuple(
+        Action(LABELS[choice], f"{base}{PATH}{issue(path, choice, target, seconds)}")
+        for choice in CHOICES
+    )
 
 
 def _target(carried: Any) -> Optional[Dict[str, Any]]:
@@ -139,31 +152,36 @@ def _target(carried: Any) -> Optional[Dict[str, Any]]:
     return target if isinstance(target, dict) else None
 
 
-def redeem(path: Path, token: Any) -> Claim:
+def claim(path: Path, token: Any, allowed: Collection[str]) -> Claim:
     """Claims the row one press is worth, answering what happened to it.
+
+    Only a row whose choice is one of ``allowed`` can be claimed: a link is redeemed by the route
+    for its own purpose, so a token minted for one purpose answers nothing at another's.
 
     One statement sets ``used_at`` only where the row is unspent, unexpired and one of ours, so of two
     presses racing exactly one changes a row and the other is told it was spent. The row is what says
-    the run, the room member and the choice: nothing a request carries can widen or change them.
+    the target and the choice: nothing a request carries can widen or change them.
     """
-    if not isinstance(token, str) or not token:
+    choices = tuple(allowed)
+    if not isinstance(token, str) or not token or not choices:
         return Claim(UNKNOWN)
     now = now_ms()
     key = digest(token)
+    marks = ", ".join("?" for _ in choices)
     conn = connect(path)
     try:
         changed = conn.execute(
             "UPDATE answer_tokens SET used_at = ? WHERE token = ? AND used_at IS NULL"
-            " AND expires_at > ? AND choice IN (?, ?)",
-            (now, key, now, *CHOICES),
+            f" AND expires_at > ? AND choice IN ({marks})",
+            (now, key, now, *choices),
         ).rowcount
         row = conn.execute(
             "SELECT choice, target FROM answer_tokens WHERE token = ?", (key,)
         ).fetchone()
     finally:
         conn.close()
-    if row is None or row[0] not in CHOICES:
-        # No such token, or a row this build never minted: no button carries a third choice.
+    if row is None or row[0] not in choices:
+        # No such token, or one minted for another purpose: it answers nothing here.
         return Claim(UNKNOWN)
     target = _target(row[1])
     if target is None:
@@ -171,6 +189,11 @@ def redeem(path: Path, token: Any) -> Claim:
     if changed != 1:
         return Claim(SPENT)
     return Claim(ANSWERED, row[0], target)
+
+
+def redeem(path: Path, token: Any) -> Claim:
+    """Claims an approval's button: a press answers ``once`` or ``deny``, and no third choice."""
+    return claim(path, token, CHOICES)
 
 
 def release(path: Path, token: Any) -> None:
