@@ -76,8 +76,10 @@ export function ModelPicker({
   // The cached BenchLM overall rankings, live: each row's score repaints when a refresh lands.
   const rankings = useOverallRankings()
   const sorted = useMemo(() => sortProviders(providers), [providers])
-  // The provider the reader opened, which is the one that stacks its own sheet over the picker.
-  const opened = sorted.find((p) => p.slug === openSlug)
+  // The provider the reader opened, which is the one that stacks its own sheet over the picker —
+  // but only where there is more than one to choose between: a host with one provider has its
+  // models drawn at once, and a sheet left over `openSlug` would draw them a second time.
+  const opened = sorted.length > 1 ? sorted.find((p) => p.slug === openSlug) : undefined
   // A host with one provider has nothing to choose between, so its models show at once.
   const drilled = sorted.length === 1 ? sorted[0] : opened
   const total = (drilled ? [drilled] : sorted).reduce((n, p) => n + p.models.length, 0)

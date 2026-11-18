@@ -251,6 +251,14 @@ test("a host with one provider draws its models once, and its sheet is put away 
  */
 const ONE_PROVIDER = [{ slug: "anthropic", name: "Anthropic", models: ["claude-sonnet-4-6"] }]
 
+/** A custom endpoint the host has not probed: Hermes lists its models only once it has. */
+const CUSTOM_ENDPOINT = {
+  slug: "custom",
+  name: "Custom",
+  api_url: "https://openrouter.example/v1",
+  models: [],
+}
+
 /** A host answering `/api/model/options`, recording every query it was asked with. */
 function modelsHost({
   providers = ONE_PROVIDER,
@@ -259,6 +267,7 @@ function modelsHost({
   hold,
   refreshedModel,
   unprobed,
+  drop,
 }: {
   providers?: { slug: string; name: string; models: string[] }[]
   /** The model the host adds to its list once it has been asked to read it again. */
@@ -277,6 +286,8 @@ function modelsHost({
    * has probed it, which is what a plain read does not do.
    */
   unprobed?: boolean
+  /** The provider the host drops from its list once it has been asked to read it again. */
+  drop?: string
 } = {}) {
   const asked: string[] = []
   let refreshed = false
@@ -292,30 +303,17 @@ function modelsHost({
     }
     // What the host answers is what it holds when it is asked, not when it finishes answering, so a
     // read held out past a refresh carries the list as it was when that read went out.
+    const listed = providers
+      .filter((one) => !(refreshed && drop && one.slug === drop))
+      .map((one) => ({
+        ...one,
+        models:
+          refreshed && added && one.slug === "anthropic" ? [...one.models, added] : one.models,
+      }))
     const body = {
       model: refreshed && refreshedModel ? refreshedModel : "claude-sonnet-4-6",
       provider: "anthropic",
-      providers: unprobed
-        ? [
-            ...providers.map((one) => ({
-              ...one,
-              models:
-                refreshed && added && one.slug === "anthropic"
-                  ? [...one.models, added]
-                  : one.models,
-            })),
-            {
-              slug: "custom",
-              name: "Custom",
-              api_url: "https://openrouter.example/v1",
-              models: [],
-            },
-          ]
-        : providers.map((one) => ({
-            ...one,
-            models:
-              refreshed && added && one.slug === "anthropic" ? [...one.models, added] : one.models,
-          })),
+      providers: unprobed ? [...listed, CUSTOM_ENDPOINT] : listed,
     }
     // A refresh read answers at once; the plain read a case holds out waits on its promise.
     if (hold && !held && !url.searchParams.get("refresh")) {
@@ -368,6 +366,50 @@ test("a one-provider host's own header carries the refresh where the surface dra
         wordsOf(frontHeader()?.querySelector('[data-slot="sheet-title"]') ?? null),
         "Anthropic",
         "the header names the provider whose models it heads",
+      )
+    },
+  )
+})
+
+/**
+ * A refresh that shrinks the host to one provider while a provider's sheet stands over the picker
+ * must not leave that sheet standing over a second copy of the same models: with one provider there
+ * is nothing to choose between, so the picker drills into it and its models are drawn once — and
+ * the header over them is the one carrying the refresh.
+ */
+test("a refresh that leaves one provider draws its models once, with the refresh to hand", async () => {
+  modelsHost({
+    providers: [
+      { slug: "anthropic", name: "Anthropic", models: ["claude-sonnet-4-6"] },
+      { slug: "openrouter", name: "OpenRouter", models: ["deepseek-v4-flash"] },
+    ],
+    drop: "openrouter",
+  })
+  await mount(
+    <ModelMenu profile={botProfile("shrink-host.test")} onChoose={() => {}} />,
+    async () => {
+      await until(async () => Boolean(pill()), "the composer's model pill")
+      await click(pill())
+      await until(async () => Boolean(refresh()), "the picker's own header")
+      // Drill into one provider, so its models stand as a sheet over the picker's own.
+      await click(findAll("button").find((one) => wordsOf(one).startsWith("Anthropic")) ?? null)
+      await until(async () => Boolean(frontHeader()), "the provider's own sheet")
+      assert.equal(findAll("[data-popup-form]").length, 2, "the sheet stands over the picker")
+      await click(refresh())
+      await until(
+        async () => findAll("[data-popup-form]").length === 1,
+        "one layer, not the survivor's models drawn twice",
+      )
+      assert.equal(
+        wordsOf(frontHeader()?.querySelector('[data-slot="sheet-title"]') ?? null),
+        "Anthropic",
+        "one header names the survivor",
+      )
+      assert.ok(refresh(), "the refresh is to hand on the header over the models")
+      assert.equal(
+        findAll("li").filter((row) => wordsOf(row).includes("claude-sonnet-4-6")).length,
+        1,
+        "the survivor's model is one row, not one in each of two layers",
       )
     },
   )
