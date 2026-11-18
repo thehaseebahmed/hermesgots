@@ -131,6 +131,7 @@ import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { Chip } from "@/components/chip"
 import { BackButton } from "@/components/back-button"
+import { PAGE_BODY } from "@/lib/layout"
 
 function Gate({ children }: { children: ReactNode }) {
   const enabled = useMeetingsEnabled()
@@ -333,7 +334,7 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
         }
       />
 
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
+      <div className={`${PAGE_BODY} flex flex-col gap-6 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]`}>
         {reason && <Banner>{reason}</Banner>}
         <Unfinished />
         {meetings.length > 0 && (
@@ -1053,7 +1054,7 @@ function MeetingView() {
             .join(" · ")}
           actions={<MeetingMenu meeting={meeting} onRemoved={leave} />}
         />
-        <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-6 px-4 pt-2 pb-8">
+        <div className={`${PAGE_BODY} flex flex-1 flex-col gap-6 pt-2 pb-8`}>
           {meeting.stage === "ready" && !isFailed(meeting) ? (
             meeting.notes?.topics.length ? (
               <RecapView
@@ -1714,7 +1715,7 @@ function TopicView({ meeting, notes, topic }: { meeting: Meeting; notes: Notes; 
           title={topic.title}
           subtitle={`Topic ${index + 1} of ${notes.topics.length} · ${clock(topic.start)} to ${clock(topic.end)}`}
         />
-        <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col px-4 pb-8">
+        <div className={`${PAGE_BODY} flex flex-1 flex-col pb-8`}>
           <Tabs value={tab} onValueChange={(value) => setTab(value as string)}>
             <TabsList>
               <TabsTrigger value="summary">Summary</TabsTrigger>
@@ -1835,7 +1836,7 @@ function AskBar({ meeting }: { meeting: Meeting }) {
       data-toast-above
       className="border-t bg-background/90 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur"
     >
-      <div className="mx-auto flex max-w-2xl flex-col gap-2.5 px-4">
+      <div className={`${PAGE_BODY} flex flex-col gap-2.5`}>
         <Refusal hold={refusal} />
         {!meeting.chat?.length && (
           <div className="-mx-4 flex [scrollbar-width:none] gap-2 overflow-x-auto px-4">

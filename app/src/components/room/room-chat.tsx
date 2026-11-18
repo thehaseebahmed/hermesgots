@@ -40,7 +40,7 @@ import {
   type Profile,
   type RoomMember,
 } from "@/lib/db"
-import { COLUMN_BOX } from "@/lib/layout"
+import { COLUMN } from "@/lib/layout"
 import { seatedLine } from "@/lib/room-seats"
 import { useRoom } from "@/lib/room"
 import { memberLabel, type RoomRow } from "@/lib/room-log"
@@ -166,7 +166,7 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
               {wasSeated && (
                 <p
                   data-slot="room-seated"
-                  className={cn(COLUMN_BOX, "px-3.5 text-sm text-muted-foreground")}
+                  className={cn(COLUMN, "px-3.5 text-sm text-muted-foreground")}
                 >
                   {wasSeated}
                 </p>
@@ -176,7 +176,7 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
                   key={row.seq}
                   data-slot="room-row"
                   data-kind={row.kind}
-                  className={COLUMN_BOX}
+                  className={COLUMN}
                 >
                   <RoomRowView
                     row={row}
@@ -193,7 +193,7 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
                   role="status"
                   data-slot="room-working"
                   className={cn(
-                    COLUMN_BOX,
+                    COLUMN,
                     "flex items-center gap-2 px-3.5 text-sm text-muted-foreground",
                   )}
                 >
@@ -209,7 +209,7 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
         // A refused send is a toast (and a refused file its own red tile), so what stands here is
         // the two things no toast says: a read that failed, and an answer or a stop the Host
         // refused. A toast clears it as well as the composer, so the two never sit on each other.
-        <div className={cn(COLUMN_BOX, "px-3 pb-2 sm:px-4")} role="alert" data-toast-above>
+        <div className={cn(COLUMN, "px-3 pb-2 sm:px-4")} role="alert" data-toast-above>
           <Banner tone="error">{live.refused ?? live.error}</Banner>
         </div>
       )}
@@ -286,7 +286,7 @@ const RoomRowView = memo(function RoomRowView({
   const files = canMedia && row.attachments?.length ? row.attachments : undefined
   if (row.kind === "notice") {
     return (
-      <div className={cn(COLUMN_BOX, "px-1")}>
+      <div className={cn(COLUMN, "px-1")}>
         <SystemLine>{row.text}</SystemLine>
       </div>
     )

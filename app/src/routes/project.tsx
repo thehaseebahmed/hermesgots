@@ -167,7 +167,7 @@ export function ProjectPage() {
   const ready = profile && project?.status === "ready"
 
   return (
-    <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col">
+    <div className="mx-auto flex min-h-0 w-full max-w-[704px] flex-1 flex-col">
       <ChatHeader
         className="relative pb-2"
         title={project?.name ?? ""}
@@ -259,7 +259,7 @@ export function ProjectPage() {
           onDelete={() => setDeleting(true)}
         />
       ) : (
-        <Tabs value={tab} onValueChange={setTab} className="flex-1">
+        <Tabs value={tab} onValueChange={setTab} className="flex-1 px-4">
           <TabsList>
             <TabsTrigger value="library">Library</TabsTrigger>
             <TabsTrigger value="prs">Pull requests</TabsTrigger>
@@ -278,7 +278,7 @@ export function ProjectPage() {
             )}
           </TabsContent>
           <TabsContent value="prs" className="overflow-y-auto">
-            <div className="mx-auto w-full max-w-2xl px-4 py-6">
+            <div className="mx-auto w-full max-w-2xl py-6">
               {sessions && prs.length === 0 ? (
                 <p className="px-1 text-sm text-muted-foreground">No pull requests yet.</p>
               ) : (

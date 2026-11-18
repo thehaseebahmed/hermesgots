@@ -105,6 +105,7 @@ import { tell } from "@/lib/tell"
 import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { BackButton } from "@/components/back-button"
+import { PAGE_BODY } from "@/lib/layout"
 
 const FORMAT_ICONS: Record<OutputFormat, typeof BookOpenTextIcon> = {
   guide: BookOpenTextIcon,
@@ -263,7 +264,7 @@ function ResearchHome({ ask, list }: { ask?: boolean; list?: FeaturePane }) {
         />
       )}
 
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-4 pt-4 pb-[max(2rem,env(safe-area-inset-bottom))] md:pt-10">
+      <div className={`${PAGE_BODY} flex flex-col gap-8 pt-4 pb-[max(2rem,env(safe-area-inset-bottom))] md:pt-10`}>
         {!list && (
           <section className="flex flex-col gap-4">
             <h2 className="text-center text-2xl font-semibold tracking-tight md:text-3xl">
@@ -536,7 +537,7 @@ export function MissionPage() {
         onBack={beside ? undefined : leave}
         actions={<MissionMenu mission={mission} />}
       />
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-5 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
+      <div className={`${PAGE_BODY} flex flex-col gap-5 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]`}>
         <Steps mission={mission} />
         <p className="ml-auto max-w-[85%] rounded-3xl rounded-br-lg bg-muted px-4 py-2.5">
           {mission.input}

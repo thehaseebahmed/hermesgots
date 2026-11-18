@@ -36,6 +36,7 @@ import { useModelInfo } from "@/lib/model-info"
 import { useRefusal, useSaidRefusal } from "@/lib/use-refusal"
 import { holdsUnsavedChanges, useUnsavedChanges } from "@/lib/unsaved"
 import { cn } from "@/lib/utils"
+import { PAGE_BODY } from "@/lib/layout"
 
 /**
  * The slot a page fills in the header of the Screen holding it, keyed so one page's action replaces
@@ -112,7 +113,7 @@ export function Screen({
       <HeaderSlot.Provider value={publish}>
         <TitleSlot.Provider value={setNamed}>
           <RefusalSlot.Provider value={refusal}>
-            <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
+            <div className={`${PAGE_BODY} flex flex-1 flex-col gap-4 pb-[max(2rem,env(safe-area-inset-bottom))]`}>
               {children}
             </div>
           </RefusalSlot.Provider>

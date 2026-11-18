@@ -62,6 +62,7 @@ import { closedAs, emptyLine, keeps, type CodeFilter } from "@/lib/code-filter"
 import { filterByFuzzy } from "@/lib/fuzzy"
 import { type Sort, type SortKey } from "@/lib/sort"
 import { useStoredSort } from "@/lib/use-sort"
+import { PAGE_BODY } from "@/lib/layout"
 
 const DAY_MS = 86_400_000
 const LAST_PROJECT = "gots:last-session-project"
@@ -348,7 +349,7 @@ function CodeList({ pane }: { pane?: FeaturePane }) {
         }
       />
 
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-4 px-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]">
+      <div className={`${PAGE_BODY} flex flex-col gap-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]`}>
         {sessions && rows.length === 0 && (
           <p className="py-8 text-center text-sm text-muted-foreground">No sessions yet.</p>
         )}

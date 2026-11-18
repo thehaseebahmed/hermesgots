@@ -70,7 +70,7 @@ import { db, getActiveProfile, type Attachment, type Profile } from "@/lib/db"
 import { MAX_ATTACHMENTS } from "@/lib/attachment-caps"
 import { serverConfig } from "@/lib/connection"
 import { usePluginFeature, usePluginFeatureOn } from "@/lib/features"
-import { HEADER_BUTTON } from "@/lib/layout"
+import { HEADER_BUTTON, PAGE_BODY } from "@/lib/layout"
 import type { CanvasPoint } from "@/lib/point-marker"
 import { useLarge } from "@/lib/media"
 import { openExternal } from "@/lib/native"
@@ -214,7 +214,7 @@ export function CanvasPage() {
         }
       />
 
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-8 px-4 pt-4 pb-[max(2rem,env(safe-area-inset-bottom))] md:pt-10">
+      <div className={`${PAGE_BODY} flex flex-col gap-8 pt-4 pb-[max(2rem,env(safe-area-inset-bottom))] md:pt-10`}>
         <section className="flex flex-col gap-3">
           <h2 className="text-center text-2xl font-semibold tracking-tight md:text-3xl">
             What should it be?

@@ -25,7 +25,7 @@ import { failed } from "@/lib/refusal"
 import { equal } from "@/lib/equal"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { pausedQueue, type PendingQueue } from "@/lib/pending"
-import { COLUMN_BOX, COMPOSER_SLOT } from "@/lib/layout"
+import { COLUMN, COMPOSER_SLOT } from "@/lib/layout"
 import { opensOnBlank, opensOnChatNext } from "@/chat-next/route"
 import { noteFailure, quietly } from "@/lib/report"
 import { awayLine } from "@/lib/away"
@@ -1211,7 +1211,7 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
       )}
 
       <div data-slot="composer-slot" data-toast-above className={COMPOSER_SLOT}>
-        <Refusal hold={refusal} className={cn(COLUMN_BOX, "mb-2")} />
+        <Refusal hold={refusal} className={cn(COLUMN, "mb-2")} />
         {(todos.length > 0 || prs.length > 0 || outputs > 0) && (
           // One line, centred; wider than the screen it scrolls, from the first pill.
           <div className="-mx-3 flex [scrollbar-width:none] overflow-x-auto px-3 pb-2 sm:-mx-4 sm:px-4 [&::-webkit-scrollbar]:hidden">
