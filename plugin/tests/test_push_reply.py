@@ -13,6 +13,8 @@ Run: python3 -m unittest plugin.tests.test_push_reply -v
 from __future__ import annotations
 
 import asyncio
+import sys
+import types
 from pathlib import Path
 from typing import Any, Dict, Optional
 from unittest import mock
@@ -231,6 +233,68 @@ class WhoGetsOne(Tray):
     def test_a_reply_link_outlives_the_push(self) -> None:
         self.assertEqual(answers.REPLY_SECONDS, 24 * 3600)
         self.assertGreater(answers.REPLY_SECONDS, push.TTL_SECONDS)
+
+
+class FakeAiohttp:
+    """Just enough of aiohttp for ``outbox.post``: it records where a run was posted and with what."""
+
+    def __init__(self) -> None:
+        self.posts: list = []
+        fake = self
+
+        class Response:
+            status = 200
+
+            async def json(self, content_type: Any = None) -> Dict[str, Any]:
+                return {"run_id": "run_1"}
+
+            async def __aenter__(self) -> "Response":
+                return self
+
+            async def __aexit__(self, *exc: Any) -> None:
+                return None
+
+        class ClientSession:
+            def __init__(self, timeout: Any = None) -> None:
+                pass
+
+            async def __aenter__(self) -> "ClientSession":
+                return self
+
+            async def __aexit__(self, *exc: Any) -> None:
+                return None
+
+            def post(self, url: str, json: Any = None, headers: Any = None) -> Response:
+                fake.posts.append((url, dict(headers or {}), json))
+                return Response()
+
+        self.module = types.ModuleType("aiohttp")
+        self.module.ClientSession = ClientSession  # type: ignore[attr-defined]
+        self.module.ClientTimeout = lambda total=None: None  # type: ignore[attr-defined]
+
+
+class AProfileBot(Tray):
+    """A bot served at /p/work: the app never posted from it, so the plugin knows no key of the app's."""
+
+    def test_a_reply_for_a_profile_bot_posts_on_its_prefix_with_its_homes_key(self) -> None:
+        (self.home / ".env").write_text("API_SERVER_KEY=workkey\n", encoding="utf-8")
+        url = self.reply_of()
+        with mock.patch.object(plugin, "_request_profile", lambda: "work"):
+            self.assertEqual(self.press(url)["status"], 200)
+        self.watch.assert_called_once()
+        self.assertEqual(self.watch.call_args.args[:2], ("gots-1", "work"), "watched as the profile's")
+
+        adapter = types.SimpleNamespace(_host="0.0.0.0", _port=8642, _api_key="launchkey", _run_statuses={})
+        web = FakeAiohttp()
+        with mock.patch.dict(sys.modules, {"aiohttp": web.module}), mock.patch.dict(
+            outbox._keys, {}, clear=True
+        ), mock.patch.object(outbox, "session_ids", mock.AsyncMock(return_value={"gots-1"})):
+            asyncio.run(outbox.tick(adapter, "gots-1", "work", self.path))
+        self.assertEqual(len(web.posts), 1, "the queued reply was posted")
+        posted, headers, run = web.posts[0]
+        self.assertEqual(posted, "http://127.0.0.1:8642/p/work/v1/runs", "on the profile's own prefix")
+        self.assertEqual(headers["Authorization"], "Bearer workkey", "with that home's key, never the launch one")
+        self.assertEqual(run["input"], [{"role": "user", "content": "try again"}])
 
 
 class TheHint(unittest.TestCase):
