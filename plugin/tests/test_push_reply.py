@@ -168,6 +168,19 @@ class AReply(Tray):
         self.assertEqual(self.press(url)["status"], 409)
         self.assertEqual(outbox.read(self.path, "gots-1")["items"], [])
 
+    def test_a_reply_that_was_spent_expired_or_refused_tells_the_entry_so(self) -> None:
+        # The tray reads each refusal's status and its `error.message` (`ReplyOutcome.of` in the APK):
+        # a spent or unknown link drops Reply, words the route won't take keep it.
+        url = self.reply_of()
+        words = self.press(url, {"text": " "})
+        self.assertEqual((words["status"], words["payload"]["error"]["message"]), (400, "A reply needs some words."))
+        self.assertEqual(self.press(url)["status"], 200)
+        spent = self.press(url)
+        self.assertEqual((spent["status"], spent["payload"]["error"]["message"]), (410, "That reply has already been sent."))
+        unknown = self.press(url.rsplit("/", 1)[0] + "/not-a-token")
+        self.assertEqual(unknown["status"], 404)
+        self.assertEqual(unknown["payload"]["error"]["message"], "That reply isn't one this bot sent.")
+
 
 class WhoGetsOne(Tray):
     def test_approvals_questions_plans_routines_and_rooms_mint_no_reply(self) -> None:

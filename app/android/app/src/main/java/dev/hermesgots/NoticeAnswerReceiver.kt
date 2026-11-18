@@ -5,7 +5,9 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.app.RemoteInput
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.IOException
+import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import kotlin.concurrent.thread
@@ -18,7 +20,8 @@ import kotlin.concurrent.thread
  * no session, no page), and then the row it was pressed on leaves the tray. The choice is the
  * token's, so a press cannot ask for more than the one thing it was drawn for, and a second press of
  * the same link is refused by the host. A Reply is the same: its link is `push/reply/<token>`, and the
- * typed text is its body. The entry leaves the tray once the post is made, as an answered one does.
+ * typed text is its body. Its entry stays, and says what happened ([ReplyOutcome]): the words sent,
+ * or why they weren't, with Reply kept only while the link is still unspent.
  * Mark as read posts nothing: it queues the press for the page ([TrayReads]) and clears the entry.
  *
  * Not exported: the only intents that reach it are the ones [GotsMessagingService] built. The post
@@ -39,26 +42,39 @@ class NoticeAnswerReceiver : BroadcastReceiver() {
         if (!Notice.isLink(url)) return
         val tag = intent.getStringExtra(EXTRA_TAG)
         // A reply posts what was typed as `{text}` (`push_reply` in the plugin); a button posts nothing.
-        val body = if (intent.action == ACTION_REPLY) {
-            val typed = RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_TEXT)
-                ?.toString()?.trim().orEmpty()
-            if (typed.isEmpty()) return
-            JSONObject().put("text", typed).toString().toByteArray(Charsets.UTF_8)
+        val text = if (intent.action == ACTION_REPLY) {
+            RemoteInput.getResultsFromIntent(intent)?.getCharSequence(KEY_TEXT)
+                ?.toString()?.trim().orEmpty().ifEmpty { return }
         } else {
-            ByteArray(0)
+            null
         }
+        val body = text?.let { JSONObject().put("text", it).toString().toByteArray(Charsets.UTF_8) } ?: ByteArray(0)
         val pending = goAsync()
         thread {
             try {
-                post(url, body)
+                val answer = post(url, body)
+                if (tag != null) {
+                    if (text == null) {
+                        // The row has been answered, whatever the network said: a notice that waits
+                        // for a retry is one the reader has to clear twice.
+                        NoticeDrawer.clear(context, tag)
+                    } else {
+                        // A reply's entry stays and says what became of it, which also ends the
+                        // spinner Android shows on a sent RemoteInput until the entry is posted again.
+                        val outcome = ReplyOutcome.of(answer?.status, answer?.body)
+                        NoticeDrawer.replied(context, tag, outcome.line(text, wordsOf(context)), outcome.keepsReply)
+                    }
+                }
             } finally {
-                // The row has been answered, whatever the network said: a notice that waits for a
-                // retry is one the reader has to clear twice.
-                if (tag != null) NoticeDrawer.clear(context, tag)
                 pending.finish()
             }
         }
     }
+
+    private fun wordsOf(context: Context) = ReplyWords(
+        couldntSend = context.getString(R.string.notice_couldnt_send),
+        notSent = context.getString(R.string.notice_not_sent),
+    )
 
     /**
      * Mark as read: the press is queued for the page, which holds the read marks, and the entry
@@ -75,16 +91,22 @@ class NoticeAnswerReceiver : BroadcastReceiver() {
         intent.getStringExtra(EXTRA_TAG)?.let { NoticeDrawer.clear(context, it) }
     }
 
-    /** One POST to the link, and no exception out of it: a dead network is a press that didn't land. */
-    private fun post(url: String, body: ByteArray) {
+    /** What the host answered a post: its status, and its body as text where it sent one. */
+    private class Answer(val status: Int, val body: String?)
+
+    /**
+     * One POST to the link, and no exception out of it: null is a press that didn't land — a dead
+     * network, a host asleep or gone, a timeout.
+     */
+    private fun post(url: String, body: ByteArray): Answer? {
         val connection = try {
             URL(url).openConnection() as HttpURLConnection
         } catch (error: IOException) {
-            return
+            return null
         } catch (error: SecurityException) {
-            return
+            return null
         }
-        try {
+        return try {
             connection.requestMethod = "POST"
             // A press made in a lift is given a few seconds and then let go: a broadcast is held open
             // for about ten, and a press the reader can repeat is better than one this process hangs on.
@@ -96,17 +118,33 @@ class NoticeAnswerReceiver : BroadcastReceiver() {
             if (body.isNotEmpty()) connection.setRequestProperty("Content-Type", "application/json")
             connection.setFixedLengthStreamingMode(body.size)
             connection.outputStream.use { it.write(body) }
-            // Read the answer, so the host's refusal is read as one and the exchange is closed cleanly.
+            // Read the answer, so the host's refusal is read as one, in its own words, and the
+            // exchange is closed cleanly. A refusal is a few dozen bytes; more than that is not one.
             val answered = connection.responseCode
             val answer = if (answered >= 400) connection.errorStream else connection.inputStream
-            answer?.use { it.readBytes() }
+            val words = answer?.use { String(head(it), Charsets.UTF_8) }
+            Answer(answered, words)
         } catch (error: IOException) {
             // No network, a host asleep or gone: the press is lost, and it is one tap to repeat.
+            null
         } catch (error: SecurityException) {
             // No INTERNET permission — nothing can be done about that from here.
+            null
         } finally {
             runCatching { connection.disconnect() }
         }
+    }
+
+    /** The first [ANSWER_BYTES] of a stream, read on any Android this app runs on. */
+    private fun head(stream: InputStream): ByteArray {
+        val out = ByteArrayOutputStream()
+        val chunk = ByteArray(1_024)
+        while (out.size() < ANSWER_BYTES) {
+            val read = stream.read(chunk, 0, minOf(chunk.size, ANSWER_BYTES - out.size()))
+            if (read < 0) break
+            out.write(chunk, 0, read)
+        }
+        return out.toByteArray()
     }
 
     companion object {
@@ -136,5 +174,8 @@ class NoticeAnswerReceiver : BroadcastReceiver() {
 
         /** What one press may cost each way: a broadcast is only held open for about ten seconds. */
         private const val ANSWER_MS = 3_500
+
+        /** How much of an answer is read: enough for the host's error shape and its sentence. */
+        private const val ANSWER_BYTES = 4_096
     }
 }
