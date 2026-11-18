@@ -314,7 +314,7 @@ function Waiting({
                     collapsed ? railClass(state) : cn(rowClass(state), "min-h-14 py-2")
                   }
                 >
-                    <Icon
+                  <Icon
                     className={
                       collapsed
                         ? "size-5 shrink-0 text-warning"

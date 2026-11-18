@@ -9,8 +9,9 @@
  * of the bot's (G11). At the split width the bot's **Main** stands above the rows with a Home glyph,
  * since Main is the chat drawn beside this list, and the rows under it wear the "Side Chats" heading
  * that names the divider between them, under Main's own bar — the bot's face and name onto its
- * settings, with no way back to a Main that stands beside it; at one pane there is no row for Main and no heading either,
- * because this screen is what Main is not — a list of side chats, named by its own bar.
+ * settings, with no way back to a Main that stands beside it. At one pane there is no row for Main
+ * and no heading either, because this screen is what Main is not — a list of side chats, named by
+ * its own bar.
  *
  * A bot whose Main was never minted opens here — the bot's address, where this list is the app's
  * first entry — and the bar leads with the app's own drawer instead of a step back to a chat that is
@@ -118,24 +119,24 @@ function SideChatsList({
   const count = shownSideChats(answer.rows).length
   // Beside Main the list is the bot's screen, so it wears Main's own bar: the bot's face and name onto
   // its settings, with nothing leading back to the Main already standing beside it.
-  const besideMain = split && Boolean(main)
+  const mainBeside = split ? main : undefined
   return (
     <ChatList
       bot={bot}
       leading={
-        main && !besideMain ? (
+        main && !mainBeside ? (
           <BackButton label="Back to Main" onClick={ontoMain} floating />
         ) : undefined
       }
       title={
-        besideMain ? (
+        mainBeside ? (
           <BotTitle botId={bot.id} face={bot.botId} label={labelOf(labels, bot)} />
         ) : (
           "Sidechats"
         )
       }
       subtitle={
-        besideMain
+        mainBeside
           ? undefined
           : `${labelOf(labels, bot)} · ${count} ${count === 1 ? "side chat" : "side chats"}`
       }
@@ -146,13 +147,19 @@ function SideChatsList({
       listPath={botChatsPath(bot.id)}
       onBack={!beside && main ? ontoMain : undefined}
       above={
-        besideMain && main ? (
-          <MainRow row={main} now={now} bot={bot} replace={Boolean(beside)} selected={selected} />
+        mainBeside ? (
+          <MainRow
+            row={mainBeside}
+            now={now}
+            bot={bot}
+            replace={Boolean(beside)}
+            selected={selected}
+          />
         ) : undefined
       }
       // The heading names the divider between Main and its chats, so it draws only where Main's row
       // does: over a list of nothing but side chats there is nothing to divide.
-      group={besideMain ? "Side Chats" : undefined}
+      group={mainBeside ? "Side Chats" : undefined}
       clock="latest"
       rows={sides}
       selected={selected}
