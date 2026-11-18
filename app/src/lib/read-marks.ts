@@ -6,7 +6,6 @@
  */
 
 import { createStore } from "@/lib/store"
-import { holdsWith, type Hold, type Holds, type TrayRead } from "@/lib/tray-reads"
 
 const KEY = "gots:read-marks"
 /** The store only ever grows: the oldest marks drop past this many. */
@@ -74,55 +73,3 @@ export const readMark = (sessionId: string): number | undefined => marks.get()[s
 
 /** Re-renders whatever draws the dots when a mark moves. */
 export const useReadMarks = marks.use
-
-const HELD_KEY = "gots:read-through"
-
-const loadHeld = (): Holds => {
-  try {
-    const stored: unknown = JSON.parse(localStorage.getItem(HELD_KEY) ?? "{}")
-    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return {}
-    const holds: Holds = {}
-    for (const [chat, hold] of Object.entries(stored as Record<string, Partial<Hold>>)) {
-      if (isMark(hold?.through) && isMark(hold?.press) && isMark(hold?.until))
-        holds[chat] = { through: hold.through, press: hold.press, until: hold.until }
-    }
-    return holds
-  } catch {
-    return {}
-  }
-}
-
-const held = createStore<Holds>(loadHeld())
-
-const persistHeld = (next: Holds) => {
-  held.set(next)
-  try {
-    localStorage.setItem(HELD_KEY, JSON.stringify(next))
-  } catch {
-    // Blocked storage: the holds still hold for this session's life.
-  }
-}
-
-/**
- * A Mark as read pressed in the tray (`tray-reads.ts`): the chat is marked read at once, through the
- * later of the press and the activity its notice reported, and held read through that activity until
- * its rows catch up — a clock a later sync writes can be newer than the press. Device-local, like
- * every mark, and bounded: a hold lasts a day.
- */
-export function readThrough(read: TrayRead, now = Date.now()) {
-  markRead(read.chat, Math.max(read.at, read.through ?? 0))
-  if (read.through) persistHeld(holdsWith(held.get(), read, now))
-}
-
-/** The chats held read through a tray's press, for the one follower that marks them. */
-export const heldReads = held.get
-export const onHeldReads = held.subscribe
-
-/** A hold lets go: the chat's newest reply is newer than what the press covered, or its day is out. */
-export function releaseHeld(chat: string) {
-  const current = held.get()
-  if (!(chat in current)) return
-  const next = { ...current }
-  delete next[chat]
-  persistHeld(next)
-}
