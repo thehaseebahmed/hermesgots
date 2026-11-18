@@ -13,6 +13,7 @@ import { BotPicker } from "@/components/chat/bot-picker"
 import { ModelMenu, ModelPicker } from "@/components/chat/model-picker"
 import { Popup, PopupContent } from "@/components/popup"
 import { db } from "@/lib/db"
+import { useModelInfo } from "@/lib/model-info"
 import { scoreFor, scoreMapOf } from "@/lib/model-match"
 import { RANKINGS } from "@/lib/rankings-data"
 
@@ -255,14 +256,24 @@ function modelsHost({
   providers = ONE_PROVIDER,
   added,
   refuseRefresh = false,
+  hold,
+  refreshedModel,
 }: {
   providers?: { slug: string; name: string; models: string[] }[]
   /** The model the host adds to its list once it has been asked to read it again. */
   added?: string
   refuseRefresh?: boolean
+  /**
+   * A promise the first plain read waits on before it answers, so a case can hold that read out
+   * past a refresh and release it once the refresh has repainted.
+   */
+  hold?: Promise<void> | null
+  /** The main model the host answers with once it has been asked to read its models again. */
+  refreshedModel?: string
 } = {}) {
   const asked: string[] = []
   let refreshed = false
+  let held = false
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input instanceof Request ? input.url : input))
     if (!url.pathname.endsWith("/api/model/options")) return json({})
@@ -272,15 +283,23 @@ function modelsHost({
       if (refuseRefresh) return json({ error: { message: "The host is busy." } }, 500)
       refreshed = true
     }
-    return json({
-      model: "claude-sonnet-4-6",
+    // What the host answers is what it holds when it is asked, not when it finishes answering, so a
+    // read held out past a refresh carries the list as it was when that read went out.
+    const body = {
+      model: refreshed && refreshedModel ? refreshedModel : "claude-sonnet-4-6",
       provider: "anthropic",
       providers: providers.map((one) => ({
         ...one,
         models:
           refreshed && added && one.slug === "anthropic" ? [...one.models, added] : one.models,
       })),
-    })
+    }
+    // A refresh read answers at once; the plain read a case holds out waits on its promise.
+    if (hold && !held && !url.searchParams.get("refresh")) {
+      held = true
+      await hold
+    }
+    return json(body)
   }) as unknown as typeof fetch
   return {
     asked,
@@ -375,6 +394,56 @@ test("a provider's header carries the refresh too", async () => {
       )
     },
   )
+})
+
+/**
+ * A read still out when a refresh lands must not answer after it. The host holds the first plain
+ * read open — a promise the case releases once the refresh has repainted — and answers the refresh
+ * at once, with a model the held read never saw. The picker is driven over the read every surface
+ * makes for it rather than through `ModelMenu`, whose pill stays disabled until that read lands:
+ * the first read cannot be held out with the pill's picker open.
+ */
+test("a read still out when a refresh lands doesn't answer after it", async () => {
+  let release: () => void = () => {}
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  modelsHost({ added: "claude-opus-4-5", refreshedModel: "claude-opus-4-5", hold: held })
+  const profile = botProfile("race-host.test")
+  await db.profiles.clear()
+  await db.profiles.put(profile)
+  const Reading = () => {
+    const info = useModelInfo(profile)
+    return (
+      <OpenedPicker>
+        <ModelPicker
+          providers={info?.providers ?? []}
+          fallback={{ label: "Default" }}
+          onChoose={() => {}}
+          profile={profile}
+        />
+      </OpenedPicker>
+    )
+  }
+  await mount(<Reading />, async () => {
+    await until(async () => Boolean(refresh()), "the picker's own header")
+    // The first read is still out: what the refresh answers is the answer the cache comes to hold.
+    await click(refresh())
+    await until(async () => text().includes("claude-opus-4-5"), "the model the host added")
+    // The held read lands now, after the refresh's answer is the connection's current one.
+    release()
+    await settle()
+    assert.ok(
+      text().includes("claude-opus-4-5"),
+      "the model the host added is still on the list",
+    )
+    const saved = await db.profiles.get(profile.id)
+    assert.equal(
+      saved?.hostModel?.model,
+      "claude-opus-4-5",
+      "the bot's remembered host model is the one the refresh answered, not the held read's",
+    )
+  })
 })
 
 test("a host that doesn't answer keeps the list and says so", async () => {
