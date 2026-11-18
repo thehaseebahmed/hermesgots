@@ -258,6 +258,7 @@ function modelsHost({
   refuseRefresh = false,
   hold,
   refreshedModel,
+  unprobed,
 }: {
   providers?: { slug: string; name: string; models: string[] }[]
   /** The model the host adds to its list once it has been asked to read it again. */
@@ -270,6 +271,12 @@ function modelsHost({
   hold?: Promise<void> | null
   /** The main model the host answers with once it has been asked to read its models again. */
   refreshedModel?: string
+  /**
+   * Whether the host also holds a custom endpoint it has not probed: a row with an `api_url` and
+   * no models, beside the providers it lists. Hermes lists such an endpoint's models only once it
+   * has probed it, which is what a plain read does not do.
+   */
+  unprobed?: boolean
 } = {}) {
   const asked: string[] = []
   let refreshed = false
@@ -288,11 +295,27 @@ function modelsHost({
     const body = {
       model: refreshed && refreshedModel ? refreshedModel : "claude-sonnet-4-6",
       provider: "anthropic",
-      providers: providers.map((one) => ({
-        ...one,
-        models:
-          refreshed && added && one.slug === "anthropic" ? [...one.models, added] : one.models,
-      })),
+      providers: unprobed
+        ? [
+            ...providers.map((one) => ({
+              ...one,
+              models:
+                refreshed && added && one.slug === "anthropic"
+                  ? [...one.models, added]
+                  : one.models,
+            })),
+            {
+              slug: "custom",
+              name: "Custom",
+              api_url: "https://openrouter.example/v1",
+              models: [],
+            },
+          ]
+        : providers.map((one) => ({
+            ...one,
+            models:
+              refreshed && added && one.slug === "anthropic" ? [...one.models, added] : one.models,
+          })),
     }
     // A refresh read answers at once; the plain read a case holds out waits on its promise.
     if (hold && !held && !url.searchParams.get("refresh")) {
@@ -305,6 +328,8 @@ function modelsHost({
     asked,
     /** Every plain read of the list: a refresh is a read of its own, and not one of these. */
     reads: () => asked.filter((search) => !search.includes("refresh")).length,
+    /** Every full probe of the host's endpoints, which a refresh asks for. */
+    probes: () => asked.filter((search) => search.includes("refresh")).length,
   }
 }
 
@@ -444,6 +469,46 @@ test("a read still out when a refresh lands doesn't answer after it", async () =
       "the bot's remembered host model is the one the refresh answered, not the held read's",
     )
   })
+})
+
+/**
+ * A refresh probes every endpoint on the host, so the re-read it causes must not probe again. The
+ * host holds a custom endpoint that still comes back empty, and its escalation throttle has lapsed
+ * since it was last probed in full: the re-read would otherwise ask for a second full probe for an
+ * answer the refresh has just gone and got.
+ */
+test("a refresh's re-read doesn't ask the host for a second full probe", async () => {
+  const host = modelsHost({ unprobed: true })
+  await mount(
+    <ModelMenu profile={botProfile("unprobed-host.test")} onChoose={() => {}} />,
+    async () => {
+      await until(async () => Boolean(pill()), "the composer's model pill")
+      await click(pill())
+      await until(async () => Boolean(refresh()), "the picker's own header")
+      // The throttle's window has lapsed since the host was last probed in full.
+      const real = Date.now
+      Date.now = () => real() + 11 * 60_000
+      try {
+        const probes = host.probes()
+        const reads = host.reads()
+        await click(refresh())
+        // Both the press's own probe and the re-read it causes have to land before the count is read.
+        await until(async () => host.reads() > reads, "the re-read the refresh causes")
+        await settle()
+        assert.equal(
+          host.probes() - probes,
+          1,
+          "one press asks the host for one full probe, not two",
+        )
+      } finally {
+        Date.now = real
+      }
+      assert.ok(
+        text().includes("claude-sonnet-4-6"),
+        "the host's models are still on the list",
+      )
+    },
+  )
 })
 
 test("a host that doesn't answer keeps the list and says so", async () => {

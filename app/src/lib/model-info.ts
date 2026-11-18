@@ -86,6 +86,10 @@ export async function refreshModelInfo(profile: Server): Promise<boolean> {
   const info = await getModelInfo(profile, { refresh: true })
   if (!info) return false
   forget(profile)
+  // This read just probed every endpoint, so the re-read the forget causes is stamped against
+  // probing again: a host whose custom endpoint still comes back empty would otherwise be asked
+  // for a second full probe for an answer this one has already been and got.
+  refreshed.set(connectionKey(profile), Date.now())
   return true
 }
 
