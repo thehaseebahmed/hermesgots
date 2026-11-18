@@ -296,6 +296,7 @@ function JudgePicker({
               if (next && profile) void rememberModel(profile.id, next)
               onChoose(next)
             }}
+            profile={profile}
           />
         </PopupContent>
       </Popup>

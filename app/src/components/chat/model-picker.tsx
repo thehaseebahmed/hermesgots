@@ -1,11 +1,6 @@
 import { useMemo, useRef, useState } from "react"
 import { BrainIcon, EyeIcon, type LucideIcon } from "lucide-react"
-import {
-  ArrowLeftIcon,
-  ChevronDownIcon,
-  PlusIcon,
-  XIcon,
-} from "lucide-react"
+import { ArrowLeftIcon, ChevronDownIcon, PlusIcon, RefreshCwIcon, XIcon } from "lucide-react"
 
 import { MODEL_SORTS, sortByFacts, type ModelSort } from "@/components/chat/model-sort"
 import { SortMenu } from "@/components/sort-menu"
@@ -23,7 +18,14 @@ import { MAX_FALLBACKS, withFallback } from "@/lib/fallback-list"
 import { useFallbackModels } from "@/lib/fallbacks"
 import { formatTokens } from "@/lib/format"
 import type { ModelProvider } from "@/lib/hermes"
-import { botModel, fullModel, hostChoice, shortModel, useModelInfo } from "@/lib/model-info"
+import {
+  botModel,
+  fullModel,
+  hostChoice,
+  refreshModelInfo,
+  shortModel,
+  useModelInfo,
+} from "@/lib/model-info"
 import { MAX_COST_TIER, modelFacts, useModelCatalog, type Catalog } from "@/lib/models"
 import { overallScoreOf, useOverallRankings, type RankingsData } from "@/lib/rankings"
 import { tell } from "@/lib/tell"
@@ -41,6 +43,7 @@ export function ModelPicker({
   choice,
   onChoose,
   header = true,
+  profile,
 }: {
   providers: ModelProvider[]
   /** The row that clears the choice: its label and the model it runs. */
@@ -51,10 +54,21 @@ export function ModelPicker({
   onChoose: (choice: ModelChoice | undefined) => void
   /** Whether the picker draws its own sheet header; a card or a dialog already says the title. */
   header?: boolean
+  /** The bot whose host is asked again for its models; without one there is nothing to refresh. */
+  profile?: Profile | null
 }) {
   const [query, setQuery] = useState("")
   const [openSlug, setOpenSlug] = useState<string>()
   const [sort, setSort] = useState<Sort<ModelSort>>(() => defaultSort(MODEL_SORTS))
+  // The one refresh both headers share: a press in either is the same ask to the host, so a second
+  // cannot be sent while the first is still out.
+  const [refreshing, setRefreshing] = useState(false)
+  const refresh = async () => {
+    if (!profile || refreshing) return
+    setRefreshing(true)
+    if (!(await refreshModelInfo(profile))) tell.error("Couldn't refresh this bot's models.")
+    setRefreshing(false)
+  }
   // The cached models.dev catalog, live: each row's facts repaint when a refresh lands.
   const catalog = useModelCatalog()
   // The cached BenchLM overall rankings, live: each row's score repaints when a refresh lands.
@@ -106,6 +120,9 @@ export function ModelPicker({
         isChosen={isChosen}
         onChoose={onChoose}
         onBack={() => setOpenSlug(undefined)}
+        busy={refreshing}
+        onRefresh={refresh}
+        profile={profile}
       />
     )
 
@@ -115,9 +132,20 @@ export function ModelPicker({
 
   return (
     <>
+      {/* The header keeps the padding its form gives it: a drawer's own close button sits at its
+          right, and the room for it is `pr-14`, which a class here would override. */}
       {header && (
-        <PopupHeader>
-          <PopupTitle>{drilled ? drilled.name : "Select Model"}</PopupTitle>
+        <PopupHeader className="flex-row items-center gap-2 pl-2 text-left">
+          <div className="min-w-0 flex-1">
+            <PopupTitle className="justify-start text-left">
+              {drilled ? drilled.name : "Select Model"}
+            </PopupTitle>
+          </div>
+          {/* Only the picker's own layer carries it: a provider's sheet stacked over this one has
+              a header of its own, and two of them would ask the host twice for one thing. */}
+          {!opened && (
+            <RefreshModelsButton busy={refreshing} onRefresh={refresh} profile={profile} />
+          )}
         </PopupHeader>
       )}
       <div className="flex flex-col gap-5 px-6 pt-2 text-[15px]">
@@ -205,6 +233,9 @@ export function ModelPicker({
               rankings={rankings}
               isChosen={isChosen}
               onChoose={onChoose}
+              busy={refreshing}
+              onRefresh={refresh}
+              profile={profile}
             />
           </PopupContent>
         </Popup>
@@ -221,6 +252,9 @@ function ProviderModels({
   isChosen,
   onChoose,
   onBack,
+  busy,
+  onRefresh,
+  profile,
 }: {
   provider: ModelProvider
   catalog: Catalog | undefined
@@ -229,6 +263,11 @@ function ProviderModels({
   onChoose: (choice: ModelChoice | undefined) => void
   /** Back to the providers, where the models take the picker's place rather than stack on it. */
   onBack?: () => void
+  /** Whether a refresh this picker asked for is still out, so its buttons all say so. */
+  busy: boolean
+  onRefresh: () => void
+  /** The bot whose host is asked again; without one the header carries no refresh. */
+  profile?: Profile | null
 }) {
   const [query, setQuery] = useState("")
   const [sort, setSort] = useState<Sort<ModelSort>>(() => defaultSort(MODEL_SORTS))
@@ -247,19 +286,26 @@ function ProviderModels({
   }, [provider, query, sort, catalog])
   return (
     <>
-      <PopupHeader className={cn(onBack && "pl-16")}>
+      {/* The back control, the title and the refresh share one row so the three line up: an
+          absolutely placed control beside a centred title leaves the title off the sheet's middle
+          and the control sitting low. The header keeps the padding its form gives it, so a drawer's
+          own close button at its right keeps the room it was given. */}
+      <PopupHeader className="flex-row items-center gap-2 pl-2 text-left">
         {onBack && (
           <Button
             variant="ghost"
             size="icon-lg"
-            className="absolute top-1.5 left-2 size-11"
+            className="size-11 shrink-0"
             aria-label="All providers"
             onClick={onBack}
           >
             <ArrowLeftIcon />
           </Button>
         )}
-        <PopupTitle>{provider.name}</PopupTitle>
+        <div className="min-w-0 flex-1">
+          <PopupTitle className="justify-start text-left">{provider.name}</PopupTitle>
+        </div>
+        <RefreshModelsButton busy={busy} onRefresh={onRefresh} profile={profile} />
       </PopupHeader>
       <div className="flex flex-col gap-5 px-6 pt-2 text-[15px]">
         <div className="flex items-center gap-2">
@@ -288,6 +334,35 @@ function ProviderModels({
         )}
       </div>
     </>
+  )
+}
+
+/**
+ * A header's refresh: it asks the host to read its models again, which is a host-wide call, and
+ * holds the press while that is out. Nothing is drawn where the picker holds no bot to ask for.
+ */
+function RefreshModelsButton({
+  busy,
+  onRefresh,
+  profile,
+}: {
+  busy: boolean
+  onRefresh: () => void
+  /** The bot whose host is asked again; without one there is nothing to refresh. */
+  profile?: Profile | null
+}) {
+  if (!profile) return null
+  return (
+    <Button
+      variant="ghost"
+      size="icon-lg"
+      className="size-11 shrink-0"
+      aria-label="Refresh models"
+      disabled={busy}
+      onClick={onRefresh}
+    >
+      {busy ? <Spinner /> : <RefreshCwIcon />}
+    </Button>
   )
 }
 
@@ -485,6 +560,7 @@ export function ModelMenu({
               if (next && profile) void rememberModel(profile.id, next)
               setOpen(false)
             }}
+            profile={profile}
           />
         </PopupContent>
       </Popup>
@@ -550,6 +626,7 @@ export function DefaultModelSetting({
               if (next) void rememberModel(profile.id, next)
               setOpen(false)
             }}
+            profile={profile}
           />
         </PopupContent>
       </Popup>
@@ -649,6 +726,7 @@ export function FallbackModelsSetting({ profile }: { profile: Profile }) {
               if (next) void rememberModel(profile.id, next)
               setOpen(undefined)
             }}
+            profile={profile}
           />
         </PopupContent>
       </Popup>

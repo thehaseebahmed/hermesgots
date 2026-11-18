@@ -10,7 +10,7 @@ import test from "node:test"
 import { useState, type ReactNode } from "react"
 
 import { BotPicker } from "@/components/chat/bot-picker"
-import { ModelPicker } from "@/components/chat/model-picker"
+import { ModelMenu, ModelPicker } from "@/components/chat/model-picker"
 import { Popup, PopupContent } from "@/components/popup"
 import { db } from "@/lib/db"
 import { scoreFor, scoreMapOf } from "@/lib/model-match"
@@ -19,13 +19,16 @@ import { RANKINGS } from "@/lib/rankings-data"
 import {
   botProfile,
   click,
+  find,
   findAll,
+  json,
   mount,
   seedSettings,
   settle,
   text,
   until,
   wordsOf,
+  withToasts,
 } from "./component-kit.tsx"
 
 const bot = (id: string, host: string, path = "/v1", name = "Hermes") =>
@@ -238,4 +241,127 @@ test("a host with one provider draws its models once, and its sheet is put away 
       await until(async () => layers().length === 0, "the sheet is put away")
     },
   )
+})
+
+/**
+ * The headers' refresh. The picker is driven through `ModelMenu`, which reads the host's models
+ * through `useModelInfo`: a press has to drop that cached answer for the list on screen to repaint,
+ * which a picker handed its providers as props would never show.
+ */
+const ONE_PROVIDER = [{ slug: "anthropic", name: "Anthropic", models: ["claude-sonnet-4-6"] }]
+
+/** A host answering `/api/model/options`, recording every query it was asked with. */
+function modelsHost({
+  providers = ONE_PROVIDER,
+  added,
+  refuseRefresh = false,
+}: {
+  providers?: { slug: string; name: string; models: string[] }[]
+  /** The model the host adds to its list once it has been asked to read it again. */
+  added?: string
+  refuseRefresh?: boolean
+} = {}) {
+  const asked: string[] = []
+  let refreshed = false
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input instanceof Request ? input.url : input))
+    if (!url.pathname.endsWith("/api/model/options")) return json({})
+    asked.push(url.search)
+    if (url.searchParams.get("refresh")) {
+      // A host that never answers: the refresh gets nothing back, so the cache keeps what it had.
+      if (refuseRefresh) return json({ error: { message: "The host is busy." } }, 500)
+      refreshed = true
+    }
+    return json({
+      model: "claude-sonnet-4-6",
+      provider: "anthropic",
+      providers: providers.map((one) => ({
+        ...one,
+        models:
+          refreshed && added && one.slug === "anthropic" ? [...one.models, added] : one.models,
+      })),
+    })
+  }) as unknown as typeof fetch
+  return {
+    asked,
+    /** Every plain read of the list: a refresh is a read of its own, and not one of these. */
+    reads: () => asked.filter((search) => !search.includes("refresh")).length,
+  }
+}
+
+const pill = () => document.querySelector('button[aria-label^="Model: "]')
+const refresh = () => find('[aria-label="Refresh models"]')
+/** The header of the layer standing in front, which over the picker's own is a provider's sheet. */
+const frontHeader = () =>
+  findAll("[data-popup-form]").at(-1)?.querySelector('[data-slot="sheet-header"]') ?? null
+
+test("a header's refresh reads the host's models again, and the list repaints with them", async () => {
+  const host = modelsHost({ added: "claude-opus-4-5" })
+  await mount(
+    <ModelMenu profile={botProfile("refresh-host.test")} onChoose={() => {}} />,
+    async () => {
+      await until(async () => Boolean(pill()), "the composer's model pill")
+      await click(pill())
+      await until(async () => Boolean(refresh()), "the picker's own header")
+      assert.equal(host.reads(), 1, "the host's list was read once, for the models on screen")
+      await click(refresh())
+      await until(async () => text().includes("claude-opus-4-5"), "the model the host added")
+      assert.ok(
+        host.asked.some((search) => search.includes("refresh=true")),
+        "the host was asked to read its models again",
+      )
+      assert.equal(host.reads(), 2, "and the picker read the new answer back off the host")
+    },
+  )
+})
+
+test("a provider's header carries the refresh too", async () => {
+  modelsHost({
+    providers: [
+      { slug: "anthropic", name: "Anthropic", models: ["claude-sonnet-4-6"] },
+      { slug: "openrouter", name: "OpenRouter", models: ["deepseek-v4-flash"] },
+    ],
+  })
+  await mount(
+    <ModelMenu profile={botProfile("refresh-two.test")} onChoose={() => {}} />,
+    async () => {
+      await until(async () => Boolean(pill()), "the composer's model pill")
+      await click(pill())
+      await until(async () => Boolean(refresh()), "the picker's own header")
+      await click(findAll("button").find((one) => wordsOf(one).startsWith("Anthropic")) ?? null)
+      await until(async () => Boolean(frontHeader()), "the provider's own sheet")
+      assert.ok(
+        frontHeader()?.querySelector('[aria-label="Refresh models"]'),
+        "the provider's header carries the refresh at its right",
+      )
+      assert.equal(
+        wordsOf(frontHeader()?.querySelector('[data-slot="sheet-title"]') ?? null),
+        "Anthropic",
+        "the sheet standing in front is that provider's own, under its name",
+      )
+    },
+  )
+})
+
+test("a host that doesn't answer keeps the list and says so", async () => {
+  const host = modelsHost({ refuseRefresh: true })
+  await withToasts(async (said) => {
+    await mount(
+      <ModelMenu profile={botProfile("refresh-away.test")} onChoose={() => {}} />,
+      async () => {
+        await until(async () => Boolean(pill()), "the composer's model pill")
+        await click(pill())
+        await until(async () => Boolean(refresh()), "the picker's own header")
+        const reads = host.reads()
+        await click(refresh())
+        await until(async () => said.length > 0, "the sentence")
+        assert.deepEqual(said, ["Couldn't refresh this bot's models."])
+        assert.equal(host.reads(), reads, "no further read lands, so the list is untouched")
+        assert.ok(
+          text().includes("claude-sonnet-4-6"),
+          "the model the host listed is still on the list",
+        )
+      },
+    )
+  })
 })

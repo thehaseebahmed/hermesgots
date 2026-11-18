@@ -831,6 +831,7 @@ export function ModelPick({
             void refusal.write("save that", async () => onPick(next))
             onClose()
           }}
+          profile={profile}
         />
       ) : (
         <p className="px-1 py-2 text-sm text-muted-foreground">Couldn't read this bot's models.</p>

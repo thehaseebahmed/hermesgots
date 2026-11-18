@@ -77,6 +77,18 @@ export function modelInfoFor({ baseUrl, apiKey }: Server) {
   return entry.info
 }
 
+/**
+ * Asks the host to read its models again and drops what this connection had cached, so every picker
+ * of the bot reads the new answer. A host that refused, or never answered, keeps the cache:
+ * dropping it would only make every picker ask again for an answer this one could not get.
+ */
+export async function refreshModelInfo(profile: Server): Promise<boolean> {
+  const info = await getModelInfo(profile, { refresh: true })
+  if (!info) return false
+  forget(profile)
+  return true
+}
+
 /** The host's model and the models it's configured for, shared by every picker on its server. */
 export function useModelInfo(profile?: (Server & { id?: string }) | null) {
   const baseUrl = profile?.baseUrl ?? ""

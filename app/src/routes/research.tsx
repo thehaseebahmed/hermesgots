@@ -765,6 +765,7 @@ function RewritePicker({ mission, onDone }: { mission: Mission; onDone: () => vo
         recent={profile?.recentModels}
         choice={mission.writer}
         onChoose={(next) => void choose(next)}
+        profile={profile}
       />
     </>
   )
