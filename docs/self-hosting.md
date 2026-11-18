@@ -43,7 +43,7 @@ Set these under **Project configuration → Environment variables**. Only the fi
 | Variable | Needed for | What it is |
 | --- | --- | --- |
 | `FIREBASE_SERVICE_ACCOUNT` | Android push | A Firebase service account's JSON, with permission to send through Cloud Messaging. It stays in the function: a phone never holds it, and neither does a Hermes host. |
-| `GITHUB_OAUTH_CLIENT_ID` | Joining the leaderboard | The client id of a GitHub OAuth app with **Enable Device Flow** ticked. Joining proves the username through GitHub's device flow, which needs no client secret; without it, joining answers that it isn't set up. |
+| `GITHUB_TOKEN` | Community leaderboard | Optional. Lifts GitHub's rate limit when the function looks up a username from its account id. |
 
 `URL` is Netlify's own and is already there.
 

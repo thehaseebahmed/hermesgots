@@ -2,11 +2,11 @@
  * The community leaderboard: who spent the most tokens, and which models people run, by day.
  *
  * Only a GitHub username is ever kept about a person. A signed-in user joins with `POST join`, which
- * starts GitHub's device flow, and `POST join-poll`, which finishes it: the username is the one
- * GitHub answers for the account that approved the code, so nobody types one in and nobody can claim
- * another's. Netlify Identity can't say it: everything it keeps from the GitHub sign-in sits in
- * `user_metadata`, which the user can rewrite (docs/adr/0165). Their hosts (the Gots plugin) then
- * report counts: tokens by day, model and permission mode, never a prompt, a repo or a path.
+ * takes the GitHub account id the signup hook stamped on their sign-in's `app_metadata` and asks
+ * GitHub for the username, so nobody types one in and nobody can claim another's: the avatar the
+ * sign-in also carries sits in `user_metadata`, which the user can rewrite, and is never read
+ * (docs/adr/0166). Their hosts (the Gots plugin) then report counts: tokens by day, model and
+ * permission mode, never a prompt, a repo or a path.
  *
  * Two stores keep it apart. The registry store holds what must stay private (which account joined,
  * and each host's own report); the community store holds the public aggregate, one record per
@@ -14,6 +14,7 @@
  * person, and leaving deletes the lot.
  */
 
+import { isGithubId } from "./github-id.ts"
 import { modelKeys, type Catalog } from "./models-dev.ts"
 import { sha256, type RegistryStore } from "./registry.ts"
 
@@ -54,7 +55,34 @@ export interface Member {
   verified?: true
 }
 
-export type Caller = { kind: "user"; userId: string } | { kind: "host"; token: string } | null
+export type Caller =
+  | {
+      kind: "user"
+      userId: string
+      /** From `app_metadata.github_id`, which the signup hook writes and the user cannot. */
+      githubId?: string
+      /** Holds the Identity role `admin`, which only Netlify's settings grant. */
+      admin?: boolean
+    }
+  | { kind: "host"; token: string }
+  | null
+
+/** An Identity account as the backfill sees it: who it is, and what its sign-in claims. */
+export interface IdentityAccount {
+  id: string
+  email?: string
+  provider?: string
+  githubId?: string
+  /** The id its avatar names: the user's own say-so, shown for the operator to confirm. */
+  claimedGithubId?: string
+}
+
+/** Netlify Identity's admin API, for stamping accounts that signed up before the hook. */
+export interface IdentityAdmin {
+  list: () => Promise<IdentityAccount[]>
+  get: (userId: string) => Promise<IdentityAccount | null>
+  stamp: (userId: string, githubId: string) => Promise<void>
+}
 
 export interface CommunityContext {
   /** Public aggregates: `users/<login>` and the cached `board`. */
@@ -62,8 +90,10 @@ export interface CommunityContext {
   /** The registry's store: host tokens, and what stays private about who joined. */
   registry: RegistryStore
   caller: Caller
-  /** GitHub's device flow, which is what proves a username is the caller's. */
-  github: GitHubDevice
+  /** The username behind a GitHub account id; null when GitHub doesn't know it. */
+  github: (id: string) => Promise<string | null>
+  /** Absent where the function has no admin access to Identity. */
+  identity?: IdentityAdmin
   /**
    * The model ids models.dev lists, or null when the catalogue couldn't be read — in which case
    * nothing is filtered and a report is taken as it always was. Absent in a caller with no
@@ -71,31 +101,6 @@ export interface CommunityContext {
    */
   catalog?: () => Promise<Catalog | null>
   now?: number
-}
-
-/** A device flow GitHub opened: the code the user types, and the one only the server holds. */
-export interface DeviceStart {
-  deviceCode: string
-  userCode: string
-  verificationUri: string
-  /** Seconds. */
-  expiresIn: number
-  /** Seconds GitHub asks between two polls. */
-  interval: number
-}
-
-export type DevicePoll =
-  | { kind: "pending"; interval?: number }
-  | { kind: "expired" }
-  | { kind: "denied" }
-  /** The account that approved the code, as GitHub's own `GET /user` answers it. */
-  | { kind: "user"; login: string }
-
-export interface GitHubDevice {
-  /** Null when the site has no OAuth app to ask with; throws when GitHub didn't answer. */
-  start: () => Promise<DeviceStart | null>
-  /** Throws when GitHub didn't answer, or answered something the flow has no word for. */
-  poll: (deviceCode: string) => Promise<DevicePoll>
 }
 
 /** One person's tokens, split by the period's top models (`topModels`) and the rest. */
@@ -170,17 +175,6 @@ interface Account {
 interface Owner {
   userId: string
   verified?: true
-}
-
-/** A device flow in progress, private to the account that started it. */
-interface Pending {
-  deviceCode: string
-  userCode: string
-  verificationUri: string
-  expiresAt: number
-  interval: number
-  /** The earliest GitHub may be asked again, so a client polling fast can't earn a `slow_down`. */
-  nextAt: number
 }
 
 interface Report {
@@ -548,7 +542,6 @@ const accountKey = (userId: string) => `users/${userId}/community`
 const ownerKey = (login: string) => `community/owners/${login.toLowerCase()}`
 const reportKey = (userId: string, hostId: string) => `community/reports/${userId}/${hostId}`
 const memberKey = (login: string) => `users/${login.toLowerCase()}`
-const pendingKey = (userId: string) => `community/verify/${userId}`
 
 async function recompute(
   ctx: CommunityContext,
@@ -642,16 +635,6 @@ async function removeReports(ctx: CommunityContext, userId: string) {
   for (const { key } of (await ctx.registry.list({ prefix })).blobs) await ctx.registry.delete(key)
 }
 
-/** What the app is shown of a flow: never the device code, which only the server redeems. */
-function verifyOf(pending: Pending, now: number) {
-  return {
-    userCode: pending.userCode,
-    verificationUri: pending.verificationUri,
-    expiresIn: Math.max(0, Math.round((pending.expiresAt - now) / 1000)),
-    interval: pending.interval,
-  }
-}
-
 export async function handleCommunity(req: Request, ctx: CommunityContext) {
   const now = ctx.now ?? Date.now()
   const route = new URL(req.url).searchParams.get("route") ?? ""
@@ -728,56 +711,17 @@ export async function handleCommunity(req: Request, ctx: CommunityContext) {
 
   if (op === "POST join") {
     if (account?.verifiedAt) return json(await me(account))
-    // A flow already open is handed back rather than opened again: GitHub counts every code.
-    let pending = await read<Pending>(ctx.registry, pendingKey(userId))
-    if (!pending || pending.expiresAt <= now) {
-      let started: DeviceStart | null
-      try {
-        started = await ctx.github.start()
-      } catch {
-        return error("GitHub didn't answer. Try again in a minute.", 502)
-      }
-      if (!started) return error("Joining the leaderboard isn't set up on this site.", 503)
-      pending = {
-        deviceCode: started.deviceCode,
-        userCode: started.userCode,
-        verificationUri: started.verificationUri,
-        expiresAt: now + started.expiresIn * 1000,
-        interval: started.interval,
-        nextAt: now + started.interval * 1000,
-      }
-      await ctx.registry.setJSON(pendingKey(userId), pending)
+    const id = caller.githubId
+    if (!id) {
+      return error("This sign-in has no GitHub account on record yet, so it can't join.", 403)
     }
-    return json({ ...(await me(account)), verify: verifyOf(pending, now) })
-  }
-
-  if (op === "POST join-poll") {
-    if (account?.verifiedAt) return json(await me(account))
-    const pending = await read<Pending>(ctx.registry, pendingKey(userId))
-    if (!pending || pending.expiresAt <= now) {
-      if (pending) await ctx.registry.delete(pendingKey(userId))
-      return json({ ...(await me(account)), status: "expired" })
-    }
-    if (now < pending.nextAt) return json({ ...(await me(account)), status: "pending" })
-    let answer: DevicePoll
+    let login: string | null
     try {
-      answer = await ctx.github.poll(pending.deviceCode)
+      login = await ctx.github(id)
     } catch {
       return error("GitHub didn't answer. Try again in a minute.", 502)
     }
-    if (answer.kind === "pending") {
-      const interval = answer.interval ?? pending.interval
-      await ctx.registry.setJSON(pendingKey(userId), {
-        ...pending,
-        interval,
-        nextAt: now + interval * 1000,
-      } satisfies Pending)
-      return json({ ...(await me(account)), status: "pending" })
-    }
-    await ctx.registry.delete(pendingKey(userId))
-    if (answer.kind !== "user") return json({ ...(await me(account)), status: answer.kind })
-    const { login } = answer
-    if (!LOGIN.test(login)) return error("Couldn't read your GitHub username.", 502)
+    if (!login || !LOGIN.test(login)) return error("Couldn't read your GitHub username.", 502)
 
     // One GitHub account, one place on the board, however many Netlify sign-ins it has. A claim an
     // avatar made gives way: it was never proof, and may have been someone wearing this one's face.
@@ -791,7 +735,6 @@ export async function handleCommunity(req: Request, ctx: CommunityContext) {
         // Out of the leaderboard as Leave would take it: its hosts are told to stop on their next
         // check-in, and what they sent goes with it.
         await removeReports(ctx, owner.userId)
-        await ctx.registry.delete(pendingKey(owner.userId))
         await ctx.registry.delete(accountKey(owner.userId))
       }
     }
@@ -819,8 +762,29 @@ export async function handleCommunity(req: Request, ctx: CommunityContext) {
       if (owner?.userId === userId) await ctx.registry.delete(ownerKey(account.login))
       await ctx.registry.delete(accountKey(userId))
     }
-    await ctx.registry.delete(pendingKey(userId))
     return json({ joined: false })
+  }
+
+  // The backfill: an account from before the signup hook carries no GitHub id, and nothing it
+  // holds can be trusted to give one, so an admin who knows the person writes it.
+  if (op === "GET unstamped" || op === "POST stamp") {
+    if (!caller.admin) return error("Only an admin can do that", 403)
+    if (!ctx.identity) return error("This site's Identity admin access isn't available.", 503)
+    if (op === "GET unstamped") {
+      const accounts = (await ctx.identity.list()).filter((account) => !account.githubId)
+      return json({ accounts })
+    }
+    const input = await body(req)
+    const target = typeof input?.userId === "string" ? input.userId : ""
+    const githubId = input?.githubId
+    if (!target || !isGithubId(githubId)) return error("Name an account and a GitHub id", 400)
+    const found = await ctx.identity.get(target)
+    if (!found) return error("No such account", 404)
+    if (found.githubId && found.githubId !== githubId && input?.replace !== true) {
+      return error("That account already has a GitHub id; send replace to change it", 409)
+    }
+    await ctx.identity.stamp(target, githubId)
+    return json({ id: target, githubId })
   }
 
   return error("Not found", 404)

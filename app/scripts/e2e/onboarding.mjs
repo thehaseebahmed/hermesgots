@@ -1,5 +1,5 @@
-// The setup wizard's Join the leaderboard step: on by default, Continue shows GitHub's device code
-// and moves on once it is approved, and a user who switches it off goes on without joining.
+// The setup wizard's Join the leaderboard step: on by default, Continue joins the board, and a user
+// who switches it off goes on to link bots without joining.
 import { app, assert, pass, signedIn } from "./lib.mjs"
 
 async function scenario(name, { width, dark, joinOn }) {
@@ -27,11 +27,6 @@ async function scenario(name, { width, dark, joinOn }) {
     await shot(`${name}-community`)
     if (!joinOn) await toggle.click()
     await page.getByRole("button", { name: "Continue" }).click()
-    if (joinOn) {
-      // GitHub's code stands until the device flow answers, and the step moves on by itself.
-      await page.getByText("WDJB-MJHT").waitFor({ timeout: 15_000 })
-      await shot(`${name}-github-code`)
-    }
     await page.getByRole("heading", { name: "Link your bots" }).waitFor({ timeout: 15_000 })
     await shot(`${name}-link`)
     assert.deepEqual(joins, joinOn ? ["POST"] : [], `join calls for ${name}`)

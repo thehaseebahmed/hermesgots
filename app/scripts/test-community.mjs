@@ -23,31 +23,10 @@ function setup() {
   return { store, registry }
 }
 
-/** GitHub's device flow, answering for whichever account approves the code (`login`). */
-function device(login = "octocat", { pending = 0 } = {}) {
-  const started = []
-  let waits = pending
-  return {
-    started,
-    async start() {
-      started.push(1)
-      return {
-        deviceCode: "dc_secret",
-        userCode: "WDJB-MJHT",
-        verificationUri: "https://github.com/login/device",
-        expiresIn: 900,
-        interval: 5,
-      }
-    },
-    async poll(code) {
-      assert.equal(code, "dc_secret")
-      if (waits-- > 0) return { kind: "pending" }
-      return typeof login === "string" ? { kind: "user", login } : login
-    },
-  }
-}
+/** GitHub's `GET /user/<id>`, over the accounts a test names. */
+const logins = (map = { 583231: "octocat" }) => async (id) => map[id] ?? null
 
-async function call(env, caller, method, route, body, github = device(), now = NOW) {
+async function call(env, caller, method, route, body, github = logins(), now = NOW) {
   const req = new Request(`https://x.test/api?route=${route}`, {
     method,
     body: body ? JSON.stringify(body) : undefined,
@@ -56,14 +35,10 @@ async function call(env, caller, method, route, body, github = device(), now = N
   return { status: res.status, body: await res.json() }
 }
 
-const user = { kind: "user", userId: "u1" }
+/** A signed-in caller whose signup hook stamped octocat's GitHub id on their sign-in. */
+const user = { kind: "user", userId: "u1", githubId: "583231" }
 
-/** Join through the device flow: open it, then poll once GitHub's interval has passed. */
-async function join(env, caller, github = device()) {
-  const opened = await call(env, caller, "POST", "join", null, github)
-  if (opened.status !== 200 || !opened.body.verify) return opened
-  return call(env, caller, "POST", "join-poll", null, github, NOW + 5_000)
-}
+const join = (env, caller, github) => call(env, caller, "POST", "join", null, github)
 
 async function hostToken(env) {
   const token = "mh_abc"
@@ -181,92 +156,41 @@ test("a GitHub account can't be claimed by a second sign-in; failures are report
   const env = setup()
   await join(env, user)
   assert.equal((await join(env, { ...user, userId: "u2" })).status, 409)
-  const failing = {
-    async start() {
-      throw new Error("down")
-    },
+  const failing = async () => {
+    throw new Error("down")
   }
-  assert.equal(
-    (await call(env, { ...user, userId: "u4" }, "POST", "join", null, failing)).status,
-    502,
-  )
-  const unset = { start: async () => null }
-  assert.equal(
-    (await call(env, { ...user, userId: "u5" }, "POST", "join", null, unset)).status,
-    503,
-  )
+  assert.equal((await join(env, { ...user, userId: "u4" }, failing)).status, 502)
 })
 
-test("the username is the one GitHub answers for, whatever the sign-in's avatar says", async () => {
+test("the username is the one the stamped id names, whatever the sign-in's avatar says", async () => {
   const env = setup()
   // The caller dressed their Identity avatar as octocat's (`PUT /user` lets anyone write their own
-  // user_metadata). The handler is never handed it; GitHub answers for whoever approved the code.
+  // user_metadata); the stamp from their signup names their own account, and that is what counts.
   const dressed = {
     kind: "user",
     userId: "u9",
+    githubId: "9001",
     pictureUrl: "https://avatars.githubusercontent.com/u/583231?v=4",
   }
-  const out = await join(env, dressed, device("mallory"))
+  const out = await join(env, dressed, logins({ 583231: "octocat", 9001: "mallory" }))
   assert.equal(out.body.login, "mallory")
   assert.equal(env.registry.data.has("community/owners/octocat"), false)
   assert.equal(env.registry.data.get("community/owners/mallory").userId, "u9")
 })
 
-test("joining is a device flow: the code is shown, the device code stays on the server", async () => {
+test("a sign-in with no stamped GitHub id can't join, and writes nothing", async () => {
   const env = setup()
-  const github = device("octocat", { pending: 1 })
-  const opened = await call(env, user, "POST", "join", null, github)
-  assert.deepEqual(opened.body, {
-    joined: false,
-    verify: {
-      userCode: "WDJB-MJHT",
-      verificationUri: "https://github.com/login/device",
-      expiresIn: 900,
-      interval: 5,
-    },
-  })
-  assert.ok(!JSON.stringify(opened.body).includes("dc_secret"))
-  // A second tap hands back the same flow rather than spending another code.
-  await call(env, user, "POST", "join", null, github, NOW + 1_000)
-  assert.equal(github.started.length, 1)
-
-  // Asked before GitHub's interval: answered pending without asking GitHub.
-  const early = await call(env, user, "POST", "join-poll", null, github, NOW + 1_000)
-  assert.equal(early.body.status, "pending")
-  const waiting = await call(env, user, "POST", "join-poll", null, github, NOW + 5_000)
-  assert.equal(waiting.body.status, "pending")
-  const done = await call(env, user, "POST", "join-poll", null, github, NOW + 10_000)
-  assert.equal(done.body.verified, true)
-  assert.equal(env.registry.data.has("community/verify/u1"), false)
-
-  // Another account can't redeem a flow it didn't open.
-  const stranger = await call(env, { ...user, userId: "u2" }, "POST", "join-poll", null, github)
-  assert.deepEqual(stranger.body, { joined: false, status: "expired" })
-})
-
-test("a denied or expired flow joins nobody", async () => {
-  const env = setup()
-  await call(env, user, "POST", "join", null, device({ kind: "denied" }))
-  const denied = await call(
-    env,
-    user,
-    "POST",
-    "join-poll",
-    null,
-    device({ kind: "denied" }),
-    NOW + 5_000,
-  )
-  assert.deepEqual(denied.body, { joined: false, status: "denied" })
-  await call(env, user, "POST", "join")
-  const late = await call(env, user, "POST", "join-poll", null, device(), NOW + 901_000)
-  assert.deepEqual(late.body, { joined: false, status: "expired" })
-  assert.equal(env.registry.data.has("users/u1/community"), false)
+  const unstamped = { kind: "user", userId: "u3" }
+  const out = await join(env, unstamped)
+  assert.equal(out.status, 403)
+  assert.equal(env.registry.data.size, 0)
+  assert.equal(env.store.data.size, 0)
 })
 
 test("an avatar's join stays private until it verifies, and a verified claim takes it back", async () => {
   const env = setup()
   const host = await hostToken(env)
-  // u1 joined before the device flow, under the login its avatar named: octocat's.
+  // u1 joined before the stamp, under the login its avatar named: octocat's.
   env.registry.data.set("users/u1/community", { login: "octocat", joinedAt: NOW - 86_400_000 })
   env.registry.data.set("community/owners/octocat", { userId: "u1" })
   env.store.data.set("users/octocat", {
@@ -284,16 +208,17 @@ test("an avatar's join stays private until it verifies, and a verified claim tak
   const board = await call(env, null, "GET", "board")
   assert.equal(board.body.periods.today.tokens.length, 0)
   assert.equal(env.store.data.has("users/octocat"), false)
-  assert.deepEqual((await call(env, user, "GET", "me")).body, {
+  const legacy = { kind: "user", userId: "u1" }
+  assert.deepEqual((await call(env, legacy, "GET", "me")).body, {
     joined: true,
     verified: false,
     login: "octocat",
     totals: { today: 0, week: 0, month: 0 },
   })
 
-  // The real octocat verifies from another sign-in: the avatar's claim gives way, its reports go.
-  const real = { kind: "user", userId: "u7" }
-  const out = await join(env, real, device("octocat"))
+  // The real octocat joins from another sign-in: the avatar's claim gives way, its reports go.
+  const real = { kind: "user", userId: "u7", githubId: "583231" }
+  const out = await join(env, real)
   assert.equal(out.body.verified, true)
   assert.equal(env.registry.data.get("community/owners/octocat").userId, "u7")
   assert.equal(env.registry.data.has("users/u1/community"), false)
@@ -309,12 +234,69 @@ test("an avatar's join that verifies keeps its counts, under the username GitHub
   await call(env, host, "POST", "report", {
     days: { "2026-10-15": { "claude-x": { auto: counts(50) } } },
   })
-  const out = await join(env, user, device("octocat"))
+  const out = await join(env, user)
   assert.equal(out.body.login, "octocat")
   assert.equal(out.body.totals.today, 100)
   assert.equal(env.registry.data.has("community/owners/someone-else"), false)
   const board = await call(env, null, "GET", "board")
   assert.equal(board.body.periods.today.tokens[0].login, "octocat")
+})
+
+/** Identity's admin API over a list of accounts, recording what it stamped. */
+function identityOf(accounts) {
+  const stamped = []
+  return {
+    stamped,
+    list: async () => accounts,
+    get: async (id) => accounts.find((account) => account.id === id) ?? null,
+    stamp: async (id, githubId) => {
+      stamped.push([id, githubId])
+    },
+  }
+}
+
+async function adminCall(env, caller, method, route, body) {
+  const req = new Request(`https://x.test/api?route=${route}`, {
+    method,
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  const res = await handleCommunity(req, { ...env, caller, github: logins(), now: NOW })
+  return { status: res.status, body: await res.json() }
+}
+
+test("only an admin lists the unstamped accounts and stamps one", async () => {
+  const identity = identityOf([
+    { id: "u1", email: "a@x.test", provider: "github", claimedGithubId: "583231" },
+    { id: "u2", email: "b@x.test", provider: "github", githubId: "42" },
+  ])
+  const env = { ...setup(), identity }
+  const admin = { kind: "user", userId: "u0", admin: true }
+
+  assert.equal((await adminCall(env, user, "GET", "unstamped")).status, 403)
+  assert.equal((await adminCall(env, user, "POST", "stamp", { userId: "u1", githubId: "1" })).status, 403)
+
+  const listed = await adminCall(env, admin, "GET", "unstamped")
+  assert.deepEqual(
+    listed.body.accounts.map((account) => account.id),
+    ["u1"],
+  )
+
+  const bad = await adminCall(env, admin, "POST", "stamp", { userId: "u1", githubId: "octocat" })
+  assert.equal(bad.status, 400)
+  const missing = await adminCall(env, admin, "POST", "stamp", { userId: "u9", githubId: "1" })
+  assert.equal(missing.status, 404)
+  // An id already stamped, by the hook or by hand, is changed only when asked to.
+  const kept = await adminCall(env, admin, "POST", "stamp", { userId: "u2", githubId: "43" })
+  assert.equal(kept.status, 409)
+
+  const done = await adminCall(env, admin, "POST", "stamp", { userId: "u1", githubId: "583231" })
+  assert.equal(done.status, 200)
+  assert.deepEqual(identity.stamped, [["u1", "583231"]])
+})
+
+test("the backfill answers that it can't reach Identity where the function has no admin access", async () => {
+  const admin = { kind: "user", userId: "u0", admin: true }
+  assert.equal((await adminCall(setup(), admin, "GET", "unstamped")).status, 503)
 })
 
 test("buildBoard ranks by total", () => {
