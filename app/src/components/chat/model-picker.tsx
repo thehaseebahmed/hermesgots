@@ -60,8 +60,10 @@ export function ModelPicker({
   // The cached BenchLM overall rankings, live: each row's score repaints when a refresh lands.
   const rankings = useOverallRankings()
   const sorted = useMemo(() => sortProviders(providers), [providers])
+  // The provider the reader opened, which is the one that stacks its own sheet over the picker.
+  const opened = sorted.find((p) => p.slug === openSlug)
   // A host with one provider has nothing to choose between, so its models show at once.
-  const drilled = sorted.length === 1 ? sorted[0] : sorted.find((p) => p.slug === openSlug)
+  const drilled = sorted.length === 1 ? sorted[0] : opened
   const total = (drilled ? [drilled] : sorted).reduce((n, p) => n + p.models.length, 0)
   // Only ones the host still offers, so a recent pick never sends a model it dropped.
   const recentOffered = recent.filter((r) =>
@@ -192,13 +194,13 @@ export function ModelPicker({
           <p className="px-1 text-sm text-muted-foreground">No models match.</p>
         )}
       </div>
-      {/* A provider's models open as a sheet stacked on this one, dismissed back to it; it
-          renders inside this sheet's tree so Base UI registers the nesting. */}
-      {drilled && form !== "menu" && (
+      {/* A provider the reader opened shows its models as a sheet stacked on this one, dismissed
+          back to it; it renders inside this sheet's tree so Base UI registers the nesting. */}
+      {opened && form !== "menu" && (
         <Popup open onOpenChange={(next) => !next && setOpenSlug(undefined)}>
           <PopupContent initialFocus={false} fixedHeight={PICKER_HEIGHT}>
             <ProviderModels
-              provider={drilled}
+              provider={opened}
               catalog={catalog}
               rankings={rankings}
               isChosen={isChosen}

@@ -7,6 +7,7 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
+import { useState, type ReactNode } from "react"
 
 import { BotPicker } from "@/components/chat/bot-picker"
 import { ModelPicker } from "@/components/chat/model-picker"
@@ -38,6 +39,20 @@ async function seed(bots: ReturnType<typeof bot>[]) {
 }
 
 const picker = (one: ReturnType<typeof bot>) => <BotPicker profile={one} />
+
+/**
+ * The model picker's sheet as a caller holds it open, the way every screen that opens one does: the
+ * sheet's own close has to be able to put it away, which a pop-up mounted with a hardcoded `open`
+ * never shows.
+ */
+const OpenedPicker = ({ children }: { children: ReactNode }) => {
+  const [open, setOpen] = useState(true)
+  return (
+    <Popup open={open} onOpenChange={setOpen}>
+      <PopupContent>{children}</PopupContent>
+    </Popup>
+  )
+}
 
 test("two hosts' sealed defaults say which host each is, and a name nobody shares stands alone", async () => {
   // Linked in an order no list draws: the rows prove the order comes from the labels.
@@ -176,6 +191,51 @@ test("the picker scores a model from the shipped payload", async () => {
         "a model it has no row for says so",
       )
       await settle()
+    },
+  )
+})
+
+/**
+ * A host with one provider has nothing to choose between, so its models show at once — under the
+ * provider's own name, in the picker's own layer. A provider the reader opened stacks a sheet over
+ * that layer; one the picker drilled into on its own must not, or the models are drawn twice and the
+ * layer standing over the list has no way back.
+ */
+test("a host with one provider draws its models once, and its sheet is put away by its close", async () => {
+  await mount(
+    <OpenedPicker>
+      <ModelPicker
+        providers={[
+          {
+            slug: "anthropic",
+            name: "Anthropic",
+            models: ["claude-sonnet-4-6", "deepseek-v4-flash"],
+          },
+        ]}
+        fallback={{ label: "Default" }}
+        onChoose={() => {}}
+      />
+    </OpenedPicker>,
+    async () => {
+      const layers = () => findAll("[data-popup-form]")
+      await until(async () => text().includes("claude-sonnet-4-6"), "the picker's model rows")
+      assert.equal(layers().length, 1, "one layer, not one stacked over the picker's own")
+      assert.equal(
+        wordsOf(layers()[0].querySelector('[data-slot="sheet-title"]')),
+        "Anthropic",
+        "the picker's own header names the provider",
+      )
+      const rows = (model: string) => findAll("li").filter((row) => wordsOf(row).includes(model))
+      assert.equal(
+        rows("claude-sonnet-4-6").length,
+        1,
+        "each model is one row, not one in each of two layers",
+      )
+      assert.equal(rows("deepseek-v4-flash").length, 1, "and so is the host's other model")
+      // The sheet's own close, the ordinary way out: with a second layer standing over the list,
+      // pressing it only clears the provider the reader opened and the stacked sheet opens again.
+      await click(document.querySelector('button[aria-label="Close"]'))
+      await until(async () => layers().length === 0, "the sheet is put away")
     },
   )
 })
