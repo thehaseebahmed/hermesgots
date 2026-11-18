@@ -35,7 +35,7 @@ function reply(at: number, hermesAt: number, words = "Booked."): Message {
 }
 
 /** One bot with one chat it has spoken in, read on this device before its newest turn. */
-async function seed(legacy: boolean) {
+async function seed(legacy: boolean, rows = true) {
   // Marks and holds live in the page's memory as well as its storage: each case starts from neither.
   forgetRead(CHAT)
   releaseHeld(CHAT)
@@ -53,7 +53,9 @@ async function seed(legacy: boolean) {
     updatedAt: 500,
     changedAt: 10,
   })
-  await db.messages.put(reply(500, 400, "Earlier."))
+  // chat-next keeps a thread's rows in its own tables and writes no `db.messages`, so a list on it
+  // reads the record's clock alone.
+  if (rows) await db.messages.put(reply(500, 400, "Earlier."))
   markRead(CHAT, 100)
   globalThis.fetch = async () => json({})
 }
@@ -127,6 +129,58 @@ test("a reply newer than the notice keeps its dot", async () => {
     await until(async () => Boolean(listRow()), "the chat's row")
     await sync(NOTICE + 2_000)
     await until(async () => dotted(listRow()), "a reply the host wrote after the notice to be news")
+  })
+  await seedSidebar()
+  await mount(sidebar, async () => {
+    await until(async () => dotted(botRow()), "and the sidebar to say so")
+  })
+})
+
+test("a newer turn whose record synced before its reply keeps its dot", async () => {
+  await seed(true)
+  stop = followHeldReads()
+  await press(NOTICE)
+  await mount(list, async () => {
+    await until(async () => Boolean(listRow()), "the chat's row")
+    await sync(NOTICE - 1_000)
+    await until(async () => !dotted(listRow()), "the notice's own reply to stay read")
+    // An hour on, another device sends again: its record lands before any of the turn's rows.
+    await db.conversations.update(CHAT, { updatedAt: NOTICE + 3_600_000 })
+    await until(async () => dotted(listRow()), "the newer turn to be news")
+  })
+  await seedSidebar()
+  await mount(sidebar, async () => {
+    await until(async () => dotted(botRow()), "and the sidebar to say so")
+  })
+})
+
+test("with no rows on the device, the notice's own turn landing later stays read", async () => {
+  await seed(true, false)
+  stop = followHeldReads()
+  await press(NOTICE)
+  await mount(list, async () => {
+    await until(async () => Boolean(listRow()), "the chat's row")
+    // The device that sent the turn stamped its end on its own clock, a little ahead of the host's.
+    await db.conversations.update(CHAT, { updatedAt: NOTICE + 30_000 })
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    await until(async () => !dotted(listRow()), "the notice's turn to stay read")
+  })
+  await seedSidebar()
+  await mount(sidebar, async () => {
+    await until(async () => Boolean(botRow()), "the bot's row")
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    assert.equal(dotted(botRow()), false, "and the sidebar's row reads it the same way")
+  })
+})
+
+test("with no rows on the device, a newer turn keeps its dot", async () => {
+  await seed(true, false)
+  stop = followHeldReads()
+  await press(NOTICE)
+  await mount(list, async () => {
+    await until(async () => Boolean(listRow()), "the chat's row")
+    await db.conversations.update(CHAT, { updatedAt: NOTICE + 3_600_000 })
+    await until(async () => dotted(listRow()), "a turn an hour after the notice to be news")
   })
   await seedSidebar()
   await mount(sidebar, async () => {

@@ -12,6 +12,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
+  CLOCK_SLACK_MS,
   HOLD_KEEP,
   HOLD_MS,
   drainTrayReads,
@@ -104,6 +105,25 @@ test("a held chat is marked through its own clocks while its newest reply is one
     { mark: NOW + 8_500 },
   )
   assert.deepEqual(heldMark(hold, NOW + 9_000, { updatedAt: NOW + 7_000 }), { mark: NOW + 7_000 })
+  // With no rows on the device the record is the clock, and a stamp a little ahead of the host's,
+  // from the device that sent the turn, is still the notice's turn.
+  assert.deepEqual(heldMark(hold, NOW + 9_000, { updatedAt: NOW + CLOCK_SLACK_MS }), {
+    mark: NOW + CLOCK_SLACK_MS,
+  })
+})
+
+test("a record clock past what the notice covered is news, with rows or without", () => {
+  const hold = { through: NOW, press: NOW + 5_000, until: NOW + HOLD_MS }
+  assert.equal(heldMark(hold, NOW + 9_000, { updatedAt: NOW + CLOCK_SLACK_MS + 1 }), "release")
+  // A newer turn's record can land before its reply: the covered reply doesn't vouch for it.
+  assert.equal(
+    heldMark(hold, NOW + 9_000, {
+      at: NOW + 8_000,
+      updatedAt: NOW + 8_000 + CLOCK_SLACK_MS + 1,
+      newest: { hermesAt: NOW - 1_000, createdAt: NOW + 8_000 },
+    }),
+    "release",
+  )
 })
 
 test("a reply newer than the notice keeps its dot, and the hold lets go", () => {

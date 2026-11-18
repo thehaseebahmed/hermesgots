@@ -6,8 +6,8 @@
  * A press alone can be overtaken: a catch-up floors a synced message's `createdAt` forward and the
  * record's `updatedAt` moves when it syncs, both after the press. So a press holds its chat read
  * through `through`, the host's moment of what the notice reported, and the chat is marked again by
- * its own clocks while its newest reply is one the host wrote no later than that. A reply written
- * after it is news, and keeps its dot. Import-free, so `scripts/test-tray-reads.mjs` runs it.
+ * its own clocks while they are ones that moment covered (`heldMark`). A reply written after it, or a
+ * record moved well past it, is news, and keeps its dot. Import-free, so `scripts/test-tray-reads.mjs` runs it.
  */
 
 /** One press: the chat, when it was pressed (this device's clock), and what it covered (the host's). */
@@ -95,9 +95,19 @@ export interface HeldClocks {
 }
 
 /**
- * What a hold does with a chat's clocks: mark it through them while its newest reply is one the
- * notice covered, or let go — once that reply is newer, which is news, or once the day is out. A
- * reply with no host clock yet is one this device wrote, judged against the press on its own clock.
+ * How far a device's clock may stand past the host's and still be the turn the notice reported: the
+ * device that sent the turn stamps its record on its own clock, as a catch-up stamps the row it adopts.
+ */
+export const CLOCK_SLACK_MS = 60 * 1000
+
+/**
+ * What a hold does with a chat's clocks: mark it through the ones the notice covered, or let go once
+ * one of them is news — a reply the host wrote after it, or a record moved past it — or the day is out.
+ *
+ * A reply's host clock settles it. The record's own clock carries none, so it is covered while it
+ * stands within the slack of what the notice covered, or of a covered reply this device just adopted.
+ * A device holding no reply rows (chat-next keeps its own) has only the record to go by, so a record
+ * a device stamped long after the turn ended reads as news: the dot is kept rather than lost.
  */
 export function heldMark(
   hold: Hold,
@@ -111,6 +121,12 @@ export function heldMark(
       newest.hermesAt != null ? newest.hermesAt > hold.through : newest.createdAt > hold.press
     if (newer) return "release"
   }
-  const mark = Math.max(clocks.at ?? 0, clocks.updatedAt ?? 0)
+  const updatedAt = clocks.updatedAt
+  if (updatedAt != null) {
+    // Anything up to the press was marked by the press itself.
+    const covers = Math.max(hold.through, newest?.createdAt ?? 0) + CLOCK_SLACK_MS
+    if (updatedAt > Math.max(hold.press, covers)) return "release"
+  }
+  const mark = Math.max(clocks.at ?? 0, updatedAt ?? 0)
   return mark > 0 ? { mark } : {}
 }
