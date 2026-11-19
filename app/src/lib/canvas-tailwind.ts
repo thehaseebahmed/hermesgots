@@ -8,9 +8,12 @@
  * disk, so the browser needs no native scanner and the frame gets plain CSS rather than a runtime.
  */
 
-import { compile } from "tailwindcss"
+import { compile as appCompiler } from "tailwindcss"
 
 import { TOKENS } from "./canvas-document.ts"
+
+/** Tailwind's own compiler, as the class compile takes it: the app's, unless a caller names one. */
+export type CanvasCompiler = typeof appCompiler
 
 /** Every token but the radius is a colour: it names a `bg-`, `text-` and `border-` utility. */
 const COLOURS = TOKENS.filter((token) => token !== "radius")
@@ -59,8 +62,17 @@ export function canvasClasses(html: string): string[] {
   return [...found].sort()
 }
 
-/** The CSS a page's classes compile to: `base` is Tailwind's own stylesheet, the theme is ours. */
-export async function compileCanvasCss(base: string, candidates: string[]): Promise<string> {
+/**
+ * The CSS a page's classes compile to: `base` is Tailwind's own stylesheet, the theme is ours, and
+ * the compiler is an argument — the host's harness page hands the class compile the compiler its
+ * bundle carries rather than the module reaching for the app's own (ADR 0171). A caller that names
+ * none gets the app's, which is the one every draw in the app uses.
+ */
+export async function compileCanvasCss(
+  base: string,
+  candidates: string[],
+  compile: CanvasCompiler = appCompiler,
+): Promise<string> {
   const compiler = await compile(`${base}\n${CANVAS_THEME}`, {})
   return compiler.build(candidates)
 }

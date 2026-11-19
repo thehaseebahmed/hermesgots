@@ -7,6 +7,7 @@
  * build wrote is not CSS this one can hand a page.
  */
 
+import { compile } from "tailwindcss"
 import base from "tailwindcss/index.css?raw"
 
 import { db } from "@/lib/db"
@@ -26,7 +27,7 @@ export async function canvasCss(id: string, version: number, html: string): Prom
   const key = canvasCssKey(id, version)
   const held = await db.canvasCss.get(key)
   if (held) return held.css
-  const css = await compileCanvasCss(base, canvasClasses(html))
+  const css = await compileCanvasCss(base, canvasClasses(html), compile)
   // Keeping it is a convenience, not the draw: a device out of room still gets its page styled.
   await db.canvasCss.put({ key, css, at: Date.now() }).catch(quietly("Keeping a canvas's classes"))
   void pruneCanvasCss().catch(quietly("Letting a canvas's old classes go"))
