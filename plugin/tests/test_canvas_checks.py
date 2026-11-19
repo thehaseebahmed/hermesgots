@@ -4,8 +4,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 import sys
+import tempfile
 import unittest
+from pathlib import Path
 from types import ModuleType
 from unittest import mock
 from unittest.mock import patch
@@ -13,6 +17,36 @@ from unittest.mock import patch
 import plugin
 from plugin import canvas_checks
 from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
+
+# The two lines a program hands the page its request on, and where it puts its screenshots: the
+# shapes are the runner's own, so the test holds them rather than reading them out of the module it
+# is checking.
+REQUEST_LINE = re.compile(r"^REQUEST = (.*)$", re.M)
+FOLDER_LINE = re.compile(r"^FOLDER = (.*)$", re.M)
+
+# A draft a build would hand a check: a page that reads its canvas's data and counts a tap.
+PAGE = """<!DOCTYPE html>
+<html><head><title>Tracker</title></head>
+<body><div id="count">0</div><button id="plus">Add one</button>
+<script>
+var n = 0;
+document.getElementById("plus").addEventListener("click", function () {
+  n += 1;
+  document.getElementById("count").textContent = String(n);
+});
+window.canvas.data.list("tasks").then(function (rows) {
+  document.getElementById("count").textContent = String(rows.length);
+});
+</script></body></html>"""
+
+# The canvas's data, as a snapshot a check is answered from.
+DATA = {"tasks": [{"collection": "tasks", "id": "a", "doc": {"title": "one"}, "at": 1}]}
+
+# The tests a build's plan filed: one that passes, and one the page breaks.
+TESTS = [
+    {"name": "the counter reads the snapshot", "script": "return 1"},
+    {"name": "the page breaks it", "script": "throw new Error('the page broke it')"},
+]
 
 
 def plant_layer(available: bool = True) -> patch:
@@ -48,6 +82,66 @@ def plant_unreadable_layer() -> patch:
     cli.browser_exec_available = unreadable
     tools.browser_use_cli = cli
     return patch.dict(sys.modules, {"tools": tools, "tools.browser_use_cli": cli})
+
+
+def plant_runner(answer=None) -> patch:
+    """Hermes's browser layer as a host that has it stands, with the runner's program answered.
+
+    ``browser_exec`` answers a JSON string (``tool_result`` in ``tools/registry.py``), so this does
+    too: it reads the request out of the program the runner generated — which is what proves the
+    runner serialised the document, the snapshot and the tests — and answers the report ``answer``
+    builds from it, the way the harness page would. The four screenshots are the program's own: it
+    takes them with the layer's ``capture_screenshot``, so this writes a file per drawing and names
+    it the way the program does. The browser's own side, a Chromium drawing that page, is what a
+    plugin test cannot run; a probe on a real host is what verifies it.
+    """
+    programs = []
+
+    def browser_exec(code: str, session: str = "", timeout_s: int = 0, **kwargs):
+        found = REQUEST_LINE.search(code)
+        folder = Path(FOLDER_LINE.search(code).group(1).strip("'\""))
+        programs.append(
+            {
+                "code": code,
+                "session": session,
+                "timeout_s": timeout_s,
+                "request": json.loads(found.group(1)) if found else None,
+            }
+        )
+        said = answer(json.loads(found.group(1))) if found and answer else {"tests": [], "console": []}
+        shots = []
+        for width, _height, mode in canvas_checks.DRAWINGS:
+            path = folder / f"{width}-{mode}.png"
+            path.write_bytes(b"\x89PNG\r\n\x1a\n")
+            shots.append({"width": width, "mode": mode, "path": str(path)})
+        return json.dumps(
+            {"success": True, "exit_code": 0, "output": json.dumps({**said, "shots": shots})}
+        )
+
+    tools = ModuleType("tools")
+    cli = ModuleType("tools.browser_use_cli")
+    cli.browser_exec = browser_exec
+    cli.browser_exec_available = lambda: True
+    tools.browser_use_cli = cli
+    planted = patch.dict(sys.modules, {"tools": tools, "tools.browser_use_cli": cli})
+    planted.programs = programs
+    return planted
+
+
+def page_answer(request):
+    """What the harness page answers for a page that breaks one of its tests: the tests the request
+    carries, the one whose script throws answered with what it threw, and the page's own console."""
+    tests = []
+    for one in request["tests"]:
+        broken = "throw" in one["script"]
+        tests.append(
+            {
+                "name": one["name"],
+                "ok": not broken,
+                "error": "the page broke it" if broken else None,
+            }
+        )
+    return {"tests": tests, "console": ["error: the page said something"]}
 
 
 class ProbeTest(unittest.TestCase):
@@ -98,6 +192,120 @@ class AdvertisedTest(unittest.TestCase):
                 with patch.object(canvas_checks, "available", return_value=None if found else "no"):
                     features = self.call("/info")["payload"]["features"]
                     self.assertEqual("canvas_checks" in features, listed)
+
+
+class CheckTest(unittest.TestCase):
+    """The runner over Hermes's browser layer: what it hands the page, and what it answers."""
+
+    def setUp(self) -> None:
+        self.folder = Path(tempfile.mkdtemp())
+        self.addCleanup(lambda: __import__("shutil").rmtree(self.folder, ignore_errors=True))
+
+    def run_check(self, answer=None):
+        # The layer the runner calls into, planted whole: `plant_runner` already carries the
+        # availability check the probe reads, so a second plant would only take the entry point away.
+        planted = plant_runner(answer)
+        self.addCleanup(planted.stop)
+        with planted:
+            return canvas_checks.check(PAGE, DATA, TESTS, self.folder), planted
+
+    def test_a_page_that_breaks_a_test_answers_it_failing_and_shoots_four_ways(self) -> None:
+        report, _ = self.run_check(page_answer)
+        self.assertTrue(report.ran, report.reason)
+        # One test passes, one fails with the words the page gave, and the console's errors ride
+        # beside them.
+        self.assertEqual(
+            report.tests,
+            [
+                {"name": "the counter reads the snapshot", "ok": True, "error": None},
+                {"name": "the page breaks it", "ok": False, "error": "the page broke it"},
+            ],
+        )
+        self.assertEqual(report.console, ["error: the page said something"])
+        self.assertFalse(report.passing)
+        # G8: a phone and a tablet, in the reader's light and dark mode — four screenshots, each
+        # named for the drawing it was taken at.
+        self.assertEqual(
+            [(shot.width, shot.mode) for shot in report.shots],
+            [(390, "light"), (390, "dark"), (768, "light"), (768, "dark")],
+        )
+        for shot in report.shots:
+            self.assertTrue(Path(shot.path).is_file(), f"{shot.path} was not written")
+
+    def test_a_page_whose_tests_all_pass_answers_them_passing(self) -> None:
+        report, _ = self.run_check(lambda request: {"tests": [
+            {"name": one["name"], "ok": True, "error": None} for one in request["tests"]
+        ], "console": []})
+        self.assertTrue(report.passing)
+        self.assertEqual(len(report.tests), 2)
+
+    def test_the_runner_hands_the_page_the_document_the_snapshot_and_the_tests(self) -> None:
+        report, planted = self.run_check(page_answer)
+        self.assertTrue(report.ran, report.reason)
+        # One program for the whole check, carrying the request once: the document, the snapshot and
+        # the tests, so a 256 KB page is not four copies in the program the layer runs.
+        self.assertEqual(len(planted.programs), 1)
+        program = planted.programs[0]
+        self.assertEqual(program["request"], {"html": PAGE, "data": DATA, "tests": TESTS})
+        # The harness page is opened as a local file, and the four drawings are asked for by name.
+        self.assertIn(canvas_checks.HARNESS.as_uri(), program["code"])
+        for width, _height, mode in canvas_checks.DRAWINGS:
+            self.assertIn(mode, program["code"])
+        self.assertIn(str(390), program["code"])
+        self.assertIn(str(768), program["code"])
+        # One session and one bound, so a slow host's four renders are inside the layer's own timeout.
+        self.assertEqual(program["session"], canvas_checks.SESSION)
+        self.assertEqual(program["timeout_s"], canvas_checks.CHECK_TIMEOUT_S)
+
+    def test_a_host_with_no_browser_answers_the_reason_and_no_shots(self) -> None:
+        with take_layer_away():
+            report = canvas_checks.check(PAGE, DATA, TESTS, self.folder)
+        self.assertFalse(report.ran)
+        self.assertIn("browser", report.reason)
+        self.assertEqual(report.shots, [])
+
+    def test_a_host_whose_engine_is_missing_answers_the_reason(self) -> None:
+        with plant_layer(available=False):
+            report = canvas_checks.check(PAGE, DATA, TESTS, self.folder)
+        self.assertEqual(report.reason, canvas_checks.NO_ENGINE)
+        self.assertEqual(report.shots, [])
+
+    def test_a_plugin_with_no_harness_answers_the_reason(self) -> None:
+        with plant_layer(), patch.object(canvas_checks, "HARNESS", self.folder / "gone.html"):
+            report = canvas_checks.check(PAGE, DATA, TESTS, self.folder)
+        self.assertEqual(report.reason, canvas_checks.NO_HARNESS)
+        self.assertEqual(report.shots, [])
+
+    def test_a_layer_that_refuses_is_answered_rather_than_raised(self) -> None:
+        def refusing(code, session="", timeout_s=0, **kwargs):
+            return json.dumps({"error": "browser-harness is missing from Hermes's Python environment."})
+
+        with plant_runner(), plant_layer():
+            with patch.object(canvas_checks, "_layer", lambda: refusing):
+                report = canvas_checks.check(PAGE, DATA, TESTS, self.folder)
+        self.assertEqual(
+            report.reason,
+            "browser-harness is missing from Hermes's Python environment.",
+        )
+        self.assertEqual(report.shots, [])
+
+    def test_a_layer_that_raises_is_answered_rather_than_raised(self) -> None:
+        def exploding(code, session="", timeout_s=0, **kwargs):
+            raise OSError("the daemon is gone")
+
+        with plant_layer():
+            with patch.object(canvas_checks, "_layer", lambda: exploding):
+                report = canvas_checks.check(PAGE, DATA, TESTS, self.folder)
+        self.assertEqual(report.reason, canvas_checks.FAILED)
+
+    def test_a_check_that_prints_nothing_readable_answers_the_reason(self) -> None:
+        def silent(code, session="", timeout_s=0, **kwargs):
+            return json.dumps({"success": True, "exit_code": 0, "output": "not json at all"})
+
+        with plant_layer():
+            with patch.object(canvas_checks, "_layer", lambda: silent):
+                report = canvas_checks.check(PAGE, DATA, TESTS, self.folder)
+        self.assertEqual(report.reason, canvas_checks.NO_ANSWER)
 
 
 if __name__ == "__main__":
