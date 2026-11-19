@@ -57,6 +57,10 @@ from .store import connect, home_of
 
 logger = logging.getLogger(__name__)
 
+# A model call is given two minutes. With no timeout Hermes bounds a plugin's call at its 30 s side-call
+# default, and a reply written whole (the judge's, a case) can take longer than that.
+MODEL_TIMEOUT_S = 120
+
 # The plugin context, kept by wire() so llm_gate can see whether the host offers ctx.llm.
 ctx: Any = None
 
@@ -955,6 +959,7 @@ def _structured(purpose: str, system: str, instructions: str, text: str, schema:
     options = {key: value for key, value in (model or {}).items() if key in ("provider", "model") and value}
     problem = ""
     for _attempt in range(2):
+        started = time.monotonic()
         try:
             result = llm.complete_structured(
                 instructions=instructions,
@@ -964,20 +969,23 @@ def _structured(purpose: str, system: str, instructions: str, text: str, schema:
                 max_tokens=max_tokens,
                 temperature=0.3,
                 purpose=f"gots.research.{purpose}",
+                timeout=MODEL_TIMEOUT_S,
                 **options,
             )
         except ValueError as error:
             # Hermes validates the reply against the schema when it can.
+            logger.warning("gots.research.%s failed after %.1f s: %s", purpose, time.monotonic() - started, error)
             problem = str(error)
             continue
         except Exception as error:
-            name = type(error).__name__
+            logger.warning("gots.research.%s failed after %.1f s: %s", purpose, time.monotonic() - started, error)
             name = type(error).__name__
             if options and ("Trust" in name or "Override" in name or "Denied" in name):
                 raise ResearchError(
                     f"{error} Allow it with `hermes plugins enable gots`, or pick Default.", 403
                 ) from None
             raise ResearchError(f"The model call failed: {error}", 502) from None
+        logger.info("gots.research.%s answered in %.1f s", purpose, time.monotonic() - started)
         parsed = getattr(result, "parsed", None)
         if isinstance(parsed, dict):
             return parsed

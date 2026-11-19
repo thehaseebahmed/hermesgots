@@ -279,6 +279,34 @@ class MeetingsTest(unittest.TestCase):
         meetings._job(self.path, found["id"])
         return meetings.meeting(self.path, found["id"])
 
+    def test_every_model_call_carries_the_two_minute_timeout(self):
+        self.written([{"at": 0, "text": "Ana: ship Friday"}], notes(), {"topics": []})
+        self.assertTrue(self.llm.calls)
+        self.assertEqual([call.get("timeout") for call in self.llm.calls], [120] * len(self.llm.calls))
+
+    def test_a_model_calls_elapsed_time_is_logged_when_it_answers(self):
+        with self.assertLogs(meetings.logger, level="INFO") as logged:
+            self.written([{"at": 0, "text": "Ana: ship Friday"}], notes(), {"topics": []})
+        self.assertEqual(logged.records[0].levelname, "INFO")
+        self.assertRegex(logged.records[0].getMessage(), r"gots\.meetings\.\w+ answered in \d+\.\d s")
+
+    def test_a_model_calls_elapsed_time_is_logged_when_it_fails(self):
+        self.llm.answers.append(TimeoutError("Request timed out."))
+        with self.assertLogs(meetings.logger, level="INFO") as logged:
+            with self.assertRaises(meetings.MeetingError):
+                meetings._structured("sys", "text", "notes")
+        self.assertEqual(logged.records[-1].levelname, "WARNING")
+        self.assertRegex(
+            logged.records[-1].getMessage(), r"gots\.meetings\.notes failed after \d+\.\d s: .*Request timed out"
+        )
+
+    def test_a_topics_call_that_fails_is_logged_and_the_notes_still_land(self):
+        with self.assertLogs(meetings.logger, level="INFO") as logged:
+            done = self.written([{"at": 0, "text": "Ana: ship Friday"}], notes(), TimeoutError("Request timed out."))
+        self.assertEqual(done["stage"], "ready")
+        self.assertEqual([call["timeout"] for call in self.llm.calls], [120, 120])
+        self.assertTrue(any("gots.meetings.topics failed after" in r.getMessage() for r in logged.records))
+
     def test_notes_keep_the_stamps_the_transcript_has_and_mark_the_rest(self):
         lines = [{"at": 0, "text": "Ana: ship Friday"}, {"at": 724, "text": "Budget is fixed"}]
         done = self.written(

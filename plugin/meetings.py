@@ -51,6 +51,9 @@ from .store import connect
 
 logger = logging.getLogger(__name__)
 
+# A model call is given two minutes; Hermes's default for a plugin's call is 30 s.
+MODEL_TIMEOUT_S = 120
+
 # A window of audio is at most 5 minutes, a meeting at most 3 hours.
 PART_SECONDS = 300
 MAX_SECONDS = 3 * 60 * 60
@@ -611,6 +614,7 @@ def _structured(
         raise MeetingError(no_notes() or "No model.", 501)
     problem = ""
     for _attempt in range(2):
+        started = time.monotonic()
         try:
             result = llm.complete_structured(
                 instructions=system,
@@ -620,12 +624,16 @@ def _structured(
                 max_tokens=4000,
                 temperature=0.2,
                 purpose=f"gots.meetings.{purpose}",
+                timeout=MODEL_TIMEOUT_S,
             )
         except ValueError as error:
+            logger.warning("gots.meetings.%s failed after %.1f s: %s", purpose, time.monotonic() - started, error)
             problem = str(error)
             continue
         except Exception as error:
+            logger.warning("gots.meetings.%s failed after %.1f s: %s", purpose, time.monotonic() - started, error)
             raise MeetingError(f"The model call failed: {error}", 502) from None
+        logger.info("gots.meetings.%s answered in %.1f s", purpose, time.monotonic() - started)
         parsed = getattr(result, "parsed", None)
         if isinstance(parsed, dict):
             return parsed
@@ -787,6 +795,7 @@ def write_topics(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     found: List[Dict[str, Any]] = []
     for piece in pieces:
         system = TOPICS_SYSTEM.replace("{count}", count)
+        started = time.monotonic()
         try:
             result = llm.complete_structured(
                 instructions=system,
@@ -796,9 +805,12 @@ def write_topics(lines: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 max_tokens=3000,
                 temperature=0.2,
                 purpose="gots.meetings.topics",
+                timeout=MODEL_TIMEOUT_S,
             )
-        except Exception:
+        except Exception as error:
+            logger.warning("gots.meetings.topics failed after %.1f s: %s", time.monotonic() - started, error)
             continue
+        logger.info("gots.meetings.topics answered in %.1f s", time.monotonic() - started)
         parsed = getattr(result, "parsed", None)
         if isinstance(parsed, dict):
             found.extend(check_topics(parsed, lines)[:12])

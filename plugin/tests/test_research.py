@@ -180,6 +180,30 @@ class MissionTest(unittest.TestCase):
             {"provider": "anthropic", "model": "claude-opus-5-5"},
         )
 
+    def test_every_model_call_carries_the_two_minute_timeout(self) -> None:
+        self.reach_reading()
+        self.assertGreaterEqual(len(self.llm.calls), 2)
+        self.assertEqual([call.get("timeout") for call in self.llm.calls], [120] * len(self.llm.calls))
+
+    def test_a_model_calls_elapsed_time_is_logged_when_it_answers(self) -> None:
+        with self.assertLogs(research.logger, level="INFO") as logged:
+            self.reach_reading()
+        line = next(entry for entry in logged.records if "gots.research.brief" in entry.getMessage())
+        self.assertEqual(line.levelname, "INFO")
+        self.assertRegex(line.getMessage(), r"gots\.research\.brief answered in \d+\.\d s")
+
+    def test_a_model_calls_elapsed_time_is_logged_when_it_fails(self) -> None:
+        def broken(**kwargs):
+            raise TimeoutError("Request timed out.")
+
+        self.llm.complete_structured = broken
+        with self.assertLogs(research.logger, level="INFO") as logged:
+            with self.assertRaises(research.ResearchError):
+                research._structured("verdict", "sys", "ins", "text", {"type": "object"})
+        line = logged.records[-1]
+        self.assertEqual(line.levelname, "WARNING")
+        self.assertRegex(line.getMessage(), r"gots\.research\.verdict failed after \d+\.\d s: .*Request timed out")
+
     def test_a_mission_from_question_to_guide_and_quiz(self) -> None:
         self.reach_reading()
         first = self.claim("based solely on attention mechanisms, dispensing with recurrence and convolutions entirely.")
