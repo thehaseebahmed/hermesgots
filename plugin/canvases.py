@@ -40,11 +40,6 @@ lets the whole of it be capped at ``DATA_BYTES`` with one document at ``DOC_MAX_
 whole-array read an app from before the paged route makes survives, bounded to
 ``LEGACY_DATA_BYTES``.
 
-Each canvas also has a folder of its own under the plugin's data (``keep``, ``folder_of``): the
-draft a build writes, its plans, its tests and its memory. It is made with the canvas and taken with
-it, each file and the whole folder capped, and no route or bridge read reaches it — a page's only
-channel answers the store's own data (G4).
-
 A page calls a tool on the host only when the version it is drawn from declared that tool, and only
 once the user has answered for it: ``may_call`` reads the version's list and the canvas's own grant
 row, and answers one of the verdicts ``page_calls`` names. The grant is the canvas's rather than a
@@ -86,9 +81,6 @@ logger = logging.getLogger(__name__)
 # A document a phone has to hold in memory and draw; the cap is the whole write or nothing.
 MAX_BYTES = 256 * 1024
 KEEP_VERSIONS = 20
-# The columns a commit writes itself, so a version's fields are the ones beside them. The store's
-# own schema is the author of which those are: a field naming one of these, or one this store
-# doesn't carry, is a caller's mistake rather than a row to attempt.
 COMMIT_COLUMNS = ("canvas_id", "version", "html", "at")
 # How much of a prompt becomes a canvas's title — and so its chat's.
 TITLE_CHARS = 60
@@ -118,20 +110,9 @@ NAME_CHARS = 64
 # A version's declared tools are the options sheet's rows: every one is a switch, so a version that
 # declared thousands would be a list nobody could read and a dialog nobody could answer.
 TOOLS_MAX = 50
-# A canvas's own folder under the plugin's data (ADR 0170): the draft a build writes, its plans,
-# its tests and its memory. It is made with the canvas and taken with it, and no route or bridge
-# read reaches it — a page's only channel answers the store's own data (G4).
 FOLDER = "canvas"
-# What one file in a canvas's folder may weigh: a page at most — the same 256 KB a write admits,
-# kept as its own number because the draft is a page and a plan, a test and a memory are not.
 FILE_BYTES = 256 * 1024
-# What one file in a canvas's folder may be named: one plain file name, chosen by the plugin's own
-# writes rather than sent by a page, so the cap is the folder's own too.
 FILE_NAME_CHARS = 64
-# What the whole folder may weigh: the draft, the plans, the tests and the memory one canvas keeps.
-# A canvas keeps one draft and a handful of small files beside it, so four megabytes is room no
-# canvas reaches — and a bound a host can hold, since a canvas that grew without end would be a
-# disk that filled.
 FOLDER_BYTES = 4 * 1024 * 1024
 # A start's files are one queued turn's attachments, and the queue keeps `outbox.MAX_FILES` of
 # them; a longer list is refused rather than trimmed without a word.
@@ -1057,17 +1038,7 @@ def _commit(
     title: Optional[Any] = None,
     image: Any = None,
 ) -> Dict[str, Any]:
-    """One version, written under the store's write lock, and the canvas as it now is.
-
-    ``html`` is a write's whole document; ``edits`` are an edit's pairs, applied to the version the
-    record points at, which is read on this connection under this transaction. ``fields`` are the
-    per-version columns the version carries beyond its document and its consent list — the
-    requests, summary and check flag a build's publish carries (ADR 0170) — each named by the column
-    it lands in, so a caller that names none commits the document alone. ``tools`` is the consent
-    list this version declares, read here beside the 404: a write naming both a canvas that isn't
-    and a tool that can't be called is a canvas that isn't there, whatever its tools were. Both
-    answer the shape ``current`` does but for its ``data``: a version never touches a canvas's data.
-    """
+    """One version, written under the store's write lock, and the canvas as it now is."""
     named = title_of(title) if isinstance(title, str) and title.strip() else None
     pictured = _image(image) if image is not None else None
     carried = {name: value for name, value in (fields or {}).items() if value is not None}
@@ -1078,17 +1049,11 @@ def _commit(
         found = _record(conn, canvas_id)
         if found is None:
             raise CanvasError("There is no such canvas.", 404)
-        # The consent list has one door: the call's own ``tools``, read through ``_tools``. A
-        # version's fields are the data a build publishes, and a tools value smuggled in among
-        # them would reach the row unread and the answer as a decode error.
         if "tools" in carried:
             raise CanvasError(
                 "A version's tools are the call's own; its fields are the data a build publishes."
             )
         if carried:
-            # The store's own columns are which fields a version may carry, read here rather than
-            # trusted from the caller: a key naming one the commit writes itself, or one this
-            # store doesn't carry, is refused in words rather than attempted as a row.
             carried_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvas_versions)")}
             for name in carried:
                 if name in COMMIT_COLUMNS or name not in carried_columns:
@@ -1107,8 +1072,6 @@ def _commit(
             if pointer is None or not pointer["html"]:
                 raise CanvasError("This canvas has no document yet: write it with canvas_write first.")
             document = _apply(pointer["html"], edits)
-            # An edit changes the page rather than replacing it, so the tools it declared carry
-            # forward unless this edit declares its own.
             if "tools" not in carried:
                 carried["tools"] = json.dumps(pointer["tools"])
         scan(document)
@@ -1315,11 +1278,7 @@ def delete(
     except Exception:
         logger.debug("gots: couldn't drop %s's queued turns", found["session_id"], exc_info=True)
     events.note("canvas", found["session_id"], path, True)
-    # The folder goes with the record: nothing a build left in it outlives the canvas it was
-    # working on, and a canvas deleted before its first build leaves nothing behind.
     _close_folder(home, canvas_id)
-    # The session end is best effort like the turns beside it: a chat's mark and the record are
-    # gone, and a session this can't reach is one left behind rather than a delete that failed.
     try:
         cleanup.end_session(path, found["chat_id"], found["session_id"], home, db, now)
     except Exception:
@@ -1331,20 +1290,11 @@ def delete(
 
 
 def folder_of(home: Path, canvas_id: str) -> Path:
-    """A canvas's own folder, under the plugin's data directory.
-
-    Named by the canvas's id rather than its title: a title is the user's to change, and a rename
-    would orphan every file in it — the vault's notes are named the same way, for the same reason.
-    """
+    """A canvas's own folder, under the plugin's data directory."""
     return data_dir(home) / FOLDER / canvas_id
 
 
 def _open_folder(home: Path, canvas_id: str) -> None:
-    """Makes a canvas's folder with the canvas, quietly.
-
-    A folder that can't be made is a build that writes nothing later, not a canvas that fails to
-    open: the record and its versions are what a canvas is, and the folder is where a build works.
-    """
     try:
         folder_of(home, canvas_id).mkdir(parents=True, exist_ok=True)
     except OSError:
@@ -1352,22 +1302,10 @@ def _open_folder(home: Path, canvas_id: str) -> None:
 
 
 def _close_folder(home: Path, canvas_id: str) -> None:
-    """Takes a canvas's folder with the canvas: nothing here is ever read back, so what the folder
-    held goes with the canvas it belonged to.
-
-    Best effort, like the session end beside it — a folder left behind is disk a host can sweep,
-    not a canvas the user still sees.
-    """
     shutil.rmtree(folder_of(home, canvas_id), ignore_errors=True)
 
 
 def _folder_bytes(folder: Path, rewritten: str) -> int:
-    """What a canvas's folder weighs, the file being written left out; a folder that isn't there
-    weighs nothing.
-
-    The file being written is replaced rather than added to, so its own bytes are the folder's to
-    spend again — a draft rewritten at the same size is not a folder that grew.
-    """
     return sum(
         one.stat().st_size for one in folder.rglob("*") if one.is_file() and one.name != rewritten
     )
@@ -2046,8 +1984,6 @@ def create(
         "at": now,
     }
     _insert(path, found)
-    # The folder is made with the record: a build's first write has it to land in, and a canvas
-    # deleted before its first build leaves nothing behind.
     _open_folder(home_of(path), canvas_id)
     try:
         # The canvas row is in first: the run this queues may write to it the moment it starts.

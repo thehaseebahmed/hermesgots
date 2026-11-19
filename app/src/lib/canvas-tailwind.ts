@@ -14,7 +14,6 @@ import { compile as appCompiler } from "tailwindcss"
 
 import { TOKENS } from "./canvas-document.ts"
 
-/** Tailwind's own compiler, as the class compile takes it: the app's, unless a caller names one. */
 type CanvasCompiler = typeof appCompiler
 
 /** Every token but the radius is a colour: it names a `bg-`, `text-` and `border-` utility. */

@@ -479,16 +479,12 @@ class WriteTest(unittest.TestCase):
         self.assertEqual(canvases.listing(self.path)[0]["version"], 2)
 
     def test_a_write_to_a_canvas_that_isnt_there_answers_before_it_reads_the_tools(self) -> None:
-        # One answer for a canvas that isn't there, whatever else the call got wrong: the record
-        # is read inside the write lock, before the consent list this version would declare.
         with self.assertRaises(canvases.CanvasError) as refused:
             canvases.write(self.path, "canvas-gone", DOCUMENT, tools="tasks.todo_list")
         self.assertEqual(refused.exception.status, 404)
         self.assertIn("no such canvas", str(refused.exception))
 
     def test_a_write_whose_fields_name_the_tools_is_refused(self) -> None:
-        # The consent list has one door: a tools value smuggled in among the fields would reach
-        # the row unread and the answer as a decode error rather than a refusal.
         smuggled = {"tools": "not json at all"}
         with self.assertRaises(canvases.CanvasError) as refused:
             canvases.write(self.path, self.canvas["id"], DOCUMENT, fields=smuggled)
@@ -504,9 +500,6 @@ class WriteTest(unittest.TestCase):
         self.assertIn("tools", str(refused.exception))
 
     def test_a_field_the_store_has_no_column_for_is_refused(self) -> None:
-        # The store's own columns are which fields a version may carry, so a key naming one the
-        # commit writes itself, or one this store doesn't carry, is refused in words rather than
-        # attempted as a row — where it would answer as a store error, not a canvas one.
         for field in ("summarys", "at", "canvas_id"):
             with self.subTest(field=field):
                 with self.assertRaises(canvases.CanvasError) as refused:
@@ -2549,9 +2542,6 @@ class RouteTest(unittest.TestCase):
         })
 
     def test_a_delete_whose_session_cant_be_ended_still_answers_deleted(self) -> None:
-        # The session end is best effort, like the queued turns beside it: the record is gone and
-        # the chat is marked, so a session this can't reach is one left behind rather than a delete
-        # that failed, and the answer says deleted either way.
         canvas_id = self.make()
         canvases.write(self.path, canvas_id, DOCUMENT)
         with mock.patch.object(canvases.cleanup, "end_session", side_effect=OSError("no store")):

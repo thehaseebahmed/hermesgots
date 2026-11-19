@@ -1,12 +1,4 @@
-"""The probe for Hermes's browser layer: whether this host can draw a canvas's page at all.
-
-A build is checked on the page it renders (ADR 0171), which the plugin does through Hermes's own
-browser layer rather than a browser of its own. That a plugin can call into that layer was
-unverified when the plan was written, so the check runner starts with a probe: it looks for the
-entry without starting a browser, and says why where there is none. ``info`` advertises
-``canvas_checks`` only where the probe finds it, so the app knows a build would publish unchecked.
-
-Run: python3 -m unittest plugin.tests.test_canvas_checks -v
+"""Run: python3 -m unittest plugin.tests.test_canvas_checks -v
 """
 
 from __future__ import annotations
@@ -59,8 +51,6 @@ def plant_unreadable_layer() -> patch:
 
 
 class ProbeTest(unittest.TestCase):
-    """The probe's answer, with the layer in reach and with it gone."""
-
     def test_the_layer_in_reach_reads_ready(self) -> None:
         with plant_layer():
             self.assertIsNone(canvas_checks.available())
@@ -72,22 +62,16 @@ class ProbeTest(unittest.TestCase):
         self.assertIn("browser", reason)
 
     def test_a_layer_whose_engine_is_missing_reads_not_ready_with_the_reason(self) -> None:
-        # The entry is there but the engine behind it isn't installed: the same answer a host
-        # with no layer gives, because a build on either publishes unchecked.
         with plant_layer(available=False):
             reason = canvas_checks.available()
         self.assertIsInstance(reason, str)
         self.assertIn("hermes update", reason)
 
     def test_a_layer_that_cant_be_read_answers_rather_than_raises(self) -> None:
-        # A probe answers a host's question, so a host whose layer won't be read is told so in
-        # words rather than given a traceback, whatever calls it next.
         with plant_unreadable_layer():
             self.assertEqual(canvas_checks.UNREADABLE, canvas_checks.available())
 
     def test_a_layer_that_wont_import_reads_not_ready_with_the_reason(self) -> None:
-        # A module that is there but raises on the way in is a layer that couldn't be read, not a
-        # host with no layer at all: the two answers send a reader to different fixes.
         class Exploding(ModuleType):
             @property
             def browser_use_cli(self) -> ModuleType:
@@ -98,8 +82,6 @@ class ProbeTest(unittest.TestCase):
 
 
 class AdvertisedTest(unittest.TestCase):
-    """``info`` names ``canvas_checks`` only where the probe found the layer."""
-
     def setUp(self) -> None:
         temp_hermes_home(self)
         self.app = wire(self, RouteAdapter())
