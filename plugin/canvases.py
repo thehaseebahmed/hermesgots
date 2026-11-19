@@ -86,6 +86,10 @@ logger = logging.getLogger(__name__)
 # A document a phone has to hold in memory and draw; the cap is the whole write or nothing.
 MAX_BYTES = 256 * 1024
 KEEP_VERSIONS = 20
+# The columns a commit writes itself, so a version's fields are the ones beside them. The store's
+# own schema is the author of which those are: a field naming one of these, or one this store
+# doesn't carry, is a caller's mistake rather than a row to attempt.
+COMMIT_COLUMNS = ("canvas_id", "version", "html", "at")
 # How much of a prompt becomes a canvas's title — and so its chat's.
 TITLE_CHARS = 60
 # The whole of a canvas's data. The cap is the canvas's rather than one document's: a page reads its
@@ -1081,6 +1085,17 @@ def _commit(
             raise CanvasError(
                 "A version's tools are the call's own; its fields are the data a build publishes."
             )
+        if carried:
+            # The store's own columns are which fields a version may carry, read here rather than
+            # trusted from the caller: a key naming one the commit writes itself, or one this
+            # store doesn't carry, is refused in words rather than attempted as a row.
+            carried_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvas_versions)")}
+            for name in carried:
+                if name in COMMIT_COLUMNS or name not in carried_columns:
+                    raise CanvasError(
+                        f"A version's fields are the columns a build publishes beside the "
+                        f"document's own four; {name!r} is not one."
+                    )
         if tools is not None:
             carried["tools"] = _tools(tools)
         if edits is None:
@@ -1105,7 +1120,7 @@ def _commit(
             (canvas_id, found["version"]),
         )
         number = found["version"] + 1
-        columns = ["canvas_id", "version", "html", "at", *carried]
+        columns = [*COMMIT_COLUMNS, *carried]
         conn.execute(
             f"INSERT INTO canvas_versions ({', '.join(columns)}) "
             f"VALUES ({', '.join('?' * len(columns))})",

@@ -503,6 +503,16 @@ class WriteTest(unittest.TestCase):
             )
         self.assertIn("tools", str(refused.exception))
 
+    def test_a_field_the_store_has_no_column_for_is_refused(self) -> None:
+        # The store's own columns are which fields a version may carry, so a key naming one the
+        # commit writes itself, or one this store doesn't carry, is refused in words rather than
+        # attempted as a row — where it would answer as a store error, not a canvas one.
+        for field in ("summarys", "at", "canvas_id"):
+            with self.subTest(field=field):
+                with self.assertRaises(canvases.CanvasError) as refused:
+                    canvases.write(self.path, self.canvas["id"], DOCUMENT, fields={field: "kept"})
+                self.assertIn(field, str(refused.exception))
+
     def test_a_write_answers_with_the_guides_warnings(self) -> None:
         # A warning is advice beside the answer and never a gate: the version is stored, and the bot is
         # told what the guide would say before the user ever sees the page. Nothing here judges a
