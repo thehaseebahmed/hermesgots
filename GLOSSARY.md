@@ -595,8 +595,12 @@ An Android notice about one chat, drawn by Android as that chat's conversation: 
 _Avoid_: messaging notification, chat notification, large-icon notice
 
 **Reply link**:
-The one-shot link a finished or failed run's conversation notice carries for its inline Reply. Pressing it queues the typed text as a turn on that chat, built by the host, so a reply goes with the app closed. It lives a day, is spent once, and is withdrawn when no phone received the notice.
+The one-shot link a finished or failed run's conversation notice carries for its inline Reply. Pressing it queues the typed text as a turn on that chat, built by the host, so a reply goes with the app closed. It lives a day, is spent once, is withdrawn when no phone received the notice, and is taken only with a signature from a **Notice key**.
 _Avoid_: reply token, quick reply, reply URL
+
+**Notice key**:
+The P-256 key pair an Android phone makes in its Keystore and hands the public half of to each bot's plugin, over the bot's own key. A link the relay carries — a **Reply link**, or an approval's buttons drawn in the tray — is pressed only with a signature from it, since the registry and Firebase can read what they relay. A profile no phone has handed one to mints the relay no link.
+_Avoid_: device key, push key, signing key
 
 **Signed URL**:
 The address a bot's host mints for one file — a signature over its path, the profile and a few minutes of expiry — which the app draws every photo, clip and recording from, and a file's row opens. It stands in for the bot's key, which an `<img>` or a `<video>` can't send. It is asked for once per file and kept only while the expiry it names is worth drawing from: a page outlives the minutes a signature lives for, so another is minted when one runs out.
