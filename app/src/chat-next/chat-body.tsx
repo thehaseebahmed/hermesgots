@@ -78,6 +78,17 @@ export interface ChatBodyProps {
   onAway?: (away: boolean) => void
   limit: LimitValue
   /**
+   * The session this chat's thread is drawn from: the chat's own, or — for a canvas with a build
+   * running — that build's session, whose transcript is the work the reader asked for (ADR 0170).
+   */
+  session?: string
+  /**
+   * Whether every send of this chat is queued on the plugin rather than posted as a run: a canvas
+   * whose requests are builds sends that way, so the queue hands each request to the canvas's open
+   * build, or opens one (ADR 0170).
+   */
+  queueSends?: boolean
+  /**
    * The container's own read at a turn's end, run after the body's follow-up reads (the plugin's
    * title, context, todos, pull requests and library) — and run even when one of those fails, since
    * what it reads is its own: a canvas re-reads the page its session has just written.
@@ -97,10 +108,15 @@ export function ChatBody({
   blank,
   onAway,
   limit,
+  session,
+  queueSends,
   afterSettled,
 }: ChatBodyProps) {
   const id = chat.id
   const botKey = bot.id
+  // The session the thread is drawn from, and the one its sends are filed under: a canvas with a
+  // build running draws that build's session, and its chat's own has nothing in it.
+  const thread = session || chat.hermesSessionId
   // One component per chat and bot, so the composer keeps its text across the thread's renders:
   // a write to the bot's row hands back a new object, which mustn't remount it.
   const composer = useMemo(
@@ -114,7 +130,7 @@ export function ChatBody({
     <LimitContext.Provider value={limit}>
       <Suspense fallback={null}>
         <ChatNextThread
-          key={chat.hermesSessionId}
+          key={thread}
           chatId={id}
           code={Boolean(chat.projectId)}
           compacted={mayHoldArchive(chat.compactions)}
@@ -122,9 +138,12 @@ export function ChatBody({
           blank={blank}
           server={bot.baseUrl}
           apiKey={bot.apiKey}
-          session={chat.hermesSessionId}
+          session={thread}
+          queueSends={queueSends}
           prepareTurn={(text, attachments, at) => prepareTurn(id, text, attachments, at)}
-          queueTurn={async (text, attachments) => void (await queueTurn(id, text, attachments))}
+          queueTurn={async (text, attachments, on) =>
+            void (await queueTurn(id, text, attachments, on))
+          }
           steerTurn={(text, attachments) => steerTurn(id, text, attachments)}
           // What the plugin holds beside the transcript — the title, the context, the todos, a
           // session's workspace, pull requests and library — read as every chat reads it, and then

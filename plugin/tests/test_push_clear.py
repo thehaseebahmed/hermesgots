@@ -142,11 +142,17 @@ class Schema(unittest.TestCase):
         connect(path).close()
         conn = sqlite3.connect(path)
         try:
-            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 76)
+            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 77)
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
             self.assertIn(
                 "push_live",
-                {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")},
+                tables,
                 "a store already in use reaches the table a dismissal reads",
+            )
+            self.assertIn(
+                "canvas_builds",
+                tables,
+                "a store already in use reaches the table a canvas's builds are read from",
             )
             self.assertEqual(
                 conn.execute("SELECT COUNT(*) FROM push_prefs").fetchone()[0],

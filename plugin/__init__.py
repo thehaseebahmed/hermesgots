@@ -31,6 +31,7 @@ from . import (
     answers,
     approvals,
     attachments,
+    builds,
     canvases,
     canvas_checks,
     canvas_vault,
@@ -776,6 +777,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                         if await asyncio.to_thread(canvas_checks.available) is None
                         else []
                     ),
+                    # A canvas's requests are builds on their own sessions (builds.py, ADR 0170), so
+                    # a canvas's chat queues them on the plugin rather than posting them to the
+                    # canvas's session. Advertised beside the canvas rows: an app that predates it
+                    # keeps the one-session path, and the canvas it makes keeps it too.
+                    *([builds.FEATURE] if canvases.ready() and openui.canvas_ready() else []),
                     # Hermes's own MCP built-ins, and the MCP screen with them; see mcp.py.
                     *mcp_features,
                 ],
@@ -3810,6 +3816,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         A start that carries files names the chat it made for the canvas and the records it saved
         under that chat's session, and both go to the store as they came; one that names neither
         is a start with a prompt alone, which the store mints a chat for.
+
+        ``builds`` is what an app that knows the ``canvas_builds`` feature says: this canvas's
+        requests are builds on their own sessions, and the queue hands them to the canvas's open
+        build (builds.py, ADR 0170). An app that says nothing keeps today's one-session path, so a
+        canvas it made is written by its own session exactly as it was before.
         """
         denied = unauthorized(request)
         if denied is not None:
@@ -3828,6 +3839,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 body=body.get("body"),
                 chat_id=body.get("chat_id"),
                 files=body.get("files"),
+                builds=body.get("builds") is True,
             )
         except canvases.CanvasError as error:
             return _error(web, str(error), error.status)
@@ -4457,6 +4469,10 @@ def register(ctx) -> None:
         register_hook("pre_llm_call", sessions.before_llm)
         register_hook("post_llm_call", sessions.after_llm)
         register_hook("on_session_end", sessions.after_run)
+        # A build's run is over, so it publishes its draft as one version — or ends failed, keeping
+        # the draft for the next request (builds.py, ADR 0170). Before the queue's own wake, so the
+        # build is settled by the time the next item is looked for.
+        register_hook("on_session_end", builds.ended)
         # What a turn that gave up ended with, kept for every device that opens the chat: the
         # transcript's notice says nothing of the reason (failures.py, ADR 0157).
         register_hook("on_session_end", failures.after_run)
@@ -4464,6 +4480,8 @@ def register(ctx) -> None:
         register_hook("pre_llm_call", alerts.turn_started)
         # The reply a run gives, kept until its news is told or held (alerts.py).
         register_hook("post_llm_call", alerts.after_llm)
+        # A build's final reply, kept as the summary of the version it publishes (builds.py).
+        register_hook("post_llm_call", builds.reply)
         register_hook("on_session_end", alerts.turn_finished)
         register_hook("pre_llm_call", events.on_turn_start)
         register_hook("post_api_request", events.on_model_call)

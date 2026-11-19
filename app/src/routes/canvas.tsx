@@ -1048,6 +1048,11 @@ const FLIP = { edit: "Edit", preview: "Preview" } as const
  * composer's limit line asks for it, and the sheet's portals are where the popup lands whatever it
  * is nested in — so the chat that reads the numbers is the chat that draws them, and no screen has
  * to hand them up to a root it does not own.
+ *
+ * Where the canvas has a build going, the lane draws that build's session and queues its sends: a
+ * build is a session of its own, seeded with the page, and the queue is what hands a request to it
+ * or opens one (ADR 0170). The canvas's own session holds nothing while a build runs, so a lane that
+ * drew it would draw an empty thread.
  */
 function CanvasChat({
   canvas,
@@ -1079,6 +1084,8 @@ function CanvasChat({
         bot={bot}
         summaries={summaries}
         limit={limit}
+        {...(canvas.build ? { session: canvas.build.session } : {})}
+        queueSends={Boolean(canvas.builds)}
         afterSettled={() => {
           // Every turn's end re-reads what this screen draws: a stream can be open and silent (a
           // buffering proxy), so the event is never the only news. A read already in flight is joined

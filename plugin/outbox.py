@@ -7,6 +7,11 @@ the plugin posts it to its own API server, as Hermes's wake does, so the run is 
 every device can follow. A run that was stopped or failed pauses the queue until the user sends an
 item again.
 
+A canvas chat's items go somewhere else again: a canvas's requests are builds on sessions of their
+own, so the queue hands each one to the canvas's open build, or opens one (``builds.py``, ADR 0170).
+The item stays filed under the canvas's chat — that record is the request inbox — while the run it
+starts is the build's.
+
 An item can also steer the run that's going (``POST /v1/runs/{id}/steer``). Hermes hands back a
 steer the agent never read (``pending_steer``, when it came during the last reply), and the plugin
 puts it first in the queue, as Hermes's own messaging gateway does.
@@ -24,7 +29,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from . import chats, events, link, ticker
+from . import builds, chats, events, link, ticker
 from .store import connect, db_path, home_of
 
 logger = logging.getLogger(__name__)
@@ -596,12 +601,23 @@ async def tick(adapter: Any, session_id: str, profile: Optional[str], path: Path
         return
     if row["error"] or state(runs, resumed_at) == "paused":
         return
+    # A canvas chat's item goes to the canvas's build rather than to the canvas's own session: a
+    # build is a session of its own, seeded once, that publishes one version at its end (ADR 0170).
+    canvas_id = _canvas_of(path, session_id)
+    build = await asyncio.to_thread(builds.enter, path, canvas_id, row["text"] or "") if canvas_id else None
+    if build is not None:
+        working = session_runs(adapter, await session_ids(adapter, build["session_id"]))
+        if any(run.get("status") in ACTIVE for run in working):
+            # The build is still working, so this request is its next turn rather than a second run
+            # beside it: it waits where it is until the build's run is over.
+            return
+    target = build["session_id"] if build else session_id
     try:
         started = await post(
             adapter,
             profile,
             "/v1/runs",
-            json.loads(row["body"]),
+            _run_body(row, target, build, path),
             authorization=_dispatch_authorization(adapter, profile, path),
             idempotency_key=row["id"],
         )
@@ -615,9 +631,52 @@ async def tick(adapter: Any, session_id: str, profile: Optional[str], path: Path
     if not isinstance(run_id, str) or not run_id:
         await asyncio.to_thread(mark, path, row["id"], None, "Hermes didn't start the run.")
         return
+    if build is not None:
+        await asyncio.to_thread(builds.note_run, path, build["id"], run_id)
     await asyncio.to_thread(mark, path, row["id"], run_id)
     events.note("session", session_id, path, True)
     events.note("runs", session_id, path, True)
+
+
+def _canvas_of(path: Path, session_id: str) -> Optional[str]:
+    """The canvas a queued session belongs to, where it is one whose requests are builds.
+
+    A session that is no canvas's, and a canvas made before builds, answer None: their turns go to
+    their own session exactly as they always did. The flag is read on its own rather than with the
+    record, which carries the tile's picture: the dispatcher asks this of every watched session every
+    second, and a picture is up to 192 KB nobody needs here.
+    """
+    try:
+        from . import canvases
+
+        canvas_id = canvases.canvas_of_session(path, home_of(path), session_id)
+        if canvas_id is None:
+            return None
+        return canvas_id if canvases.building(path, canvas_id) else None
+    except Exception:
+        logger.debug("gots: couldn't tell whether %s is a canvas chat's", session_id, exc_info=True)
+        return None
+
+
+def _run_body(row: Any, target: str, build: Optional[Dict[str, Any]], path: Path) -> Dict[str, Any]:
+    """The run a queued item starts: its own body, on the session it is going to.
+
+    A build's first turn carries the build's seed as its ``instructions`` — the page, the canvas's
+    memory and its newest summaries — so the method and the page are told once per build rather
+    than once per turn (ADR 0170). A later turn of the same build carries its own body as it came.
+    """
+    run = json.loads(row["body"])
+    run["session_id"] = target
+    if build is not None and not build["requests"][1:]:
+        from . import builds
+
+        try:
+            run["instructions"] = builds.seed(path, build["canvas_id"])
+        except Exception:
+            # A canvas that went while its item was being dispatched: the turn still goes, told
+            # nothing rather than the dispatcher losing the session's queue over it.
+            logger.debug("gots: couldn't seed %s's build", build["canvas_id"], exc_info=True)
+    return run
 
 
 async def run(adapter: Any, home: Path) -> None:

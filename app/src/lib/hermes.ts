@@ -2707,6 +2707,11 @@ export type CanvasFile = Pick<Attachment, "name" | "type" | "size"> & { path: st
  * those files (ADR 0131). The two only mean anything together — the files live under the session the
  * chat names — so a caller that has neither leaves both out of the body rather than sending an empty
  * half, and a create that names no start is a canvas from a prompt alone.
+ *
+ * `builds` is said only where the host advertises `canvas_builds`: the canvas's requests are then
+ * builds on their own sessions, and the queue hands each one to the canvas's open build or opens one
+ * (ADR 0170). A create that says nothing keeps the one-session path, where the canvas's own session
+ * writes versions.
  */
 export async function createCanvas(
   config: HermesConfig,
@@ -2715,6 +2720,12 @@ export async function createCanvas(
     profileId: string
     body?: Record<string, unknown>
     start?: { chatId: string; files: CanvasFile[] }
+    /**
+     * Whether this canvas's requests are builds on their own sessions (`canvas_builds`, ADR 0170),
+     * said only where the host advertises the feature: the queue then hands each request to the
+     * canvas's open build, or opens one. A start that says nothing keeps the one-session path.
+     */
+    builds?: boolean
   },
 ) {
   const response = await request(canvasRoot(config), {
@@ -2725,6 +2736,7 @@ export async function createCanvas(
       profile_id: input.profileId,
       body: input.body,
       ...(input.start ? { chat_id: input.start.chatId, files: input.start.files } : {}),
+      ...(input.builds ? { builds: true } : {}),
     }),
     signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
   })
