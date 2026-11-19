@@ -478,6 +478,34 @@ class WriteTest(unittest.TestCase):
         self.assertEqual(second["version"], 2)
         self.assertEqual(canvases.listing(self.path)[0]["version"], 2)
 
+    def test_a_write_to_a_canvas_that_isnt_there_answers_before_it_reads_the_tools(self) -> None:
+        with self.assertRaises(canvases.CanvasError) as refused:
+            canvases.write(self.path, "canvas-gone", DOCUMENT, tools="tasks.todo_list")
+        self.assertEqual(refused.exception.status, 404)
+        self.assertIn("no such canvas", str(refused.exception))
+
+    def test_a_write_whose_fields_name_the_tools_is_refused(self) -> None:
+        smuggled = {"tools": "not json at all"}
+        with self.assertRaises(canvases.CanvasError) as refused:
+            canvases.write(self.path, self.canvas["id"], DOCUMENT, fields=smuggled)
+        self.assertIn("tools", str(refused.exception))
+        canvases.write(self.path, self.canvas["id"], DOCUMENT)
+        with self.assertRaises(canvases.CanvasError) as refused:
+            canvases.edit(
+                self.path,
+                self.canvas["id"],
+                [{"find": "Tip", "replace": "Split"}],
+                fields=smuggled,
+            )
+        self.assertIn("tools", str(refused.exception))
+
+    def test_a_field_the_store_has_no_column_for_is_refused(self) -> None:
+        for field in ("summarys", "at", "canvas_id"):
+            with self.subTest(field=field):
+                with self.assertRaises(canvases.CanvasError) as refused:
+                    canvases.write(self.path, self.canvas["id"], DOCUMENT, fields={field: "kept"})
+                self.assertIn(field, str(refused.exception))
+
     def test_a_write_answers_with_the_guides_warnings(self) -> None:
         # A warning is advice beside the answer and never a gate: the version is stored, and the bot is
         # told what the guide would say before the user ever sees the page. Nothing here judges a
@@ -2512,6 +2540,15 @@ class RouteTest(unittest.TestCase):
             "canvas_docs": 0,
             "canvas_grants": 0,
         })
+
+    def test_a_delete_whose_session_cant_be_ended_still_answers_deleted(self) -> None:
+        canvas_id = self.make()
+        canvases.write(self.path, canvas_id, DOCUMENT)
+        with mock.patch.object(canvases.cleanup, "end_session", side_effect=OSError("no store")):
+            gone = self.call("/canvases/{canvas_id}", "DELETE", canvas_id=canvas_id)
+        self.assertEqual(gone["status"], 200)
+        self.assertIs(gone["payload"]["deleted"], True)
+        self.assertEqual(self.call("/canvases/{canvas_id}", canvas_id=canvas_id)["status"], 404)
 
 
 if __name__ == "__main__":

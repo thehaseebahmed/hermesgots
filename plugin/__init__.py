@@ -32,6 +32,7 @@ from . import (
     approvals,
     attachments,
     canvases,
+    canvas_checks,
     canvas_vault,
     chats,
     clarify,
@@ -765,6 +766,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     *(
                         ["canvas", "canvas_data", "canvas_vault", "canvas_mark"]
                         if canvases.ready() and openui.canvas_ready()
+                        else []
+                    ),
+                    *(
+                        ["canvas_checks"]
+                        if await asyncio.to_thread(canvas_checks.available) is None
                         else []
                     ),
                     # Hermes's own MCP built-ins, and the MCP screen with them; see mcp.py.

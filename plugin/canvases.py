@@ -19,8 +19,8 @@ picture.
 The user's own decisions about a canvas — its name, whether it is pinned to the sidebar and whether
 it is archived out of the list — are the host's record too (``update``), so every device draws the same
 list and a name written there renames the chat with it. A canvas the user deletes is gone whole
-(``delete``): its versions, data and grants, its chat as a tombstone, and the Hermes session it was
-made in.
+(``delete``): its versions, data and grants, the folder it was made with, its chat as a tombstone,
+and the Hermes session it was made in.
 
 A version is the whole document. A small change is a list of find-and-replace pairs applied as one
 version (``edit``), undo moves the record's pointer back one without deleting anything, and a read
@@ -53,6 +53,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
 import sqlite3
 import time
 import uuid
@@ -73,13 +74,14 @@ from . import (
     sessions,
     tools_common,
 )
-from .store import connect
+from .store import connect, data_dir, home_of
 
 logger = logging.getLogger(__name__)
 
 # A document a phone has to hold in memory and draw; the cap is the whole write or nothing.
 MAX_BYTES = 256 * 1024
 KEEP_VERSIONS = 20
+COMMIT_COLUMNS = ("canvas_id", "version", "html", "at")
 # How much of a prompt becomes a canvas's title — and so its chat's.
 TITLE_CHARS = 60
 # The whole of a canvas's data. The cap is the canvas's rather than one document's: a page reads its
@@ -108,6 +110,10 @@ NAME_CHARS = 64
 # A version's declared tools are the options sheet's rows: every one is a switch, so a version that
 # declared thousands would be a list nobody could read and a dialog nobody could answer.
 TOOLS_MAX = 50
+FOLDER = "canvas"
+FILE_BYTES = 256 * 1024
+FILE_NAME_CHARS = 64
+FOLDER_BYTES = 4 * 1024 * 1024
 # A start's files are one queued turn's attachments, and the queue keeps `outbox.MAX_FILES` of
 # them; a longer list is refused rather than trimmed without a word.
 
@@ -973,6 +979,7 @@ def write(
     title: Optional[Any] = None,
     tools: Any = None,
     image: Any = None,
+    fields: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Stores a write as the canvas's next version, and answers the canvas as it now is.
 
@@ -982,21 +989,42 @@ def write(
     writes the canvas's and its chat's together, so a rename is one name. A picture is the record's
     rather than the version's — it is what the list draws — and a write that names none leaves the
     one it had.
+
+    ``fields`` are the per-version fields this version carries beyond its document and the tools it
+    declares — none a write names today; a build's publish carries the requests it took and its
+    summary here (ADR 0170). The tools have their own door: a ``tools`` among the fields is refused.
     """
-    return _commit(path, canvas_id, html=html, title=title, tools=tools, image=image)
+    return _commit(
+        path,
+        canvas_id,
+        html=html,
+        title=title,
+        image=image,
+        tools=tools,
+        fields=fields,
+    )
 
 
-def edit(path: Path, canvas_id: str, edits: Any, tools: Any = None) -> Dict[str, Any]:
+def edit(
+    path: Path,
+    canvas_id: str,
+    edits: Any,
+    tools: Any = None,
+    fields: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Changes a canvas by find and replace, stored as one version, and answers it as it now is.
 
     Every pair is applied in order to the version the user is looking at, and that version is read
     inside the transaction the edit writes in — so an undo landing between the two can't be reverted
     by an edit built from the version it walked off. The version carries the tools it declared
     forward unless this edit declares its own.
+
+    ``fields`` are the per-version fields this version carries beyond its document and the tools it
+    declares, as for a write — the tools among them refused, the call's own read instead.
     """
     if not isinstance(edits, list) or not edits:
         raise CanvasError("edits must be a list of find and replace pairs.")
-    return _commit(path, canvas_id, edits=edits, tools=tools)
+    return _commit(path, canvas_id, edits=edits, tools=tools, fields=fields)
 
 
 def _commit(
@@ -1005,18 +1033,15 @@ def _commit(
     *,
     html: Any = None,
     edits: Optional[List[Any]] = None,
-    title: Optional[Any] = None,
     tools: Any = None,
+    fields: Optional[Dict[str, Any]] = None,
+    title: Optional[Any] = None,
     image: Any = None,
 ) -> Dict[str, Any]:
-    """One version, written under the store's write lock, and the canvas as it now is.
-
-    ``html`` is a write's whole document; ``edits`` are an edit's pairs, applied to the version the
-    record points at, which is read on this connection under this transaction. Both answer the
-    shape ``current`` does but for its ``data``: a version never touches a canvas's data.
-    """
+    """One version, written under the store's write lock, and the canvas as it now is."""
     named = title_of(title) if isinstance(title, str) and title.strip() else None
     pictured = _image(image) if image is not None else None
+    carried = {name: value for name, value in (fields or {}).items() if value is not None}
     with _writing(path) as conn:
         now = int(time.time() * 1000)
         # Read under the write lock: two writers racing here would otherwise both take the same
@@ -1024,9 +1049,22 @@ def _commit(
         found = _record(conn, canvas_id)
         if found is None:
             raise CanvasError("There is no such canvas.", 404)
+        if "tools" in carried:
+            raise CanvasError(
+                "A version's tools are the call's own; its fields are the data a build publishes."
+            )
+        if carried:
+            carried_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvas_versions)")}
+            for name in carried:
+                if name in COMMIT_COLUMNS or name not in carried_columns:
+                    raise CanvasError(
+                        f"A version's fields are the columns a build publishes beside the "
+                        f"document's own four; {name!r} is not one."
+                    )
+        if tools is not None:
+            carried["tools"] = _tools(tools)
         if edits is None:
             document = html
-            declared = _tools(tools)
         else:
             # An edit is built from the version the record points at, read here rather than before
             # the transaction: an undo landing in between would otherwise be silently reverted.
@@ -1034,7 +1072,8 @@ def _commit(
             if pointer is None or not pointer["html"]:
                 raise CanvasError("This canvas has no document yet: write it with canvas_write first.")
             document = _apply(pointer["html"], edits)
-            declared = _tools(tools) if tools is not None else json.dumps(pointer["tools"])
+            if "tools" not in carried:
+                carried["tools"] = json.dumps(pointer["tools"])
         scan(document)
         # The version above the one the record points at. An undo left the versions it walked off
         # stored and unreachable — there is no redo — and a write replaces that history rather than
@@ -1044,14 +1083,15 @@ def _commit(
             (canvas_id, found["version"]),
         )
         number = found["version"] + 1
+        columns = [*COMMIT_COLUMNS, *carried]
         conn.execute(
-            """INSERT INTO canvas_versions (canvas_id, version, html, tools, at)
-               VALUES (?, ?, ?, ?, ?)""",
-            (canvas_id, number, document, declared, now),
+            f"INSERT INTO canvas_versions ({', '.join(columns)}) "
+            f"VALUES ({', '.join('?' * len(columns))})",
+            [canvas_id, number, document, now, *carried.values()],
         )
         conn.execute(
             """UPDATE canvases SET version = ?, at = ?, title = COALESCE(?, title),
-                                 image = COALESCE(?, image)
+                               image = COALESCE(?, image)
                WHERE id = ?""",
             (number, now, named, pictured, canvas_id),
         )
@@ -1074,7 +1114,7 @@ def _commit(
             {
                 "version": number,
                 "html": document,
-                "tools": json.loads(declared) if declared else [],
+                "tools": json.loads(carried["tools"]) if carried.get("tools") else [],
                 "written_at": now,
             },
             can_undo,
@@ -1238,8 +1278,85 @@ def delete(
     except Exception:
         logger.debug("gots: couldn't drop %s's queued turns", found["session_id"], exc_info=True)
     events.note("canvas", found["session_id"], path, True)
-    cleanup.end_session(path, found["chat_id"], found["session_id"], home, db, now)
+    _close_folder(home, canvas_id)
+    try:
+        cleanup.end_session(path, found["chat_id"], found["session_id"], home, db, now)
+    except Exception:
+        logger.debug("gots: couldn't end %s's session", found["session_id"], exc_info=True)
     return {"deleted": True, "id": canvas_id}
+
+
+# --- the canvas's folder --------------------------------------------------------------------------
+
+
+def folder_of(home: Path, canvas_id: str) -> Path:
+    """A canvas's own folder, under the plugin's data directory."""
+    return data_dir(home) / FOLDER / canvas_id
+
+
+def _open_folder(home: Path, canvas_id: str) -> None:
+    try:
+        folder_of(home, canvas_id).mkdir(parents=True, exist_ok=True)
+    except OSError:
+        logger.debug("gots: couldn't make %s's folder", canvas_id, exc_info=True)
+
+
+def _close_folder(home: Path, canvas_id: str) -> None:
+    shutil.rmtree(folder_of(home, canvas_id), ignore_errors=True)
+
+
+def _folder_bytes(folder: Path, rewritten: str) -> int:
+    return sum(
+        one.stat().st_size for one in folder.rglob("*") if one.is_file() and one.name != rewritten
+    )
+
+
+def keep(path: Path, canvas_id: str, name: str, text: str) -> Path:
+    """Writes one file in a canvas's folder, and answers where it landed.
+
+    One file is capped at ``FILE_BYTES`` and the folder whole at ``FOLDER_BYTES``, each refused in
+    words naming the cap: a build's files are the draft, its plans, its tests and its memory, and a
+    canvas that could grow without end would be a host that filled its disk. A name is one plain
+    file name — the plugin's own, never a page's — so no write lands outside the folder. The cap
+    is read and spent under the store's write lock, the way every write here is, so two builds
+    writing one folder both answer the cap; and a canvas the store doesn't hold has no folder to
+    write in.
+    """
+    if (
+        not name
+        or name in {".", ".."}
+        or "\x00" in name
+        or name != Path(name).name
+        or len(name) > FILE_NAME_CHARS
+    ):
+        raise CanvasError(
+            f"A canvas folder's file is one plain name of at most {FILE_NAME_CHARS} characters; "
+            f"{name!r} is not one."
+        )
+    if not isinstance(text, str):
+        raise CanvasError("A canvas folder's file is text.")
+    weighed = len(text.encode("utf-8"))
+    if weighed > FILE_BYTES:
+        raise CanvasError(
+            f"{name} is {_cap(weighed)} and one file in a canvas's folder holds at most "
+            f"{_cap(FILE_BYTES)}."
+        )
+    with _writing(path) as conn:
+        if _record(conn, canvas_id) is None:
+            raise CanvasError("There is no such canvas.", 404)
+        folder = folder_of(home_of(path), canvas_id)
+        held = _folder_bytes(folder, name)
+        if held + weighed > FOLDER_BYTES:
+            raise CanvasError(
+                f"A canvas's folder holds at most {_cap(FOLDER_BYTES)}; {name} would take it to "
+                f"{_cap(held + weighed)}. Take a file the build no longer needs out first."
+            )
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / name).write_text(text, encoding="utf-8")
+        except OSError as error:
+            raise CanvasError(f"This host couldn't write {name} in the canvas's folder.") from error
+    return folder / name
 
 
 # --- the data ------------------------------------------------------------------------------------
@@ -1740,6 +1857,7 @@ def _drop(path: Path, canvas_id: str) -> None:
         _erase(conn, canvas_id)
     finally:
         conn.close()
+    _close_folder(home_of(path), canvas_id)
 
 
 def _named_chat(path: Path, value: Any) -> Optional[str]:
@@ -1866,6 +1984,7 @@ def create(
         "at": now,
     }
     _insert(path, found)
+    _open_folder(home_of(path), canvas_id)
     try:
         # The canvas row is in first: the run this queues may write to it the moment it starts.
         item = new_chats.queue_first_turn(path, request_profile, opened, session_id, prompt, saved, body)
