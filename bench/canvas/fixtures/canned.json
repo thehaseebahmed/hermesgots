@@ -1,0 +1,17 @@
+{
+  "object": "gots.bench.canvas.canned",
+  "note": "What the canned page answers, as a real run of its prompt would have recorded it. The page is fixtures/canned-page.html, the prompt the bench's own 'standup' first build; its three assertions pass on it — it names Yesterday, Today and Blockers, it reads its data through the bridge and it holds an add form — which is what a fixture author reads off the page and commits, the way the dictation fixtures commit their reference transcripts. The turns and the wall time are the fixture's own numbers, never a measurement: a dry run measures the machine, the harness it would draw in and the warnings the page was written with, and labels everything else as the fixture's. A real run replaces all of it.",
+  "prompt": "standup",
+  "grading": {
+    "assertions": [
+      {"name": "the page names the three standup parts", "ok": true, "error": null},
+      {"name": "the page's data bridge answers a read", "ok": true, "error": null},
+      {"name": "the page has a way to add a standup", "ok": true, "error": null}
+    ],
+    "console": [],
+    "reason": null
+  },
+  "turns": 1,
+  "wall_ms": 42123,
+  "version": 1
+}

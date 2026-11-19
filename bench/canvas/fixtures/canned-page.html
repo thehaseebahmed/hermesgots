@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Team standup</title>
+<style>
+  body { font-family: Figtree, system-ui, sans-serif; margin: 0; padding: 16px; }
+  h1 { font-size: 20px; margin: 0 0 12px; }
+  .cols { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .col h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; opacity: 0.7; }
+  .card { border: 1px solid var(--border); border-radius: var(--radius-md); padding: 10px; margin-bottom: 8px; }
+  .card .who { font-weight: 600; font-size: 14px; }
+  .card .said { font-size: 13px; white-space: pre-wrap; }
+  form { display: flex; gap: 8px; margin-top: 16px; }
+  form input { flex: 1; padding: 8px; }
+  form button { padding: 8px 14px; }
+</style>
+</head>
+<body>
+<h1>Team standup</h1>
+<div class="cols">
+  <div class="col"><h2>Yesterday</h2><div id="yesterday"></div></div>
+  <div class="col"><h2>Today</h2><div id="today"></div></div>
+  <div class="col"><h2>Blockers</h2><div id="blockers"></div></div>
+</div>
+<form id="add">
+  <input name="who" placeholder="Teammate" aria-label="Teammate">
+  <input name="said" placeholder="Yesterday / today / blockers" aria-label="What they said">
+  <button type="submit">Add standup</button>
+</form>
+<script>
+var COLUMNS = { yesterday: 'yesterday', today: 'today', blockers: 'blockers' };
+function card(row) {
+  var box = document.createElement('div');
+  box.className = 'card';
+  var who = document.createElement('div');
+  who.className = 'who';
+  who.textContent = row.doc.who || 'Someone';
+  var said = document.createElement('div');
+  said.className = 'said';
+  said.textContent = row.doc.said || '';
+  box.append(who, said);
+  return box;
+}
+function draw(rows) {
+  for (var name in COLUMNS) { document.getElementById(name).textContent = ''; }
+  rows.forEach(function (row) {
+    var column = COLUMNS[(row.doc.column || 'today')];
+    if (column) { document.getElementById(column).append(card(row)); }
+  });
+}
+window.canvas.data.list('standups').then(draw).catch(function () { draw([]); });
+document.getElementById('add').addEventListener('submit', function (event) {
+  event.preventDefault();
+  var who = event.target.elements.who.value.trim();
+  var said = event.target.elements.said.value.trim();
+  if (!who || !said) { return; }
+  window.canvas.data.put('standups', who, { who: who, said: said, column: 'today' });
+  event.target.reset();
+});
+</script>
+</body>
+</html>
