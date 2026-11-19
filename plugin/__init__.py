@@ -42,6 +42,7 @@ from . import (
     compactions,
     context,
     delegation,
+    device_keys,
     dictation,
     dictation_cleanup,
     dictations,
@@ -701,6 +702,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "events",
                     "push",
                     "push_ntfy",
+                    # A phone's key, which a press of a link the relay carried is signed with
+                    # (device_keys.py, ADR 0167): an app that sees it hands its key over.
+                    "push_keys",
                     "host_model",
                     "fallbacks",
                     "delegation_model",
@@ -2585,6 +2589,59 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         await asyncio.to_thread(push.set_web, store_path(), body.get("subject"))
         return web.json_response({"object": "gots.push", "subscribed": True})
 
+    async def unsigned(
+        request: "web.Request", path: Path, token: str, purpose: str, text: str = ""
+    ) -> Optional["web.Response"]:
+        """A 403 for a press of a signed link that a phone this bot knows didn't sign, else None.
+
+        Asked before the link is claimed, so a refused press spends nothing (ADR 0167).
+        """
+        if not await asyncio.to_thread(answers.needs_signature, path, token):
+            return None
+        signed = await asyncio.to_thread(
+            device_keys.verify,
+            path,
+            request.headers.get("X-Gots-Key"),
+            request.headers.get("X-Gots-Signature"),
+            purpose,
+            token,
+            text,
+        )
+        if signed:
+            return None
+        return _error(web, "That press didn't come from a phone this bot knows.", 403)
+
+    async def push_key(request: "web.Request") -> "web.Response":
+        # A phone's public key, handed over with the bot's own key and never through the registry:
+        # what a press of a link the relay carried is signed with (device_keys.py).
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        try:
+            found = await asyncio.to_thread(
+                device_keys.register, store_path(), body.get("device"), body.get("key")
+            )
+        except device_keys.DeviceKeyError as exc:
+            return _error(web, str(exc), 400)
+        # The address a signed press posts back to, as every route the phone calls keeps it.
+        dialled = push.base_url(request, "/push/key")
+        if dialled:
+            await asyncio.to_thread(push.set_base, store_path(), dialled)
+        return web.json_response({"object": "gots.push.key", "key_id": found})
+
+    async def push_key_remove(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        await asyncio.to_thread(device_keys.remove, store_path(), body.get("device"))
+        return web.json_response({"object": "gots.push.key", "removed": True})
+
     async def push_answer(request: "web.Request") -> "web.Response":
         # The one route with no key of the account's: the token in the path is the credential, which
         # is what makes an approval answerable from a notification with the app closed. It is
@@ -2601,6 +2658,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             except Exception:
                 logger.debug("gots: couldn't give a button back", exc_info=True)
 
+        refused = await unsigned(request, path, token, device_keys.ANSWER)
+        if refused is not None:
+            return refused
         claim = await asyncio.to_thread(answers.redeem, path, token)
         if claim.outcome == answers.UNKNOWN:
             return _error(web, "That button isn't one this bot sent.", 404)
@@ -2642,6 +2702,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, "A reply needs some words.", 400)
         if len(text) > outbox.MAX_TEXT:
             return _error(web, "That reply is too long.", 400)
+        refused = await unsigned(request, path, token, device_keys.REPLY, text)
+        if refused is not None:
+            return refused
         claim = await asyncio.to_thread(answers.redeem_reply, path, token)
         if claim.outcome == answers.UNKNOWN:
             return _error(web, "That reply isn't one this bot sent.", 404)
@@ -3092,6 +3155,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/push", push_subscribe)
     app.router.add_post(f"{PREFIX}/push/remove", push_unsubscribe)
     app.router.add_post(f"{PREFIX}/push/mute", push_mute)
+    app.router.add_post(f"{PREFIX}/push/key", push_key)
+    app.router.add_post(f"{PREFIX}/push/key/remove", push_key_remove)
     app.router.add_get(f"{PREFIX}/push/ntfy", push_ntfy_read)
     app.router.add_post(f"{PREFIX}/push/ntfy", push_ntfy_write)
     app.router.add_post(f"{PREFIX}/push/ntfy/remove", push_ntfy_remove)

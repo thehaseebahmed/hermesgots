@@ -63,7 +63,7 @@ logger = logging.getLogger(__name__)
 # per session, replaced as each failure lands, so nothing already written has to move.
 # 74 keeps an approval's buttons (`answers.py`): one row per token, hashed, single-use and expiring
 # with the push that carried it. A new table alone, so nothing else reads differently.
-SCHEMA_VERSION = 74
+SCHEMA_VERSION = 75
 
 
 def data_dir(hermes_home: Path) -> Path:
@@ -1101,6 +1101,24 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    target TEXT NOT NULL,
                    expires_at INTEGER NOT NULL,
                    used_at INTEGER
+               )"""
+        )
+        # v75: a link the relay carries is pressed only by a phone this bot knows (device_keys.py,
+        # ADR 0167). `signed` marks a token whose press must carry a signature from one of the keys in
+        # `device_keys`; a store from before reads every token as one a press alone redeems, which is
+        # what those links were minted as.
+        token_columns = {row[1] for row in conn.execute("PRAGMA table_info(answer_tokens)")}
+        if "signed" not in token_columns:
+            conn.execute("ALTER TABLE answer_tokens ADD COLUMN signed INTEGER NOT NULL DEFAULT 0")
+        # `key` is the phone's public key as X.509 SubjectPublicKeyInfo DER, made in its Android
+        # Keystore and never able to leave it; `key_id` is that DER's SHA-256, which a press names it
+        # by. One row per device, so a reinstall's new key replaces the old one.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS device_keys (
+                   device TEXT PRIMARY KEY,
+                   key_id TEXT NOT NULL UNIQUE,
+                   key BLOB NOT NULL,
+                   at INTEGER NOT NULL
                )"""
         )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

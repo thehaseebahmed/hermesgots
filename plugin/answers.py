@@ -23,6 +23,11 @@ one link per chat's notice whose target is that chat and its session, living a d
 push's ten minutes since a tray entry outlives its push, and ``redeem_reply`` claims it only as a
 reply — so it queues one turn of text on that chat and answers no approval.
 
+A link the relay to Android carries is ``signed``: the registry and Firebase can read what they relay,
+so its route takes a press only with a signature from a phone's own key (``device_keys``, ADR 0167),
+checked through ``needs_signature`` before the token is claimed. Every reply link is one; the browser's
+buttons ride Web Push, encrypted to the browser, and are a press alone.
+
 Nothing here logs a token or writes one down: the address comes from the host the app dialled
 (``push.base``), a token is built into its button's link and kept only as its hash, and the route that
 redeems it never says it.
@@ -117,8 +122,13 @@ def room_target(room_id: Any, wait: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }
 
 
-def issue(path: Path, choice: str, target: Dict[str, Any], seconds: int) -> str:
+def issue(
+    path: Path, choice: str, target: Dict[str, Any], seconds: int, signed: bool = False
+) -> str:
     """Mints one link: a token that answers ``choice`` for ``target``, once, for ``seconds``.
+
+    ``signed`` is a link the relay carries: a press redeems it only with a signature from a phone
+    this bot knows (``device_keys.verify``), since whoever relays the push can read the link.
 
     The token is returned once and kept only as its hash, so the caller builds it into the one link
     it rides on and nothing else ever holds it. Spent and expired rows are dropped here, which is the
@@ -132,8 +142,15 @@ def issue(path: Path, choice: str, target: Dict[str, Any], seconds: int) -> str:
             "DELETE FROM answer_tokens WHERE expires_at <= ? OR used_at IS NOT NULL", (now,)
         )
         conn.execute(
-            "INSERT INTO answer_tokens (token, choice, target, expires_at) VALUES (?, ?, ?, ?)",
-            (digest(token), choice, json.dumps(target, separators=(",", ":")), now + seconds * 1000),
+            "INSERT INTO answer_tokens (token, choice, target, expires_at, signed)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (
+                digest(token),
+                choice,
+                json.dumps(target, separators=(",", ":")),
+                now + seconds * 1000,
+                1 if signed else 0,
+            ),
         )
     finally:
         conn.close()
@@ -141,7 +158,11 @@ def issue(path: Path, choice: str, target: Dict[str, Any], seconds: int) -> str:
 
 
 def mint(
-    path: Path, target: Optional[Dict[str, Any]], base: Optional[str], seconds: int
+    path: Path,
+    target: Optional[Dict[str, Any]],
+    base: Optional[str],
+    seconds: int,
+    signed: bool = False,
 ) -> Tuple[Action, ...]:
     """The buttons one approval's notice carries: Allow once and Deny, and nothing else.
 
@@ -153,7 +174,7 @@ def mint(
     if not isinstance(target, dict) or not base or not seconds:
         return ()
     return tuple(
-        Action(LABELS[choice], f"{base}{PATH}{issue(path, choice, target, seconds)}")
+        Action(LABELS[choice], f"{base}{PATH}{issue(path, choice, target, seconds, signed)}")
         for choice in CHOICES
     )
 
@@ -219,7 +240,8 @@ def reply_link(path: Path, session_id: str, chat_id: str, base: Optional[str]) -
     if not base or not session_id or not chat_id:
         return None
     target = {"kind": REPLY, "session_id": session_id, "chat": chat_id}
-    return f"{base}{REPLY_PATH}{issue(path, REPLY, target, REPLY_SECONDS)}"
+    # Only the relay carries a reply, so every reply link is a signed one.
+    return f"{base}{REPLY_PATH}{issue(path, REPLY, target, REPLY_SECONDS, signed=True)}"
 
 
 def withdraw(path: Path, link: Any) -> None:
@@ -239,6 +261,21 @@ def withdraw(path: Path, link: Any) -> None:
         )
     finally:
         conn.close()
+
+
+def needs_signature(path: Path, token: Any) -> bool:
+    """Whether a press of this token must be signed: asked before it is claimed, so a press the
+    route refuses for want of a signature spends nothing."""
+    if not isinstance(token, str) or not token or not path.exists():
+        return False
+    conn = connect(path)
+    try:
+        row = conn.execute(
+            "SELECT signed FROM answer_tokens WHERE token = ?", (digest(token),)
+        ).fetchone()
+    finally:
+        conn.close()
+    return bool(row and row[0])
 
 
 def redeem_reply(path: Path, token: Any) -> Claim:

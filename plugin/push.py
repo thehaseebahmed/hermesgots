@@ -46,7 +46,7 @@ from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-from . import answers, link, ntfy
+from . import answers, device_keys, link, ntfy
 from .notice import (
     CATEGORIES,
     KINDS,
@@ -55,6 +55,7 @@ from .notice import (
     SESSION_KINDS,
     Action,
     Notice,
+    actions_wire,
     carried,
     category_of,
     flatten,
@@ -349,9 +350,12 @@ def _relay(path: Path, kind: str, category: str, session_id: str, notice: Notice
     if isinstance(answer, dict) and not answer.get("sent") and answer.get("failed"):
         logger.warning("gots: the registry couldn't deliver the push (%s)", answer)
     if not (isinstance(answer, dict) and answer.get("sent")):
-        # A reply link is minted for the relay alone, so one the relay put on no phone — every
-        # device on screen or not wanting the category, or a push that never went — is withdrawn.
+        # A reply link and the relay's buttons are minted for the relay alone, so ones it put on no
+        # phone — every device on screen or not wanting the category, or a push that never went —
+        # are withdrawn.
         answers.withdraw(path, conversation.get("reply"))
+        for action in conversation.get("actions") or ():
+            answers.withdraw(path, action.get("url") if isinstance(action, dict) else None)
 
 
 def face(origin: Optional[str], bot: Optional[str]) -> Optional[str]:
@@ -672,6 +676,11 @@ def _notice(
                 conversation["reply"] = reply
         if not title:
             title = session_title(path, session_id, found[1] if found else None)
+    if answer:
+        # The relay's own pair, signed, since whoever relays a push to Android can read it; the
+        # browser's buttons ride Web Push, which is encrypted to the browser itself. A profile no
+        # phone has handed a key to draws no button on Android rather than one anyone could press.
+        conversation["actions"] = actions_wire(_relay_buttons(path, answer))
     return Notice(
         title=_short(title),
         body=body,
@@ -685,11 +694,12 @@ def _reply(path: Path, kind: str, session_id: str, chat_id: str, chat: Dict[str,
     """The reply link a chat's notice carries, where a kind takes one and someone could press it.
 
     Only the relay to Android draws a reply, so a profile not linked to the registry mints none —
-    a credential no transport carries is one nobody can press — and a chat the user is done with
+    a credential no transport carries is one nobody can press — nor one no phone has handed a key
+    to, since a reply link is pressed only with a phone's signature; and a chat the user is done with
     takes none, since a turn queued there would reopen work they put away. The turn goes on the
     session the chat names, which is the one its record keeps however compression moved it on.
     """
-    if not KINDS_BY_NAME[kind].reply or not _linked(path):
+    if not KINDS_BY_NAME[kind].reply or not _signs(path):
         return None
     from . import chats
 
@@ -709,6 +719,20 @@ def _buttons(path: Path, answer: Optional[Dict[str, Any]]) -> Tuple[Action, ...]
     if not answer:
         return ()
     return answers.mint(path, answer, base(path), TTL_SECONDS)
+
+
+def _relay_buttons(path: Path, answer: Dict[str, Any]) -> Tuple[Action, ...]:
+    """The approval buttons the relay carries: a pair of its own, pressed only with a phone's
+    signature (``device_keys``), and none where no phone could sign one."""
+    if not _signs(path):
+        return ()
+    return answers.mint(path, answer, base(path), TTL_SECONDS, signed=True)
+
+
+def _signs(path: Path) -> bool:
+    """Whether a link the relay carries could be pressed: the profile is linked to the registry and
+    a phone has handed it a key to sign with."""
+    return _linked(path) and device_keys.held(path)
 
 
 # Where the app dialled this bot, as `POST push` and `POST push/ntfy` keep it: the scheme and host,

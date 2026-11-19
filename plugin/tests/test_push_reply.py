@@ -19,8 +19,11 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 from unittest import mock
 
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+
 import plugin
-from plugin import answers, chats, link, notice, outbox, prompt_builder, push, sessions
+from plugin import answers, chats, device_keys, link, notice, outbox, prompt_builder, push, sessions
 from plugin.store import connect, db_path
 from plugin.tests._helpers import FakeWeb, RouteAdapter, js_constant, route, temp_hermes_home, wire
 
@@ -32,6 +35,25 @@ ANSWER = plugin.PREFIX + "/push/answer/{token}"
 HERMES_TS = Path(__file__).resolve().parents[2] / "app" / "src" / "lib" / "hermes.ts"
 PINNED = {"provider": "anthropic", "model": "claude-sonnet-5"}
 LINKED = {"token": "mh_x", "site": "https://app.example"}
+
+
+class Phone:
+    """A phone with its own P-256 key, as `NoticeKey.kt` makes one: it hands the public half to the
+    plugin and signs each press it makes."""
+
+    def __init__(self) -> None:
+        self.private = ec.generate_private_key(ec.SECP256R1())
+        self.der = self.private.public_key().public_bytes(
+            serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo
+        )
+
+    @property
+    def key(self) -> str:
+        return push._b64(self.der)
+
+    def headers(self, purpose: str, token: str, text: str = "") -> Dict[str, str]:
+        signature = self.private.sign(device_keys.message(purpose, token, text), ec.ECDSA(hashes.SHA256()))
+        return {"X-Gots-Key": device_keys.key_id(self.der), "X-Gots-Signature": push._b64(signature)}
 
 
 def reply_rows(path: Path) -> list:
@@ -48,7 +70,8 @@ class Tray(unittest.TestCase):
     def setUp(self) -> None:
         self.home = temp_hermes_home(self)
         self.path = db_path(self.home)
-        self.app = wire(self, RouteAdapter())
+        self.adapter = RouteAdapter()
+        self.app = wire(self, self.adapter)
         push.set_base(self.path, BASE)
         chats.merge(
             self.path,
@@ -62,19 +85,30 @@ class Tray(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
         self.watch = outbox.watch
+        # A phone that handed this profile its key, so the relay is minted links it can press.
+        self.phone = Phone()
+        device_keys.register(self.path, "phone-1", self.phone.key)
 
     def reply_of(self, kind: str = "run_done", session_id: str = "gots-1") -> Optional[str]:
         """The reply link one notice of ``kind`` would carry, or None."""
         return push._notice(self.path, kind, session_id, None, "Booked.", None).conversation.get("reply")
 
-    def press(self, url: str, body: Any = None, at: str = REPLY) -> Dict[str, Any]:
+    def press(
+        self, url: str, body: Any = None, at: str = REPLY, phone: Optional[Phone] = None, signed: bool = True
+    ) -> Dict[str, Any]:
+        """One press of a link, signed by this test's phone (or ``phone``) unless ``signed`` is False."""
         token = url.rsplit("/", 1)[-1]
+        sent = {"text": "try again"} if body is None else body
         request = FakeWeb.Request()
         request.headers = {}
+        if signed:
+            purpose = device_keys.REPLY if at == REPLY else device_keys.ANSWER
+            text = sent.get("text") if purpose == device_keys.REPLY and isinstance(sent, dict) else ""
+            request.headers = (phone or self.phone).headers(purpose, token, text if isinstance(text, str) else "")
         request.match_info = {"token": token}
         request.query = {}
         request.path = at.replace("{token}", token)
-        request.json = mock.AsyncMock(return_value={"text": "try again"} if body is None else body)
+        request.json = mock.AsyncMock(return_value=sent)
         return asyncio.run(route(self.app, at, "POST")(request))
 
 
