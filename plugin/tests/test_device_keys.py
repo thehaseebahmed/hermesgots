@@ -1,4 +1,4 @@
-"""A link the relay carries is pressed only by a phone this bot knows (ADR 0167).
+"""A link the relay carries is pressed only by a phone this bot knows (ADR 0168).
 
 The relay to Android goes through the Gots registry and Firebase in clear, so a reply link or an
 approval's button riding it could be pressed by whoever relayed it. Each phone hands the plugin a

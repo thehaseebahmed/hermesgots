@@ -4,7 +4,7 @@ A link the relay carries — a tray Reply, an approval's buttons drawn on Androi
 Gots registry and Firebase Cloud Messaging as a data message, and FCM encrypts each hop with TLS and
 nothing more, so whoever relays the push can read the link. A bearer link alone would let them press
 it. So a link minted for the relay is ``signed`` (``answers.issue``): a press redeems it only with a
-signature from a key this file holds (ADR 0167).
+signature from a key this file holds (ADR 0168).
 
 Each phone makes its key pair in its Android Keystore (``NoticeKey.kt``), where the private half
 can't be read out, and hands the public half here itself, over the bot's own key (``POST push/key``)

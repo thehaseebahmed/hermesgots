@@ -6,7 +6,7 @@ import java.security.PrivateKey
 import java.security.Signature
 
 /**
- * What a press of a link the relay carried signs, and how (ADR 0167).
+ * What a press of a link the relay carried signs, and how (ADR 0168).
  *
  * A reply link and an approval's buttons ride the Gots registry and Firebase in clear, so the plugin
  * takes a press of one only with a signature from a key this phone handed it ([NoticeKey]). The

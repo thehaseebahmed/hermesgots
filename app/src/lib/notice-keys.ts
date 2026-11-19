@@ -1,5 +1,5 @@
 /**
- * Which bots a phone's notice key is handed to, and which are told to forget it (ADR 0167), as a
+ * Which bots a phone's notice key is handed to, and which are told to forget it (ADR 0168), as a
  * rule: a bot that can be called and is on is handed the key unless it already holds this one, and
  * a bot turned off is told to forget it once. `given` is what each connection was last told — the
  * key, or `""` for told to forget — so a pass on every return posts only what changed.

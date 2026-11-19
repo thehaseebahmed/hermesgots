@@ -2904,7 +2904,7 @@ export async function setPushMuted(config: HermesConfig, muted: boolean, bot?: s
 }
 
 /**
- * Hands this phone's notice key to a bot's plugin (`plugin/device_keys.py`, ADR 0167): a press of a
+ * Hands this phone's notice key to a bot's plugin (`plugin/device_keys.py`, ADR 0168): a press of a
  * link the relay carried is taken only signed with it. Over the bot's own key, never through the
  * registry, which could otherwise hand over a key of its own.
  */

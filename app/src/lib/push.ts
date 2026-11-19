@@ -653,7 +653,7 @@ async function trayReads(): Promise<unknown> {
 const keyGiven = new Map<string, string>()
 
 /**
- * Hands this phone's notice key to every bot it is notified by through Firebase (ADR 0167): the tray
+ * Hands this phone's notice key to every bot it is notified by through Firebase (ADR 0168): the tray
  * signs each Reply and button press with it, and a plugin draws the relay no button and no Reply
  * until a phone has handed it one. A bot turned off is told to forget it.
  */

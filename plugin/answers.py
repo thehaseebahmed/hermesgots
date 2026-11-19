@@ -24,7 +24,7 @@ push's ten minutes since a tray entry outlives its push, and ``redeem_reply`` cl
 reply — so it queues one turn of text on that chat and answers no approval.
 
 A link the relay to Android carries is ``signed``: the registry and Firebase can read what they relay,
-so its route takes a press only with a signature from a phone's own key (``device_keys``, ADR 0167),
+so its route takes a press only with a signature from a phone's own key (``device_keys``, ADR 0168),
 checked through ``needs_signature`` before the token is claimed. Every reply link is one; the browser's
 buttons ride Web Push, encrypted to the browser, and are a press alone.
 

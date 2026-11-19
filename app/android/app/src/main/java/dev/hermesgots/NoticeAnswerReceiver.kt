@@ -57,7 +57,7 @@ class NoticeAnswerReceiver : BroadcastReceiver() {
         thread {
             try {
                 // Signed with this phone's own key, off the main thread since the Keystore can be slow:
-                // a link read off the relay on its way is one only this phone can press (ADR 0167).
+                // a link read off the relay on its way is one only this phone can press (ADR 0168).
                 val signed = if (text == null) {
                     NoticeKey.headers(NoticeSignature.ANSWER, url)
                 } else {

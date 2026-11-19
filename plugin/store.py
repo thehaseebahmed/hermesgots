@@ -1104,7 +1104,7 @@ def _migrate(conn: sqlite3.Connection) -> None:
                )"""
         )
         # v75: a link the relay carries is pressed only by a phone this bot knows (device_keys.py,
-        # ADR 0167). `signed` marks a token whose press must carry a signature from one of the keys in
+        # ADR 0168). `signed` marks a token whose press must carry a signature from one of the keys in
         # `device_keys`; a store from before reads every token as one a press alone redeems, which is
         # what those links were minted as.
         token_columns = {row[1] for row in conn.execute("PRAGMA table_info(answer_tokens)")}

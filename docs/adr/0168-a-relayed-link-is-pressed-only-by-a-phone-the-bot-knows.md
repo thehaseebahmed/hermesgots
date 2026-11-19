@@ -1,6 +1,6 @@
 # A relayed link is pressed only by a phone the bot knows
 
-ADR 0166 made a notice's Reply and an approval's buttons one-shot links the plugin redeems. The links
+ADR 0167 made a notice's Reply and an approval's buttons one-shot links the plugin redeems. The links
 are bearer credentials, and on Android they travel in a data message through the Gots registry and
 Firebase Cloud Messaging. FCM encrypts each hop with TLS but not the payload end to end
 ([Firebase](https://firebase.google.com/docs/cloud-messaging/encryption)), so whoever relays the push

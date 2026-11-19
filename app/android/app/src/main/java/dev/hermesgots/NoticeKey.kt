@@ -10,7 +10,7 @@ import java.security.spec.ECGenParameterSpec
 
 /**
  * This phone's notice key: a P-256 pair made in the Android Keystore, whose private half can't be
- * read out of it (ADR 0167).
+ * read out of it (ADR 0168).
  *
  * The page hands the public half to each bot's plugin over the bot's own key (`POST push/key`), and
  * [NoticeAnswerReceiver] signs every press of a link the relay carried with the private half, so a

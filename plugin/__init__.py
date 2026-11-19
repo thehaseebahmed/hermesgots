@@ -703,7 +703,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "push",
                     "push_ntfy",
                     # A phone's key, which a press of a link the relay carried is signed with
-                    # (device_keys.py, ADR 0167): an app that sees it hands its key over.
+                    # (device_keys.py, ADR 0168): an app that sees it hands its key over.
                     "push_keys",
                     "host_model",
                     "fallbacks",
@@ -2594,7 +2594,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     ) -> Optional["web.Response"]:
         """A 403 for a press of a signed link that a phone this bot knows didn't sign, else None.
 
-        Asked before the link is claimed, so a refused press spends nothing (ADR 0167).
+        Asked before the link is claimed, so a refused press spends nothing (ADR 0168).
         """
         if not await asyncio.to_thread(answers.needs_signature, path, token):
             return None
