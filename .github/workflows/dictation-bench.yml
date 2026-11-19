@@ -18,9 +18,10 @@ on:
     paths:
       # The plugin is what is measured; the bench is the instrument; the app's own cut rule and the
       # phone's copy of it are where the bench's `device` policy is copied from, so a change to either
-      # has to run the comparison.
+      # has to run the comparison. The bench's own directory, not `bench/` whole: the canvas bench
+      # beside it (bench/canvas/, no gate reads it) is a different instrument over a different host.
       - "plugin/**"
-      - "bench/**"
+      - "bench/dictation/**"
       - "app/src/lib/dictation.ts"
       - "app/android/app/src/main/java/dev/hermesgots/BubbleRecorder.kt"
       - ".github/workflows/dictation-bench.yml"
