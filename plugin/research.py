@@ -61,6 +61,17 @@ logger = logging.getLogger(__name__)
 # default, and a reply written whole (the judge's, a case) can take longer than that.
 MODEL_TIMEOUT_S = 120
 
+# How much of a judge's reply is logged when nothing of it survives the checks.
+REPLY_LOG_CHARS = 4000
+
+
+def _kept_nothing(purpose: str, answer: Dict[str, Any]) -> None:
+    """A judge answered and every tag or score failed the checks: the reply is the only way to see
+    which check, so it goes to the log (the host's own, cut to ``REPLY_LOG_CHARS``)."""
+    logger.warning(
+        "gots.research.%s kept nothing; its reply was: %s", purpose, json.dumps(answer, ensure_ascii=False)[:REPLY_LOG_CHARS]
+    )
+
 # The plugin context, kept by wire() so llm_gate can see whether the host offers ctx.llm.
 ctx: Any = None
 
@@ -2328,6 +2339,7 @@ def judge(found: Dict[str, Any], options: List[Dict[str, Any]]) -> Dict[str, Any
     verdict = [spans(text, known) for text in answer.get("verdict") or [] if isinstance(text, str) and text.strip()]
     flip = [spans(text, known) for text in answer.get("flip") or [] if isinstance(text, str) and text.strip()]
     if not any(scores.values()):
+        _kept_nothing("judge", answer)
         raise ResearchError("The judge scored nothing.", 502)
     return {"scores": scores, "ruled_out": ruled_out, "verdict": verdict, "flip": flip}
 
@@ -2442,6 +2454,7 @@ def judge_claim(found: Dict[str, Any]) -> Dict[str, Any]:
             if kept not in tags:
                 tags.append(kept)
     if not tags:
+        _kept_nothing("verdict", answer)
         raise ResearchError("The judge tagged nothing.", 502)
     change = [spans(text, known) for text in answer.get("change") or [] if isinstance(text, str) and text.strip()]
     return {"tags": tags, "change": [paragraph for paragraph in change if paragraph]}
