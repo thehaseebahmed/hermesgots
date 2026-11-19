@@ -100,7 +100,12 @@ test("the Developer switch is off until it is turned on, keeps the pick, and ask
       assert.equal(checkedOf(row()), true, "and on once it is")
     },
   )
-  assert.deepEqual(asked, [], "the switch is the device's: nothing was asked of a host")
+  // The screen's model-timeout row reads each bot's feature list when it opens; that read is the row's.
+  assert.deepEqual(
+    asked.filter((url) => !url.endsWith("/api/plugins/gots/info")),
+    [],
+    "the switch is the device's: nothing else was asked of a host",
+  )
   assert.equal(
     (await db.settings.get("settings"))?.showProgressReminders,
     true,
