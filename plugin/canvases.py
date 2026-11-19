@@ -973,6 +973,7 @@ def write(
     title: Optional[Any] = None,
     tools: Any = None,
     image: Any = None,
+    fields: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Stores a write as the canvas's next version, and answers the canvas as it now is.
 
@@ -982,21 +983,41 @@ def write(
     writes the canvas's and its chat's together, so a rename is one name. A picture is the record's
     rather than the version's — it is what the list draws — and a write that names none leaves the
     one it had.
+
+    ``fields`` are the per-version fields this version carries beyond its document and the tools it
+    declares — none a write names today; a build's publish carries the requests it took and its
+    summary here (ADR 0170).
     """
-    return _commit(path, canvas_id, html=html, title=title, tools=tools, image=image)
+    return _commit(
+        path,
+        canvas_id,
+        html=html,
+        title=title,
+        image=image,
+        fields={**(fields or {}), "tools": _tools(tools)},
+    )
 
 
-def edit(path: Path, canvas_id: str, edits: Any, tools: Any = None) -> Dict[str, Any]:
+def edit(
+    path: Path,
+    canvas_id: str,
+    edits: Any,
+    tools: Any = None,
+    fields: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Changes a canvas by find and replace, stored as one version, and answers it as it now is.
 
     Every pair is applied in order to the version the user is looking at, and that version is read
     inside the transaction the edit writes in — so an undo landing between the two can't be reverted
     by an edit built from the version it walked off. The version carries the tools it declared
     forward unless this edit declares its own.
+
+    ``fields`` are the per-version fields this version carries beyond its document and the tools it
+    declares, as for a write.
     """
     if not isinstance(edits, list) or not edits:
         raise CanvasError("edits must be a list of find and replace pairs.")
-    return _commit(path, canvas_id, edits=edits, tools=tools)
+    return _commit(path, canvas_id, edits=edits, fields={**(fields or {}), "tools": _tools(tools)})
 
 
 def _commit(
@@ -1005,18 +1026,22 @@ def _commit(
     *,
     html: Any = None,
     edits: Optional[List[Any]] = None,
+    fields: Optional[Dict[str, Any]] = None,
     title: Optional[Any] = None,
-    tools: Any = None,
     image: Any = None,
 ) -> Dict[str, Any]:
     """One version, written under the store's write lock, and the canvas as it now is.
 
     ``html`` is a write's whole document; ``edits`` are an edit's pairs, applied to the version the
-    record points at, which is read on this connection under this transaction. Both answer the
-    shape ``current`` does but for its ``data``: a version never touches a canvas's data.
+    record points at, which is read on this connection under this transaction. ``fields`` are the
+    per-version columns the version carries beyond its document — the consent list it declares
+    today, and the requests, summary and check flag a build's publish carries (ADR 0170) — each
+    named by the column it lands in, so a caller that names none commits the document alone. Both
+    answer the shape ``current`` does but for its ``data``: a version never touches a canvas's data.
     """
     named = title_of(title) if isinstance(title, str) and title.strip() else None
     pictured = _image(image) if image is not None else None
+    carried = {name: value for name, value in (fields or {}).items() if value is not None}
     with _writing(path) as conn:
         now = int(time.time() * 1000)
         # Read under the write lock: two writers racing here would otherwise both take the same
@@ -1026,7 +1051,6 @@ def _commit(
             raise CanvasError("There is no such canvas.", 404)
         if edits is None:
             document = html
-            declared = _tools(tools)
         else:
             # An edit is built from the version the record points at, read here rather than before
             # the transaction: an undo landing in between would otherwise be silently reverted.
@@ -1034,7 +1058,10 @@ def _commit(
             if pointer is None or not pointer["html"]:
                 raise CanvasError("This canvas has no document yet: write it with canvas_write first.")
             document = _apply(pointer["html"], edits)
-            declared = _tools(tools) if tools is not None else json.dumps(pointer["tools"])
+            # An edit changes the page rather than replacing it, so the tools it declared carry
+            # forward unless this edit declares its own.
+            if "tools" not in carried:
+                carried["tools"] = json.dumps(pointer["tools"])
         scan(document)
         # The version above the one the record points at. An undo left the versions it walked off
         # stored and unreachable — there is no redo — and a write replaces that history rather than
@@ -1044,14 +1071,15 @@ def _commit(
             (canvas_id, found["version"]),
         )
         number = found["version"] + 1
+        columns = ["canvas_id", "version", "html", "at", *carried]
         conn.execute(
-            """INSERT INTO canvas_versions (canvas_id, version, html, tools, at)
-               VALUES (?, ?, ?, ?, ?)""",
-            (canvas_id, number, document, declared, now),
+            f"INSERT INTO canvas_versions ({', '.join(columns)}) "
+            f"VALUES ({', '.join('?' * len(columns))})",
+            [canvas_id, number, document, now, *carried.values()],
         )
         conn.execute(
             """UPDATE canvases SET version = ?, at = ?, title = COALESCE(?, title),
-                                 image = COALESCE(?, image)
+                               image = COALESCE(?, image)
                WHERE id = ?""",
             (number, now, named, pictured, canvas_id),
         )
@@ -1074,7 +1102,7 @@ def _commit(
             {
                 "version": number,
                 "html": document,
-                "tools": json.loads(declared) if declared else [],
+                "tools": json.loads(carried["tools"]) if carried.get("tools") else [],
                 "written_at": now,
             },
             can_undo,
