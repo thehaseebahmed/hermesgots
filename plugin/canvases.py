@@ -53,6 +53,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
 import sqlite3
 import time
 import uuid
@@ -73,7 +74,7 @@ from . import (
     sessions,
     tools_common,
 )
-from .store import connect
+from .store import connect, data_dir, home_of
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,18 @@ NAME_CHARS = 64
 # A version's declared tools are the options sheet's rows: every one is a switch, so a version that
 # declared thousands would be a list nobody could read and a dialog nobody could answer.
 TOOLS_MAX = 50
+# A canvas's own folder under the plugin's data (ADR 0170): the draft a build writes, its plans,
+# its tests and its memory. It is made with the canvas and taken with it, and no route or bridge
+# read reaches it — a page's only channel answers the store's own data (G4).
+FOLDER = ("canvas",)
+# What one file in a canvas's folder may weigh: a page at most — the same 256 KB a write admits,
+# kept as its own number because the draft is a page and a plan, a test and a memory are not.
+FILE_BYTES = MAX_BYTES
+# What the whole folder may weigh: the draft, the plans, the tests and the memory one canvas keeps.
+# A canvas keeps one draft and a handful of small files beside it, so four megabytes is room no
+# canvas reaches — and a bound a host can hold, since a canvas that grew without end would be a
+# disk that filled.
+FOLDER_BYTES = 4 * 1024 * 1024
 # A start's files are one queued turn's attachments, and the queue keeps `outbox.MAX_FILES` of
 # them; a longer list is refused rather than trimmed without a word.
 
@@ -1266,8 +1279,95 @@ def delete(
     except Exception:
         logger.debug("gots: couldn't drop %s's queued turns", found["session_id"], exc_info=True)
     events.note("canvas", found["session_id"], path, True)
+    _close_folder(home, canvas_id)
     cleanup.end_session(path, found["chat_id"], found["session_id"], home, db, now)
     return {"deleted": True, "id": canvas_id}
+
+
+# --- the canvas's folder --------------------------------------------------------------------------
+
+
+def folder_of(home: Path, canvas_id: str) -> Path:
+    """A canvas's own folder, under the plugin's data directory.
+
+    Named by the canvas's id rather than its title: a title is the user's to change, and a rename
+    would orphan every file in it — the vault's notes are named the same way, for the same reason.
+    """
+    return data_dir(home).joinpath(*FOLDER, canvas_id)
+
+
+def _open_folder(home: Path, canvas_id: str) -> None:
+    """Makes a canvas's folder with the canvas, quietly.
+
+    A folder that can't be made is a build that writes nothing later, not a canvas that fails to
+    open: the record and its versions are what a canvas is, and the folder is where a build works.
+    """
+    try:
+        folder_of(home, canvas_id).mkdir(parents=True, exist_ok=True)
+    except OSError:
+        logger.debug("gots: couldn't make %s's folder", canvas_id, exc_info=True)
+
+
+def _close_folder(home: Path, canvas_id: str) -> None:
+    """Takes a canvas's folder with the canvas: nothing here is ever read back, so what the folder
+    held goes with the canvas it belonged to.
+
+    Best effort, like the session end beside it — a folder left behind is disk a host can sweep,
+    not a canvas the user still sees.
+    """
+    try:
+        shutil.rmtree(folder_of(home, canvas_id), ignore_errors=True)
+    except OSError:
+        logger.debug("gots: couldn't take %s's folder", canvas_id, exc_info=True)
+
+
+def _folder_bytes(folder: Path, but: str) -> int:
+    """What a canvas's folder weighs, the file being written left out.
+
+    The file being written is replaced rather than added to, so its own bytes are the folder's to
+    spend again — a draft rewritten at the same size is not a folder that grew.
+    """
+    if not folder.is_dir():
+        return 0
+    return sum(
+        one.stat().st_size for one in folder.rglob("*") if one.is_file() and one.name != but
+    )
+
+
+def keep(path: Path, canvas_id: str, name: str, text: str) -> Path:
+    """Writes one file in a canvas's folder, and answers where it landed.
+
+    One file is capped at ``FILE_BYTES`` and the folder whole at ``FOLDER_BYTES``, each refused in
+    words naming the cap: a build's files are the draft, its plans, its tests and its memory, and a
+    canvas that could grow without end would be a host that filled its disk. A name is one plain
+    file name — the plugin's own, never a page's — so no write lands outside the folder.
+    """
+    if not name or name != Path(name).name or len(name) > NAME_CHARS:
+        raise CanvasError(
+            f"A canvas folder's file is one plain name of at most {NAME_CHARS} characters; "
+            f"{name!r} is neither."
+        )
+    if not isinstance(text, str):
+        raise CanvasError("A canvas folder's file is text.")
+    weighed = len(text.encode("utf-8"))
+    if weighed > FILE_BYTES:
+        raise CanvasError(
+            f"{name} is {_cap(weighed)} and one file in a canvas's folder holds at most "
+            f"{_cap(FILE_BYTES)}."
+        )
+    folder = folder_of(home_of(path), canvas_id)
+    held = _folder_bytes(folder, name)
+    if held + weighed > FOLDER_BYTES:
+        raise CanvasError(
+            f"A canvas's folder holds at most {_cap(FOLDER_BYTES)}; {name} would take it to "
+            f"{_cap(held + weighed)}. Take a file the build no longer needs out first."
+        )
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / name).write_text(text, encoding="utf-8")
+    except OSError as error:
+        raise CanvasError(f"This host couldn't write {name} in the canvas's folder.") from error
+    return folder / name
 
 
 # --- the data ------------------------------------------------------------------------------------
@@ -1768,6 +1868,7 @@ def _drop(path: Path, canvas_id: str) -> None:
         _erase(conn, canvas_id)
     finally:
         conn.close()
+    _close_folder(home_of(path), canvas_id)
 
 
 def _named_chat(path: Path, value: Any) -> Optional[str]:
@@ -1894,6 +1995,9 @@ def create(
         "at": now,
     }
     _insert(path, found)
+    # The folder is made with the record: a build's first write has it to land in, and a canvas
+    # deleted before its first build leaves nothing behind.
+    _open_folder(home_of(path), canvas_id)
     try:
         # The canvas row is in first: the run this queues may write to it the moment it starts.
         item = new_chats.queue_first_turn(path, request_profile, opened, session_id, prompt, saved, body)
