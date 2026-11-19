@@ -1286,7 +1286,12 @@ def delete(
         logger.debug("gots: couldn't drop %s's queued turns", found["session_id"], exc_info=True)
     events.note("canvas", found["session_id"], path, True)
     _close_folder(home, canvas_id)
-    cleanup.end_session(path, found["chat_id"], found["session_id"], home, db, now)
+    # The session end is best effort like the turns beside it: a chat's mark and the record are
+    # gone, and a session this can't reach is one left behind rather than a delete that failed.
+    try:
+        cleanup.end_session(path, found["chat_id"], found["session_id"], home, db, now)
+    except Exception:
+        logger.debug("gots: couldn't end %s's session", found["session_id"], exc_info=True)
     return {"deleted": True, "id": canvas_id}
 
 

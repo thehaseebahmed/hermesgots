@@ -44,6 +44,20 @@ def take_layer_away() -> patch:
     return patch.dict(sys.modules, {"tools": None, "tools.browser_use_cli": None})
 
 
+def plant_unreadable_layer() -> patch:
+    """A layer whose availability check can't be read: the entry is there, the read raises."""
+
+    def unreadable() -> bool:
+        raise OSError("the layer won't answer")
+
+    tools = ModuleType("tools")
+    cli = ModuleType("tools.browser_use_cli")
+    cli.browser_exec = lambda *args, **kwargs: None
+    cli.browser_exec_available = unreadable
+    tools.browser_use_cli = cli
+    return patch.dict(sys.modules, {"tools": tools, "tools.browser_use_cli": cli})
+
+
 class ProbeTest(unittest.TestCase):
     """The probe's answer, with the layer in reach and with it gone."""
 
@@ -64,6 +78,12 @@ class ProbeTest(unittest.TestCase):
             reason = canvas_checks.available()
         self.assertIsInstance(reason, str)
         self.assertIn("hermes update", reason)
+
+    def test_a_layer_that_cant_be_read_answers_rather_than_raises(self) -> None:
+        # A probe answers a host's question, so a host whose layer won't be read is told so in
+        # words rather than given a traceback, whatever calls it next.
+        with plant_unreadable_layer():
+            self.assertEqual(canvas_checks.UNREADABLE, canvas_checks.available())
 
 
 class AdvertisedTest(unittest.TestCase):
