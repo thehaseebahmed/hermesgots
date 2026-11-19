@@ -114,6 +114,11 @@ FOLDER = "canvas"
 FILE_BYTES = 256 * 1024
 FILE_NAME_CHARS = 64
 FOLDER_BYTES = 4 * 1024 * 1024
+# The two files a build keeps in a canvas's folder (ADR 0170, builds.py): the page it is writing and
+# the requirements and decisions the canvas keeps. Both are the store's names rather than the
+# build's, so a write of either goes through the same cap and the same delete.
+DRAFT = "draft.html"
+MEMORY = "memory.md"
 # A start's files are one queued turn's attachments, and the queue keeps `outbox.MAX_FILES` of
 # them; a longer list is refused rather than trimmed without a word.
 
@@ -548,6 +553,10 @@ _COLUMNS = (
     # The mark a pinned canvas's row draws (#1065): one icon's name or one emoji. The record's, not
     # the pin's, so every device draws the same row.
     "mark",
+    # Whether this canvas's requests are builds on their own sessions (ADR 0170, builds.py) rather
+    # than writes on the canvas's own session. Set where the canvas is made, by an app that knows
+    # the `canvas_builds` feature; a canvas made before builds keeps the path it was made with.
+    "builds",
     "at",
     "created_at",
 )
@@ -568,6 +577,7 @@ def _row(row: Any) -> Dict[str, Any]:
     record["pinned"] = bool(record["pinned"])
     record["archived"] = bool(record["archived"])
     record["vault"] = bool(record["vault"])
+    record["builds"] = bool(record["builds"])
     return record
 
 
@@ -597,6 +607,23 @@ def record(path: Path, canvas_id: str) -> Optional[Dict[str, Any]]:
         return _record(conn, canvas_id)
     finally:
         conn.close()
+
+
+def building(path: Path, canvas_id: str) -> bool:
+    """Whether this canvas's requests are builds, read on its own and not with its record.
+
+    The record carries the tile's picture, up to 192 KB, and the dispatcher asks this of every
+    watched session every second — so the flag is a column read of its own rather than a copy of a
+    picture nobody asked for.
+    """
+    if not canvas_id or not path.exists():
+        return False
+    conn = connect(path)
+    try:
+        row = conn.execute("SELECT builds FROM canvases WHERE id = ?", (canvas_id,)).fetchone()
+    finally:
+        conn.close()
+    return bool(row[0]) if row else False
 
 
 def listing(path: Path) -> List[Dict[str, Any]]:
@@ -712,7 +739,8 @@ def resolve(path: Path, name: Any) -> str:
 def _version(conn: sqlite3.Connection, canvas_id: str, number: int) -> Optional[Dict[str, Any]]:
     """One version's document and the tools it declared, over a connection the caller holds."""
     row = conn.execute(
-        "SELECT version, html, tools, at FROM canvas_versions WHERE canvas_id = ? AND version = ?",
+        "SELECT version, html, tools, at, requests, summary FROM canvas_versions"
+        " WHERE canvas_id = ? AND version = ?",
         (canvas_id, number),
     ).fetchone()
     if row is None:
@@ -722,7 +750,26 @@ def _version(conn: sqlite3.Connection, canvas_id: str, number: int) -> Optional[
         "html": row[1],
         "tools": json.loads(row[2]) if row[2] else [],
         "written_at": row[3],
+        # What a build's publish carries on the version it wrote (ADR 0170, builds.py): the
+        # requests that made it and its own summary. Both are absent for a version a canvas's own
+        # session wrote, which no build made.
+        **(_fields(row[4], row[5])),
     }
+
+
+def _fields(requests: Any, summary: Any) -> Dict[str, Any]:
+    """A version's build fields, where it has any: the requests that made it and its summary."""
+    found: Dict[str, Any] = {}
+    if requests:
+        try:
+            held = json.loads(requests)
+        except ValueError:
+            held = []
+        if isinstance(held, list):
+            found["requests"] = held
+    if summary:
+        found["summary"] = summary
+    return found
 
 
 def _empty_version(found: Dict[str, Any]) -> Dict[str, Any]:
@@ -826,9 +873,19 @@ def current(path: Path, canvas_id: str, documents: bool = True) -> Dict[str, Any
         # The data beside the page, on this same connection: a page that keeps state needs it the
         # moment it opens, and no version has ever touched it.
         answer = _page(conn, canvas_id)
+        # The build this canvas has open, where it has one (ADR 0170, builds.py): its session is
+        # what a lane draws while a build runs, since a build's work is its own transcript. Absent
+        # for a canvas on the one-session path, and for one with no build going.
+        from . import builds as _builds
+
+        build = _builds.read(conn, canvas_id)
         if not documents:
-            return answer
-        return {**answer, "data": canvas_docs.upto(conn, canvas_id, LEGACY_DATA_BYTES)}
+            return answer if build is None else {**answer, "build": build}
+        return {
+            **answer,
+            "data": canvas_docs.upto(conn, canvas_id, LEGACY_DATA_BYTES),
+            **({"build": build} if build is not None else {}),
+        }
     finally:
         conn.close()
 
@@ -1359,6 +1416,29 @@ def keep(path: Path, canvas_id: str, name: str, text: str) -> Path:
     return folder / name
 
 
+def draft(path: Path, canvas_id: str) -> Optional[str]:
+    """The page a build of this canvas is writing, or None when no build has one open.
+
+    The draft is a file of the canvas's folder, capped and deleted with the canvas like the rest of
+    them: a build's writes land there rather than in a version, so a half-built page is never drawn
+    and never published. A store this can't read is no draft, which is the safe way to be wrong.
+    """
+    try:
+        found = folder_of(home_of(path), canvas_id) / DRAFT
+        return found.read_text(encoding="utf-8") if found.is_file() else None
+    except OSError:
+        logger.debug("gots: couldn't read %s's draft", canvas_id, exc_info=True)
+        return None
+
+
+def drop_draft(path: Path, canvas_id: str) -> None:
+    """Takes a published draft away: it is a version now, so the folder holds no second copy."""
+    try:
+        (folder_of(home_of(path), canvas_id) / DRAFT).unlink(missing_ok=True)
+    except OSError:
+        logger.debug("gots: couldn't take %s's draft away", canvas_id, exc_info=True)
+
+
 # --- the data ------------------------------------------------------------------------------------
 
 def _documents(
@@ -1835,8 +1915,8 @@ def _insert(path: Path, found: Dict[str, Any]) -> None:
     try:
         conn.execute(
             """INSERT INTO canvases (id, title, session_id, chat_id, version, pinned, archived, at,
-                                     created_at)
-               VALUES (?, ?, ?, ?, 0, 0, 0, ?, ?)""",
+                                     created_at, builds)
+               VALUES (?, ?, ?, ?, 0, 0, 0, ?, ?, ?)""",
             (
                 found["id"],
                 found["title"],
@@ -1844,6 +1924,7 @@ def _insert(path: Path, found: Dict[str, Any]) -> None:
                 found["chat_id"],
                 found["at"],
                 found["at"],
+                1 if found.get("builds") else 0,
             ),
         )
     finally:
@@ -1939,6 +2020,7 @@ def create(
     body: Any,
     chat_id: Optional[str] = None,
     files: Any = None,
+    builds: bool = False,
 ) -> Dict[str, Any]:
     """A canvas from a prompt: its record, its chat and the run that builds it, in that order.
 
@@ -1949,6 +2031,12 @@ def create(
     it saved under that chat's session with ``files``: the canvas opens on that chat and the first
     turn carries those files, which is how a canvas is started with an attachment. A caller that
     names neither keeps the chat ``open_thread`` mints and queues no files.
+
+    ``builds`` is what an app that knows the ``canvas_builds`` feature says: this canvas's requests
+    are builds on their own sessions (ADR 0170, ``builds.py``), and the outbox routes the items its
+    chat queues into them. A caller that says nothing — an app from before the feature — gets
+    today's one-session path, where the prompt runs on the canvas's own session and every write is
+    a version, exactly as it did before builds existed.
 
     The prompt is queued on that session as its first turn, so the canvas is built with the app
     closed, and a failure anywhere takes the record back rather than leaving a canvas with no run.
@@ -1982,6 +2070,7 @@ def create(
         "session_id": session_id,
         "chat_id": opened,
         "at": now,
+        "builds": bool(builds),
     }
     _insert(path, found)
     _open_folder(home_of(path), canvas_id)
@@ -2009,15 +2098,23 @@ def canvas_of_session(path: Path, home: Path, session_id: Optional[str]) -> Opti
     """The canvas a run's session edits, or None when that session isn't a canvas's.
 
     A run may be keyed on a session compression moved the chat on to, so the chat is found from the
-    root the walk answers and its record names the canvas. A store this can't read is no canvas:
-    the caller then equips nothing, which is the safe way to be wrong.
+    root the walk answers and its record names the canvas. A build's own session names no chat — it
+    is not one — so the build table is asked as well: a build's session edits its canvas's draft
+    (ADR 0170, builds.py). A store this can't read is no canvas: the caller then equips nothing,
+    which is the safe way to be wrong.
     """
     if not isinstance(session_id, str) or not session_id:
         return None
     try:
+        # Imported here rather than at the top: builds reads this module for the store's own write
+        # and folder rules, so the two would otherwise import each other.
+        from . import builds as _builds
+
         root = sessions.chat_session(home, session_id)
         value = (chats.by_session(path, root) or {}).get("value")
         found = value.get("canvasId") if isinstance(value, dict) else None
+        if found is None and root.startswith(_builds.SESSION_PREFIX):
+            found = (_builds.of_session(path, root) or {}).get("canvas_id")
     except Exception:
         logger.debug("gots: couldn't resolve a canvas for %s", session_id, exc_info=True)
         return None
@@ -2364,8 +2461,15 @@ def handle_list(
 
 
 def handle_write(args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any) -> str:
-    """The tool: writes the canvas whose session made the call."""
+    """The tool: writes the canvas whose session made the call.
+
+    A build's session writes the canvas's draft rather than a version: the page a build is working
+    on reaches the reader once, when its build publishes it (ADR 0170).
+    """
     args = args if isinstance(args, dict) else {}
+    drafted = _draft_answer(TOOL_WRITE, task_id, session_id, args.get("html"))
+    if drafted is not None:
+        return drafted
     return _tool_answer(
         TOOL_WRITE,
         task_id,
@@ -2389,8 +2493,15 @@ def handle_write(args: Any, task_id: Optional[str] = None, session_id: Optional[
 
 
 def handle_edit(args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any) -> str:
-    """The tool: changes the canvas whose session made the call, by find and replace."""
+    """The tool: changes the canvas whose session made the call, by find and replace.
+
+    A build's edits are applied to its draft — or to the canvas's current version where it has
+    written nothing yet — and land in the draft rather than in a version (ADR 0170).
+    """
     args = args if isinstance(args, dict) else {}
+    drafted = _draft_edits(TOOL_EDIT, task_id, session_id, args.get("edits"))
+    if drafted is not None:
+        return drafted
     return _tool_answer(
         TOOL_EDIT,
         task_id,
@@ -2407,7 +2518,14 @@ def handle_edit(args: Any, task_id: Optional[str] = None, session_id: Optional[s
 
 
 def handle_read(args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any) -> str:
-    """The tool: the canvas's current version, as it stands."""
+    """The tool: the canvas's current version, as it stands.
+
+    A build reads its own draft where it has written one, so a change starts from what this build
+    has made rather than from the version the reader is looking at (ADR 0170).
+    """
+    drafted = _draft_read(task_id, session_id)
+    if drafted is not None:
+        return drafted
     return _tool_answer(
         TOOL_READ,
         task_id,
@@ -2420,6 +2538,100 @@ def handle_read(args: Any, task_id: Optional[str] = None, session_id: Optional[s
             "tools": found["tools"],
             "html": found["html"],
         },
+    )
+
+
+def _call_build(
+    task_id: Optional[str], session_id: Optional[str]
+) -> tuple[Optional[Dict[str, Any]], Optional[Path]]:
+    """The build a tool call belongs to and the store it lives in, when it came from a build's own
+    session — and nothing at all for a call from the canvas's session, which writes versions."""
+    from . import builds
+
+    for one in (task_id, session_id):
+        if not isinstance(one, str) or not one.startswith(builds.SESSION_PREFIX):
+            continue
+        try:
+            path, _home = sessions._paths()
+        except Exception:
+            logger.debug("gots: couldn't find the store a build lives in", exc_info=True)
+            return None, None
+        found = builds.of_session(path, one)
+        if found is not None:
+            return found, path
+    return None, None
+
+
+def _draft_answer(
+    tool: str, task_id: Optional[str], session_id: Optional[str], html: Any
+) -> Optional[str]:
+    """A build's whole-document write, kept in the canvas's draft, or None where it isn't one."""
+    build, path = _call_build(task_id, session_id)
+    if build is None or path is None:
+        return None
+    try:
+        scan(html)
+        keep(path, build["canvas_id"], DRAFT, html)
+    except CanvasError as refused:
+        return json.dumps({"error": str(refused)})
+    except (sqlite3.Error, OSError):
+        logger.debug("gots: %s couldn't write the draft", tool, exc_info=True)
+        return _unreadable(tool)
+    return json.dumps(
+        {
+            "id": build["canvas_id"],
+            "draft": True,
+            "written": True,
+            "warnings": warnings(html),
+        }
+    )
+
+
+def _draft_edits(
+    tool: str, task_id: Optional[str], session_id: Optional[str], edits: Any
+) -> Optional[str]:
+    """A build's find-and-replace change, applied to its draft, or None where it isn't one."""
+    build, path = _call_build(task_id, session_id)
+    if build is None or path is None:
+        return None
+    try:
+        held = draft(path, build["canvas_id"])
+        if held is None:
+            # Nothing written yet: the build edits the page the reader has, as a canvas's own
+            # session would, and the result is the draft it starts from.
+            held = page(path, build["canvas_id"]).get("html") or ""
+        document = _apply(held, edits)
+        scan(document)
+        keep(path, build["canvas_id"], DRAFT, document)
+    except CanvasError as refused:
+        return json.dumps({"error": str(refused)})
+    except (sqlite3.Error, OSError):
+        logger.debug("gots: %s couldn't write the draft", tool, exc_info=True)
+        return _unreadable(tool)
+    return json.dumps(
+        {
+            "id": build["canvas_id"],
+            "draft": True,
+            "edited": True,
+            "warnings": warnings(document),
+        }
+    )
+
+
+def _draft_read(task_id: Optional[str], session_id: Optional[str]) -> Optional[str]:
+    """A build's read: its draft where it has written one, or None where it isn't a build's call."""
+    build, path = _call_build(task_id, session_id)
+    if build is None or path is None:
+        return None
+    held = draft(path, build["canvas_id"])
+    if held is None:
+        return None
+    return json.dumps(
+        {
+            "id": build["canvas_id"],
+            "draft": True,
+            "html": held,
+        }
     )
 
 

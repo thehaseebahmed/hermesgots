@@ -731,7 +731,13 @@ interface ThreadOptions {
   /** `at` is when the reader sent it, which a thread's first turn is stamped with. */
   prepareTurn?: (text: string, attachments: Attachment[], at?: number) => Promise<PreparedTurn>
   /** Queues a message on the plugin, as the app builds one; without it, nothing can be queued. */
-  queueTurn?: (text: string, attachments: Attachment[]) => Promise<void>
+  queueTurn?: (text: string, attachments: Attachment[], on?: string) => Promise<void>
+  /**
+   * Whether every send of this thread is queued on the plugin rather than posted as a run: a
+   * canvas whose requests are builds (ADR 0170) sends that way, because the queue is what hands a
+   * request to the canvas's open build — or opens one — with the app closed too.
+   */
+  queueSends?: boolean
   /**
    * Steers the running reply through the plugin's queue; without it, nothing can be steered. Answers
    * whether the reply took it, which settles the part the thread drew at the press.
@@ -792,6 +798,7 @@ export function ChatNextThread({
   session,
   prepareTurn,
   queueTurn,
+  queueSends = false,
   steerTurn,
   onSettled,
   onAway,
@@ -1594,6 +1601,15 @@ export function ChatNextThread({
   ) {
     const words = text.trim()
     if ((!words && !attachments.length) || !server || !key || !session) return
+    // A canvas whose requests are builds queues every send: the queue is what hands a request to
+    // the canvas's open build, or opens one, and the row is drawn from the queue's own read — as a
+    // send made while a reply runs already is (ADR 0170). Nothing is posted to the canvas's own
+    // session, where a run would write a version the way it did before builds.
+    if (queueSends && !resend) {
+      reads.current++
+      await queueMessage(words, attachments)
+      return
+    }
     // The request as the thread keeps it: the words, the files, the retry and the points — so a
     // message that names elements of a canvas's page draws those chips at once, not once it lands.
     const asked = requestOf(words)
@@ -1719,7 +1735,9 @@ export function ChatNextThread({
 
   async function queueMessage(text: string, attachments: Attachment[]) {
     if (!queueTurn) throw new Error("This bot can't hold a message until the reply is over.")
-    await queueTurn(text, attachments)
+    // The session the item is filed under is the one this thread is drawn from: the canvas chat's
+    // own, or the build's where one is running, which is where the queue has to hold it.
+    await queueTurn(text, attachments, session ?? undefined)
     void catchUp()
   }
 

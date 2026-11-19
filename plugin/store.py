@@ -67,7 +67,11 @@ logger = logging.getLogger(__name__)
 # column on the tokens, one new table.
 # 76 keeps the notifications an ntfy tray may still be showing (`push.py`): one new table, one row
 # per (category, id) a publish went out under, which a dismissal reads to clear them.
-SCHEMA_VERSION = 76
+# 77 keeps a canvas's builds (ADR 0170, `builds.py`): one new table holding a build's session, its
+# phase, the requests it took and its summary; the two columns a published version carries them in;
+# and the flag saying this canvas's requests are builds rather than writes on its own session. A
+# canvas an older store holds takes no flag, so it keeps the one-session path it was made with.
+SCHEMA_VERSION = 77
 
 
 def data_dir(hermes_home: Path) -> Path:
@@ -1040,6 +1044,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
             canvas_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvases)")}
             if "hidden" in canvas_columns and "archived" not in canvas_columns:
                 conn.execute("ALTER TABLE canvases RENAME COLUMN hidden TO archived")
+        # v77: whether this canvas's requests are builds on their own sessions rather than writes on
+        # the canvas's own (ADR 0170, builds.py). Off for every canvas an older store holds, since a
+        # canvas made before builds keeps the one-session path it was built with.
+        if version < 77:
+            canvas_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvases)")}
+            if "builds" not in canvas_columns:
+                conn.execute("ALTER TABLE canvases ADD COLUMN builds INTEGER NOT NULL DEFAULT 0")
         # A version's `tools` is the consent list it declared, kept with the words it was written
         # for: a page reads what its own version declared, never a later one's.
         conn.execute(
@@ -1052,6 +1063,37 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    PRIMARY KEY (canvas_id, version)
                )"""
         )
+        # v77: what a build's publish carries on the version it writes (ADR 0170, builds.py): the
+        # requests that made it and its own summary. Both are the version's, so an undo takes the
+        # whole build back with it, and both are absent for a version a write made — a version
+        # written by a canvas's own session carries no build's requests.
+        if version < 77:
+            version_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvas_versions)")}
+            if "requests" not in version_columns:
+                conn.execute("ALTER TABLE canvas_versions ADD COLUMN requests TEXT")
+            if "summary" not in version_columns:
+                conn.execute("ALTER TABLE canvas_versions ADD COLUMN summary TEXT")
+        # v77: a canvas's builds (ADR 0170, builds.py). One row a build — the session it runs on, the
+        # phase it is in, the requests it took and the reply it ended on. A canvas has at most one
+        # open build, so the phase is what a read looks for; the rows of finished builds stay, since
+        # a version's summary is read back through the build that published it.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS canvas_builds (
+                   id TEXT PRIMARY KEY,
+                   canvas_id TEXT NOT NULL,
+                   session_id TEXT NOT NULL,
+                   phase TEXT NOT NULL,
+                   requests TEXT NOT NULL,
+                   summary TEXT,
+                   run_id TEXT,
+                   at INTEGER NOT NULL,
+                   created_at INTEGER NOT NULL
+               )"""
+        )
+        if version < 77:
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS canvas_builds_canvas ON canvas_builds (canvas_id, at)"
+            )
         # v61: the data a canvas keeps, one row per document of one collection. `value` is the
         # document as JSON and `at` is the host's clock when it was written, since the page owns the
         # data and a device's copy is only the page it was drawn from. No version or undo reads or

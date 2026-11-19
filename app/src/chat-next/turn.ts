@@ -43,10 +43,19 @@ export async function prepareTurn(
 }
 
 /** `at` is when the reader sent the message, which the record's opener is stamped with. */
-async function built(chatId: string, text: string, attachments: Attachment[], at: number) {
+async function built(
+  chatId: string,
+  text: string,
+  attachments: Attachment[],
+  at: number,
+  on?: string,
+) {
   const chat = await db.conversations.get(chatId)
   const bot = chat && (await db.profiles.get(chat.profileId))
   if (!chat || !bot) throw new Error("This chat is gone.")
+  // The session the turn is filed under: the chat's own, or one a canvas's build is running on
+  // (`queueTurn` names it), which is where the queue has to hold it for the build to take it.
+  const session = on || chat.hermesSessionId
   const { conversation: pinned, release } = await pinModel(chat, bot)
   try {
     const config = serverConfig(bot)
@@ -68,11 +77,11 @@ async function built(chatId: string, text: string, attachments: Attachment[], at
         .between([chat.hermesSessionId], [chat.hermesSessionId, []])
         .count())
     const sent = attachments.length
-      ? await uploadAttachments(config, chat.hermesSessionId, attachments, Boolean(bot.apiKey))
+      ? await uploadAttachments(config, session, attachments, Boolean(bot.apiKey))
       : attachments
     const body = runRequest(config, {
       ...modelOf(pinned, bot),
-      sessionId: chat.hermesSessionId,
+      sessionId: session,
       messages: [{ role: "user", content: await wireContent(words, sent) }],
       workspaceInstructions: workspace?.instructions,
     })
@@ -98,7 +107,7 @@ async function built(chatId: string, text: string, attachments: Attachment[], at
         if (ask) void pinFromHost(chatId, bot).catch(quietly("Pinning a chat's model"))
       },
     }
-    return { turn, config, session: chat.hermesSessionId, sent, shown }
+    return { turn, config, session, sent, shown }
   } catch (error) {
     await release?.()
     throw error
@@ -108,14 +117,23 @@ async function built(chatId: string, text: string, attachments: Attachment[], at
 /**
  * Hands a message sent mid-reply to the plugin's queue, built as a send is, so it starts once the
  * reply is over with the app closed too. Answers the item the plugin holds it as.
+ *
+ * ``on`` is the session the item is filed under: the chat's own, or — for a canvas whose requests
+ * are builds — the session of the build that is running, which is where the queue has to hold it
+ * for that build to take it as its next turn (ADR 0170).
  */
-export async function queueTurn(chatId: string, text: string, attachments: Attachment[]) {
+export async function queueTurn(
+  chatId: string,
+  text: string,
+  attachments: Attachment[],
+  on?: string,
+) {
   // Asked before anything is pinned or uploaded, so a bot that can't queue spends nothing.
   const chat = await db.conversations.get(chatId)
   const bot = chat && (await db.profiles.get(chat.profileId))
   if (!bot || !(await hasPluginFeature(serverConfig(bot), "queue")))
     throw new Error("This bot's plugin can't hold a message until the reply is over.")
-  const { turn, config, session, sent } = await built(chatId, text, attachments, Date.now())
+  const { turn, config, session, sent } = await built(chatId, text, attachments, Date.now(), on)
   try {
     const item = await addToQueue(config, session, {
       // The queue holds the message as it was sent, markers and all: the row that draws it reads the

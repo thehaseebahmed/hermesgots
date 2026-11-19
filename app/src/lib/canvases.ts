@@ -51,6 +51,7 @@ import {
 } from "@/lib/canvas-outbox"
 import { sweepCanvas } from "@/lib/canvas-sweep"
 import { hostTargets, serverConfig } from "@/lib/connection"
+import { hasPluginFeature } from "@/lib/hermes"
 import { db, getSettings, listEnabledProfiles, type Attachment, type ModelChoice, type Profile } from "@/lib/db"
 import { equal } from "@/lib/equal"
 import { LIST_MS, SAFETY_MS } from "@/lib/freshness"
@@ -132,6 +133,29 @@ export interface Canvas {
   tools?: string[]
   /** The user's answers about those tools, one per tool; a missing tool was never asked. */
   grants?: CanvasGrant[]
+  /**
+   * Whether this canvas's requests are builds on their own sessions (ADR 0170): a canvas made by
+   * an app that knows the `canvas_builds` feature queues each request on the plugin, which hands it
+   * to the canvas's open build — or opens one. A canvas made before builds keeps the one-session
+   * path, where its own session writes versions.
+   */
+  builds?: boolean
+  /**
+   * The build this canvas has open, where it has one: its session, whose transcript is the work the
+   * reader asked for, its phase and the requests it has taken. Absent for a canvas on the
+   * one-session path, and for one with no build going.
+   */
+  build?: CanvasBuild
+}
+
+/** What a canvas's open build says of itself, as the host's read answers it (`builds.py`). */
+export interface CanvasBuild {
+  id: string
+  /** The Hermes session the build runs on, drawn in the canvas's lane while it works. */
+  session: string
+  phase: string
+  /** The requests this build has taken, in the order they came. */
+  requests: string[]
 }
 
 /** A canvas as a list keeps it, and as the cache's list row keeps it (`canvas-cache.ts`). */
@@ -267,6 +291,7 @@ function grantsOf(raw: unknown): CanvasGrant[] | undefined {
 
 function toCanvas(raw: Record<string, unknown>, profileId: string): Canvas {
   const grants = grantsOf(raw.grants)
+  const build = buildOf(raw.build)
   return {
     id: String(raw.id ?? ""),
     profileId,
@@ -286,6 +311,24 @@ function toCanvas(raw: Record<string, unknown>, profileId: string): Canvas {
     ...(grants ? { grants } : {}),
     ...(typeof raw.html === "string" ? { html: raw.html } : {}),
     ...(Array.isArray(raw.tools) ? { tools: raw.tools.filter((t): t is string => typeof t === "string") } : {}),
+    ...(raw.builds ? { builds: true } : {}),
+    ...(build ? { build } : {}),
+  }
+}
+
+/** The open build a host's read answers, or nothing for a canvas with no build going. */
+function buildOf(raw: unknown): CanvasBuild | undefined {
+  if (!raw || typeof raw !== "object") return undefined
+  const build = raw as Record<string, unknown>
+  const session = typeof build.session === "string" ? build.session : ""
+  if (!session) return undefined
+  return {
+    id: String(build.id ?? ""),
+    session,
+    phase: typeof build.phase === "string" ? build.phase : "open",
+    requests: Array.isArray(build.requests)
+      ? build.requests.filter((one): one is string => typeof one === "string")
+      : [],
   }
 }
 
@@ -1059,6 +1102,11 @@ export async function grantCanvasTool(id: string, tool: string, allow: boolean) 
  * from them, so the markers naming the saved files ride only the run body. The record the host
  * answers is the canvas the screen opens — a plugin older than the chat id mints its own chat, and
  * its record is the one that exists.
+ *
+ * Where the host advertises `canvas_builds` the start says so, and this canvas's requests are builds
+ * on their own sessions (ADR 0170): each one is queued on the plugin, which hands it to the canvas's
+ * open build or opens one, and the lane draws that build's session while it works. A host that
+ * advertises nothing keeps the one-session path, where the canvas's own session writes versions.
  */
 export async function startCanvas(
   profile: Profile,
@@ -1084,11 +1132,14 @@ export async function startCanvas(
     messages: [{ role: "user", content: await wireContent(prompt, saved) }],
     ...(choice ? { model: choice.model, provider: choice.provider } : {}),
   })
+  // Asked before anything is written, so a host that can't hold a build spends nothing on one.
+  const builds = await hasPluginFeature(serverConfig(profile), "canvas_builds")
   const raw = await createCanvas(profile, {
     prompt,
     profileId: profile.id,
     body,
     start: { chatId, files },
+    ...(builds ? { builds: true } : {}),
   })
   if (!raw) throw new Error("The bot didn't make the canvas.")
   const canvas = toCanvas(raw, profile.id)
