@@ -40,7 +40,7 @@ import {
   type Profile,
   type RoomMember,
 } from "@/lib/db"
-import { COLUMN } from "@/lib/layout"
+import { COLUMN, THREAD_GUTTER } from "@/lib/layout"
 import { seatedLine } from "@/lib/room-seats"
 import { useRoom } from "@/lib/room"
 import { memberLabel, type RoomRow } from "@/lib/room-log"
@@ -162,7 +162,7 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
       <MessageScrollerProvider autoScroll defaultScrollPosition="end">
         <MessageScroller className="flex-1">
           <MessageScrollerViewport aria-label="Room messages">
-            <MessageScrollerContent className="w-full gap-6 px-4 pt-32 pb-6">
+            <MessageScrollerContent className={cn("w-full gap-6 pt-32 pb-6", THREAD_GUTTER)}>
               {wasSeated && (
                 <p
                   data-slot="room-seated"

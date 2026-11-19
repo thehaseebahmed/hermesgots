@@ -7,6 +7,14 @@
 export const COLUMN = "mx-auto w-full max-w-[672px]"
 
 /**
+ * A thread's gutters inside a chat's scroller: 16px on the left, and 16px less the scrollbar's own
+ * width on the right (the scroller root's width, `100cqw`, less the content box's, `100%`), so the
+ * thread's box is the header's box at every width and the column centres on the pane as the header
+ * does (ADR 0166). An overlay scrollbar takes no width and leaves both gutters 16px.
+ */
+export const THREAD_GUTTER = "pl-4 pr-[max(0px,calc(1rem_-_(100cqw_-_100%)))]"
+
+/**
  * A list screen's body: the column with its 16px gutters outside the box, so its rows start on the
  * same pixel as its header (`px-4` around a `COLUMN` row) instead of 16px inside it (ADR 0166).
  */

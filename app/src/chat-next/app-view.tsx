@@ -47,7 +47,7 @@ import { clarifyWire, questionAt, questionsIn } from "@/lib/clarify"
 import { db, type ApprovalChoice, type ClarifyQuestion, type Message } from "@/lib/db"
 import type { DelegatedAgent } from "@/lib/hermes"
 import { describeActivity } from "@/lib/format"
-import { COLUMN, COMPOSER_SLOT, REPLY_EDGE } from "@/lib/layout"
+import { COLUMN, COMPOSER_SLOT, REPLY_EDGE, THREAD_GUTTER } from "@/lib/layout"
 import { modelChanges } from "@/lib/model-changes"
 import { useDraws } from "@/lib/openui-draws"
 import { retryText } from "@/lib/retry-message"
@@ -252,7 +252,7 @@ export function AppThreadView({
             <MessageScroller className="flex-1">
               <MessageScrollerViewport aria-label="Messages">
                 <MessageScrollerContent
-                  className={cn("w-full gap-6 px-4 pt-32 pb-6", cut && "justify-end")}
+                  className={cn("w-full gap-6 pt-32 pb-6", THREAD_GUTTER, cut && "justify-end")}
                 >
                   {failure !== undefined && (
                     <div className={COLUMN} role="alert">

@@ -32,12 +32,6 @@ function MessageScroller({
   )
 }
 
-/**
- * Where the pane holds the column with room to spare (its 672px, its 16px gutters and a thin
- * scrollbar each side), the scrollbar's gutter is balanced on the other edge, so the thread centres
- * on the pane's own centre as the header over it does (ADR 0166). Narrower, the thread keeps the
- * whole width and its column starts on the header's edge anyway.
- */
 function MessageScrollerViewport({
   className,
   ...props
@@ -46,7 +40,7 @@ function MessageScrollerViewport({
     <MessageScrollerPrimitive.Viewport
       data-slot="message-scroller-viewport"
       className={cn(
-        "size-full min-h-0 min-w-0 scroll-fade-b scrollbar-thin scrollbar-gutter-stable overflow-y-auto overscroll-contain contain-content data-autoscrolling:scrollbar-thumb-transparent data-autoscrolling:scrollbar-track-transparent data-pending-scroll:invisible @min-[724px]/message-scroller:[scrollbar-gutter:stable_both-edges]",
+        "size-full min-h-0 min-w-0 scroll-fade-b scrollbar-thin scrollbar-gutter-stable overflow-y-auto overscroll-contain contain-content data-autoscrolling:scrollbar-thumb-transparent data-autoscrolling:scrollbar-track-transparent data-pending-scroll:invisible",
         className,
       )}
       {...props}

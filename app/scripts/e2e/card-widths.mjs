@@ -4,9 +4,6 @@ import { app, assert, flow, pass, runId, settled } from "./lib.mjs"
 
 const GUTTER = 16
 const BOX_PX = 672
-// The pane from which the box caps with room for a balancing gutter each side: the box, its 16px
-// gutters and a thin scrollbar on both edges (`BALANCED` in message-scroller.tsx).
-const BALANCED_PX = 724
 const TOLERANCE = 1
 
 const VIEWPORT = "[data-slot=message-scroller-viewport]"
@@ -34,14 +31,13 @@ const facts = (page, selectors) =>
     return {
       pane: viewport.offsetWidth,
       thread: viewport.clientWidth,
-      header: box(rowOf(viewport)),
+      header: box(chatHeaderRow(viewport)),
       card: box(document.querySelector(where.card)),
       question: box(document.querySelector(where.question)),
       text: widest(where.text),
     }
 
-    // The chat's own header row: the one over the pane, not a list's beside it.
-    function rowOf(pane) {
+    function chatHeaderRow(pane) {
       const left = pane.getBoundingClientRect().left
       return [...document.querySelectorAll('[data-slot="header-row"]')].find(
         (row) => row.getBoundingClientRect().left >= left,
@@ -103,29 +99,22 @@ await flow(
       const questionWidth = Math.min(waiting, BOX_PX)
       assert.ok(seen.header, `the chat's header is on the page at ${where}`)
       const header = seen.header
-      // Where the pane holds more than the box, the thread's scrollbar is balanced by a gutter on
-      // the other edge, so the column centres on the pane's own centre, as the header does.
-      const capped = seen.pane >= BALANCED_PX
 
       assert.ok(seen.text, `a reply's text is on the page at ${where}`)
-      // Between the box's own width and the balanced one, the header caps while the thread still
-      // fills, so the two may part by up to half a classic scrollbar; an overlay scrollbar takes
-      // no width and they meet exactly.
-      const slack = capped ? TOLERANCE : Math.max(TOLERANCE, (seen.pane - seen.thread) / 2)
-      assert.ok(
-        Math.abs(seen.text.left - header.left) <= slack,
-        `a reply's text starts where the header does at ${where}, in a ${seen.pane}px pane (${seen.text.left}px against ${header.left}px)`,
+      near(
+        seen.text.left,
+        header.left,
+        `a reply's text starts where the header does at ${where}, in a ${seen.pane}px pane`,
+      )
+      near(
+        seen.text.width,
+        header.width,
+        `and it is as wide as the header at ${where}, in a ${seen.pane}px pane`,
       )
       assert.ok(
         seen.text.width <= BOX_PX + TOLERANCE,
         `a reply's text never passes the ${BOX_PX}px box at ${where} (${seen.text.width}px)`,
       )
-      if (capped)
-        near(
-          seen.text.width,
-          header.width,
-          `and it is as wide as the header at ${where}, in a ${seen.pane}px pane`,
-        )
 
       assert.ok(seen.card, `the subagent's card is on the page at ${where}`)
       near(
@@ -145,11 +134,11 @@ await flow(
         questionWidth,
         `the waiting Question fills the composer slot up to the ${BOX_PX}px cap at ${where}, ${slot}px gutter each side in a ${seen.pane}px pane`,
       )
-      if (capped)
+      if (slot === GUTTER)
         near(
           seen.question.left,
           header.left,
-          `and lines up with the header where the box caps at ${where}, in a ${seen.pane}px pane`,
+          `and lines up with the header where the slot keeps the header's gutter at ${where}, in a ${seen.pane}px pane`,
         )
 
       const path = await shot(`at-${width}`)
@@ -158,7 +147,6 @@ await flow(
       )
     }
 
-    // A list screen draws the same column: its rows start where its header does.
     const bot = await page.evaluate(async () => {
       const { db } = await import("/src/lib/db.ts")
       return (await db.profiles.toArray())[0].id

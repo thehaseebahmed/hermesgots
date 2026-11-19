@@ -25,7 +25,7 @@ import { failed } from "@/lib/refusal"
 import { equal } from "@/lib/equal"
 import { listsAsChat } from "@/lib/lists-as-chat"
 import { pausedQueue, type PendingQueue } from "@/lib/pending"
-import { COLUMN, COMPOSER_SLOT } from "@/lib/layout"
+import { COLUMN, COMPOSER_SLOT, THREAD_GUTTER } from "@/lib/layout"
 import { opensOnBlank, opensOnChatNext } from "@/chat-next/route"
 import { noteFailure, quietly } from "@/lib/report"
 import { awayLine } from "@/lib/away"
@@ -1125,9 +1125,7 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
             <MessageScrollerViewport aria-label="Messages">
               <MessageScrollerContent
                 // A cut chat's rows sit at the end, where they will be once the rows above land.
-                className={
-                  cut ? "w-full justify-end gap-6 px-4 pt-32 pb-6" : "w-full gap-6 px-4 pt-32 pb-6"
-                }
+                className={cn("w-full gap-6 pt-32 pb-6", THREAD_GUTTER, cut && "justify-end")}
               >
                 {!cut && loadingEarlier && (
                   <div className="flex shrink-0 justify-center py-2" aria-hidden>

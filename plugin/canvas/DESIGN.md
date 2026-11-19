@@ -352,7 +352,7 @@ drawer.
 - **The reading column is a 672px box, with its 16px gutters outside it.** A chat's header, its
   words and its cards, and a list screen's header and rows, all stand on that box, so they start on
   the same pixel at every screen width. Where the pane is wider than the box, the box centres on the
-  pane, and a chat's scrollbar is balanced by a gutter on the other edge so it centres there too.
+  pane, and a chat's thread gives up the scrollbar's width from its right gutter so it does too.
 - **A reply is one column.** Its text, the interface a block draws and the rows that account for its
   work all stand on the same inset, so a block starting to draw moves nothing.
 - **Gutters are 16px**, and 12px at the foot of a composer. Nothing scrolls sideways.

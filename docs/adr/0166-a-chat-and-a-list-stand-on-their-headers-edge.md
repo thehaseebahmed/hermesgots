@@ -12,9 +12,10 @@ thread stood 5px left of the header.
 
 **Decision.** One column: a 672px box with its gutters outside it. `COLUMN` is that box for a chat's
 header, text and cards alike, and `PAGE_BODY` is a list screen's body — `max-w-[704px] px-4`, the
-box with its gutters outside — so a list's rows start on its header's pixel. Where the chat's pane
-holds the box with room for a thin scrollbar each side (724px), the thread's scrollbar gutter is
-balanced on both edges, so the thread centres on the pane as the header does.
+box with its gutters outside — so a list's rows start on its header's pixel. A chat's thread keeps
+16px on its left and 16px less the scrollbar's own width on its right (`THREAD_GUTTER`: the
+scroller's width, `100cqw`, less its content box's, `100%`), so the thread's box is the header's box
+at every width and with any scrollbar.
 
 **Considered options.** Narrowing the header to 640px, which kept ADR 0114's measure but left the
 cards 16px past the header on either side and the chat no wider; leaving it, which is what a reader
@@ -23,9 +24,10 @@ noticed.
 **Consequences.** A chat's words widen from 640px to 672px — about 85 to 90 characters a line at
 15px — and so do the list screens' rows, so the two still match each other. A card no longer frames
 the text with a 16px gutter on a wide pane: it stands on the same edge, as it always did on a phone.
-Between a 704px and a 724px pane, with a classic scrollbar, the header caps while the thread still
-fills, so the two part by up to half a scrollbar; an overlay scrollbar (a phone, macOS) takes no
-width and they meet exactly. The card-widths flow measures the header's edge against a reply's text
+A classic scrollbar wider than 16px (an unstyled one on Windows) leaves the right gutter at
+nothing and the thread up to a pixel short; the app's thin scrollbar and an overlay one meet the
+header exactly. A first cut balanced the scrollbar's gutter on both edges from a 724px pane, which
+left a 704–724px pane — 1440px with the sidebar open — 2px off; the review caught it. The card-widths flow measures the header's edge against a reply's text
 and card at 390, 1024, 1440 and 1920px, and a bot's chat list rows against its header at 390 and
 1920px. This amends ADR 0114's numbers and ADR 0047's frame; ADR 0047's rule — a card fills its
 container and never passes the box — stands.
