@@ -63,7 +63,11 @@ logger = logging.getLogger(__name__)
 # per session, replaced as each failure lands, so nothing already written has to move.
 # 74 keeps an approval's buttons (`answers.py`): one row per token, hashed, single-use and expiring
 # with the push that carried it. A new table alone, so nothing else reads differently.
-SCHEMA_VERSION = 75
+# 75 keeps which of a phone's keys signed a link the relay carried (`device_keys.py`, ADR 0168): one
+# column on the tokens, one new table.
+# 76 keeps the notifications an ntfy tray may still be showing (`push.py`): one new table, one row
+# per (category, id) a publish went out under, which a dismissal reads to clear them.
+SCHEMA_VERSION = 76
 
 
 def data_dir(hermes_home: Path) -> Path:
@@ -1119,6 +1123,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
                    key_id TEXT NOT NULL UNIQUE,
                    key BLOB NOT NULL,
                    at INTEGER NOT NULL
+               )"""
+        )
+        # v76: the notifications a phone's tray may still be showing (push.py). A publish over ntfy
+        # writes the (category, id) it went out under, since ntfy clears a notification by its
+        # sequence id and a dismissal names only the id; a clear reads them and forgets them. One
+        # row per pair, so a newer publish of the same thing keeps its place.
+        conn.execute(
+            """CREATE TABLE IF NOT EXISTS push_live (
+                   category TEXT NOT NULL,
+                   session_id TEXT NOT NULL,
+                   at INTEGER NOT NULL,
+                   PRIMARY KEY (category, session_id)
                )"""
         )
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")

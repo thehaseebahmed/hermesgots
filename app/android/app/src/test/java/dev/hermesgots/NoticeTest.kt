@@ -161,6 +161,33 @@ class NoticeTest {
         assertEquals(AdaptiveFace(side = 3, inset = 1), Notice.adaptiveFace(1))
     }
 
+    @Test
+    fun aClearIsNoNoticeAndNamesItsSubject() {
+        // A clear carries no words, so `from` answers null for it and it is read on its own (ADR
+        // 0169): the registry's `clearMessage` in `app/netlify/lib/fcm.ts` writes exactly this.
+        assertNull(read("kind" to "clear", "session_id" to "s1"))
+        assertEquals("s1", Notice.clearSubject(mapOf("kind" to "clear", "session_id" to "s1")))
+        assertNull(Notice.clearSubject(mapOf("kind" to "clear")))
+        assertNull(Notice.clearSubject(mapOf("kind" to "clear", "session_id" to " ")))
+        assertNull(Notice.clearSubject(mapOf("kind" to "run_done", "session_id" to "s1")))
+        assertNull(Notice.clearSubject(mapOf("session_id" to "s1")))
+    }
+
+    @Test
+    fun aTagIsAboutTheIdItEndsWith() {
+        // The rule `pushSubject` keeps in the app (`src/lib/push-kinds.ts`), which both tag writers
+        // are held to: the web's `group:session` and the registry's `category:session`.
+        assertEquals("s1", Notice.subjectOf("chat_input:s1"))
+        assertEquals("s1", Notice.subjectOf("session:s1"))
+        assertEquals("routine-1", Notice.subjectOf("routine_failed:routine-1"))
+        assertNull(Notice.subjectOf("gots"))
+        assertNull(Notice.subjectOf("gots:"))
+        assertTrue(Notice.about("chat_input:s1", "s1"))
+        assertTrue(Notice.about("session:s1", "s1"))
+        assertFalse(Notice.about("chat_input:s2", "s1"))
+        assertFalse(Notice.about("gots", "s1"))
+    }
+
     private companion object {
         const val APP = "Gots"
     }

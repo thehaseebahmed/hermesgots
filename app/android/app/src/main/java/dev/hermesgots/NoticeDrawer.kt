@@ -40,6 +40,21 @@ object NoticeDrawer {
     }
 
     /**
+     * Takes every entry about a subject out of the tray: a dismissal on another device reaches this
+     * phone as a clear, and no push protocol removes a notification it didn't deliver to (ADR 0169).
+     * The active entries are read as [replied] already reads one, and each whose tag is about the
+     * subject is cancelled — a phone whose app never ran again holds nothing, and that is a no-op.
+     */
+    fun clearSubject(context: Context, subject: String) {
+        val manager = context.getSystemService(NotificationManager::class.java) ?: return
+        val active = runCatching { manager.activeNotifications }.getOrNull() ?: return
+        for (one in active) {
+            val tag = one.tag ?: continue
+            if (one.id == NOTICE_ID && Notice.about(tag, subject)) clear(context, tag)
+        }
+    }
+
+    /**
      * Posts the entry again with what became of its Reply ([ReplyOutcome]): the conversation as it
      * stands in the tray, plus [line] where there is one, and Reply only where [keepsReply]. It is rebuilt from the
      * active entry itself, since the receiver holds nothing else of the notice, and it doesn't alert

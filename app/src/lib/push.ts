@@ -22,6 +22,7 @@ import {
   registerNtfy,
   registerPush,
   setPushMuted,
+  dismissPush,
   registerNoticeKey,
   unregisterNoticeKey,
   unregisterNtfy,
@@ -32,6 +33,7 @@ import { connectionKey, reconnectLive } from "@/lib/live"
 import { isNative } from "@/lib/platform"
 import { quietly } from "@/lib/report"
 import { followHeldReads, takeTrayReads } from "@/lib/tray-marks"
+import { latestReads } from "@/lib/tray-reads"
 import { keyMoves } from "@/lib/notice-keys"
 import { onReturn } from "@/lib/wake"
 import { callFunction, failure, functionUrl } from "@/lib/account"
@@ -251,15 +253,51 @@ async function dismiss(subject: string) {
       const { notifications } = await push.getDeliveredNotifications()
       const answered = notifications.filter((entry) => aboutSubject(entry, subject))
       if (answered.length) await push.removeDeliveredNotifications({ notifications: answered })
-      return
+    } else {
+      const registration = await navigator.serviceWorker?.getRegistration()
+      if (!registration) return
+      for (const notification of await registration.getNotifications())
+        if (aboutSubject(notification, subject)) notification.close()
     }
-    const registration = await navigator.serviceWorker?.getRegistration()
-    if (!registration) return
-    for (const notification of await registration.getNotifications())
-      if (aboutSubject(notification, subject)) notification.close()
   } catch {
     // An older APK's plugin without the read, or a browser without the Notifications API.
   }
+  // The same subject leaves every other device's tray too (ADR 0169): no push protocol removes
+  // another device's notification, so the account is told and each device clears its own.
+  void broadcast(subject).catch(quietly("Telling the account a dismissal"))
+}
+
+/** What was told this session, and when, so a screen coming back doesn't re-tell the account. */
+const told = new Map<string, number>()
+/** How long one subject's dismissal is remembered before the account is told again. */
+const TELL_AGAIN_MS = 60_000
+
+/**
+ * Tells the account a subject is no news (ADR 0169): the registry, which reaches the account's
+ * Android installs, and every bot's plugin, which reaches its own web subscriptions and its ntfy
+ * topic. This device's own id is named where it has one, so it is not told what it already closed —
+ * an app on the web has none, and every phone of the account is told.
+ *
+ * Best effort, like every other push call here: a host that doesn't know the route yet, or a site
+ * that is away, is asked again by the next dismissal of the same subject.
+ */
+async function broadcast(subject: string) {
+  const now = Date.now()
+  const last = told.get(subject)
+  if (last !== undefined && now - last < TELL_AGAIN_MS) return
+  told.set(subject, now)
+  const { fcm, push: identity } = await getSettings()
+  const device = fcm?.device
+  await callFunction("POST", functionUrl("registry", { route: "dismiss" }), {
+    session_id: subject,
+    ...(device ? { device } : {}),
+  }).catch(() => undefined)
+  const bots = (await listEnabledProfiles()).filter(
+    (bot) => bot.apiKey && bot.baseUrl.trim() && !bot.disabled,
+  )
+  await Promise.all(
+    bots.map((bot) => dismissPush(bot, subject, identity?.device).catch(() => undefined)),
+  )
 }
 
 /**
@@ -304,6 +342,14 @@ function startWeb() {
     if (document.visibilityState !== "visible") return
     soon()
   })
+  // A tap on a push about something no screen opens — a routine, a project — opens the list, and the
+  // worker puts the subject in the link so the account is told it is no news (ADR 0169). The
+  // navigation is a full one, so reading it here at start is the whole of it.
+  const dismissed = new URLSearchParams(location.search).get("dismissed")
+  if (dismissed) {
+    history.replaceState(null, "", location.pathname + location.hash)
+    void broadcast(dismissed).catch(quietly("Telling the account a dismissal"))
+  }
 }
 
 /**
@@ -638,6 +684,7 @@ const TRAY_PLUGIN = "Tray"
 
 interface TrayPlugin {
   takeReads(): Promise<{ reads: unknown }>
+  takeDismisses(): Promise<{ dismisses: unknown }>
   noticeKey(): Promise<{ key: string }>
 }
 
@@ -647,6 +694,46 @@ const Tray = registerPlugin<TrayPlugin>(TRAY_PLUGIN)
 async function trayReads(): Promise<unknown> {
   if (!Capacitor.isPluginAvailable(TRAY_PLUGIN)) return []
   return (await Tray.takeReads()).reads
+}
+
+/** The swipes the tray queued while the page wasn't running, each naming the subject it dismissed. */
+async function trayDismisses(): Promise<unknown> {
+  if (!Capacitor.isPluginAvailable(TRAY_PLUGIN)) return []
+  return (await Tray.takeDismisses()).dismisses
+}
+
+/** The subjects the tray queued as swiped away: each row's own, bounded and told once. */
+export function latestDismisses(rows: unknown): string[] {
+  if (!Array.isArray(rows)) return []
+  const subjects = new Set<string>()
+  for (const row of rows) {
+    const subject = (row as { subject?: unknown })?.subject
+    if (typeof subject === "string" && subject && subject.length <= 200) subjects.add(subject)
+  }
+  return [...subjects]
+}
+
+/**
+ * Dismisses on every other device the subjects this phone's tray was told with the app closed: a
+ * Mark as read's chat, and a swipe's own. The read marks stay this device's (`tray-marks.ts`); only
+ * the dismissal crosses (ADR 0169).
+ */
+async function dismissTrayPresses() {
+  const [reads, swipes] = await Promise.all([
+    trayReads().catch(() => []),
+    trayDismisses().catch(() => []),
+  ])
+  const tell = (subject: string) =>
+    broadcast(subject).catch(quietly("Telling the account a dismissal"))
+  await Promise.all([
+    ...latestReads(reads).map(async (read) => {
+      const record = await db.conversations
+        .get(read.chat)
+        .catch(quietly("Reading a tray press's chat"))
+      if (record) await tell(chatSubject(record))
+    }),
+    ...latestDismisses(swipes).map(tell),
+  ])
 }
 
 /** Which bot has been handed which key, by its connection, so a pass posts only what is new. */
@@ -703,9 +790,14 @@ function startNative() {
   // A Mark as read pressed with the app closed moves its chat's read mark here, at start and on
   // every return, and the chats it holds read are followed while their rows catch up.
   followHeldReads()
-  const reads = () => void takeTrayReads(trayReads)
-  reads()
-  onReturn(reads)
+  // Both presses a tray can queue with the app closed — a Mark as read, and a swipe — leave the
+  // phone's tray already, and the subject is dismissed on every other device too (ADR 0169).
+  const drained = () => {
+    void takeTrayReads(trayReads)
+    void dismissTrayPresses()
+  }
+  drained()
+  onReturn(drained)
   // A bot linked or turned off after ntfy was switched on is handed the topic, or told to forget it.
   let timer: number | undefined
   liveQuery(() => db.profiles.toArray()).subscribe(() => {

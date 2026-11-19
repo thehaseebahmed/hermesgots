@@ -18,6 +18,11 @@ that session, or an ancestor of it, is one of the app's chats — the chat compr
 onto, and the chat a subagent forked it off, are both the chat's news — or is the profile's own
 Bot Chat, which is the bot's Main, or carries a chat record, which is how a routine's run is the
 app's news.
+
+No push protocol removes a notification from another device, so a dismissal travels the same roads
+backwards: ``dismiss`` tells this profile's own web subscriptions and its ntfy topic that a subject
+is no news, and ``dismissed`` — an approval settled here — tells the account's Android installs
+through the registry as well. Every device clears its own tray, which is the only tray it can.
 Everything here is best effort and runs on its own thread, so a slow push service never holds up
 Hermes.
 """
@@ -400,9 +405,14 @@ def _deliver(path: Path, kind: str, category: str, session_id: str, notice: Opti
         elif status is None or status >= 300:
             logger.debug("gots: push to %s answered %s", urllib.parse.urlsplit(row["endpoint"]).netloc, status)
     try:
-        ntfy.deliver(path, kind, category, session_id, notice, _on_screen_devices(path))
+        published = ntfy.deliver(path, kind, category, session_id, notice, _on_screen_devices(path))
     except Exception:
         logger.debug("gots: an ntfy publish failed", exc_info=True)
+        published = None
+    if published is not None and published < 300:
+        # A phone's ntfy tray may still be showing it, and ntfy clears by the pair's sequence id,
+        # so what a dismissal has to name is kept here (`dismiss`).
+        remember(path, category, session_id)
     _relay(path, kind, category, session_id, notice)
 
 
@@ -429,6 +439,157 @@ def clear(path: Path, key: str) -> None:
         conn.execute("DELETE FROM push_seen WHERE key = ?", (key,))
     finally:
         conn.close()
+
+
+# How long a notification an ntfy tray may still be showing is remembered for: the window
+# `push_seen` keeps its own keys for, so a row outlives any entry it could be clearing.
+LIVE_KEEP_MS = 30 * 24 * 3600 * 1000
+
+# A device as the app names one: the id its push identity carries, which a dismissal leaves out.
+DEVICE_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def remember(path: Path, category: str, session_id: str) -> None:
+    """Remembers a notification an ntfy tray may still be showing, for `outstanding` to read."""
+    conn = connect(path)
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO push_live (category, session_id, at) VALUES (?, ?, ?)",
+            (category, session_id, int(time.time() * 1000)),
+        )
+    finally:
+        conn.close()
+
+
+def outstanding(path: Path, session_id: str) -> List[str]:
+    """The categories a notification about this id may still be showing under.
+
+    ntfy clears a notification by its sequence id, which is the (category, id) pair's own, and a
+    dismissal names only the id — so what a publish went out under is kept here and read back one
+    category at a time. A row older than `LIVE_KEEP_MS` is one nobody dismissed anywhere, and is
+    dropped as it is read.
+    """
+    now = int(time.time() * 1000)
+    conn = connect(path)
+    try:
+        conn.execute("DELETE FROM push_live WHERE at < ?", (now - LIVE_KEEP_MS,))
+        rows = conn.execute(
+            "SELECT category FROM push_live WHERE session_id = ?", (session_id,)
+        ).fetchall()
+    finally:
+        conn.close()
+    # A row is this plugin's own write, but the id it names travels in a clear's address, so it is
+    # held to the list of categories that can be published all the same.
+    return [row[0] for row in rows if row[0] in CATEGORIES]
+
+
+def forget(path: Path, session_id: str, categories: List[str]) -> None:
+    """Forgets the pairs a clear has just dismissed, so the next one has nothing to name. Ones it
+    didn't land on stay behind, and are tried again by the next dismissal of the same id."""
+    if not categories:
+        return
+    conn = connect(path)
+    try:
+        conn.executemany(
+            "DELETE FROM push_live WHERE category = ? AND session_id = ?",
+            [(category, session_id) for category in categories],
+        )
+    finally:
+        conn.close()
+
+
+def _send_clear(row: Dict[str, Any], subject: str) -> Optional[int]:
+    """One clear to one subscription, under a topic of its own: clears collapse with each other and
+    never replace a notification still queued at the push service."""
+    topic = _b64(hashlib.sha256(f"clear:{subject}".encode()).digest()[:18])
+    return send(row, {"kind": "clear", "session_id": subject}, topic)
+
+
+def _clear_ntfy(path: Path, session_id: str) -> int:
+    """Tells the ntfy topic to drop what it is still showing about this id: one clear per category a
+    publish went out under, each naming that pair's own sequence id. Answers how many landed; a
+    profile with no target, or a server that didn't answer, leaves them where they are."""
+    held = ntfy.target(path)
+    if not held:
+        return 0
+    landed: List[str] = []
+    for category in outstanding(path, session_id):
+        status = ntfy.publish_clear(held, ntfy.sequence_id(category, session_id))
+        if status is not None and status < 300:
+            landed.append(category)
+        else:
+            logger.debug(
+                "gots: ntfy at %s answered %s",
+                urllib.parse.urlsplit(held["server"]).netloc,
+                status,
+            )
+    forget(path, session_id, landed)
+    return len(landed)
+
+
+def dismiss(path: Path, body: Dict[str, Any]) -> Dict[str, int]:
+    """A subject dismissed on one device, told to every other this profile reaches: each web
+    subscription that isn't the one that asked is sent a clear, and the ntfy topic is told to drop
+    what it is still showing. Raises ``PushError`` with a message for the app.
+
+    Best effort, like every delivery here — a subscription or a server that didn't answer is asked
+    again by the next dismissal of the same subject.
+    """
+    subject = body.get("session_id")
+    if not isinstance(subject, str) or not subject or len(subject) > 200:
+        raise PushError("Missing session.")
+    device = body.get("device")
+    if device is not None and (not isinstance(device, str) or not DEVICE_ID.match(device)):
+        raise PushError("Not a device.")
+    sent = 0
+    for row in _rows(path):
+        # The device that asked closed its own entry already, and is not told again.
+        if device and row["device"] == device:
+            continue
+        status = _send_clear(row, subject)
+        if status in (404, 410):
+            # The browser dropped the subscription (or the user revoked it).
+            unsubscribe(path, row["endpoint"])
+        elif status is None or status >= 300:
+            logger.debug(
+                "gots: clear to %s answered %s",
+                urllib.parse.urlsplit(row["endpoint"]).netloc,
+                status,
+            )
+        else:
+            sent += 1
+    return {"cleared": sent, "ntfy": _clear_ntfy(path, subject)}
+
+
+def dismissed(path: Path, session_id: str) -> None:
+    """A subject answered on this host — an approval settled, from a button or from a screen — told
+    to every device of the account: this profile's own subscriptions and topic, and, where the
+    profile is linked, the account's Android installs through the registry.
+
+    Nothing is skipped, since the host doesn't know which device pressed, and a clear that matches
+    nothing is a no-op. Runs on the answer's own thread, best effort, like every delivery here.
+    """
+    dismiss(path, {"session_id": session_id})
+    state = _link_state(path)
+    if state is None:
+        return
+    for attempt in range(RELAY_TRIES):
+        try:
+            link.call(
+                state["site"],
+                "POST",
+                "push/dismiss",
+                token=state["token"],
+                body={"session_id": session_id},
+            )
+            return
+        except link.LinkError as error:
+            if error.status == 429 and attempt + 1 < RELAY_TRIES:
+                # The registry takes one push a second from a host, and news can come in bunches.
+                time.sleep(RELAY_RETRY_SECONDS)
+                continue
+            logger.warning("gots: the registry wouldn't dismiss (%s)", error)
+            return
 
 
 def _gots_chat(path: Path, session_id: str) -> bool:

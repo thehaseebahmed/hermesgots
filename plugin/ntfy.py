@@ -282,6 +282,14 @@ def click(kind: str, session_id: str) -> str:
     return "gots://open?" + urllib.parse.urlencode({"kind": kind, "id": session_id})
 
 
+def sequence_id(category: str, session_id: str) -> str:
+    """The id that links a topic's notifications about one thing: the pair's own digest, as ntfy
+    reads it. A newer message of the same category about the same thing replaces one still showing,
+    and a clear names the same id to dismiss it (`publish_clear`)."""
+    digest = hashlib.sha256(f"{category}:{session_id}".encode()).digest()[:18]
+    return base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
+
+
 def message(
     held: Dict[str, Any], kind: str, category: str, session_id: str, notice: Optional[Notice] = None
 ) -> Dict[str, Any]:
@@ -294,7 +302,6 @@ def message(
     title = ((notice or {}).get("title") or "").strip() or UNTITLED.get(kind) or "Gots"
     words = ((notice or {}).get("body") or "").strip() or WORDS.get(kind, "Waiting for you")
     priorities = held.get("priorities") if isinstance(held.get("priorities"), dict) else {}
-    sequence = hashlib.sha256(f"{category}:{session_id}".encode()).digest()[:18]
     body = {
         "topic": held["topic"],
         "title": title,
@@ -302,7 +309,7 @@ def message(
         "priority": priorities.get(category, DEFAULT_PRIORITY),
         "click": click(kind, session_id),
         # A newer message of the same category about the same thing replaces one still showing.
-        "sequence_id": base64.urlsafe_b64encode(sequence).rstrip(b"=").decode(),
+        "sequence_id": sequence_id(category, session_id),
     }
     return body
 
@@ -391,6 +398,25 @@ def publish(
         data=json.dumps(body, separators=(",", ":")).encode(),
         headers={**auth_header(held["token"]), "Content-Type": "application/json", **(extra or {})},
         method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=SEND_TIMEOUT) as response:
+            return response.status
+    except urllib.error.HTTPError as error:
+        return error.code
+    except (urllib.error.URLError, OSError):
+        return None
+
+
+def publish_clear(held: Dict[str, Any], sequence: str) -> Optional[int]:
+    """One clear to the topic: ``PUT /<topic>/<sequence_id>/clear``, which ntfy answers with a
+    ``message_clear`` every subscribed client — the Android app and the web app alike — drops that
+    notification for. The server's status, or None when it didn't answer, which leaves the entry
+    where it is: a clear is best effort, like every publish here."""
+    request = urllib.request.Request(
+        f"{held['server']}/{held['topic']}/{sequence}/clear",
+        headers=auth_header(held["token"]),
+        method="PUT",
     )
     try:
         with urllib.request.urlopen(request, timeout=SEND_TIMEOUT) as response:

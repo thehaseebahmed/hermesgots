@@ -36,6 +36,10 @@ class NoticeAnswerReceiver : BroadcastReceiver() {
             markRead(context, intent)
             return
         }
+        if (intent.action == ACTION_DISMISS) {
+            dismiss(context, intent)
+            return
+        }
         if (intent.action != ACTION_ANSWER && intent.action != ACTION_REPLY) return
         val url = intent.getStringExtra(EXTRA_URL).orEmpty()
         // Only a link is ever posted. The registry keeps an http(s) address and drops anything else
@@ -86,6 +90,23 @@ class NoticeAnswerReceiver : BroadcastReceiver() {
         couldntSend = context.getString(R.string.notice_couldnt_send),
         notSent = context.getString(R.string.notice_not_sent),
     )
+
+    /**
+     * A swipe: the subject the entry was about is queued for the page, which tells the account it is
+     * no news (ADR 0169). Nothing is posted — the receiver holds no key of the account's, so the host
+     * can't be told from here — and the entry is already gone, Android having put it away.
+     */
+    private fun dismiss(context: Context, intent: Intent) {
+        val tag = intent.getStringExtra(EXTRA_TAG)?.takeIf { it.isNotBlank() } ?: return
+        val subject = Notice.subjectOf(tag) ?: return
+        val prefs = context.getSharedPreferences(TrayDismisses.PREFS, Context.MODE_PRIVATE)
+        synchronized(TrayDismisses) {
+            val stored = prefs.getString(TrayDismisses.KEY, null)
+            prefs.edit()
+                .putString(TrayDismisses.KEY, TrayDismisses.append(stored, subject, System.currentTimeMillis()))
+                .apply()
+        }
+    }
 
     /**
      * Mark as read: the press is queued for the page, which holds the read marks, and the entry
@@ -177,6 +198,9 @@ class NoticeAnswerReceiver : BroadcastReceiver() {
 
         /** The host's moment of the activity the notice reported, which a Mark as read covers. */
         const val EXTRA_AT = "dev.hermesgots.push.AT"
+
+        /** What [GotsMessagingService] marks a swipe's intent with: nothing is posted for it either. */
+        const val ACTION_DISMISS = "dev.hermesgots.push.DISMISS"
 
         /** The link a press posts. */
         const val EXTRA_URL = "dev.hermesgots.push.URL"
