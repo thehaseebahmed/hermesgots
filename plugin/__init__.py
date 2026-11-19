@@ -60,6 +60,7 @@ from . import (
     media,
     model_changes,
     merges,
+    model_timeout,
     openui,
     outbox,
     page_calls,
@@ -659,6 +660,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # How often a bot is asked to say what it is doing: a row on its General page
                     # (progress.py). An app that predates the row draws nothing for it.
                     "progress_reminders",
+                    # How long a Research or Meetings model call may take, per bot (model_timeout.py).
+                    "model_timeout",
                     # A project's ready tasks, read from its repositories' GitHub issues; see tasks.py.
                     "afk",
                     # Whether that project is left to work them: AFK's switch, the project's own
@@ -1145,6 +1148,26 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except Exception:
             return _error(web, "Couldn't save this bot's reminders setting.", 503)
         return web.json_response(progress.record(held))
+
+    async def get_model_timeout(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        held = await asyncio.to_thread(model_timeout.seconds, store_path())
+        return web.json_response(model_timeout.record(held))
+
+    async def set_model_timeout(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request) or {}
+        try:
+            held = await asyncio.to_thread(model_timeout.set_seconds, store_path(), body.get("seconds"))
+        except ValueError as error:
+            return _error(web, str(error), 400)
+        except Exception:
+            return _error(web, "Couldn't save this bot's model timeout.", 503)
+        return web.json_response(model_timeout.record(held))
 
     async def set_openui(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -2880,6 +2903,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/delegation", get_delegation)
     app.router.add_get(f"{PREFIX}/openui", get_openui)
     app.router.add_get(f"{PREFIX}/reminders", get_reminders)
+    app.router.add_get(f"{PREFIX}/model-timeout", get_model_timeout)
     app.router.add_get(f"{PREFIX}/skills", list_skills)
     # The list's writes and one skill's read, in the `skills/{name}` space the list answers for. The
     # word `skills` itself is a static segment above, so it is registered first; no static sibling
@@ -2907,6 +2931,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/delegation", set_delegation)
     app.router.add_post(f"{PREFIX}/openui", set_openui)
     app.router.add_post(f"{PREFIX}/reminders", set_reminders)
+    app.router.add_post(f"{PREFIX}/model-timeout", set_model_timeout)
     app.router.add_get(f"{PREFIX}/github", github_status)
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)

@@ -52,14 +52,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-from . import events, push, scholar, tools_common
+from . import events, model_timeout, push, scholar, tools_common
 from .store import connect, home_of
 
 logger = logging.getLogger(__name__)
 
-# A model call is given two minutes. With no timeout Hermes bounds a plugin's call at its 30 s side-call
-# default, and a reply written whole (the judge's, a case) can take longer than that.
-MODEL_TIMEOUT_S = 120
 
 # How much of a judge's reply is logged when nothing of it survives the checks.
 REPLY_LOG_CHARS = 4000
@@ -1000,7 +997,7 @@ def _structured(purpose: str, system: str, instructions: str, text: str, schema:
                 max_tokens=max_tokens,
                 temperature=0.3,
                 purpose=f"gots.research.{purpose}",
-                timeout=MODEL_TIMEOUT_S,
+                timeout=model_timeout.seconds(),
                 **options,
             )
         except ValueError as error:
