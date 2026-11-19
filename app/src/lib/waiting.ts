@@ -12,7 +12,7 @@ export type { WaitingReason }
 // The wait's sentence is a rule of its own (`wait-text.ts`), so a screen with no DOM can read it too.
 export { reasonText } from "@/lib/wait-text"
 
-/** A project session, in any project, that waits for the user. */
+/** A session of any kind — a project's, a chat's, a canvas's — that waits for the user. */
 export interface WaitingSession {
   sessionId: string
   title: string
@@ -257,21 +257,24 @@ export function useLiveRunId(
   )
 }
 
-/** Project sessions, across every bot, waiting on the user, newest first. Needs the plugin. */
+/** Sessions of every kind, across every bot, waiting on the user, newest first. Needs the plugin. */
 export function useWaitingSessions(): WaitingSession[] {
   const waiting = useWaiting()
-  const any = Object.keys(waiting).length > 0
-  // Every open project session, matched to what waits below, so the query needn't follow the ids.
+  // The conversations of the sessions the poll says wait, read by Hermes session id: a project's,
+  // a plain chat's and a canvas's alike. A session with no conversation here has no row to open,
+  // and is correctly absent.
+  const ids = Object.keys(waiting)
   const sessions = useLiveQuery(
     () =>
-      any
+      ids.length
         ? db.conversations
-            .where("projectId")
-            .above("")
+            .where("hermesSessionId")
+            .anyOf(ids)
             .filter((c) => !c.resolvedAt && !c.discardedAt)
             .toArray()
         : [],
-    [any],
+    // The waiting ids as one string, so a different session waiting re-reads the query.
+    [ids.join("\n")],
   )
   // The query can lag a poll, so a session no longer waiting is skipped.
   return [...(sessions ?? [])]
