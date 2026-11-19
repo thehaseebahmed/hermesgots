@@ -109,6 +109,45 @@ function cleanCategories(value: unknown): PushCategory[] | null {
   return PUSH_CATEGORIES.filter((category) => value.includes(category))
 }
 
+/** The id a push or a clear is about, as the plugin writes it, or null where it names none. */
+function cleanSession(value: unknown): string | null {
+  return typeof value === "string" && value && value.length <= 200 ? value : null
+}
+
+/**
+ * A clear fanned out to the account's devices: every one but those `skip` names is told to drop the
+ * entries about this id (`clearMessage` in `fcm.ts`). A device's own switches say nothing here — a
+ * clear removes entries, it notifies nothing — and a token Firebase no longer knows is dropped the
+ * same way a refused push drops it. Answers what each device did, so a caller can say so.
+ */
+async function clearDevices(
+  store: RegistryStore,
+  userId: string,
+  fcm: FcmSender,
+  sessionId: string,
+  skip: Set<string>,
+) {
+  let sent = 0
+  let failed = 0
+  let skipped = 0
+  for (const { key } of (await store.list({ prefix: `users/${userId}/devices/` })).blobs) {
+    const deviceId = key.slice(key.lastIndexOf("/") + 1)
+    if (skip.has(deviceId)) {
+      skipped++
+      continue
+    }
+    const device = await read<Device>(store, key)
+    if (!device) continue
+    const result = await fcm.clear(device.data.token, sessionId)
+    if (result === "ok") sent++
+    else {
+      failed++
+      if (result === "gone") await store.delete(key)
+    }
+  }
+  return { sent, failed, skipped }
+}
+
 function json(body: unknown, status = 200) {
   return Response.json(body, { status, headers: { "Cache-Control": "no-store" } })
 }
@@ -413,6 +452,24 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
       return json({ sent, failed, skipped, muted })
     }
 
+    if (op === "POST push/dismiss") {
+      const input = await body(req)
+      const sessionId = cleanSession(input?.session_id)
+      if (!sessionId) return error("Invalid session", 400)
+      if (!ctx.fcm) return error("Push isn't set up on this site", 503)
+      // Nothing is skipped: the host doesn't know which device pressed, and a clear that matches
+      // nothing is a no-op. No gap either — a clear is idempotent, and two subjects dismissed in a
+      // burst are two facts, not a flood.
+      const { sent, failed } = await clearDevices(
+        store,
+        userId,
+        ctx.fcm,
+        sessionId,
+        new Set<string>(),
+      )
+      return json({ sent, failed })
+    }
+
     if (op === "DELETE host") {
       await deleteHost(store, userId, hostId)
       return new Response(null, { status: 204 })
@@ -519,6 +576,25 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
     if (!device) return error("This device isn't registered for push", 404)
     await store.setJSON(key, { ...device.data, categories, updatedAt: now } satisfies Device)
     return json({ ok: true })
+  }
+
+  if (op === "POST dismiss") {
+    const input = await body(req)
+    const sessionId = cleanSession(input?.session_id)
+    if (!sessionId) return error("Invalid session", 400)
+    // The device that dismissed it, which closed its own entry already and is not told again. An
+    // app on the web has no device here at all — the registry holds Android installs — so it skips
+    // nothing and every phone of the account is told.
+    const device = typeof input?.device === "string" && ID.test(input.device) ? input.device : ""
+    if (!ctx.fcm) return error("Push isn't set up on this site", 503)
+    const { sent, failed, skipped } = await clearDevices(
+      store,
+      userId,
+      ctx.fcm,
+      sessionId,
+      new Set(device ? [device] : []),
+    )
+    return json({ sent, failed, skipped })
   }
 
   if (op === "POST push-test") {

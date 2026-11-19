@@ -67,8 +67,40 @@ self.addEventListener("push", (event) => {
   } catch {
     // A message we can't read still gets a notification: browsers insist on one.
   }
-  event.waitUntil(show(data))
+  // A clear is not news: it takes the entries about its subject out of the tray, and shows one
+  // silent entry it closes at once — the dance a push landing with the app open already does, since
+  // Safari revokes a subscription whose pushes never show anything.
+  event.waitUntil(data.kind === "clear" ? clear(data.session_id) : show(data))
 })
+
+// The id a tray entry is about: the one its data carries, else the last segment of its tag.
+function subjectOf(entry) {
+  const named = entry.data && typeof entry.data.sessionId === "string" ? entry.data.sessionId : ""
+  if (named) return named
+  const tag = typeof entry.tag === "string" ? entry.tag : ""
+  const colon = tag.lastIndexOf(":")
+  return colon < 0 ? "" : tag.slice(colon + 1)
+}
+
+async function clear(subject) {
+  if (!subject) return
+  const registration = self.registration
+  for (const one of await registration.getNotifications())
+    if (subjectOf(one) === subject) one.close()
+  // A subscription whose pushes show nothing is one Safari revokes, so one silent entry is shown
+  // and closed at once: nobody sees it, and the subscription stands.
+  await registration.showNotification("Gots", { tag: "gots-clear", silent: true })
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const shown = await registration.getNotifications({ tag: "gots-clear" })
+    if (shown.length) {
+      for (const one of shown) one.close()
+      break
+    }
+    // The entry is not there yet: the browser draws it on its own clock, and a close too soon
+    // leaves the empty one sitting in the tray.
+    await new Promise((resolve) => setTimeout(resolve, 300))
+  }
+}
 
 async function show(data) {
   const sessionId = typeof data.session_id === "string" ? data.session_id : ""
@@ -130,7 +162,14 @@ self.addEventListener("notificationclick", (event) => {
     event.waitUntil(answer(link))
     return
   }
-  const path = screen || (sessionId ? `/s/${encodeURIComponent(sessionId)}` : "/")
+  const opened = screen || (sessionId ? `/s/${encodeURIComponent(sessionId)}` : "/")
+  // A screen that names its subject answers it itself (`useDismissPushes` in the app); the two that
+  // name nothing — a routine, a project — are answered by the tap alone, so the subject rides in the
+  // link for the app to tell the account it is no news (`startWeb` there).
+  const path =
+    sessionId && !opened.includes(encodeURIComponent(sessionId))
+      ? `${opened}${opened.includes("?") ? "&" : "?"}dismissed=${encodeURIComponent(sessionId)}`
+      : opened
   event.waitUntil(open(path))
 })
 

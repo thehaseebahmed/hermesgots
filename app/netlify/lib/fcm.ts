@@ -101,6 +101,13 @@ export interface FcmSender {
     sessionId: string,
     detail?: PushDetail,
   ): Promise<SendResult>
+  /**
+   * A clear: the entries about this id leave every tray that holds them. No push protocol removes
+   * another device's notification, so this is a data-only message the app answers by cancelling its
+   * own (`GotsMessagingService`) — the device that dismissed the subject told the account, and the
+   * account's other devices are told here.
+   */
+  clear(token: string, sessionId: string): Promise<SendResult>
   /** A test message to one device: null when Firebase took it, else Google's own reason. */
   test(token: string): Promise<string | null>
 }
@@ -332,19 +339,29 @@ export function message(
   }
 }
 
+/**
+ * A clear: data-only, and no words to draw. It says which id the dismissed subject is, and nothing
+ * else — the app cancels the entries whose tag ends with it (`Notice.about` in
+ * `GotsMessagingService.kt`). The TTL is a push's own, so a device that was away is told when it
+ * comes back rather than left holding an entry that was answered elsewhere.
+ */
+export function clearMessage(token: string, sessionId: string) {
+  return {
+    message: {
+      token,
+      data: { kind: "clear", session_id: sessionId },
+      android: { priority: "HIGH", ttl: "600s" },
+    },
+  }
+}
+
 /** The sender for the configured service account, or null when none is set. */
 export function createFcm(raw: string | undefined): FcmSender | null {
   const account = parseServiceAccount(raw)
   if (!account) return null
   const cache = { token: undefined as string | undefined, expires: 0 }
 
-  async function deliver(
-    token: string,
-    kind: PushKind,
-    category: string,
-    sessionId: string,
-    about?: PushDetail,
-  ): Promise<{ result: SendResult; reason?: string }> {
+  async function post(payload: unknown): Promise<{ result: SendResult; reason?: string }> {
     try {
       const response = await fetch(
         `https://fcm.googleapis.com/v1/projects/${encodeURIComponent(account!.project_id)}/messages:send`,
@@ -354,7 +371,7 @@ export function createFcm(raw: string | undefined): FcmSender | null {
             Authorization: `Bearer ${await accessToken(account!, cache)}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify(message(token, kind, category, sessionId, about)),
+          body: JSON.stringify(payload),
         },
       )
       if (response.ok) return { result: "ok" }
@@ -384,9 +401,24 @@ export function createFcm(raw: string | undefined): FcmSender | null {
     }
   }
 
+  async function deliver(
+    token: string,
+    kind: PushKind,
+    category: string,
+    sessionId: string,
+    about?: PushDetail,
+  ): Promise<{ result: SendResult; reason?: string }> {
+    return post(message(token, kind, category, sessionId, about))
+  }
+
   return {
     async send(token, kind, category, sessionId, detail) {
       return (await deliver(token, kind, category, sessionId, detail)).result
+    },
+    async clear(token, sessionId) {
+      // A refused clear reads like a refused push: the same answer, and the same dropping of a
+      // token Firebase no longer knows.
+      return (await post(clearMessage(token, sessionId))).result
     },
     async test(token) {
       const { result, reason } = await deliver(token, "test", "test", "")
