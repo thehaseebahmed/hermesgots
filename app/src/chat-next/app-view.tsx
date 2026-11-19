@@ -47,7 +47,7 @@ import { clarifyWire, questionAt, questionsIn } from "@/lib/clarify"
 import { db, type ApprovalChoice, type ClarifyQuestion, type Message } from "@/lib/db"
 import type { DelegatedAgent } from "@/lib/hermes"
 import { describeActivity } from "@/lib/format"
-import { COLUMN_BOX, COMPOSER_SLOT, REPLY_EDGE } from "@/lib/layout"
+import { COLUMN, COMPOSER_SLOT, REPLY_EDGE, THREAD_GUTTER } from "@/lib/layout"
 import { modelChanges } from "@/lib/model-changes"
 import { useDraws } from "@/lib/openui-draws"
 import { retryText } from "@/lib/retry-message"
@@ -252,10 +252,10 @@ export function AppThreadView({
             <MessageScroller className="flex-1">
               <MessageScrollerViewport aria-label="Messages">
                 <MessageScrollerContent
-                  className={cn("w-full gap-6 px-4 pt-32 pb-6", cut && "justify-end")}
+                  className={cn("w-full gap-6 pt-32 pb-6", THREAD_GUTTER, cut && "justify-end")}
                 >
                   {failure !== undefined && (
-                    <div className={COLUMN_BOX} role="alert">
+                    <div className={COLUMN} role="alert">
                       <Banner tone="error">{failure || "Something went wrong."}</Banner>
                     </div>
                   )}
@@ -325,7 +325,7 @@ export function AppThreadView({
                       )
                     })}
                     {!holds && line && (
-                      <div className={COLUMN_BOX}>
+                      <div className={COLUMN}>
                         <LineRow line={line} count={running} onOpen={showSubagents} seed={chatId} />
                       </div>
                     )}
@@ -345,7 +345,7 @@ export function AppThreadView({
                       <div
                         key={item.id}
                         data-queued
-                        className={cn(COLUMN_BOX, "flex flex-col items-end gap-1")}
+                        className={cn(COLUMN, "flex flex-col items-end gap-1")}
                       >
                         <PointChips points={held.points} />
                         {item.files.length > 0 && (
@@ -427,7 +427,7 @@ export function AppThreadView({
           </MessageScrollerProvider>
         )}
         <div data-slot="composer-slot" data-toast-above className={COMPOSER_SLOT}>
-          {waiting ? <div className={COLUMN_BOX}>{waiting}</div> : composer}
+          {waiting ? <div className={COLUMN}>{waiting}</div> : composer}
         </div>
         <AgentPopup
           agent={shown}

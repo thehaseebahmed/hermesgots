@@ -39,6 +39,7 @@ import { cn } from "@/lib/utils"
 import { botSubPath, type BotSub } from "@/lib/bot-subs"
 import { botTabPath } from "@/lib/bot-tabs"
 import { useXLarge } from "@/lib/media"
+import { COLUMN } from "@/lib/layout"
 
 /** What a read that hasn't answered holds: one array, so the derivation below isn't rebuilt. */
 const NO_SKILLS: Skill[] = []
@@ -217,7 +218,7 @@ export function SkillsTab({ profile, sub }: { profile: Profile; sub?: BotSub }) 
           data-skills-foot
           className="pointer-events-none sticky bottom-0 z-20 -mx-4 mt-auto bg-gradient-to-t from-background via-background/90 to-transparent px-4 pt-6 pb-[max(1rem,env(safe-area-inset-bottom))]"
         >
-          <div className="mx-auto flex w-full max-w-2xl items-center gap-2">
+          <div className={cn(COLUMN, "flex items-center gap-2")}>
             <FootSearch
               open={seeking}
               onOpen={() => setSeeking(true)}

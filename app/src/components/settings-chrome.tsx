@@ -19,7 +19,7 @@ import { LabBadge } from "@/components/lab-badge"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { PickGroup, PickRow } from "@/components/pick-row"
 import { SearchField } from "@/components/search-field"
-import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { CentredTitle, Popup, PopupContent, PopupHeader } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
@@ -36,6 +36,7 @@ import { useModelInfo } from "@/lib/model-info"
 import { useRefusal, useSaidRefusal } from "@/lib/use-refusal"
 import { holdsUnsavedChanges, useUnsavedChanges } from "@/lib/unsaved"
 import { cn } from "@/lib/utils"
+import { PAGE_BODY, COLUMN } from "@/lib/layout"
 
 /**
  * The slot a page fills in the header of the Screen holding it, keyed so one page's action replaces
@@ -96,7 +97,7 @@ export function Screen({
   return (
     <div className={cn("flex min-h-0 flex-1 flex-col overflow-y-auto", className)}>
       <header className="sticky top-0 z-10 bg-background/80 px-4 pt-[max(0.75rem,env(safe-area-inset-top))] pb-3 backdrop-blur">
-        <div className="mx-auto flex min-h-11 max-w-2xl items-center gap-3">
+        <div className={cn(COLUMN, "flex min-h-11 items-center gap-3")}>
           {leading}
           <h1 className="text-xl font-semibold tracking-tight">{named ?? title}</h1>
           {shown && <div className="ml-auto flex min-h-11 shrink-0 items-center">{shown}</div>}
@@ -104,7 +105,7 @@ export function Screen({
         {/* The page's refusal is pinned with the header: a write made at the foot of a long page is
             answered where the reader is looking, not a screenful above them. */}
         {refusal.words && (
-          <div className="mx-auto mt-3 w-full max-w-2xl">
+          <div className={cn(COLUMN, "mt-3")}>
             <Refusal hold={refusal} />
           </div>
         )}
@@ -112,7 +113,12 @@ export function Screen({
       <HeaderSlot.Provider value={publish}>
         <TitleSlot.Provider value={setNamed}>
           <RefusalSlot.Provider value={refusal}>
-            <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col gap-4 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
+            <div
+              className={cn(
+                PAGE_BODY,
+                "flex flex-1 flex-col gap-4 pb-[max(2rem,env(safe-area-inset-bottom))]",
+              )}
+            >
               {children}
             </div>
           </RefusalSlot.Provider>
@@ -372,8 +378,8 @@ export function PickSurface({
   return (
     <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent initialFocus={false}>
-        <PopupHeader>
-          <PopupTitle>{title}</PopupTitle>
+        <PopupHeader className="min-h-16">
+          <CentredTitle>{title}</CentredTitle>
         </PopupHeader>
         <div className="flex min-h-0 flex-col overflow-y-auto px-4 pb-4">{children}</div>
       </PopupContent>
@@ -831,6 +837,7 @@ export function ModelPick({
             void refusal.write("save that", async () => onPick(next))
             onClose()
           }}
+          profile={profile}
         />
       ) : (
         <p className="px-1 py-2 text-sm text-muted-foreground">Couldn't read this bot's models.</p>

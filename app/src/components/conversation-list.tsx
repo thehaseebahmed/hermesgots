@@ -224,12 +224,12 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
               >
                 <span className="relative flex shrink-0">
                   <Bot id={bot.botId} className="size-9" />
-                  {/* The rail draws no line under the name, so its mark is the only one a row has
-                      there: news since this device last looked at one of the bot's conversations
-                      (ADR 0110, ADR 0151). */}
-                  {collapsed && unread > 0 && (
+                  {/* News since this device last looked at one of the bot's conversations, as the
+                      dot an unread chat's row wears (ADR 0110, ADR 0151). The rail draws no line
+                      under the name, so there the words are this mark's too. */}
+                  {unread > 0 && (
                     <>
-                      <span className="sr-only">New activity</span>
+                      {collapsed && <span className="sr-only">New activity</span>}
                       <span
                         data-unread
                         aria-hidden
@@ -250,27 +250,16 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
                       )}
                       {age && <RowAge at={age} now={now} />}
                     </span>
-                    {/* Drawn, never read out: the line beside it already counts what it marks
-                        (ADR 0151). */}
-                    <span className="flex items-center gap-2">
-                      <span
-                        data-slot="bot-state"
-                        className="min-w-0 flex-1 truncate text-xs font-normal text-muted-foreground"
-                      >
-                        {stateLine({
-                          unread,
-                          bot,
-                          now,
-                          answer: chatStores[bot.id],
-                        })}
-                      </span>
-                      {unread > 0 && (
-                        <span
-                          data-unread
-                          aria-hidden
-                          className="dot-glow size-2.5 shrink-0 rounded-full bg-warning"
-                        />
-                      )}
+                    <span
+                      data-slot="bot-state"
+                      className="block truncate text-xs font-normal text-muted-foreground"
+                    >
+                      {stateLine({
+                        unread,
+                        bot,
+                        now,
+                        answer: chatStores[bot.id],
+                      })}
                     </span>
                   </span>
                 )}
@@ -325,7 +314,7 @@ function Waiting({
                     collapsed ? railClass(state) : cn(rowClass(state), "min-h-14 py-2")
                   }
                 >
-                    <Icon
+                  <Icon
                     className={
                       collapsed
                         ? "size-5 shrink-0 text-warning"

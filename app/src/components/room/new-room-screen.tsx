@@ -23,7 +23,7 @@ import {
   type RoomMember,
 } from "@/lib/db"
 import { refreshAnswer, usePluginAnswersByServer } from "@/lib/features"
-import { COLUMN_BOX, COMPOSER_SLOT } from "@/lib/layout"
+import { COLUMN, COMPOSER_SLOT } from "@/lib/layout"
 import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
 import { FACES, roomSeats } from "@/lib/rooms"
 import { makerOf, seatedByAny } from "@/lib/room-seats"
@@ -199,7 +199,7 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
         leading={lead.leading}
       />
       <div className="flex min-h-0 flex-1 items-center justify-center px-6">
-        <p className={cn(COLUMN_BOX, "max-w-sm text-center text-sm text-muted-foreground")}>
+        <p className={cn(COLUMN, "max-w-sm text-center text-sm text-muted-foreground")}>
           {writers.length
             ? "Pick two to six bots of one Host, then send the first message. The room is made when you send, and who it holds is fixed from then on."
             : "This bot's Host can't make a room, so there is nothing to start here."}
@@ -207,13 +207,13 @@ export function NewRoomScreen({ slot }: { slot?: string }) {
       </div>
 
       {notice && (
-        <div className={cn(COLUMN_BOX, "px-3 pb-2 sm:px-4")} role="alert">
+        <div className={cn(COLUMN, "px-3 pb-2 sm:px-4")} role="alert">
           <Banner tone="error">{notice}</Banner>
         </div>
       )}
 
       <div data-slot="composer-slot" data-toast-above className={COMPOSER_SLOT}>
-        <div className={cn(COLUMN_BOX, "pb-2")}>
+        <div className={cn(COLUMN, "pb-2")}>
           <Button
             variant="outline"
             className="h-11 rounded-full"

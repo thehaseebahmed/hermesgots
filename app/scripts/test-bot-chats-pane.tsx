@@ -178,7 +178,12 @@ test(
       await until(async () => titles().includes("Alpha"), "the chat's own header")
       assert.equal(missing(LANE), false, "the shell keeps the bot's list on screen")
       assert.match(laneClass(), /\bw-103\b/, "at the 412px lane every list of the app's keeps")
-      assert.ok(titles().includes("Sidechats"), "the lane is the Side Chat List, not the flat one")
+      assert.ok(titles().includes("Mainly"), "the lane wears the bot's bar")
+      assert.equal(
+        missing('[data-slot="main-row"]'),
+        false,
+        "over the Side Chat List, Main above it, not the flat one",
+      )
       assert.equal(
         missing('[data-slot="bot-chats-empty"]'),
         true,
@@ -205,14 +210,10 @@ test(
         "/c/c-a",
         "the row of the chat on screen is the one the list marks open",
       )
-      assert.ok(
-        find(`[data-slot="header-leading"] ${BACK_TO_BOT}`),
-        "and the chat's bar leads with its way back to the bot's list",
-      )
       assert.equal(
-        missing(`[data-slot="header-actions"] ${BACK_TO_BOT}`),
+        missing(BACK_TO_BOT),
         true,
-        "which the corner does not carry",
+        "and the chat's bar has no way back to the list already beside it",
       )
     })
   }),
@@ -231,9 +232,10 @@ test(
         "/c/c-b",
         "and marks the chat the address names",
       )
-      assert.ok(
-        find(`[data-slot="header-leading"] ${BACK_TO_BOT}`),
-        "the chat leads with its way back, the list beside it or not",
+      assert.equal(
+        missing(BACK_TO_BOT),
+        true,
+        "the chat has no way back to the list beside it",
       )
       assert.equal(
         missing(SIDE_CHATS_CONTROL),
@@ -550,14 +552,30 @@ test(
     await mount(screen("/c/c-a"), async () => {
       await until(async () => titles().includes("Alpha"), "the chat's own header")
       assert.match(
-        find('[data-slot="list-lane"] [data-slot="header-line"]')?.textContent ?? "",
+        find('[data-slot="list-lane"] [data-slot="header-title"]')?.textContent ?? "",
         /Mainly/,
-        "the list's line names the bot",
+        "the list's bar names the bot",
       )
       assert.equal(
         findAll('[data-slot="item-lane"] [data-slot="header-row"] [role="img"]').length,
         0,
         "and the chat beside it repeats no face",
+      )
+    })
+  }),
+)
+
+test(
+  "Main beside its list is drawn as a side chat is: its title, and no face",
+  laptop(async () => {
+    localStorage.clear()
+    await seed()
+    await mount(screen(`/b/${bot.id}/sidechats`), async () => {
+      await until(async () => titles().includes("Main"), "Main in the item lane")
+      assert.equal(
+        findAll('[data-slot="item-lane"] [data-slot="header-row"] [role="img"]').length,
+        0,
+        "Main's bar repeats no face beside the list that wears it",
       )
     })
   }),
@@ -575,7 +593,7 @@ test(
     localStorage.clear()
     await seed()
     await mount(screen(`/b/${bot.id}/sidechats`), async () => {
-      await until(async () => titles().includes("Sidechats"), "the list in the lane")
+      await until(async () => titles().includes("Mainly"), "the list in the lane")
       await until(async () => titles().includes("Main"), "Main in the item lane")
       assert.equal(
         path(),
@@ -586,7 +604,7 @@ test(
       assert.match(laneClass(), /\bw-103\b/, "at the 412px the app's lists keep")
       assert.deepEqual(
         [...titles()].sort(),
-        ["Main", "Sidechats"],
+        ["Main", "Mainly"],
         "one list and one chat: the list in the lane, Main beside it",
       )
       assert.equal(
@@ -654,13 +672,13 @@ test(
       )
       assert.equal(missing(LANE), false, "and the list keeps its lane beside it")
 
-      await click(find(`[data-slot="header-leading"] ${BACK_TO_BOT}`))
-      await until(async () => path() === `/b/${bot.id}/sidechats`, "the list the chat stands in")
+      await click(find(MAIN_ROW))
+      await until(async () => path() === `/c/${MAIN}`, "Main, from its row in the list")
       await until(async () => titles().includes("Main"), "Main standing beside the list again")
       assert.equal(
         find('[data-slot="main-row"] a[aria-current="page"]')?.getAttribute("href"),
         `/c/${MAIN}`,
-        "with Main the chat the pane holds, one rung under the list",
+        "with Main the chat the pane holds",
       )
       assert.equal(openRow()?.getAttribute("href"), `/c/${MAIN}`, "and the row the list marks")
     })

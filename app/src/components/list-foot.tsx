@@ -4,6 +4,7 @@ import { MessageCircleIcon, PlusIcon, UsersIcon, XIcon } from "lucide-react"
 import { FootSearch } from "@/components/foot-search"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { COLUMN } from "@/lib/layout"
 
 /**
  * The field's own name, for the control that shows and hides it — and for the bar's field, which takes
@@ -110,7 +111,8 @@ export function ListFoot({
     >
       <div
         className={cn(
-          "mx-auto flex w-full max-w-2xl items-center gap-2",
+          COLUMN,
+          "flex items-center gap-2",
           // Where the bar holds the search, the New cluster is the row's only control and keeps its
           // right edge, which is the slot a thumb finds it in at every width.
           searchable ? "justify-between" : "justify-end",

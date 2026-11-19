@@ -77,15 +77,32 @@ export function Popup({
  * a control of the header's own passes `text-left`.
  */
 export function PopupTitle({ className, ...props }: ComponentProps<typeof SheetTitle>) {
-  const classes = cn(
-    "cn-font-heading max-w-full justify-center truncate text-center text-base font-medium text-foreground",
-    className,
-  )
-  // A menu's heading starts where its rows do, as it sits beside the button it opened from.
-  if (usePopupForm() === "menu")
-    return <Popover.Title {...props} className={cn(classes, "justify-start text-left")} />
+  const base =
+    "cn-font-heading max-w-full justify-center truncate text-center text-base font-medium text-foreground"
+  // A menu's heading starts where its rows do, as it sits beside the button it opened from. A
+  // header that says otherwise — one whose name belongs in the middle — passes it, and wins: the
+  // form's habit is a default, not a rule a caller cannot overrule.
+  const menu = usePopupForm() === "menu" ? "justify-start text-left" : undefined
+  const classes = cn(base, menu, className)
+  if (menu) return <Popover.Title {...props} className={classes} />
   return <SheetTitle className={classes} {...props} />
 }
+/**
+ * A heading laid over the middle of its header rather than left in the row of controls beside it. A
+ * drawer holds 56px clear at its right for its own close button and 8px at its left, so a heading
+ * left in that row sits off centre however the header is padded — and a header whose only child is
+ * its heading would collapse to its padding if the heading were merely taken out of the flow. This
+ * one is placed against the header's own middle, the room held on each side keeping a long name
+ * clear of the controls at either edge; the header holds its own height.
+ */
+export function CentredTitle({ children, ...props }: ComponentProps<typeof PopupTitle>) {
+  return (
+    <PopupTitle {...props} className="absolute inset-y-0 inset-x-16 flex items-center">
+      <span className="w-full truncate text-center">{children}</span>
+    </PopupTitle>
+  )
+}
+
 export function PopupDescription(props: ComponentProps<typeof SheetDescription>) {
   if (usePopupForm() === "menu")
     return (
