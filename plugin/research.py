@@ -65,6 +65,26 @@ MODEL_TIMEOUT_S = 120
 REPLY_LOG_CHARS = 4000
 
 
+_ID_AT_START = re.compile(r"^\W*([A-Za-z]+\d+)(?!\w)")
+
+
+def _ref(value: Any, names: Dict[str, str]) -> Optional[str]:
+    """The id a judge's reference means, or None. ``names`` is id -> name ('' for none). A judge is
+    shown "- p1: <text>" and "Option o1 (<name>)" and echoes them back in several shapes: the id, the id
+    with its text after it, the id in brackets, or the name alone. An id leading the reference wins, then
+    a name that is exactly one entry's (any case); a name two entries share names neither."""
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    if text in names:
+        return text
+    led = _ID_AT_START.match(text)
+    if led and led.group(1) in names:
+        return led.group(1)
+    named = [key for key, name in names.items() if name and name.strip().casefold() == text.casefold()]
+    return named[0] if len(named) == 1 else None
+
+
 def _kept_nothing(purpose: str, answer: Dict[str, Any]) -> None:
     """A judge answered and every tag or score failed the checks: the reply is the only way to see
     which check, so it goes to the log (the host's own, cut to ``REPLY_LOG_CHARS``)."""
@@ -2296,14 +2316,16 @@ def judge(found: Dict[str, Any], options: List[Dict[str, Any]]) -> Dict[str, Any
     criterion (0 to 10, with the claims that settle it), rules out any option that fails a criterion
     outright, and writes the verdict and what would flip it. The ranking is not its to make."""
     known = {claim["id"] for claim in found["ledger"]["claims"]}
-    ids = {o["id"] for o in found["options"]}
-    topics = {k["id"] for k in found["criteria"]}
+    claim_ids = {cid: "" for cid in known}
+    ids = {o["id"]: o["name"] for o in found["options"]}
+    topics = {k["id"]: k["name"] for k in found["criteria"]}
     text = "\n\n".join(
         f"Option {o['id']} ({o['name']})\nCase:\n{_plain(o['case'])}\nRebuttal:\n{_plain(o['rebuttal'])}" for o in options
     )
     criteria = "\n".join(f"- {k['id']}: {k['name']} (weight {k['weight']})" for k in found["criteria"])
     instructions = (
-        f"Decision: {found['goal']}\nCriteria:\n{criteria}\n\nScore every option on every criterion "
+        f"Decision: {found['goal']}\nCriteria:\n{criteria}\n\nName each option and criterion by its id "
+        f"alone (such as o1 and k1). Score every option on every criterion "
         f"from 0 (fails it) to {MAX_SCORE} (excels), with a one-sentence reason and the ids of the "
         f"claims it rests on. Put in ruled_out only an option a claim shows can't work at all on a "
         f"criterion (a hard requirement), naming the claim. Write the verdict in 1 to 3 short "
@@ -2316,26 +2338,30 @@ def judge(found: Dict[str, Any], options: List[Dict[str, Any]]) -> Dict[str, Any
     )
     scores: Dict[str, Dict[str, Any]] = {oid: {} for oid in ids}
     for item in answer.get("scores") or []:
-        if not isinstance(item, dict) or item.get("option") not in ids or item.get("criterion") not in topics:
+        option = _ref(item.get("option"), ids) if isinstance(item, dict) else None
+        criterion = _ref(item.get("criterion"), topics) if isinstance(item, dict) else None
+        if option is None or criterion is None:
             continue
         score = item.get("score")
         if isinstance(score, bool) or not isinstance(score, int):
             continue
-        cites = [cid for cid in dict.fromkeys(item.get("claims") or []) if cid in known]
+        cites = [cid for cid in dict.fromkeys(_ref(c, claim_ids) for c in item.get("claims") or []) if cid]
         reason = _clip(item.get("reason"), MAX_CLAIM)
-        scores[item["option"]][item["criterion"]] = {
+        scores[option][criterion] = {
             "score": max(0, min(MAX_SCORE, score)),
             "reason": reason,
             "claims": cites,
             # No claim behind a score, or none said why: the app shows it as thin.
             "flagged": not cites or not reason,
         }
-    ruled_out = [
-        {"option": item["option"], "criterion": item["criterion"], "claim": item["claim"]}
-        for item in answer.get("ruled_out") or []
-        if isinstance(item, dict) and item.get("option") in ids and item.get("criterion") in topics
-        and item.get("claim") in known
-    ]
+    ruled_out = []
+    for item in answer.get("ruled_out") or []:
+        if not isinstance(item, dict):
+            continue
+        option, criterion = _ref(item.get("option"), ids), _ref(item.get("criterion"), topics)
+        claim = _ref(item.get("claim"), claim_ids)
+        if option and criterion and claim:
+            ruled_out.append({"option": option, "criterion": criterion, "claim": claim})
     verdict = [spans(text, known) for text in answer.get("verdict") or [] if isinstance(text, str) and text.strip()]
     flip = [spans(text, known) for text in answer.get("flip") or [] if isinstance(text, str) and text.strip()]
     if not any(scores.values()):
@@ -2435,9 +2461,10 @@ def judge_claim(found: Dict[str, Any]) -> Dict[str, Any]:
     """One judge tags the claims that bear on each part, and says what would change the answer.
     The label is not its to give."""
     known = {claim["id"] for claim in found["ledger"]["claims"]}
-    parts = {p["id"] for p in found["parts"]}
+    parts = {p["id"]: p["text"] for p in found["parts"]}
+    claim_ids = {cid: "" for cid in known}
     instructions = (
-        "For every part, list the ids of the claims that bear on it, each with supports, refutes or "
+        "For every part, give its id alone (such as p1) and list the ids of the claims that bear on it, each with supports, refutes or "
         "context. Read every claim by the terms the claim takes literally, where it names any: a "
         "passage that does not meet a term's plain meaning does not support the part. Leave out a claim that has nothing to do with a part. Then write change in 1 or 2 "
         f"sentences saying what evidence would change the answer. In change: {CITE_RULE}"
@@ -2445,12 +2472,14 @@ def judge_claim(found: Dict[str, Any]) -> Dict[str, Any]:
     answer = _structured("verdict", VERDICT_SYSTEM, instructions, _verify_ledger_text(found), VERDICT_SCHEMA, 4000)
     tags: List[Dict[str, str]] = []
     for item in answer.get("parts") or []:
-        if not isinstance(item, dict) or item.get("part") not in parts:
+        part = _ref(item.get("part"), parts) if isinstance(item, dict) else None
+        if part is None:
             continue
         for tag in item.get("claims") or []:
-            if not isinstance(tag, dict) or tag.get("claim") not in known or tag.get("stance") not in VERIFY_STANCES:
+            claim = _ref(tag.get("claim"), claim_ids) if isinstance(tag, dict) else None
+            if claim is None or tag.get("stance") not in VERIFY_STANCES:
                 continue
-            kept = {"claim": tag["claim"], "part": item["part"], "stance": tag["stance"]}
+            kept = {"claim": claim, "part": part, "stance": tag["stance"]}
             if kept not in tags:
                 tags.append(kept)
     if not tags:
