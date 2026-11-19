@@ -14,6 +14,9 @@ import org.json.JSONException;
  * Hands the page the Mark as read presses the tray queued while it wasn't running
  * ({@link TrayReads}), and clears them: the read marks are the page's, so a press waits here for it.
  * The rows go as they were written; the page's own rule (`src/lib/tray-reads.ts`) reads them.
+ *
+ * It also hands the page this phone's notice key ({@link NoticeKey}), which the page gives each bot's
+ * plugin so a press from the tray can be signed.
  */
 @CapacitorPlugin(name = "Tray")
 public class TrayPlugin extends Plugin {
@@ -36,5 +39,17 @@ public class TrayPlugin extends Plugin {
         JSObject answer = new JSObject();
         answer.put("reads", reads);
         call.resolve(answer);
+    }
+
+    @PluginMethod
+    public void noticeKey(PluginCall call) {
+        try {
+            JSObject answer = new JSObject();
+            answer.put("key", NoticeKey.INSTANCE.publicKeyText());
+            call.resolve(answer);
+        } catch (Exception unavailable) {
+            // A Keystore that can't make the key: the page hands over none, and the tray draws no buttons.
+            call.reject("This phone can't make a notice key.");
+        }
     }
 }

@@ -20,7 +20,8 @@ import kotlin.concurrent.thread
  * no session, no page), and then the row it was pressed on leaves the tray. The choice is the
  * token's, so a press cannot ask for more than the one thing it was drawn for, and a second press of
  * the same link is refused by the host. A Reply is the same: its link is `push/reply/<token>`, and the
- * typed text is its body. Its entry stays, and says what happened ([ReplyOutcome]): the words sent,
+ * typed text is its body. Every press is signed with this phone's own key ([NoticeKey]), since the
+ * link rode the relay in clear and the host takes it only from a phone it knows. Its entry stays, and says what happened ([ReplyOutcome]): the words sent,
  * or why they weren't, with Reply kept only while the link is still unspent.
  * Mark as read posts nothing: it queues the press for the page ([TrayReads]) and clears the entry.
  *
@@ -55,7 +56,14 @@ class NoticeAnswerReceiver : BroadcastReceiver() {
         val pending = goAsync()
         thread {
             try {
-                val answer = post(url, body)
+                // Signed with this phone's own key, off the main thread since the Keystore can be slow:
+                // a link read off the relay on its way is one only this phone can press (ADR 0167).
+                val signed = if (text == null) {
+                    NoticeKey.headers(NoticeSignature.ANSWER, url)
+                } else {
+                    NoticeKey.headers(NoticeSignature.REPLY, url, text)
+                }
+                val answer = post(url, body, signed)
                 if (tag != null) {
                     if (text == null) {
                         // The row has been answered, whatever the network said: a notice that waits
@@ -101,7 +109,7 @@ class NoticeAnswerReceiver : BroadcastReceiver() {
      * One POST to the link, and no exception out of it: null is a press that didn't land — a dead
      * network, a host asleep or gone, a timeout.
      */
-    private fun post(url: String, body: ByteArray): Answer? {
+    private fun post(url: String, body: ByteArray, headers: Map<String, String>): Answer? {
         val connection = try {
             URL(url).openConnection() as HttpURLConnection
         } catch (error: IOException) {
@@ -119,6 +127,7 @@ class NoticeAnswerReceiver : BroadcastReceiver() {
             // The length is declared — zero for a button, the JSON for a reply — so the request is a
             // fixed one rather than a chunked one.
             if (body.isNotEmpty()) connection.setRequestProperty("Content-Type", "application/json")
+            headers.forEach { (name, value) -> connection.setRequestProperty(name, value) }
             connection.setFixedLengthStreamingMode(body.size)
             connection.outputStream.use { it.write(body) }
             // Read the answer, so the host's refusal is read as one, in its own words, and the

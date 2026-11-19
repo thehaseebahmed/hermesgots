@@ -176,7 +176,7 @@
 //   pnpm mock            # then point Settings at http://localhost:8642/v1
 
 import http from "node:http"
-import { randomBytes, randomUUID } from "node:crypto"
+import { createHash, randomBytes, randomUUID } from "node:crypto"
 import { mkdirSync, readFileSync, statSync, writeFileSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, extname, join } from "node:path"
@@ -3575,6 +3575,8 @@ const ROOT_RUN_IDS = process.env.MOCK_RUNS_LIVE_ROOT_IDS !== "0"
 // The plugin's change stream: one log per profile (the "" key is the default one). Runs and sessions
 // belong to no profile here, so they go to every log.
 const pushSubscriptions = new Map()
+/** The notice keys phones handed over (`push/key`), by device. */
+const noticeKeys = new Map()
 /** The ntfy topic the app wrote, as `plugin/ntfy.py` keeps one per profile. */
 let ntfyTarget
 /** Hermes's own ntfy variables for the profile, which the plugin reads and writes. */
@@ -4354,6 +4356,7 @@ http
           ...(EVENTS ? ["events"] : []),
           "push",
           "push_ntfy",
+          "push_keys",
           "host_model",
           "fallbacks",
           "delegation_model",
@@ -4923,6 +4926,33 @@ http
         return json(res, 400, { error: { message: "Not a bot" } })
       }
       return json(res, 200, { object: "gots.push.mute", muted })
+    }
+    if (
+      PLUGIN &&
+      !profile &&
+      req.method === "POST" &&
+      url.pathname === "/api/plugins/gots/push/key"
+    ) {
+      // A phone's notice key (`plugin/device_keys.py`): kept by device, answered by its id.
+      const { device, key } = await readBody(req)
+      if (typeof device !== "string" || !/^[A-Za-z0-9._-]{1,128}$/.test(device))
+        return json(res, 400, { error: { message: "Not a device" } })
+      if (typeof key !== "string" || !key) return json(res, 400, { error: { message: "Not a key" } })
+      noticeKeys.set(device, key)
+      const keyId = createHash("sha256")
+        .update(Buffer.from(key.replace(/-/g, "+").replace(/_/g, "/"), "base64"))
+        .digest("hex")
+      return json(res, 200, { object: "gots.push.key", key_id: keyId })
+    }
+    if (
+      PLUGIN &&
+      !profile &&
+      req.method === "POST" &&
+      url.pathname === "/api/plugins/gots/push/key/remove"
+    ) {
+      const { device } = await readBody(req)
+      noticeKeys.delete(device)
+      return json(res, 200, { object: "gots.push.key", removed: true })
     }
     if (
       PLUGIN &&

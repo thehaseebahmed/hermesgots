@@ -22,6 +22,8 @@ import {
   registerNtfy,
   registerPush,
   setPushMuted,
+  registerNoticeKey,
+  unregisterNoticeKey,
   unregisterNtfy,
   unregisterPush,
 } from "@/lib/hermes"
@@ -30,6 +32,7 @@ import { connectionKey, reconnectLive } from "@/lib/live"
 import { isNative } from "@/lib/platform"
 import { quietly } from "@/lib/report"
 import { followHeldReads, takeTrayReads } from "@/lib/tray-marks"
+import { keyMoves } from "@/lib/notice-keys"
 import { onReturn } from "@/lib/wake"
 import { callFunction, failure, functionUrl } from "@/lib/account"
 import {
@@ -574,6 +577,13 @@ async function disableNative() {
   await saveSettings({ fcm: { ...fcm, on: false } })
   registeredToken = undefined
   sentCategories = undefined
+  // A phone notified no more is a phone whose presses no bot should take.
+  await Promise.all(
+    (await listProfiles())
+      .filter((bot) => bot.apiKey && bot.baseUrl.trim())
+      .map((bot) => unregisterNoticeKey(bot, fcm.device).catch(() => undefined)),
+  )
+  keyGiven.clear()
   try {
     await callFunction("DELETE", functionUrl("registry", { route: "devices", id: fcm.device }))
     await (await plugin()).push.unregister()
@@ -628,6 +638,7 @@ const TRAY_PLUGIN = "Tray"
 
 interface TrayPlugin {
   takeReads(): Promise<{ reads: unknown }>
+  noticeKey(): Promise<{ key: string }>
 }
 
 const Tray = registerPlugin<TrayPlugin>(TRAY_PLUGIN)
@@ -638,11 +649,54 @@ async function trayReads(): Promise<unknown> {
   return (await Tray.takeReads()).reads
 }
 
+/** Which bot has been handed which key, by its connection, so a pass posts only what is new. */
+const keyGiven = new Map<string, string>()
+
+/**
+ * Hands this phone's notice key to every bot it is notified by through Firebase (ADR 0167): the tray
+ * signs each Reply and button press with it, and a plugin draws the relay no button and no Reply
+ * until a phone has handed it one. A bot turned off is told to forget it.
+ */
+async function syncNoticeKeys() {
+  const { fcm } = await getSettings()
+  if (!fcm?.on || !nativeConfigured || (await currentTransport()) !== "firebase") return
+  if (!Capacitor.isPluginAvailable(TRAY_PLUGIN)) return
+  let key: string
+  try {
+    key = (await Tray.noticeKey()).key
+  } catch {
+    // An APK built before the key, or a Keystore that couldn't make one: the tray stays buttonless.
+    return
+  }
+  const bots = (await listProfiles()).filter((bot) => bot.apiKey && bot.baseUrl.trim())
+  const byId = new Map(bots.map((bot) => [connectionKey(bot), bot]))
+  const moves = keyMoves(
+    bots.map((bot) => ({ id: connectionKey(bot), disabled: bot.disabled })),
+    keyGiven,
+    key,
+  )
+  const tell = async (id: string, told: string, call: (bot: Profile) => Promise<void>) => {
+    const bot = byId.get(id)
+    if (!bot) return
+    try {
+      await call(bot)
+      keyGiven.set(id, told)
+    } catch {
+      // No plugin, an older one, or the server is away: asked again on the next pass.
+    }
+  }
+  await Promise.all([
+    ...moves.hand.map((id) => tell(id, key, (bot) => registerNoticeKey(bot, fcm.device, key))),
+    ...moves.forget.map((id) => tell(id, "", (bot) => unregisterNoticeKey(bot, fcm.device))),
+  ])
+}
+
 /** On launch and whenever the app returns, a rotated token or a new sign-in is told to the registry. */
 function startNative() {
   const pass = () => {
     void syncNative().catch(() => {})
     void syncNtfy().catch(() => {})
+    void syncNoticeKeys().catch(() => {})
   }
   pass()
   void App.addListener("resume", pass)
@@ -656,7 +710,10 @@ function startNative() {
   let timer: number | undefined
   liveQuery(() => db.profiles.toArray()).subscribe(() => {
     window.clearTimeout(timer)
-    timer = window.setTimeout(() => void syncNtfy().catch(() => {}), 1000)
+    timer = window.setTimeout(() => {
+      void syncNtfy().catch(() => {})
+      void syncNoticeKeys().catch(() => {})
+    }, 1000)
   })
   // An ntfy notification is the ntfy app's, so its tap arrives as a link rather than as an action.
   const linked = (url: string | undefined) => {
