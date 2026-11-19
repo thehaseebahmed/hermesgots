@@ -825,8 +825,40 @@ A page of plain HTML a bot writes for you, keeps on its host and draws in a sand
 _Avoid_: app, space, studio, gadget, widget, mini-app, artifact
 
 **Canvas session**:
-The one long-lived conversation that belongs to a canvas, reachable only from that canvas. It is never a chat of its bot's list and never a card, and it carries the canvas's name as its title.
-_Avoid_: canvas chat, build session, edit thread
+The one long-lived conversation that belongs to a canvas, reachable only from that canvas. It is never a chat of its bot's list and never a card, and it carries the canvas's name as its title. Where builds are on (ADR 0169) it is where requests are sent, and each one runs in a build rather than on this session.
+_Avoid_: canvas chat, edit thread
+
+**Build**:
+One request's work on a canvas (ADR 0169): a fresh session seeded with the page, the canvas memory and the newest build summaries, which plans, writes a canvas draft, is checked, and publishes at most one version. A request sent while a build is open joins it; a canvas has at most one open build.
+_Avoid_: run, job, task, iteration
+
+**Build plan**:
+What a build will change and how it will be checked, filed by its agent before any write. The agent says whether it waits for the reader's Approve; a message sent while it waits revises it.
+_Avoid_: spec, proposal, brief
+
+**Canvas draft**:
+The page a build writes, kept in the canvas folder and never drawn to the reader; it becomes a version only when its build publishes.
+_Avoid_: draft (a composer's unsent text), working copy, staging
+
+**Canvas folder**:
+A canvas's own place in its host's plugin data, holding its draft, plans, tests and memory: capped, deleted with the canvas, and never served to its page.
+_Avoid_: workspace, worktree, sandbox
+
+**Canvas memory**:
+The requirements and decisions a canvas's builds keep in its folder, read by every build.
+_Avoid_: notes, context, history
+
+**Check report**:
+What the host found when it drew a build's draft the way the app does (ADR 0170): each test's result, the console's errors and the screenshots, posted to the build as its next turn.
+_Avoid_: test run, lint, review
+
+**Check flag**:
+What a published version says of its checks: passing, failing (still failing after the build's rounds) or unchecked (its host had no browser).
+_Avoid_: status, badge, health
+
+**Build summary**:
+A build's final reply: what changed, kept on the version it published, drawn in the canvas's lane and carried into later builds.
+_Avoid_: changelog, recap, description
 
 **Canvas preview**:
 The screen a canvas opens on: its page drawn in its frame, and on a wide screen its canvas session beside it. A canvas that has no version yet has nothing to preview, so a phone opens its edit screen instead.
@@ -837,7 +869,7 @@ A page of its own that holds a canvas's session and nothing else, opened from th
 _Avoid_: edit mode, drawer, sheet, full-screen chat
 
 **Version**:
-One saved state of a canvas's HTML, made by every write its bot does. Undo steps back to the one before; a canvas's data is not part of a version.
+One saved state of a canvas's HTML. Where builds are on, each build publishes one, carrying its requests, its build summary and its check flag; otherwise every write its bot does makes one. Undo steps back to the one before; a canvas's data is not part of a version.
 _Avoid_: revision, snapshot, draft
 
 **Canvas data**:
