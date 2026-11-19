@@ -44,6 +44,7 @@ Set these under **Project configuration → Environment variables**. Only the fi
 | --- | --- | --- |
 | `FIREBASE_SERVICE_ACCOUNT` | Android push | A Firebase service account's JSON, with permission to send through Cloud Messaging. It stays in the function: a phone never holds it, and neither does a Hermes host. |
 | `GITHUB_TOKEN` | Community avatars | Optional. Without it the leaderboard still lists people; it just can't resolve a login to an avatar. |
+| `ROADMAP_ORIGINS` | The website's roadmap | Optional. The origins allowed to read and vote on the roadmap from another site, comma separated; `https://hermesgots.dev` when unset. Whoever edits the roadmap is given the Identity role `admin` under **Identity → Users**. |
 
 `URL` is Netlify's own and is already there.
 

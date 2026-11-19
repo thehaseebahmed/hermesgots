@@ -1,8 +1,18 @@
 import { getUser, verifyRequestOrigin } from "@netlify/identity"
 
+/**
+ * The caller Identity vouches for. `roles` is `app_metadata.roles`, which only the site's owner can
+ * set; `pictureUrl` is `user_metadata`, which the user can rewrite, so it never grants anything.
+ */
+export interface IdentityUser {
+  id: string
+  pictureUrl?: string
+  roles?: string[]
+}
+
 /** What Identity's own answer about a Bearer token amounts to. */
 type BearerCheck =
-  | { kind: "user"; user: { id: string; pictureUrl?: string } }
+  | { kind: "user"; user: IdentityUser }
   /** Identity declined this token: the caller is not signed in. */
   | { kind: "declined" }
   /** Identity couldn't be asked (a hiccup, a rate limit, no answer): no verdict about the token. */
@@ -21,12 +31,21 @@ async function bearerUser(req: Request, authorization: string): Promise<BearerCh
   // Only Identity's own refusal is a verdict about the token; anything else is us failing to ask.
   if (response.status === 401 || response.status === 403) return { kind: "declined" }
   if (!response.ok) return { kind: "unreachable" }
-  const user = (await response.json()) as { id?: string; user_metadata?: { avatar_url?: unknown } }
+  const user = (await response.json()) as {
+    id?: string
+    user_metadata?: { avatar_url?: unknown }
+    app_metadata?: { roles?: unknown }
+  }
   const picture = user.user_metadata?.avatar_url
+  const roles = user.app_metadata?.roles
   if (!user.id) return { kind: "unreachable" }
   return {
     kind: "user",
-    user: { id: user.id, pictureUrl: typeof picture === "string" ? picture : undefined },
+    user: {
+      id: user.id,
+      pictureUrl: typeof picture === "string" ? picture : undefined,
+      roles: Array.isArray(roles) ? roles.filter((r) => typeof r === "string") : undefined,
+    },
   }
 }
 
@@ -39,9 +58,7 @@ function signInFirst() {
  * The signed-in user behind a request, or an error response. Writes need the site's own origin
  * unless they carry a Bearer header.
  */
-export async function requireUser(
-  req: Request,
-): Promise<{ id: string; pictureUrl?: string } | Response> {
+export async function requireUser(req: Request): Promise<IdentityUser | Response> {
   const authorization = req.headers.get("authorization") ?? ""
   const bearer = /^Bearer\s/i.test(authorization)
   const cookie = await getUser()

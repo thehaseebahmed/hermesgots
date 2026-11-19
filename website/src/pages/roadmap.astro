@@ -1,0 +1,321 @@
+---
+import "../styles/board.css"
+import "../styles/roadmap.css"
+import Base from "../layouts/Base.astro"
+import { STATUSES, roadmapHtml, sampleRoadmap } from "../lib/roadmap"
+
+const base = (import.meta.env.PUBLIC_COMMUNITY_URL ?? "").replace(/\/+$/, "")
+const endpoint = base ? `${base}/.netlify/functions/roadmap` : ""
+const signIn = base ? `${base}/auth/website.html` : ""
+const sample = sampleRoadmap()
+const initial = endpoint
+  ? '<p class="empty">Loading…</p>'
+  : roadmapHtml(sample.features, { live: false, voted: new Set(), admin: false, busy: new Set() })
+---
+
+<Base
+  title="Gots Roadmap"
+  description="What's coming to Gots next. Sign in with GitHub to vote for what you want first."
+>
+  <div class="sky sky-page" aria-hidden="true"></div>
+  <div class="shell board-page">
+    <main id="roadmap" data-endpoint={endpoint} data-sign-in={signIn}>
+      <span class="badge" id="sample-badge" hidden={Boolean(endpoint)}>Sample data</span>
+      <div class="hero">
+        <div>
+          <p class="eyebrow">Roadmap</p>
+          <h1>What's next</h1>
+          <p class="lede">Vote for what you want first. Tap a feature to read it on GitHub.</p>
+        </div>
+      </div>
+
+      <div class="road-account" data-account hidden>
+        <button type="button" class="btn btn-ink btn-sm" data-sign-in>Sign in with GitHub to vote</button>
+        <p class="road-signed" data-signed hidden>
+          Signed in <button type="button" class="link" data-sign-out>Sign out</button>
+        </p>
+      </div>
+      <p class="road-error" role="alert" data-error hidden></p>
+
+      <details class="board road-admin" data-admin hidden>
+        <summary>Add a feature</summary>
+        <form data-form>
+          <label>
+            GitHub issue link
+            <input name="issue" type="url" required placeholder="https://github.com/owner/repo/issues/1" />
+          </label>
+          <label>
+            Title <small>From the issue when left empty</small>
+            <input name="title" maxlength="120" />
+          </label>
+          <label>
+            Summary
+            <textarea name="summary" maxlength="500" rows="3"></textarea>
+          </label>
+          <label>
+            Status
+            <select name="status">
+              {STATUSES.map((s) => <option value={s.key} selected={s.key === "planned"}>{s.label}</option>)}
+            </select>
+          </label>
+          <div class="road-form-actions">
+            <button type="button" class="btn btn-glass btn-sm" data-cancel hidden>Cancel</button>
+            <button type="submit" class="btn btn-ink btn-sm" data-submit>Add</button>
+          </div>
+        </form>
+      </details>
+
+      <div data-list set:html={initial} />
+    </main>
+  </div>
+</Base>
+
+<script>
+  import { readRoadmap, roadmapHtml, type Feature, type Roadmap } from "../lib/roadmap"
+
+  const TOKEN = "gots-roadmap-token"
+  const PENDING = "gots-roadmap-pending"
+  const root = document.getElementById("roadmap")!
+  const endpoint = root.dataset.endpoint
+  const signInUrl = root.dataset.signIn
+  const list = root.querySelector<HTMLElement>("[data-list]")!
+  const account = root.querySelector<HTMLElement>("[data-account]")!
+  const signInButton = root.querySelector<HTMLButtonElement>("[data-sign-in]")!
+  const signed = root.querySelector<HTMLElement>("[data-signed]")!
+  const errorLine = root.querySelector<HTMLElement>("[data-error]")!
+  const adminBox = root.querySelector<HTMLDetailsElement>("[data-admin]")!
+  const form = root.querySelector<HTMLFormElement>("[data-form]")!
+  const submit = root.querySelector<HTMLButtonElement>("[data-submit]")!
+  const cancel = root.querySelector<HTMLButtonElement>("[data-cancel]")!
+
+  let state: Roadmap | null = null
+  let editing: string | null = null
+  const busy = new Set<string>()
+
+  const store = {
+    get(storage: Storage, key: string) {
+      try {
+        return storage.getItem(key)
+      } catch {
+        return null
+      }
+    },
+    set(storage: Storage, key: string, value: string | null) {
+      try {
+        if (value === null) storage.removeItem(key)
+        else storage.setItem(key, value)
+      } catch {
+        // Storage blocked: a sign-in lasts as long as the page.
+      }
+    },
+  }
+
+  let memoryToken: string | null = null
+
+  /** The bridge hands the token back in the fragment; keep it and take it off the address. */
+  function takeToken() {
+    const params = new URLSearchParams(location.hash.slice(1))
+    const token = params.get("access_token")
+    if (!token) return
+    const expiresIn = Number(params.get("expires_in")) || 3600
+    const saved = JSON.stringify({ token, expiresAt: Date.now() + expiresIn * 1000 - 60_000 })
+    memoryToken = saved
+    store.set(localStorage, TOKEN, saved)
+    history.replaceState(null, "", location.pathname + location.search)
+  }
+
+  function token(): string | null {
+    const raw = store.get(localStorage, TOKEN) ?? memoryToken
+    if (!raw) return null
+    try {
+      const { token, expiresAt } = JSON.parse(raw) as { token: string; expiresAt: number }
+      if (typeof token === "string" && expiresAt > Date.now()) return token
+    } catch {
+      // A broken entry is no sign-in.
+    }
+    forget()
+    return null
+  }
+
+  function forget() {
+    memoryToken = null
+    store.set(localStorage, TOKEN, null)
+  }
+
+  function showError(message: string | null) {
+    errorLine.textContent = message ?? ""
+    errorLine.hidden = !message
+  }
+
+  function signIn(pendingVote?: string) {
+    if (!signInUrl) return
+    if (pendingVote) store.set(sessionStorage, PENDING, pendingVote)
+    const back = location.origin + location.pathname
+    location.assign(`${signInUrl}?return=${encodeURIComponent(back)}`)
+  }
+
+  async function request(query: string, init: RequestInit = {}) {
+    const headers = new Headers(init.headers)
+    const bearer = token()
+    if (bearer) headers.set("Authorization", `Bearer ${bearer}`)
+    if (init.body) headers.set("Content-Type", "application/json")
+    const response = await fetch(`${endpoint}?${query}`, { ...init, headers })
+    // Identity declined the token (it ran out early, or was revoked): sign out here.
+    if (response.status === 401 && bearer) forget()
+    const body = await response.json().catch(() => null)
+    return { response, body }
+  }
+
+  function draw() {
+    if (!state) return
+    list.innerHTML = roadmapHtml(state.features, {
+      live: true,
+      voted: new Set(state.voted),
+      admin: state.admin,
+      busy,
+    })
+    account.hidden = false
+    signInButton.hidden = state.signedIn
+    signed.hidden = !state.signedIn
+    adminBox.hidden = !state.admin
+  }
+
+  async function load() {
+    let { response, body } = await request("route=board")
+    if (response.status === 401) ({ response, body } = await request("route=board"))
+    const read = response.ok ? readRoadmap(body) : null
+    if (!read) {
+      list.innerHTML = '<p class="empty">The roadmap couldn\'t be read. Try again later.</p>'
+      return
+    }
+    state = read
+    draw()
+  }
+
+  async function vote(id: string) {
+    if (!state) return
+    if (!token()) return signIn(id)
+    const on = state.voted.includes(id)
+    busy.add(id)
+    draw()
+    try {
+      const { response, body } = await request(`route=vote&id=${encodeURIComponent(id)}`, {
+        method: on ? "DELETE" : "POST",
+      })
+      if (response.status === 401) return signIn(id)
+      if (!response.ok) {
+        showError(body?.error ?? "That vote didn't go through.")
+        return
+      }
+      showError(null)
+      const feature = state.features.find((f) => f.id === id)
+      if (feature && typeof body?.votes === "number") feature.votes = body.votes
+      state.voted = body?.voted
+        ? [...new Set([...state.voted, id])]
+        : state.voted.filter((v) => v !== id)
+    } catch {
+      showError("That vote didn't go through.")
+    } finally {
+      busy.delete(id)
+      draw()
+    }
+  }
+
+  const field = (name: string) =>
+    form.elements.namedItem(name) as HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement
+
+  function startEdit(feature: Feature) {
+    editing = feature.id
+    field("issue").value = feature.url
+    field("title").value = feature.title
+    field("summary").value = feature.summary
+    field("status").value = feature.status
+    submit.textContent = "Save"
+    cancel.hidden = false
+    adminBox.querySelector("summary")!.textContent = "Edit a feature"
+    adminBox.open = true
+    adminBox.scrollIntoView({ block: "nearest" })
+  }
+
+  function stopEdit() {
+    editing = null
+    form.reset()
+    submit.textContent = "Add"
+    cancel.hidden = true
+    adminBox.querySelector("summary")!.textContent = "Add a feature"
+  }
+
+  list.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement
+    const voteButton = target.closest<HTMLButtonElement>("[data-vote]")
+    if (voteButton) return void vote(voteButton.dataset.vote!)
+    const edit = target.closest<HTMLButtonElement>("[data-edit]")
+    const feature = edit && state?.features.find((f) => f.id === edit.dataset.edit)
+    if (feature) return startEdit(feature)
+    const remove = target.closest<HTMLButtonElement>("[data-remove]")
+    if (remove) void removeFeature(remove.dataset.remove!)
+  })
+
+  async function removeFeature(id: string) {
+    const feature = state?.features.find((f) => f.id === id)
+    if (!feature || !confirm(`Remove “${feature.title}” and its votes?`)) return
+    const { response, body } = await request(`route=feature&id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    })
+    if (!response.ok) return showError(body?.error ?? "Couldn't remove it.")
+    showError(null)
+    if (editing === id) stopEdit()
+    await load()
+  }
+
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault()
+    const data = new FormData(form)
+    const payload = {
+      issue: String(data.get("issue") ?? "").trim(),
+      title: String(data.get("title") ?? "").trim() || undefined,
+      summary: String(data.get("summary") ?? "").trim(),
+      status: String(data.get("status") ?? "planned"),
+    }
+    submit.disabled = true
+    try {
+      const { response, body } = editing
+        ? await request(`route=feature&id=${encodeURIComponent(editing)}`, {
+            method: "PATCH",
+            body: JSON.stringify(payload),
+          })
+        : await request("route=feature", { method: "POST", body: JSON.stringify(payload) })
+      if (!response.ok) return showError(body?.error ?? "Couldn't save it.")
+      showError(null)
+      stopEdit()
+      adminBox.open = false
+      await load()
+    } catch {
+      showError("Couldn't save it.")
+    } finally {
+      submit.disabled = false
+    }
+  })
+
+  cancel.addEventListener("click", stopEdit)
+  signInButton.addEventListener("click", () => signIn())
+  root.querySelector("[data-sign-out]")!.addEventListener("click", () => {
+    forget()
+    stopEdit()
+    void load()
+  })
+
+  if (endpoint) {
+    takeToken()
+    load()
+      .then(() => {
+        // A vote asked for before signing in is cast once the reader is back.
+        const pending = store.get(sessionStorage, PENDING)
+        store.set(sessionStorage, PENDING, null)
+        if (pending && state?.signedIn && !state.voted.includes(pending)) void vote(pending)
+      })
+      .catch(() => {
+        list.innerHTML = '<p class="empty">The roadmap couldn\'t be read. Try again later.</p>'
+      })
+  }
+</script>
