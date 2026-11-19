@@ -14,7 +14,16 @@ import { connectionKey, noteChange } from "@/lib/live"
 import { db } from "@/lib/db"
 import { markRead } from "@/lib/read-marks"
 
-import { Path, botProfile, json, mount, seedSettings, until, wordsOf } from "./component-kit.tsx"
+import {
+  Path,
+  botProfile,
+  json,
+  missing,
+  mount,
+  seedSettings,
+  until,
+  wordsOf,
+} from "./component-kit.tsx"
 
 const bot = botProfile("bot-main", { id: "bot-1", name: "Mainly" })
 
@@ -104,7 +113,10 @@ test("a side chat that starts waiting while the app is open is listed, with no n
   serveLive(() => ({ waiting }))
   await seedSession("waiting-live", "gots-waiting-live", "A chat that starts waiting")
   await mount(sidebar(), async () => {
-    assert.equal(waitingNav(), null, "nothing waits yet, so the section is not drawn")
+    assert.ok(
+      missing('nav[aria-labelledby="waiting-heading"]'),
+      "nothing waits yet, so the section is not drawn",
+    )
     // The host's run begins holding a question, and the events stream says runs changed: the app is
     // open, so no push reaches this device — the poll's own answer is what the sidebar reads.
     waiting = { "gots-waiting-live": { kind: "question", count: 1 } }
@@ -153,7 +165,7 @@ test("a run that ends while the app is open dots the bot's row", async () => {
   await seedSession("chat-run", "gots-run-1", "A chat whose run ends")
   await mount(sidebar(), async () => {
     await until(async () => Boolean(document.querySelector('nav[aria-labelledby="bots-heading"] a')), "the bot's row")
-    assert.equal(botDot(), null, "nothing new yet: the run is still in flight")
+    assert.ok(missing("[data-unread]"), "nothing new yet: the run is still in flight")
     // The run ends on the host and the stream says runs changed. No push reaches this device — the
     // app is open — so the bot row's own unread mark is what has to say the run is done.
     live = { sessions: {}, run_ids: {} }
