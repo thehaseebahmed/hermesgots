@@ -131,7 +131,7 @@ import { useNow } from "@/lib/threads"
 import { cn } from "@/lib/utils"
 import { Chip } from "@/components/chip"
 import { BackButton } from "@/components/back-button"
-import { PAGE_BODY } from "@/lib/layout"
+import { PAGE_BODY, COLUMN } from "@/lib/layout"
 
 function Gate({ children }: { children: ReactNode }) {
   const enabled = useMeetingsEnabled()
@@ -334,7 +334,12 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
         }
       />
 
-      <div className={`${PAGE_BODY} flex flex-col gap-6 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]`}>
+      <div
+        className={cn(
+          PAGE_BODY,
+          "flex flex-col gap-6 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]",
+        )}
+      >
         {reason && <Banner>{reason}</Banner>}
         <Unfinished />
         {meetings.length > 0 && (
@@ -403,7 +408,7 @@ function MeetingsList({ pane }: { pane?: PaneState }) {
       </div>
 
       <div className="pointer-events-none sticky bottom-0 mt-auto px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-        <div className="mx-auto flex w-full max-w-2xl justify-end">
+        <div className={cn(COLUMN, "flex justify-end")}>
           <Button
             data-toast-above
             size="lg"
@@ -1054,7 +1059,7 @@ function MeetingView() {
             .join(" · ")}
           actions={<MeetingMenu meeting={meeting} onRemoved={leave} />}
         />
-        <div className={`${PAGE_BODY} flex flex-1 flex-col gap-6 pt-2 pb-8`}>
+        <div className={cn(PAGE_BODY, "flex flex-1 flex-col gap-6 pt-2 pb-8")}>
           {meeting.stage === "ready" && !isFailed(meeting) ? (
             meeting.notes?.topics.length ? (
               <RecapView
@@ -1715,7 +1720,7 @@ function TopicView({ meeting, notes, topic }: { meeting: Meeting; notes: Notes; 
           title={topic.title}
           subtitle={`Topic ${index + 1} of ${notes.topics.length} · ${clock(topic.start)} to ${clock(topic.end)}`}
         />
-        <div className={`${PAGE_BODY} flex flex-1 flex-col pb-8`}>
+        <div className={cn(PAGE_BODY, "flex flex-1 flex-col pb-8")}>
           <Tabs value={tab} onValueChange={(value) => setTab(value as string)}>
             <TabsList>
               <TabsTrigger value="summary">Summary</TabsTrigger>
@@ -1836,7 +1841,7 @@ function AskBar({ meeting }: { meeting: Meeting }) {
       data-toast-above
       className="border-t bg-background/90 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] backdrop-blur"
     >
-      <div className={`${PAGE_BODY} flex flex-col gap-2.5`}>
+      <div className={cn(PAGE_BODY, "flex flex-col gap-2.5")}>
         <Refusal hold={refusal} />
         {!meeting.chat?.length && (
           <div className="-mx-4 flex [scrollbar-width:none] gap-2 overflow-x-auto px-4">

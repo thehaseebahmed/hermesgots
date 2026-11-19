@@ -123,7 +123,9 @@ export function RoutinesPage() {
         }
       />
 
-      <div className={`${PAGE_BODY} flex flex-col gap-3 pb-[max(2rem,env(safe-area-inset-bottom))]`}>
+      <div
+        className={cn(PAGE_BODY, "flex flex-col gap-3 pb-[max(2rem,env(safe-area-inset-bottom))]")}
+      >
         <BotRoutines profile={bot} tick={tick} pollTick={pollTick} filter={filter} />
       </div>
     </div>

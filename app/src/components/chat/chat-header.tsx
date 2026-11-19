@@ -193,7 +193,7 @@ export function ChatHeader({
           {actions}
         </div>
       </div>
-      {pinned && below && <div className="mx-auto max-w-2xl pt-3">{below}</div>}
+      {pinned && below && <div className={cn(COLUMN, "pt-3")}>{below}</div>}
     </header>
   )
 }

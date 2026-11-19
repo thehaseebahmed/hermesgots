@@ -70,7 +70,8 @@ import { db, getActiveProfile, type Attachment, type Profile } from "@/lib/db"
 import { MAX_ATTACHMENTS } from "@/lib/attachment-caps"
 import { serverConfig } from "@/lib/connection"
 import { usePluginFeature, usePluginFeatureOn } from "@/lib/features"
-import { HEADER_BUTTON, PAGE_BODY } from "@/lib/layout"
+import { HEADER_BUTTON, PAGE_BODY, COLUMN } from "@/lib/layout"
+import { cn } from "@/lib/utils"
 import type { CanvasPoint } from "@/lib/point-marker"
 import { useLarge } from "@/lib/media"
 import { openExternal } from "@/lib/native"
@@ -214,7 +215,12 @@ export function CanvasPage() {
         }
       />
 
-      <div className={`${PAGE_BODY} flex flex-col gap-8 pt-4 pb-[max(2rem,env(safe-area-inset-bottom))] md:pt-10`}>
+      <div
+        className={cn(
+          PAGE_BODY,
+          "flex flex-col gap-8 pt-4 pb-[max(2rem,env(safe-area-inset-bottom))] md:pt-10",
+        )}
+      >
         <section className="flex flex-col gap-3">
           <h2 className="text-center text-2xl font-semibold tracking-tight md:text-3xl">
             What should it be?
@@ -499,11 +505,11 @@ function CanvasPagePane({
         </div>
       ) : null}
       {missing ? (
-        <p className="mx-auto max-w-2xl p-4 text-center text-sm text-muted-foreground">{GONE}</p>
+        <p className={cn(PAGE_BODY, "py-4 text-center text-sm text-muted-foreground")}>{GONE}</p>
       ) : drawn?.error ? (
-        <p className="mx-auto max-w-2xl p-4 text-sm text-muted-foreground">{drawn.error}</p>
+        <p className={cn(PAGE_BODY, "py-4 text-sm text-muted-foreground")}>{drawn.error}</p>
       ) : escaped ? (
-        <p className="mx-auto max-w-2xl p-4 text-center text-sm text-muted-foreground">
+        <p className={cn(PAGE_BODY, "py-4 text-center text-sm text-muted-foreground")}>
           This page keeps trying to leave. Open it again from its chat.
         </p>
       ) : drawn?.document ? (
@@ -809,7 +815,7 @@ export function CanvasView() {
           draws the chat there, so there is nothing to flip to (ADR 0130), and a canvas no bot holds has
           no chat to open: there is no Edit for either. */}
       <div data-canvas-lane className={LANE}>
-        <Refusal hold={refusal} className="mx-auto mb-2 w-full max-w-2xl" />
+        <Refusal hold={refusal} className={cn(COLUMN, "mb-2")} />
         <CanvasHead
           canvas={canvas}
           profile={profile}

@@ -28,7 +28,8 @@ import { createSignal, createStore } from "@/lib/store"
 import { HermesError, deleteProject, type HermesConfig, type HermesProject } from "@/lib/hermes"
 import { tell } from "@/lib/tell"
 import { folderName } from "@/lib/workspace"
-import { PAGE_BODY } from "@/lib/layout"
+import { PAGE_BODY, COLUMN } from "@/lib/layout"
+import { cn } from "@/lib/utils"
 
 const DAY_MS = 86_400_000
 
@@ -214,7 +215,9 @@ function ProjectsList({ pane }: { pane?: FeaturePane }) {
         }
       />
 
-      <div className={`${PAGE_BODY} flex flex-col gap-4 pb-[max(2rem,env(safe-area-inset-bottom))]`}>
+      <div
+        className={cn(PAGE_BODY, "flex flex-col gap-4 pb-[max(2rem,env(safe-area-inset-bottom))]")}
+      >
         {unreachable.map(({ profile, error }) => (
           <Banner key={profile.id} tone="error">
             {profile.name}: {error}
@@ -255,7 +258,7 @@ function ProjectsList({ pane }: { pane?: FeaturePane }) {
 
       {withPlugin.length > 0 && (
         <div className="pointer-events-none sticky bottom-0 mt-auto flex justify-end px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
-          <div className="mx-auto flex w-full max-w-2xl justify-end">
+          <div className={cn(COLUMN, "flex justify-end")}>
             <Button
               data-toast-above
               size="lg"

@@ -15,10 +15,16 @@ export const COLUMN = "mx-auto w-full max-w-[672px]"
 export const THREAD_GUTTER = "pl-4 pr-[max(0px,calc(1rem_-_(100cqw_-_100%)))]"
 
 /**
+ * A screen's box with room for its 16px gutters outside the column: what a screen holding its own
+ * header lays its parts in, each carrying those gutters itself (ADR 0166).
+ */
+export const PAGE = "mx-auto w-full max-w-[704px]"
+
+/**
  * A list screen's body: the column with its 16px gutters outside the box, so its rows start on the
  * same pixel as its header (`px-4` around a `COLUMN` row) instead of 16px inside it (ADR 0166).
  */
-export const PAGE_BODY = "mx-auto w-full max-w-[704px] px-4"
+export const PAGE_BODY = `${PAGE} px-4`
 
 /**
  * The round outline button a header bar wears — a Project's menu, a chat's options, a canvas's Undo,

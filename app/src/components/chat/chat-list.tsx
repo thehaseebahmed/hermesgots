@@ -33,6 +33,7 @@ import { useCanMakeRoom } from "@/lib/room"
 import { beginChat, useNow } from "@/lib/threads"
 import { useAllLiveRuns } from "@/lib/waiting"
 import { PAGE_BODY } from "@/lib/layout"
+import { cn } from "@/lib/utils"
 
 /** A pill as a list holds it: the key it narrows by, its word, and the sentence it keeps nothing by. */
 type ChatPill = (typeof CHAT_FILTERS)[number]
@@ -192,7 +193,12 @@ export function ChatList({
         }
       />
 
-      <div className={`${PAGE_BODY} flex flex-col gap-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]`}>
+      <div
+        className={cn(
+          PAGE_BODY,
+          "flex flex-col gap-4 pt-2 pb-[max(2rem,env(safe-area-inset-bottom))]",
+        )}
+      >
         {above}
         {empty && <p className="py-8 text-center text-sm text-muted-foreground">{empty}</p>}
 
