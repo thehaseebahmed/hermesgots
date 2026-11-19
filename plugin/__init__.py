@@ -32,6 +32,7 @@ from . import (
     approvals,
     attachments,
     canvases,
+    canvas_checks,
     canvas_vault,
     chats,
     clarify,
@@ -767,6 +768,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                         if canvases.ready() and openui.canvas_ready()
                         else []
                     ),
+                    # A build's checks draw its draft through Hermes's own browser layer
+                    # (canvas_checks.py, ADR 0171), advertised only where this host has that
+                    # layer to call: a host with none publishes a build unchecked rather than
+                    # not at all, and the app is told which kind of host it is talking to.
+                    *(["canvas_checks"] if canvas_checks.available() is None else []),
                     # Hermes's own MCP built-ins, and the MCP screen with them; see mcp.py.
                     *mcp_features,
                 ],
