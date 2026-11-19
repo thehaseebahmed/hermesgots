@@ -2475,8 +2475,8 @@ export const isReply = (message: Message) => message.role === "assistant"
 
 /**
  * The newest message this device holds for a chat, or the newest one `keep` accepts: the one read a
- * list's line, its clock and what it waits on all come from. The range over a chat's tail is written
- * here alone, so every list that reads one reads the same rows.
+ * list's line, its clock and what it waits on all come from. The ranges over a chat's tail and a
+ * session's live rows are written here alone, so every list that reads one reads the same rows.
  */
 export async function newestMessage(
   conversationId: string,
@@ -2487,6 +2487,20 @@ export async function newestMessage(
     .between([conversationId, Dexie.minKey], [conversationId, Dexie.maxKey])
     .reverse()
     .filter(keep)
+    .first()
+}
+
+/**
+ * The newest row a session's live set holds on this device, or the newest one `keep` accepts — a
+ * chat-next chat's tail, which the thread's one writer keeps here and never in `messages` (ADR
+ * 0065). Same walk as `newestMessage`, from the newest end, stopping at the first accepted row.
+ */
+export async function newestSessionRow(session: string, keep: (row: SessionRow["row"]) => boolean) {
+  return db.sessionRows
+    .where("[session+set+pos]")
+    .between([session, "live", Dexie.minKey], [session, "live", Dexie.maxKey])
+    .reverse()
+    .filter((one) => keep(one.row))
     .first()
 }
 

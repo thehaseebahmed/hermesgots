@@ -9,19 +9,24 @@ import {
   BOT_CHATS,
   chatRowOf,
   isListed,
+  lineOf,
   shownSideChats,
   type ChatFilter,
   type ChatListRow,
   type ChatRecord,
 } from "@/lib/chat-list"
+import { drawnWordsOf } from "@/chat-next/fold"
+import { opensOnChatNext } from "@/chat-next/route"
 import {
   conversationsOf,
   db,
   isReply,
   mainChatOf,
   newestMessage,
+  newestSessionRow,
   type Conversation,
   type Profile,
+  type SessionRow,
 } from "@/lib/db"
 import { draftKey, unsentAmong } from "@/lib/drafts"
 import { listsAsChat } from "@/lib/lists-as-chat"
@@ -119,15 +124,57 @@ export function newestReplyOf(chatId: string) {
 }
 
 /**
+ * Whether one of a session's rows is one a chat's line may be read off: the thread draws words of it
+ * — the fold's own rule, shared so a row can only say what the thread says — and they are not blank.
+ */
+const isSaidRow = (row: SessionRow["row"]) => Boolean(drawnWordsOf(row).trim())
+
+/** Whether a session's row is the bot's own words. */
+const saidByBot = (row: SessionRow["row"]) => row.role === "assistant" && isSaidRow(row)
+
+/**
+ * The line a chat's own session gives its row: the newest row the bot wrote, and where the bot has
+ * not answered yet the newest row of either role — the reader's own, which is the line a chat holds
+ * while the answer is still out. `undefined` where the session holds no such row, which is a chat
+ * this device has never opened.
+ */
+async function sessionLineOf(chat: Conversation): Promise<string | undefined> {
+  if (!chat.hermesSessionId) return undefined
+  const reply = await newestSessionRow(chat.hermesSessionId, saidByBot)
+  const last = reply ?? (await newestSessionRow(chat.hermesSessionId, isSaidRow))
+  return last ? drawnWordsOf(last.row) : undefined
+}
+
+/**
  * One chat's row, with its tail read where the bound put it: a routine's row reads its line and time
  * off the record, so its tail isn't asked for at all.
  *
  * The read that dates the row is the newest message of *either* role, so the row's other clock —
  * `latest`, which the Side Chat List lists by — is stamped off the same read and costs nothing extra.
  * A row the bound left unread carries neither, and a list orders it by the record's own clock.
+ *
+ * Where the bot can be called, the chat's own screen is chat-next (ADR 0065), whose one writer keeps
+ * the thread's rows in `sessionRows` and never in `db.messages`, so the line is read off that
+ * session's rows and the message read is not made at all. That read sits in the caller's live query
+ * beside the one below it, so a reply landing wakes the row that says it. Every clock stays the
+ * record's — the one chat-next bumps for a list row, and the one the thread's read mark rides — since
+ * the line is the only thing the session read changes.
  */
-async function rowOfChat(chat: Conversation, tailed: ReadonlySet<string>): Promise<ChatListRow> {
+async function rowOfChat(
+  chat: Conversation,
+  tailed: ReadonlySet<string>,
+  bot: Profile | null,
+): Promise<ChatListRow> {
   if (chat.routine || !tailed.has(chat.id)) return chatRowOf(chat)
+  // The row reads the store the chat's own screen reads, by the question that screen is opened with
+  // (`opensOnChatNext`): chat-next's session rows where the bot can be called, `db.messages` where it
+  // cannot. A bot that loses its server moves the same record onto the screen that is the one writer
+  // of `messages`, and the newest words the device holds are the ones the row must say — so the
+  // session is not asked first, it is asked where it is the store being read.
+  if (opensOnChatNext(chat, bot)) {
+    const said = await sessionLineOf(chat)
+    if (said !== undefined) return { ...chatRowOf(chat), line: lineOf(said) }
+  }
   const newest = await newestMessage(chat.id)
   // The row says what the bot last said, and a question or an approval sits on a reply: a read of the
   // newest message that already is one answers both, and one that is the reader's own asks for the
@@ -228,7 +275,7 @@ function useBotChats(profileId: string, filter?: ChatFilter): BotChats | undefin
     // (ADR 0158) — so a row left behind by a chat that never started is never drawn.
     const chats = await readListedChats(profileId)
     const tailed = tailedIds(chats, filter)
-    const rows = await Promise.all(chats.map((chat) => rowOfChat(chat, tailed)))
+    const rows = await Promise.all(chats.map((chat) => rowOfChat(chat, tailed, bot)))
     return { profileId, bot, rows }
   }, [profileId, filter])
 }

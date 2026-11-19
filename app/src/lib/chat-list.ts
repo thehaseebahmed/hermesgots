@@ -234,6 +234,12 @@ export function rowMarksOf(record: ChatMarks): ChatMarks {
 }
 
 /**
+ * A row's line from the words it says: one plain line, or the fallback where it says nothing. The
+ * one rule every line is drawn by, whichever store the words were read from.
+ */
+export const lineOf = (words: string) => plainLine(words) ?? NO_MESSAGES
+
+/**
  * One chat's row, from its record, the newest message this device holds for it and the newest *reply*
  * it holds. The line is the reply's words — the last thing the reader was told — and the reader's own
  * message stands in for it only while the bot has not answered them; `at` is that reply's, so the list
@@ -265,7 +271,7 @@ export function chatRowOf(
     id: chat.id,
     // Main is the host's record with Hermes's title ("Bot Chat"); the app says its own word over it.
     title: chat.main ? MAIN_TITLE : chat.title,
-    line: plainLine((reply ?? newest)?.content ?? "") ?? NO_MESSAGES,
+    line: lineOf((reply ?? newest)?.content ?? ""),
     at: reply?.createdAt ?? chat.updatedAt,
     ...(newest ? { latest: newest.createdAt } : {}),
     pinned: Boolean(chat.pinned),
