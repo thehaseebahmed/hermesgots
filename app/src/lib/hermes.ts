@@ -1509,6 +1509,37 @@ function openuiEnabled(body: unknown) {
   return (body as { enabled?: unknown } | null)?.enabled !== false
 }
 
+/**
+ * How long a research or meeting model call may take, in seconds, held per bot on its host
+ * (`model_timeout.py`). A host that answers without a usable number is read as the default it
+ * runs on, since the call goes on either way.
+ */
+export const DEFAULT_MODEL_TIMEOUT_S = 120
+
+const timeoutSeconds = (body: unknown, fallback: number) => {
+  const held = (body as { seconds?: unknown } | null)?.seconds
+  return typeof held === "number" && Number.isInteger(held) && held > 0 ? held : fallback
+}
+
+export async function getModelTimeout(config: HermesConfig, signal?: AbortSignal) {
+  const response = await request(`${pluginRoot(config.baseUrl)}/model-timeout`, {
+    headers: headers(config),
+    signal,
+  })
+  return timeoutSeconds(await response.json(), DEFAULT_MODEL_TIMEOUT_S)
+}
+
+/** Writes the bot's timeout, and answers what the host now holds: it refuses a value outside its range. */
+export async function setModelTimeout(config: HermesConfig, seconds: number, signal?: AbortSignal) {
+  const response = await request(`${pluginRoot(config.baseUrl)}/model-timeout`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ seconds }),
+    signal,
+  })
+  return timeoutSeconds(await response.json(), seconds)
+}
+
 export async function checkHealth(config: HermesConfig, signal?: AbortSignal) {
   const response = await request(`${serverRoot(config.baseUrl)}/health`, {
     headers: headers(config),
