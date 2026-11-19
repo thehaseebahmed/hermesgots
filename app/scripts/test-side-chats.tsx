@@ -17,10 +17,15 @@ import test from "node:test"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { AppShell } from "@/components/app-shell"
+import { foldTurns } from "@/chat-next/fold"
+import { attachmentParts } from "@/lib/attachment-text"
 import { db, saveChatFilter } from "@/lib/db"
 import { markRead } from "@/lib/read-marks"
 import { SideChatsPage } from "@/routes/side-chats"
+import { rowText } from "@/lib/row-text"
+import { NO_MESSAGES, plainLine } from "@/lib/words"
 
+import { durableUserRow } from "./host-row.mjs"
 import {
   Nav,
   Path,
@@ -49,6 +54,8 @@ interface Seed {
   title: string
   /** The record's own clock, and the time a message falls back to. */
   at: number
+  /** When the chat started: the clock a turn's settle leaves behind `at`. */
+  createdAt?: number
   pinned?: boolean
   archived?: boolean
   /** The bot's own Main: permanent, never a side chat, and drawn above the rows at the split width. */
@@ -80,7 +87,7 @@ async function seed(chats: Seed[]) {
         ? { room: { id: `room-${one.id}`, members: [{ profile: "default", displayName: LABEL }] } }
         : {}),
       hermesSessionId: `gots-${one.id}`,
-      createdAt: one.at,
+      createdAt: one.createdAt ?? one.at,
       updatedAt: one.at,
       changedAt: one.at,
     })),
@@ -109,6 +116,15 @@ const screen = () => (
     </Routes>
   </MemoryRouter>
 )
+
+/** A session row as chat-next's one writer keeps it: the host's stored words, in the live set. */
+const said = (id: number, pos: number, role: string, content: unknown, display_kind?: string) => ({
+  session: "gots-trip",
+  set: "live" as const,
+  id,
+  pos,
+  row: { id, role, content: rowText(content), ...(display_kind ? { display_kind } : {}) },
+})
 
 /**
  * The same address as the app draws it: the list in the shell's lane and the chat it stands beside in
@@ -465,6 +481,343 @@ test("a chat the reader wrote in last stands above one the bot answered earlier"
     assert.ok(
       wordsOf(find(`a[href="/c/written"]`)).includes("An earlier answer"),
       "while its line stays the last thing the bot said",
+    )
+  })
+})
+
+test("a chat whose words are in its session says them on its row", async () => {
+  // The loop that found the bug: a chat started from this list, a message sent, the bot's reply in
+  // the thread — and the row still saying nothing was ever said in it. chat-next is the thread's one
+  // writer (ADR 0065), so the turn's rows went into the session's own store and `db.messages` holds
+  // nothing for the chat; the record's own clock, which chat-next bumps on send, is what keeps the
+  // row listed, ordered and aged.
+  const at = Date.now() - 60_000
+  await seed([{ id: "trip", title: "Trip to Lisbon", at, createdAt: at - 60_000 }])
+  // The kit's reset leaves `sessionRows` alone, and no other case in this file writes it.
+  await db.sessionRows.clear()
+  await db.sessionRows.bulkPut([
+    {
+      session: "gots-trip",
+      set: "live",
+      id: 1,
+      pos: 0,
+      row: { id: 1, role: "user", content: "when do we fly?" },
+    },
+    {
+      session: "gots-trip",
+      set: "live",
+      id: 2,
+      pos: 1,
+      row: {
+        id: 2,
+        role: "assistant",
+        content: "The tide is out at 06:40.",
+        finish_reason: "stop",
+      },
+    },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 1, "the bot's side chat")
+    assert.equal(
+      wordsOf(find(`a[href="/c/trip"] [data-slot="row-line"]`)),
+      "The tide is out at 06:40.",
+      "the row says the bot's last words, not No messages yet",
+    )
+  })
+})
+
+test("a chat whose session holds newer words than its messages says the session's", async () => {
+  // The session is asked first: chat-next never writes `db.messages`, so any message this device
+  // holds for such a chat is older than the session's own rows.
+  const at = Date.now() - 60_000
+  await seed([
+    {
+      id: "trip",
+      title: "Trip to Lisbon",
+      at,
+      createdAt: at - 120_000,
+      said: [{ content: "The tide is out at 06:40.", at: at - 60_000 }],
+    },
+  ])
+  await db.sessionRows.clear()
+  await db.sessionRows.bulkPut([
+    {
+      session: "gots-trip",
+      set: "live",
+      id: 1,
+      pos: 0,
+      row: { id: 1, role: "assistant", content: "The tide is out at 06:40." },
+    },
+    {
+      session: "gots-trip",
+      set: "live",
+      id: 2,
+      pos: 1,
+      row: { id: 2, role: "assistant", content: "We fly at noon.", finish_reason: "stop" },
+    },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 1, "the bot's side chat")
+    assert.equal(
+      wordsOf(find(`a[href="/c/trip"] [data-slot="row-line"]`)),
+      "We fly at noon.",
+      "the session's own words are the newer ones, so they are the row's",
+    )
+  })
+})
+
+test("a chat whose bot has not answered says the reader's own words", async () => {
+  // The line a chat holds while the answer is still out, which the message read has always drawn.
+  const at = Date.now() - 60_000
+  await seed([{ id: "trip", title: "Trip to Lisbon", at, createdAt: at - 60_000 }])
+  await db.sessionRows.clear()
+  await db.sessionRows.bulkPut([
+    {
+      session: "gots-trip",
+      set: "live",
+      id: 1,
+      pos: 0,
+      row: { id: 1, role: "user", content: "when do we fly?" },
+    },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 1, "the bot's side chat")
+    assert.equal(
+      wordsOf(find(`a[href="/c/trip"] [data-slot="row-line"]`)),
+      "when do we fly?",
+      "the reader's own words are the line until the bot answers them",
+    )
+  })
+})
+
+test("a chat whose newest row is scaffolding says the turn's own words, not the notice", async () => {
+  // The thread draws a model switch nowhere, so its words are nobody's to quote: `drawnWordsOf` is
+  // the fold's own rule, and a row the reader was never told cannot be the chat's line either.
+  const at = Date.now() - 60_000
+  await seed([{ id: "trip", title: "Trip to Lisbon", at, createdAt: at - 60_000 }])
+  await db.sessionRows.clear()
+  await db.sessionRows.bulkPut([
+    {
+      session: "gots-trip",
+      set: "live",
+      id: 1,
+      pos: 0,
+      row: { id: 1, role: "user", content: "when do we fly?" },
+    },
+    {
+      session: "gots-trip",
+      set: "live",
+      id: 2,
+      pos: 1,
+      row: {
+        id: 2,
+        role: "user",
+        content: "[System: The active model for this chat has changed to model-b via prompt]",
+        display_kind: "model_switch",
+      },
+    },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 1, "the bot's side chat")
+    assert.equal(
+      wordsOf(find(`a[href="/c/trip"] [data-slot="row-line"]`)),
+      "when do we fly?",
+      "the row says the turn's own words, never a notice the thread shows nowhere",
+    )
+  })
+})
+
+// The row's line is the words the thread draws of the row, not the words the host stored: what a
+// reader sent with a file, what a delegation delivered and what a compaction merged all carry more
+// than the thread shows, and the fold derives each of those. These seed the stored shapes and read
+// the expectation off the thread itself, so the row and the thread cannot drift apart.
+
+/** What the thread draws of a row's own words, through the fold. */
+const threadWordsOf = (row: { id: number; role: string; content: string; display_kind?: string }) =>
+  foldTurns([row])
+    .flatMap((turn) => [
+      turn.user,
+      ...turn.parts.flatMap((part) => (part.kind === "text" ? [part.text] : [])),
+    ])
+    .filter(Boolean)
+    .join(" ")
+
+test("a chat whose reader sent a file says the reader's own words, not the host's notice", async () => {
+  // A message carrying a file is stored with its marker block and the host's sentence about the
+  // file's content; the thread draws the reader's words and the file as a chip.
+  const at = Date.now() - 60_000
+  await seed([{ id: "trip", title: "Trip to Lisbon", at, createdAt: at - 60_000 }])
+  const stored = durableUserRow(
+    attachmentParts("look at this", [
+      {
+        id: "a1",
+        name: "report.pdf",
+        type: "application/pdf",
+        size: 4821,
+        path: "/host/report.pdf",
+      },
+    ]),
+  )
+  const words = threadWordsOf({ id: 1, role: "user", content: stored })
+  assert.equal(words, "look at this", "the thread's own words for the row")
+  await db.sessionRows.clear()
+  await db.sessionRows.bulkPut([said(1, 0, "user", stored)])
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 1, "the bot's side chat")
+    assert.equal(
+      wordsOf(find(`a[href="/c/trip"] [data-slot="row-line"]`)),
+      plainLine(words),
+      "the row says the reader's own words, not the host's sentence about the file",
+    )
+  })
+})
+
+test("a chat a delegation was delivered into says nothing of the delivery", async () => {
+  // The delivery row opens a wake turn and carries none of its own words: the row must not quote
+  // the notice the thread shows nowhere, and says the fallback where the session holds nothing else.
+  const at = Date.now() - 60_000
+  await seed([{ id: "trip", title: "Trip to Lisbon", at, createdAt: at - 60_000 }])
+  const content = [
+    "[ASYNC DELEGATION COMPLETE — trip-agent-1]",
+    "A background subagent you dispatched earlier has finished.",
+    "",
+    "Status: completed   API calls: 4   Duration: 42s",
+    "--- RESULT ---",
+    "The journal is the growth: cap it with SystemMaxUse=500M.",
+  ].join("\n")
+  const words = threadWordsOf({
+    id: 1,
+    role: "user",
+    content,
+    display_kind: "async_delegation_complete",
+  })
+  assert.equal(words, "", "the thread draws none of the delivery's words")
+  await db.sessionRows.clear()
+  await db.sessionRows.bulkPut([said(1, 0, "user", content, "async_delegation_complete")])
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 1, "the bot's side chat")
+    assert.equal(
+      wordsOf(find(`a[href="/c/trip"] [data-slot="row-line"]`)),
+      NO_MESSAGES,
+      "the row says nothing, as the thread does",
+    )
+  })
+})
+
+test("a chat whose reply a compaction merged says the reply's own words", async () => {
+  // A compaction's merged row keeps the reply's words above its delimiter and the host's
+  // reference-only block under it; the thread draws only the words above.
+  const at = Date.now() - 60_000
+  await seed([{ id: "trip", title: "Trip to Lisbon", at, createdAt: at - 60_000 }])
+  const content = [
+    "[PRIOR CONTEXT — for reference only; not a new message]",
+    "",
+    "We fly at noon.",
+    "",
+    "[END OF PRIOR CONTEXT — COMPACTION SUMMARY BELOW]",
+    "",
+    "[CONTEXT COMPACTION — REFERENCE ONLY]",
+    "The reader asked about flights.",
+    "--- END OF CONTEXT SUMMARY — respond to the message below, not the summary above ---",
+  ].join("\n")
+  const words = threadWordsOf({ id: 7, role: "assistant", content })
+  assert.equal(words, "We fly at noon.", "the thread draws only the reply's own words")
+  await db.sessionRows.clear()
+  await db.sessionRows.bulkPut([said(7, 0, "assistant", content)])
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 1, "the bot's side chat")
+    assert.equal(
+      wordsOf(find(`a[href="/c/trip"] [data-slot="row-line"]`)),
+      "We fly at noon.",
+      "the row says the reply's own words, not the host's reference-only header",
+    )
+  })
+})
+
+// Which store a row is read from is the question the chat's own screen is opened with
+// (`opensOnChatNext`), not a preference: a bot that loses its server moves the same record onto the
+// current screen, the one writer of `db.messages`, and the newest words this device holds are the
+// ones the row must say.
+
+test("a chat whose bot can no longer be called says the words this device holds, not its session's", async () => {
+  const at = Date.now() - 60_000
+  await seed([
+    {
+      id: "trip",
+      title: "Trip to Lisbon",
+      at,
+      createdAt: at - 120_000,
+      said: [
+        { role: "user", content: "when do we sail?", at: at - 30_000 },
+        { role: "assistant", content: "We sail at dusk.", at },
+      ],
+    },
+  ])
+  // The bot lost its server, so the chat opens on the current screen from now on.
+  await db.profiles.put({ ...bot, baseUrl: "", apiKey: "" })
+  await db.sessionRows.clear()
+  await db.sessionRows.bulkPut([
+    {
+      session: "gots-trip",
+      set: "live",
+      id: 1,
+      pos: 0,
+      row: { id: 1, role: "user", content: "when do we fly?" },
+    },
+    {
+      session: "gots-trip",
+      set: "live",
+      id: 2,
+      pos: 1,
+      row: { id: 2, role: "assistant", content: "We fly at noon.", finish_reason: "stop" },
+    },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 1, "the bot's side chat")
+    assert.equal(
+      wordsOf(find(`a[href="/c/trip"] [data-slot="row-line"]`)),
+      "We sail at dusk.",
+      "the row says the newer words the device holds, which the chat's own screen draws",
+    )
+  })
+})
+
+test("a chat whose bot can be called says its session's words over the messages it also holds", async () => {
+  // The same device the other way round: the bot can be called, so the chat's screen is chat-next and
+  // the session's rows are the ones being read — the older messages are not the chat's words any more.
+  const at = Date.now() - 60_000
+  await seed([
+    {
+      id: "trip",
+      title: "Trip to Lisbon",
+      at,
+      createdAt: at - 120_000,
+      said: [{ role: "assistant", content: "We sail at dusk.", at }],
+    },
+  ])
+  await db.sessionRows.clear()
+  await db.sessionRows.bulkPut([
+    {
+      session: "gots-trip",
+      set: "live",
+      id: 1,
+      pos: 0,
+      row: { id: 1, role: "user", content: "when do we fly?" },
+    },
+    {
+      session: "gots-trip",
+      set: "live",
+      id: 2,
+      pos: 1,
+      row: { id: 2, role: "assistant", content: "We fly at noon.", finish_reason: "stop" },
+    },
+  ])
+  await mount(screen(), async () => {
+    await until(async () => rowIds().length === 1, "the bot's side chat")
+    assert.equal(
+      wordsOf(find(`a[href="/c/trip"] [data-slot="row-line"]`)),
+      "We fly at noon.",
+      "the row says the session's words, the ones the chat's own screen reads",
     )
   })
 })

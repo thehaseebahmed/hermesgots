@@ -258,6 +258,25 @@ const PRUNED = /^\[(Old tool output cleared|Duplicate tool output|[a-z_]+\] )/
 const DELIVERY = /^\[(ASYNC DELEGATION|IMPORTANT: \d+ background process)/
 const CHILD = /^\[ASYNC DELEGATION COMPLETE — (\S+?)\]/
 
+/**
+ * The words the thread draws of a row, as a reader is told them: nothing for a row it shows nowhere —
+ * scaffolding, a delivery whose wake turn carries none of the row's words, a summary on its own — a
+ * compaction's merged row cut to the words it kept above its delimiter, a request's own words with
+ * its markers peeled, and any other row's own words. Read by a list's line, so a row can only ever
+ * say what the thread says, whatever the host stored.
+ */
+export const drawnWordsOf = (row: Row): string => {
+  const drawn = readRow(row)
+  if (drawn.role !== "user" && drawn.role !== "assistant") return ""
+  const boundary = boundaryOf(drawn)
+  if (boundary?.kind === "alone") return ""
+  const kept = boundary ? { ...drawn, content: boundary.after } : drawn
+  if (isScaffold(kept)) return ""
+  if (kept.role !== "user") return kept.content
+  const content = seamDrawnContent(kept)
+  return DELIVERY.test(content) ? "" : requestOf(content).user
+}
+
 const msOf = (row: Row) => (typeof row.timestamp === "number" ? row.timestamp * 1000 : undefined)
 
 export interface FoldOptions {

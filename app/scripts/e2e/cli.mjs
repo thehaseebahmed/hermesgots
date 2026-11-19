@@ -535,6 +535,11 @@ export const FLOWS = {
     about:
       "The way out of a bot's chats, rung by rung: a launch lands on its Main at the app's only entry, Main's control opens the Side Chat List one step above it, a row opens a side chat one step above the list, and the way back walks the same rungs down to the app — while a side chat opened cold steps into its bot's list rather than out of the app",
   },
+  "side-chat-line": {
+    script: "e2e/side-chat-line.mjs",
+    about:
+      'A chat started from the Side Chat List\'s own foot, a message sent into it and the bot\'s reply streamed into the thread: back on the list, the chat\'s row says the reply\'s own words as its line — the same line the thread\'s words give it — rather than "No messages yet"',
+  },
   "card-widths": {
     script: "e2e/card-widths.mjs",
     about:

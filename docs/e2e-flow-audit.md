@@ -17,20 +17,20 @@ ticket that lands a family edits its own rows.
 
 ## The arithmetic, and how to check it
 
-The registry in `app/scripts/e2e/cli.mjs` holds **100 keys**, and every one of them has a row
-below. `pnpm e2e list` prints the same 100 keys, and the rows here are grouped by the ticket that
+The registry in `app/scripts/e2e/cli.mjs` holds **101 keys**, and every one of them has a row
+below. `pnpm e2e list` prints the same 101 keys, and the rows here are grouped by the ticket that
 takes them rather than by the registry's order, so the count is the thing to check:
 
 | Verdict | Keys |
 | --------- | ------ |
-| stay | 45 |
+| stay | 46 |
 | component | 51 |
 | plugin | 2 |
 | delete | 2 |
-| **total** | **100** |
+| **total** | **101** |
 
-Of those 100, 94 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
-reuses `todos.mjs`, so 93 distinct files) and 6 point at the older
+Of those 101, 95 keys point at a script under `app/scripts/e2e/` (one of them, `todos-legacy`,
+reuses `todos.mjs`, so 94 distinct files) and 6 point at the older
 `app/scripts/regression-*.mjs`.
 
 #297's plan counted **60** keys and split them **48 component / 7 stay / 3 delete / 2 plugin**.
@@ -248,20 +248,34 @@ of every kind in both states; `test-sidebar-layout.mjs` holds the record a drop 
 98 + 1 = **99** keys, the component verdicts unchanged at **51**, the plugin verdicts **2**, the
 deletes **2**, and the stays are 43 + 1: **44**.
 
+A further stay has arrived with the Side Chat List's line: `side-chat-line`, because the claim is
+the write path a real turn takes, end to end in a browser. chat-next is the thread's one writer
+(ADR 0065): a message sent in a chat started from the list streams its reply into the chat's own
+session store on the device and writes nothing to `db.messages`, so a row whose line was read from
+there said "No messages yet" on a chat the bot had just answered in — the loop that found it.
+`test-side-chats.tsx` holds the row's line over a session seeded by hand, which is the rule; what
+the browser adds is the turn itself — the send, the stream, the rows it lands and the list read
+back off them, in the order a reader meets them — so the flow starts the chat from the list's own
+foot, sends, waits on the reply in the thread and reads the row's line through the same rule the
+thread's words give it (`plainLine`), with the expectation derived from the reply rather than
+restated. It fails at the base commit on "No messages yet". So the registry holds 100 + 1 = **101**
+keys, the component verdicts unchanged at **51**, the plugin verdicts **2**, the deletes **2**, and
+the stays are 45 + 1: **46**.
+
 `app/scripts/test-e2e-registry.mjs`, a unit test, holds the registry and this page to each other:
 a key with no row here, a row with no key, a verdict outside the four, a count in the table above
-that its rows don't add up to, or a stay beyond the forty-four fails the app's gates. A new flow is
+that its rows don't add up to, or a stay beyond the forty-six fails the app's gates. A new flow is
 then an argument this page has to carry, never a default (ADR 0019).
 
 Check any of it in one line:
 
 ```bash
-grep -c '^| `' docs/e2e-flow-audit.md                           # 99 rows, one per registry key
-grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 44
+grep -c '^| `' docs/e2e-flow-audit.md                           # 101 rows, one per registry key
+grep -c '^| `[a-z0-9-]*` | stay |' docs/e2e-flow-audit.md      # 46
 grep -c '^| `[a-z0-9-]*` | component |' docs/e2e-flow-audit.md # 51
 grep -c '^| `[a-z0-9-]*` | delete |' docs/e2e-flow-audit.md    # 2
 grep -c '^| `[a-z0-9-]*` | plugin |' docs/e2e-flow-audit.md    # 2
-cd app && pnpm -s e2e list | wc -l                             # 99 keys in the registry
+cd app && pnpm -s e2e list | wc -l                             # 101 keys in the registry
 git show 8a4e842^:app/scripts/e2e/cli.mjs |
   sed -n '/^const FLOWS = {/,/^}$/p' | grep -c '^  [a-z"-]*: {'  # 61, before goal mode left
 ```
@@ -456,6 +470,7 @@ One key, the only one that walks the whole feature: #417–#421 each brought the
 | `bot-chats` | stay | A bot pressed from the sidebar or from Home lands on its **Main** at the app's own entry, with nothing made for it and no chat resumed; its Side Chat List is a screen the chat opens above it, so the bar's control and the platform's own back button both step onto that list, a side chat opened cold lands it rather than the app, and a reload keeps the reader where they were. A row's line is measured too: a long reply keeps to one line, cut at the row's edge instead of wrapped or reaching past it, and a room's cluster of faces stands on the same centre line as a chat row's icon. | The claim is the browser's own session history: which entry a page stands on (`window.history.state.idx`), which press walks back to which address, and what a real reload does to a stack of them. The component harness fakes depth with a `replaceState` and stubs `history.back`, so `test-main-navigation.tsx` and `test-back-press.tsx` rule the moves right — the address each lands, and the guard each screen registers — but neither has a stack to walk: only a real history says what an entry leaves behind, which is the whole of what a reader's next press meets. The row geometry is layout, which no DOM without a layout engine measures. | Nothing: a stay is replaced by itself. `test-main-navigation.tsx` holds the addresses, `test-back-press.tsx` the guards, `test-bot-chats-pane.tsx` the panes and `test-side-chats.tsx` the list; this flow is where a real history, a real reload and the browser's own back button are walked. |
 | `bot-list` | stay | The **flat chat list**, with the Developer switch on (ADR 0162): a bot's address draws it, a routine's delivery among its rows, ordered by the last message *received* in each — the chat the reader wrote in last sitting below one the bot answered later, its line still the bot's own words — and a chat, a room and a run each opening in the pane beside the list at 1280px, with the list keeping its lane and marking the row the pane holds; the bot's face drawn once on that screen, in the list's bar and not again in the chat's; a bot's row in the sidebar at the app's 56px row for a title with a line under it, the bot's picture on that row's own centre line; the bar's leading control returning to the list with nothing beside it — a large chat mark over "No chat selected", centred on both axes of the item lane; and on a phone the one order again, a row opening one step above the list, with the control leading the bar and the drawer's bot row landing back on it. | Geometry at two widths — a row's height, a face counted in one bar rather than two, a lane beside an item — and the ruled order read through the real IndexedDB a device keeps: no DOM without layout measures the first, and no component test reads a list drawn from rows written with clocks the reader chose. It is also the only flow that opens the app's other layout, so a reader who turned the switch on has a browser of their own. | `test-chat-list.mjs` carries the order rule and `test-bot-chats-pane.tsx` the face and the lane; only here does the rule meet rows a browser wrote and the pane a laptop actually lays out, under the switch that turns this list on. |
 | `side-chats` | stay | The way out of a bot's chats, rung by rung: a launch lands on the bot's **Main** at the app's only entry with nothing leading back from it; Main's control opens the **Side Chat List** one step above it, naming the bot and how many side chats it has, its rows the bot's chats and rooms and Main nowhere among them; a row opens a side chat one step above the list, its bar leading that list; and the way back walks the same rungs down — the chat's control to the list, the list's press to Main, and back from Main out of the app. A side chat opened cold answers back with its bot's list in the chat's own entry, and the list's own control lands Main, never the app's exit. | The claim is the browser's own session history at each rung — `history.state.idx`, the address it shows, and its own back button — for a chain of three addresses whose whole point is which one a press lands. The component harness fakes depth and stubs `history.back`, so `test-main-navigation.tsx` and `test-back-press.tsx` rule each move and `test-side-chats.tsx` the screen; neither has a stack to walk, and no lower tier has a real reload or a real launch onto a bot's address. What the press at Main comes to inside the app is the toast the app arms (`test-back-press.tsx`): a browser's back at a site's first entry is not a page's to intercept, so the flow watches that it leaves. | Nothing: a stay is replaced by itself. |
+| `side-chat-line` | stay | A chat started from the Side Chat List's own foot, a message sent into it and the bot's reply streamed into the thread: back on the list, the chat's row says the reply's own words as its line — read through the same rule the thread's words give it (`plainLine`) — rather than "No messages yet". | The claim is the write path a real turn takes. chat-next is the thread's one writer (ADR 0065): the turn's rows land in the chat's own session store on this device and nothing is written to `db.messages`, which is why a line read from there alone said "No messages yet" on a chat the bot had just answered in. `test-side-chats.tsx` holds the row's line over a session seeded by hand, which is the rule; what no lower tier writes is the turn itself — the send, the stream and the rows it lands — and the list read back off them. | Nothing: a stay is replaced by itself. `test-side-chats.tsx` holds the row's line over a seeded session, which is the rule; this flow is where a real turn's own writes meet the list's read of them, in the order a reader meets them. |
 
 `bot-threads` (#422) has left the registry with Main's cards, and each of its proofs went with
 what it described or to a test that already held it:
