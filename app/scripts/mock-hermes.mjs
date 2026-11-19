@@ -3586,6 +3586,8 @@ const hostModels = new Map()
 const REMINDER_LEVELS = ["off", "quiet", "normal", "chatty"]
 const LEGACY_REMINDER_LEVELS = { frequent: "chatty" }
 const reminderLevels = new Map()
+// A bot's model-call timeout, as `model_timeout.py` holds it: whole seconds from 30 to 1800.
+const modelTimeouts = new Map()
 // What the host runs when a turn asks for no model: the one picked for this profile, else the model
 // its endpoint is configured with. The plugin's hook records a call either way, so a chat whose turns
 // were never picked for still has rows to read.
@@ -4370,6 +4372,7 @@ http
           // (plugin/pending.py): the card that names it and the one control that clears it.
           "pending",
           "progress_reminders",
+          "model_timeout",
           // The Dashboard's General tab, as a plugin that carries it advertises it (general.py).
           "general_page",
           // The bot's API-key providers, each key as the mask the host makes of it
@@ -5074,6 +5077,24 @@ http
       return json(res, 200, {
         object: "gots.progress_reminders",
         level: reminderLevels.get(key) ?? "normal",
+      })
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/model-timeout") {
+      const key = pluginProfile ?? ""
+      if (req.method === "POST") {
+        const { seconds } = await readBody(req)
+        if (!Number.isInteger(seconds) || seconds < 30 || seconds > 1800)
+          return json(res, 400, {
+            error: { message: "seconds must be a whole number from 30 to 1800" },
+          })
+        modelTimeouts.set(key, seconds)
+      }
+      return json(res, 200, {
+        object: "gots.model_timeout",
+        seconds: modelTimeouts.get(key) ?? 120,
+        default: 120,
+        min: 30,
+        max: 1800,
       })
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/general") {

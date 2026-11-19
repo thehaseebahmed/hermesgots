@@ -223,13 +223,13 @@ class MissionTest(unittest.TestCase):
         self.assertIn('"part": "Part 1"', logged.records[0].getMessage())
         self.assertIn('"stance": "supported"', logged.records[0].getMessage())
 
-        scores = {"scores": [{"option": "A", "criterion": "K", "score": 7}], "ruled_out": [], "verdict": ["v"], "flip": ["f"]}
+        scores = {"scores": [{"option": "Nope", "criterion": "K", "score": 7}], "ruled_out": [], "verdict": ["v"], "flip": ["f"]}
         with mock.patch.object(research, "_structured", return_value=scores):
             with self.assertLogs(research.logger, level="WARNING") as logged:
                 with self.assertRaisesRegex(research.ResearchError, "scored nothing"):
                     research.judge(compare, [{"id": "o1", "name": "A", "case": [], "rebuttal": []}])
         self.assertIn("gots.research.judge kept nothing", logged.records[0].getMessage())
-        self.assertIn('"option": "A"', logged.records[0].getMessage())
+        self.assertIn('"option": "Nope"', logged.records[0].getMessage())
 
         long = {"parts": [], "change": ["x" * 9000]}
         with mock.patch.object(research, "_structured", return_value=long):
@@ -237,6 +237,78 @@ class MissionTest(unittest.TestCase):
                 with self.assertRaises(research.ResearchError):
                     research.judge_claim(verify)
         self.assertLess(len(logged.records[0].getMessage()), 4200)
+
+    def judged_found(self):
+        ledger = {
+            "claims": [
+                {"id": f"c{n}", "text": "t", "source": "s1", "confidence": "verified", "snippet": "s"} for n in range(1, 4)
+            ],
+            "sources": [{"id": "s1", "title": "T", "url": "u"}],
+        }
+        verify = {
+            "parts": [{"id": "p1", "text": "Pakistani passport holders can get a visa on arrival"}, {"id": "p10", "text": "Z"}],
+            "terms": [], "restatement": "X", "ledger": ledger,
+        }
+        compare = {
+            "goal": "g", "ledger": ledger,
+            "options": [{"id": "o1", "name": "Samsung A27"}, {"id": "o2", "name": "Samsung A15"}],
+            "criteria": [{"id": "k1", "name": "Price in Pakistan", "weight": 3}],
+        }
+        return verify, compare
+
+    def test_a_judge_that_names_a_part_with_its_text_is_read_by_its_id(self) -> None:
+        # What the Egypt mission's judge wrote: the ledger lists "- p1: <text>" and it echoed that line.
+        verify, _ = self.judged_found()
+        reply = {
+            "parts": [
+                {"part": "p1: Pakistani passport holders can get a visa on arrival",
+                 "claims": [{"claim": "c1", "stance": "supports"}, {"claim": "[c2]", "stance": "refutes"}]},
+                {"part": "p10: Z", "claims": [{"claim": "c3", "stance": "context"}]},
+                {"part": "p7: not a part of this claim", "claims": [{"claim": "c1", "stance": "supports"}]},
+            ],
+            "change": ["Why. [c1]"],
+        }
+        with mock.patch.object(research, "_structured", return_value=reply):
+            tags = research.judge_claim(verify)["tags"]
+        self.assertEqual(
+            tags,
+            [
+                {"claim": "c1", "part": "p1", "stance": "supports"},
+                {"claim": "c2", "part": "p1", "stance": "refutes"},
+                {"claim": "c3", "part": "p10", "stance": "context"},
+            ],
+        )
+
+    def test_a_judge_that_names_options_and_criteria_is_read_by_their_ids(self) -> None:
+        # What the Samsung mission's judge wrote: names, where the ledger gave "o1 (Samsung A27)" and "k1: ...".
+        _, compare = self.judged_found()
+        reply = {
+            "scores": [
+                {"option": "Samsung A27", "criterion": "Price in Pakistan", "score": 3, "reason": "Dear.", "claims": ["c1"]},
+                {"option": "o2", "criterion": "k1: Price in Pakistan", "score": 9, "reason": "Cheap.", "claims": ["c2"]},
+                {"option": "samsung a15", "criterion": "price in pakistan", "score": 7, "reason": "Fine.", "claims": ["c3"]},
+                {"option": "Samsung S99", "criterion": "Price in Pakistan", "score": 1, "reason": "Unknown.", "claims": ["c1"]},
+            ],
+            "ruled_out": [{"option": "Samsung A27", "criterion": "Price in Pakistan", "claim": "c1"}],
+            "verdict": ["The A15. [c2]"],
+            "flip": ["A price cut. [c1]"],
+        }
+        options = [{"id": "o1", "name": "Samsung A27", "case": [], "rebuttal": []},
+                   {"id": "o2", "name": "Samsung A15", "case": [], "rebuttal": []}]
+        with mock.patch.object(research, "_structured", return_value=reply):
+            done = research.judge(compare, options)
+        self.assertEqual(done["scores"]["o1"]["k1"]["score"], 3)
+        self.assertEqual(done["scores"]["o2"]["k1"]["score"], 7, "the later answer for an option and criterion wins")
+        self.assertEqual(done["ruled_out"], [{"option": "o1", "criterion": "k1", "claim": "c1"}])
+
+    def test_a_name_two_options_share_names_neither(self) -> None:
+        _, compare = self.judged_found()
+        compare["options"] = [{"id": "o1", "name": "Plan"}, {"id": "o2", "name": "plan"}]
+        reply = {"scores": [{"option": "Plan", "criterion": "k1", "score": 5, "reason": "r", "claims": ["c1"]}],
+                 "ruled_out": [], "verdict": ["v"], "flip": ["f"]}
+        with mock.patch.object(research, "_structured", return_value=reply):
+            with self.assertRaisesRegex(research.ResearchError, "scored nothing"):
+                research.judge(compare, [{"id": "o1", "name": "Plan", "case": [], "rebuttal": []}])
 
     def test_a_mission_from_question_to_guide_and_quiz(self) -> None:
         self.reach_reading()

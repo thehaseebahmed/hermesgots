@@ -54,6 +54,7 @@ import { LinkSheet } from "@/components/link-bots"
 import { AppearanceSettings } from "@/components/settings/appearance"
 import { DictationSettings } from "@/components/settings/dictation"
 import { LabSettings } from "@/components/settings/lab"
+import { ModelTimeoutRow } from "@/components/settings/model-timeout"
 import {
   ActionRow,
   Group,
@@ -787,6 +788,11 @@ export function DeveloperSettings() {
         )}
         {botsByLabel(bots ?? [], labels).map((bot) => (
           <LiveRow key={bot.id} bot={bot} title={labelOf(labels, bot)} />
+        ))}
+      </Group>
+      <Group>
+        {botsByLabel(bots ?? [], labels).map((bot) => (
+          <ModelTimeoutRow key={bot.id} bot={bot} title={labelOf(labels, bot)} />
         ))}
       </Group>
       <Group>
