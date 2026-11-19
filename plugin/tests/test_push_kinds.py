@@ -726,8 +726,9 @@ class OnScreen(unittest.TestCase):
             self.assertEqual(bodies[0]["bot"], "nova", "the phone's entry wears this bot's picture")
             self.assertEqual(
                 bodies[0]["icon"],
-                "https://hermesgots.dev/bots/nova/notify.png",
-                "the app's own file, the one the browser's tray and ntfy read",
+                "https://hermesgots.dev/bots/nova/happy.png",
+                "the bot's plain face: Android badges it with the app's icon itself, so the "
+                "badged copy the browser's tray and ntfy read would wear the mark twice",
             )
             self.assertEqual(
                 bodies[0]["actions"],

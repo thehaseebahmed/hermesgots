@@ -13,6 +13,15 @@ from typing import Any, Dict, NamedTuple, Optional
 
 from . import tasks
 
+# The line the app sends as every run's `instructions` (`PLAN_HINT` in `app/src/lib/hermes.ts`),
+# repeated for a turn the plugin builds on the app's behalf — a reply typed in the tray — so that turn
+# is told what the app's own send would tell it. `tests/test_push_reply.py` holds the two to each other.
+PLAN_HINT = (
+    "When a task takes three or more steps, plan it first with the todo_list tool (load it through "
+    "tool search if it isn't loaded yet), keep exactly one item in progress, and update the list as "
+    "each step is done."
+)
+
 # --- The base prompt ---------------------------------------------------------------------
 # Told to every session that has a worktree, in this order: an overview of what the bot is, the
 # guidelines it works by (Do, then Don't), and the tools it may reach for with the use each is for.
@@ -237,6 +246,13 @@ def session_prompt(record: Dict[str, Any]) -> str:
     this session's own worktrees, templates and temporary directory (ADR 0028).
     """
     return _join(_base(record), _plan_mode(record), _session(record))
+
+
+def run_instructions(record: Optional[Dict[str, Any]]) -> str:
+    """A turn's ``instructions`` as the app's own send builds them (`runRequest` in
+    `app/src/lib/hermes.ts`): the run hint, then a project session's prompt where it has one."""
+    workspace = session_prompt(record) if record else ""
+    return "\n".join(part for part in (PLAN_HINT, workspace) if part)
 
 
 def afk_prompt(record: Dict[str, Any], task: Dict[str, Any], prompt: Optional[str] = None) -> str:

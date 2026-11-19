@@ -12,7 +12,7 @@ what a title falls back to when nothing named it.
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, Iterable, List, NamedTuple, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Mapping, NamedTuple, Optional, Tuple
 
 
 class Action(NamedTuple):
@@ -29,6 +29,9 @@ class Notice(dict):
     picking fields out of it, and a field with no value is left out rather than sent empty — a device
     reads a missing title as ``Gots``. ``actions`` are the buttons a tray may draw: they are not in the
     mapping, since a button is not a word, so a transport spreads ``payload()`` instead.
+    ``conversation`` is what only the Android tray can draw — the chat a notice is about and the
+    buttons that act on it — so it is in neither: the relay to Android is the one transport that
+    spreads it, and Web Push and ntfy never see it.
     """
 
     def __init__(
@@ -37,11 +40,13 @@ class Notice(dict):
         body: Optional[str] = None,
         bot: Optional[str] = None,
         actions: Iterable[Action] = (),
+        conversation: Optional[Mapping[str, Any]] = None,
     ) -> None:
         super().__init__(
             {key: value for key, value in (("title", title), ("body", body), ("bot", bot)) if value}
         )
         self.actions: Tuple[Action, ...] = tuple(actions)
+        self.conversation: Dict[str, Any] = dict(conversation or {})
 
     def payload(self) -> Dict[str, Any]:
         """The notice as a transport carries it: its fields, and its buttons where it has any.
@@ -184,6 +189,9 @@ class Kind(NamedTuple):
     # About a chat's session, so that chat's mute silences it too.
     session: bool = False
     waits: bool = False
+    # The Android tray's buttons on it: a Reply typed inline, and a Mark as read.
+    reply: bool = False
+    read: bool = False
 
 
 # What a push is about. The registry (`app/netlify/lib/fcm.ts`) and the app
@@ -192,15 +200,15 @@ KINDS_TABLE: Tuple[Kind, ...] = (
     Kind("approval", "chat_input", "code_input", "Waiting for your approval", session=True, waits=True),
     Kind("question", "chat_input", "code_input", "You have a question waiting", session=True, waits=True),
     Kind("plan", "code_input", None, "The plan is ready for your review", session=True, waits=True),
-    Kind("run_done", "chat_run_done", "code_run_done", "You have a new reply", session=True),
-    Kind("run_failed", "chat_run_failed", "code_run_failed", "The run stopped with an error", session=True),
+    Kind("run_done", "chat_run_done", "code_run_done", "You have a new reply", session=True, reply=True, read=True),
+    Kind("run_failed", "chat_run_failed", "code_run_failed", "The run stopped with an error", session=True, reply=True, read=True),
     Kind("clone_failed", "code_setup_failed", None, "This project couldn't be set up", "A project"),
     Kind("routine_failed", "routine_failed", None, "The last run failed", "A routine"),
     Kind("research_brief", "research_input", None, "The brief is ready for your review", "A research mission"),
     Kind("research_scope", "research_input", None, "The scope is ready for your approval", "A research mission"),
     Kind("research_done", "research_done", None, "Your research is ready", "A research mission"),
     Kind("research_failed", "research_failed", None, "The mission stopped with an error", "A research mission"),
-    Kind("routine_message", "routine_message", None, "A bot has a message", "A bot", session=True),
+    Kind("routine_message", "routine_message", None, "A bot has a message", "A bot", session=True, read=True),
     Kind("meeting_done", "meeting_done", None, "Your meeting notes are ready", "A meeting"),
     Kind("meeting_failed", "meeting_failed", None, "Meeting notes failed", "A meeting"),
     # A room of this Host's bots waits on the user, and it is its own kind because a room is

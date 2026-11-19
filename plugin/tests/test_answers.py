@@ -23,13 +23,22 @@ from typing import Any, Dict, List, Optional
 from unittest import mock
 
 import plugin
-from plugin import answers, approvals, ntfy, push, rooms, store
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import ec
+
+from plugin import answers, approvals, device_keys, link, ntfy, push, rooms, store
 from plugin.store import connect, db_path
 from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
 
 # The address the app dialled this bot at, as `POST push` keeps it: the host, the profile a bot at
 # /p/<profile> is, and the plugin's own prefix. A button posts back to the same one.
 BASE = "https://bot.example/p/penny/api/plugins/gots"
+# A phone's public key, as one hands it over (`POST push/key`).
+PHONE_KEY = push._b64(
+    ec.generate_private_key(ec.SECP256R1())
+    .public_key()
+    .public_bytes(serialization.Encoding.DER, serialization.PublicFormat.SubjectPublicKeyInfo)
+)
 ANSWER = plugin.PREFIX + "/push/answer/{token}"
 
 # A room member's approval, as `rooms.waiting` draws it: the Host's own request and the generation
@@ -410,7 +419,12 @@ class OnTheWire(unittest.TestCase):
         self.assertEqual(
             [one.label for one in self.relayed[0].actions],
             ["Allow once", "Deny"],
-            "the registry is told the same links, since Android answers from the tray too",
+            "the notice's own buttons, which ntfy carries too",
+        )
+        self.assertEqual(
+            self.relayed[0].conversation["actions"],
+            [],
+            "the relay is given none of them: no phone has handed this profile a key to sign with",
         )
         held = {"topic": "gots-Zk3", "server": "https://ntfy.example", "token": "tk_abc"}
         message = ntfy.message(held, "approval", "chat_input", "gots-1", self.relayed[0])
@@ -555,16 +569,21 @@ class TheAddress(unittest.TestCase):
             "the address this phone dialled, kept from the route it really calls",
         )
         relayed: List[Any] = []
+        device_keys.register(self.path, "phone-1", PHONE_KEY)
         with mock.patch.object(
             push, "_relay", lambda path, kind, category, session_id, notice: relayed.append(notice)
-        ):
+        ), mock.patch.object(link, "load_state", lambda home: {"token": "mh_x", "site": "https://app.example"}):
             push._run(
                 self.path, "approval", "gots-1", answer=answers.run_target("run_1", "gots-1")
             )
         self.assertEqual(
-            [one.label for one in relayed[-1].actions],
+            [one["label"] for one in relayed[-1].conversation["actions"]],
             ["Allow once", "Deny"],
             "so the approval it is sent carries two buttons that post to that address",
+        )
+        self.assertTrue(
+            all(one["url"].startswith("https://bot.example/api/plugins/gots/push/answer/")
+                for one in relayed[-1].conversation["actions"])
         )
 
     def test_a_mute_write_keeps_the_address_the_phone_reached_it_at(self) -> None:
@@ -602,8 +621,29 @@ class Store(unittest.TestCase):
             columns = [row[1] for row in conn.execute("PRAGMA table_info(answer_tokens)")]
             version = conn.execute("PRAGMA user_version").fetchone()[0]
             conn.close()
-        self.assertEqual(columns, ["token", "choice", "target", "expires_at", "used_at"])
+        self.assertEqual(columns, ["token", "choice", "target", "expires_at", "used_at", "signed"])
         self.assertEqual(version, store.SCHEMA_VERSION)
+
+    def test_a_v74_store_gains_the_signed_mark_and_reads_its_links_as_unsigned(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "gots.db"
+            old = sqlite3.connect(path)
+            old.execute(
+                "CREATE TABLE answer_tokens (token TEXT PRIMARY KEY, choice TEXT NOT NULL,"
+                " target TEXT NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER)"
+            )
+            old.execute(
+                "INSERT INTO answer_tokens VALUES (?, 'once', '{}', 99999999999999, NULL)",
+                (answers.digest("held"),),
+            )
+            old.execute("PRAGMA user_version = 74")
+            old.commit()
+            old.close()
+            self.assertFalse(answers.needs_signature(path, "held"), "a link minted before the mark")
+            conn = connect(path)
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master")}
+            conn.close()
+        self.assertIn("device_keys", tables)
 
 
 if __name__ == "__main__":

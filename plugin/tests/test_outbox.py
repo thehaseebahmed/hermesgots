@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from plugin import outbox
+from plugin import outbox, store
 
 
 def body(text: str) -> dict:
@@ -49,8 +49,11 @@ class OutboxTest(unittest.TestCase):
         self.adapter = Adapter()
         self.posted: list = []
 
+        self.authorizations: list = []
+
         async def post(adapter, profile, path, request, authorization=None, idempotency_key=None):
             self.posted.append((path, request, idempotency_key))
+            self.authorizations.append(authorization)
             return {"run_id": f"run_{len(self.posted)}"}
 
         patch = mock.patch.object(outbox, "post", post)
@@ -127,6 +130,42 @@ class OutboxTest(unittest.TestCase):
         self.assertEqual(outbox.read(self.path, "s1")["items"], [])
         outbox.put_back(self.path, row)
         self.assertEqual(outbox.read(self.path, "s1")["items"][0]["id"], item["id"])
+
+    def test_an_item_queued_with_no_app_key_posts_with_the_homes_key(self) -> None:
+        # A non-default profile the app never posted from has no remembered key, and the adapter's
+        # own key is the launch profile's: the home's .env is the one key that is this bot's.
+        home = Path(self.dir.name) / "work"
+        path = store.db_path(home)
+        path.parent.mkdir(parents=True)
+        (home / ".env").write_text("API_SERVER_KEY=homekey\n", encoding="utf-8")
+        outbox.add(path, "s1", "work", "one", [], body("one"))
+        with mock.patch.dict(outbox._keys, {}, clear=True):
+            asyncio.run(outbox.tick(self.adapter, "s1", "work", path))
+        self.assertEqual(len(self.posted), 1)
+        self.assertEqual(self.authorizations, ["Bearer homekey"])
+
+    def test_an_item_with_an_app_key_leaves_the_key_to_post(self) -> None:
+        outbox.add(self.path, "s1", "work", "one", [], body("one"))
+        with mock.patch.dict(outbox._keys, {"work": "appkey"}, clear=True):
+            asyncio.run(outbox.tick(self.adapter, "s1", "work", self.path))
+        self.assertEqual(self.authorizations, [None])
+
+    def test_turn_body_is_the_text_the_pin_and_the_instructions(self) -> None:
+        pinned = {"provider": "p", "model": "m"}
+        self.assertEqual(
+            outbox.turn_body("s1", "hi", pinned, instructions="be brief"),
+            {
+                "model": "m",
+                "provider": "p",
+                "instructions": "be brief",
+                "input": [{"role": "user", "content": "hi"}],
+                "session_id": "s1",
+            },
+        )
+        self.assertEqual(
+            outbox.turn_body("s1", "hi", None),
+            {"input": [{"role": "user", "content": "hi"}], "session_id": "s1"},
+        )
 
     def test_clean_body_keeps_the_run_fields(self) -> None:
         run = outbox.clean_body("s1", {"model": "m", "input": [], "stream": True, "session_id": "x"})

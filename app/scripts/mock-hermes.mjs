@@ -176,7 +176,7 @@
 //   pnpm mock            # then point Settings at http://localhost:8642/v1
 
 import http from "node:http"
-import { randomBytes, randomUUID } from "node:crypto"
+import { createHash, randomBytes, randomUUID } from "node:crypto"
 import { mkdirSync, readFileSync, statSync, writeFileSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { basename, extname, join } from "node:path"
@@ -198,6 +198,9 @@ const pendingApprovals = new Map()
 /** The buttons an approval's notice would carry, by token, so a press can be tried by hand
  *  (`plugin/answers.py`): the choice is the row's, since a token in a URL names nothing. */
 const pushAnswers = new Map()
+/** The reply links a run's notice would carry, by token (`answers.reply_link`): the session each
+ *  queues a turn on. Minted by hand with POST /__mock/push-reply, since nothing here sends a push. */
+const pushReplies = new Map()
 const pendingClarifies = new Map()
 /** Questions Hermes's own route is asked one at a time, by `prompt_id` (0.22.5 and newer). */
 const pendingPrompts = new Map()
@@ -3572,6 +3575,8 @@ const ROOT_RUN_IDS = process.env.MOCK_RUNS_LIVE_ROOT_IDS !== "0"
 // The plugin's change stream: one log per profile (the "" key is the default one). Runs and sessions
 // belong to no profile here, so they go to every log.
 const pushSubscriptions = new Map()
+/** The notice keys phones handed over (`push/key`), by device. */
+const noticeKeys = new Map()
 /** The ntfy topic the app wrote, as `plugin/ntfy.py` keeps one per profile. */
 let ntfyTarget
 /** Hermes's own ntfy variables for the profile, which the plugin reads and writes. */
@@ -4351,6 +4356,7 @@ http
           ...(EVENTS ? ["events"] : []),
           "push",
           "push_ntfy",
+          "push_keys",
           "host_model",
           "fallbacks",
           "delegation_model",
@@ -4835,6 +4841,37 @@ http
         choice: held.choice,
       })
     }
+    const replyRoute = /^\/api\/plugins\/gots\/push\/reply\/([^/]+)$/.exec(url.pathname)
+    if (PLUGIN && !profile && req.method === "POST" && replyRoute) {
+      const { text } = await readBody(req)
+      // Read before the link is spent, as the plugin reads it.
+      if (typeof text !== "string" || !text.trim())
+        return json(res, 400, { error: { message: "A reply needs some words." } })
+      const held = pushReplies.get(decodeURIComponent(replyRoute[1]))
+      if (!held) return json(res, 404, { error: { message: "That reply isn't one this bot sent." } })
+      if (held.spent)
+        return json(res, 410, { error: { message: "That reply has already been sent." } })
+      held.spent = true
+      // A turn the plugin builds itself, queued as the user sending again (`outbox.add(resumed)`).
+      const queue = queueOf(held.sessionId)
+      queue.url ??= req.url
+      const reply = {
+        id: `q_${randomUUID().replace(/-/g, "").slice(0, 20)}`,
+        text,
+        attachments: [],
+        created_at: Date.now(),
+        body: { input: [{ role: "user", content: text }], session_id: held.sessionId },
+      }
+      queue.resumedAt = Date.now()
+      queue.items.push(reply)
+      noteEvent("session", held.sessionId)
+      setTimeout(() => pumpQueue(held.sessionId), 50)
+      return json(res, 200, {
+        object: "gots.push.reply",
+        queued: true,
+        item: reply.id,
+      })
+    }
     // ntfy: the mock keeps the bot's topic and stands in for Hermes's own NTFY_SERVER_URL and
     // NTFY_TOKEN, and publishes nothing (plugin/ntfy.py).
     if (PLUGIN && !profile && url.pathname.startsWith("/api/plugins/gots/push/ntfy")) {
@@ -4889,6 +4926,33 @@ http
         return json(res, 400, { error: { message: "Not a bot" } })
       }
       return json(res, 200, { object: "gots.push.mute", muted })
+    }
+    if (
+      PLUGIN &&
+      !profile &&
+      req.method === "POST" &&
+      url.pathname === "/api/plugins/gots/push/key"
+    ) {
+      // A phone's notice key (`plugin/device_keys.py`): kept by device, answered by its id.
+      const { device, key } = await readBody(req)
+      if (typeof device !== "string" || !/^[A-Za-z0-9._-]{1,128}$/.test(device))
+        return json(res, 400, { error: { message: "Not a device" } })
+      if (typeof key !== "string" || !key) return json(res, 400, { error: { message: "Not a key" } })
+      noticeKeys.set(device, key)
+      const keyId = createHash("sha256")
+        .update(Buffer.from(key.replace(/-/g, "+").replace(/_/g, "/"), "base64"))
+        .digest("hex")
+      return json(res, 200, { object: "gots.push.key", key_id: keyId })
+    }
+    if (
+      PLUGIN &&
+      !profile &&
+      req.method === "POST" &&
+      url.pathname === "/api/plugins/gots/push/key/remove"
+    ) {
+      const { device } = await readBody(req)
+      noticeKeys.delete(device)
+      return json(res, 200, { object: "gots.push.key", removed: true })
     }
     if (
       PLUGIN &&
@@ -6314,6 +6378,15 @@ http
         if (count > 0) waking[ROOT_RUN_IDS ? chatSessionOf(id) : id] = count
       }
       return json(res, 200, { object: "gots.runs", sessions, run_ids, waiting, waking })
+    }
+    // Dev only: POST { session_id } mints the reply link a finished run's tray entry would carry, so
+    // the reply route can be tried by hand with curl.
+    if (url.pathname === "/__mock/push-reply" && req.method === "POST") {
+      const { session_id: sessionId } = await readBody(req)
+      if (!sessionId) return json(res, 400, { error: { message: "session_id is required" } })
+      const token = randomBytes(32).toString("base64url")
+      pushReplies.set(token, { sessionId })
+      return json(res, 200, { url: `http://localhost:${PORT}/api/plugins/gots/push/reply/${token}` })
     }
     // Dev only: POST { delay } is how long runs/live keeps naming an owed wake before the mock
     // posts the wake turn — the plugin's sweep and post, held open long enough for a flow to watch

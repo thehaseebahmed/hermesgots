@@ -25,6 +25,7 @@ import {
   coverageOf,
   drawableName,
   drawablePath,
+  faceBytes,
   photoPath,
 } from "./build-badges.mjs"
 import { decode } from "./lib/png.mjs"
@@ -165,18 +166,32 @@ test("the badge is cut once: a second render is byte-identical", () => {
   }
 })
 
-test("the APK ships the same badge under a drawable name", () => {
+test("the APK's drawable is the plain photo, notify.png is still the badge", () => {
   for (const id of botIds()) {
-    // One image, cut once: the copy the app draws when a phone can't fetch the picture at all.
-    assert.deepEqual(
+    // Android badges a conversation's picture with the app's own icon, so the copy the APK draws is
+    // the bot's face alone: the badge would wear the mark twice. The browser's tray and ntfy can't
+    // badge, so notify.png keeps the mark the other tests read.
+    const picture = photo(id)
+    const bytes = readFileSync(drawablePath(id))
+    const drawable = decode(bytes)
+    assert.equal(drawable.width, SIZE, `${id}'s drawable is ${SIZE} wide`)
+    assert.equal(drawable.height, SIZE, `${id}'s drawable is ${SIZE} high`)
+    assert.equal(bytes[25], 6, `${id}'s drawable is RGBA`)
+    for (let y = 0; y < SIZE; y += 5) {
+      for (let x = 0; x < SIZE; x += 5) {
+        assert.ok(isScaled(drawable, picture, x, y), `${id}'s drawable at (${x}, ${y}) is the photo's own pixel`)
+      }
+    }
+    assert.deepEqual(readFileSync(drawablePath(id)), faceBytes(id), `${id}'s drawable is what the generator renders`)
+    assert.notDeepEqual(
       readFileSync(drawablePath(id)),
       readFileSync(badgePath(id)),
-      `${id}'s drawable is the bytes .../notify.png holds`,
+      `${id}'s drawable carries no badge`,
     )
   }
   // A resource name carries no hyphen, so a bot id's is written with an underscore on both sides
-  // (`GotsMessagingService` looks the same name up). No bot in the tree is hyphenated, so the rule
-  // is pinned on a name rather than left to the ones that happen to exist.
+  // (`Notice.kt` looks the same name up). No bot in the tree is hyphenated, so the rule is pinned on
+  // a name rather than left to the ones that happen to exist.
   assert.equal(drawableName("ada-love"), "bot_ada_love.png")
 })
 

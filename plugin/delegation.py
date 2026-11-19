@@ -52,7 +52,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any, Collection, Dict, Iterable, Iterator, List, NamedTuple, Optional, Tuple
 
-from . import chats, events, link, outbox, sessions
+from . import events, link, outbox, sessions
 from .store import db_path, get_setting, put_setting
 
 logger = logging.getLogger(__name__)
@@ -601,13 +601,7 @@ async def _wake_root(adapter: Any, home: Path, root: str, children: List[Dict[st
             sessions.put_wake_batch, path, batch_id, root, members, text
         )
     key = f"wakeb_{batch_id}" if len(members) >= 2 else f"wake_{members[0]}"
-    body = outbox.clean_body(
-        root,
-        {
-            "input": [{"role": "user", "content": text}],
-            **chats.pin_fields(pinned),
-        },
-    )
+    body = outbox.turn_body(root, text, pinned)
     try:
         started = await outbox.post(
             adapter,
