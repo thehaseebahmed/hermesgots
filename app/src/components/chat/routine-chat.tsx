@@ -27,7 +27,8 @@ import {
 import { hold, type HoldSlot } from "@/lib/chat-hold"
 import { hasServer, serverConfig } from "@/lib/connection"
 import { db, type Message } from "@/lib/db"
-import { COMPOSER_SLOT } from "@/lib/layout"
+import { COMPOSER_SLOT, THREAD_GUTTER } from "@/lib/layout"
+import { cn } from "@/lib/utils"
 import { useChatLead } from "@/lib/chat-lead"
 import { useNav } from "@/lib/nav"
 import { useDraws } from "@/lib/openui-draws"
@@ -111,7 +112,7 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
           <MessageScrollerProvider key={id} autoScroll defaultScrollPosition="end">
             <MessageScroller className="flex-1">
               <MessageScrollerViewport aria-label="Messages">
-                <MessageScrollerContent className="w-full gap-6 px-4 pt-32 pb-6">
+                <MessageScrollerContent className={cn("w-full gap-6 pt-32 pb-6", THREAD_GUTTER)}>
                   {messages.map((message) => (
                     <MessageScrollerItem key={message.id} messageId={message.id}>
                       <MessageItem

@@ -5,7 +5,7 @@ import { useOpenDrawer } from "@/components/drawer-context"
 import { Bot } from "@/components/bot"
 import type { BotMood } from "@/components/bots"
 import { Button } from "@/components/ui/button"
-import { COLUMN_BOX, HEADER_BUTTON } from "@/lib/layout"
+import { COLUMN, HEADER_BUTTON } from "@/lib/layout"
 import { cn } from "@/lib/utils"
 
 /**
@@ -113,7 +113,7 @@ export function ChatHeader({
       <div
         data-slot="header-row"
         className={cn(
-          COLUMN_BOX,
+          COLUMN,
           centered
             ? "grid grid-cols-[1fr_minmax(0,2fr)_1fr] items-center gap-3"
             : "flex items-center gap-3",
@@ -193,7 +193,7 @@ export function ChatHeader({
           {actions}
         </div>
       </div>
-      {pinned && below && <div className="mx-auto max-w-2xl pt-3">{below}</div>}
+      {pinned && below && <div className={cn(COLUMN, "pt-3")}>{below}</div>}
     </header>
   )
 }

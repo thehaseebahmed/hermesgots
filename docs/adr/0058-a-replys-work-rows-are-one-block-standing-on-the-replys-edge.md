@@ -1,5 +1,7 @@
 # A reply's work rows are one block standing on the reply's own edge
 
+**Amended by [ADR 0166](0166-a-chat-and-a-list-stand-on-their-headers-edge.md)** (2026-11-18): `COLUMN_BOX` is gone — a reply's text and a card both stand on `COLUMN`, the header's own 672px box.
+
 **Superseded in its dent sentence — by [ADR 0062](0062-a-work-row-wears-no-mark-and-the-status-line-loads.md), restored by [ADR 0064](0064-a-work-row-turns-a-spinner-and-wears-its-mark-again.md), and taken off again by [ADR 0092](0092-a-work-row-carries-no-leading-sign.md)**: a work row now carries no sign at all, so there is nothing for a note to clear and it stands on the row's own edge. Everything else here stands.
 
 A reply draws its working-out as rows — a thought row, the tool group its calls merged into, a
