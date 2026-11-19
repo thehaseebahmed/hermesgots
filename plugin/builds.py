@@ -41,8 +41,9 @@ FEATURE = "canvas_builds"
 SESSION_PREFIX = "canvas-"
 
 # The two files a build keeps in a canvas's folder: the page it is writing and the requirements and
-# decisions the canvas holds (the memory tool is step 8; the file is read by every build's seed
-# either way). Both names are the store's, so a write of either goes through the folder's own cap.
+# decisions the canvas holds — the memory a build's session writes with ``canvas_memory``
+# (canvases.py) and every build's seed reads. Both names are the store's, so a write of either goes
+# through the folder's own cap.
 DRAFT = canvases.DRAFT
 MEMORY = canvases.MEMORY
 

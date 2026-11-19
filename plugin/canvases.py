@@ -12,7 +12,9 @@ nowhere else, and the canvas is found from a run's session by walking the chat's
 ``canvas_list``, ``canvas_data_read`` and ``canvas_data_write`` reach every session — a session
 with no canvas of its own is exactly who has to look one up, and a chat that wants a canvas's data
 shouldn't have to become that canvas's session — while ``canvas_write``, ``canvas_edit`` and
-``canvas_read`` are equipped in the canvas's own session and nowhere else. The two data tools name
+``canvas_read`` are equipped in the canvas's own session and nowhere else. ``canvas_memory`` is a
+build's alone: the requirements and decisions a build remembers are the canvas's own file in its
+folder, which every build's seed reads (ADR 0170, builds.py). The two data tools name
 a canvas by its title or its id (``resolve``), and all three answer ``names``, never a record's
 picture.
 
@@ -144,6 +146,7 @@ TOOL_LIST = "canvas_list"
 TOOL_WRITE = "canvas_write"
 TOOL_EDIT = "canvas_edit"
 TOOL_READ = "canvas_read"
+TOOL_MEMORY = "canvas_memory"
 TOOL_DATA_READ = "canvas_data_read"
 TOOL_DATA_WRITE = "canvas_data_write"
 
@@ -2216,6 +2219,27 @@ READ_SCHEMA = {
     "parameters": {"type": "object", "properties": {}},
 }
 
+MEMORY_SCHEMA = {
+    "name": TOOL_MEMORY,
+    "description": (
+        "Build sessions only: replaces what this canvas remembers — the requirements and "
+        "decisions every build of it is told at its start. Write the whole memory each time, as "
+        "markdown: what the canvas is for and what has been decided about it, kept short and "
+        "current. An empty string forgets everything. It is capped like every other file in the "
+        "canvas's folder, and a canvas that is deleted takes it with it."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "memory": {
+                "type": "string",
+                "description": "The whole memory, as markdown. An empty string forgets everything.",
+            },
+        },
+        "required": ["memory"],
+    },
+}
+
 EDIT_SCHEMA = {
     "name": TOOL_EDIT,
     "description": (
@@ -2541,6 +2565,30 @@ def handle_read(args: Any, task_id: Optional[str] = None, session_id: Optional[s
     )
 
 
+def handle_memory(
+    args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any
+) -> str:
+    """The tool: what a build's canvas remembers, replaced whole.
+
+    A build's session is the only one that carries this tool and the only one it answers: the
+    canvas's own session writes versions, and every other session has no canvas to remember for.
+    The memory is the store's own file in the canvas's folder — the one every build's seed reads —
+    so it is written through ``keep``, capped and deleted with the canvas like the rest of them.
+    """
+    args = args if isinstance(args, dict) else {}
+    build, path = _call_build(task_id, session_id)
+    if build is None or path is None:
+        return json.dumps({"error": f"{TOOL_MEMORY} only works in a build's session."})
+    try:
+        keep(path, build["canvas_id"], MEMORY, args.get("memory") or "")
+    except CanvasError as refused:
+        return json.dumps({"error": str(refused)})
+    except (sqlite3.Error, OSError):
+        logger.debug("gots: %s couldn't write the memory", TOOL_MEMORY, exc_info=True)
+        return _unreadable(TOOL_MEMORY)
+    return json.dumps({"id": build["canvas_id"], "remembered": True})
+
+
 def _call_build(
     task_id: Optional[str], session_id: Optional[str]
 ) -> tuple[Optional[Dict[str, Any]], Optional[Path]]:
@@ -2697,8 +2745,9 @@ def before_tool(**kwargs: Any) -> Optional[Dict[str, str]]:
 
 
 def register(plugin_ctx: Any) -> bool:
-    """Keeps the context and registers the canvas's six tools — the list and the two data tools
-    every session carries, and the three more a canvas's own session is given."""
+    """Keeps the context and registers the canvas's seven tools — the list and the two data tools
+    every session carries, the three more a canvas's own session is given, and the memory a
+    build's session is given."""
     global ctx, _registered
     ctx = plugin_ctx
     register_tool = getattr(plugin_ctx, "register_tool", None)
@@ -2710,6 +2759,7 @@ def register(plugin_ctx: Any) -> bool:
         (TOOL_WRITE, WRITE_SCHEMA, handle_write),
         (TOOL_EDIT, EDIT_SCHEMA, handle_edit),
         (TOOL_READ, READ_SCHEMA, handle_read),
+        (TOOL_MEMORY, MEMORY_SCHEMA, handle_memory),
         (TOOL_DATA_READ, DATA_READ_SCHEMA, handle_data_read),
         (TOOL_DATA_WRITE, DATA_WRITE_SCHEMA, handle_data_write),
     ):
@@ -2724,18 +2774,34 @@ def register(plugin_ctx: Any) -> bool:
 
 
 def wire(api_adapter: Any) -> bool:
-    """Gives every agent the list and the two data tools, and a canvas's agents the rest.
+    """Gives every agent the list and the two data tools, a canvas's agents the document tools,
+    and a build's agents the memory tool.
 
     Those three are wired with no ``when``: a session with no canvas of its own is exactly who needs
     to look one up, one that isn't a canvas's reads or writes a canvas's data by naming it, and a
     canvas's own session leaves the name out to mean itself. The three document tools stay in the
-    session the canvas is edited in.
+    session the canvas is edited in, and the memory in a build's: the canvas's own session writes
+    versions, and it is a build that remembers.
     """
     global adapter, _wired
     adapter = api_adapter
 
     def is_canvas(session: Optional[str]) -> bool:
         return _session_canvas(session) is not None
+
+    def is_build(session: Optional[str]) -> bool:
+        # Imported here rather than at the top: builds reads this module for the store's own write
+        # and folder rules, so the two would otherwise import each other.
+        from . import builds as _builds
+
+        if not isinstance(session, str) or not session.startswith(_builds.SESSION_PREFIX):
+            return False
+        try:
+            path, _home = sessions._paths()
+        except Exception:
+            logger.debug("gots: couldn't find the store a build lives in", exc_info=True)
+            return False
+        return _builds.of_session(path, session) is not None
 
     took = True
     for tool, schema, when in (
@@ -2745,6 +2811,7 @@ def wire(api_adapter: Any) -> bool:
         (TOOL_WRITE, WRITE_SCHEMA, is_canvas),
         (TOOL_EDIT, EDIT_SCHEMA, is_canvas),
         (TOOL_READ, READ_SCHEMA, is_canvas),
+        (TOOL_MEMORY, MEMORY_SCHEMA, is_build),
     ):
         if not tools_common.wire_tool(api_adapter, tool, schema, tool, when=when):
             took = False

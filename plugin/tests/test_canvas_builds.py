@@ -383,6 +383,58 @@ class BuildSessionTest(unittest.TestCase):
         self.assertEqual(self.host.version(), 1, "the published page is untouched")
 
 
+class MemoryToolTest(unittest.TestCase):
+    """The plan's step 8 check: a build remembers, and the next build's seed carries it.
+
+    The memory file itself was already read by every build's seed (step 7); what the tool adds is
+    the one way a build writes it — the requirements and decisions a canvas keeps are the store's
+    own file, capped and deleted with the canvas like the rest of the folder.
+    """
+
+    def setUp(self) -> None:
+        self.host = Host(self)
+
+    def test_a_second_builds_seed_holds_what_the_first_remembered(self) -> None:
+        build = self.host.start()
+        answered = json.loads(
+            canvases.handle_memory(
+                {"memory": "Split at the table."}, session_id=build["session_id"]
+            )
+        )
+        self.assertTrue(answered["remembered"])
+        self.host.end(build["session_id"], completed=True)
+
+        self.host.queue("add a tip percentage")
+        self.host.tick()
+        self.assertIsNotNone(self.host.build(), "the next request opened a build")
+        self.assertIn("Split at the table.", builds.seed(self.host.path, self.host.id))
+
+    def test_the_memory_file_is_refused_past_its_cap(self) -> None:
+        build = self.host.start()
+        answered = json.loads(
+            canvases.handle_memory(
+                {"memory": "x" * (canvases.FILE_BYTES + 1)}, session_id=build["session_id"]
+            )
+        )
+        self.assertIn("error", answered)
+        self.assertIn("256 KB", answered["error"], "the refusal names the cap")
+
+    def test_only_a_builds_session_remembers(self) -> None:
+        build = self.host.start()
+        # The canvas's own session writes versions, not memory, and neither does a plain one.
+        for session in (self.host.session, "plain"):
+            with self.subTest(session=session):
+                answered = json.loads(
+                    canvases.handle_memory({"memory": "Split at the table."}, session_id=session)
+                )
+                self.assertIn("error", answered)
+        self.assertIsNone(
+            canvases.draft(self.host.path, self.host.id), "the refused calls wrote nothing"
+        )
+        memory = canvases.folder_of(self.host.home, self.host.id) / canvases.MEMORY
+        self.assertFalse(memory.exists(), "no memory file is made by a refused call")
+
+
 class OneSessionPathTest(unittest.TestCase):
     """An app that predates the feature keeps the path it had: the canvas's own session."""
 
