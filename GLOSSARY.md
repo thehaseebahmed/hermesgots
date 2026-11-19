@@ -825,11 +825,11 @@ A page of plain HTML a bot writes for you, keeps on its host and draws in a sand
 _Avoid_: app, space, studio, gadget, widget, mini-app, artifact
 
 **Canvas session**:
-The one long-lived conversation that belongs to a canvas, reachable only from that canvas. It is never a chat of its bot's list and never a card, and it carries the canvas's name as its title. Where builds are on (ADR 0169) it is where requests are sent, and each one runs in a build rather than on this session.
+The one long-lived conversation that belongs to a canvas, reachable only from that canvas. It is never a chat of its bot's list and never a card, and it carries the canvas's name as its title. Where builds are on (ADR 0170) it is where requests are sent, and each one runs in a build rather than on this session.
 _Avoid_: canvas chat, edit thread
 
 **Build**:
-One request's work on a canvas (ADR 0169): a fresh session seeded with the page, the canvas memory and the newest build summaries, which plans, writes a canvas draft, is checked, and publishes at most one version. A request sent while a build is open joins it; a canvas has at most one open build.
+One request's work on a canvas (ADR 0170): a fresh session seeded with the page, the canvas memory and the newest build summaries, which plans, writes a canvas draft, is checked, and publishes at most one version. A request sent while a build is open joins it; a canvas has at most one open build.
 _Avoid_: run, job, task, iteration
 
 **Build plan**:
@@ -849,7 +849,7 @@ The requirements and decisions a canvas's builds keep in its folder, read by eve
 _Avoid_: notes, context, history
 
 **Check report**:
-What the host found when it drew a build's draft the way the app does (ADR 0170): each test's result, the console's errors and the screenshots, posted to the build as its next turn.
+What the host found when it drew a build's draft the way the app does (ADR 0171): each test's result, the console's errors and the screenshots, posted to the build as its next turn.
 _Avoid_: test run, lint, review
 
 **Check flag**:

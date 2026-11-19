@@ -8,7 +8,7 @@ work. **The guide section becomes the user's design first, the floor, and the me
 follows** — file a plan, break the work into slices, write to the draft, test, read the screenshots,
 keep the memory, end on a summary — while the coding practices it holds today move into a bundled
 canvas-craft skill, registered beside the three design skills and named by the guide. A section is
-frozen when a session starts, and a session per build (ADR 0169) is what makes the method current on
+frozen when a session starts, and a session per build (ADR 0170) is what makes the method current on
 every build rather than on every canvas.
 
 ## Considered and rejected
