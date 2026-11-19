@@ -204,6 +204,40 @@ class MissionTest(unittest.TestCase):
         self.assertEqual(line.levelname, "WARNING")
         self.assertRegex(line.getMessage(), r"gots\.research\.verdict failed after \d+\.\d s: .*Request timed out")
 
+    def test_a_judge_that_keeps_nothing_has_its_reply_logged(self) -> None:
+        ledger = {
+            "claims": [{"id": "c1", "text": "t", "source": "s1", "confidence": "verified", "snippet": "s"}],
+            "sources": [{"id": "s1", "title": "T", "url": "u"}],
+        }
+        verify = {"parts": [{"id": "p1", "text": "X"}], "terms": [], "restatement": "X", "ledger": ledger}
+        compare = {
+            "goal": "g", "ledger": ledger, "options": [{"id": "o1", "name": "A"}],
+            "criteria": [{"id": "k1", "name": "K", "weight": 3}],
+        }
+        reply = {"parts": [{"part": "Part 1", "claims": [{"claim": "c1", "stance": "supported"}]}], "change": ["Why."]}
+        with mock.patch.object(research, "_structured", return_value=reply):
+            with self.assertLogs(research.logger, level="WARNING") as logged:
+                with self.assertRaisesRegex(research.ResearchError, "tagged nothing"):
+                    research.judge_claim(verify)
+        self.assertIn("gots.research.verdict kept nothing", logged.records[0].getMessage())
+        self.assertIn('"part": "Part 1"', logged.records[0].getMessage())
+        self.assertIn('"stance": "supported"', logged.records[0].getMessage())
+
+        scores = {"scores": [{"option": "A", "criterion": "K", "score": 7}], "ruled_out": [], "verdict": ["v"], "flip": ["f"]}
+        with mock.patch.object(research, "_structured", return_value=scores):
+            with self.assertLogs(research.logger, level="WARNING") as logged:
+                with self.assertRaisesRegex(research.ResearchError, "scored nothing"):
+                    research.judge(compare, [{"id": "o1", "name": "A", "case": [], "rebuttal": []}])
+        self.assertIn("gots.research.judge kept nothing", logged.records[0].getMessage())
+        self.assertIn('"option": "A"', logged.records[0].getMessage())
+
+        long = {"parts": [], "change": ["x" * 9000]}
+        with mock.patch.object(research, "_structured", return_value=long):
+            with self.assertLogs(research.logger, level="WARNING") as logged:
+                with self.assertRaises(research.ResearchError):
+                    research.judge_claim(verify)
+        self.assertLess(len(logged.records[0].getMessage()), 4200)
+
     def test_a_mission_from_question_to_guide_and_quiz(self) -> None:
         self.reach_reading()
         first = self.claim("based solely on attention mechanisms, dispensing with recurrence and convolutions entirely.")
