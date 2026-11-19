@@ -7,24 +7,29 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
+import { useState, type ReactNode } from "react"
 
 import { BotPicker } from "@/components/chat/bot-picker"
-import { ModelPicker } from "@/components/chat/model-picker"
+import { ModelMenu, ModelPicker } from "@/components/chat/model-picker"
 import { Popup, PopupContent } from "@/components/popup"
 import { db } from "@/lib/db"
+import { useModelInfo } from "@/lib/model-info"
 import { scoreFor, scoreMapOf } from "@/lib/model-match"
 import { RANKINGS } from "@/lib/rankings-data"
 
 import {
   botProfile,
   click,
+  find,
   findAll,
+  json,
   mount,
   seedSettings,
   settle,
   text,
   until,
   wordsOf,
+  withToasts,
 } from "./component-kit.tsx"
 
 const bot = (id: string, host: string, path = "/v1", name = "Hermes") =>
@@ -38,6 +43,20 @@ async function seed(bots: ReturnType<typeof bot>[]) {
 }
 
 const picker = (one: ReturnType<typeof bot>) => <BotPicker profile={one} />
+
+/**
+ * The model picker's sheet as a caller holds it open, the way every screen that opens one does: the
+ * sheet's own close has to be able to put it away, which a pop-up mounted with a hardcoded `open`
+ * never shows.
+ */
+const OpenedPicker = ({ children }: { children: ReactNode }) => {
+  const [open, setOpen] = useState(true)
+  return (
+    <Popup open={open} onOpenChange={setOpen}>
+      <PopupContent>{children}</PopupContent>
+    </Popup>
+  )
+}
 
 test("two hosts' sealed defaults say which host each is, and a name nobody shares stands alone", async () => {
   // Linked in an order no list draws: the rows prove the order comes from the labels.
@@ -178,4 +197,384 @@ test("the picker scores a model from the shipped payload", async () => {
       await settle()
     },
   )
+})
+
+/**
+ * A host with one provider has nothing to choose between, so its models show at once — under the
+ * provider's own name, in the picker's own layer. A provider the reader opened stacks a sheet over
+ * that layer; one the picker drilled into on its own must not, or the models are drawn twice and the
+ * layer standing over the list has no way back.
+ */
+test("a host with one provider draws its models once, and its sheet is put away by its close", async () => {
+  await mount(
+    <OpenedPicker>
+      <ModelPicker
+        providers={[
+          {
+            slug: "anthropic",
+            name: "Anthropic",
+            models: ["claude-sonnet-4-6", "deepseek-v4-flash"],
+          },
+        ]}
+        fallback={{ label: "Default" }}
+        onChoose={() => {}}
+      />
+    </OpenedPicker>,
+    async () => {
+      const layers = () => findAll("[data-popup-form]")
+      await until(async () => text().includes("claude-sonnet-4-6"), "the picker's model rows")
+      assert.equal(layers().length, 1, "one layer, not one stacked over the picker's own")
+      assert.equal(
+        wordsOf(layers()[0].querySelector('[data-slot="sheet-title"]')),
+        "Anthropic",
+        "the picker's own header names the provider",
+      )
+      const rows = (model: string) => findAll("li").filter((row) => wordsOf(row).includes(model))
+      assert.equal(
+        rows("claude-sonnet-4-6").length,
+        1,
+        "each model is one row, not one in each of two layers",
+      )
+      assert.equal(rows("deepseek-v4-flash").length, 1, "and so is the host's other model")
+      assert.match(
+        layers()[0].querySelector('[data-slot="sheet-title"]')?.className ?? "",
+        /text-center/,
+        "the provider's name is centred over its models, not left of them",
+      )
+      // The sheet's own close, the ordinary way out: with a second layer standing over the list,
+      // pressing it only clears the provider the reader opened and the stacked sheet opens again.
+      await click(document.querySelector('button[aria-label="Close"]'))
+      await until(async () => layers().length === 0, "the sheet is put away")
+    },
+  )
+})
+
+/**
+ * The headers' refresh. The picker is driven through `ModelMenu`, which reads the host's models
+ * through `useModelInfo`: a press has to drop that cached answer for the list on screen to repaint,
+ * which a picker handed its providers as props would never show.
+ */
+const ONE_PROVIDER = [{ slug: "anthropic", name: "Anthropic", models: ["claude-sonnet-4-6"] }]
+
+/** A custom endpoint the host has not probed: Hermes lists its models only once it has. */
+const CUSTOM_ENDPOINT = {
+  slug: "custom",
+  name: "Custom",
+  api_url: "https://openrouter.example/v1",
+  models: [],
+}
+
+/** A host answering `/api/model/options`, recording every query it was asked with. */
+function modelsHost({
+  providers = ONE_PROVIDER,
+  added,
+  refuseRefresh = false,
+  hold,
+  refreshedModel,
+  unprobed,
+  drop,
+}: {
+  providers?: { slug: string; name: string; models: string[] }[]
+  /** The model the host adds to its list once it has been asked to read it again. */
+  added?: string
+  refuseRefresh?: boolean
+  /**
+   * A promise the first plain read waits on before it answers, so a case can hold that read out
+   * past a refresh and release it once the refresh has repainted.
+   */
+  hold?: Promise<void> | null
+  /** The main model the host answers with once it has been asked to read its models again. */
+  refreshedModel?: string
+  /**
+   * Whether the host also holds a custom endpoint it has not probed: a row with an `api_url` and
+   * no models, beside the providers it lists. Hermes lists such an endpoint's models only once it
+   * has probed it, which is what a plain read does not do.
+   */
+  unprobed?: boolean
+  /** The provider the host drops from its list once it has been asked to read it again. */
+  drop?: string
+} = {}) {
+  const asked: string[] = []
+  let refreshed = false
+  let held = false
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input instanceof Request ? input.url : input))
+    if (!url.pathname.endsWith("/api/model/options")) return json({})
+    asked.push(url.search)
+    if (url.searchParams.get("refresh")) {
+      // A host that never answers: the refresh gets nothing back, so the cache keeps what it had.
+      if (refuseRefresh) return json({ error: { message: "The host is busy." } }, 500)
+      refreshed = true
+    }
+    // What the host answers is what it holds when it is asked, not when it finishes answering, so a
+    // read held out past a refresh carries the list as it was when that read went out.
+    const listed = providers
+      .filter((one) => !(refreshed && drop && one.slug === drop))
+      .map((one) => ({
+        ...one,
+        models:
+          refreshed && added && one.slug === "anthropic" ? [...one.models, added] : one.models,
+      }))
+    const body = {
+      model: refreshed && refreshedModel ? refreshedModel : "claude-sonnet-4-6",
+      provider: "anthropic",
+      providers: unprobed ? [...listed, CUSTOM_ENDPOINT] : listed,
+    }
+    // A refresh read answers at once; the plain read a case holds out waits on its promise.
+    if (hold && !held && !url.searchParams.get("refresh")) {
+      held = true
+      await hold
+    }
+    return json(body)
+  }) as unknown as typeof fetch
+  return {
+    asked,
+    /** Every plain read of the list: a refresh is a read of its own, and not one of these. */
+    reads: () => asked.filter((search) => !search.includes("refresh")).length,
+    /** Every full probe of the host's endpoints, which a refresh asks for. */
+    probes: () => asked.filter((search) => search.includes("refresh")).length,
+  }
+}
+
+const pill = () => document.querySelector('button[aria-label^="Model: "]')
+/** The refresh at the foot of the list, named by what it does rather than by an icon. */
+const refresh = () => findAll("button").find((one) => wordsOf(one) === "Refresh Models") ?? null
+/** The header of the layer standing in front, which over the picker's own is a provider's sheet. */
+const frontHeader = () =>
+  findAll("[data-popup-form]").at(-1)?.querySelector('[data-slot="sheet-header"]') ?? null
+
+/**
+ * The refresh reaches a one-provider host's models on the five surfaces that pass
+ * `header={false}` too: with one provider there is nothing to choose between, so the picker drills
+ * into it, and the refresh stands at the foot of its models wherever the surface puts them.
+ */
+test("a one-provider host's models carry the refresh where the surface draws no header", async () => {
+  modelsHost()
+  await mount(
+    <OpenedPicker>
+      <ModelPicker
+        header={false}
+        profile={botProfile("one-provider-header.test")}
+        providers={[
+          {
+            slug: "anthropic",
+            name: "Anthropic",
+            models: ["claude-sonnet-4-6", "deepseek-v4-flash"],
+          },
+        ]}
+        fallback={{ label: "Default" }}
+        onChoose={() => {}}
+      />
+    </OpenedPicker>,
+    async () => {
+      await until(async () => Boolean(refresh()), "the refresh at the foot of the list")
+      assert.equal(
+        frontHeader(),
+        null,
+        "the surface draws no header of its own, and the picker draws none over the models either",
+      )
+    },
+  )
+})
+
+/**
+ * A refresh that shrinks the host to one provider while a provider's sheet stands over the picker
+ * must not leave that sheet standing over a second copy of the same models: with one provider there
+ * is nothing to choose between, so the picker drills into it and its models are drawn once — with
+ * the refresh at their foot, on the one layer left.
+ */
+test("a refresh that leaves one provider draws its models once, with the refresh to hand", async () => {
+  modelsHost({
+    providers: [
+      { slug: "anthropic", name: "Anthropic", models: ["claude-sonnet-4-6"] },
+      { slug: "openrouter", name: "OpenRouter", models: ["deepseek-v4-flash"] },
+    ],
+    drop: "openrouter",
+  })
+  await mount(
+    <ModelMenu profile={botProfile("shrink-host.test")} onChoose={() => {}} />,
+    async () => {
+      await until(async () => Boolean(pill()), "the composer's model pill")
+      await click(pill())
+      await until(async () => Boolean(refresh()), "the picker's own layer")
+      // Drill into one provider, so its models stand as a sheet over the picker's own.
+      await click(findAll("button").find((one) => wordsOf(one).startsWith("Anthropic")) ?? null)
+      await until(async () => Boolean(frontHeader()), "the provider's own sheet")
+      assert.equal(findAll("[data-popup-form]").length, 2, "the sheet stands over the picker")
+      await click(refresh())
+      await until(
+        async () => findAll("[data-popup-form]").length === 1,
+        "one layer, not the survivor's models drawn twice",
+      )
+      assert.equal(
+        wordsOf(frontHeader()?.querySelector('[data-slot="sheet-title"]') ?? null),
+        "Anthropic",
+        "one header names the survivor",
+      )
+      assert.ok(refresh(), "the refresh is to hand at the foot of the models")
+      assert.equal(
+        findAll("li").filter((row) => wordsOf(row).includes("claude-sonnet-4-6")).length,
+        1,
+        "the survivor's model is one row, not one in each of two layers",
+      )
+    },
+  )
+})
+
+test("the foot's refresh reads the host's models again, and the list repaints with them", async () => {
+  const host = modelsHost({ added: "claude-opus-4-5" })
+  await mount(
+    <ModelMenu profile={botProfile("refresh-host.test")} onChoose={() => {}} />,
+    async () => {
+      await until(async () => Boolean(pill()), "the composer's model pill")
+      await click(pill())
+      await until(async () => Boolean(refresh()), "the picker's own layer")
+      assert.equal(host.reads(), 1, "the host's list was read once, for the models on screen")
+      await click(refresh())
+      await until(async () => text().includes("claude-opus-4-5"), "the model the host added")
+      assert.ok(
+        host.asked.some((search) => search.includes("refresh=true")),
+        "the host was asked to read its models again",
+      )
+      assert.equal(host.reads(), 2, "and the picker read the new answer back off the host")
+    },
+  )
+})
+
+test("a provider's list carries the refresh too", async () => {
+  modelsHost({
+    providers: [
+      { slug: "anthropic", name: "Anthropic", models: ["claude-sonnet-4-6"] },
+      { slug: "openrouter", name: "OpenRouter", models: ["deepseek-v4-flash"] },
+    ],
+  })
+  await mount(
+    <ModelMenu profile={botProfile("refresh-two.test")} onChoose={() => {}} />,
+    async () => {
+      await until(async () => Boolean(pill()), "the composer's model pill")
+      await click(pill())
+      await until(async () => Boolean(refresh()), "the picker's own layer")
+      await click(findAll("button").find((one) => wordsOf(one).startsWith("Anthropic")) ?? null)
+      await until(async () => Boolean(frontHeader()), "the provider's own sheet")
+      assert.ok(refresh(), "the provider's list carries the refresh at its foot")
+      assert.equal(
+        wordsOf(frontHeader()?.querySelector('[data-slot="sheet-title"]') ?? null),
+        "Anthropic",
+        "the sheet standing in front is that provider's own, under its name",
+      )
+    },
+  )
+})
+
+/**
+ * A read still out when a refresh lands must not answer after it. The host holds the first plain
+ * read open — a promise the case releases once the refresh has repainted — and answers the refresh
+ * at once, with a model the held read never saw. The picker is driven over the read every surface
+ * makes for it rather than through `ModelMenu`, whose pill stays disabled until that read lands:
+ * the first read cannot be held out with the pill's picker open.
+ */
+test("a read still out when a refresh lands doesn't answer after it", async () => {
+  let release: () => void = () => {}
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  modelsHost({ added: "claude-opus-4-5", refreshedModel: "claude-opus-4-5", hold: held })
+  const profile = botProfile("race-host.test")
+  await db.profiles.clear()
+  await db.profiles.put(profile)
+  const Reading = () => {
+    const info = useModelInfo(profile)
+    return (
+      <OpenedPicker>
+        <ModelPicker
+          providers={info?.providers ?? []}
+          fallback={{ label: "Default" }}
+          onChoose={() => {}}
+          profile={profile}
+        />
+      </OpenedPicker>
+    )
+  }
+  await mount(<Reading />, async () => {
+    await until(async () => Boolean(refresh()), "the picker's own layer")
+    // The first read is still out: what the refresh answers is the answer the cache comes to hold.
+    await click(refresh())
+    await until(async () => text().includes("claude-opus-4-5"), "the model the host added")
+    // The held read lands now, after the refresh's answer is the connection's current one.
+    release()
+    await settle()
+    assert.ok(
+      text().includes("claude-opus-4-5"),
+      "the model the host added is still on the list",
+    )
+    const saved = await db.profiles.get(profile.id)
+    assert.equal(
+      saved?.hostModel?.model,
+      "claude-opus-4-5",
+      "the bot's remembered host model is the one the refresh answered, not the held read's",
+    )
+  })
+})
+
+/**
+ * A refresh probes every endpoint on the host, so the re-read it causes must not probe again. The
+ * host holds a custom endpoint that still comes back empty, and its escalation throttle has lapsed
+ * since it was last probed in full: the re-read would otherwise ask for a second full probe for an
+ * answer the refresh has just gone and got.
+ */
+test("a refresh's re-read doesn't ask the host for a second full probe", async () => {
+  const host = modelsHost({ unprobed: true })
+  await mount(
+    <ModelMenu profile={botProfile("unprobed-host.test")} onChoose={() => {}} />,
+    async () => {
+      await until(async () => Boolean(pill()), "the composer's model pill")
+      await click(pill())
+      await until(async () => Boolean(refresh()), "the picker's own layer")
+      // The throttle's window has lapsed since the host was last probed in full.
+      const real = Date.now
+      Date.now = () => real() + 11 * 60_000
+      try {
+        const probes = host.probes()
+        const reads = host.reads()
+        await click(refresh())
+        // Both the press's own probe and the re-read it causes have to land before the count is read.
+        await until(async () => host.reads() > reads, "the re-read the refresh causes")
+        await settle()
+        assert.equal(
+          host.probes() - probes,
+          1,
+          "one press asks the host for one full probe, not two",
+        )
+      } finally {
+        Date.now = real
+      }
+      assert.ok(
+        text().includes("claude-sonnet-4-6"),
+        "the host's models are still on the list",
+      )
+    },
+  )
+})
+
+test("a host that doesn't answer keeps the list and says so", async () => {
+  const host = modelsHost({ refuseRefresh: true })
+  await withToasts(async (said) => {
+    await mount(
+      <ModelMenu profile={botProfile("refresh-away.test")} onChoose={() => {}} />,
+      async () => {
+        await until(async () => Boolean(pill()), "the composer's model pill")
+        await click(pill())
+        await until(async () => Boolean(refresh()), "the picker's own layer")
+        const reads = host.reads()
+        await click(refresh())
+        await until(async () => said.length > 0, "the sentence")
+        assert.deepEqual(said, ["Couldn't refresh this bot's models."])
+        assert.equal(host.reads(), reads, "no further read lands, so the list is untouched")
+        assert.ok(
+          text().includes("claude-sonnet-4-6"),
+          "the model the host listed is still on the list",
+        )
+      },
+    )
+  })
 })

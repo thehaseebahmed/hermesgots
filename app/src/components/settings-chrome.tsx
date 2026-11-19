@@ -19,7 +19,7 @@ import { LabBadge } from "@/components/lab-badge"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
 import { PickGroup, PickRow } from "@/components/pick-row"
 import { SearchField } from "@/components/search-field"
-import { Popup, PopupContent, PopupHeader, PopupTitle } from "@/components/popup"
+import { CentredTitle, Popup, PopupContent, PopupHeader } from "@/components/popup"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import {
@@ -378,8 +378,8 @@ export function PickSurface({
   return (
     <Popup open={open} onOpenChange={onOpenChange}>
       <PopupContent initialFocus={false}>
-        <PopupHeader>
-          <PopupTitle>{title}</PopupTitle>
+        <PopupHeader className="min-h-16">
+          <CentredTitle>{title}</CentredTitle>
         </PopupHeader>
         <div className="flex min-h-0 flex-col overflow-y-auto px-4 pb-4">{children}</div>
       </PopupContent>
@@ -837,6 +837,7 @@ export function ModelPick({
             void refusal.write("save that", async () => onPick(next))
             onClose()
           }}
+          profile={profile}
         />
       ) : (
         <p className="px-1 py-2 text-sm text-muted-foreground">Couldn't read this bot's models.</p>

@@ -1,13 +1,7 @@
 import { useCallback, useEffect, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { Navigate, useNavigate, useParams } from "react-router"
-import {
-  EllipsisIcon,
-  PauseIcon,
-  PlayIcon,
-  RefreshCwIcon,
-  RotateCwIcon,
-} from "lucide-react"
+import { EllipsisIcon, PauseIcon, PlayIcon, RefreshCwIcon, RotateCwIcon } from "lucide-react"
 
 import { botRoutinesPath } from "@/lib/bot-tabs"
 import { LIST_MS, SAFETY_MS } from "@/lib/freshness"
@@ -67,7 +61,8 @@ export function RoutinesPage() {
   // List's, or the flat layout's bot screen. The lead withholds its own control until the device's
   // settings answer, and the new UX's list is what a device with no settings row draws, which is the
   // fallback below.
-  const lead = useChatLead({ bot: profileId })
+  // A page, not a chat: it keeps its way back even with the list beside it.
+  const lead = useChatLead({ bot: profileId, beside: false })
   const layout = useChatLayout()
   const list = listPathOf(layout ?? "sides", profileId)
   const { up } = useNav()
