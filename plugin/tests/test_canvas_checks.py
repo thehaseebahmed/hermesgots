@@ -11,9 +11,11 @@ Run: python3 -m unittest plugin.tests.test_canvas_checks -v
 
 from __future__ import annotations
 
+import asyncio
 import sys
 import unittest
 from types import ModuleType
+from unittest import mock
 from unittest.mock import patch
 
 import plugin
@@ -37,7 +39,8 @@ def plant_layer(available: bool = True) -> patch:
 
 
 def take_layer_away() -> patch:
-    """A host with no browser layer in reach: both names gone from ``sys.modules``."""
+    """A host with no browser layer in reach: both names held as ``None`` in ``sys.modules``, so
+    the probe's import of them is halted."""
     return patch.dict(sys.modules, {"tools": None, "tools.browser_use_cli": None})
 
 
@@ -71,13 +74,9 @@ class AdvertisedTest(unittest.TestCase):
         self.app = wire(self, RouteAdapter())
 
     def call(self, path: str, method: str = "GET", body: dict | None = None, **match: str) -> dict:
-        from unittest import mock
-
         request = FakeWeb.Request()
         request.match_info, request.headers = match, {}
         request.json = mock.AsyncMock(return_value=body)
-        import asyncio
-
         return asyncio.run(route(self.app, plugin.PREFIX + path, method)(request))
 
     def test_info_advertises_canvas_checks_only_where_the_layer_is_found(self) -> None:

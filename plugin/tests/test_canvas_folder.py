@@ -11,56 +11,20 @@ Run: python3 -m unittest plugin.tests.test_canvas_folder -v
 
 from __future__ import annotations
 
-import asyncio
 import unittest
 from pathlib import Path
-from typing import Any, Dict
-from unittest import mock
 
-import plugin
 from plugin import canvases
-from plugin.store import db_path
-from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
-
-PROMPT = "A bookmark board, one collection of five thousand links"
-BODY = {"input": [{"role": "user", "content": PROMPT}]}
+from plugin.tests.test_canvas_vault import Host as CanvasHost
 
 
-class Host:
-    """A wired plugin over a throwaway home, with one canvas in it and its routes to call."""
-
-    def __init__(self, case: unittest.TestCase) -> None:
-        self.home = temp_hermes_home(case)
-
-        class SessionDb:
-            def delete_session(self, session_id: str) -> None:
-                pass
-
-        adapter = RouteAdapter()
-        adapter.session_db = SessionDb()
-        self.app = wire(case, adapter)
-        self.path = db_path(self.home)
-        self.canvas = canvases.create(
-            self.path, request_profile="default", bot_id="bot-1", prompt=PROMPT, body=BODY
-        )
-
-    @property
-    def id(self) -> str:
-        return self.canvas["id"]
+class Host(CanvasHost):
+    """The canvas host the vault suite wires, and the folder under it this suite is about."""
 
     @property
     def folder(self) -> Path:
         """The canvas's own folder, found by the store's own rule rather than named here."""
         return canvases.folder_of(self.home, self.id)
-
-    def call(
-        self, path: str, method: str = "GET", body: Any = None, **match: str
-    ) -> Dict[str, Any]:
-        request = FakeWeb.Request()
-        request.match_info, request.headers = match, {}
-        request.query = {}
-        request.json = mock.AsyncMock(return_value=body)
-        return asyncio.run(route(self.app, plugin.PREFIX + path, method)(request))
 
 
 class MadeWithTheCanvasTest(unittest.TestCase):
@@ -93,36 +57,28 @@ class CappedTest(unittest.TestCase):
     def test_a_file_past_its_cap_is_refused_in_words_naming_the_cap(self) -> None:
         # A file is a page at most — the same 256 KB a write admits, since the draft is a page —
         # and the refusal carries the number, so the words move with the cap.
-        refused = None
-        try:
+        with self.assertRaises(canvases.CanvasError) as refused:
             canvases.keep(self.host.path, self.host.id, "draft.html", "x" * (canvases.FILE_BYTES + 1))
-        except canvases.CanvasError as error:
-            refused = str(error)
-        self.assertIsNotNone(refused, "an over-cap file is refused")
-        self.assertIn("draft.html", refused)
-        self.assertIn(str(canvases.FILE_BYTES // 1024), refused)
+        self.assertIn("draft.html", str(refused.exception))
+        self.assertIn(str(canvases.FILE_BYTES // 1024), str(refused.exception))
 
     def test_the_folder_past_its_cap_refuses_a_write(self) -> None:
         # The folder's cap bounds the lot — the draft, its plans, its tests and its memory — so a
         # canvas cannot grow without end on the host. The write that would cross it is refused
         # whole, and the files already there stay where they are.
-        written = 0
-        try:
+        with self.assertRaises(canvases.CanvasError) as refused:
             for index in range(canvases.FOLDER_BYTES // canvases.FILE_BYTES + 1):
                 canvases.keep(
                     self.host.path, self.host.id, f"plan-{index}.md", "p" * canvases.FILE_BYTES
                 )
-                written += 1
-        except canvases.CanvasError as error:
-            refused = str(error)
-        else:
-            refused = None
-        self.assertIsNotNone(refused, "the folder is capped whole")
-        self.assertIn("canvas", refused)
-        self.assertIn(str(canvases.FOLDER_BYTES // (1024 * 1024)), refused)
+        self.assertIn("canvas", str(refused.exception))
+        self.assertIn(str(canvases.FOLDER_BYTES // (1024 * 1024)), str(refused.exception))
         self.assertEqual(
             sorted(one.name for one in self.host.folder.iterdir()),
-            sorted(f"plan-{index}.md" for index in range(written)),
+            sorted(
+                f"plan-{index}.md"
+                for index in range(canvases.FOLDER_BYTES // canvases.FILE_BYTES)
+            ),
             "the files already written stay where they are",
         )
 

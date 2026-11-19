@@ -115,7 +115,7 @@ TOOLS_MAX = 50
 FOLDER = ("canvas",)
 # What one file in a canvas's folder may weigh: a page at most — the same 256 KB a write admits,
 # kept as its own number because the draft is a page and a plan, a test and a memory are not.
-FILE_BYTES = MAX_BYTES
+FILE_BYTES = 256 * 1024
 # What the whole folder may weigh: the draft, the plans, the tests and the memory one canvas keeps.
 # A canvas keeps one draft and a handful of small files beside it, so four megabytes is room no
 # canvas reaches — and a bound a host can hold, since a canvas that grew without end would be a
@@ -1007,7 +1007,8 @@ def write(
         html=html,
         title=title,
         image=image,
-        fields={**(fields or {}), "tools": _tools(tools)},
+        tools=tools,
+        fields=fields,
     )
 
 
@@ -1030,7 +1031,7 @@ def edit(
     """
     if not isinstance(edits, list) or not edits:
         raise CanvasError("edits must be a list of find and replace pairs.")
-    return _commit(path, canvas_id, edits=edits, fields={**(fields or {}), "tools": _tools(tools)})
+    return _commit(path, canvas_id, edits=edits, tools=tools, fields=fields)
 
 
 def _commit(
@@ -1039,6 +1040,7 @@ def _commit(
     *,
     html: Any = None,
     edits: Optional[List[Any]] = None,
+    tools: Any = None,
     fields: Optional[Dict[str, Any]] = None,
     title: Optional[Any] = None,
     image: Any = None,
@@ -1047,9 +1049,11 @@ def _commit(
 
     ``html`` is a write's whole document; ``edits`` are an edit's pairs, applied to the version the
     record points at, which is read on this connection under this transaction. ``fields`` are the
-    per-version columns the version carries beyond its document — the consent list it declares
-    today, and the requests, summary and check flag a build's publish carries (ADR 0170) — each
-    named by the column it lands in, so a caller that names none commits the document alone. Both
+    per-version columns the version carries beyond its document and its consent list — the
+    requests, summary and check flag a build's publish carries (ADR 0170) — each named by the column
+    it lands in, so a caller that names none commits the document alone. ``tools`` is the consent
+    list this version declares, read here beside the 404: a write naming both a canvas that isn't
+    and a tool that can't be called is a canvas that isn't there, whatever its tools were. Both
     answer the shape ``current`` does but for its ``data``: a version never touches a canvas's data.
     """
     named = title_of(title) if isinstance(title, str) and title.strip() else None
@@ -1062,6 +1066,8 @@ def _commit(
         found = _record(conn, canvas_id)
         if found is None:
             raise CanvasError("There is no such canvas.", 404)
+        if tools is not None:
+            carried["tools"] = _tools(tools)
         if edits is None:
             document = html
         else:
@@ -1315,20 +1321,16 @@ def _close_folder(home: Path, canvas_id: str) -> None:
     Best effort, like the session end beside it — a folder left behind is disk a host can sweep,
     not a canvas the user still sees.
     """
-    try:
-        shutil.rmtree(folder_of(home, canvas_id), ignore_errors=True)
-    except OSError:
-        logger.debug("gots: couldn't take %s's folder", canvas_id, exc_info=True)
+    shutil.rmtree(folder_of(home, canvas_id), ignore_errors=True)
 
 
 def _folder_bytes(folder: Path, but: str) -> int:
-    """What a canvas's folder weighs, the file being written left out.
+    """What a canvas's folder weighs, the file being written left out; a folder that isn't there
+    weighs nothing.
 
     The file being written is replaced rather than added to, so its own bytes are the folder's to
     spend again — a draft rewritten at the same size is not a folder that grew.
     """
-    if not folder.is_dir():
-        return 0
     return sum(
         one.stat().st_size for one in folder.rglob("*") if one.is_file() and one.name != but
     )
