@@ -1,6 +1,5 @@
 package dev.hermesgots
 
-import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -9,14 +8,20 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Rect
 import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.Person
+import androidx.core.app.RemoteInput
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
 import com.capacitorjs.plugins.pushnotifications.PushNotificationsPlugin
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
-import org.json.JSONArray
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
@@ -27,93 +32,157 @@ import java.net.URL
  * A push to the Android app arrives as a data-only message (`message` in `app/netlify/lib/fcm.ts`),
  * because a `notification` payload is drawn by Android itself, with no code of ours running, and
  * Android's own drawing has no room for a button — an approval could only be answered by opening
- * Gots. So this service draws the entry: the notice's title and the body under it, the bot's badged
- * picture as the large icon (the same file the browser's tray and ntfy wear, cut by
- * `app/scripts/build-badges.mjs`), the channel the app makes for the category, the tag a newer
- * notice about the same thing replaces, and the two buttons an approval carries, each posting its
- * own link through [NoticeAnswerReceiver] with the app closed.
+ * Gots. So this service draws the entry: the notice's title and the body under it, the bot's plain
+ * face (`happy.png`, or the copy `app/scripts/build-badges.mjs` ships), the channel the app makes for
+ * the category, the tag a newer notice about the same thing replaces, and the two buttons an
+ * approval carries, each posting its own link through [NoticeAnswerReceiver] with the app closed, and
+ * a chat's Reply, typed inline and posted to its own one-shot link the same way, and its Mark as
+ * read, which queues the press for the page and leaves the tray. A
+ * notice about a chat is drawn as that chat's conversation, the bot its Person, so Android badges
+ * the face with the app's icon itself; any other keeps the face as its large icon.
  *
  * Nothing here decides anything: the kind, the id, the words, the picture and the buttons are the
- * plugin's (`plugin/notice.py`), relayed by the registry bounded and untouched.
+ * plugin's (`plugin/notice.py`), relayed by the registry bounded and untouched, and read by [Notice].
  */
 class GotsMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
-        val data = message.data
-        val title = data[KEY_TITLE].orEmpty().trim()
-        val body = data[KEY_BODY].orEmpty().trim()
-        // A message with nothing to say draws no row: the filter this service is declared with is a
-        // public one, and a notice whose words went missing is one the reader can't act on.
-        if (title.isEmpty() && body.isEmpty()) return
-        val kind = data[KEY_KIND].orEmpty()
-        val id = data[KEY_ID].orEmpty()
-        val category = data[KEY_CATEGORY].orEmpty()
-        val tag = data[KEY_TAG]?.takeIf { it.isNotBlank() } ?: "$category:$id"
-        val channel =
-            data[KEY_CHANNEL]?.takeIf { it.isNotBlank() } ?: category.ifEmpty { FALLBACK_CHANNEL }
-        channelFor(channel, category)
-        val notice = entry(
-            kind = kind,
-            id = id,
-            tag = tag,
-            channel = channel,
-            title = title.ifEmpty { getString(R.string.app_name) },
-            body = body,
-            picture = pictureOf(data[KEY_ICON], data[KEY_BOT]),
-            actions = actionsOf(data[KEY_ACTIONS]),
-        )
-        post(tag, notice)
+        // A clear is not a notice: it carries no words, and takes the entries about its subject out
+        // of the tray — the account was told a subject is no news, and this phone answers it
+        // (ADR 0169). It is read before [Notice.from], which answers null for a message with none.
+        val subject = Notice.clearSubject(message.data)
+        if (subject != null) {
+            NoticeDrawer.clearSubject(this, subject)
+            return
+        }
+        val notice = Notice.from(message.data, getString(R.string.app_name)) ?: return
+        channelFor(notice.channel, notice.category)
+        NoticeDrawer.post(this, notice.tag, entry(notice, pictureOf(notice)))
     }
 
-    /** The entry itself: the notice's words, its picture, and a button for each of its links. */
-    private fun entry(
-        kind: String,
-        id: String,
-        tag: String,
-        channel: String,
-        title: String,
-        body: String,
-        picture: Bitmap?,
-        actions: List<Action>,
-    ): Notification {
-        val builder = NotificationCompat.Builder(this, channel)
+    /**
+     * The entry itself: the notice's words, its picture, and a button for each of its links. A notice
+     * about a chat is that chat's conversation — the bot a [Person] wearing its face, a long-lived
+     * shortcut linked to the entry — and anything else keeps the plain entry, the face beside it.
+     */
+    private fun entry(notice: Notice, picture: Bitmap?): Notification {
+        val builder = NotificationCompat.Builder(this, notice.channel)
             // Android draws the small icon as a mask — one colour, its shape cut out of it — so it is a
             // silhouette, not the launcher icon, which is a picture and would be drawn as a black square.
             .setSmallIcon(R.drawable.ic_stat_notice)
-            .setContentTitle(title)
-            .setContentText(body)
-            // An approval's body is the card's: a description, then the command on lines of its own. The
-            // collapsed row shows the first, and opening it shows all of it.
-            .setStyle(NotificationCompat.BigTextStyle().bigText(body.ifEmpty { title }))
-            .setContentIntent(openIntent(kind, id, tag))
+            .setContentTitle(notice.title)
+            .setContentText(notice.body)
+            .setContentIntent(openIntent(notice.kind, notice.id, notice.tag))
             // A tap is the reader answering it: the row leaves the tray and nothing is left behind.
             .setAutoCancel(true)
-        if (picture != null) builder.setLargeIcon(picture)
-        for ((index, action) in actions.withIndex()) {
+            // So is a swipe, which queues the subject for the page to tell the account (ADR 0169).
+            .setDeleteIntent(dismissIntent(notice.tag))
+        val shortcut = notice.shortcut
+        if (shortcut != null) {
+            val face = picture?.let { IconCompat.createWithAdaptiveBitmap(adaptive(it)) }
+            val bot = Person.Builder()
+                // The plugin doesn't know the name the reader gave the bot, so the conversation is the
+                // chat's, as a messaging app names a one-to-one chat by its contact.
+                .setName(notice.title)
+                .setKey(shortcut)
+                .setIcon(face)
+                .setBot(true)
+                .build()
+            conversation(shortcut, notice, bot, face)
+            builder
+                .setStyle(
+                    NotificationCompat.MessagingStyle(Person.Builder().setName(getString(R.string.notice_you)).build())
+                        .addMessage(notice.body.ifEmpty { notice.title }, System.currentTimeMillis(), bot),
+                )
+                .setShortcutId(shortcut)
+                .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+        } else {
+            // An approval's body is the card's: a description, then the command on lines of its own.
+            // The collapsed row shows the first, and opening it shows all of it.
+            builder.setStyle(NotificationCompat.BigTextStyle().bigText(notice.body.ifEmpty { notice.title }))
+        }
+        if (notice.largeIcon && picture != null) builder.setLargeIcon(picture)
+        val reply = notice.reply
+        if (notice.inlineReply && reply != null) {
+            val typed = RemoteInput.Builder(NoticeAnswerReceiver.KEY_TEXT)
+                .setLabel(getString(R.string.notice_reply))
+                .build()
             builder.addAction(
-                NotificationCompat.Action(0, action.label, answerIntent(tag, index, action.url)),
+                NotificationCompat.Action.Builder(0, getString(R.string.notice_reply), replyIntent(notice.tag, reply))
+                    .addRemoteInput(typed)
+                    .setAllowGeneratedReplies(false)
+                    .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
+                    .build(),
+            )
+        }
+        val chat = notice.chat
+        if (notice.markAsRead && chat != null) {
+            builder.addAction(
+                NotificationCompat.Action.Builder(0, getString(R.string.notice_mark_read), readIntent(notice.tag, chat, notice.at))
+                    .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
+                    .setShowsUserInterface(false)
+                    .build(),
+            )
+        }
+        for ((index, action) in notice.actions.withIndex()) {
+            builder.addAction(
+                NotificationCompat.Action(0, action.label, answerIntent(notice.tag, index, action.url)),
             )
         }
         return builder.build()
     }
 
     /**
+     * The chat's long-lived shortcut, pushed before the entry names it: Android files a notification
+     * under Conversations only when the shortcut it names exists, is long-lived and carries the Person.
+     * Labelled with the chat's title and opening what a tap opens. Pushing it again replaces it, and a
+     * launcher that keeps no more shortcuts drops the oldest — the entry is drawn either way.
+     */
+    private fun conversation(id: String, notice: Notice, bot: Person, face: IconCompat?) {
+        val shortcut = ShortcutInfoCompat.Builder(this, id)
+            .setShortLabel(notice.title)
+            .setLongLived(true)
+            .setPerson(bot)
+            .setIntent(openLink(notice.kind, notice.id))
+            .setCategories(setOf(SHORTCUT_CATEGORY))
+        if (face != null) shortcut.setIcon(face)
+        runCatching { ShortcutManagerCompat.pushDynamicShortcut(this, shortcut.build()) }
+    }
+
+    /** The face padded into an adaptive icon's safe zone, so a launcher's mask never cuts it. */
+    private fun adaptive(face: Bitmap): Bitmap {
+        val laid = Notice.adaptiveFace(maxOf(face.width, face.height))
+        val canvas = Bitmap.createBitmap(laid.side, laid.side, Bitmap.Config.ARGB_8888)
+        val inner = laid.side - 2 * laid.inset
+        Canvas(canvas).drawBitmap(
+            face,
+            null,
+            Rect(laid.inset, laid.inset, laid.inset + inner, laid.inset + inner),
+            Paint(Paint.FILTER_BITMAP_FLAG),
+        )
+        return canvas
+    }
+
+    /**
      * What a tap opens: the app, told the kind and the id and never a route, so the screen is decided
      * there (`linkedPush` in `src/lib/push-kinds.ts`) — the same link ntfy's notification carries.
      */
-    private fun openIntent(kind: String, id: String, tag: String): PendingIntent {
+    private fun openIntent(kind: String, id: String, tag: String): PendingIntent =
+        PendingIntent.getActivity(this, tag.hashCode(), openLink(kind, id), pendingFlags())
+
+    /** The `gots://open` link a tap and a chat's shortcut both open. */
+    private fun openLink(kind: String, id: String): Intent {
         val link = Uri.Builder()
             .scheme("gots")
             .authority("open")
             .appendQueryParameter("kind", kind)
             .appendQueryParameter("id", id)
             .build()
-        val open = Intent(Intent.ACTION_VIEW, link).apply {
+        return Intent(Intent.ACTION_VIEW, link).apply {
             // Gots is one task (`launchMode="singleTask"`), so a tap from the tray lands in the app that
             // is already there, which is what hands the link to the page (Capacitor's `appUrlOpen`).
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
-        return PendingIntent.getActivity(this, tag.hashCode(), open, pendingFlags())
     }
 
     /** A button's broadcast, carrying the one link a press is allowed to post. */
@@ -125,6 +194,50 @@ class GotsMessagingService : FirebaseMessagingService() {
         }
         // Each button is its own broadcast, since a notification answered two ways is two links.
         return PendingIntent.getBroadcast(this, "$tag#$index".hashCode(), answer, pendingFlags())
+    }
+
+    /**
+     * A swipe's broadcast, carrying the tag of the entry put away: the subject it names is queued for
+     * the page, which tells the account it is no news (ADR 0169). A press of it holds no key of the
+     * account's — as a button's does not — so the host can't be told from here.
+     */
+    private fun dismissIntent(tag: String): PendingIntent {
+        val dismiss = Intent(this, NoticeAnswerReceiver::class.java).apply {
+            action = NoticeAnswerReceiver.ACTION_DISMISS
+            putExtra(NoticeAnswerReceiver.EXTRA_TAG, tag)
+        }
+        return PendingIntent.getBroadcast(this, "$tag#dismiss".hashCode(), dismiss, pendingFlags())
+    }
+
+    /** Mark as read's broadcast: the chat whose read mark it moves, and the moment the notice covered. */
+    private fun readIntent(tag: String, chat: String, at: Long?): PendingIntent {
+        val read = Intent(this, NoticeAnswerReceiver::class.java).apply {
+            action = NoticeAnswerReceiver.ACTION_READ
+            putExtra(NoticeAnswerReceiver.EXTRA_TAG, tag)
+            putExtra(NoticeAnswerReceiver.EXTRA_CHAT, chat)
+            if (at != null) putExtra(NoticeAnswerReceiver.EXTRA_AT, at)
+        }
+        return PendingIntent.getBroadcast(this, "$tag#read".hashCode(), read, pendingFlags())
+    }
+
+    /**
+     * Reply's broadcast, carrying the one link the typed text is posted to. A RemoteInput fills the
+     * intent in with what was typed, so this one intent is mutable where Android asks it to say so.
+     */
+    private fun replyIntent(tag: String, url: String): PendingIntent {
+        val reply = Intent(this, NoticeAnswerReceiver::class.java).apply {
+            action = NoticeAnswerReceiver.ACTION_REPLY
+            putExtra(NoticeAnswerReceiver.EXTRA_URL, url)
+            putExtra(NoticeAnswerReceiver.EXTRA_TAG, tag)
+        }
+        val mutable =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) PendingIntent.FLAG_MUTABLE else 0
+        return PendingIntent.getBroadcast(
+            this,
+            "$tag#reply".hashCode(),
+            reply,
+            mutable or PendingIntent.FLAG_UPDATE_CURRENT,
+        )
     }
 
     private fun pendingFlags() = PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
@@ -153,24 +266,21 @@ class GotsMessagingService : FirebaseMessagingService() {
     private fun channelName(channel: String) = "Gots " + channel.replace('_', ' ')
 
     /**
-     * The badged picture, fetched from the app's own origin or taken from the copy the APK ships.
+     * The bot's plain face, fetched from the app's own origin or taken from the copy the APK ships.
      *
      * A phone that can't reach the picture still draws the bot's face, and the entry is posted either
      * way. The fetch is bounded to [PICTURE_MS] each way because this runs on the message's own
      * thread: a tray entry a few seconds late beats one that never comes.
      */
-    private fun pictureOf(icon: String?, bot: String?): Bitmap? {
-        fetch(icon)?.let { return it }
-        if (bot.isNullOrBlank()) return null
-        // `build-badges.mjs` writes the APK's copy under the bot's id, its hyphen as an underscore
-        // since a resource name carries none.
-        val bundled = resources.getIdentifier("bot_" + bot.replace('-', '_'), "drawable", packageName)
+    private fun pictureOf(notice: Notice): Bitmap? {
+        notice.icon?.let(::fetch)?.let { return it }
+        val name = notice.bundled ?: return null
+        val bundled = resources.getIdentifier(name, "drawable", packageName)
         return if (bundled == 0) null else BitmapFactory.decodeResource(resources, bundled)
     }
 
-    /** The picture at an http(s) address, or null for anything else, a refusal, or no network. */
-    private fun fetch(icon: String?): Bitmap? {
-        if (icon == null || !(icon.startsWith("https://") || icon.startsWith("http://"))) return null
+    /** The picture at an http(s) address, or null for a refusal or no network. */
+    private fun fetch(icon: String): Bitmap? {
         val connection = try {
             URL(icon).openConnection() as HttpURLConnection
         } catch (error: IOException) {
@@ -203,78 +313,17 @@ class GotsMessagingService : FirebaseMessagingService() {
         PushNotificationsPlugin.onNewToken(token)
     }
 
-    /** A message's buttons: at most two, each a label and an http(s) link, as the registry bounded them. */
-    private fun actionsOf(raw: String?): List<Action> {
-        if (raw.isNullOrBlank()) return emptyList()
-        val rows = try {
-            JSONArray(raw)
-        } catch (bad: Exception) {
-            // A payload we can't read is a notice with no buttons, never a dropped notification.
-            return emptyList()
-        }
-        val actions = ArrayList<Action>(ACTION_LIMIT)
-        for (index in 0 until rows.length()) {
-            if (actions.size == ACTION_LIMIT) break
-            val row = rows.optJSONObject(index) ?: continue
-            val label = row.optString("label").trim()
-            val url = row.optString("url").trim()
-            // Only a link can be posted; anything else is a button that would do nothing.
-            if (label.isEmpty() || !(url.startsWith("https://") || url.startsWith("http://"))) continue
-            actions.add(Action(label, url))
-        }
-        return actions
-    }
-
-    /**
-     * Puts the entry in the tray, or nothing at all.
-     *
-     * A phone that refused `POST_NOTIFICATIONS` has switched this app's notifications off, and that
-     * is a no-op rather than a crash: the grant is asked for by the app's own Notifications switch,
-     * and a push that arrives before it is answered is news the reader has already let go of.
-     */
-    @SuppressLint("MissingPermission")
-    private fun post(tag: String, notice: Notification) {
-        val manager = NotificationManagerCompat.from(this)
-        if (!manager.areNotificationsEnabled()) return
-        try {
-            // The tag is what makes a newer notice about the same thing replace the one still showing.
-            manager.notify(tag, NOTICE_ID, notice)
-        } catch (revoked: SecurityException) {
-            // The grant went between the check and the post.
-        }
-    }
-
-    /** One button a notice carries: what it says, and the link a press posts. */
-    private class Action(val label: String, val url: String)
-
     companion object {
-        /** The id every entry is posted under: the tag is what tells them apart, and what is cleared. */
-        const val NOTICE_ID = 7301
-
-        private const val ACTION_LIMIT = 2
+        /** The category Android files a conversation's shortcut under (`Notification.CATEGORY_MESSAGE`'s). */
+        private const val SHORTCUT_CATEGORY = "android.shortcut.conversation"
 
         /** What fetching a picture may cost the message thread, each way: a couple of seconds, no more. */
         private const val PICTURE_MS = 2_000
-
-        /** A message naming no channel at all still has to name one on Android 8 and later. */
-        private const val FALLBACK_CHANNEL = "gots"
 
         /**
          * The categories that wait on the user, and so may peek: the same list Settings reads, where
          * every one of them is at importance 4 (`PUSH_CATEGORIES` in `src/lib/push-kinds.ts`).
          */
         private val WAITS = setOf("chat_input", "code_input", "room_input", "research_input")
-
-        // The message's data, as `app/netlify/lib/fcm.ts` writes it.
-        private const val KEY_KIND = "kind"
-        private const val KEY_ID = "session_id"
-        private const val KEY_TITLE = "title"
-        private const val KEY_BODY = "body"
-        private const val KEY_ICON = "icon"
-        private const val KEY_BOT = "bot"
-        private const val KEY_CATEGORY = "category"
-        private const val KEY_CHANNEL = "channel"
-        private const val KEY_TAG = "tag"
-        private const val KEY_ACTIONS = "actions"
     }
 }

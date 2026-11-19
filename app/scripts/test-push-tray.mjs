@@ -85,10 +85,13 @@ test("nothing empties the tray: an arrival answers no push", () => {
   assert.doesNotMatch(push, /clearNotifications/, "and nothing clears the tray whole")
   for (const name of ["startWeb", "startNative", "startPush"]) {
     assert.ok(body(name), `${name} is in push.ts`)
+    // What the tray queued with the app closed — a Mark as read, a swipe — is told to the account
+    // (ADR 0169), but nothing here closes an entry: a push leaves by the screen it is about, or by
+    // its tap, and the account is told through `broadcast`, never through a dismissal of its own.
     assert.doesNotMatch(
       body(name),
-      /dismiss/,
-      `${name} answers nothing: a push leaves by the screen it is about, or by its tap`,
+      /dismiss\(|notification\.close\(/,
+      `${name} closes nothing: it only tells the account`,
     )
   }
 })
@@ -158,6 +161,8 @@ function tray() {
   const posted = []
   const opened = []
   const closed = []
+  // The tray as the browser holds it: what was shown and not yet closed, each closing itself.
+  const entries = []
   const scope = {
     setTimeout,
     fetch: async (url, init) => {
@@ -167,8 +172,17 @@ function tray() {
     self: {
       addEventListener: (type, fn) => listeners.push({ type, fn }),
       registration: {
-        showNotification: async (title, options) => shown.push({ title, options }),
-        getNotifications: async () => [],
+        showNotification: async (title, options) => {
+          shown.push({ title, options })
+          const entry = { tag: options.tag, data: options.data, closed: false }
+          entry.close = () => {
+            entry.closed = true
+            closed.push(entry.tag)
+          }
+          entries.push(entry)
+        },
+        getNotifications: async (filter) =>
+          entries.filter((one) => !one.closed && (!filter?.tag || one.tag === filter.tag)),
       },
       clients: { matchAll: async () => [], openWindow: async (path) => opened.push(path) },
     },
@@ -188,6 +202,7 @@ function tray() {
     posted,
     opened,
     closed,
+    entries,
     push: (data) => fire("push", { data: { json: () => data } }),
     press: (event) => fire("notificationclick", event),
   }
@@ -259,4 +274,55 @@ test("a press with no button still opens what the push is about", async () => {
   assert.deepEqual(worker.opened, ["/s/gots-1"], "the chat the push is about")
   assert.deepEqual(worker.posted, [], "a visit answers nothing")
   assert.equal(worker.closed.length, 1)
+})
+
+test("a clear takes the entries about its subject out of the tray, and only those", async () => {
+  const worker = tray()
+  await worker.push({ kind: "approval", session_id: "gots-1", title: "Fix the build" })
+  await worker.push({ kind: "run_done", session_id: "gots-2", title: "Another" })
+  // No push protocol removes another device's notification, so a dismissal travels as a clear and
+  // the worker closes what it is about itself (ADR 0169).
+  await worker.push({ kind: "clear", session_id: "gots-1" })
+  assert.deepEqual(
+    worker.entries.map((one) => [one.tag, one.closed]),
+    [
+      ["session:gots-1", true],
+      ["run_done:gots-2", false],
+      ["gots-clear", true],
+    ],
+    "the subject's own entry leaves, the other thread's stays, and the silent entry closes at once",
+  )
+})
+
+test("a clear that names nothing closes nothing", async () => {
+  const worker = tray()
+  await worker.push({ kind: "approval", session_id: "gots-1", title: "Fix the build" })
+  await worker.push({ kind: "clear" })
+  assert.deepEqual(
+    worker.entries.filter((one) => one.closed),
+    [],
+    "a clear with no subject is nothing to answer",
+  )
+})
+
+test("a tap on what no screen opens carries the subject in the link", async () => {
+  const worker = tray()
+  await worker.push({ kind: "routine_failed", session_id: "job-1", title: "A routine" })
+  const entry = worker.shown[0]
+  await worker.press({
+    notification: { data: plain(entry.options.data), close: () => worker.closed.push(true) },
+  })
+  // A routine and a project name no screen of their own, so the subject rides in the link for the
+  // app to tell the account it is no news (ADR 0169).
+  assert.deepEqual(worker.opened, ["/routines?dismissed=job-1"])
+})
+
+test("a tap on a screen that names its subject needs no link of its own", async () => {
+  const worker = tray()
+  await worker.push({ kind: "run_done", session_id: "gots-1", title: "A reply" })
+  const entry = worker.shown[0]
+  await worker.press({
+    notification: { data: plain(entry.options.data), close: () => worker.closed.push(true) },
+  })
+  assert.deepEqual(worker.opened, ["/s/gots-1"], "the session route syncs and its screen answers")
 })

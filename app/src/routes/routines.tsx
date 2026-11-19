@@ -36,7 +36,7 @@ import { usePoll } from "@/lib/poll"
 import { formatDuration, formatRelative } from "@/lib/format"
 import { describeSchedule } from "@/lib/schedule"
 import { HermesError, controlCronJob, type CronJob } from "@/lib/hermes"
-import { HEADER_BUTTON } from "@/lib/layout"
+import { HEADER_BUTTON, PAGE_BODY } from "@/lib/layout"
 import { INSTALL_PLUGIN } from "@/lib/repo"
 import { tell } from "@/lib/tell"
 import { cn } from "@/lib/utils"
@@ -118,7 +118,9 @@ export function RoutinesPage() {
         }
       />
 
-      <div className="mx-auto flex w-full max-w-2xl flex-col gap-3 px-4 pb-[max(2rem,env(safe-area-inset-bottom))]">
+      <div
+        className={cn(PAGE_BODY, "flex flex-col gap-3 pb-[max(2rem,env(safe-area-inset-bottom))]")}
+      >
         <BotRoutines profile={bot} tick={tick} pollTick={pollTick} filter={filter} />
       </div>
     </div>

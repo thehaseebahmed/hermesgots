@@ -2903,6 +2903,41 @@ export async function setPushMuted(config: HermesConfig, muted: boolean, bot?: s
   })
 }
 
+/**
+ * Tells a bot's plugin a subject is no news on any device (`plugin/push.py`, ADR 0169): its web
+ * subscriptions but this one's are sent a clear, and its ntfy topic is told to drop what it is
+ * still showing. `device` is this device's own id, so it is not told what it already closed.
+ */
+export async function dismissPush(config: HermesConfig, sessionId: string, device?: string) {
+  await request(`${pluginRoot(config.baseUrl)}/push/dismiss`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ session_id: sessionId, ...(device ? { device } : {}) }),
+  })
+}
+
+/**
+ * Hands this phone's notice key to a bot's plugin (`plugin/device_keys.py`, ADR 0168): a press of a
+ * link the relay carried is taken only signed with it. Over the bot's own key, never through the
+ * registry, which could otherwise hand over a key of its own.
+ */
+export async function registerNoticeKey(config: HermesConfig, device: string, key: string) {
+  await request(`${pluginRoot(config.baseUrl)}/push/key`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ device, key }),
+  })
+}
+
+/** Tells a bot's plugin to forget this phone's key: its presses are refused from then on. */
+export async function unregisterNoticeKey(config: HermesConfig, device: string) {
+  await request(`${pluginRoot(config.baseUrl)}/push/key/remove`, {
+    method: "POST",
+    headers: headers(config),
+    body: JSON.stringify({ device }),
+  })
+}
+
 export async function unregisterPush(config: HermesConfig, endpoint: string) {
   await request(`${pluginRoot(config.baseUrl)}/push/remove`, {
     method: "POST",

@@ -18,6 +18,11 @@ that session, or an ancestor of it, is one of the app's chats — the chat compr
 onto, and the chat a subagent forked it off, are both the chat's news — or is the profile's own
 Bot Chat, which is the bot's Main, or carries a chat record, which is how a routine's run is the
 app's news.
+
+No push protocol removes a notification from another device, so a dismissal travels the same roads
+backwards: ``dismiss`` tells this profile's own web subscriptions and its ntfy topic that a subject
+is no news, and ``dismissed`` — an approval settled here — tells the account's Android installs
+through the registry as well. Every device clears its own tray, which is the only tray it can.
 Everything here is best effort and runs on its own thread, so a slow push service never holds up
 Hermes.
 """
@@ -46,14 +51,16 @@ from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
-from . import answers, link, ntfy
+from . import answers, device_keys, link, ntfy
 from .notice import (
     CATEGORIES,
     KINDS,
+    KINDS_BY_NAME,
     LEGACY_CATEGORIES,
     SESSION_KINDS,
     Action,
     Notice,
+    actions_wire,
     carried,
     category_of,
     flatten,
@@ -305,16 +312,18 @@ def _on_screen_devices(path: Path) -> List[str]:
 
 def _relay(path: Path, kind: str, category: str, session_id: str, notice: Notice) -> None:
     """Asks the registry to push to the account's Android installs, if this profile is linked."""
-    home = home_of(path)
-    state = link.load_state(home)
-    if not state.get("token") or state.get("revoked") or not state.get("site"):
+    state = _link_state(path)
+    if state is None:
         return
     fields = carried(notice)
+    # The chat it is about and the buttons that act on it: only the phone's own tray can draw them.
+    conversation = notice.conversation if isinstance(notice, Notice) else {}
     # The phone draws the notice itself (a notification payload is Android's to draw, and its drawing
     # can carry no button), so it is told whose picture to wear and where that picture is: the app's
-    # own file, at the origin its subscription named (`build-badges.mjs` cuts it, and the browser's
-    # tray and ntfy read the same bytes), never the host's address, which may be a tunnel.
-    picture = ntfy.icon(web(path), fields.get("bot"))
+    # own file, at the origin its subscription named, never the host's address, which may be a
+    # tunnel. It is the bot's plain face rather than the badge the browser's tray and ntfy wear:
+    # Android badges a conversation's picture with the app's icon itself.
+    picture = face(web(path), fields.get("bot"))
     answer = None
     for attempt in range(RELAY_TRIES):
         try:
@@ -330,6 +339,7 @@ def _relay(path: Path, kind: str, category: str, session_id: str, notice: Notice
                     # A device that chose ntfy is told there, so a token it left on file stays quiet.
                     "skip": list(dict.fromkeys(_on_screen_devices(path) + ntfy.devices(path)))[:50],
                     **fields,
+                    **conversation,
                     **({"icon": picture} if picture else {}),
                 },
             )
@@ -341,9 +351,24 @@ def _relay(path: Path, kind: str, category: str, session_id: str, notice: Notice
                 continue
             # 503: the site has no Firebase key. Not worth a retry.
             logger.warning("gots: the registry wouldn't push (%s)", error)
-            return
+            break
     if isinstance(answer, dict) and not answer.get("sent") and answer.get("failed"):
         logger.warning("gots: the registry couldn't deliver the push (%s)", answer)
+    if not (isinstance(answer, dict) and answer.get("sent")):
+        # A reply link and the relay's buttons are minted for the relay alone, so ones it put on no
+        # phone — every device on screen or not wanting the category, or a push that never went —
+        # are withdrawn.
+        answers.withdraw(path, conversation.get("reply"))
+        for action in conversation.get("actions") or ():
+            answers.withdraw(path, action.get("url") if isinstance(action, dict) else None)
+
+
+def face(origin: Optional[str], bot: Optional[str]) -> Optional[str]:
+    """This profile's bot's own picture, unbadged, at the app's own origin, or None while either is
+    unknown: what the Android tray wears (``ntfy.icon`` is the badged one, for trays that can't)."""
+    if not origin or not bot:
+        return None
+    return f"{origin}/bots/{bot}/happy.png"
 
 
 def reachable(path: Path) -> bool:
@@ -352,9 +377,16 @@ def reachable(path: Path) -> bool:
     return bool(_rows(path)) or ntfy.target(path) is not None or _linked(path)
 
 
-def _linked(path: Path) -> bool:
+def _link_state(path: Path) -> Optional[Dict[str, Any]]:
+    """The profile's registry link, or None where it is unlinked, revoked or names no site."""
     state = link.load_state(home_of(path))
-    return bool(state.get("token") and not state.get("revoked") and state.get("site"))
+    if not state.get("token") or state.get("revoked") or not state.get("site"):
+        return None
+    return state
+
+
+def _linked(path: Path) -> bool:
+    return _link_state(path) is not None
 
 
 def _deliver(path: Path, kind: str, category: str, session_id: str, notice: Optional[Notice] = None) -> None:
@@ -373,9 +405,14 @@ def _deliver(path: Path, kind: str, category: str, session_id: str, notice: Opti
         elif status is None or status >= 300:
             logger.debug("gots: push to %s answered %s", urllib.parse.urlsplit(row["endpoint"]).netloc, status)
     try:
-        ntfy.deliver(path, kind, category, session_id, notice, _on_screen_devices(path))
+        published = ntfy.deliver(path, kind, category, session_id, notice, _on_screen_devices(path))
     except Exception:
         logger.debug("gots: an ntfy publish failed", exc_info=True)
+        published = None
+    if published is not None and published < 300:
+        # A phone's ntfy tray may still be showing it, and ntfy clears by the pair's sequence id,
+        # so what a dismissal has to name is kept here (`dismiss`).
+        remember(path, category, session_id)
     _relay(path, kind, category, session_id, notice)
 
 
@@ -402,6 +439,157 @@ def clear(path: Path, key: str) -> None:
         conn.execute("DELETE FROM push_seen WHERE key = ?", (key,))
     finally:
         conn.close()
+
+
+# How long a notification an ntfy tray may still be showing is remembered for: the window
+# `push_seen` keeps its own keys for, so a row outlives any entry it could be clearing.
+LIVE_KEEP_MS = 30 * 24 * 3600 * 1000
+
+# A device as the app names one: the id its push identity carries, which a dismissal leaves out.
+DEVICE_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
+def remember(path: Path, category: str, session_id: str) -> None:
+    """Remembers a notification an ntfy tray may still be showing, for `outstanding` to read."""
+    conn = connect(path)
+    try:
+        conn.execute(
+            "INSERT OR REPLACE INTO push_live (category, session_id, at) VALUES (?, ?, ?)",
+            (category, session_id, int(time.time() * 1000)),
+        )
+    finally:
+        conn.close()
+
+
+def outstanding(path: Path, session_id: str) -> List[str]:
+    """The categories a notification about this id may still be showing under.
+
+    ntfy clears a notification by its sequence id, which is the (category, id) pair's own, and a
+    dismissal names only the id — so what a publish went out under is kept here and read back one
+    category at a time. A row older than `LIVE_KEEP_MS` is one nobody dismissed anywhere, and is
+    dropped as it is read.
+    """
+    now = int(time.time() * 1000)
+    conn = connect(path)
+    try:
+        conn.execute("DELETE FROM push_live WHERE at < ?", (now - LIVE_KEEP_MS,))
+        rows = conn.execute(
+            "SELECT category FROM push_live WHERE session_id = ?", (session_id,)
+        ).fetchall()
+    finally:
+        conn.close()
+    # A row is this plugin's own write, but the id it names travels in a clear's address, so it is
+    # held to the list of categories that can be published all the same.
+    return [row[0] for row in rows if row[0] in CATEGORIES]
+
+
+def forget(path: Path, session_id: str, categories: List[str]) -> None:
+    """Forgets the pairs a clear has just dismissed, so the next one has nothing to name. Ones it
+    didn't land on stay behind, and are tried again by the next dismissal of the same id."""
+    if not categories:
+        return
+    conn = connect(path)
+    try:
+        conn.executemany(
+            "DELETE FROM push_live WHERE category = ? AND session_id = ?",
+            [(category, session_id) for category in categories],
+        )
+    finally:
+        conn.close()
+
+
+def _send_clear(row: Dict[str, Any], subject: str) -> Optional[int]:
+    """One clear to one subscription, under a topic of its own: clears collapse with each other and
+    never replace a notification still queued at the push service."""
+    topic = _b64(hashlib.sha256(f"clear:{subject}".encode()).digest()[:18])
+    return send(row, {"kind": "clear", "session_id": subject}, topic)
+
+
+def _clear_ntfy(path: Path, session_id: str) -> int:
+    """Tells the ntfy topic to drop what it is still showing about this id: one clear per category a
+    publish went out under, each naming that pair's own sequence id. Answers how many landed; a
+    profile with no target, or a server that didn't answer, leaves them where they are."""
+    held = ntfy.target(path)
+    if not held:
+        return 0
+    landed: List[str] = []
+    for category in outstanding(path, session_id):
+        status = ntfy.publish_clear(held, ntfy.sequence_id(category, session_id))
+        if status is not None and status < 300:
+            landed.append(category)
+        else:
+            logger.debug(
+                "gots: ntfy at %s answered %s",
+                urllib.parse.urlsplit(held["server"]).netloc,
+                status,
+            )
+    forget(path, session_id, landed)
+    return len(landed)
+
+
+def dismiss(path: Path, body: Dict[str, Any]) -> Dict[str, int]:
+    """A subject dismissed on one device, told to every other this profile reaches: each web
+    subscription that isn't the one that asked is sent a clear, and the ntfy topic is told to drop
+    what it is still showing. Raises ``PushError`` with a message for the app.
+
+    Best effort, like every delivery here — a subscription or a server that didn't answer is asked
+    again by the next dismissal of the same subject.
+    """
+    subject = body.get("session_id")
+    if not isinstance(subject, str) or not subject or len(subject) > 200:
+        raise PushError("Missing session.")
+    device = body.get("device")
+    if device is not None and (not isinstance(device, str) or not DEVICE_ID.match(device)):
+        raise PushError("Not a device.")
+    sent = 0
+    for row in _rows(path):
+        # The device that asked closed its own entry already, and is not told again.
+        if device and row["device"] == device:
+            continue
+        status = _send_clear(row, subject)
+        if status in (404, 410):
+            # The browser dropped the subscription (or the user revoked it).
+            unsubscribe(path, row["endpoint"])
+        elif status is None or status >= 300:
+            logger.debug(
+                "gots: clear to %s answered %s",
+                urllib.parse.urlsplit(row["endpoint"]).netloc,
+                status,
+            )
+        else:
+            sent += 1
+    return {"cleared": sent, "ntfy": _clear_ntfy(path, subject)}
+
+
+def dismissed(path: Path, session_id: str) -> None:
+    """A subject answered on this host — an approval settled, from a button or from a screen — told
+    to every device of the account: this profile's own subscriptions and topic, and, where the
+    profile is linked, the account's Android installs through the registry.
+
+    Nothing is skipped, since the host doesn't know which device pressed, and a clear that matches
+    nothing is a no-op. Runs on the answer's own thread, best effort, like every delivery here.
+    """
+    dismiss(path, {"session_id": session_id})
+    state = _link_state(path)
+    if state is None:
+        return
+    for attempt in range(RELAY_TRIES):
+        try:
+            link.call(
+                state["site"],
+                "POST",
+                "push/dismiss",
+                token=state["token"],
+                body={"session_id": session_id},
+            )
+            return
+        except link.LinkError as error:
+            if error.status == 429 and attempt + 1 < RELAY_TRIES:
+                # The registry takes one push a second from a host, and news can come in bunches.
+                time.sleep(RELAY_RETRY_SECONDS)
+                continue
+            logger.warning("gots: the registry wouldn't dismiss (%s)", error)
+            return
 
 
 def _gots_chat(path: Path, session_id: str) -> bool:
@@ -533,18 +721,24 @@ def _lineage(path: Path, session_id: str) -> List[str]:
     return found
 
 
-def _chat(path: Path, session_id: str) -> Optional[Dict[str, Any]]:
-    """The chat list record of this session's chat, as the app last synced it."""
+def _chat_entry(path: Path, session_id: str) -> Optional[Tuple[str, Dict[str, Any]]]:
+    """This session's chat as the app last synced it: its id and its chat list record."""
     from . import chats
 
     ids = set(_lineage(path, session_id))
-    for entry in chats.read(path).values():
+    for chat_id, entry in chats.read(path).items():
         value = entry.get("value")
         if entry.get("deleted") or not isinstance(value, dict):
             continue
         if value.get("hermesSessionId") in ids:
-            return value
+            return chat_id, value
     return None
+
+
+def _chat(path: Path, session_id: str) -> Optional[Dict[str, Any]]:
+    """The chat list record of this session's chat, as the app last synced it."""
+    found = _chat_entry(path, session_id)
+    return found[1] if found else None
 
 
 def thread_muted(path: Path, session_id: str) -> bool:
@@ -569,9 +763,12 @@ def _hermes_title(path: Path, session_id: str) -> Optional[str]:
     return None
 
 
-def session_title(path: Path, session_id: str) -> Optional[str]:
-    """What the user calls the session's chat: the app's title (renames included), else Hermes's."""
-    chat = _chat(path, session_id)
+def session_title(path: Path, session_id: str, chat: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    """What the user calls the session's chat: the app's title (renames included), else Hermes's.
+
+    ``chat`` is that chat's record where the caller has already found it.
+    """
+    chat = chat if chat is not None else _chat(path, session_id)
     title = chat.get("title") if chat else None
     if isinstance(title, str) and title.strip():
         return title
@@ -606,14 +803,71 @@ def _run(
         if muted(path, kind, session_id):
             return
         project = kind in SESSION_KINDS and _project_session(path, session_id)
-        if kind in SESSION_KINDS and not title:
-            title = session_title(path, session_id)
-        notice = Notice(
-            title=_short(title), body=body, bot=bot(path), actions=_buttons(path, answer)
-        )
+        notice = _notice(path, kind, session_id, title, body, answer)
         _deliver(path, kind, category_of(kind, project), session_id, notice)
     except Exception:
         logger.debug("gots: a push failed", exc_info=True)
+
+
+def _notice(
+    path: Path,
+    kind: str,
+    session_id: str,
+    title: Optional[str],
+    body: Optional[str],
+    answer: Optional[Dict[str, Any]],
+) -> Notice:
+    """The whole notice one piece of news makes: its words, its bot, its buttons and the part only
+    the Android tray draws, built in one place so every transport is handed the same value."""
+    conversation: Dict[str, Any] = {}
+    if kind in SESSION_KINDS:
+        # The chat the news is about, found through the lineage the title already walks: the phone
+        # keys its conversation entry and its shortcut by it, and can't find it from a session that
+        # compression moved on.
+        found = _chat_entry(path, session_id)
+        if found:
+            conversation["chat"] = found[0]
+            if KINDS_BY_NAME[kind].read:
+                # Mark as read covers the activity this notice reports, on the host's clock: the app
+                # holds the chat read through it, since a later sync can write a newer clock of its own.
+                conversation["read"] = True
+                conversation["at"] = int(time.time() * 1000)
+            reply = _reply(path, kind, session_id, *found)
+            if reply:
+                conversation["reply"] = reply
+        if not title:
+            title = session_title(path, session_id, found[1] if found else None)
+    if answer:
+        # The relay's own pair, signed, since whoever relays a push to Android can read it; the
+        # browser's buttons ride Web Push, which is encrypted to the browser itself. A profile no
+        # phone has handed a key to draws no button on Android rather than one anyone could press.
+        conversation["actions"] = actions_wire(_relay_buttons(path, answer))
+    return Notice(
+        title=_short(title),
+        body=body,
+        bot=bot(path),
+        actions=_buttons(path, answer),
+        conversation=conversation,
+    )
+
+
+def _reply(path: Path, kind: str, session_id: str, chat_id: str, chat: Dict[str, Any]) -> Optional[str]:
+    """The reply link a chat's notice carries, where a kind takes one and someone could press it.
+
+    Only the relay to Android draws a reply, so a profile not linked to the registry mints none —
+    a credential no transport carries is one nobody can press — nor one no phone has handed a key
+    to, since a reply link is pressed only with a phone's signature; and a chat the user is done with
+    takes none, since a turn queued there would reopen work they put away. The turn goes on the
+    session the chat names, which is the one its record keeps however compression moved it on.
+    """
+    if not KINDS_BY_NAME[kind].reply or not _signs(path):
+        return None
+    from . import chats
+
+    if chats.closed({"value": chat}):
+        return None
+    root = chat.get("hermesSessionId") if isinstance(chat.get("hermesSessionId"), str) else session_id
+    return answers.reply_link(path, root, chat_id, base(path))
 
 
 def _buttons(path: Path, answer: Optional[Dict[str, Any]]) -> Tuple[Action, ...]:
@@ -626,6 +880,20 @@ def _buttons(path: Path, answer: Optional[Dict[str, Any]]) -> Tuple[Action, ...]
     if not answer:
         return ()
     return answers.mint(path, answer, base(path), TTL_SECONDS)
+
+
+def _relay_buttons(path: Path, answer: Dict[str, Any]) -> Tuple[Action, ...]:
+    """The approval buttons the relay carries: a pair of its own, pressed only with a phone's
+    signature (``device_keys``), and none where no phone could sign one."""
+    if not _signs(path):
+        return ()
+    return answers.mint(path, answer, base(path), TTL_SECONDS, signed=True)
+
+
+def _signs(path: Path) -> bool:
+    """Whether a link the relay carries could be pressed: the profile is linked to the registry and
+    a phone has handed it a key to sign with."""
+    return _linked(path) and device_keys.held(path)
 
 
 # Where the app dialled this bot, as `POST push` and `POST push/ntfy` keep it: the scheme and host,

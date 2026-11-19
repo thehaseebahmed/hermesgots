@@ -1,17 +1,30 @@
 /**
- * The reading column a chat's non-card parts carry: the 672px box's own 640px of text, centred in
- * the pane, so text lands on the same pixels at every width and a chat reads at the measure the
- * app's list screens read at (`max-w-2xl`, 672px with their own 16px gutters inside it).
- * A card the app draws inside a chat takes COLUMN_BOX instead — it fills its container up to that
- * box and never past it (ADR 0047, superseding ADR 0041; the measure itself ADR 0114).
+ * The one column a chat and a list screen draw in: a 672px box centred in the pane, its gutters
+ * outside it, so the header, a reply's text, a card and a list's rows all start on the header's
+ * leading edge at every width (ADR 0166, amending ADR 0114). A card fills it, and never passes it
+ * (ADR 0047).
  */
-export const COLUMN = "mx-auto w-full max-w-[640px]"
+export const COLUMN = "mx-auto w-full max-w-[672px]"
 
 /**
- * The box COLUMN is the interior of, and the width no in-chat card passes: the two differ by the
- * 16px gutters either side of the text, so a card capped here frames the text measure exactly.
+ * A thread's gutters inside a chat's scroller: 16px on the left, and 16px less the scrollbar's own
+ * width on the right (the scroller root's width, `100cqw`, less the content box's, `100%`), so the
+ * thread's box is the header's box at every width and the column centres on the pane as the header
+ * does (ADR 0166). An overlay scrollbar takes no width and leaves both gutters 16px.
  */
-export const COLUMN_BOX = "mx-auto w-full max-w-[672px]"
+export const THREAD_GUTTER = "pl-4 pr-[max(0px,calc(1rem_-_(100cqw_-_100%)))]"
+
+/**
+ * A screen's box with room for its 16px gutters outside the column: what a screen holding its own
+ * header lays its parts in, each carrying those gutters itself (ADR 0166).
+ */
+export const PAGE = "mx-auto w-full max-w-[704px]"
+
+/**
+ * A list screen's body: the column with its 16px gutters outside the box, so its rows start on the
+ * same pixel as its header (`px-4` around a `COLUMN` row) instead of 16px inside it (ADR 0166).
+ */
+export const PAGE_BODY = `${PAGE} px-4`
 
 /**
  * The round outline button a header bar wears — a Project's menu, a chat's options, a canvas's Undo,
@@ -26,7 +39,7 @@ export const COMPOSER_SLOT = "px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]
 /**
  * The inset every part of a reply stands on — its text, the interface a block draws, the rows that
  * account for its work — so one edge serves them all and a block starting to draw moves nothing
- * (ADR 0058). A card fills COLUMN_BOX to its own gutters instead (ADR 0047).
+ * (ADR 0058). A card fills COLUMN instead (ADR 0047).
  */
 export const REPLY_INSET = "px-1"
 

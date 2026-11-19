@@ -12,6 +12,22 @@ that answers nothing. ``redeem`` claims a row in one statement, so two presses r
 answer, and it answers what happened — the row it spent, a token this profile never minted, or one
 already spent or expired — which is what lets the route say 404 or 410 rather than pretend it answered.
 
+The mechanics are separate from that vocabulary: ``issue`` mints one link for a choice and a
+target, ``claim`` redeems one only within the choices its caller allows, and ``release`` gives one
+back. An approval's ``mint`` and ``redeem`` are those mechanics held to ``once`` and ``deny``, so a
+link minted for another purpose answers nothing at the approval's route, and an approval's at none
+other.
+
+A reply typed in the Android tray is the same mechanics for one more purpose: ``reply_link`` mints
+one link per chat's notice whose target is that chat and its session, living a day rather than the
+push's ten minutes since a tray entry outlives its push, and ``redeem_reply`` claims it only as a
+reply — so it queues one turn of text on that chat and answers no approval.
+
+A link the relay to Android carries is ``signed``: the registry and Firebase can read what they relay,
+so its route takes a press only with a signature from a phone's own key (``device_keys``, ADR 0168),
+checked through ``needs_signature`` before the token is claimed. Every reply link is one; the browser's
+buttons ride Web Push, encrypted to the browser, and are a press alone.
+
 Nothing here logs a token or writes one down: the address comes from the host the app dialled
 (``push.base``), a token is built into its button's link and kept only as its hash, and the route that
 redeems it never says it.
@@ -23,7 +39,7 @@ import hashlib
 import json
 import secrets
 from pathlib import Path
-from typing import Any, Dict, List, NamedTuple, Optional, Tuple
+from typing import Any, Collection, Dict, NamedTuple, Optional, Tuple
 
 from .notice import Action
 from .store import connect, now_ms
@@ -41,6 +57,15 @@ PATH = "/push/answer/"
 # What a target is: a run's approval, or one room member's.
 RUN = "run"
 ROOM = "room"
+
+# A reply typed in the Android tray: one link a notice carries, answering one turn of text on one
+# chat. Its own choice, so a reply link answers nothing at the approval's route and an approval's
+# nothing at the reply's.
+REPLY = "reply"
+REPLY_PATH = "/push/reply/"
+# A tray entry outlives the push that drew it (``push.TTL_SECONDS`` is how long the push service
+# holds it undelivered), and a reply is typed when the reader gets to it, so its link lives a day.
+REPLY_SECONDS = 24 * 3600
 
 # What a press found. ``ANSWERED`` is the one outcome that settles anything.
 ANSWERED = "answered"
@@ -97,38 +122,61 @@ def room_target(room_id: Any, wait: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     }
 
 
-def mint(
-    path: Path, target: Optional[Dict[str, Any]], base: Optional[str], seconds: int
-) -> Tuple[Action, ...]:
-    """The buttons one approval's notice carries: Allow once and Deny, and nothing else.
+def issue(
+    path: Path, choice: str, target: Dict[str, Any], seconds: int, signed: bool = False
+) -> str:
+    """Mints one link: a token that answers ``choice`` for ``target``, once, for ``seconds``.
 
-    Each is a token of its own, kept hashed and expiring ``seconds`` from now — the push's own TTL, so
-    a button lives exactly as long as the tray entry that carries it. Spent and expired rows are
-    dropped here, which is the only place the table grows.
+    ``signed`` is a link the relay carries: a press redeems it only with a signature from a phone
+    this bot knows (``device_keys.verify``), since whoever relays the push can read the link.
 
-    No address means no buttons at all: a button that cannot be pressed is worse than no button.
+    The token is returned once and kept only as its hash, so the caller builds it into the one link
+    it rides on and nothing else ever holds it. Spent and expired rows are dropped here, which is the
+    only place the table grows.
     """
-    if not isinstance(target, dict) or not base or not seconds:
-        return ()
     now = now_ms()
-    expires = now + seconds * 1000
-    carried = json.dumps(target, separators=(",", ":"))
+    token = secrets.token_urlsafe(32)
     conn = connect(path)
     try:
         conn.execute(
             "DELETE FROM answer_tokens WHERE expires_at <= ? OR used_at IS NOT NULL", (now,)
         )
-        actions: List[Action] = []
-        for choice in CHOICES:
-            token = secrets.token_urlsafe(32)
-            conn.execute(
-                "INSERT INTO answer_tokens (token, choice, target, expires_at) VALUES (?, ?, ?, ?)",
-                (digest(token), choice, carried, expires),
-            )
-            actions.append(Action(LABELS[choice], f"{base}{PATH}{token}"))
+        conn.execute(
+            "INSERT INTO answer_tokens (token, choice, target, expires_at, signed)"
+            " VALUES (?, ?, ?, ?, ?)",
+            (
+                digest(token),
+                choice,
+                json.dumps(target, separators=(",", ":")),
+                now + seconds * 1000,
+                1 if signed else 0,
+            ),
+        )
     finally:
         conn.close()
-    return tuple(actions)
+    return token
+
+
+def mint(
+    path: Path,
+    target: Optional[Dict[str, Any]],
+    base: Optional[str],
+    seconds: int,
+    signed: bool = False,
+) -> Tuple[Action, ...]:
+    """The buttons one approval's notice carries: Allow once and Deny, and nothing else.
+
+    Each is a token of its own, expiring ``seconds`` from now — the push's own TTL, so a button lives
+    exactly as long as the tray entry that carries it.
+
+    No address means no buttons at all: a button that cannot be pressed is worse than no button.
+    """
+    if not isinstance(target, dict) or not base or not seconds:
+        return ()
+    return tuple(
+        Action(LABELS[choice], f"{base}{PATH}{issue(path, choice, target, seconds, signed)}")
+        for choice in CHOICES
+    )
 
 
 def _target(carried: Any) -> Optional[Dict[str, Any]]:
@@ -139,31 +187,36 @@ def _target(carried: Any) -> Optional[Dict[str, Any]]:
     return target if isinstance(target, dict) else None
 
 
-def redeem(path: Path, token: Any) -> Claim:
+def claim(path: Path, token: Any, allowed: Collection[str]) -> Claim:
     """Claims the row one press is worth, answering what happened to it.
+
+    Only a row whose choice is one of ``allowed`` can be claimed: a link is redeemed by the route
+    for its own purpose, so a token minted for one purpose answers nothing at another's.
 
     One statement sets ``used_at`` only where the row is unspent, unexpired and one of ours, so of two
     presses racing exactly one changes a row and the other is told it was spent. The row is what says
-    the run, the room member and the choice: nothing a request carries can widen or change them.
+    the target and the choice: nothing a request carries can widen or change them.
     """
-    if not isinstance(token, str) or not token:
+    choices = tuple(allowed)
+    if not isinstance(token, str) or not token or not choices:
         return Claim(UNKNOWN)
     now = now_ms()
     key = digest(token)
+    marks = ", ".join("?" for _ in choices)
     conn = connect(path)
     try:
         changed = conn.execute(
             "UPDATE answer_tokens SET used_at = ? WHERE token = ? AND used_at IS NULL"
-            " AND expires_at > ? AND choice IN (?, ?)",
-            (now, key, now, *CHOICES),
+            f" AND expires_at > ? AND choice IN ({marks})",
+            (now, key, now, *choices),
         ).rowcount
         row = conn.execute(
             "SELECT choice, target FROM answer_tokens WHERE token = ?", (key,)
         ).fetchone()
     finally:
         conn.close()
-    if row is None or row[0] not in CHOICES:
-        # No such token, or a row this build never minted: no button carries a third choice.
+    if row is None or row[0] not in choices:
+        # No such token, or one minted for another purpose: it answers nothing here.
         return Claim(UNKNOWN)
     target = _target(row[1])
     if target is None:
@@ -171,6 +224,63 @@ def redeem(path: Path, token: Any) -> Claim:
     if changed != 1:
         return Claim(SPENT)
     return Claim(ANSWERED, row[0], target)
+
+
+def redeem(path: Path, token: Any) -> Claim:
+    """Claims an approval's button: a press answers ``once`` or ``deny``, and no third choice."""
+    return claim(path, token, CHOICES)
+
+
+def reply_link(path: Path, session_id: str, chat_id: str, base: Optional[str]) -> Optional[str]:
+    """The one reply link a chat's notice carries: a turn of text on ``session_id``, for a day.
+
+    No address means no link, for the reason ``mint`` gives: a link nobody can reach is a
+    credential with nothing to show for it.
+    """
+    if not base or not session_id or not chat_id:
+        return None
+    target = {"kind": REPLY, "session_id": session_id, "chat": chat_id}
+    # Only the relay carries a reply, so every reply link is a signed one.
+    return f"{base}{REPLY_PATH}{issue(path, REPLY, target, REPLY_SECONDS, signed=True)}"
+
+
+def withdraw(path: Path, link: Any) -> None:
+    """Takes back a link that was minted and never pressed, because nothing carried it to a phone.
+
+    Unlike ``release``, which gives a spent press back, this ends an unspent one: a reply link the
+    relay delivered to no device is a live credential nobody can press, which is the one thing a
+    link must never be.
+    """
+    if not isinstance(link, str) or not link or not path.exists():
+        return
+    token = link.rsplit("/", 1)[-1]
+    conn = connect(path)
+    try:
+        conn.execute(
+            "DELETE FROM answer_tokens WHERE token = ? AND used_at IS NULL", (digest(token),)
+        )
+    finally:
+        conn.close()
+
+
+def needs_signature(path: Path, token: Any) -> bool:
+    """Whether a press of this token must be signed: asked before it is claimed, so a press the
+    route refuses for want of a signature spends nothing."""
+    if not isinstance(token, str) or not token or not path.exists():
+        return False
+    conn = connect(path)
+    try:
+        row = conn.execute(
+            "SELECT signed FROM answer_tokens WHERE token = ?", (digest(token),)
+        ).fetchone()
+    finally:
+        conn.close()
+    return bool(row and row[0])
+
+
+def redeem_reply(path: Path, token: Any) -> Claim:
+    """Claims a reply link: it answers a reply, and nothing an approval's button could."""
+    return claim(path, token, (REPLY,))
 
 
 def release(path: Path, token: Any) -> None:

@@ -48,7 +48,7 @@ import { failed } from "@/lib/refusal"
 import { useRefusal } from "@/lib/use-refusal"
 import { tell } from "@/lib/tell"
 import type { HermesConfig } from "@/lib/hermes"
-import { COLUMN_BOX } from "@/lib/layout"
+import { COLUMN } from "@/lib/layout"
 import {
   canRecord,
   joinText,
@@ -759,7 +759,7 @@ export function Composer({
 
   if (dictation.status !== "idle") {
     return (
-      <div className={COLUMN_BOX}>
+      <div className={COLUMN}>
         <VoiceBar
           status={dictation.status}
           levels={dictation.levels}
@@ -886,7 +886,7 @@ export function Composer({
       onDragOver={dragging}
       onDragLeave={() => setOver(false)}
       onDrop={dropped}
-      className={`${COLUMN_BOX} relative`}
+      className={`${COLUMN} relative`}
     >
       {menu === "slash" && (
         <SlashMenu

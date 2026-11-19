@@ -107,8 +107,7 @@ spacing:
   lg: 24px
   xl: 32px
   gutter: 16px
-  column: 640px
-  column-box: 672px
+  column: 672px
   touch: 44px
   row: 56px
   field: 48px
@@ -350,10 +349,10 @@ The app is laid out for a **390px phone** first, then a 768px tablet, then a lap
 sheet; from 1024px the list takes a rail and the item stands beside it, and a sheet becomes a side
 drawer.
 
-- **The reading column is 640px of text inside a 672px box.** The box is what an in-chat card fills
-  and the width no card passes; the 16px gutters either side of the text are the difference, so a
-  card frames the measure exactly. A chat's words stand on that measure at every screen width, which
-  is the measure the list screens read at too.
+- **The reading column is a 672px box, with its 16px gutters outside it.** A chat's header, its
+  words and its cards, and a list screen's header and rows, all stand on that box, so they start on
+  the same pixel at every screen width. Where the pane is wider than the box, the box centres on the
+  pane, and a chat's thread gives up the scrollbar's width from its right gutter so it does too.
 - **A reply is one column.** Its text, the interface a block draws and the rows that account for its
   work all stand on the same inset, so a block starting to draw moves nothing.
 - **Gutters are 16px**, and 12px at the foot of a composer. Nothing scrolls sideways.
@@ -451,7 +450,7 @@ words, once.
   `{colors.warning}` as text scores 2.55:1.
 - Do keep every target 44px tall, every row 56px, and every typed field at 16px.
 - Do keep the foot of the screen clear of the phone's bar with `env(safe-area-inset-bottom)`.
-- Do hold text to the 640px column, and cards to its 672px box.
+- Do hold text, cards and list rows to the 672px column, starting on the header's leading edge.
 - Don't hardcode a colour. A literal is not a token and it breaks in the dark.
 - Don't explain the interface. A title, one muted line, and nothing about why the screen exists.
 - Don't set a paragraph under 15px, a label under 12px, or type into a field under 16px.

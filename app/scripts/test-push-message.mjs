@@ -20,7 +20,7 @@ import { memoryStore } from "./netlify-store.mjs"
 
 const ONCE = "https://bot.example/api/plugins/gots/push/answer/once-1"
 const DENY = "https://bot.example/api/plugins/gots/push/answer/deny-1"
-const ICON = "https://hermesgots.dev/bots/nova/notify.png"
+const ICON = "https://hermesgots.dev/bots/nova/happy.png"
 
 /** An approval's notice as the plugin relays it: the chat's name, the card's body, the two links. */
 const approval = {
@@ -121,7 +121,7 @@ test("the body a plugin sent is what the phone shows, over the table's line", ()
 
 test("the badged picture and both links ride in the message", () => {
   const { data } = message("t", "approval", "chat_input", "gots-1", approval).message
-  assert.equal(data.icon, ICON, "the one image web push, ntfy and Android all wear")
+  assert.equal(data.icon, ICON, "the bot's plain face, which Android badges itself")
   assert.equal(data.bot, "nova", "so a phone that can't fetch it falls back to the badge it ships")
   assert.deepEqual(
     JSON.parse(data.actions),
@@ -206,6 +206,75 @@ test("the registry bounds a notice and drops what isn't a picture or a link", as
   )
 })
 
+test("the registry forwards a chat id and drops one that isn't an id", async () => {
+  // An approval, which every device takes; every session kind with a chat names it alike.
+  const notice = { kind: "approval", category: "chat_input", session_id: "gots-1", title: "Trip" }
+  const kept = await relay(await setup(), { ...notice, chat: " 6b0f2c1e-9a4d-4c3b-8e2f-1a2b3c4d5e6f " })
+  assert.equal(kept.detail.chat, "6b0f2c1e-9a4d-4c3b-8e2f-1a2b3c4d5e6f", "the chat the phone keys its entry by")
+  assert.equal(
+    message("t", "run_done", "chat_run_done", "gots-1", kept.detail).message.data.chat,
+    "6b0f2c1e-9a4d-4c3b-8e2f-1a2b3c4d5e6f",
+    "and it rides the message to the phone",
+  )
+  for (const chat of ["../../etc", "a b", "x".repeat(257), 42, ""]) {
+    const { status, detail } = await relay(await setup(), { ...notice, chat })
+    assert.equal(status, 200, "a chat that isn't an id costs the notice nothing")
+    assert.equal(detail.chat, undefined, `${JSON.stringify(chat)} is no chat id`)
+  }
+  assert.equal(
+    message("t", "run_done", "chat_run_done", "gots-1").message.data.chat,
+    undefined,
+    "a notice about no chat names none",
+  )
+})
+
+test("the registry forwards a reply link and drops one that isn't http(s)", async () => {
+  const REPLY = "https://bot.example/api/plugins/gots/push/reply/r-1"
+  // The plugin decides which kinds carry one; the registry only bounds it, whatever the kind. An
+  // approval is the kind the device in `setup` takes.
+  const notice = { kind: "approval", category: "chat_input", session_id: "gots-1", title: "Trip" }
+  const kept = await relay(await setup(), { ...notice, chat: "chat-1", reply: ` ${REPLY} ` })
+  assert.equal(kept.detail.reply, REPLY, "the link the tray's Reply posts to")
+  assert.equal(
+    message("t", "run_done", "chat_run_done", "gots-1", kept.detail).message.data.reply,
+    REPLY,
+    "and it rides the message to the phone",
+  )
+  for (const reply of ["javascript:alert(1)", "file:///etc/passwd", "bot.example/reply", 42, ""]) {
+    const { status, detail } = await relay(await setup(), { ...notice, chat: "chat-1", reply })
+    assert.equal(status, 200, "a reply that isn't a link costs the notice nothing")
+    assert.equal(detail.reply, undefined, `${JSON.stringify(reply)} is no link`)
+  }
+  assert.equal(
+    message("t", "run_done", "chat_run_done", "gots-1").message.data.reply,
+    undefined,
+    "a notice with no reply carries none",
+  )
+})
+
+test("the registry forwards read only as a boolean, with the moment it covers", async () => {
+  const AT = 1_763_456_000_000
+  const notice = { kind: "approval", category: "chat_input", session_id: "gots-1", title: "Trip" }
+  const kept = await relay(await setup(), { ...notice, chat: "chat-1", read: true, at: AT })
+  assert.equal(kept.detail.read, true, "Mark as read rides to the phone")
+  assert.equal(kept.detail.at, AT, "with the host's moment of the activity it covers")
+  const data = message("t", "run_done", "chat_run_done", "gots-1", kept.detail).message.data
+  assert.equal(data.read, "true", "a data message carries strings")
+  assert.equal(data.at, String(AT))
+  for (const read of ["true", 1, "yes", {}, null]) {
+    const { status, detail } = await relay(await setup(), { ...notice, chat: "chat-1", read, at: AT })
+    assert.equal(status, 200, "a read that isn't a boolean costs the notice nothing")
+    assert.equal(detail.read, undefined, `${JSON.stringify(read)} is no boolean`)
+  }
+  for (const at of ["1763456000000", -1, 0, 1.5, Number.MAX_VALUE, "x"]) {
+    const { detail } = await relay(await setup(), { ...notice, chat: "chat-1", read: true, at })
+    assert.equal(detail.at, undefined, `${JSON.stringify(at)} is no moment`)
+  }
+  const none = message("t", "run_done", "chat_run_done", "gots-1").message.data
+  assert.equal(none.read, undefined, "a notice with no read carries none")
+  assert.equal(none.at, undefined)
+})
+
 test("the dev mock answers a tray's button the way the plugin does", () => {
   // AGENTS.md requires the mock to serve what the app calls, and this one route no browser flow can
   // reach: nothing in the mock sends a push, so a press is driven from the source it serves. The
@@ -233,5 +302,34 @@ test("the dev mock answers a tray's button the way the plugin does", () => {
     mock,
     /const resolve = pendingApprovals\.get\(held\.runId\)/,
     "and it settles the run that minted the token, as `answers.answer_run` settles one through Hermes's queue",
+  )
+})
+
+test("the dev mock answers a reply the way the plugin does", () => {
+  // As with a button, nothing in the mock sends a push, so the route is held to the source it
+  // serves: the link it matches, the plugin's own words, and a reply queued as the user sending again.
+  const mock = readFileSync(new URL("./mock-hermes.mjs", import.meta.url), "utf8")
+  const plugin = readFileSync(new URL("../../plugin/__init__.py", import.meta.url), "utf8")
+  assert.ok(
+    mock.includes(String.raw`/^\/api\/plugins\/gots\/push\/reply\/([^/]+)$/`),
+    "the mock matches the link the tray's Reply posts to",
+  )
+  for (const said of [
+    "A reply needs some words.",
+    "That reply isn't one this bot sent.",
+    "That reply has already been sent.",
+  ]) {
+    assert.ok(plugin.includes(said), `the plugin answers a reply with "${said}"`)
+    assert.ok(mock.includes(said), `and the mock answers it the same way`)
+  }
+  assert.match(
+    mock,
+    /object: "gots\.push\.reply",\s*\n\s*queued: true/,
+    "a reply answers as the plugin's route does",
+  )
+  assert.match(
+    mock,
+    /queue\.resumedAt = Date\.now\(\)\s*\n\s*queue\.items\.push\(reply\)/,
+    "and it is the user sending again, so a paused queue goes",
   )
 })

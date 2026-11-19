@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react"
 import { App } from "@capacitor/app"
+import { Capacitor, registerPlugin } from "@capacitor/core"
 import type { Importance } from "@capacitor/push-notifications"
 import { liveQuery } from "dexie"
 import { useLiveQuery } from "dexie-react-hooks"
@@ -21,6 +22,9 @@ import {
   registerNtfy,
   registerPush,
   setPushMuted,
+  dismissPush,
+  registerNoticeKey,
+  unregisterNoticeKey,
   unregisterNtfy,
   unregisterPush,
 } from "@/lib/hermes"
@@ -28,6 +32,10 @@ import { hasServer } from "@/lib/connection"
 import { connectionKey, reconnectLive } from "@/lib/live"
 import { isNative } from "@/lib/platform"
 import { quietly } from "@/lib/report"
+import { followHeldReads, takeTrayReads } from "@/lib/tray-marks"
+import { latestReads } from "@/lib/tray-reads"
+import { keyMoves } from "@/lib/notice-keys"
+import { onReturn } from "@/lib/wake"
 import { callFunction, failure, functionUrl } from "@/lib/account"
 import {
   PUSH_CATEGORIES,
@@ -245,15 +253,51 @@ async function dismiss(subject: string) {
       const { notifications } = await push.getDeliveredNotifications()
       const answered = notifications.filter((entry) => aboutSubject(entry, subject))
       if (answered.length) await push.removeDeliveredNotifications({ notifications: answered })
-      return
+    } else {
+      const registration = await navigator.serviceWorker?.getRegistration()
+      if (!registration) return
+      for (const notification of await registration.getNotifications())
+        if (aboutSubject(notification, subject)) notification.close()
     }
-    const registration = await navigator.serviceWorker?.getRegistration()
-    if (!registration) return
-    for (const notification of await registration.getNotifications())
-      if (aboutSubject(notification, subject)) notification.close()
   } catch {
     // An older APK's plugin without the read, or a browser without the Notifications API.
   }
+  // The same subject leaves every other device's tray too (ADR 0169): no push protocol removes
+  // another device's notification, so the account is told and each device clears its own.
+  void broadcast(subject).catch(quietly("Telling the account a dismissal"))
+}
+
+/** What was told this session, and when, so a screen coming back doesn't re-tell the account. */
+const told = new Map<string, number>()
+/** How long one subject's dismissal is remembered before the account is told again. */
+const TELL_AGAIN_MS = 60_000
+
+/**
+ * Tells the account a subject is no news (ADR 0169): the registry, which reaches the account's
+ * Android installs, and every bot's plugin, which reaches its own web subscriptions and its ntfy
+ * topic. This device's own id is named where it has one, so it is not told what it already closed —
+ * an app on the web has none, and every phone of the account is told.
+ *
+ * Best effort, like every other push call here: a host that doesn't know the route yet, or a site
+ * that is away, is asked again by the next dismissal of the same subject.
+ */
+async function broadcast(subject: string) {
+  const now = Date.now()
+  const last = told.get(subject)
+  if (last !== undefined && now - last < TELL_AGAIN_MS) return
+  told.set(subject, now)
+  const { fcm, push: identity } = await getSettings()
+  const device = fcm?.device
+  await callFunction("POST", functionUrl("registry", { route: "dismiss" }), {
+    session_id: subject,
+    ...(device ? { device } : {}),
+  }).catch(() => undefined)
+  const bots = (await listEnabledProfiles()).filter(
+    (bot) => bot.apiKey && bot.baseUrl.trim() && !bot.disabled,
+  )
+  await Promise.all(
+    bots.map((bot) => dismissPush(bot, subject, identity?.device).catch(() => undefined)),
+  )
 }
 
 /**
@@ -298,6 +342,14 @@ function startWeb() {
     if (document.visibilityState !== "visible") return
     soon()
   })
+  // A tap on a push about something no screen opens — a routine, a project — opens the list, and the
+  // worker puts the subject in the link so the account is told it is no news (ADR 0169). The
+  // navigation is a full one, so reading it here at start is the whole of it.
+  const dismissed = new URLSearchParams(location.search).get("dismissed")
+  if (dismissed) {
+    history.replaceState(null, "", location.pathname + location.hash)
+    void broadcast(dismissed).catch(quietly("Telling the account a dismissal"))
+  }
 }
 
 /**
@@ -571,6 +623,13 @@ async function disableNative() {
   await saveSettings({ fcm: { ...fcm, on: false } })
   registeredToken = undefined
   sentCategories = undefined
+  // A phone notified no more is a phone whose presses no bot should take.
+  await Promise.all(
+    (await listProfiles())
+      .filter((bot) => bot.apiKey && bot.baseUrl.trim())
+      .map((bot) => unregisterNoticeKey(bot, fcm.device).catch(() => undefined)),
+  )
+  keyGiven.clear()
   try {
     await callFunction("DELETE", functionUrl("registry", { route: "devices", id: fcm.device }))
     await (await plugin()).push.unregister()
@@ -620,19 +679,133 @@ async function syncNative() {
   soonCategories(fcm.device, () => readPhone(push))
 }
 
+/** The tray's own plugin, as `MainActivity` registers it: the Mark as read presses it queued. */
+const TRAY_PLUGIN = "Tray"
+
+interface TrayPlugin {
+  takeReads(): Promise<{ reads: unknown }>
+  takeDismisses(): Promise<{ dismisses: unknown }>
+  noticeKey(): Promise<{ key: string }>
+}
+
+const Tray = registerPlugin<TrayPlugin>(TRAY_PLUGIN)
+
+/** The presses the tray queued while the page wasn't running; an APK built before the plugin has none. */
+async function trayReads(): Promise<unknown> {
+  if (!Capacitor.isPluginAvailable(TRAY_PLUGIN)) return []
+  return (await Tray.takeReads()).reads
+}
+
+/** The swipes the tray queued while the page wasn't running, each naming the subject it dismissed. */
+async function trayDismisses(): Promise<unknown> {
+  if (!Capacitor.isPluginAvailable(TRAY_PLUGIN)) return []
+  return (await Tray.takeDismisses()).dismisses
+}
+
+/** The subjects the tray queued as swiped away: each row's own, bounded and told once. */
+export function latestDismisses(rows: unknown): string[] {
+  if (!Array.isArray(rows)) return []
+  const subjects = new Set<string>()
+  for (const row of rows) {
+    const subject = (row as { subject?: unknown })?.subject
+    if (typeof subject === "string" && subject && subject.length <= 200) subjects.add(subject)
+  }
+  return [...subjects]
+}
+
+/**
+ * Dismisses on every other device the subjects this phone's tray was told with the app closed: a
+ * Mark as read's chat, and a swipe's own. The read marks stay this device's (`tray-marks.ts`); only
+ * the dismissal crosses (ADR 0169).
+ */
+async function dismissTrayPresses() {
+  const [reads, swipes] = await Promise.all([
+    trayReads().catch(() => []),
+    trayDismisses().catch(() => []),
+  ])
+  const tell = (subject: string) =>
+    broadcast(subject).catch(quietly("Telling the account a dismissal"))
+  await Promise.all([
+    ...latestReads(reads).map(async (read) => {
+      const record = await db.conversations
+        .get(read.chat)
+        .catch(quietly("Reading a tray press's chat"))
+      if (record) await tell(chatSubject(record))
+    }),
+    ...latestDismisses(swipes).map(tell),
+  ])
+}
+
+/** Which bot has been handed which key, by its connection, so a pass posts only what is new. */
+const keyGiven = new Map<string, string>()
+
+/**
+ * Hands this phone's notice key to every bot it is notified by through Firebase (ADR 0168): the tray
+ * signs each Reply and button press with it, and a plugin draws the relay no button and no Reply
+ * until a phone has handed it one. A bot turned off is told to forget it.
+ */
+async function syncNoticeKeys() {
+  const { fcm } = await getSettings()
+  if (!fcm?.on || !nativeConfigured || (await currentTransport()) !== "firebase") return
+  if (!Capacitor.isPluginAvailable(TRAY_PLUGIN)) return
+  let key: string
+  try {
+    key = (await Tray.noticeKey()).key
+  } catch {
+    // An APK built before the key, or a Keystore that couldn't make one: the tray stays buttonless.
+    return
+  }
+  const bots = (await listProfiles()).filter((bot) => bot.apiKey && bot.baseUrl.trim())
+  const byId = new Map(bots.map((bot) => [connectionKey(bot), bot]))
+  const moves = keyMoves(
+    bots.map((bot) => ({ id: connectionKey(bot), disabled: bot.disabled })),
+    keyGiven,
+    key,
+  )
+  const tell = async (id: string, told: string, call: (bot: Profile) => Promise<void>) => {
+    const bot = byId.get(id)
+    if (!bot) return
+    try {
+      await call(bot)
+      keyGiven.set(id, told)
+    } catch {
+      // No plugin, an older one, or the server is away: asked again on the next pass.
+    }
+  }
+  await Promise.all([
+    ...moves.hand.map((id) => tell(id, key, (bot) => registerNoticeKey(bot, fcm.device, key))),
+    ...moves.forget.map((id) => tell(id, "", (bot) => unregisterNoticeKey(bot, fcm.device))),
+  ])
+}
+
 /** On launch and whenever the app returns, a rotated token or a new sign-in is told to the registry. */
 function startNative() {
   const pass = () => {
     void syncNative().catch(() => {})
     void syncNtfy().catch(() => {})
+    void syncNoticeKeys().catch(() => {})
   }
   pass()
   void App.addListener("resume", pass)
+  // A Mark as read pressed with the app closed moves its chat's read mark here, at start and on
+  // every return, and the chats it holds read are followed while their rows catch up.
+  followHeldReads()
+  // Both presses a tray can queue with the app closed — a Mark as read, and a swipe — leave the
+  // phone's tray already, and the subject is dismissed on every other device too (ADR 0169).
+  const drained = () => {
+    void takeTrayReads(trayReads)
+    void dismissTrayPresses()
+  }
+  drained()
+  onReturn(drained)
   // A bot linked or turned off after ntfy was switched on is handed the topic, or told to forget it.
   let timer: number | undefined
   liveQuery(() => db.profiles.toArray()).subscribe(() => {
     window.clearTimeout(timer)
-    timer = window.setTimeout(() => void syncNtfy().catch(() => {}), 1000)
+    timer = window.setTimeout(() => {
+      void syncNtfy().catch(() => {})
+      void syncNoticeKeys().catch(() => {})
+    }, 1000)
   })
   // An ntfy notification is the ntfy app's, so its tap arrives as a link rather than as an action.
   const linked = (url: string | undefined) => {

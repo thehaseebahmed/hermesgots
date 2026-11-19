@@ -42,6 +42,7 @@ from . import (
     compactions,
     context,
     delegation,
+    device_keys,
     dictation,
     dictation_cleanup,
     dictations,
@@ -701,6 +702,9 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     "events",
                     "push",
                     "push_ntfy",
+                    # A phone's key, which a press of a link the relay carried is signed with
+                    # (device_keys.py, ADR 0168): an app that sees it hands its key over.
+                    "push_keys",
                     "host_model",
                     "fallbacks",
                     "delegation_model",
@@ -2585,6 +2589,74 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         await asyncio.to_thread(push.set_web, store_path(), body.get("subject"))
         return web.json_response({"object": "gots.push", "subscribed": True})
 
+    async def unsigned(
+        request: "web.Request", path: Path, token: str, purpose: str, text: str = ""
+    ) -> Optional["web.Response"]:
+        """A 403 for a press of a signed link that a phone this bot knows didn't sign, else None.
+
+        Asked before the link is claimed, so a refused press spends nothing (ADR 0168).
+        """
+        if not await asyncio.to_thread(answers.needs_signature, path, token):
+            return None
+        signed = await asyncio.to_thread(
+            device_keys.verify,
+            path,
+            request.headers.get("X-Gots-Key"),
+            request.headers.get("X-Gots-Signature"),
+            purpose,
+            token,
+            text,
+        )
+        if signed:
+            return None
+        return _error(web, "That press didn't come from a phone this bot knows.", 403)
+
+    async def push_key(request: "web.Request") -> "web.Response":
+        # A phone's public key, handed over with the bot's own key and never through the registry:
+        # what a press of a link the relay carried is signed with (device_keys.py).
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        try:
+            found = await asyncio.to_thread(
+                device_keys.register, store_path(), body.get("device"), body.get("key")
+            )
+        except device_keys.DeviceKeyError as exc:
+            return _error(web, str(exc), 400)
+        # The address a signed press posts back to, as every route the phone calls keeps it.
+        dialled = push.base_url(request, "/push/key")
+        if dialled:
+            await asyncio.to_thread(push.set_base, store_path(), dialled)
+        return web.json_response({"object": "gots.push.key", "key_id": found})
+
+    async def push_key_remove(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        await asyncio.to_thread(device_keys.remove, store_path(), body.get("device"))
+        return web.json_response({"object": "gots.push.key", "removed": True})
+
+    async def push_dismiss(request: "web.Request") -> "web.Response":
+        # A subject dismissed on one device, told to every other this profile reaches: the web
+        # subscriptions that aren't the one that asked, and the ntfy topic (ADR 0169).
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        try:
+            counts = await asyncio.to_thread(push.dismiss, store_path(), body)
+        except push.PushError as exc:
+            return _error(web, str(exc), 400)
+        return web.json_response({"object": "gots.push", **counts})
+
     async def push_answer(request: "web.Request") -> "web.Response":
         # The one route with no key of the account's: the token in the path is the credential, which
         # is what makes an approval answerable from a notification with the app closed. It is
@@ -2601,19 +2673,25 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             except Exception:
                 logger.debug("gots: couldn't give a button back", exc_info=True)
 
+        refused = await unsigned(request, path, token, device_keys.ANSWER)
+        if refused is not None:
+            return refused
         claim = await asyncio.to_thread(answers.redeem, path, token)
         if claim.outcome == answers.UNKNOWN:
             return _error(web, "That button isn't one this bot sent.", 404)
         if claim.outcome == answers.SPENT:
             return _error(web, "That button has already been answered.", 410)
         target, choice = claim.target or {}, claim.choice or ""
+        subject: Optional[str] = None
         try:
             if target.get("kind") == answers.ROOM:
                 # A room member's approval is the Host's to resolve, and its call can block on the
                 # waiting turn, so it runs on a worker thread; a refusal keeps its own status.
+                subject = target.get("room_id")
                 await asyncio.to_thread(answers.answer_room, target, choice, home_of(path))
             elif target.get("kind") == answers.RUN:
                 # A run's approval is answered on the loop, where its status and its stream live.
+                subject = target.get("session_id")
                 if not answers.answer_run(target.get("run_id") or "", choice):
                     # Nothing waiting is the wait's own end, not a failure: the token stays spent.
                     return _error(web, "That approval isn't waiting any more.", 409)
@@ -2625,7 +2703,66 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except Exception:
             await give_back()
             raise
+        if isinstance(subject, str) and subject:
+            # The approval is settled, so it is no news on any device: the subject it was pushed
+            # under — a run's session, a room's own id — is dismissed everywhere (ADR 0169). A press
+            # carries no key of the account's, so the host is the one that tells, on a thread of its
+            # own so the answer isn't held up by it.
+            threading.Thread(
+                target=push.dismissed, args=(path, subject), name="gots-dismiss", daemon=True
+            ).start()
         return web.json_response({"object": "gots.push.answer", "answered": True, "choice": choice})
+
+    async def push_reply(request: "web.Request") -> "web.Response":
+        # A reply typed in the Android tray, with the app closed. Like `push_answer`, the token in the
+        # path is the credential and no account key is asked for, and the route is a POST alone. The
+        # link answers a reply and nothing else (`answers.redeem_reply`), and it queues one turn the
+        # plugin builds itself, so the phone never holds the bot's key and the turn goes whatever
+        # the app is doing.
+        path = store_path()
+        token = request.match_info.get("token") or ""
+        body = await json_body(request)
+        text = body.get("text") if body else None
+        # Read before the link is spent, so a body the route can't take costs the reader nothing.
+        if not isinstance(text, str) or not text.strip():
+            return _error(web, "A reply needs some words.", 400)
+        if len(text) > outbox.MAX_TEXT:
+            return _error(web, "That reply is too long.", 400)
+        refused = await unsigned(request, path, token, device_keys.REPLY, text)
+        if refused is not None:
+            return refused
+        claim = await asyncio.to_thread(answers.redeem_reply, path, token)
+        if claim.outcome == answers.UNKNOWN:
+            return _error(web, "That reply isn't one this bot sent.", 404)
+        if claim.outcome == answers.SPENT:
+            return _error(web, "That reply has already been sent.", 410)
+        target = claim.target or {}
+        session_id, chat_id = target.get("session_id"), target.get("chat")
+        if not isinstance(session_id, str) or not isinstance(chat_id, str):
+            return _error(web, "That reply isn't one this bot sent.", 404)
+        try:
+            chat = await asyncio.to_thread(chats.one, path, chat_id)
+            if chat is None or chats.closed(chat):
+                # Closed since the notice was drawn: a turn there would reopen what the user put away.
+                return _error(web, "That chat is closed.", 409)
+            record = await asyncio.to_thread(sessions.record_for, path, home_of(path), session_id)
+            run = outbox.turn_body(
+                session_id, text, chats.choice(chat), prompt_builder.run_instructions(record)
+            )
+            item = await asyncio.to_thread(
+                outbox.add, path, session_id, _request_profile(), text, [], run, resumed=True
+            )
+        except Exception:
+            # Nothing landed, so the link is given back to be pressed again.
+            try:
+                await asyncio.to_thread(answers.release, path, token)
+            except Exception:
+                logger.debug("gots: couldn't give a reply link back", exc_info=True)
+            raise
+        # No key of the app's: the dispatcher posts with the home's own (`outbox._dispatch_authorization`).
+        outbox.watch(session_id, _request_profile(), path)
+        events.note("session", session_id, path, True)
+        return web.json_response({"object": "gots.push.reply", "queued": True, "item": item["id"]})
 
     async def push_mute(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
@@ -3044,12 +3181,17 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/push", push_subscribe)
     app.router.add_post(f"{PREFIX}/push/remove", push_unsubscribe)
     app.router.add_post(f"{PREFIX}/push/mute", push_mute)
+    app.router.add_post(f"{PREFIX}/push/dismiss", push_dismiss)
+    app.router.add_post(f"{PREFIX}/push/key", push_key)
+    app.router.add_post(f"{PREFIX}/push/key/remove", push_key_remove)
     app.router.add_get(f"{PREFIX}/push/ntfy", push_ntfy_read)
     app.router.add_post(f"{PREFIX}/push/ntfy", push_ntfy_write)
     app.router.add_post(f"{PREFIX}/push/ntfy/remove", push_ntfy_remove)
     # A button's own link (answers.py): the one route outside `unauthorized()`, POST alone, so a
     # read of it spends nothing. Every route gains its /p/<profile> twin with the rest.
     app.router.add_post(f"{PREFIX}/push/answer/{{token}}", push_answer)
+    # A reply typed in the tray: the same kind of link, redeemed only as a reply.
+    app.router.add_post(f"{PREFIX}/push/reply/{{token}}", push_reply)
     app.router.add_post(f"{PREFIX}/runs/{{run_id}}/clarify", answer_clarify)
     async def get_speech(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)

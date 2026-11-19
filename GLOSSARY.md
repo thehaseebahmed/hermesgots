@@ -590,6 +590,18 @@ _Avoid_: HTML preview, web view, document, site
 The files an agent made, kept in a project's own tree and listed by folder — the tab a project opens them from, and the outputs a session filed. A tap opens the file the way a thread does: in the **Previewer** from a **Signed URL**, with the folder's other files it draws behind it so the reader can step through them, or handed to the platform where the Previewer can't draw it. Each of those files is signed when it is looked at, never the folder up front.
 _Avoid_: outputs folder, artifacts, files tab, downloads
 
+**Conversation notice**:
+An Android notice about one chat, drawn by Android as that chat's conversation: the bot's plain face as the sender with the app's icon badged on it, filed under Conversations through a long-lived shortcut per chat. A notice about anything else stays a plain entry.
+_Avoid_: messaging notification, chat notification, large-icon notice
+
+**Reply link**:
+The one-shot link a finished or failed run's conversation notice carries for its inline Reply. Pressing it queues the typed text as a turn on that chat, built by the host, so a reply goes with the app closed. It lives a day, is spent once, is withdrawn when no phone received the notice, and is taken only with a signature from a **Notice key**.
+_Avoid_: reply token, quick reply, reply URL
+
+**Notice key**:
+The P-256 key pair an Android phone makes in its Keystore and hands the public half of to each bot's plugin, over the bot's own key. A link the relay carries — a **Reply link**, or an approval's buttons drawn in the tray — is pressed only with a signature from it, since the registry and Firebase can read what they relay. A profile no phone has handed one to mints the relay no link.
+_Avoid_: device key, push key, signing key
+
 **Signed URL**:
 The address a bot's host mints for one file — a signature over its path, the profile and a few minutes of expiry — which the app draws every photo, clip and recording from, and a file's row opens. It stands in for the bot's key, which an `<img>` or a `<video>` can't send. It is asked for once per file and kept only while the expiry it names is worth drawing from: a page outlives the minutes a signature lives for, so another is minted when one runs out.
 _Avoid_: media link, token URL, blob URL, download link
@@ -813,8 +825,40 @@ A page of plain HTML a bot writes for you, keeps on its host and draws in a sand
 _Avoid_: app, space, studio, gadget, widget, mini-app, artifact
 
 **Canvas session**:
-The one long-lived conversation that belongs to a canvas, reachable only from that canvas. It is never a chat of its bot's list and never a card, and it carries the canvas's name as its title.
-_Avoid_: canvas chat, build session, edit thread
+The one long-lived conversation that belongs to a canvas, reachable only from that canvas. It is never a chat of its bot's list and never a card, and it carries the canvas's name as its title. Where builds are on (ADR 0170) it is where requests are sent, and each one runs in a build rather than on this session.
+_Avoid_: canvas chat, edit thread
+
+**Build**:
+One request's work on a canvas (ADR 0170): a fresh session seeded with the page, the canvas memory and the newest build summaries, which plans, writes a canvas draft, is checked, and publishes at most one version. A request sent while a build is open joins it; a canvas has at most one open build.
+_Avoid_: run, job, task, iteration
+
+**Build plan**:
+What a build will change and how it will be checked, filed by its agent before any write. The agent says whether it waits for the reader's Approve; a message sent while it waits revises it.
+_Avoid_: spec, proposal, brief
+
+**Canvas draft**:
+The page a build writes, kept in the canvas folder and never drawn to the reader; it becomes a version only when its build publishes.
+_Avoid_: draft (a composer's unsent text), working copy, staging
+
+**Canvas folder**:
+A canvas's own place in its host's plugin data, holding its draft, plans, tests and memory: capped, deleted with the canvas, and never served to its page.
+_Avoid_: workspace, worktree, sandbox
+
+**Canvas memory**:
+The requirements and decisions a canvas's builds keep in its folder, read by every build.
+_Avoid_: notes, context, history
+
+**Check report**:
+What the host found when it drew a build's draft the way the app does (ADR 0171): each test's result, the console's errors and the screenshots, posted to the build as its next turn.
+_Avoid_: test run, lint, review
+
+**Check flag**:
+What a published version says of its checks: passing, failing (still failing after the build's rounds) or unchecked (its host had no browser).
+_Avoid_: status, badge, health
+
+**Build summary**:
+A build's final reply: what changed, kept on the version it published, drawn in the canvas's lane and carried into later builds.
+_Avoid_: changelog, recap, description
 
 **Canvas preview**:
 The screen a canvas opens on: its page drawn in its frame, and on a wide screen its canvas session beside it. A canvas that has no version yet has nothing to preview, so a phone opens its edit screen instead.
@@ -825,7 +869,7 @@ A page of its own that holds a canvas's session and nothing else, opened from th
 _Avoid_: edit mode, drawer, sheet, full-screen chat
 
 **Version**:
-One saved state of a canvas's HTML, made by every write its bot does. Undo steps back to the one before; a canvas's data is not part of a version.
+One saved state of a canvas's HTML. Where builds are on, each build publishes one, carrying its requests, its build summary and its check flag; otherwise every write its bot does makes one. Undo steps back to the one before; a canvas's data is not part of a version.
 _Avoid_: revision, snapshot, draft
 
 **Canvas data**:

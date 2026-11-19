@@ -17,7 +17,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from plugin import link, ntfy, push
+from plugin import chats, link, ntfy, push
 from plugin.notice import Action, Notice
 from plugin.store import db_path
 
@@ -325,6 +325,60 @@ class BothTransports(Env):
             push._deliver(self.path, "question", "chat_input", "gots-1", {"title": "A chat"})
         self.assertEqual([body["title"] for body in published], ["A chat"])
         self.assertEqual(relayed[0]["skip"], ["phone-1"])
+
+    def each_transport(self, notice=None, run=None):
+        """What a push of this notice puts on each wire: the Web Push payload, the ntfy publish (its
+        JSON and its headers) and the registry's relay body. ``run`` sends it some other way than
+        handing ``_deliver`` a notice — the whole path a piece of news takes, say."""
+        conn = push.connect(self.path)
+        conn.execute(
+            "INSERT OR REPLACE INTO push_subscriptions (endpoint, device, p256dh, auth, vapid_key, subject,"
+            " created_at, categories) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            ("https://push.example/1", "browser-1", "k", "a", "v", "mailto:a@b.c", 1, '["chat_run_done"]'),
+        )
+        conn.close()
+        ntfy.set_target(self.path, {**TARGET, "categories": ["chat_run_done"]})
+        push.set_web(self.path, APP)
+        web, published, relayed = [], [], []
+        with mock.patch.object(push, "send", lambda row, payload, topic: web.append(payload) or 201), \
+            mock.patch.object(ntfy, "publish", lambda held, body, extra=None: published.append((body, extra)) or 200), \
+            mock.patch.object(link, "load_state", lambda home: {"token": "mh_x", "site": "https://app.example"}), \
+            mock.patch.object(link, "call", lambda site, method, route, token=None, body=None: relayed.append(body) or {"sent": 1}):
+            if run is None:
+                push._deliver(self.path, "run_done", "chat_run_done", "gots-1", notice)
+            else:
+                run()
+        return web, published, relayed
+
+    def test_a_sessions_notice_names_its_chat_on_the_relay_and_nowhere_else(self):
+        """The phone keys its conversation entry by the chat, and only the phone draws one: the chat's
+        id rides the relay to Android, found through the chat list the title is read from."""
+        chats.merge(self.path, {"chat-1": {"at": 1, "value": {"title": "Trip", "hermesSessionId": "gots-1"}}})
+        web, published, relayed = self.each_transport(
+            run=lambda: push._run(self.path, "run_done", "gots-1", body="Booked.")
+        )
+        self.assertEqual(relayed[0]["chat"], "chat-1", "the relay names the chat the news is about")
+        self.assertEqual(relayed[0]["title"], "Trip")
+        self.assertNotIn("chat", web[0], "Web Push draws no conversation")
+        self.assertNotIn("chat-1", json.dumps(published), "nor does ntfy, in its JSON or its headers")
+
+    def test_a_session_whose_chat_is_not_known_names_no_chat(self):
+        _, _, relayed = self.each_transport(
+            run=lambda: push._run(self.path, "run_done", "gots-unknown", body="Booked.")
+        )
+        self.assertNotIn("chat", relayed[0], "a notice with no chat keeps today's entry")
+
+    def test_web_push_and_ntfy_carry_exactly_what_they_carried_before(self):
+        """The conversation part is the Android tray's alone: neither Web Push nor ntfy can draw a
+        reply or a read button, so a link minted for them would be a credential nobody can press."""
+        words = dict(title="Trip", body="Booked.", bot="nova", actions=(Action("Open", ONCE),))
+        before = self.each_transport(Notice(**words))
+        after = self.each_transport(Notice(**words, conversation={"chat": "chat-1", "read": True}))
+        self.assertEqual(after[0], before[0], "Web Push carries no conversation part")
+        self.assertEqual(after[1], before[1], "nor does ntfy, in its JSON or its headers")
+        self.assertEqual(
+            after[2][0], {**before[2][0], "chat": "chat-1", "read": True}, "the relay to Android does"
+        )
 
     def test_a_muted_bot_publishes_nothing_on_any_transport(self):
         ntfy.set_target(self.path, {**TARGET, "categories": ["chat_input"]})

@@ -1,5 +1,7 @@
 # A chat reads at the width the list screens read at
 
+**Amended by [ADR 0166](0166-a-chat-and-a-list-stand-on-their-headers-edge.md)** (2026-11-18): the column is the 672px box itself, its gutters outside it, for a chat and the list screens alike, so their words and rows start on the header's edge.
+
 A chat's text was 736px inside a 768px box (ADR 0047), while every list screen — Code, Research,
 Routines, Meetings and the apps — centres `max-w-2xl`: a 672px box with its own 16px gutters
 inside it. So moving between a chat and Code changed the measure by 64px for no reason a reader

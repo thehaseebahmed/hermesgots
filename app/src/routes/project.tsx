@@ -48,7 +48,8 @@ import {
   type PullRequestRef,
 } from "@/lib/db"
 import { usePluginFeatureOn } from "@/lib/features"
-import { HEADER_BUTTON } from "@/lib/layout"
+import { HEADER_BUTTON, PAGE } from "@/lib/layout"
+import { cn } from "@/lib/utils"
 import { useChanges, useLive } from "@/lib/live"
 import { setBackGuard } from "@/lib/native"
 import { useNav } from "@/lib/nav"
@@ -167,7 +168,7 @@ export function ProjectPage() {
   const ready = profile && project?.status === "ready"
 
   return (
-    <div className="mx-auto flex min-h-0 w-full max-w-2xl flex-1 flex-col">
+    <div className={cn(PAGE, "flex min-h-0 flex-1 flex-col")}>
       <ChatHeader
         className="relative pb-2"
         title={project?.name ?? ""}
@@ -259,7 +260,7 @@ export function ProjectPage() {
           onDelete={() => setDeleting(true)}
         />
       ) : (
-        <Tabs value={tab} onValueChange={setTab} className="flex-1">
+        <Tabs value={tab} onValueChange={setTab} className="flex-1 px-4">
           <TabsList>
             <TabsTrigger value="library">Library</TabsTrigger>
             <TabsTrigger value="prs">Pull requests</TabsTrigger>
@@ -267,18 +268,16 @@ export function ProjectPage() {
           </TabsList>
           <TabsContent value="library" className="flex-1 overflow-y-auto">
             {server && (
-              <div className="mx-auto w-full max-w-2xl">
-                <LibraryTab
-                  config={server}
-                  projectId={projectId}
-                  titles={titles}
-                  active={tab === "library"}
-                />
-              </div>
+              <LibraryTab
+                config={server}
+                projectId={projectId}
+                titles={titles}
+                active={tab === "library"}
+              />
             )}
           </TabsContent>
           <TabsContent value="prs" className="overflow-y-auto">
-            <div className="mx-auto w-full max-w-2xl px-4 py-6">
+            <div className="py-6">
               {sessions && prs.length === 0 ? (
                 <p className="px-1 text-sm text-muted-foreground">No pull requests yet.</p>
               ) : (
