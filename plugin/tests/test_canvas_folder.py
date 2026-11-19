@@ -109,7 +109,7 @@ class KeptFileTest(unittest.TestCase):
             "..",
             "plans/today.md",
             "draft.html\x00.txt",
-            "x" * (canvases.NAME_CHARS + 1),
+            "x" * (canvases.FILE_NAME_CHARS + 1),
         ):
             with self.subTest(name=name):
                 with self.assertRaises(canvases.CanvasError) as refused:

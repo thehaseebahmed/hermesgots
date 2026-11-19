@@ -2,10 +2,12 @@
  * The page's own classes, compiled: Tailwind v4 over the tokens the page is handed
  * (`canvas-document.ts`), so a canvas is styled by the app's theme rather than by a copy of it.
  *
- * The compiler runs in the app, not on a build: `tailwindcss/index.css` is self-contained, so the
- * app's copy of it is the base, `CANVAS_THEME` names every token, and the only candidates are the
- * classes the page's markup carries — the guide tells a bot exactly that. Nothing is scanned from
- * disk, so the browser needs no native scanner and the frame gets plain CSS rather than a runtime.
+ * The app compiles with its own `tailwindcss/index.css`, which is self-contained, so its copy is
+ * the base, `CANVAS_THEME` names every token, and the only candidates are the classes the page's
+ * markup carries — the guide tells a bot exactly that. Nothing is scanned from disk, so the browser
+ * needs no native scanner and the frame gets plain CSS rather than a runtime. The class compile
+ * takes its compiler as an argument so the host's harness page can carry the same code in its own
+ * bundle (ADR 0171); the app passes what it reads today.
  */
 
 import { compile as appCompiler } from "tailwindcss"

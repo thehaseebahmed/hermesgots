@@ -486,6 +486,23 @@ class WriteTest(unittest.TestCase):
         self.assertEqual(refused.exception.status, 404)
         self.assertIn("no such canvas", str(refused.exception))
 
+    def test_a_write_whose_fields_name_the_tools_is_refused(self) -> None:
+        # The consent list has one door: a tools value smuggled in among the fields would reach
+        # the row unread and the answer as a decode error rather than a refusal.
+        smuggled = {"tools": "not json at all"}
+        with self.assertRaises(canvases.CanvasError) as refused:
+            canvases.write(self.path, self.canvas["id"], DOCUMENT, fields=smuggled)
+        self.assertIn("tools", str(refused.exception))
+        canvases.write(self.path, self.canvas["id"], DOCUMENT)
+        with self.assertRaises(canvases.CanvasError) as refused:
+            canvases.edit(
+                self.path,
+                self.canvas["id"],
+                [{"find": "Tip", "replace": "Split"}],
+                fields=smuggled,
+            )
+        self.assertIn("tools", str(refused.exception))
+
     def test_a_write_answers_with_the_guides_warnings(self) -> None:
         # A warning is advice beside the answer and never a gate: the version is stored, and the bot is
         # told what the guide would say before the user ever sees the page. Nothing here judges a

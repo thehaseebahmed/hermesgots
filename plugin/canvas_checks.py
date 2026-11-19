@@ -41,8 +41,11 @@ def available() -> Optional[str]:
     """
     try:
         from tools import browser_use_cli
-    except Exception:
+    except ImportError:
         return NO_ENTRY
+    except Exception:
+        logger.debug("gots: couldn't import Hermes's browser layer", exc_info=True)
+        return UNREADABLE
     if not callable(getattr(browser_use_cli, "browser_exec", None)):
         return NO_ENTRY
     check = getattr(browser_use_cli, "browser_exec_available", None)

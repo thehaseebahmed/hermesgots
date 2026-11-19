@@ -19,8 +19,8 @@ picture.
 The user's own decisions about a canvas — its name, whether it is pinned to the sidebar and whether
 it is archived out of the list — are the host's record too (``update``), so every device draws the same
 list and a name written there renames the chat with it. A canvas the user deletes is gone whole
-(``delete``): its versions, data and grants, its chat as a tombstone, and the Hermes session it was
-made in.
+(``delete``): its versions, data and grants, the folder it was made with, its chat as a tombstone,
+and the Hermes session it was made in.
 
 A version is the whole document. A small change is a list of find-and-replace pairs applied as one
 version (``edit``), undo moves the record's pointer back one without deleting anything, and a read
@@ -39,6 +39,11 @@ a version the user walks back. It is read a page at a time, a collection at a ti
 lets the whole of it be capped at ``DATA_BYTES`` with one document at ``DOC_MAX_BYTES``; the
 whole-array read an app from before the paged route makes survives, bounded to
 ``LEGACY_DATA_BYTES``.
+
+Each canvas also has a folder of its own under the plugin's data (``keep``, ``folder_of``): the
+draft a build writes, its plans, its tests and its memory. It is made with the canvas and taken with
+it, each file and the whole folder capped, and no route or bridge read reaches it — a page's only
+channel answers the store's own data (G4).
 
 A page calls a tool on the host only when the version it is drawn from declared that tool, and only
 once the user has answered for it: ``may_call`` reads the version's list and the canvas's own grant
@@ -112,10 +117,13 @@ TOOLS_MAX = 50
 # A canvas's own folder under the plugin's data (ADR 0170): the draft a build writes, its plans,
 # its tests and its memory. It is made with the canvas and taken with it, and no route or bridge
 # read reaches it — a page's only channel answers the store's own data (G4).
-FOLDER = ("canvas",)
+FOLDER = "canvas"
 # What one file in a canvas's folder may weigh: a page at most — the same 256 KB a write admits,
 # kept as its own number because the draft is a page and a plan, a test and a memory are not.
 FILE_BYTES = 256 * 1024
+# What one file in a canvas's folder may be named: one plain file name, chosen by the plugin's own
+# writes rather than sent by a page, so the cap is the folder's own too.
+FILE_NAME_CHARS = 64
 # What the whole folder may weigh: the draft, the plans, the tests and the memory one canvas keeps.
 # A canvas keeps one draft and a handful of small files beside it, so four megabytes is room no
 # canvas reaches — and a bound a host can hold, since a canvas that grew without end would be a
@@ -999,7 +1007,7 @@ def write(
 
     ``fields`` are the per-version fields this version carries beyond its document and the tools it
     declares — none a write names today; a build's publish carries the requests it took and its
-    summary here (ADR 0170).
+    summary here (ADR 0170). The tools have their own door: a ``tools`` among the fields is refused.
     """
     return _commit(
         path,
@@ -1027,7 +1035,7 @@ def edit(
     forward unless this edit declares its own.
 
     ``fields`` are the per-version fields this version carries beyond its document and the tools it
-    declares, as for a write.
+    declares, as for a write — the tools among them refused, the call's own read instead.
     """
     if not isinstance(edits, list) or not edits:
         raise CanvasError("edits must be a list of find and replace pairs.")
@@ -1066,6 +1074,13 @@ def _commit(
         found = _record(conn, canvas_id)
         if found is None:
             raise CanvasError("There is no such canvas.", 404)
+        # The consent list has one door: the call's own ``tools``, read through ``_tools``. A
+        # version's fields are the data a build publishes, and a tools value smuggled in among
+        # them would reach the row unread and the answer as a decode error.
+        if "tools" in carried:
+            raise CanvasError(
+                "A version's tools are the call's own; its fields are the data a build publishes."
+            )
         if tools is not None:
             carried["tools"] = _tools(tools)
         if edits is None:
@@ -1285,6 +1300,8 @@ def delete(
     except Exception:
         logger.debug("gots: couldn't drop %s's queued turns", found["session_id"], exc_info=True)
     events.note("canvas", found["session_id"], path, True)
+    # The folder goes with the record: nothing a build left in it outlives the canvas it was
+    # working on, and a canvas deleted before its first build leaves nothing behind.
     _close_folder(home, canvas_id)
     # The session end is best effort like the turns beside it: a chat's mark and the record are
     # gone, and a session this can't reach is one left behind rather than a delete that failed.
@@ -1304,7 +1321,7 @@ def folder_of(home: Path, canvas_id: str) -> Path:
     Named by the canvas's id rather than its title: a title is the user's to change, and a rename
     would orphan every file in it — the vault's notes are named the same way, for the same reason.
     """
-    return data_dir(home).joinpath(*FOLDER, canvas_id)
+    return data_dir(home) / FOLDER / canvas_id
 
 
 def _open_folder(home: Path, canvas_id: str) -> None:
@@ -1329,7 +1346,7 @@ def _close_folder(home: Path, canvas_id: str) -> None:
     shutil.rmtree(folder_of(home, canvas_id), ignore_errors=True)
 
 
-def _folder_bytes(folder: Path, but: str) -> int:
+def _folder_bytes(folder: Path, rewritten: str) -> int:
     """What a canvas's folder weighs, the file being written left out; a folder that isn't there
     weighs nothing.
 
@@ -1337,7 +1354,7 @@ def _folder_bytes(folder: Path, but: str) -> int:
     spend again — a draft rewritten at the same size is not a folder that grew.
     """
     return sum(
-        one.stat().st_size for one in folder.rglob("*") if one.is_file() and one.name != but
+        one.stat().st_size for one in folder.rglob("*") if one.is_file() and one.name != rewritten
     )
 
 
@@ -1357,11 +1374,11 @@ def keep(path: Path, canvas_id: str, name: str, text: str) -> Path:
         or name in {".", ".."}
         or "\x00" in name
         or name != Path(name).name
-        or len(name) > NAME_CHARS
+        or len(name) > FILE_NAME_CHARS
     ):
         raise CanvasError(
-            f"A canvas folder's file is one plain name of at most {NAME_CHARS} characters; "
-            f"{name!r} is neither."
+            f"A canvas folder's file is one plain name of at most {FILE_NAME_CHARS} characters; "
+            f"{name!r} is not one."
         )
     if not isinstance(text, str):
         raise CanvasError("A canvas folder's file is text.")

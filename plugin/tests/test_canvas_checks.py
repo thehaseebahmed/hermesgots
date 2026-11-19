@@ -85,6 +85,17 @@ class ProbeTest(unittest.TestCase):
         with plant_unreadable_layer():
             self.assertEqual(canvas_checks.UNREADABLE, canvas_checks.available())
 
+    def test_a_layer_that_wont_import_reads_not_ready_with_the_reason(self) -> None:
+        # A module that is there but raises on the way in is a layer that couldn't be read, not a
+        # host with no layer at all: the two answers send a reader to different fixes.
+        class Exploding(ModuleType):
+            @property
+            def browser_use_cli(self) -> ModuleType:
+                raise RuntimeError("the layer won't import")
+
+        with patch.dict(sys.modules, {"tools": Exploding("tools")}):
+            self.assertEqual(canvas_checks.UNREADABLE, canvas_checks.available())
+
 
 class AdvertisedTest(unittest.TestCase):
     """``info`` names ``canvas_checks`` only where the probe found the layer."""
