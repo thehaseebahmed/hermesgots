@@ -103,6 +103,31 @@ data class Notice(
             return AdaptiveFace(side + 2 * inset, inset)
         }
 
+        /** A clear's kind, which no notice carries: a message that is one says only its subject. */
+        private const val CLEAR = "clear"
+
+        /**
+         * A clear's subject — the id every entry about it ends its tag with — or null for a message
+         * that is not a clear. A clear carries no words, so [from] answers null for it and it is read
+         * before the notice is (ADR 0169).
+         */
+        fun clearSubject(data: Map<String, String>): String? {
+            if (data[KEY_KIND] != CLEAR) return null
+            return data[KEY_ID]?.takeIf { it.isNotBlank() }
+        }
+
+        /**
+         * The id a tray entry's tag is about: its last segment, the rule `pushSubject` keeps in the
+         * app (`src/lib/push-kinds.ts`), or null where the tag has none of its own.
+         */
+        fun subjectOf(tag: String): String? {
+            val colon = tag.lastIndexOf(':')
+            return if (colon < 0) null else tag.substring(colon + 1).takeIf { it.isNotBlank() }
+        }
+
+        /** Whether a tray entry's tag is about [subject], which is what a clear cancels by. */
+        fun about(tag: String, subject: String) = subjectOf(tag) == subject
+
         /** Whether an address is one the phone may fetch or post: http(s), and nothing else. */
         fun isLink(url: String) = url.startsWith("https://") || url.startsWith("http://")
 

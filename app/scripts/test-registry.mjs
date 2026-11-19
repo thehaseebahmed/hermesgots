@@ -47,14 +47,24 @@ function register(store, deviceId) {
   })
 }
 
-/** A sender that takes everything, so a push's own path is what the test reads. */
-function sender() {
+/**
+ * A sender that takes everything, so a push's own path is what the test reads. `gone` names a token
+ * Firebase no longer knows, which a clear is answered with exactly as a push is.
+ */
+function sender(gone = "") {
   const sent = []
+  const cleared = []
+  const answer = (token) => (token === gone ? "gone" : "ok")
   return {
     sent,
+    cleared,
     async send(token, kind, category) {
       sent.push({ token, kind, category })
-      return "ok"
+      return answer(token)
+    },
+    async clear(token, sessionId) {
+      cleared.push({ token, session_id: sessionId })
+      return answer(token)
     },
     async test() {
       return null
@@ -200,4 +210,82 @@ test("two devices' tests do not throttle each other", async () => {
   })
   assert.equal(later.status, 200)
   assert.equal(device("d1").testedAt, NOW + 3000)
+})
+
+test("a dismissal clears every device but the one that dismissed it", async () => {
+  const store = setup()
+  register(store, "d1")
+  register(store, "d2")
+  const fcm = sender()
+
+  const res = await call(store, user, "POST", "dismiss", {
+    body: { session_id: "s1", device: "d1" },
+    fcm,
+  })
+
+  assert.equal(res.status, 200)
+  assert.deepEqual(res.body, { sent: 1, failed: 0, skipped: 1 })
+  // The device that dismissed it closed its own entry already; the other is told to drop it.
+  assert.deepEqual(fcm.cleared, [{ token: "token-d2", session_id: "s1" }])
+})
+
+test("a dismissal from the web, which holds no device here, tells every phone", async () => {
+  const store = setup()
+  register(store, "d1")
+  const fcm = sender()
+
+  const res = await call(store, user, "POST", "dismiss", { body: { session_id: "s1" }, fcm })
+
+  assert.deepEqual(res.body, { sent: 1, failed: 0, skipped: 0 })
+  assert.deepEqual(fcm.cleared, [{ token: "token-d1", session_id: "s1" }])
+})
+
+test("a host's dismissal tells every device, and two in a row sit behind no gap", async () => {
+  const store = setup()
+  register(store, "d1")
+  const fcm = sender()
+  const hostKey = `users/${USER_ID}/hosts/${HOST_ID}`
+
+  const first = await call(store, host, "POST", "push/dismiss", { body: { session_id: "s1" }, fcm })
+  assert.deepEqual(first.body, { sent: 1, failed: 0 })
+  // A clear is idempotent and alerts nothing, so two subjects dismissed in a burst are two facts.
+  const second = await call(store, host, "POST", "push/dismiss", { body: { session_id: "s2" }, fcm })
+  assert.deepEqual(second.body, { sent: 1, failed: 0 })
+  assert.deepEqual(fcm.cleared, [
+    { token: "token-d1", session_id: "s1" },
+    { token: "token-d1", session_id: "s2" },
+  ])
+  // No push was asked for, so the host's own record is left as it was.
+  assert.equal(store.data.get(hostKey).pushedAt, undefined)
+})
+
+test("a clear a device can't take drops it, as a push does", async () => {
+  const store = setup()
+  register(store, "d1")
+  register(store, "d2")
+  const fcm = sender("token-d2")
+
+  const res = await call(store, user, "POST", "dismiss", { body: { session_id: "s1" }, fcm })
+
+  assert.deepEqual(res.body, { sent: 1, failed: 1, skipped: 0 })
+  assert.equal(store.data.has(`users/${USER_ID}/devices/d2`), false)
+  assert.equal(store.data.has(`users/${USER_ID}/devices/d1`), true)
+})
+
+test("a dismissal that names nothing is refused", async () => {
+  const store = setup()
+  for (const body of [{}, { session_id: "" }, { session_id: "x".repeat(201) }, { session_id: 5 }]) {
+    const res = await call(store, user, "POST", "dismiss", { body, fcm: sender() })
+    assert.equal(res.status, 400)
+    assert.deepEqual(res.body, { error: "Invalid session" })
+  }
+})
+
+test("only the account's own app dismisses, and only a host relays a dismissal", async () => {
+  const store = setup()
+  // The host's routes are the plugin's and the account's are the app's: neither reaches the other's.
+  const hostDismiss = await call(store, host, "POST", "dismiss", { body: { session_id: "s1" } })
+  assert.equal(hostDismiss.status, 404)
+  const userClear = await call(store, user, "POST", "push/dismiss", { body: { session_id: "s1" } })
+  assert.equal(userClear.status, 404)
 })

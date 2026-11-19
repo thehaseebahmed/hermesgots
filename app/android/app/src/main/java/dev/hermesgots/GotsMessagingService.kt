@@ -47,6 +47,14 @@ import java.net.URL
 class GotsMessagingService : FirebaseMessagingService() {
 
     override fun onMessageReceived(message: RemoteMessage) {
+        // A clear is not a notice: it carries no words, and takes the entries about its subject out
+        // of the tray — the account was told a subject is no news, and this phone answers it
+        // (ADR 0169). It is read before [Notice.from], which answers null for a message with none.
+        val subject = Notice.clearSubject(message.data)
+        if (subject != null) {
+            NoticeDrawer.clearSubject(this, subject)
+            return
+        }
         val notice = Notice.from(message.data, getString(R.string.app_name)) ?: return
         channelFor(notice.channel, notice.category)
         NoticeDrawer.post(this, notice.tag, entry(notice, pictureOf(notice)))
@@ -67,6 +75,8 @@ class GotsMessagingService : FirebaseMessagingService() {
             .setContentIntent(openIntent(notice.kind, notice.id, notice.tag))
             // A tap is the reader answering it: the row leaves the tray and nothing is left behind.
             .setAutoCancel(true)
+            // So is a swipe, which queues the subject for the page to tell the account (ADR 0169).
+            .setDeleteIntent(dismissIntent(notice.tag))
         val shortcut = notice.shortcut
         if (shortcut != null) {
             val face = picture?.let { IconCompat.createWithAdaptiveBitmap(adaptive(it)) }
@@ -184,6 +194,19 @@ class GotsMessagingService : FirebaseMessagingService() {
         }
         // Each button is its own broadcast, since a notification answered two ways is two links.
         return PendingIntent.getBroadcast(this, "$tag#$index".hashCode(), answer, pendingFlags())
+    }
+
+    /**
+     * A swipe's broadcast, carrying the tag of the entry put away: the subject it names is queued for
+     * the page, which tells the account it is no news (ADR 0169). A press of it holds no key of the
+     * account's — as a button's does not — so the host can't be told from here.
+     */
+    private fun dismissIntent(tag: String): PendingIntent {
+        val dismiss = Intent(this, NoticeAnswerReceiver::class.java).apply {
+            action = NoticeAnswerReceiver.ACTION_DISMISS
+            putExtra(NoticeAnswerReceiver.EXTRA_TAG, tag)
+        }
+        return PendingIntent.getBroadcast(this, "$tag#dismiss".hashCode(), dismiss, pendingFlags())
     }
 
     /** Mark as read's broadcast: the chat whose read mark it moves, and the moment the notice covered. */

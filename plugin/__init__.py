@@ -2642,6 +2642,21 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         await asyncio.to_thread(device_keys.remove, store_path(), body.get("device"))
         return web.json_response({"object": "gots.push.key", "removed": True})
 
+    async def push_dismiss(request: "web.Request") -> "web.Response":
+        # A subject dismissed on one device, told to every other this profile reaches: the web
+        # subscriptions that aren't the one that asked, and the ntfy topic (ADR 0169).
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        body = await json_body(request)
+        if body is None:
+            return _error(web, "Body must be a JSON object", 400)
+        try:
+            counts = await asyncio.to_thread(push.dismiss, store_path(), body)
+        except push.PushError as exc:
+            return _error(web, str(exc), 400)
+        return web.json_response({"object": "gots.push", **counts})
+
     async def push_answer(request: "web.Request") -> "web.Response":
         # The one route with no key of the account's: the token in the path is the credential, which
         # is what makes an approval answerable from a notification with the app closed. It is
@@ -2667,13 +2682,16 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         if claim.outcome == answers.SPENT:
             return _error(web, "That button has already been answered.", 410)
         target, choice = claim.target or {}, claim.choice or ""
+        subject: Optional[str] = None
         try:
             if target.get("kind") == answers.ROOM:
                 # A room member's approval is the Host's to resolve, and its call can block on the
                 # waiting turn, so it runs on a worker thread; a refusal keeps its own status.
+                subject = target.get("room_id")
                 await asyncio.to_thread(answers.answer_room, target, choice, home_of(path))
             elif target.get("kind") == answers.RUN:
                 # A run's approval is answered on the loop, where its status and its stream live.
+                subject = target.get("session_id")
                 if not answers.answer_run(target.get("run_id") or "", choice):
                     # Nothing waiting is the wait's own end, not a failure: the token stays spent.
                     return _error(web, "That approval isn't waiting any more.", 409)
@@ -2685,6 +2703,14 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         except Exception:
             await give_back()
             raise
+        if isinstance(subject, str) and subject:
+            # The approval is settled, so it is no news on any device: the subject it was pushed
+            # under — a run's session, a room's own id — is dismissed everywhere (ADR 0169). A press
+            # carries no key of the account's, so the host is the one that tells, on a thread of its
+            # own so the answer isn't held up by it.
+            threading.Thread(
+                target=push.dismissed, args=(path, subject), name="gots-dismiss", daemon=True
+            ).start()
         return web.json_response({"object": "gots.push.answer", "answered": True, "choice": choice})
 
     async def push_reply(request: "web.Request") -> "web.Response":
@@ -3155,6 +3181,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/push", push_subscribe)
     app.router.add_post(f"{PREFIX}/push/remove", push_unsubscribe)
     app.router.add_post(f"{PREFIX}/push/mute", push_mute)
+    app.router.add_post(f"{PREFIX}/push/dismiss", push_dismiss)
     app.router.add_post(f"{PREFIX}/push/key", push_key)
     app.router.add_post(f"{PREFIX}/push/key/remove", push_key_remove)
     app.router.add_get(f"{PREFIX}/push/ntfy", push_ntfy_read)
