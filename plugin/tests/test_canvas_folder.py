@@ -11,6 +11,7 @@ Run: python3 -m unittest plugin.tests.test_canvas_folder -v
 
 from __future__ import annotations
 
+import threading
 import unittest
 from pathlib import Path
 
@@ -81,6 +82,63 @@ class CappedTest(unittest.TestCase):
             ),
             "the files already written stay where they are",
         )
+
+
+class KeptFileTest(unittest.TestCase):
+    """A kept file is the canvas's own: a canvas the store holds, one plain name, and its cap read
+    and spent under the store's write lock."""
+
+    def setUp(self) -> None:
+        self.host = Host(self)
+
+    def test_a_canvas_the_store_doesnt_hold_has_no_folder_to_write_in(self) -> None:
+        # put_doc and remove_doc refuse a canvas that isn't there, and keep answers the same way:
+        # a folder no canvas owns would be one no delete ever reaches.
+        with self.assertRaises(canvases.CanvasError) as refused:
+            canvases.keep(self.host.path, "canvas-gone", "draft.html", "<h1>Tip</h1>")
+        self.assertEqual(refused.exception.status, 404)
+        self.assertIn("no such canvas", str(refused.exception))
+        self.assertFalse(canvases.folder_of(self.host.home, "canvas-gone").exists())
+
+    def test_a_name_that_is_not_one_plain_file_name_is_refused(self) -> None:
+        # `..` is a directory's own name and a null byte can't be written at all: both are a name
+        # the caller got wrong, refused as such rather than by a write the host refuses.
+        for name in (
+            "",
+            ".",
+            "..",
+            "plans/today.md",
+            "draft.html\x00.txt",
+            "x" * (canvases.NAME_CHARS + 1),
+        ):
+            with self.subTest(name=name):
+                with self.assertRaises(canvases.CanvasError) as refused:
+                    canvases.keep(self.host.path, self.host.id, name, "<h1>Tip</h1>")
+                self.assertIn("plain name", str(refused.exception))
+        self.assertEqual(list(self.host.folder.iterdir()), [], "nothing landed in the folder")
+
+    def test_a_kept_file_is_written_under_the_stores_write_lock(self) -> None:
+        # The cap is read and spent inside the store's write lock, the way every write in this
+        # module is: two builds writing one folder both answer the cap, not both fit under it.
+        held, free, kept = threading.Event(), threading.Event(), threading.Event()
+
+        def hold_the_lock() -> None:
+            with canvases._writing(self.host.path):
+                held.set()
+                free.wait(5)
+
+        def write_the_file() -> None:
+            canvases.keep(self.host.path, self.host.id, "draft.html", "<h1>Tip</h1>")
+            kept.set()
+
+        threading.Thread(target=hold_the_lock).start()
+        self.assertTrue(held.wait(5), "the lock is held")
+        try:
+            threading.Thread(target=write_the_file).start()
+            self.assertFalse(kept.wait(0.3), "the write waits for the lock")
+        finally:
+            free.set()
+        self.assertTrue(kept.wait(5))
 
 
 class UnreachableTest(unittest.TestCase):

@@ -1347,9 +1347,18 @@ def keep(path: Path, canvas_id: str, name: str, text: str) -> Path:
     One file is capped at ``FILE_BYTES`` and the folder whole at ``FOLDER_BYTES``, each refused in
     words naming the cap: a build's files are the draft, its plans, its tests and its memory, and a
     canvas that could grow without end would be a host that filled its disk. A name is one plain
-    file name — the plugin's own, never a page's — so no write lands outside the folder.
+    file name — the plugin's own, never a page's — so no write lands outside the folder. The cap
+    is read and spent under the store's write lock, the way every write here is, so two builds
+    writing one folder both answer the cap; and a canvas the store doesn't hold has no folder to
+    write in.
     """
-    if not name or name != Path(name).name or len(name) > NAME_CHARS:
+    if (
+        not name
+        or name in {".", ".."}
+        or "\x00" in name
+        or name != Path(name).name
+        or len(name) > NAME_CHARS
+    ):
         raise CanvasError(
             f"A canvas folder's file is one plain name of at most {NAME_CHARS} characters; "
             f"{name!r} is neither."
@@ -1362,18 +1371,21 @@ def keep(path: Path, canvas_id: str, name: str, text: str) -> Path:
             f"{name} is {_cap(weighed)} and one file in a canvas's folder holds at most "
             f"{_cap(FILE_BYTES)}."
         )
-    folder = folder_of(home_of(path), canvas_id)
-    held = _folder_bytes(folder, name)
-    if held + weighed > FOLDER_BYTES:
-        raise CanvasError(
-            f"A canvas's folder holds at most {_cap(FOLDER_BYTES)}; {name} would take it to "
-            f"{_cap(held + weighed)}. Take a file the build no longer needs out first."
-        )
-    try:
-        folder.mkdir(parents=True, exist_ok=True)
-        (folder / name).write_text(text, encoding="utf-8")
-    except OSError as error:
-        raise CanvasError(f"This host couldn't write {name} in the canvas's folder.") from error
+    with _writing(path) as conn:
+        if _record(conn, canvas_id) is None:
+            raise CanvasError("There is no such canvas.", 404)
+        folder = folder_of(home_of(path), canvas_id)
+        held = _folder_bytes(folder, name)
+        if held + weighed > FOLDER_BYTES:
+            raise CanvasError(
+                f"A canvas's folder holds at most {_cap(FOLDER_BYTES)}; {name} would take it to "
+                f"{_cap(held + weighed)}. Take a file the build no longer needs out first."
+            )
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            (folder / name).write_text(text, encoding="utf-8")
+        except OSError as error:
+            raise CanvasError(f"This host couldn't write {name} in the canvas's folder.") from error
     return folder / name
 
 
