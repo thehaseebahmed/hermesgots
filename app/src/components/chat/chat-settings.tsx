@@ -134,6 +134,7 @@ export function ChatSettings({
   open,
   onOpenChange,
   onDeleted,
+  onArchived,
   code,
 }: {
   chat: Conversation
@@ -163,6 +164,13 @@ export function ChatSettings({
    * screen that holds it already steps off a room it no longer holds (`room-chat.tsx`).
    */
   onDeleted?: () => void
+  /**
+   * Where to go once a chat or a run is archived. An archive is a way out of the conversation, so the
+   * press closes this sheet and the screen takes the step back onto the bot's list — the move the
+   * bar's back control answers with (ADR 0154). An unarchive names none: a row coming back is a
+   * reason to stay, so the sheet stands.
+   */
+  onArchived?: () => void
 }) {
   const room = Boolean(chat.room)
   // A bot's Main is the host's record with the host's title: it may not be renamed, pinned, archived or
@@ -360,7 +368,17 @@ export function ChatSettings({
                   variant="outline"
                   data-chat-archive
                   className="h-11 rounded-full"
-                  onClick={() => void setArchived(chat.id, !chat.archived)}
+                  onClick={() => {
+                    // The mark is written at once, as it always was, and the host's flag is asked
+                    // for behind it (ADR 0159). An archive is then a way out of the conversation —
+                    // the sheet closes and the screen takes the step back onto the bot's list the
+                    // bar's back control answers with (ADR 0154) — while an unarchive is a row
+                    // coming back, which is a reason to stay, so the sheet stands.
+                    void setArchived(chat.id, !chat.archived)
+                    if (chat.archived) return
+                    setSheetOpen(false)
+                    onArchived?.()
+                  }}
                 >
                   <ArchiveIcon data-icon="inline-start" />
                   {chat.archived ? "Unarchive" : "Archive"}

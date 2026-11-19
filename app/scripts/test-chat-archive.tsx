@@ -22,7 +22,9 @@ import {
   find,
   findText,
   json,
+  missing,
   mount,
+  path,
   seedSettings,
   settle,
   until,
@@ -87,17 +89,11 @@ async function seed(name: string, patch: Partial<Conversation> = {}, advertised:
 
 const screen = (id = CHAT) => (
   <MemoryRouter initialEntries={[`/c/${id}`]}>
+    <Path />
     <Routes>
-      <Route
-        path="/c/:id"
-        element={
-          <>
-            <ChatPage slot="route" />
-            <Path />
-          </>
-        }
-      />
-      <Route path="/" element={<Path />} />
+      <Route path="/c/:id" element={<ChatPage slot="route" />} />
+      {/* The step an archive takes: the bot's list, whose address is the bot's own. */}
+      <Route path="/b/:botId/sidechats" element={<p data-list />} />
     </Routes>
   </MemoryRouter>
 )
@@ -116,7 +112,7 @@ async function pressArchive() {
 }
 
 test("the sheet's Archive tells Hermes, and the row here lands at once", async () => {
-  await seed("archive-posts", {}, ["chats", "session_archive"])
+  const bot = await seed("archive-posts", {}, ["chats", "session_archive"])
   await mount(screen(), async () => {
     await pressArchive()
     await until(async () => posts.length === 1, "the route the plugin answers")
@@ -128,30 +124,47 @@ test("the sheet's Archive tells Hermes, and the row here lands at once", async (
     const row = await db.conversations.get(CHAT)
     assert.equal(row?.archived, true, "and the row written here, without waiting for a merge")
     assert.equal(row?.pinned, undefined, "archiving takes the pin with it, as it always did")
-    await settle()
+    await until(async () => missing("[role=dialog]"), "the sheet closed with the press")
+    await until(async () => path() === `/b/${bot.id}/sidechats`, "the bot's list, the step back")
+  })
+})
+
+/**
+ * The way back is the same write the other way round: a chat opened already archived is unarchived
+ * from its sheet, the host is asked to take the flag off and the row here is cleared with it. A row
+ * coming back is a reason to stay, so the sheet stands on the conversation it was opened from.
+ */
+test("a chat opened archived is unarchived from its sheet, and the host takes the flag off", async () => {
+  await seed("archive-back", { archived: true }, ["chats", "session_archive"])
+  await mount(screen(), async () => {
+    await until(async () => Boolean(titlePress()), "the chat's bar")
+    await click(titlePress())
+    await until(async () => Boolean(sheet()), "the chat's settings")
     await until(async () => archiveButton()?.textContent === "Unarchive", "the way back")
     await click(archiveButton())
-    await until(async () => posts.length === 2, "the second write")
-    assert.deepEqual(posts[1].body, { archived: false })
+    await until(async () => posts.length === 1, "the write the other way")
+    assert.deepEqual(posts[0].body, { archived: false })
     await until(
       async () => (await db.conversations.get(CHAT))?.archived === undefined,
       "unarchived here too",
     )
+    assert.ok(sheet(), "and the sheet stays open, as it always did")
+    assert.equal(path(), `/c/${CHAT}`, "on the chat's own screen")
   })
 })
 
 test("a plugin from before session_archive writes the mark on this device alone", async () => {
-  await seed("archive-old", {})
+  const bot = await seed("archive-old", {})
   await mount(screen(), async () => {
     await pressArchive()
     await until(async () => (await db.conversations.get(CHAT))?.archived === true, "archived here")
-    await settle()
     assert.deepEqual(posts, [], "a host that can't take the flag is not asked for it")
+    await until(async () => path() === `/b/${bot.id}/sidechats`, "the bot's list, the step back")
   })
 })
 
 test("a host whose store can't hold the flag still leaves the chat archived here", async () => {
-  await seed("archive-refused", {}, ["chats", "session_archive"])
+  const bot = await seed("archive-refused", {}, ["chats", "session_archive"])
   host = false
   await mount(screen(), async () => {
     await pressArchive()
@@ -160,6 +173,7 @@ test("a host whose store can't hold the flag still leaves the chat archived here
       async () => (await db.conversations.get(CHAT))?.archived === true,
       "the device keeps its own mark when the host answers that it took no flag",
     )
+    await until(async () => path() === `/b/${bot.id}/sidechats`, "the bot's list, the step back")
   })
 })
 
