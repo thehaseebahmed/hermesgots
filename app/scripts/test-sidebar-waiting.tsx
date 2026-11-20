@@ -179,3 +179,29 @@ test("a run that ends while the app is open dots the bot's row", async () => {
     await until(async () => Boolean(botDot()), "the bot row's unread dot")
   })
 })
+
+test("a project session's run that ends leaves the bot's row to Code's list (ADR 0110)", async () => {
+  await seed()
+  markRead("session-run", 4)
+  let live: Record<string, unknown> = {
+    sessions: { "gots-run-2": "running" },
+    run_ids: { "gots-run-2": "run-2" },
+  }
+  serveLive(() => live)
+  await seedSession("session-run", "gots-run-2", "A session whose run ends", {
+    projectId: "a-project",
+  })
+  await mount(sidebar(), async () => {
+    await until(async () => Boolean(find('nav[aria-labelledby="bots-heading"] a')), "the bot's row")
+    live = { sessions: {}, run_ids: {} }
+    await act(async () => noteChange(connectionKey(bot), "runs"))
+    // A session is no thread of the bot's: its news is Code's row's, which reads the same clock
+    // this move writes. Dotting the bot row for it would send the reader to Main for news Main
+    // cannot draw, and tapping the row would not clear it (ADR 0110).
+    await until(
+      async () => (await db.conversations.get("session-run"))!.updatedAt > 4,
+      "the clock moved",
+    )
+    assert.ok(missing("[data-unread]"), "the bot row stays clear of a session's news")
+  })
+})

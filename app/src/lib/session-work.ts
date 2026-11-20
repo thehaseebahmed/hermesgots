@@ -145,9 +145,9 @@ export function runFinished(facts: Pick<SessionFacts, "live" | "local" | "subage
 
 /**
  * The sessions whose run ended between one `runs/live` answer and the next: held in flight before,
- * gone now, with no subagent of theirs still at work and no wake turn still owed — `runFinished`'s
- * own rule read over the two snapshots, and the hold the plugin keeps a finished run's news behind
- * until its subagents are gone (`plugin/alerts.py`). A turn that ended over subagents still working
+ * gone now, with no subagent of theirs still at work and no wake turn still owed — the hold the
+ * plugin keeps a finished run's news behind until its subagents are gone (`plugin/alerts.py`), read
+ * over the two snapshots rather than at one moment. A turn that ended over subagents still working
  * has not ended, so it is none of these.
  */
 export function endedSessions(before: LiveRuns, next: LiveRuns) {
