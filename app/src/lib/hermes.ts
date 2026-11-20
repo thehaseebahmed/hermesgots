@@ -1839,7 +1839,9 @@ function queueItem(raw: Record<string, unknown>): QueueItem {
 function objects<T>(value: unknown, row: (raw: Record<string, unknown>) => T): T[] {
   return Array.isArray(value)
     ? value
-        .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+        .filter(
+          (item): item is Record<string, unknown> => Boolean(item) && typeof item === "object",
+        )
         .map(row)
     : []
 }
@@ -1870,7 +1872,11 @@ export async function addToQueue(
     headers: headers(config),
     body: JSON.stringify({ text: item.text, attachments: item.attachments, body: item.run }),
   })
-  return queueItem((await response.json())?.item ?? {})
+  const answer = (await response.json())?.item
+  // An answer with no item means the plugin kept nothing, so the message did not go: said here, where
+  // every caller hands it back or keeps it as its own, rather than drawn as a row nobody holds.
+  if (!answer?.id) throw new HermesError("This bot's plugin didn't take the message.")
+  return queueItem(answer)
 }
 
 /** `remove` drops a queued message, `send` puts it first and lets a paused queue go, `steer` hands it to the running reply. */
@@ -1918,11 +1924,7 @@ export async function getPending(config: HermesConfig, sessionId: string) {
  * Acknowledges a lost turn so the messages queued behind it run, and answers what the host holds
  * afterwards. The lost input is not replayed: it stays in the transcript, to be sent again.
  */
-export async function discardPending(
-  config: HermesConfig,
-  sessionId: string,
-  admissionId: string,
-) {
+export async function discardPending(config: HermesConfig, sessionId: string, admissionId: string) {
   const response = await request(
     `${pendingRoot(config, sessionId)}/${encodeURIComponent(admissionId)}/discard`,
     { method: "POST", headers: headers(config), signal: AbortSignal.timeout(WRITE_TIMEOUT_MS) },
@@ -2322,18 +2324,22 @@ function roomRecordOf(raw: Record<string, unknown>): RoomRecord {
   if (at === undefined)
     throw new HermesError("The bot's plugin answered without the room's record.", 502)
   if (raw.deleted === true) return { at, deleted: true }
-  const held = raw.value && typeof raw.value === "object" ? (raw.value as Record<string, unknown>) : {}
+  const held =
+    raw.value && typeof raw.value === "object" ? (raw.value as Record<string, unknown>) : {}
   const value: NonNullable<RoomRecord["value"]> = {}
   if (typeof held.title === "string") value.title = held.title
   if (typeof held.createdAt === "number") value.createdAt = held.createdAt
   if (typeof held.updatedAt === "number") value.updatedAt = held.updatedAt
-  const room = held.room && typeof held.room === "object" ? (held.room as Record<string, unknown>) : undefined
+  const room =
+    held.room && typeof held.room === "object" ? (held.room as Record<string, unknown>) : undefined
   if (room && typeof room.id === "string" && room.id) {
     value.room = {
       id: room.id,
       members: Array.isArray(room.members)
         ? room.members
-            .filter((one): one is Record<string, unknown> => Boolean(one) && typeof one === "object")
+            .filter(
+              (one): one is Record<string, unknown> => Boolean(one) && typeof one === "object",
+            )
             .map((one) => roomMember(one))
         : [],
     }
@@ -2497,11 +2503,7 @@ export async function getCanvas(
  * The lane draws these instead of the transcript, so the read is the canvas's own history rather
  * than a session's rows — a build's transcript stays behind `Details`, one session at a time.
  */
-export async function getCanvasBuilds(
-  config: HermesConfig,
-  id: string,
-  signal?: AbortSignal,
-) {
+export async function getCanvasBuilds(config: HermesConfig, id: string, signal?: AbortSignal) {
   const response = await request(`${canvasRoot(config, id)}/builds`, {
     headers: headers(config),
     signal: signal
@@ -2666,11 +2668,7 @@ export type CanvasChanges = {
   mark?: string
 }
 
-export async function updateCanvas(
-  config: HermesConfig,
-  id: string,
-  changes: CanvasChanges,
-) {
+export async function updateCanvas(config: HermesConfig, id: string, changes: CanvasChanges) {
   const response = await request(canvasRoot(config, id), {
     method: "POST",
     headers: headers(config),

@@ -368,24 +368,29 @@ export function AppThreadView({
                           <span data-queued-state className="px-2">
                             {item.error ?? "Queued"}
                           </span>
-                          {(queue.paused || item.error) && (
-                            <Button
-                              data-send-queued
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => queue.act(item.id, "send")}
-                            >
-                              Send now
-                            </Button>
+                          {/* A row the plugin has not answered yet has no item to act on. */}
+                          {!item.pending && (
+                            <>
+                              {(queue.paused || item.error) && (
+                                <Button
+                                  data-send-queued
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => queue.act(item.id, "send")}
+                                >
+                                  Send now
+                                </Button>
+                              )}
+                              <Button
+                                data-remove-queued
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => queue.act(item.id, "remove")}
+                              >
+                                Remove
+                              </Button>
+                            </>
                           )}
-                          <Button
-                            data-remove-queued
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => queue.act(item.id, "remove")}
-                          >
-                            Remove
-                          </Button>
                         </div>
                       </div>
                     )
@@ -464,7 +469,15 @@ const drawnFor = (waiting: QuestionWait, questions?: ClarifyQuestion[]): Clarify
  * Other. The cards read a message, so the wait is dressed as the reply it interrupts, and an answer
  * goes where chat-next sends it rather than through the old engine.
  */
-export function AppPrompt({ waiting, questions: read, answer, asker, held, taken, onTaken }: PromptProps) {
+export function AppPrompt({
+  waiting,
+  questions: read,
+  answer,
+  asker,
+  held,
+  taken,
+  onTaken,
+}: PromptProps) {
   const message = useMemo((): Message => {
     const base = {
       id: `prompt-${waiting.promptId}`,

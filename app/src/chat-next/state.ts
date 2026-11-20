@@ -224,6 +224,11 @@ export type ThreadEvent =
   | { type: "gone"; run: string }
   | { type: "agents"; agents: Agent[] }
   | { type: "queue"; items: Queued[]; paused: boolean }
+  /**
+   * The item the plugin took for a message this device sent: drawn at once, under the row the press
+   * drew, so the row never goes missing between the echo leaving and the next queue read landing.
+   */
+  | { type: "queue-item"; item: Queued }
   /** The page read this device's *Show progress reminders*: what a reply's refusals draw from now. */
   | { type: "reminders"; on: boolean }
   /** The chat's record of where its context was compacted, as the rows it named (ADR 0107). */
@@ -957,7 +962,9 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         withSteer(turn, { send: event.send, text: event.text, files: event.files }),
       )
     case "steer-settled":
-      return withLiveTurn(state, (turn) => settleSteer(turn, { send: event.send, files: event.files }))
+      return withLiveTurn(state, (turn) =>
+        settleSteer(turn, { send: event.send, files: event.files }),
+      )
     case "unsteered":
       return withLiveTurn(state, (turn) => withoutSteer(turn, event.send))
     case "unsent": {
@@ -1012,6 +1019,14 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
     case "queue": {
       const next = { items: event.items, paused: event.paused }
       return sameQueue(state.queue, next) ? state : { ...state, queue: next }
+    }
+    case "queue-item": {
+      const items = state.queue?.items ?? []
+      if (items.some((item) => item.id === event.item.id)) return state
+      return {
+        ...state,
+        queue: { items: [...items, event.item], paused: state.queue?.paused ?? false },
+      }
     }
     case "waiting": {
       const { waiting } = event

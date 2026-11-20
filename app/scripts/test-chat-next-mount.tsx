@@ -186,9 +186,12 @@ test("a send the host refuses keeps the message in the thread, marked, and pins 
       "and is still drawn where it was sent, in its own bubble",
     )
     assert.equal(composerField()?.value, "", "the words are not handed back to the field")
-    assert.ok(find('[data-unsent] button[aria-label="Cancel failed message"]'), "it can be taken back")
     assert.ok(
-      findAll('[data-unsent] button').some((one) => one.textContent?.includes("Retry")),
+      find('[data-unsent] button[aria-label="Cancel failed message"]'),
+      "it can be taken back",
+    )
+    assert.ok(
+      findAll("[data-unsent] button").some((one) => one.textContent?.includes("Retry")),
       "and sent again from where it stands",
     )
     assert.equal((await db.conversations.get("c-refused"))?.modelChoice, undefined)
@@ -216,7 +219,7 @@ test("a host that isn't answering is the header's word, and the composer stays",
     await mount(chatScreen("c-away"), async () => {
       await until(() => headerLine() === "This host isn't answering", "the header to name the host")
       assert.ok(find('textarea[aria-label="Message"]'), "the composer is still drawn")
-      assert.ok(missing('[data-chat-next] [data-away]'), "and no notice in the thread")
+      assert.ok(missing("[data-chat-next] [data-away]"), "and no notice in the thread")
       assert.ok(missing('[data-chat-next] [role="alert"]'), "nor a banner about the host")
 
       Object.defineProperty(window.navigator, "onLine", { configurable: true, get: () => false })
@@ -371,6 +374,61 @@ test("a message sent mid-reply goes to the plugin's queue and runs once the repl
   })
 })
 
+test("a queued message stands in the thread the moment it is sent, before the plugin holds it", async () => {
+  const { host } = await onChatNext("c-queue-at-once", {}, { plugin: true })
+  await mount(chatScreen("c-queue-at-once"), async () => {
+    await midReply(host, "First question")
+    // The host is busy — a tool call holds the plugin — so nothing has reached its queue yet.
+    const queue = host.holdQueue()
+    try {
+      await type(composerField(), "And then this")
+      await sendPress()
+      await until(
+        () => find("[data-queued]")?.textContent?.includes("And then this") ?? false,
+        "the queued message stands in the thread while the plugin is still taking it",
+      )
+      assert.equal(host.queue.length, 0, "and the plugin does not hold it yet")
+      assert.ok(
+        missing("[data-remove-queued]"),
+        "with nothing the thread could act on where the plugin has no item",
+      )
+    } finally {
+      queue.release()
+    }
+    await until(() => host.queue.length === 1, "the plugin takes it")
+    await until(
+      () => Boolean(find("[data-remove-queued]")),
+      "and the row is the plugin's own, offering Remove",
+    )
+    assert.equal(
+      findAll("[data-queued]").filter((row) => row.textContent?.includes("And then this")).length,
+      1,
+      "one row for it: the drawn one went, and the plugin's item is what stands",
+    )
+  })
+})
+
+test("a queued message the plugin refuses goes back to the field, and leaves no row", async () => {
+  const { host } = await onChatNext("c-queue-refused", {}, { plugin: true })
+  await mount(chatScreen("c-queue-refused"), async () => {
+    await midReply(host, "First question")
+    const answer = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+      new URL(String(input)).pathname.endsWith("/queue") && init?.method === "POST"
+        ? new Response(JSON.stringify({ error: { message: "The queue is full." } }), {
+            status: 500,
+          })
+        : answer(input, init)) as typeof fetch
+    await type(composerField(), "And then this")
+    await sendPress()
+    await until(
+      () => composerField()?.value === "And then this",
+      "the words are handed back to the field, as a send the host refused is",
+    )
+    assert.ok(missing("[data-queued]"), "and the row the press drew is taken back")
+  })
+})
+
 test("a photo queued mid-reply is drawn where it waits, not named", async () => {
   const { host } = await onChatNext("c-queue-photo", {}, { plugin: true, host: { uploads: true } })
   await mount(chatScreen("c-queue-photo"), async () => {
@@ -441,7 +499,8 @@ test("a file steered into a reply is drawn where the steer stands", async () => 
       "the plugin steered the running reply",
     )
     await until(
-      () => Boolean(find('[data-chat-next] [data-message-id$="-a"] [aria-label="Download notes.txt"]')),
+      () =>
+        Boolean(find('[data-chat-next] [data-message-id$="-a"] [aria-label="Download notes.txt"]')),
       "the file is drawn in the reply the steer stands in",
     )
     run.finish("Roses are red.")
@@ -479,7 +538,8 @@ test("a steer stands in the reply the moment it is sent, before the host has tak
       "the plugin steered the running reply",
     )
     await until(
-      () => Boolean(find('[data-chat-next] [data-message-id$="-a"] [aria-label="Download notes.txt"]')),
+      () =>
+        Boolean(find('[data-chat-next] [data-message-id$="-a"] [aria-label="Download notes.txt"]')),
       "the file the host saved is drawn on the same steer",
     )
     assert.deepEqual(
@@ -652,7 +712,10 @@ test("a chat this device already holds opens as a thread, with the host's answer
     await until(() => host.offsets.length > read, "the newest page is asked for")
     assert.ok(replies().includes("Found it."), "the thread is drawn before the host answers")
     assert.ok(missing("[data-loading-fresh]"), "no loader mid-screen")
-    assert.ok(missing('[data-slot="status-line"]'), "and no line says the thread is still being read")
+    assert.ok(
+      missing('[data-slot="status-line"]'),
+      "and no line says the thread is still being read",
+    )
     second.release()
     await until(() => replies().includes("Still here."), "the host's turn to land behind it")
     assert.ok(replies().includes("Found it."), "over the rows the device already had")
@@ -704,7 +767,11 @@ test("a finished turn reads what the plugin holds beside it, and its todo list i
 test("a stop the host refused still leaves Stop for the run it could not stop", async () => {
   // A refusal is not a stop: the run is still live on the host, so the button that comes back has to
   // be Stop rather than Send, which would post a message into a running turn.
-  const { host } = await onChatNext("c-stop-refused", {}, { plugin: true, host: { refuseStops: true } })
+  const { host } = await onChatNext(
+    "c-stop-refused",
+    {},
+    { plugin: true, host: { refuseStops: true } },
+  )
   await mount(chatScreen("c-stop-refused"), async () => {
     await sendFromComposer("Keep going")
     await until(() => host.asked.runs === 1, "the turn is running")
