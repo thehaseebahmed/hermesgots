@@ -207,6 +207,16 @@ export function charmPoses(botId: string): Promise<CharmPose[]> {
   return set
 }
 
+/**
+ * The id a bot's charm entry carries. The registry's when it answers — that is the id a push names
+ * and an alert is matched against — and the bot's own when it doesn't, because a charm sync must
+ * not fail because the registry is away: the bots still sync, under the id they had before.
+ */
+async function charmIdFor(bot: Profile): Promise<string> {
+  const held = await registryId(bot).catch(() => undefined)
+  return charmBotId(bot.id, held)
+}
+
 /** What the charm gets for this phone's bots: a name and a picture each, in the order shown. */
 export async function charmBots(
   profiles: Profile[],
@@ -223,7 +233,7 @@ export async function charmBots(
       .filter((profile) => !profile.disabled)
       .map(async (profile) => ({
         // The id a push names, so an alert for this bot matches the entry the charm holds.
-        id: charmBotId(profile.id, await registryId(profile)),
+        id: await charmIdFor(profile),
         name: labelOf(labels, profile),
         accent: rgb565(ACCENT),
         image: await picture(profile.botId),
@@ -322,7 +332,7 @@ export const TEST_ALERT_SUBJECT = "test-alert"
 export async function sendTestAlert(bot: Profile) {
   if (!charmBridge()) throw new Error("A test alert needs the Android app")
   await Charm.alert({
-    botId: charmBotId(bot.id, await registryId(bot)),
+    botId: await charmIdFor(bot),
     reason: "approval",
     subject: TEST_ALERT_SUBJECT,
   })
