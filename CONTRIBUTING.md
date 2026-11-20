@@ -84,7 +84,7 @@ Under plain `pnpm dev`, the Sync card stays hidden and sign-in is not required.
 
 ## Development Container
 
-A Docker container image (`ghcr.io/thehaseebahmed/gots-dev:latest`) is available with all required toolchains (Node 22, pnpm 10, Python 3.13, headless Chromium, the GitHub CLI, and the [Reticle](https://reticle.sh) verification CLI):
+A Docker container image (`ghcr.io/thehaseebahmed/gots-dev:latest`) is available with all required toolchains (Node 22, pnpm 10, Python 3.13, headless Chromium, PlatformIO (for the Gots Charm firmware), the GitHub CLI, and the [Reticle](https://reticle.sh) verification CLI):
 
 ```bash
 docker pull ghcr.io/thehaseebahmed/gots-dev:latest
