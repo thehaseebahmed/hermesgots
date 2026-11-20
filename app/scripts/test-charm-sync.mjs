@@ -223,3 +223,13 @@ test("the charm's row says whether it is paired and when it last synced", async 
     "Gots Charm · Synced 3 h ago",
   )
 })
+
+test("the paired charm's own row says only when it last synced", async () => {
+  const { charmSynced } = await import("../src/lib/charm-words.ts")
+  const now = Date.UTC(2026, 10, 20, 12)
+  assert.equal(charmSynced({ name: "Gots Charm" }, now), "Never synced")
+  assert.equal(
+    charmSynced({ name: "Gots Charm", syncedAt: now - 5 * 60_000 }, now),
+    "Synced 5 min ago",
+  )
+})

@@ -20,7 +20,7 @@ import {
 } from "@/lib/charm"
 import type { SyncProgress } from "@/lib/charm-sync"
 import { listProfiles } from "@/lib/db"
-import { charmSubtitle } from "@/lib/charm-words"
+import { charmSynced } from "@/lib/charm-words"
 import { tell } from "@/lib/tell"
 import { useBotLabels } from "@/lib/use-bot-labels"
 
@@ -84,7 +84,7 @@ export function CharmSettings() {
           <Group>
             <div className={rowClass}>
               <BluetoothIcon className="size-5 shrink-0 text-muted-foreground" />
-              <RowText title={charm.name} subtitle={charmSubtitle(charm)} />
+              <RowText title={charm.name} subtitle={charmSynced(charm)} />
             </div>
             <button
               type="button"
@@ -102,7 +102,9 @@ export function CharmSettings() {
                     ? `${progress.done} of ${progress.total} bots`
                     : count === 0
                       ? "No bots to send"
-                      : `Sends your ${count === 1 ? "bot" : `${count} bots`} and their pictures`
+                      : count === 1
+                        ? "Sends your bot and its picture"
+                        : `Sends your ${count} bots and their pictures`
                 }
               />
             </button>

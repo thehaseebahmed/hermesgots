@@ -13,6 +13,11 @@ export function charmSubtitle(charm: CharmSeen | null, now = Date.now()) {
   return `${charm.name} · Synced ${since(charm.syncedAt, now)}`
 }
 
+/** Under the paired charm's own name: just when it last took the bots. */
+export function charmSynced(charm: CharmSeen, now = Date.now()) {
+  return charm.syncedAt ? `Synced ${since(charm.syncedAt, now)}` : "Never synced"
+}
+
 function since(at: number, now: number) {
   const minutes = Math.round((now - at) / 60_000)
   if (minutes < 1) return "just now"
