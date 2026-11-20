@@ -529,6 +529,7 @@ export function AppChatNextThread({
   chatId,
   blank,
   code,
+  View = AppThreadView,
   ...props
 }: ComponentProps<typeof ChatNextThread> & {
   chatId: string
@@ -551,7 +552,7 @@ export function AppChatNextThread({
   return (
     <CodeFaceProvider value={code ? CODE_FACE : undefined}>
       <ChatOf.Provider value={chat}>
-        <ChatNextThread {...props} chatId={chatId} View={AppThreadView} Prompt={AppPrompt} />
+        <ChatNextThread {...props} chatId={chatId} View={View} Prompt={AppPrompt} />
       </ChatOf.Provider>
     </CodeFaceProvider>
   )

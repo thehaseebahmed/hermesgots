@@ -87,14 +87,20 @@ harness sha256 31baf9d5ede99a67… (2318036 bytes) · browser ready · plugin 0.
 host 7900fdd3678e x86_64, 16 cpus, python 3.13.5 · path http://localhost:8642/api/plugins/gots
 prompts sha256 4fda0e9ab8aa57df… (4 prompts)
 
-prompt             kind    passed  turns    wall  warn  version  check
-standup            first     3 / 3      1   42.1s     0        1  passing
-standup-filter     tweak     3 / 3      1   18.7s     1        2  passing
-dashboard          first     2 / 3      1   51.3s     0        1  failing
-dashboard-streak   tweak     3 / 3      1   22.0s     0        2  passing
+prompt             kind    passed  before delta  turns    wall  warn  version  check
+standup            first     3 / 3   2 / 3    +1      2   42.1s     0        1  passing
+standup-filter     tweak     3 / 3   3 / 3    +0      2   58.7s     1        2  passing
+dashboard          first     2 / 3   3 / 3    -1      1   51.3s     0        1  failing
+dashboard-streak   tweak     3 / 3   3 / 3    +0      2   22.0s     0        2  passing
   dashboard: the page draws a chart — the page draws no chart
-totals                  11 / 12     4  134.1s
+totals                  11 / 12  11 / 12    +0      7  174.1s
+
+read against baseline.json: before, after, and the delta
 ```
+
+Where a baseline is in hand, every prompt's line carries the baseline's own count and the delta
+between the two — the "before" and "after" columns of the plan's step 14 — and the totals carry the
+same two. A prompt the baseline doesn't hold prints a dash in both, rather than a delta guessed at.
 
 The header is what makes two runs comparable: the prompt set's digest, the model that was asked,
 the machine's shape, the harness artifact the page was drawn in, whether a browser was there to
@@ -161,8 +167,11 @@ python3 -m bench.canvas --self-check
 - **No baseline is committed.** It is taken on a real host with `--write-baseline`, on the
   single-session path before builds; until one is, every real run is refused as having nothing to
   be read against, which is the refusal a deleted baseline also earns.
-- **The "after" column is step 14's.** The same prompts through builds, each prompt's grade printed
-  beside the baseline with its delta.
+- **A run takes the builds path where the host has one.** A host advertising `canvas_builds` is sent
+  the way the app sends: the canvas is made with `builds`, a follow-up is queued on its chat, and the
+  wait runs until the canvas's open build has published a version past the one it was sent at. A
+  host without the feature keeps the single-session path the baseline was taken on, and the record's
+  `turns` column is what tells the two apart.
 - **A run's end is a quiet window**, not a run's status: the record going still for `--quiet-ms` is
   the signal a client has, and a page still being written when `--max-wait` runs out is answered as
   unfinished rather than graded as it stood.

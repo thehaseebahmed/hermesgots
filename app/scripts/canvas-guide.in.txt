@@ -1,6 +1,6 @@
 # Canvas
 
-A canvas is one HTML page the user keeps. Write it whole with `canvas_write` after `canvas_read`.
+A canvas is one HTML page the user keeps: `canvas_read` it, then write it whole with `canvas_write`.
 
 ## The user's design
 
@@ -9,24 +9,28 @@ job; the rest is a floor, filling what they leave unsaid.
 ## The floor
 
 One surface, one job, a real hierarchy: a title, a next step, one deliberate accent, and its empty,
-loading and error states, each saying what to do — no explanatory copy.
-## Colour and classes
+loading and error states, each saying what to do — no explanatory copy. Phone first: lay out for
+390px, then breathe from 768px; 44px targets, 16px typed text, nothing scrolling sideways. Colour,
+space and type come from the app's tokens, which follow the light and dark mode.
 
-The app draws the page, its theme on `:root` as CSS variables:
+## The method
 
-`--background --foreground --card --card-foreground --primary --primary-foreground --secondary
---secondary-foreground --muted --muted-foreground --accent --accent-foreground --border
---destructive --success --warning --info --radius`
+Each request on a canvas is a build on its own session, and it publishes one version at its end.
+Work it in that order:
 
-They follow the mode; a hardcoded colour breaks in dark, so spend colour on tokens — `--primary`
-for what the page is for. Tailwind v4 compiles classes from the same tokens, so `bg-primary`,
-`text-foreground`, `p-4`, `md:` and `dark:` work, each token also as
-`bg-`, `text-` and `border-`. Only markup classes compile; `<style>` is for the rest.
-## Phone first
+1. `canvas_plan` first: what will change, the checks as named scripts, and whether it waits for the
+   reader's Approve — a vague or structural change waits, a clear tweak builds straight away.
+2. Break it into slices; write each into the draft with `canvas_write` and `canvas_edit`, and read it
+   back with `canvas_read`. Nothing reaches the reader before the build publishes.
+3. Check the page: the host draws the draft and sends back each test's result, the console's errors
+   and screenshots at 390px and 768px, light and dark. Read them and fix what they show.
+4. `canvas_memory` what this canvas has now decided, so every later build is told it.
+5. End on a short summary of what changed: it becomes the version's summary and the lane's row.
 
-Most open on a phone: lay out for 390px, then breathe from 768px; nothing scrolls sideways.
-Tappable is 44px tall, never behind hover; typed-into type is 16px. Keep the foot clear of the
-bar: `env(safe-area-inset-bottom)`.
+## Craft
+
+Load `gots:canvas-craft` before writing a page: the document it has to be, the tokens and compiled
+classes, the phone-first measures, what the sandbox refuses, and how it calls its host.
 
 ## Points
 
@@ -42,9 +46,9 @@ Load with `skill_view`: `gots:impeccable` when the page should look like somethi
 
 - A form's submit is cancelled in place: nothing navigates, so handle the click.
 - An `http(s)` link opens in the app on tap: use one when the reader should leave.
-- Remote images over https are allowed; nothing else loads from outside:
-  a `<script src>`, CDN `<link>`, `http://` image, `<iframe>`, `<object>`, `<embed>`, `<base>`, meta
-  refresh or `url(https://…)` refuses the write whole. No `RTCPeerConnection`.
+- Remote images over https are allowed; nothing else loads from outside: a `<script src>`, CDN
+  `<link>`, `<iframe>`, meta refresh or `url(https://…)` refuses the write whole.
+  `gots:canvas-craft` has the rest.
 
 ## The document
 
@@ -63,10 +67,3 @@ A canvas keeps documents of `{collection, id, doc, at}`. A page reads `canvas.da
 away, `page`. A list is the collection's documents; a page takes `{after, limit}` and answers
 `{rows, next, total, partial}`; a list caps at 5000. `partial` is true until a sweep finishes, and a
 missing document's get throws its code. 64 MB a canvas, 256 KB a document.
-## The host, from the page
-
-It reads four host shapes — `canvas.read("usage", {provider})`, `canvas.read("routines")`,
-`canvas.read("projects")` and `canvas.read("sessions")` — and may call a tool its version declares in
-`tools` on `canvas_write` or `canvas_edit`: `canvas.tool.call("<server>.<tool>", args)`,
-once per tool. `canvas_edit` takes find-and-replace pairs: each `find`
-matches once, all or none.

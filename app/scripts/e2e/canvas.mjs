@@ -70,6 +70,9 @@ await flow(
     )
     await shot("edit-no-build")
     pass("the edit screen: a canvas made from a prompt lands on its chat, with no page and no Preview")
+    // The lane while the build works: its phase and the line saying what it is doing, over the
+    // composer. The mock publishes 2.5s after the start, so this is the one window it is drawn in.
+    await shot("building")
 
     // The first version lands through the live record, so Preview is drawn without a reload, and
     // the flip replaces the chat's entry: the page stands where the chat stood, so the next back
@@ -176,6 +179,17 @@ await flow(
     await field.fill(EDIT)
     await field.press(SEND_CHORD)
     await page.getByText("v2", { exact: true }).waitFor({ timeout: 40_000 })
+    // The lane is builds, not the transcript (G9, G10): the request it took is the row's line, and
+    // the version it wrote is the row's version, drawn on the edit screen itself.
+    const builds = page.locator("[data-canvas-builds]")
+    await builds.waitFor({ timeout: 20_000 })
+    await builds.getByText(EDIT, { exact: true }).waitFor({ timeout: 20_000 })
+    assert.equal(
+      await page.locator("[data-canvas-builds] [data-build-details]").count() > 0,
+      true,
+      "each build offers Details",
+    )
+    pass("the edit screen: the lane draws the build's request and the version it published")
     await shot("edited")
     pass("the edit screen: an edit sent from its chat lands as version 2")
 
