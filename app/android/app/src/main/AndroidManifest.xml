@@ -125,4 +125,23 @@
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <!-- The Gots Charm syncs over Bluetooth LE. Scanning only finds the charm by its service and is
+         never used for location, so Android 12+ asks for nearby devices, not location. -->
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:node="replace"
+        tools:targetApi="s" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- Android 11 and older ask for location to scan for BLE devices; newer ones never do. The
+         Bluetooth plugin asks for both locations on every version, so these replace its own. -->
+    <uses-permission
+        android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="30"
+        tools:node="replace" />
+    <uses-permission
+        android:name="android.permission.ACCESS_COARSE_LOCATION"
+        android:maxSdkVersion="30"
+        tools:node="replace" />
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
 </manifest>

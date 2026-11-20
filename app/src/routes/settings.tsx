@@ -33,6 +33,7 @@ import {
   TimerIcon,
   UserIcon,
   UsersIcon,
+  WatchIcon,
   type LucideIcon,
 } from "lucide-react"
 
@@ -52,6 +53,7 @@ import { Bot } from "@/components/bot"
 import { OnlineDot } from "@/components/bot-card"
 import { LinkSheet } from "@/components/link-bots"
 import { AppearanceSettings } from "@/components/settings/appearance"
+import { CharmSettings } from "@/components/settings/charm"
 import { DictationSettings } from "@/components/settings/dictation"
 import { LabSettings } from "@/components/settings/lab"
 import { ModelTimeoutRow } from "@/components/settings/model-timeout"
@@ -87,6 +89,8 @@ import {
 import { wordsLabel } from "@/lib/dictation-log"
 import { useDictationTotals } from "@/lib/dictations"
 import { useLiveStatus, type LiveStatus } from "@/lib/live"
+import { charmAvailable, usePairedCharm } from "@/lib/charm"
+import { CHARM, charmSubtitle } from "@/lib/charm-words"
 import { chatLayout } from "@/lib/chat-layout"
 import { useLarge } from "@/lib/media"
 import { openNotificationSettings, setBackGuard } from "@/lib/native"
@@ -128,6 +132,7 @@ const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
   account: { title: "Account", render: () => <AccountSettings /> },
   appearance: { title: "Appearance", render: () => <AppearanceSettings /> },
   dictation: { title: "AI Dictation", render: () => <DictationSettings /> },
+  charm: { title: CHARM, render: () => <CharmSettings /> },
   community: { title: "Community", render: () => <CommunitySettings /> },
   notifications: { title: NOTIFICATIONS, render: () => <NotificationsSettings /> },
   data: { title: "Local data", render: () => <DataSettings /> },
@@ -386,6 +391,7 @@ function MenuScreen({
         <Row to="appearance" icon={PaletteIcon} title="Appearance" subtitle={themeLabel(theme)} />
         <DictationRow />
         <NotificationsRow />
+        <CharmRow />
       </Group>
       <Group>
         <CommunityRow />
@@ -926,6 +932,13 @@ function FeedbackRow() {
  * The way into the dictation log: the words spoken so far where a host has reported them, else what
  * the screen holds. Its number is the same one the Stats tab draws (ADR 0060).
  */
+/** The charm's row: on the Android app only, where there is a radio to reach it with. */
+function CharmRow() {
+  const charm = usePairedCharm()
+  if (!charmAvailable()) return null
+  return <Row to="charm" icon={WatchIcon} title={CHARM} subtitle={charmSubtitle(charm)} />
+}
+
 function DictationRow() {
   const { totals, reported } = useDictationTotals()
   return (
