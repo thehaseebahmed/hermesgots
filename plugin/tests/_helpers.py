@@ -15,9 +15,94 @@ from typing import Any, Dict, Iterable, Iterator, List, Optional, Tuple
 from unittest.mock import MagicMock, patch
 
 import plugin
-from plugin import dictation_cleanup
+from plugin import canvas_checks, dictation_cleanup
 from plugin.store import connect
 from plugin.tasks import READY_LABEL
+
+# The two lines a canvas check's program hands the page its request on, and where it puts its
+# screenshots: the shapes are the runner's own, so a test holds them rather than reading them out of
+# the module it is checking.
+REQUEST_LINE = re.compile(r"^REQUEST = (.*)$", re.M)
+FOLDER_LINE = re.compile(r"^FOLDER = (.*)$", re.M)
+
+
+def plant_layer(available: bool = True) -> patch:
+    """Hermes's browser layer as a host that has it stands in ``sys.modules``.
+
+    ``tools.browser_use_cli`` is imported lazily by the probe, the way the plugin reaches every
+    other Hermes module, so a test hands it one: the entry point (``browser_exec``) and the
+    availability check (``browser_exec_available``), which is all a probe reads.
+    """
+    tools = ModuleType("tools")
+    cli = ModuleType("tools.browser_use_cli")
+    cli.browser_exec = lambda *args, **kwargs: None
+    cli.browser_exec_available = lambda: available
+    tools.browser_use_cli = cli
+    return patch.dict(sys.modules, {"tools": tools, "tools.browser_use_cli": cli})
+
+
+def take_layer_away() -> patch:
+    """A host with no browser layer in reach: both names held as ``None`` in ``sys.modules``, so
+    the probe's import of them is halted."""
+    return patch.dict(sys.modules, {"tools": None, "tools.browser_use_cli": None})
+
+
+def plant_unreadable_layer() -> patch:
+    """A layer whose availability check can't be read: the entry is there, the read raises."""
+
+    def unreadable() -> bool:
+        raise OSError("the layer won't answer")
+
+    tools = ModuleType("tools")
+    cli = ModuleType("tools.browser_use_cli")
+    cli.browser_exec = lambda *args, **kwargs: None
+    cli.browser_exec_available = unreadable
+    tools.browser_use_cli = cli
+    return patch.dict(sys.modules, {"tools": tools, "tools.browser_use_cli": cli})
+
+
+def plant_runner(answer=None) -> patch:
+    """Hermes's browser layer as a host that has it stands, with the runner's program answered.
+
+    ``browser_exec`` answers a JSON string (``tool_result`` in ``tools/registry.py``), so this does
+    too: it reads the request out of the program the runner generated — which is what proves the
+    runner serialised the document, the snapshot and the tests — and answers the report ``answer``
+    builds from it, the way the harness page would. The four screenshots are the program's own: it
+    takes them with the layer's ``capture_screenshot``, so this writes a file per drawing and names
+    it the way the program does. The browser's own side, a Chromium drawing that page, is what a
+    plugin test cannot run; a probe on a real host is what verifies it.
+    """
+    programs = []
+
+    def browser_exec(code: str, session: str = "", timeout_s: int = 0, **kwargs):
+        found = REQUEST_LINE.search(code)
+        folder = Path(FOLDER_LINE.search(code).group(1).strip("'\""))
+        programs.append(
+            {
+                "code": code,
+                "session": session,
+                "timeout_s": timeout_s,
+                "request": json.loads(found.group(1)) if found else None,
+            }
+        )
+        said = answer(json.loads(found.group(1))) if found and answer else {"tests": [], "console": []}
+        shots = []
+        for width, _height, mode in canvas_checks.DRAWINGS:
+            path = folder / f"{width}-{mode}.png"
+            path.write_bytes(b"\x89PNG\r\n\x1a\n")
+            shots.append({"width": width, "mode": mode, "path": str(path)})
+        return json.dumps(
+            {"success": True, "exit_code": 0, "output": json.dumps({**said, "shots": shots})}
+        )
+
+    tools = ModuleType("tools")
+    cli = ModuleType("tools.browser_use_cli")
+    cli.browser_exec = browser_exec
+    cli.browser_exec_available = lambda: True
+    tools.browser_use_cli = cli
+    planted = patch.dict(sys.modules, {"tools": tools, "tools.browser_use_cli": cli})
+    planted.programs = programs
+    return planted
 
 # Stands in for the host's own profile scope: `HERMES_HOME_OVERRIDE` and the secret scope are context
 # variables a request sets and `copy_context()` carries. Read by a fake decode the way Hermes reads

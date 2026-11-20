@@ -20,6 +20,8 @@ Run: python3 -m unittest plugin.tests.test_canvas_builds -v
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import json
 import logging
 import sqlite3
@@ -28,7 +30,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import canvases, events, sessions
+from . import attachments, canvas_checks, canvases, chats, events, link, sessions
 from .store import connect, home_of, now_ms
 
 logger = logging.getLogger(__name__)
@@ -66,6 +68,11 @@ APPROVAL = "The plan is approved. Build it."
 # The newest summaries a build's seed carries: a build is told what the canvas has lately been asked
 # for and what came of it, not its whole history.
 SUMMARIES = 5
+
+# How many times a build's draft is checked before it publishes whatever the checks last said
+# (ADR 0171): a check round per turn that changed the draft, bounded because each costs four
+# renders and a model call. A build never stalls on its checks — at the cap it publishes flagged.
+ROUNDS = 3
 
 # A build's final reply, kept from `post_llm_call` until its run ends: the summary is the reply the
 # agent already writes, read here rather than out of the transcript, which a compression or a
@@ -407,6 +414,12 @@ def _ended(kwargs: Dict[str, Any]) -> None:
     # the build publishes when a run ends after that (G6).
     if build.get("wait"):
         return
+    # A draft that changed since its last check is checked before it publishes: the report is the
+    # build's next turn, and the turn that ends on the same draft publishes (ADR 0171).
+    document = canvases.draft(path, build["canvas_id"])
+    if document and build["rounds"] < ROUNDS and _changed(build, document):
+        _checked(path, home, build, document, session_id)
+        return
     publish(path, home, build["id"], _summary(session_id))
 
 
@@ -426,13 +439,215 @@ def _summary(session_id: str) -> str:
         return _replies.pop(session_id, "")
 
 
+def _digest(document: str) -> str:
+    """A draft's fingerprint, so a turn that changed nothing is told from one that did."""
+    return hashlib.sha256(document.encode("utf-8")).hexdigest()
+
+
+def _changed(build: Dict[str, Any], document: str) -> bool:
+    """Whether the draft has moved since this build last checked it."""
+    return build.get("checked") != _digest(document)
+
+
+def _tests(path: Path, canvas_id: str) -> List[Dict[str, Any]]:
+    """The scripts the build's plan filed, as the check runner takes them."""
+    said = _read_file(canvases.folder_of(home_of(path), canvas_id) / canvases.TESTS)
+    if not said:
+        return []
+    try:
+        found = json.loads(said)
+    except ValueError:
+        logger.debug("gots: couldn't read %s's tests", canvas_id, exc_info=True)
+        return []
+    if not isinstance(found, list):
+        return []
+    return [
+        one
+        for one in found
+        if isinstance(one, dict)
+        and isinstance(one.get("name"), str)
+        and isinstance(one.get("script"), str)
+    ]
+
+
+def _snapshot(path: Path, canvas_id: str) -> Dict[str, List[Dict[str, Any]]]:
+    """The canvas's data as a check answers the page from it: one read-only snapshot by collection.
+
+    The whole-array read the agent's ``canvas_data_read`` makes, grouped the way the harness reads
+    a collection. A canvas past that read's bound has no honest snapshot to hand the page, so its
+    refusal rides out to ``_checked``, which publishes unchecked rather than testing the page
+    against a truncated copy of its data.
+    """
+    found: Dict[str, List[Dict[str, Any]]] = {}
+    for row in canvases.data(path, canvas_id):
+        found.setdefault(row["collection"], []).append(row)
+    return found
+
+
+def _takes_images(pinned: Optional[Dict[str, str]]) -> bool:
+    """Whether the canvas's model reads images: the app's own rule, where an unknown takes them.
+
+    The catalogue is read through Hermes's own module, imported where it is asked for like every
+    other, and a model it doesn't know leaves the unknown reading images — the app's composer does
+    the same with an ``imageInput`` it hasn't been told.
+    """
+    if not pinned:
+        return True
+    try:
+        from agent.models_dev import get_model_capabilities
+
+        found = get_model_capabilities(pinned["provider"], pinned["model"], allow_network=False)
+    except Exception:
+        logger.debug("gots: couldn't read whether a model reads images", exc_info=True)
+        return True
+    taken = getattr(found, "supports_vision", None)
+    return True if taken is None else bool(taken)
+
+
+def _data_url(shot: canvas_checks.Shot) -> Optional[str]:
+    """One screenshot as the inline image part the API server takes, or None where it can't be read."""
+    try:
+        data = Path(shot.path).read_bytes()
+    except OSError:
+        logger.debug("gots: couldn't read a screenshot at %s", shot.path, exc_info=True)
+        return None
+    return "data:image/png;base64," + base64.b64encode(data).decode("ascii")
+
+
+def _report_words(report: canvas_checks.CheckReport, images: bool) -> str:
+    """What a check's report says: every test, the console, and where the four drawings are."""
+    lines = ["The canvas's draft was checked on the rendered page."]
+    if report.tests:
+        lines += ["", "Tests:"]
+        for one in report.tests:
+            said = (
+                "passed"
+                if one.get("ok")
+                else f"failed — {one.get('error') or 'the page gave no reason'}"
+            )
+            lines.append(f"- {one.get('name')}: {said}")
+    else:
+        lines += ["", "No tests were filed, so the page was only drawn."]
+    if report.console:
+        lines += ["", "The page's console:"]
+        lines += [f"- {one}" for one in report.console]
+    if report.shots:
+        if images:
+            lines += ["", "The four screenshots are attached: 390px and 768px, in light and dark."]
+        else:
+            lines += ["", "The four screenshots are at:"]
+            lines += [f"- {one.width}px, {one.mode}: {one.path}" for one in report.shots]
+    lines += [
+        "",
+        "Fix what failed and write the page again, or reply with the change summary if nothing "
+        "needs changing.",
+    ]
+    return "\n".join(lines)
+
+
+def _shot_files(report: canvas_checks.CheckReport) -> List[Dict[str, Any]]:
+    """The screenshots as the queue's own file rows: a name, a type, a size and where each is."""
+    found: List[Dict[str, Any]] = []
+    for shot in report.shots:
+        try:
+            size = Path(shot.path).stat().st_size
+        except OSError:
+            continue
+        found.append(
+            {"name": Path(shot.path).name, "type": "image/png", "size": size, "path": shot.path}
+        )
+    return found
+
+
+def _stamp(path: Path, build_id: str, number: int, document: str, flag: str) -> None:
+    """Records a check round on the build: how many it has run, what it read, and what it said."""
+    conn = _open(path)
+    try:
+        conn.execute(
+            "UPDATE canvas_builds SET rounds = ?, checked = ?, flag = ?, at = ? WHERE id = ?",
+            (number, _digest(document), flag, now_ms(), build_id),
+        )
+    finally:
+        conn.close()
+
+
+def _report_turn(
+    path: Path,
+    home: Path,
+    build: Dict[str, Any],
+    report: canvas_checks.CheckReport,
+) -> None:
+    """Queues a check's report as the build's next turn, the screenshots inline as image parts.
+
+    The turn rides the build's own session, as the approval turn does, and the dispatcher posts it
+    as the build's next turn rather than taking it as a request (outbox.py). A model that reads no
+    images is given the paths instead, which its own file tools can open.
+    """
+    from . import outbox
+
+    session = build["session_id"]
+    canvas = canvases.record(path, build["canvas_id"]) or {}
+    pinned = chats.pin(path, canvas.get("session_id") or "")
+    images = _takes_images(pinned)
+    words = _report_words(report, images)
+    parts: List[Dict[str, Any]] = [{"type": "text", "text": words}]
+    if images:
+        for shot in report.shots:
+            url = _data_url(shot)
+            if url:
+                parts.append({"type": "image_url", "image_url": {"url": url}})
+    content: Any = parts if len(parts) > 1 else words
+    body = outbox.clean_body(
+        session, {"input": [{"role": "user", "content": content}], **chats.pin_fields(pinned)}
+    )
+    profile = link.profile_name(home)
+    outbox.add(path, session, profile, words, _shot_files(report), body)
+    outbox.watch(session, profile, path)
+
+
+def _checked(
+    path: Path, home: Path, build: Dict[str, Any], document: str, session_id: str
+) -> None:
+    """One check round: the draft drawn the way the app draws it, and what to do with the answer.
+
+    A check that ran posts its report as the build's next turn and leaves the build open; a check
+    that couldn't run — no browser, no harness, a layer that refused, a data snapshot past its
+    read's bound — stamps ``unchecked`` and publishes, because a build never stalls on its checks.
+    """
+    number = build["rounds"] + 1
+    try:
+        snapshot = _snapshot(path, build["canvas_id"])
+    except canvases.CanvasError:
+        logger.debug("gots: %s's data has no snapshot a check can carry", build["canvas_id"])
+        _stamp(path, build["id"], number, document, canvas_checks.UNCHECKED)
+        _note(path, build["canvas_id"])
+        publish(path, home, build["id"], _summary(session_id))
+        return
+    folder = attachments.folder(home, build["session_id"]) / f"check-{number}"
+    report = canvas_checks.check(document, snapshot, _tests(path, build["canvas_id"]), folder)
+    _stamp(path, build["id"], number, document, report.flag)
+    _note(path, build["canvas_id"])
+    if not report.ran:
+        publish(path, home, build["id"], _summary(session_id))
+        return
+    try:
+        _report_turn(path, home, build, report)
+    except Exception:
+        # The report is what carries the build on. If it can't be queued — a store this can't
+        # write, a session this can't name — the build publishes rather than waiting on a turn
+        # that is never coming (ADR 0171: a build never stalls on its checks).
+        logger.warning("gots: couldn't post a check's report for %s", build["id"], exc_info=True)
+        publish(path, home, build["id"], _summary(session_id))
+
+
 def publish(path: Path, home: Path, build_id: str, summary: str) -> Optional[Dict[str, Any]]:
     """Publishes the build's draft as one version, and answers what it published.
 
-    The version carries every request the build took and the reply it ended on, so an undo takes
-    the whole build back and the lane can say what changed without reading the transcript. A build
-    that wrote nothing publishes nothing: there is no draft, so there is no version to make, and the
-    build still ends — a request that needed no change is not a failure.
+    The version carries every request the build took, the reply it ended on and what its checks
+    said of it, so an undo takes the whole build back and the lane can say what changed without
+    reading the transcript. A build that wrote nothing publishes nothing: there is no draft, so
+    there is no version to make, and the build still ends — a request that needed no change is not
+    a failure.
     """
     build = _by_id(path, build_id)
     if build is None:
@@ -444,7 +659,11 @@ def publish(path: Path, home: Path, build_id: str, summary: str) -> Optional[Dic
             path,
             build["canvas_id"],
             document,
-            fields={"requests": json.dumps(build["requests"]), "summary": summary or None},
+            fields={
+                "requests": json.dumps(build["requests"]),
+                "summary": summary or None,
+                "flag": build.get("flag"),
+            },
         )
         canvases.drop_draft(path, build["canvas_id"])
     _phase(path, build_id, PUBLISHED, summary or None)

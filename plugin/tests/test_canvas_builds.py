@@ -7,13 +7,24 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 import unittest
+from types import ModuleType, SimpleNamespace
 from typing import Any, Dict, List, Optional
 from unittest import mock
+from unittest.mock import patch
 
-from plugin import PREFIX, builds, canvases, outbox, progress
+from plugin import PREFIX, builds, canvas_checks, canvases, chats, outbox, progress
 from plugin.store import db_path, put_setting
-from plugin.tests._helpers import FakeWeb, RouteAdapter, temp_hermes_home, route, wire
+from plugin.tests._helpers import (
+    FakeWeb,
+    RouteAdapter,
+    plant_runner,
+    route,
+    take_layer_away,
+    temp_hermes_home,
+    wire,
+)
 
 PROMPT = "A tip calculator for a restaurant bill, in the app's own colours"
 BODY = {"model": "m", "input": [{"role": "user", "content": PROMPT}]}
@@ -132,6 +143,14 @@ class Host:
         """The build's run ends as ``outcome`` says, with the reply it gave before it."""
         builds.reply(session_id=session, assistant_response=SUMMARY)
         builds.ended(session_id=session, **outcome)
+
+    def plan(self, session: str, **plan: Any) -> Dict[str, Any]:
+        """Files a build's plan, as the plan tool does, and answers what it said."""
+        return json.loads(canvases.handle_plan(plan, session_id=session))
+
+    def queued(self, session: str) -> List[str]:
+        """The turns waiting in a session's queue — the canvas chat's or a build's."""
+        return [item["text"] for item in outbox.read(self.path, session)["items"]]
 
     def version(self) -> int:
         return canvases.page(self.path, self.id)["version"]
@@ -460,7 +479,7 @@ class PlanWaitingTest(unittest.TestCase):
         self.host = Host(self)
 
     def file(self, session: str, **plan: Any) -> Dict[str, Any]:
-        return json.loads(canvases.handle_plan(plan, session_id=session))
+        return self.host.plan(session, **plan)
 
     def ask(self, path: str, method: str = "POST") -> Dict[str, Any]:
         """One request through the plugin's own wiring, answered as the route answers it."""
@@ -576,6 +595,167 @@ class PlanWaitingTest(unittest.TestCase):
     def test_the_seed_names_the_plan_tool(self) -> None:
         seeded = builds.seed(self.host.path, self.host.id)
         self.assertIn("canvas_plan", seeded, "a build is told to plan before it writes")
+
+
+def passing_answer(request: Dict[str, Any]) -> Dict[str, Any]:
+    """What the harness page answers for a draft that passes every test."""
+    return {
+        "tests": [{"name": one["name"], "ok": True, "error": None} for one in request["tests"]],
+        "console": [],
+    }
+
+
+def failing_answer(request: Dict[str, Any]) -> Dict[str, Any]:
+    """What the harness page answers for a draft that breaks every test."""
+    return {
+        "tests": [
+            {"name": one["name"], "ok": False, "error": "still the old heading"}
+            for one in request["tests"]
+        ],
+        "console": ["error: the page said something"],
+    }
+
+
+def plant_no_vision() -> patch:
+    """Hermes's model catalogue, answering that a model reads no images."""
+    module = ModuleType("agent.models_dev")
+    module.get_model_capabilities = lambda provider, model, allow_network=False: SimpleNamespace(
+        supports_vision=False
+    )
+    agent = ModuleType("agent")
+    agent.models_dev = module
+    return patch.dict(sys.modules, {"agent": agent, "agent.models_dev": module})
+
+
+class CheckedBeforePublishTest(unittest.TestCase):
+    """The plan's step 10 checks: a build is checked on its rendered page before it publishes.
+
+    The browser's own side is the one thing a test host cannot run, so the runner is planted: what
+    is proved is the loop — a draft changed since its last check is checked, its report is the
+    build's next turn, and the version publishes with what the checks said of it (passing, failing,
+    or unchecked where no browser could draw the page).
+    """
+
+    def setUp(self) -> None:
+        self.host = Host(self)
+
+    def build(self, checks: Optional[List[Dict[str, str]]] = None, document: str = DOCUMENT) -> Dict[str, Any]:
+        """A build with a plan filed and the page written, before its first run ends."""
+        found = self.host.start()
+        self.host.plan(
+            found["session_id"],
+            changes="The heading says Split the bill.",
+            checks=checks or [],
+            wait=False,
+        )
+        self.host.write(found["session_id"], document)
+        return found
+
+    def test_a_small_tweak_builds_checks_and_publishes_one_version(self) -> None:
+        planted = plant_runner(passing_answer)
+        self.addCleanup(planted.stop)
+        with planted:
+            build = self.build(checks=[{"name": "the heading is split", "script": "return 1"}])
+            session = build["session_id"]
+            self.host.adapter.run("run_1", session, "completed", 3)
+            self.host.end(session, completed=True)
+
+            # The draft changed, so the check ran before anything was published: one report turn
+            # is queued on the build's own session, and the version waits on the turn it starts.
+            self.assertEqual(self.host.version(), 0, "a checked build publishes nothing yet")
+            self.assertEqual(self.host.newest()["rounds"], 1)
+            self.assertEqual(len(self.host.queued(session)), 1)
+            self.assertIn("the heading is split", self.host.queued(session)[0])
+
+            # The report is the words and the four screenshots, inline as image parts.
+            self.host.tick(session)
+            run = self.host.posted[-1]["body"]
+            self.assertEqual(run["session_id"], session)
+            parts = run["input"][0]["content"]
+            self.assertEqual(
+                [one["type"] for one in parts],
+                ["text", "image_url", "image_url", "image_url", "image_url"],
+                "the four drawings ride the report as inline images",
+            )
+            self.assertTrue(
+                all(one["image_url"]["url"].startswith("data:image/png;base64,") for one in parts[1:])
+            )
+
+            # The turn that ends on the same draft changes nothing, so the loop ends and the one
+            # version publishes with what the check said of it.
+            self.host.adapter.run("run_2", session, "completed", 4)
+            self.host.end(session, completed=True)
+            self.assertEqual(self.host.version(), 1, "one build, one version")
+            self.assertEqual(self.host.record()["flag"], canvas_checks.PASSING)
+            self.assertEqual(self.host.record()["requests"], [PROMPT])
+            self.assertEqual(self.host.record()["summary"], SUMMARY)
+
+    def test_a_build_whose_checks_keep_failing_publishes_flagged_failing(self) -> None:
+        planted = plant_runner(failing_answer)
+        self.addCleanup(planted.stop)
+        fixed = [
+            DOCUMENT,
+            TWEAKED,
+            DOCUMENT.replace("<h1>Tip</h1>", "<h1>Split it</h1>"),
+            DOCUMENT.replace("<h1>Tip</h1>", "<h1>Split the bill</h1>"),
+        ]
+        with planted:
+            build = self.build(
+                checks=[{"name": "the heading is split", "script": "throw new Error('old heading')"}],
+                document=fixed[0],
+            )
+            session = build["session_id"]
+            # Three rounds: each report posts, the agent tries again, and the check still fails.
+            for number in range(1, 4):
+                self.host.adapter.run(f"run_{number}", session, "completed", 10 + number)
+                self.host.end(session, completed=True)
+                self.assertEqual(self.host.version(), 0, "still failing, so still nothing published")
+                self.assertEqual(self.host.newest()["rounds"], number)
+                self.assertEqual(len(self.host.queued(session)), 1, "one report turn per round")
+                self.assertIn("failed", self.host.queued(session)[0])
+                self.host.tick(session)
+                self.assertEqual(self.host.posted[-1]["body"]["session_id"], session)
+                self.host.write(session, fixed[number])
+            # The round cap reached with the draft still changing: the build publishes what it
+            # has, flagged failing — a build never stalls on its checks.
+            self.host.adapter.run("run_4", session, "completed", 20)
+            self.host.end(session, completed=True)
+            self.assertEqual(self.host.version(), 1)
+            self.assertEqual(self.host.record()["flag"], canvas_checks.FAILING)
+            self.assertEqual(self.host.newest()["rounds"], 3)
+
+    def test_a_build_on_a_host_with_no_browser_publishes_unchecked(self) -> None:
+        with take_layer_away():
+            build = self.build(checks=[{"name": "the heading is split", "script": "return 1"}])
+            session = build["session_id"]
+            self.host.adapter.run("run_1", session, "completed", 3)
+            self.host.end(session, completed=True)
+            # No browser drew the page, so there is no report to post and no second round: the
+            # build publishes the draft marked unchecked.
+            self.assertEqual(self.host.version(), 1)
+            self.assertEqual(self.host.record()["flag"], canvas_checks.UNCHECKED)
+            self.assertEqual(self.host.queued(session), [])
+            self.assertEqual(self.host.newest()["rounds"], 1)
+            self.assertEqual(len(self.host.posted), 1, "no report turn was posted")
+
+    def test_a_model_that_takes_no_images_is_given_the_screenshots_as_paths(self) -> None:
+        chats.set_choice(self.host.path, self.host.canvas["chat_id"], {"provider": "p", "model": "m"})
+        planted = plant_runner(passing_answer)
+        self.addCleanup(planted.stop)
+        with planted, plant_no_vision():
+            build = self.build(checks=[{"name": "the heading is split", "script": "return 1"}])
+            session = build["session_id"]
+            self.host.adapter.run("run_1", session, "completed", 3)
+            self.host.end(session, completed=True)
+            self.host.tick(session)
+            run = self.host.posted[-1]["body"]
+            content = run["input"][0]["content"]
+            self.assertIsInstance(content, str, "a model that reads no images is given paths")
+            self.assertEqual(
+                (run["provider"], run["model"]), ("p", "m"), "the report runs on the canvas's pin"
+            )
+            for width, mode in ((390, "light"), (390, "dark"), (768, "light"), (768, "dark")):
+                self.assertIn(f"{width}-{mode}.png", content)
 
 
 class OneSessionPathTest(unittest.TestCase):

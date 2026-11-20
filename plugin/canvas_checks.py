@@ -33,6 +33,13 @@ NO_ANSWER = "Hermes's browser layer answered a check with something this plugin 
 REFUSED = "Hermes's browser layer refused the check."
 FAILED = "Hermes's browser layer didn't finish the check."
 
+# What a version published off a check says of it (GLOSSARY "Check flag"): passing where every
+# test passed, failing where they still did after the build's rounds, and unchecked where the check
+# never ran — a host with no browser, a plugin with no harness, a layer that refused.
+PASSING = "passing"
+FAILING = "failing"
+UNCHECKED = "unchecked"
+
 # The four drawings a check takes (G8): a phone and a tablet, in the reader's light and dark mode.
 # The height is each device's own viewport, since a screenshot is of what a reader would see.
 DRAWINGS = ((390, 844, "light"), (390, 844, "dark"), (768, 1024, "light"), (768, 1024, "dark"))
@@ -111,6 +118,18 @@ class CheckReport:
     def passing(self) -> bool:
         """Whether every test passed: a check that didn't run has nothing to pass."""
         return self.ran and all(one.get("ok") for one in self.tests)
+
+    @property
+    def flag(self) -> str:
+        """What a version published off this check says of it (GLOSSARY "Check flag").
+
+        A check that never ran — no browser, no harness, a layer that refused — says ``unchecked``
+        rather than claiming a pass it never made, and one that ran with a failing test says
+        ``failing`` whether or not the build had another round left.
+        """
+        if not self.ran:
+            return UNCHECKED
+        return PASSING if self.passing else FAILING
 
 
 def _program(request: Dict[str, Any], folder: Path) -> str:
