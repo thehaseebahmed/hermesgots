@@ -62,6 +62,11 @@ def available() -> Optional[str]:
 
     The import is inside the function, like every other Hermes module the plugin reaches: the
     module only exists on a Hermes host, and a test plants its own in ``sys.modules``.
+
+    Two generations of Hermes can sit side by side on one install, and only one of them exports
+    ``browser_exec_available``. Where it is absent the probe reads the engine check that wrapper
+    calls (``_harness_site_dir``), so a layer that can draw isn't mistaken for one that isn't
+    there; a layer exporting neither name is unreadable and answers not ready.
     """
     try:
         from tools import browser_use_cli
@@ -73,14 +78,28 @@ def available() -> Optional[str]:
     if not callable(getattr(browser_use_cli, "browser_exec", None)):
         return NO_ENTRY
     check = getattr(browser_use_cli, "browser_exec_available", None)
-    if not callable(check):
+    if callable(check):
+        try:
+            ready = check()
+        except Exception:
+            logger.debug("gots: couldn't read Hermes's browser layer", exc_info=True)
+            return UNREADABLE
+        return None if ready else NO_ENGINE
+    # Two generations of Hermes sit side by side on an install that keeps a release cache: the
+    # running tree answers ``browser_exec`` but exports no availability wrapper, while the tree
+    # beside it does. The wrapper only ever runs the engine's own import check, ``_harness_site_dir``,
+    # so asking that directly reads the same fact on a tree with no wrapper — and the entry point
+    # being callable is what says the layer is there at all. A tree exporting neither name is one
+    # this plugin can't read, which is not the same as a host that can check: answer not ready.
+    engine = getattr(browser_use_cli, "_harness_site_dir", None)
+    if not callable(engine):
         return NO_ENTRY
     try:
-        ready = check()
+        found = engine()
     except Exception:
-        logger.debug("gots: couldn't read Hermes's browser layer", exc_info=True)
+        logger.debug("gots: couldn't read Hermes's browser engine", exc_info=True)
         return UNREADABLE
-    return None if ready else NO_ENGINE
+    return None if found else NO_ENGINE
 
 
 def carried() -> Optional[str]:

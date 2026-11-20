@@ -31,7 +31,9 @@ def plant_layer(available: bool = True) -> patch:
 
     ``tools.browser_use_cli`` is imported lazily by the probe, the way the plugin reaches every
     other Hermes module, so a test hands it one: the entry point (``browser_exec``) and the
-    availability check (``browser_exec_available``), which is all a probe reads.
+    availability check (``browser_exec_available``). That is the generation whose wrapper answers
+    for it; ``plant_layer_without_wrapper`` holds the other, which the probe reads by the engine
+    check the wrapper itself calls.
     """
     tools = ModuleType("tools")
     cli = ModuleType("tools.browser_use_cli")
@@ -46,6 +48,32 @@ def take_layer_away() -> patch:
     the probe's import of them is halted."""
     return patch.dict(sys.modules, {"tools": None, "tools.browser_use_cli": None})
 
+
+def plant_layer_without_wrapper(engine: bool = True) -> patch:
+    """Hermes's browser layer as the generation with no availability wrapper stands: the entry
+    point and the engine's own import check (``_harness_site_dir``), which the wrapper only calls.
+
+    An install can carry two generations at once — the tree the gateway imports and a release
+    cache beside it — so the probe has to read this shape as well as the one ``plant_layer`` holds.
+    """
+    tools = ModuleType("tools")
+    cli = ModuleType("tools.browser_use_cli")
+    cli.browser_exec = lambda *args, **kwargs: None
+    cli._harness_site_dir = lambda: (
+        "/opt/hermes/.venv/lib/python3.14/site-packages" if engine else None
+    )
+    tools.browser_use_cli = cli
+    return patch.dict(sys.modules, {"tools": tools, "tools.browser_use_cli": cli})
+
+
+def plant_layer_with_no_probe() -> patch:
+    """A layer that answers ``browser_exec`` and nothing else: no wrapper, no engine check, so
+    nothing this plugin can read to say whether a check would run."""
+    tools = ModuleType("tools")
+    cli = ModuleType("tools.browser_use_cli")
+    cli.browser_exec = lambda *args, **kwargs: None
+    tools.browser_use_cli = cli
+    return patch.dict(sys.modules, {"tools": tools, "tools.browser_use_cli": cli})
 
 def plant_unreadable_layer() -> patch:
     """A layer whose availability check can't be read: the entry is there, the read raises."""

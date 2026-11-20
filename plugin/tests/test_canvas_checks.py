@@ -19,6 +19,8 @@ from plugin.tests._helpers import (
     FakeWeb,
     RouteAdapter,
     plant_layer,
+    plant_layer_with_no_probe,
+    plant_layer_without_wrapper,
     plant_runner,
     plant_unreadable_layer,
     route,
@@ -88,6 +90,31 @@ class ProbeTest(unittest.TestCase):
     def test_a_layer_that_cant_be_read_answers_rather_than_raises(self) -> None:
         with plant_unreadable_layer():
             self.assertEqual(canvas_checks.UNREADABLE, canvas_checks.available())
+
+    def test_a_layer_with_no_wrapper_reads_the_engine_itself(self) -> None:
+        with plant_layer_without_wrapper():
+            self.assertIsNone(canvas_checks.available())
+
+    def test_a_layer_with_no_wrapper_and_no_engine_reads_not_ready(self) -> None:
+        with plant_layer_without_wrapper(engine=False):
+            self.assertEqual(canvas_checks.NO_ENGINE, canvas_checks.available())
+
+    def test_a_layer_exporting_neither_probe_name_reads_not_ready(self) -> None:
+        with plant_layer_with_no_probe():
+            self.assertEqual(canvas_checks.NO_ENTRY, canvas_checks.available())
+
+    def test_the_wrapper_answers_where_a_layer_holds_both(self) -> None:
+        # An install with two generations in reach could carry both names; the wrapper is the
+        # generation's own verdict, so its "no engine" is the answer even where the private
+        # check would find one.
+        tools = ModuleType("tools")
+        cli = ModuleType("tools.browser_use_cli")
+        cli.browser_exec = lambda *args, **kwargs: None
+        cli.browser_exec_available = lambda: False
+        cli._harness_site_dir = lambda: "/opt/hermes/.venv/lib/python3.14/site-packages"
+        tools.browser_use_cli = cli
+        with patch.dict(sys.modules, {"tools": tools, "tools.browser_use_cli": cli}):
+            self.assertEqual(canvas_checks.NO_ENGINE, canvas_checks.available())
 
     def test_a_layer_that_wont_import_reads_not_ready_with_the_reason(self) -> None:
         class Exploding(ModuleType):
