@@ -58,6 +58,22 @@ class GotsMessagingService : FirebaseMessagingService() {
         val notice = Notice.from(message.data, getString(R.string.app_name)) ?: return
         channelFor(notice.channel, notice.category)
         NoticeDrawer.post(this, notice.tag, entry(notice, pictureOf(notice)))
+        // The moment the notice reports, on the charm as well as in the tray. It is asked for after
+        // the entry is drawn and can never throw into it: an alert for a wrist is a bonus beside the
+        // notice, never a reason to lose one.
+        charmAlert(notice)
+    }
+
+    /**
+     * Hands a notice that carries both a bot and a reason to the charm. The subject is the id the
+     * notice is about — the one a clear for it names — so the record and its clear cannot disagree.
+     * A notice with either field missing, or with neither, is tray news only.
+     */
+    private fun charmAlert(notice: Notice) {
+        val bot = notice.charm ?: return
+        val reason = notice.charmReason ?: return
+        if (notice.id.isBlank()) return
+        runCatching { CharmNotifier.alert(this, bot, reason, notice.id) }
     }
 
     /**

@@ -4,6 +4,7 @@
  * nothing here sends either.
  */
 import { BleClient, type BleDevice } from "@capacitor-community/bluetooth-le"
+import { Capacitor, registerPlugin } from "@capacitor/core"
 import { useSyncExternalStore } from "react"
 
 import { botImage } from "@/components/bots"
@@ -11,6 +12,7 @@ import { findBot } from "@/components/bot"
 import { labelOf } from "@/lib/bot-name"
 import type { Profile } from "@/lib/db"
 import { isNative } from "@/lib/platform"
+import { quietly } from "@/lib/report"
 import { registryId } from "@/lib/registry"
 
 import { charmBotId } from "./charm-alert.ts"
@@ -35,6 +37,24 @@ export interface PairedCharm {
 }
 
 const KEY = "gots.charm"
+
+/** The native sender's registration name, as `MainActivity` registers it. */
+const CHARM_PLUGIN = "Charm"
+
+/** The three moments a charm draws, as `docs/PROTOCOL.md` names them and the plugin reads them. */
+export type CharmReason = "question" | "approval" | "finished"
+
+interface CharmBridge {
+  save(options: { deviceId: string }): Promise<void>
+  forget(): Promise<void>
+  alert(options: { botId: string; reason: CharmReason; subject: string }): Promise<void>
+  clear(options: { subject: string }): Promise<void>
+}
+
+const Charm = registerPlugin<CharmBridge>(CHARM_PLUGIN)
+
+/** Only the Android app carries the plugin: a browser has no radio and no sender behind it. */
+const charmBridge = () => isNative() && Capacitor.isPluginAvailable(CHARM_PLUGIN)
 
 /** The charm draws its picture in a box half the 466 px screen wide. */
 export const CHARM_PICTURE_PX = 233
@@ -99,11 +119,23 @@ export async function pairCharm(): Promise<PairedCharm> {
   }
   const next = { deviceId: device.deviceId, name: device.name ?? "Gots Charm" }
   write(next)
+  await keepCharm(next.deviceId)
   return next
+}
+
+/**
+ * The phone is told which charm to write to, so a push can reach it with the app closed: the page's
+ * own store is a WebView's, and nothing native reads it. Every failure is quiet — a charm that is
+ * paired and won't be written to is still a charm the reader paired.
+ */
+async function keepCharm(deviceId: string) {
+  if (!charmBridge()) return
+  await Charm.save({ deviceId }).catch(quietly("saving the charm on the phone"))
 }
 
 export function forgetCharm() {
   write(null)
+  if (charmBridge()) void Charm.forget().catch(quietly("forgetting the charm on the phone"))
 }
 
 /** A bot's charm picture: its happy pose on black, as a square JPEG for the round screen. */
@@ -217,10 +249,32 @@ export async function syncToCharm(
   const link = await openTransport(charm.deviceId)
   try {
     const result = await syncCharm(link, bots, onProgress)
-    if (paired?.deviceId === charm.deviceId)
+    if (paired?.deviceId === charm.deviceId) {
       write({ ...paired, syncedAt: Date.now(), syncedBots: result.total })
+      // Said again after every sync: the page's store and the phone's can part ways (an app's data
+      // cleared, a charm forgotten in Android's Bluetooth settings) and the next push must still
+      // find the charm this sync just reached.
+      await keepCharm(charm.deviceId)
+    }
     return result
   } finally {
     await link.close()
   }
+}
+
+/** What a test alert is keyed by: no session's, so it clears only when the reader dismisses it. */
+export const TEST_ALERT_SUBJECT = "test-alert"
+
+/**
+ * Settings → Charm's test row: an approval for the first bot the charm holds, through the same
+ * plugin a push goes through. A phone with no charm, Bluetooth off or the grant gone writes nothing
+ * and answers nothing — the row's own words are all it can promise.
+ */
+export async function sendTestAlert(bot: Profile) {
+  if (!charmBridge()) throw new Error("A test alert needs the Android app")
+  await Charm.alert({
+    botId: charmBotId(bot.id, await registryId(bot)),
+    reason: "approval",
+    subject: TEST_ALERT_SUBJECT,
+  })
 }

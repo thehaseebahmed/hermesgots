@@ -40,3 +40,11 @@ test("the charm section on the web says to pair from the phone", async () => {
     assert.ok(!text().includes("Pair a charm"))
   })
 })
+
+test("the web offers no test alert, since only the phone can write one", async () => {
+  await mount(at("/settings/charm"), async () => {
+    await settle()
+    assert.ok(!text().includes("Send a test alert"), "the row is the phone's")
+    assert.ok(!text().includes("Buzzes your charm"), "and its line is drawn nowhere beside it")
+  })
+})
