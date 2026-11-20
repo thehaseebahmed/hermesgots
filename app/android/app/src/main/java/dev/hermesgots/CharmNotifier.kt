@@ -170,12 +170,17 @@ object CharmNotifier {
             if (gatt == null) close()
         }
 
+        @SuppressLint("MissingPermission")
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, state: Int) {
             // The callback's own handle, so a link is never closed through a field not set yet.
+            // Every call here rides a connection the link above opened only after `granted()` said
+            // the nearby-devices permission was held; one taken away mid-flight throws, and the
+            // write's own runCatching drops it like every other refusal.
             this.gatt = gatt
             if (state == BluetoothProfile.STATE_CONNECTED) gatt.discoverServices() else close()
         }
 
+        @SuppressLint("MissingPermission")
         override fun onServicesDiscovered(gatt: BluetoothGatt, status: Int) {
             // A stack that takes no MTU request writes as it is: the charm's own frames are small, and
             // a write it refuses closes the link below.
