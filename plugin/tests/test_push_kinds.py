@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
-from plugin import alerts, chats, delegation, push, sessions
+from plugin import alerts, chats, delegation, link, push, sessions
 from plugin.store import connect, db_path
 from plugin.tests._helpers import subscribed
 
@@ -725,3 +725,108 @@ class OnScreen(unittest.TestCase):
                 [{"label": "Allow once", "url": "https://bot.example/once"}],
                 "the button a press posts back",
             )
+
+
+class TheCharm(unittest.TestCase):
+    """Which bot a push is for, and one word for why: the charm's own two fields.
+
+    The charm holds one record — a bot's face and one of three reasons — so the relay names this
+    profile's registry bot id and the reason for the three moments a bot is waiting on the reader.
+    A plan waiting is an approval; every other kind is news about something that is not a bot's face
+    on the charm, and carrying a reason it has no word for would make the charm draw a lie. A clear
+    names its subject and nothing else: a clear is not a moment, it is the end of one.
+    """
+
+    PROFILE = "work"
+    REASONS = ("finished", "approval", "question")
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "gots.db"
+        self.state = {"token": "token", "site": "https://app.example", "hostId": "host-1"}
+
+    def relayed(self, kind, state=None):
+        """The body the relay posts to the registry for one kind of news."""
+        bodies = []
+
+        def call(site, method, route, **kwargs):
+            bodies.append(kwargs.get("body"))
+            return {}
+
+        with mock.patch.object(
+            push.link, "load_state", lambda home: state or self.state
+        ), mock.patch.object(push.link, "call", call):
+            push._relay(self.path, kind, "chat_input", "gots-1", {})
+        self.assertEqual(len(bodies), 1, "a linked profile tells the registry once")
+        return bodies[0]
+
+    def test_a_push_names_the_bot_the_charm_holds_and_its_reason(self):
+        self.state["botId"] = link.bot_id(self.state, self.PROFILE)
+        body = self.relayed("question")
+        self.assertEqual(
+            body["charm"],
+            link.bot_id(self.state, self.PROFILE),
+            "the id `link.bot_id` computes, which the charm's own bots are named by",
+        )
+        self.assertEqual(body["charm_reason"], "question")
+
+    def test_a_plan_waiting_is_an_approval(self):
+        self.state["botId"] = link.bot_id(self.state, self.PROFILE)
+        self.assertEqual(self.relayed("plan")["charm_reason"], "approval")
+
+    def test_a_finished_run_is_finished(self):
+        self.state["botId"] = link.bot_id(self.state, self.PROFILE)
+        self.assertEqual(self.relayed("run_done")["charm_reason"], "finished")
+
+    def test_only_the_three_moments_are_a_bot_on_the_charm(self):
+        self.state["botId"] = link.bot_id(self.state, self.PROFILE)
+        moments = {
+            "approval": "approval",
+            "plan": "approval",
+            "question": "question",
+            "run_done": "finished",
+        }
+        for kind in push.KINDS:
+            body = self.relayed(kind)
+            with self.subTest(kind=kind):
+                if kind in moments:
+                    self.assertEqual(body["charm"], self.state["botId"])
+                    self.assertEqual(body["charm_reason"], moments[kind])
+                else:
+                    self.assertNotIn("charm", body, "not a bot's face on the charm")
+                    self.assertNotIn("charm_reason", body, "not a bot's face on the charm")
+
+    def test_a_reason_is_only_ever_one_of_the_three(self):
+        self.state["botId"] = link.bot_id(self.state, self.PROFILE)
+        for kind in push.KINDS:
+            reason = self.relayed(kind).get("charm_reason")
+            if reason is not None:
+                with self.subTest(kind=kind):
+                    self.assertIn(reason, self.REASONS, "the charm draws one of three words")
+
+    def test_a_link_that_holds_no_bot_id_names_none(self):
+        body = self.relayed("question")
+        self.assertNotIn("charm", body, "an id this profile never computed is not guessed at")
+        self.assertNotIn("charm_reason", body, "a reason without a bot it belongs to")
+
+    def test_a_clear_names_no_reason(self):
+        subscribed(self.path, '["chat_input"]')
+        sent, told = [], []
+
+        def call(site, method, route, **kwargs):
+            told.append((route, kwargs.get("body")))
+            return {}
+
+        with mock.patch.object(
+            push, "send", lambda row, payload, topic: sent.append(payload) or 201
+        ), mock.patch.object(push.link, "load_state", lambda home: self.state), mock.patch.object(
+            push.link, "call", call
+        ):
+            push.dismissed(self.path, "gots-1")
+        self.assertEqual(
+            sent,
+            [{"kind": "clear", "session_id": "gots-1"}],
+            "a clear is the end of a moment, not one: it names what to clear and no reason",
+        )
+        self.assertEqual(told, [("push/dismiss", {"session_id": "gots-1"})])
