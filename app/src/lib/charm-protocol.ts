@@ -29,9 +29,25 @@ export const CharmOp = {
   PoseImage: 0x09,
   PoseImageEnd: 0x0a,
   Time: 0x0b,
+  // The moments. These go over with no Begin either: they are not a sync at all.
+  Alert: 0x20,
+  Handoff: 0x22,
 } as const
 
 type CharmOp = (typeof CharmOp)[keyof typeof CharmOp]
+
+/**
+ * The byte each reason an alert carries is on the wire, as `REASON_QUESTION` and `REASON_APPROVAL`
+ * are in `CharmWire.kt`. Only a moment that needs an action from the reader has one.
+ */
+export const CharmReasonByte = {
+  question: 1,
+  approval: 2,
+} as const
+
+/** What an alert's title and body may measure, as `kMaxTitleLen` and `kMaxBodyLen` do. */
+export const CHARM_MAX_TITLE_BYTES = 64
+export const CHARM_MAX_BODY_BYTES = 128
 
 export const CharmCode = {
   Ok: 0,
@@ -163,6 +179,25 @@ export function utf8Clip(text: string, max: number): Uint8Array {
   return bytes.slice(0, end)
 }
 
+/**
+ * Text as the charm shows it: at most `max` bytes, cut where a word ends rather than inside one, and
+ * never inside a character. A cut mid-word reads as a typo on a round screen, and a cut mid-character
+ * is a broken tail the charm would draw as a box.
+ */
+export function clampText(text: string, max: number): Uint8Array {
+  const bytes = encoder.encode(text)
+  if (bytes.length <= max) return bytes
+  let end = max
+  // A character's continuation bytes are 10xxxxxx: step back to the start of the one the cut split.
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--
+  // Then back to the space that ended the last whole word, since a space is one byte and so is never
+  // inside a character. Text with no space in it keeps the character cut: half a word beats nothing.
+  let space = end
+  while (space > 0 && bytes[space - 1] !== 0x20) space--
+  if (space > 1) end = space - 1
+  return bytes.slice(0, end)
+}
+
 let table: Uint32Array | undefined
 
 /** IEEE CRC-32, the same as zlib's and the charm's. */
@@ -223,6 +258,69 @@ export const abortMessage = () => control(CharmOp.Abort).done()
 
 /** UTC seconds, which the charm keeps in its RTC so the pet's meters know the time that passed. */
 export const timeMessage = (epochSeconds: number) => control(CharmOp.Time).u32(epochSeconds).done()
+
+export interface CharmAlert {
+  /** `CharmReasonByte`: only the two moments a bot needs the reader for reach the charm. */
+  reason: number
+  /** Minutes since local midnight at the moment this frame was built, as the reader's clock reads. */
+  minute: number
+  /** The notice's title: the first line the tray entry shows. May be none. */
+  title: string
+  /** The notice's body: what the bot said. May be none, and one cut for the link drops it whole. */
+  body: string
+  /** The session the alert is about: what a clear and a handoff answer name. */
+  subject: string
+  /** The bot's id on the charm, the one a push carries. */
+  botId: string
+}
+
+/**
+ * A bot needs the reader, with what the notification said. The charm draws it with the phone away,
+ * so it carries the words the tray shows rather than an id the reader would have to look up.
+ *
+ * The longest one is 335 bytes (64 of title, 128 of body, 64 of subject and of bot id), which is why
+ * the writer asks for a larger MTU before it writes one.
+ */
+export function alertMessage(alert: CharmAlert): Uint8Array {
+  if (alert.reason !== CharmReasonByte.question && alert.reason !== CharmReasonByte.approval)
+    throw new Error("A charm alert is a question or an approval")
+  const subject = utf8Clip(alert.subject, MAX_ID_BYTES)
+  if (subject.length === 0) throw new Error("An alert names the session it is about")
+  const botId = utf8Clip(alert.botId, MAX_ID_BYTES)
+  if (botId.length === 0) throw new Error("An alert names the bot it is about")
+  return control(CharmOp.Alert)
+    .u8(alert.reason)
+    .u16(alert.minute)
+    .str(clampText(alert.title, CHARM_MAX_TITLE_BYTES))
+    .str(clampText(alert.body, CHARM_MAX_BODY_BYTES))
+    .str(subject)
+    .str(botId)
+    .done()
+}
+
+/**
+ * The ask: whether the reader tapped "Show on phone" while the phone was away. One byte, with no
+ * version in front of it — the charm reads a one-byte control write as this ask alone, and answers
+ * in its status characteristic. One ask consumes the answer, so a pending tap is answered once and
+ * then gone.
+ */
+export const handoffMessage = () => new Uint8Array([CharmOp.Handoff])
+
+/**
+ * The subject a handoff ask was answered with, or null for an answer with nothing pending — and for
+ * anything that is not this answer at all. A status is exactly four bytes and this answer is five or
+ * more, so the two can never be read for each other; a status whose third byte happened to be `0x22`
+ * still reads as no answer here.
+ */
+export function parseHandoff(view: DataView): string | null {
+  if (view.byteLength < 5) return null
+  if (view.getUint8(2) !== CharmOp.Handoff) return null
+  const length = view.getUint8(3)
+  // Nothing was pending, or the subject the charm announced never arrived: either way, no subject.
+  if (length === 0 || view.byteLength < 4 + length) return null
+  const bytes = new Uint8Array(view.buffer, view.byteOffset + 4, length)
+  return new TextDecoder().decode(bytes)
+}
 
 export function petSettingsMessage(settings: CharmPetSettings): Uint8Array {
   const id = utf8Clip(settings.petBotId, MAX_ID_BYTES)

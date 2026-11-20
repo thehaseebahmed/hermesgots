@@ -59,7 +59,14 @@ export type CharmReason = "question" | "approval"
 interface CharmBridge {
   save(options: { deviceId: string }): Promise<void>
   forget(): Promise<void>
-  alert(options: { botId: string; reason: CharmReason; subject: string }): Promise<void>
+  alert(options: {
+    botId: string
+    reason: CharmReason
+    subject: string
+    /** The words the notice carries: the same title and body the tray entry shows. */
+    title: string
+    body: string
+  }): Promise<void>
   clear(options: { subject: string }): Promise<void>
 }
 
@@ -335,6 +342,9 @@ export const TEST_ALERT_SUBJECT = "test-alert"
  * Settings → Charm's test row: an approval for the first bot the charm holds, through the same
  * plugin a push goes through. A phone with no charm, Bluetooth off or the grant gone writes nothing
  * and answers nothing — the row's own words are all it can promise.
+ *
+ * Its words are the ones a real approval's notice carries (`WORDS.approval` in
+ * `netlify/lib/fcm.ts`), so what the charm draws for the test is what it draws for a push.
  */
 export async function sendTestAlert(bot: Profile) {
   if (!charmBridge()) throw new Error("A test alert needs the Android app")
@@ -342,5 +352,7 @@ export async function sendTestAlert(bot: Profile) {
     botId: await charmIdFor(bot),
     reason: "approval",
     subject: TEST_ALERT_SUBJECT,
+    title: "Test alert",
+    body: "Waiting for your approval",
   })
 }

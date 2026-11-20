@@ -11,7 +11,6 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
-import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.Person
@@ -72,13 +71,16 @@ class GotsMessagingService : FirebaseMessagingService() {
     /**
      * Hands a notice that carries both a bot and a reason to the charm. The subject is the id the
      * notice is about — the one a clear for it names — so the record and its clear cannot disagree.
-     * A notice with either field missing, or with neither, is tray news only.
+     * The title and the body are the words the tray entry shows, so the charm reads like the
+     * notification. A notice with either field missing, or with neither, is tray news only.
      */
     private fun charmAlert(notice: Notice) {
         val bot = notice.charm ?: return
         val reason = notice.charmReason ?: return
         if (notice.id.isBlank()) return
-        runCatching { CharmNotifier.alert(this, bot, reason, notice.id) }
+        runCatching {
+            CharmNotifier.alert(this, bot, reason, notice.id, notice.title, notice.body)
+        }
     }
 
     /**
@@ -191,20 +193,8 @@ class GotsMessagingService : FirebaseMessagingService() {
     private fun openIntent(kind: String, id: String, tag: String): PendingIntent =
         PendingIntent.getActivity(this, tag.hashCode(), openLink(kind, id), pendingFlags())
 
-    /** The `gots://open` link a tap and a chat's shortcut both open. */
-    private fun openLink(kind: String, id: String): Intent {
-        val link = Uri.Builder()
-            .scheme("gots")
-            .authority("open")
-            .appendQueryParameter("kind", kind)
-            .appendQueryParameter("id", id)
-            .build()
-        return Intent(Intent.ACTION_VIEW, link).apply {
-            // Gots is one task (`launchMode="singleTask"`), so a tap from the tray lands in the app that
-            // is already there, which is what hands the link to the page (Capacitor's `appUrlOpen`).
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        }
-    }
+    /** The `gots://open` link a tap and a chat's shortcut both open, built in one place with the charm. */
+    private fun openLink(kind: String, id: String): Intent = NoticeOpen.link(kind, id)
 
     /** A button's broadcast, carrying the one link a press is allowed to post. */
     private fun answerIntent(tag: String, index: Int, url: String): PendingIntent {

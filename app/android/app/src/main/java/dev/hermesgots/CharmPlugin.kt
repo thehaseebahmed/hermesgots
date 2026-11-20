@@ -50,7 +50,16 @@ class CharmPlugin : Plugin() {
             call.reject("A charm alert is a question or an approval.")
             return
         }
-        CharmNotifier.alert(context, botId, reason, call.getString("subject").orEmpty())
+        // The words the page's own notice carries, so a test alert reads on the charm as a real one
+        // does: the title over the body, at the minute the frame is built.
+        CharmNotifier.alert(
+            context,
+            botId,
+            reason,
+            call.getString("subject").orEmpty(),
+            call.getString("title").orEmpty(),
+            call.getString("body").orEmpty(),
+        )
         call.resolve()
     }
 
