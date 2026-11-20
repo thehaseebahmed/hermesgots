@@ -2568,6 +2568,15 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         for session_id, reason in host_side.items():
             waiting.setdefault(session_id, reason)
         try:
+            # A canvas chat whose build waits on a plan: a build session is outside the chat lists,
+            # so the read the app draws Waiting for input from is told from the canvas side.
+            building = await asyncio.to_thread(builds.waiting, store_path())
+        except Exception:
+            logger.debug("gots: reading waiting canvas builds failed", exc_info=True)
+            building = {}
+        for session_id, reason in building.items():
+            waiting.setdefault(session_id, reason)
+        try:
             subagents = await asyncio.to_thread(delegation.live_sessions, home)
         except Exception:
             logger.debug("gots: reading live subagents failed", exc_info=True)

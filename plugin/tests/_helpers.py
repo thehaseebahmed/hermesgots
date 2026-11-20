@@ -334,6 +334,17 @@ def stub_projects_db(projects=None, get_project=None, list_projects=None):
     return patch.dict(sys.modules, {"hermes_cli": module, "hermes_cli.projects_db": projects_db})
 
 
+def subscribed(path: Path, categories: str) -> None:
+    """A profile's push store with one device on it, asked for ``categories`` as the app sends them."""
+    conn = connect(path)
+    conn.execute(
+        "INSERT INTO push_subscriptions (endpoint, device, p256dh, auth, vapid_key, subject,"
+        " created_at, categories) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        ("https://push.example/1", "phone-1", "key", "auth", "vapid", "mailto:a@b.c", 1, categories),
+    )
+    conn.close()
+
+
 def temp_hermes_home(case: unittest.TestCase) -> Path:
     """Give ``case`` a throwaway Hermes home that ``hermes_constants.get_hermes_home`` answers.
 

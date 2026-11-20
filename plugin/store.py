@@ -77,7 +77,10 @@ logger = logging.getLogger(__name__)
 # 79 keeps what a build's checks said of the version it published (ADR 0171, `builds.py`): the flag
 # on the version, and on the build the checks' last flag, the rounds it has run and the draft's
 # digest at that check. A build from before this has run none and checked nothing.
-SCHEMA_VERSION = 79
+# 80 keeps whether a build's wait on its plan has been pushed (the canvas builds plan's step 12,
+# `builds.py`): one column on the build record, so one wait is one push and a plan revised by a
+# message is the same wait.
+SCHEMA_VERSION = 80
 
 
 def data_dir(hermes_home: Path) -> Path:
@@ -1129,6 +1132,14 @@ def _migrate(conn: sqlite3.Connection) -> None:
                 conn.execute("ALTER TABLE canvas_builds ADD COLUMN rounds INTEGER NOT NULL DEFAULT 0")
             if "checked" not in build_columns:
                 conn.execute("ALTER TABLE canvas_builds ADD COLUMN checked TEXT")
+        # v80: whether the canvas chat has already been told its build waits on a plan (the canvas
+        # builds plan's step 12, builds.py). The push goes once for one wait, and a plan revised by
+        # a message is the same wait; the marker clears when the wait does, so a wait after an
+        # approval is new news. A build from before this has told nobody.
+        if version < 80:
+            build_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvas_builds)")}
+            if "waiting" not in build_columns:
+                conn.execute("ALTER TABLE canvas_builds ADD COLUMN waiting INTEGER NOT NULL DEFAULT 0")
         # v61: the data a canvas keeps, one row per document of one collection. `value` is the
         # document as JSON and `at` is the host's clock when it was written, since the page owns the
         # data and a device's copy is only the page it was drawn from. No version or undo reads or

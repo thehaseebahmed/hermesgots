@@ -30,7 +30,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from . import attachments, canvas_checks, canvases, chats, events, link, sessions
+from . import attachments, canvas_checks, canvases, chats, events, link, notice, sessions
 from .store import connect, home_of, now_ms
 
 logger = logging.getLogger(__name__)
@@ -167,6 +167,27 @@ def builds_of(path: Path, canvas_id: str) -> List[Dict[str, Any]]:
     return [_build(row) for row in rows]
 
 
+def waiting(path: Path) -> Dict[str, Dict[str, Any]]:
+    """Each canvas chat whose build waits on a plan, as ``runs/live`` reports a wait (step 12).
+
+    Keyed by the canvas chat's session — the one the app polls and a plan's push is about — and
+    read in one statement, since every screen asks this on every poll and a canvas's record would
+    carry the tile's picture nobody needs here.
+    """
+    if not path.exists():
+        return {}
+    conn = _open(path)
+    try:
+        rows = conn.execute(
+            """SELECT c.session_id FROM canvas_builds b JOIN canvases c ON c.id = b.canvas_id
+               WHERE b.phase = ? AND b.wait = 1""",
+            (OPEN,),
+        ).fetchall()
+    finally:
+        conn.close()
+    return {row[0]: {"kind": "plan"} for row in rows if isinstance(row[0], str) and row[0]}
+
+
 def enter(path: Path, canvas_id: str, request: str) -> Optional[Dict[str, Any]]:
     """The build this request runs on: the canvas's open one, or a new one.
 
@@ -298,8 +319,11 @@ def approve(path: Path, canvas_id: str) -> Optional[Dict[str, Any]]:
         raise canvases.CanvasError("This build's plan isn't waiting for approval.", 409)
     conn = _open(path)
     try:
+        # The wait is over, so the marker a push left behind is cleared with it: a plan filed to
+        # wait again after this approval is a new wait and new news (step 12).
         conn.execute(
-            "UPDATE canvas_builds SET wait = 0, at = ? WHERE id = ?", (now_ms(), build["id"])
+            "UPDATE canvas_builds SET wait = 0, waiting = 0, at = ? WHERE id = ?",
+            (now_ms(), build["id"]),
         )
     finally:
         conn.close()
@@ -413,6 +437,7 @@ def _ended(kwargs: Dict[str, Any]) -> None:
     # A plan that waits holds the build open: the reader's Approve is what opens the draft, and
     # the build publishes when a run ends after that (G6).
     if build.get("wait"):
+        _note_waiting(path, build)
         return
     # A draft that changed since its last check is checked before it publishes: the report is the
     # build's next turn, and the turn that ends on the same draft publishes (ADR 0171).
@@ -640,6 +665,55 @@ def _checked(
         publish(path, home, build["id"], _summary(session_id))
 
 
+def _first_line(summary: str) -> Optional[str]:
+    """A build summary's first line, as a finished build's push carries it: one line, cut."""
+    for line in (summary or "").splitlines():
+        if line.strip():
+            return notice.flatten(line)
+    return None
+
+
+def _mark_waiting(path: Path, build_id: str, waiting: bool) -> None:
+    conn = _open(path)
+    try:
+        conn.execute(
+            "UPDATE canvas_builds SET waiting = ? WHERE id = ?", (1 if waiting else 0, build_id)
+        )
+    finally:
+        conn.close()
+
+
+def _note_waiting(path: Path, build: Dict[str, Any]) -> None:
+    """Tells the canvas chat its build waits on a plan, once per wait (step 12).
+
+    The push is the existing ``plan`` kind, about the canvas chat's session — so the bot's and the
+    chat's mute both silence it, and a tap opens the canvas through the chat the notice names.
+    ``waiting`` reports the same wait to the read every screen polls. A build that waits again
+    after an approval is a new wait: the marker the push leaves is cleared with the wait.
+    """
+    if build.get("waiting"):
+        return
+    canvas = canvases.record(path, build["canvas_id"]) or {}
+    session = canvas.get("session_id")
+    if not isinstance(session, str) or not session:
+        return
+    _mark_waiting(path, build["id"], True)
+    from . import push
+
+    push.notify("plan", session, path)
+
+
+def _pushed_published(path: Path, canvas_id: str, summary: str) -> None:
+    """Tells the canvas chat a build finished, once, carrying the summary's first line (step 12)."""
+    canvas = canvases.record(path, canvas_id) or {}
+    session = canvas.get("session_id")
+    if not isinstance(session, str) or not session:
+        return
+    from . import push
+
+    push.notify("run_done", session, path, body=_first_line(summary))
+
+
 def publish(path: Path, home: Path, build_id: str, summary: str) -> Optional[Dict[str, Any]]:
     """Publishes the build's draft as one version, and answers what it published.
 
@@ -668,6 +742,7 @@ def publish(path: Path, home: Path, build_id: str, summary: str) -> Optional[Dic
         canvases.drop_draft(path, build["canvas_id"])
     _phase(path, build_id, PUBLISHED, summary or None)
     _note(path, build["canvas_id"])
+    _pushed_published(path, build["canvas_id"], summary)
     return answer
 
 

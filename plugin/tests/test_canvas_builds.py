@@ -8,19 +8,21 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import threading
 import unittest
 from types import ModuleType, SimpleNamespace
 from typing import Any, Dict, List, Optional
 from unittest import mock
 from unittest.mock import patch
 
-from plugin import PREFIX, builds, canvas_checks, canvases, chats, outbox, progress
+from plugin import PREFIX, builds, canvas_checks, canvases, chats, outbox, progress, push
 from plugin.store import db_path, put_setting
 from plugin.tests._helpers import (
     FakeWeb,
     RouteAdapter,
     plant_runner,
     route,
+    subscribed,
     take_layer_away,
     temp_hermes_home,
     wire,
@@ -151,6 +153,28 @@ class Host:
     def queued(self, session: str) -> List[str]:
         """The turns waiting in a session's queue — the canvas chat's or a build's."""
         return [item["text"] for item in outbox.read(self.path, session)["items"]]
+
+    def ask(self, path: str, method: str = "POST") -> Dict[str, Any]:
+        """One request through the plugin's own wiring, answered as the route answers it."""
+        request = FakeWeb.Request()
+        request.headers = {}
+        request.match_info = {"canvas_id": self.id}
+        request.query = {}
+        request.content_length = None
+        request.path = path
+        request.url = _Url(path)
+        return asyncio.run(route(self.app, path, method)(request))
+
+    def live(self) -> Dict[str, Any]:
+        """``runs/live`` as an app polls it: the read every screen draws whole."""
+        path = f"{PREFIX}/runs/live"
+        request = FakeWeb.Request()
+        request.headers = {}
+        request.query = {}
+        request.path = path
+        request.match_info = {}
+        request.url = _Url(path)
+        return asyncio.run(route(self.app, path, "GET")(request))["payload"]
 
     def version(self) -> int:
         return canvases.page(self.path, self.id)["version"]
@@ -481,17 +505,6 @@ class PlanWaitingTest(unittest.TestCase):
     def file(self, session: str, **plan: Any) -> Dict[str, Any]:
         return self.host.plan(session, **plan)
 
-    def ask(self, path: str, method: str = "POST") -> Dict[str, Any]:
-        """One request through the plugin's own wiring, answered as the route answers it."""
-        request = FakeWeb.Request()
-        request.headers = {}
-        request.match_info = {"canvas_id": self.host.id}
-        request.query = {}
-        request.content_length = None
-        request.path = path
-        request.url = _Url(path)
-        return asyncio.run(route(self.host.app, path, method)(request))
-
     def test_a_plan_that_waits_is_revised_by_a_message_and_built_on_approve(self) -> None:
         build = self.host.start()
         filed = self.file(
@@ -522,7 +535,7 @@ class PlanWaitingTest(unittest.TestCase):
         self.assertEqual(self.host.version(), 0, "still waiting")
 
         # Approve clears the wait and queues the approval turn on the build's own session.
-        answered = self.ask(f"{PREFIX}/canvases/{{canvas_id}}/build/approve")["payload"]
+        answered = self.host.ask(f"{PREFIX}/canvases/{{canvas_id}}/build/approve")["payload"]
         self.assertFalse(answered["build"]["wait"], "the draft opens on Approve")
         self.host.tick(build["session_id"])
         self.assertEqual(self.host.posted[-1]["body"]["session_id"], build["session_id"])
@@ -582,7 +595,7 @@ class PlanWaitingTest(unittest.TestCase):
     def test_stop_publishes_nothing(self) -> None:
         build = self.host.start()
         self.file(build["session_id"], changes="A structural change.", checks=[], wait=True)
-        answered = self.ask(f"{PREFIX}/canvases/{{canvas_id}}/build/stop")["payload"]
+        answered = self.host.ask(f"{PREFIX}/canvases/{{canvas_id}}/build/stop")["payload"]
         self.assertEqual(answered["build"]["phase"], builds.STOPPED)
         self.assertEqual(self.host.version(), 0, "stop publishes nothing")
         self.assertIsNone(self.host.build(), "the build is closed")
@@ -756,6 +769,98 @@ class CheckedBeforePublishTest(unittest.TestCase):
             )
             for width, mode in ((390, "light"), (390, "dark"), (768, "light"), (768, "dark")):
                 self.assertIn(f"{width}-{mode}.png", content)
+
+
+class ClosedAppTest(unittest.TestCase):
+    """The plan's step 12 check: a waiting build pushes as a plan, and a published build pushes once.
+
+    The app is closed, so the news has to reach it: a build that waits on its plan reports the
+    canvas chat as waiting with kind ``plan`` — the read every screen polls, and the existing plan
+    push — and a published build sends one run-finished push carrying the summary's first line.
+    Both are about the canvas chat's session, so its mute and the bot's silence them, and a tap
+    opens the canvas through the chat the notice names.
+    """
+
+    def setUp(self) -> None:
+        self.host = Host(self)
+        subscribed(self.host.path, '["code_input", "chat_run_done"]')
+        self.sent: List[Dict[str, Any]] = []
+        self.arrived = threading.Event()
+
+        def deliver(path: Any, kind: str, category: str, session_id: str, notice: Any) -> None:
+            self.sent.append(
+                {"kind": kind, "category": category, "session": session_id, "notice": notice}
+            )
+            self.arrived.set()
+
+        delivering = mock.patch.object(push, "_deliver", deliver)
+        delivering.start()
+        self.addCleanup(delivering.stop)
+
+    def pushes(self) -> List[Dict[str, Any]]:
+        """The pushes that reached a transport since the last read, as they land."""
+        self.arrived.wait(1)
+        found, self.sent[:] = list(self.sent), []
+        self.arrived.clear()
+        return found
+
+    def test_a_waiting_build_pushes_as_a_plan_and_a_published_build_pushes_once(self) -> None:
+        build = self.host.start()
+        session = build["session_id"]
+        self.host.plan(session, changes="The heading says Split the bill.", checks=[], wait=True)
+
+        # The run ends with the plan waiting: the build holds open, and the canvas chat hears it
+        # once — as a plan waiting, the same news a project session's plan sends.
+        self.host.adapter.run("run_1", session, "completed", 2)
+        self.host.end(session, completed=True)
+        pushes = self.pushes()
+        self.assertEqual([one["kind"] for one in pushes], ["plan"])
+        self.assertEqual(pushes[0]["session"], self.host.session, "the canvas chat's news")
+        self.assertEqual(pushes[0]["notice"].conversation.get("chat"), self.host.canvas["chat_id"])
+        # And the read every screen polls says the same, in the words the app already draws.
+        self.assertEqual(builds.waiting(self.host.path), {self.host.session: {"kind": "plan"}})
+        self.assertEqual(self.host.live()["waiting"][self.host.session], {"kind": "plan"})
+
+        # A message revises the plan and it waits still: one wait, one push.
+        self.host.queue("and make it blue too")
+        self.host.tick()
+        self.host.plan(
+            session,
+            changes="The heading says Split the bill, and the page is blue.",
+            checks=[],
+            wait=True,
+        )
+        self.host.adapter.run("run_2", session, "completed", 3)
+        self.host.end(session, completed=True)
+        self.assertEqual(self.pushes(), [], "a revised plan is the same wait")
+
+        # Approve builds it: the draft is written, the run ends, and the build publishes once.
+        self.host.ask(f"{PREFIX}/canvases/{{canvas_id}}/build/approve")
+        self.host.tick(session)
+        self.host.write(session)
+        self.host.adapter.run("run_3", session, "completed", 4)
+        self.host.end(session, completed=True)
+        self.assertEqual(self.host.version(), 1)
+        pushes = self.pushes()
+        self.assertEqual([one["kind"] for one in pushes], ["run_done"], "one push for one build")
+        self.assertEqual(pushes[0]["session"], self.host.session)
+        self.assertEqual(pushes[0]["notice"].get("body"), SUMMARY, "the summary's first line")
+
+        # Both are the canvas chat's news, so its mute silences them.
+        record = chats.read(self.host.path)[self.host.canvas["chat_id"]]["value"]
+        chats.merge(
+            self.host.path,
+            {
+                self.host.canvas["chat_id"]: {
+                    "at": record["updatedAt"] + 1,
+                    "value": {**record, "muted": True},
+                }
+            },
+        )
+        for kind in ("plan", "run_done"):
+            self.assertTrue(
+                push.muted(self.host.path, kind, self.host.session), f"{kind} obeys the chat's mute"
+            )
 
 
 class OneSessionPathTest(unittest.TestCase):
