@@ -3,9 +3,9 @@ import { useLiveQuery } from "dexie-react-hooks"
 
 import { READ_TIMEOUT_MS, RUNS_MS, SAFETY_MS } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
-import { db } from "@/lib/db"
+import { db, updateConversation } from "@/lib/db"
 import { getLiveRuns, type LiveRunStatus, type LiveRuns, type WaitingReason } from "@/lib/hermes"
-import { connectionKey, isLive, onChanges } from "@/lib/live"
+import { chatOnScreen, connectionKey, isLive, onChanges } from "@/lib/live"
 import { markResume } from "@/lib/resume-trace"
 
 export type { WaitingReason }
@@ -75,8 +75,12 @@ export function readLiveRuns(
     .catch(quietly("Reading runs/live"))
     .then((next) => {
       if (next) {
+        const before = answers.get(key)
         answers.set(key, next)
         notify()
+        const ended = before ? endedSessions(before, next) : []
+        // Fire and forget: nothing about the answer waits on a chat's clock moving.
+        if (ended.length) void noteEndedRuns(key, ended).catch(quietly("Noting ended runs"))
       }
       return next ?? undefined
     })
@@ -101,6 +105,44 @@ export async function readLiveRunOf(
 ): Promise<string | null | undefined> {
   const answer = await readLiveRuns(server, options)
   return answer ? (answer.runIds[sessionId] ?? null) : undefined
+}
+
+/**
+ * The sessions whose run ended between a server's answer and the next one: held in flight before,
+ * gone now, with no subagent of theirs still at work and no wake turn still owed — the app's own
+ * `runFinished` rule, and the hold the plugin keeps a finished run's news behind until its
+ * subagents are gone (`plugin/alerts.py`). A turn that ended over subagents still working has not
+ * ended, so it is none of these.
+ */
+function endedSessions(before: LiveRuns, next: LiveRuns) {
+  return Object.keys(before.sessions).filter(
+    (sessionId) =>
+      !next.sessions[sessionId] && !next.subagents[sessionId] && !next.waking[sessionId],
+  )
+}
+
+/**
+ * Moves the clock of every conversation of the runs that ended on this server while the app was
+ * open, which is the arrival a bot row's unread dot measures (`updatedAt` past this device's read
+ * mark, ADR 0110): a chat's own reply is flushed by the thread that is open, and the plugin pushes
+ * nothing to a device holding the events stream, so nothing else would say the run is over.
+ */
+async function noteEndedRuns(key: string, ended: string[]) {
+  const bots = new Set(
+    (await db.profiles.toArray())
+      .filter((profile) => connectionKey(profile) === key)
+      .map((profile) => profile.id),
+  )
+  for (const sessionId of ended) {
+    const chats = await db.conversations.where("hermesSessionId").equals(sessionId).toArray()
+    for (const chat of chats) {
+      // Another bot's chat, one that is resolved or discarded and the chat on screen are all left
+      // alone: an open thread's own activity is what marks it.
+      if (!bots.has(chat.profileId) || chat.resolvedAt || chat.discardedAt) continue
+      if (chatOnScreen(chat.id)) continue
+      await updateConversation(chat.id, { updatedAt: Date.now() })
+    }
+  }
 }
 
 async function poll(only: Server[] = servers) {
