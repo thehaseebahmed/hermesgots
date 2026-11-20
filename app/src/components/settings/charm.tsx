@@ -1,26 +1,40 @@
 /**
- * Settings → Charm: pair a Gots Charm, then send every bot to it. The charm keeps them, with
- * their pictures, after the phone has gone. Android only, since only the app has the radio.
+ * Settings → Charm: pair a Gots Charm, then send every bot to it, and decide whether one of them
+ * lives there as a pet. The charm keeps them, with their pictures, after the phone has gone.
+ * Android only, since only the app has the radio.
  */
 import { useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { BluetoothIcon, RefreshCwIcon, UnlinkIcon } from "lucide-react"
+import { BluetoothIcon, PawPrintIcon, RefreshCwIcon, UnlinkIcon } from "lucide-react"
 
 import { Banner } from "@/components/banner"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
-import { ActionRow, Caption, Group, RowText, rowClass } from "@/components/settings-chrome"
-import { botsByLabel } from "@/lib/bot-name"
+import {
+  ActionRow,
+  Caption,
+  Group,
+  PickList,
+  PickSurface,
+  RowText,
+  SwitchRow,
+  ValueRow,
+  rowClass,
+} from "@/components/settings-chrome"
+import { botsByLabel, labelOf } from "@/lib/bot-name"
 import {
   charmAvailable,
   charmBots,
+  charmPoses,
   forgetCharm,
   pairCharm,
+  setCharmPet,
   syncToCharm,
   usePairedCharm,
 } from "@/lib/charm"
+import { petSettingsFrom, type CharmPetChoice } from "@/lib/charm-protocol"
 import type { SyncProgress } from "@/lib/charm-sync"
 import { listProfiles } from "@/lib/db"
-import { charmSynced } from "@/lib/charm-words"
+import { charmSynced, petSubtitle } from "@/lib/charm-words"
 import { tell } from "@/lib/tell"
 import { useBotLabels } from "@/lib/use-bot-labels"
 
@@ -35,6 +49,7 @@ export function CharmSettings() {
   const [progress, setProgress] = useState<SyncProgress | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const [forgetting, setForgetting] = useState(false)
+  const [picking, setPicking] = useState(false)
 
   if (!charmAvailable())
     return (
@@ -58,13 +73,27 @@ export function CharmSettings() {
     }
   }
 
-  const sync = async () => {
+  const sources = (profiles ?? []).filter((p) => !p.disabled)
+  const pet = charm?.pet
+  const petProfile = sources.find((p) => p.id === pet?.botId)
+  const petName = petProfile ? labelOf(labels, petProfile) : undefined
+
+  // `choice` is what the sheet has just written, for the sends that follow a tap: the store the
+  // charm is read from re-renders after this call, not before it.
+  const sync = async (choice?: CharmPetChoice) => {
     setBusy("sync")
     setFailure(null)
     setProgress(null)
     try {
       const bots = await charmBots(botsByLabel(profiles ?? [], labels), labels)
-      const done = await syncToCharm(bots, setProgress)
+      const settings = petSettingsFrom(
+        choice ?? pet,
+        sources.map((p) => p.id),
+      )
+      // The pet's pictures come from its character, and only one of them is the pet.
+      const petBot = sources.find((p) => p.id === settings.petBotId)
+      const poses = settings.enabled && petBot ? await charmPoses(petBot.botId) : []
+      const done = await syncToCharm(bots, setProgress, { pet: { settings, poses } })
       tell.success(done.total === 1 ? "1 bot on your charm" : `${done.total} bots on your charm`)
     } catch (error) {
       setFailure(message(error))
@@ -74,7 +103,26 @@ export function CharmSettings() {
     }
   }
 
-  const count = (profiles ?? []).filter((p) => !p.disabled).length
+  const choosePet = async (botId: string) => {
+    setPicking(false)
+    const choice = { enabled: true, botId }
+    setCharmPet(choice)
+    await sync(choice)
+  }
+
+  /** Off to on needs a bot to be the pet; the first one is a sensible answer to a bare tap. */
+  const togglePet = async (on: boolean) => {
+    const botId = pet?.botId ?? sources[0]?.id
+    if (on && !botId) {
+      setFailure("Add a bot first: the pet is one of your bots.")
+      return
+    }
+    const choice = { enabled: on, botId }
+    setCharmPet(choice)
+    await sync(choice)
+  }
+
+  const count = sources.length
 
   return (
     <>
@@ -89,7 +137,7 @@ export function CharmSettings() {
             <button
               type="button"
               className={rowClass}
-              onClick={sync}
+              onClick={() => sync()}
               disabled={busy !== null || count === 0}
             >
               <RefreshCwIcon
@@ -110,6 +158,27 @@ export function CharmSettings() {
             </button>
           </Group>
           <Group>
+            <SwitchRow
+              id="charm-pet-mode"
+              icon={PawPrintIcon}
+              title="Pet mode"
+              subtitle={petSubtitle(pet, petName)}
+              checked={Boolean(pet?.enabled)}
+              disabled={busy !== null}
+              onCheckedChange={togglePet}
+            />
+            {pet?.enabled && (
+              <ValueRow
+                title="The pet"
+                purpose="Feed it and play with it on the charm"
+                value={petName}
+                muted={!petName}
+                onClick={() => setPicking(true)}
+                disabled={busy !== null}
+              />
+            )}
+          </Group>
+          <Group>
             <ActionRow
               icon={UnlinkIcon}
               title="Forget this charm"
@@ -120,6 +189,18 @@ export function CharmSettings() {
             Keep the charm close while it syncs. Afterwards it shows your bots on its own, with the
             phone away. It holds names and pictures only, never keys or server addresses.
           </Caption>
+          <PickSurface open={picking} onOpenChange={setPicking} title="The pet">
+            <PickList
+              label="Your bots"
+              searchable={false}
+              selected={pet?.botId}
+              options={sources.map((profile) => ({
+                id: profile.id,
+                label: labelOf(labels, profile),
+              }))}
+              onPick={choosePet}
+            />
+          </PickSurface>
           <ConfirmDestructive
             open={forgetting}
             onOpenChange={setForgetting}

@@ -23,6 +23,12 @@ export const CharmOp = {
   ImageEnd: 0x04,
   Commit: 0x05,
   Abort: 0x06,
+  // Pet mode. These go over with no Begin: they are not part of the bot list.
+  PetSettings: 0x07,
+  Pose: 0x08,
+  PoseImage: 0x09,
+  PoseImageEnd: 0x0a,
+  Time: 0x0b,
 } as const
 
 type CharmOp = (typeof CharmOp)[keyof typeof CharmOp]
@@ -37,6 +43,7 @@ export const CharmCode = {
   BadImage: 7,
   MissingImage: 8,
   StorageFailed: 9,
+  BadMood: 10,
 } as const
 
 /** What the charm says a code means, in words a settings row can show. */
@@ -49,10 +56,82 @@ const CODE_WORDS: Record<number, string> = {
   [CharmCode.BadImage]: "A picture arrived damaged",
   [CharmCode.MissingImage]: "A picture never arrived",
   [CharmCode.StorageFailed]: "The charm's storage is full or failing",
+  [CharmCode.BadMood]: "The charm runs older firmware, which has no pet mode",
 }
 
 export const codeWords = (code: number) =>
   CODE_WORDS[code] ?? `The charm refused the sync (${code})`
+
+/**
+ * A mood by the number the charm knows it by, in the app's own names. The number is the wire
+ * format: the firmware's docs/PROTOCOL.md fixes it, so it never moves.
+ */
+export const CHARM_MOODS = [
+  "happy",
+  "wave",
+  "excited",
+  "love",
+  "curious",
+  "sleepy",
+  "hungry",
+  "sad",
+  "eating",
+  "asleep",
+  "playing",
+] as const
+
+/** The moods the app has a picture for; the rest are drawn by the charm's fallbacks. */
+export type CharmMood = (typeof CHARM_MOODS)[number]
+
+export const charmMood = (mood: CharmMood) => CHARM_MOODS.indexOf(mood)
+
+export interface CharmPetSettings {
+  /** Off by default: a charm with pet mode off is the Phase 1 carousel and nothing else. */
+  enabled: boolean
+  /** The bot that lives on the charm. Required when `enabled` is on. */
+  petBotId: string
+  /** The user's night, in local hours: it sleeps at `bedStart` and wakes at `bedEnd`. */
+  bedStart: number
+  bedEnd: number
+  /** Minutes east of UTC where the phone is, so the charm knows the local hour. */
+  utcOffsetMin: number
+}
+
+/** The pet's night, in local hours: it sleeps at 22:00 and wakes at 07:00. */
+export const CHARM_BED_START = 22
+export const CHARM_BED_END = 7
+
+/** What the settings page keeps about pet mode. */
+export interface CharmPetChoice {
+  enabled: boolean
+  /** The bot the pet is, by the id the charm knows it by. */
+  botId?: string
+}
+
+/**
+ * The settings to send, from what the sheet holds. A bot that has gone, or none chosen, means pet
+ * mode off: the charm is never told to run a pet the phone cannot show.
+ */
+export function petSettingsFrom(
+  choice: CharmPetChoice | undefined,
+  botIds: string[],
+  offsetMin = -new Date().getTimezoneOffset(),
+): CharmPetSettings {
+  const chosen = choice?.botId && botIds.includes(choice.botId) ? choice.botId : ""
+  return {
+    enabled: Boolean(choice?.enabled && chosen),
+    petBotId: chosen,
+    bedStart: CHARM_BED_START,
+    bedEnd: CHARM_BED_END,
+    utcOffsetMin: offsetMin,
+  }
+}
+
+export interface CharmPose {
+  mood: CharmMood
+  /** A baseline JPEG, as a bot's picture is. */
+  image: Uint8Array
+}
 
 export interface CharmBot {
   id: string
@@ -140,6 +219,37 @@ export const imageEndMessage = (index: number) => control(CharmOp.ImageEnd).u8(i
 export const commitMessage = () => control(CharmOp.Commit).done()
 export const abortMessage = () => control(CharmOp.Abort).done()
 
+/** UTC seconds, which the charm keeps in its RTC so the pet's meters know the time that passed. */
+export const timeMessage = (epochSeconds: number) => control(CharmOp.Time).u32(epochSeconds).done()
+
+export function petSettingsMessage(settings: CharmPetSettings): Uint8Array {
+  const id = utf8Clip(settings.petBotId, MAX_ID_BYTES)
+  // The charm refuses these too; catching them here keeps the failure in words the sheet can show.
+  if (settings.enabled && id.length === 0) throw new Error("Choose a bot to be the pet")
+  if (settings.bedStart > 23 || settings.bedEnd > 23)
+    throw new Error("The pet's night is two hours of the day")
+  return control(CharmOp.PetSettings)
+    .u8(settings.enabled ? 1 : 0)
+    .u8(settings.bedStart)
+    .u8(settings.bedEnd)
+    .u16(settings.utcOffsetMin & 0xffff)
+    .str(id)
+    .done()
+}
+
+export const poseMessage = (mood: CharmMood, image: Uint8Array) =>
+  control(CharmOp.Pose)
+    .u8(charmMood(mood))
+    .u32(image.length)
+    .u32(image.length ? crc32(image) : 0)
+    .done()
+
+export const poseImageMessage = (mood: CharmMood) =>
+  control(CharmOp.PoseImage).u8(charmMood(mood)).done()
+
+export const poseImageEndMessage = (mood: CharmMood) =>
+  control(CharmOp.PoseImageEnd).u8(charmMood(mood)).done()
+
 export function botMessage(index: number, bot: CharmBot): Uint8Array {
   const id = utf8Clip(bot.id, MAX_ID_BYTES)
   if (id.length === 0) throw new Error("A bot needs an id")
@@ -178,6 +288,15 @@ export function parseStatus(view: DataView): CharmStatus {
     code: view.getUint8(1),
     op: view.getUint8(2),
     needImage: view.getUint8(3) === 1,
+  }
+}
+
+/** Checks the pet's pictures before any of them goes over the air. */
+export function checkPoses(poses: CharmPose[]) {
+  for (const pose of poses) {
+    if (!CHARM_MOODS.includes(pose.mood)) throw new Error(`${pose.mood} is not a mood`)
+    if (pose.image.length > CHARM_MAX_IMAGE_BYTES)
+      throw new Error(`The pet's ${pose.mood} picture is too big for the charm`)
   }
 }
 

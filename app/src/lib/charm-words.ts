@@ -26,3 +26,12 @@ function since(at: number, now: number) {
   if (hours < 24) return `${hours} h ago`
   return new Date(at).toLocaleDateString()
 }
+
+/** Under the pet mode switch: what it does, and which bot it is, without naming a bot twice. */
+export function petSubtitle(
+  choice: { enabled: boolean; botId?: string } | undefined,
+  petName?: string,
+) {
+  if (!choice?.enabled) return "Your bots only, as they are now"
+  return petName ? `${petName} lives on the charm` : "Choose the bot that lives there"
+}

@@ -2,6 +2,10 @@
  * One sync to the Gots Charm, over any transport: announce the list, send only the pictures the
  * charm lacks, commit. The charm's shown list changes only on commit, so a sync cut off anywhere
  * leaves the last good one in place.
+ *
+ * Pet mode rides along after the bots when the settings page has something to say: the phone's
+ * clock, the pet's mood pictures, then the toggle itself — so the pet never starts with a face the
+ * charm lacks, and a charm too old for pet mode still takes the bot list.
  */
 import {
   CharmCode,
@@ -9,13 +13,21 @@ import {
   beginMessage,
   botMessage,
   checkBots,
+  checkPoses,
   chunkSize,
   codeWords,
   commitMessage,
   imageChunks,
   imageEndMessage,
   imageMessage,
+  petSettingsMessage,
+  poseImageEndMessage,
+  poseImageMessage,
+  poseMessage,
+  timeMessage,
   type CharmBot,
+  type CharmPetSettings,
+  type CharmPose,
   type CharmStatus,
 } from "./charm-protocol.ts"
 
@@ -25,6 +37,13 @@ export interface CharmTransport {
   /** Writes a data chunk without a response. */
   data(chunk: Uint8Array): Promise<void>
   mtu: number
+}
+
+export interface SyncOptions {
+  /** Pet mode as the sheet has it, with the pet's pictures ready to send. */
+  pet?: { settings: CharmPetSettings; poses: CharmPose[] }
+  /** The phone's clock, in epoch milliseconds; tests pin it. */
+  now?: number
 }
 
 export interface SyncProgress {
@@ -57,6 +76,7 @@ export async function syncCharm(
   link: CharmTransport,
   bots: CharmBot[],
   onProgress?: (progress: SyncProgress) => void,
+  options: SyncOptions = {},
 ): Promise<SyncProgress> {
   checkBots(bots)
   const progress: SyncProgress = { done: 0, total: bots.length, sent: 0 }
@@ -74,6 +94,8 @@ export async function syncCharm(
       onProgress?.({ ...progress })
     }
     await ask(link, commitMessage())
+    // The bots go first, so a charm with older firmware still takes them when pet mode is refused.
+    await sendPet(link, size, options)
     return progress
   } catch (error) {
     // Best effort: the charm drops a half-done sync on disconnect anyway.
@@ -82,11 +104,44 @@ export async function syncCharm(
   }
 }
 
+/** The clock, the pet's pictures and then the toggle, in the order the charm needs them. */
+async function sendPet(link: CharmTransport, size: number, options: SyncOptions) {
+  if (!options.pet) return
+  const { settings, poses } = options.pet
+  await ask(link, timeMessage(Math.floor((options.now ?? Date.now()) / 1000)))
+  if (settings.enabled) {
+    checkPoses(poses)
+    for (const pose of poses) {
+      if (!(await ask(link, poseMessage(pose.mood, pose.image))).needImage) continue
+      await sendPicture(
+        link,
+        pose.image,
+        size,
+        poseImageMessage(pose.mood),
+        poseImageEndMessage(pose.mood),
+      )
+    }
+  }
+  // Last, so a pet never starts on a charm that lacks its face.
+  await ask(link, petSettingsMessage(settings))
+}
+
 async function sendImage(link: CharmTransport, index: number, image: Uint8Array, size: number) {
+  await sendPicture(link, image, size, imageMessage(index), imageEndMessage(index))
+}
+
+/** Sends one picture, and sends it again if it arrives damaged. */
+async function sendPicture(
+  link: CharmTransport,
+  image: Uint8Array,
+  size: number,
+  start: Uint8Array,
+  end: Uint8Array,
+) {
   for (let attempt = 1; ; attempt++) {
-    await ask(link, imageMessage(index))
+    await ask(link, start)
     for (const chunk of imageChunks(image, size)) await link.data(chunk)
-    const answer = await ask(link, imageEndMessage(index))
+    const answer = await ask(link, end)
     if (answer.code === CharmCode.Ok) return
     if (attempt >= IMAGE_TRIES) throw new CharmRefused(CharmCode.BadImage)
   }
