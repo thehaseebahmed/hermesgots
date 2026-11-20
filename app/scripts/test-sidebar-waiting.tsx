@@ -12,6 +12,7 @@ import { MemoryRouter } from "react-router"
 import { ConversationList } from "@/components/conversation-list"
 import { connectionKey, noteChange } from "@/lib/live"
 import { db } from "@/lib/db"
+import { readLiveRuns } from "@/lib/waiting"
 import { markRead } from "@/lib/read-marks"
 
 import {
@@ -22,6 +23,7 @@ import {
   missing,
   mount,
   seedSettings,
+  settle,
   until,
   wordsOf,
 } from "./component-kit.tsx"
@@ -203,5 +205,48 @@ test("a project session's run that ends leaves the bot's row to Code's list (ADR
       "the clock moved",
     )
     assert.ok(missing("[data-unread]"), "the bot row stays clear of a session's news")
+  })
+})
+
+test("a late answer from an older read is not read as a run that ended", async () => {
+  await seed()
+  markRead("chat-order", 4)
+  // The host holds each read until the test lets it go, so the two can land in either order. The
+  // shared poll's read is asked first and left before the run began, so it answers "nothing runs";
+  // the fresh read asked while it is out sees the run in flight.
+  const release: Array<() => void> = []
+  let reads = 0
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input instanceof Request ? input.url : input))
+    if (url.pathname.endsWith("/info")) return json({ version: "0.114.0", features: ["canvas"] })
+    if (url.pathname.endsWith("/plugins/gots/runs/live")) {
+      reads += 1
+      const asked = reads
+      await new Promise<void>((done) => release.push(done))
+      return json(asked === 1 ? { sessions: {} } : { sessions: { "gots-order-1": "running" } })
+    }
+    return json({ error: { message: "no route" } }, 404)
+  }) as unknown as typeof fetch
+  await seedSession("chat-order", "gots-order-1", "A chat whose run is in flight")
+  await mount(sidebar(), async () => {
+    await until(async () => Boolean(find('nav[aria-labelledby="bots-heading"] a')), "the bot's row")
+    // Ask afresh, as a screen about to act on "no run" does, and let the newer answer land first:
+    // the older one, arriving after it, is the stale half of the pair.
+    const fresh = readLiveRuns({ baseUrl: bot.baseUrl, apiKey: bot.apiKey }, { join: false })
+    await until(async () => release.length === 2, "both reads held at the host")
+    await act(async () => {
+      release[1]()
+      release[0]()
+    })
+    await fresh
+    await settle()
+    // The run is in flight on the newer answer, so nothing ended: reading the older answer against
+    // it would dot the bot's row for a run that is still working.
+    assert.equal(
+      (await db.conversations.get("chat-order"))!.updatedAt,
+      4,
+      "the stale answer moved no clock",
+    )
+    assert.ok(missing("[data-unread]"), "and the bot row holds no dot for it")
   })
 })

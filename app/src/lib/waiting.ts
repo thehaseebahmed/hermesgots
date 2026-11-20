@@ -72,10 +72,17 @@ export function readLiveRuns(
   // began would answer for a moment that has passed.
   const out = join ? asking.get(key) : undefined
   if (out) return out
+  // The order this read was asked in, per server: an answer from an older read must neither
+  // overwrite a newer one nor be read as the runs that ended between the two. A caller about to act
+  // on "no run" asks afresh (`join: false`) while the shared poll's read is still out, and the two
+  // can land in either order — the fresh one asked later holds the newer answer.
+  const order = (asked.get(key) ?? 0) + 1
+  asked.set(key, order)
   const read = getLiveRuns(server, AbortSignal.timeout(READ_TIMEOUT_MS))
     .catch(quietly("Reading runs/live"))
     .then((next) => {
-      if (next) {
+      if (next && order >= (applied.get(key) ?? 0)) {
+        applied.set(key, order)
         const before = answers.get(key)
         answers.set(key, next)
         notify()
@@ -94,6 +101,10 @@ export function readLiveRuns(
 
 /** The reads still out, by server, so a second ask joins the first. */
 const asking = new Map<string, Promise<LiveRuns | undefined>>()
+/** The order each server's reads were asked in, and the newest one applied, so a late answer from
+ * an older read is left where it belongs: out of the shared answer, and out of the ended-run diff. */
+const asked = new Map<string, number>()
+const applied = new Map<string, number>()
 
 /**
  * The run the host has in flight for a session, asked through the shared read so every screen gets
