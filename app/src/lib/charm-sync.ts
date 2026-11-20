@@ -51,6 +51,8 @@ export interface SyncProgress {
   total: number
   /** Pictures actually sent; the rest the charm already had. */
   sent: number
+  /** The charm would not take pet mode: firmware without it, or a clock it did not believe. */
+  petRefused?: boolean
 }
 
 export class CharmRefused extends Error {
@@ -79,8 +81,12 @@ export async function syncCharm(
   options: SyncOptions = {},
 ): Promise<SyncProgress> {
   checkBots(bots)
-  // Refused before anything goes over: the bots are the part of a sync that must land.
-  if (options.pet?.settings.enabled) checkPoses(options.pet.poses)
+  // Refused before anything goes over: the bots are the part of a sync that must land. Building the
+  // settings message here is the check: it throws on a night or a pet the charm could not run.
+  if (options.pet) {
+    checkPoses(options.pet.poses)
+    petSettingsMessage(options.pet.settings)
+  }
   const progress: SyncProgress = { done: 0, total: bots.length, sent: 0 }
   const size = chunkSize(link.mtu)
   try {
@@ -96,7 +102,14 @@ export async function syncCharm(
       onProgress?.({ ...progress })
     }
     await ask(link, commitMessage())
-    await sendPet(link, size, options)
+    try {
+      await sendPet(link, size, options)
+    } catch (error) {
+      // The bots are already on the charm. A charm that cannot run a pet must not turn a good sync
+      // into a failed one, and a dead link still fails.
+      if (!(error instanceof CharmRefused)) throw error
+      progress.petRefused = true
+    }
     return progress
   } catch (error) {
     // Best effort: the charm drops a half-done sync on disconnect anyway.

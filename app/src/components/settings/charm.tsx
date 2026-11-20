@@ -3,7 +3,7 @@
  * lives there as a pet. The charm keeps them, with their pictures, after the phone has gone.
  * Android only, since only the app has the radio.
  */
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { BluetoothIcon, PawPrintIcon, RefreshCwIcon, UnlinkIcon } from "lucide-react"
 
@@ -50,6 +50,7 @@ export function CharmSettings() {
   const [failure, setFailure] = useState<string | null>(null)
   const [forgetting, setForgetting] = useState(false)
   const [picking, setPicking] = useState(false)
+  const sending = useRef(false)
 
   if (!charmAvailable())
     return (
@@ -82,6 +83,9 @@ export function CharmSettings() {
   // `choice` is what the sheet has just written, for the sends that follow a tap: the store the
   // charm is read from re-renders after this call, not before it.
   const sync = async (choice?: CharmPetChoice) => {
+    // `busy` is a render behind, so two taps in one tick would both reach the radio.
+    if (sending.current || !profiles) return
+    sending.current = true
     setBusy("sync")
     setFailure(null)
     setProgress(null)
@@ -96,9 +100,12 @@ export function CharmSettings() {
       const poses = settings.enabled && petBot ? await charmPoses(petBot.botId) : []
       const done = await syncToCharm(bots, setProgress, { pet: { settings, poses } })
       tell.success(done.total === 1 ? "1 bot on your charm" : `${done.total} bots on your charm`)
+      if (done.petRefused && settings.enabled)
+        tell.info("Your bots synced. This charm's firmware has no pet mode yet.")
     } catch (error) {
       setFailure(message(error))
     } finally {
+      sending.current = false
       setBusy(null)
       setProgress(null)
     }
@@ -169,8 +176,8 @@ export function CharmSettings() {
               icon={PawPrintIcon}
               title="Pet mode"
               subtitle={petSubtitle(pet, petName)}
-              checked={Boolean(pet?.enabled)}
-              disabled={busy !== null}
+              checked={Boolean(pet?.enabled && petProfile)}
+              disabled={busy !== null || !profiles}
               onCheckedChange={togglePet}
             />
             {pet?.enabled && (

@@ -157,7 +157,12 @@ test("chunks carry their offset and fit the link", () => {
 })
 
 /** A charm in memory, following the firmware's sync session. */
-function fakeCharm({ corruptOnce = false, refuseCommit = false, corruptPoseOnce = false } = {}) {
+function fakeCharm({
+  corruptOnce = false,
+  refuseCommit = false,
+  corruptPoseOnce = false,
+  refusePet = false,
+} = {}) {
   const held = new Map() // crc -> len
   let shown = []
   let pending = []
@@ -256,6 +261,8 @@ function fakeCharm({ corruptOnce = false, refuseCommit = false, corruptPoseOnce 
           return answer(0, op)
         }
         if (op === 11) {
+          // A charm on firmware from before pet mode answers the first pet op this way.
+          if (refusePet) return answer(CharmCode.BadMessage, op)
           pet.clock = v.getUint32(2, true)
           return answer(0, op)
         }
@@ -328,6 +335,20 @@ test("pet mode lands after the bots' commit, its pictures before the toggle", as
   })
   assert.equal(charm.imagesSent.length, before)
   assert.equal(charm.poses.size, 2)
+})
+
+test("a charm with no pet mode still keeps the bots, and says so", async () => {
+  const charm = fakeCharm({ refusePet: true })
+  const result = await syncCharm(charm.link, [nova], undefined, {
+    pet: { settings: petOn, poses: [{ mood: "hungry", image: picture(12, 900) }] },
+    now: 1795176000 * 1000,
+  })
+  assert.equal(result.petRefused, true)
+  assert.deepEqual(
+    charm.shown.map((b) => b.name),
+    ["Nova"],
+  )
+  assert.equal(charm.pet.enabled, false)
 })
 
 test("pet mode off sends the toggle and no pictures", async () => {
