@@ -25,6 +25,18 @@ from typing import Any, Dict, List, Optional, Tuple
 PLUGIN_ROOT = "/api/plugins/gots"
 
 
+def run_message(prompt: str) -> List[Dict[str, str]]:
+    """A run's ``input``, as the host reads it: the last message's ``content`` is the user's words.
+
+    Hermes takes ``input`` as a string, or as a list whose last message carries ``content``
+    (``_run_user_message`` in ``gateway/platforms/api_server_runs``); anything else is a run with no
+    user message, which the host refuses with a 400 "No user message found in input". Both of this
+    client's bodies — a canvas's first request, which the plugin queues, and a later turn — are built
+    here, so a shape the host refuses cannot come back in one of them alone.
+    """
+    return [{"role": "user", "content": prompt}]
+
+
 class HostError(Exception):
     """A host that refused, or couldn't answer: the host's own words where it gave any."""
 
@@ -120,7 +132,7 @@ class Host:
         canvas is built by the host with the app closed, which is the whole of the path being
         measured.
         """
-        body: Dict[str, Any] = {"input": [{"type": "text", "text": prompt}]}
+        body: Dict[str, Any] = {"input": run_message(prompt)}
         if self.settings.provider:
             body["provider"] = self.settings.provider
         if self.settings.model:
@@ -185,7 +197,7 @@ class Host:
         """
         body: Dict[str, Any] = {
             "session_id": session_id,
-            "input": [{"type": "text", "text": prompt}],
+            "input": run_message(prompt),
         }
         if self.settings.provider:
             body["provider"] = self.settings.provider
