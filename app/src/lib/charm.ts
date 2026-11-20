@@ -11,7 +11,9 @@ import { findBot } from "@/components/bot"
 import { labelOf } from "@/lib/bot-name"
 import type { Profile } from "@/lib/db"
 import { isNative } from "@/lib/platform"
+import { registryId } from "@/lib/registry"
 
+import { charmBotId } from "./charm-alert.ts"
 import {
   CHARM_CONTROL,
   CHARM_DATA,
@@ -140,7 +142,8 @@ export async function charmBots(
     profiles
       .filter((profile) => !profile.disabled)
       .map(async (profile) => ({
-        id: profile.id,
+        // The id a push names, so an alert for this bot matches the entry the charm holds.
+        id: charmBotId(profile.id, await registryId(profile)),
         name: labelOf(labels, profile),
         accent: rgb565(ACCENT),
         image: await picture(profile.botId),
