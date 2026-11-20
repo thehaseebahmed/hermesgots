@@ -70,6 +70,9 @@ await flow(
     )
     await shot("edit-no-build")
     pass("the edit screen: a canvas made from a prompt lands on its chat, with no page and no Preview")
+    // The lane while the build works: its phase and the line saying what it is doing, over the
+    // composer. The mock publishes 2.5s after the start, so this is the one window it is drawn in.
+    await shot("building")
 
     // The first version lands through the live record, so Preview is drawn without a reload, and
     // the flip replaces the chat's entry: the page stands where the chat stood, so the next back

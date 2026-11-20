@@ -216,6 +216,47 @@ def listing(path: Path, canvas_id: str) -> List[Dict[str, Any]]:
     ]
 
 
+def _public(found: Dict[str, Any]) -> Dict[str, Any]:
+    """A working build as the app is told it: its session, where it is, what it is doing, its plan."""
+    answer: Dict[str, Any] = {
+        "id": found["id"],
+        "session": found["session_id"],
+        "phase": found["phase"],
+        "requests": found["requests"],
+    }
+    if found.get("activity"):
+        answer["activity"] = found["activity"]
+    if found.get("plan"):
+        answer["plan"] = found["plan"]
+    if found.get("wait"):
+        answer["wait"] = True
+    return answer
+
+
+def open_map(path: Path) -> Dict[str, Dict[str, Any]]:
+    """Every canvas's working build, keyed by canvas, in one read.
+
+    The list a screen draws a record from carries the build working in it, so a phone's edit screen
+    — which reads the record and never the document — can draw the phase and the activity line. A
+    canvas has at most one working build, so the newest is the one a canvas is drawn with.
+    """
+    if not path.exists():
+        return {}
+    conn = _open(path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM canvas_builds WHERE phase NOT IN (?, ?, ?) ORDER BY created_at DESC",
+            FINISHED,
+        ).fetchall()
+    finally:
+        conn.close()
+    found: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        build = _build(row)
+        found.setdefault(build["canvas_id"], _public(build))
+    return found
+
+
 def waiting(path: Path) -> Dict[str, Dict[str, Any]]:
     """Each canvas chat whose build waits on a plan, as ``runs/live`` reports a wait (step 12).
 
@@ -886,16 +927,4 @@ def read(conn: sqlite3.Connection, canvas_id: str) -> Optional[Dict[str, Any]]:
     found = _of_canvas(conn, canvas_id)
     if found is None:
         return None
-    answer = {
-        "id": found["id"],
-        "session": found["session_id"],
-        "phase": found["phase"],
-        "requests": found["requests"],
-    }
-    if found.get("activity"):
-        answer["activity"] = found["activity"]
-    if found.get("plan"):
-        answer["plan"] = found["plan"]
-    if found.get("wait"):
-        answer["wait"] = True
-    return answer
+    return _public(found)

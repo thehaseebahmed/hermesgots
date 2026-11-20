@@ -3812,11 +3812,23 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return web.json_response({"object": "gots.research.mission", "mission": found})
 
     async def list_canvases(request: "web.Request") -> "web.Response":
-        """Every canvas this bot has, drawn from its own record (canvases.py, ADR 0113)."""
+        """Every canvas this bot has, drawn from its own record (canvases.py, ADR 0113).
+
+        A record carries the build working in it, where one is: a phone's edit screen draws the
+        record and never the document, so the build's phase and its activity line have to ride it —
+        the one read both screens already poll.
+        """
         denied = unauthorized(request)
         if denied is not None:
             return denied
-        rows = await asyncio.to_thread(canvases.listing, store_path())
+        path = store_path()
+        rows = await asyncio.to_thread(canvases.listing, path)
+        working = await asyncio.to_thread(builds.open_map, path)
+        if working:
+            rows = [
+                {**row, **({"build": working[row["id"]]} if row["id"] in working else {})}
+                for row in rows
+            ]
         return web.json_response({"object": "gots.canvases", "canvases": rows})
 
     async def create_canvas(request: "web.Request") -> "web.Response":

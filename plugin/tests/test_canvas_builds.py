@@ -849,6 +849,17 @@ class WhereABuildIsTest(unittest.TestCase):
         self.assertEqual(published["phase"], builds.PUBLISHED)
         self.assertEqual(published["version"], 1)
 
+    def test_the_list_carries_the_build_a_canvas_is_working_in(self) -> None:
+        # A phone's edit screen draws the record and never the document, so the list read is the one
+        # that has to carry where the build is — otherwise its lane has nothing to say while it works.
+        build = self.host.start()
+        answer = self.host.ask(f"{PREFIX}/canvases", "GET")["payload"]
+        row = next(one for one in answer["canvases"] if one["id"] == self.host.id)
+        self.assertTrue(row["builds"])
+        self.assertEqual(row["build"]["phase"], builds.PLANNING)
+        self.assertEqual(row["build"]["activity"], builds.ACTIVITY[builds.PLANNING])
+        self.assertEqual(row["build"]["session"], build["session_id"])
+
     def test_the_builds_read_answers_every_build_newest_first(self) -> None:
         build = self.host.start()
         session = build["session_id"]

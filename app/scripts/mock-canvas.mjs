@@ -277,8 +277,10 @@ export function createCanvasStore() {
     at: c.at,
     created_at: c.created_at,
     // A record says whether its requests are builds (ADR 0170), and the plugin's listing carries it:
-    // the edit screen draws this row alone, so the lane's choice has to be on it.
+    // the edit screen draws this row alone, so the lane's choice has to be on it — and the build
+    // working in it, so its phase and activity line draw there too.
     builds: Boolean(c.builds),
+    ...(c.build ? { build: c.build } : {}),
   })
 
   // The pointer's version, not the newest stored one: an undo moves the pointer back and leaves the
@@ -298,6 +300,9 @@ export function createCanvasStore() {
       can_undo: earlier !== null,
       data: inOrder(c.docs),
       ...(c.builds ? { builds: true } : {}),
+      // The build working now, as the plugin's one-canvas read answers it (`builds.read`): its
+      // session, its phase and the line saying what it is doing.
+      ...(c.build ? { build: c.build } : {}),
     }
   }
 
@@ -315,6 +320,24 @@ export function createCanvasStore() {
 function picture(canvas) {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240"><rect width="320" height="240" fill="#0d2b22"/><rect x="24" y="28" width="272" height="120" rx="12" fill="#123d2f"/><circle cx="72" cy="188" r="10" fill="#2f7d5f"/><text x="96" y="194" fill="#7ee2b8" font-family="ui-sans-serif, sans-serif" font-size="20">${escapeHtml(canvas.title).slice(0, 24)}</text></svg>`
   return `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`
+}
+
+/**
+ * Opens the build a request is worked in, as `builds.py` does when the queue hands a canvas chat's
+ * item to a build: the lane draws its phase and the line saying what it is doing until the version it
+ * writes publishes it. The mock works in one turn, so a build here goes straight to `building`, and
+ * the version `writeVersion` writes is what ends it `published`.
+ */
+function openBuild(canvas, request) {
+  if (!canvas.builds) return
+  canvas.build = {
+    id: `b_${randomUUID().slice(0, 8)}`,
+    session: `canvas-${randomUUID().slice(0, 8)}`,
+    phase: "building",
+    activity: "Building the page",
+    requests: [typeof request === "string" && request ? request : canvas.prompt],
+    at: Date.now(),
+  }
 }
 
 /**
@@ -337,22 +360,25 @@ function writeVersion(canvas, words) {
   if (canvas.versions.length > KEEP) canvas.versions.shift()
   // A canvas whose requests are builds publishes one per write, as `builds.py` does: the request it
   // took, the summary it ended on, the check flag a host with no browser gives it, and the version it
-  // wrote. The mock runs no checks of its own, so every build here is `unchecked`.
+  // wrote. The build the request opened is the row it publishes, so the lane's working build becomes
+  // its history. The mock runs no checks of its own, so every build here is `unchecked`.
   if (canvas.builds) {
+    const open = canvas.build
     canvas.buildRows.unshift({
-      id: `b_${randomUUID().slice(0, 8)}`,
-      session: `canvas-${randomUUID().slice(0, 8)}`,
+      id: open?.id ?? `b_${randomUUID().slice(0, 8)}`,
+      session: open?.session ?? `canvas-${randomUUID().slice(0, 8)}`,
       phase: "published",
       activity: null,
-      requests: [edited || canvas.prompt],
+      requests: open?.requests ?? [edited || canvas.prompt],
       summary: edited
         ? `The page now says ${edited.replace(/[.!?]+$/, "")}.`
         : "The page is written.",
       flag: "unchecked",
       version: canvas.version,
       at: canvas.at,
-      created_at: canvas.at,
+      created_at: open?.at ?? canvas.at,
     })
+    canvas.build = null
   }
 }
 
@@ -363,6 +389,7 @@ function writeVersion(canvas, words) {
 export function editCanvasSession(store, sessionId, words) {
   const canvas = store.bySession.get(sessionId)
   if (!canvas) return null
+  openBuild(canvas, words)
   writeVersion(canvas, words)
   return canvas
 }
@@ -596,6 +623,7 @@ export async function handleCanvas(
       // The app says this canvas's requests are builds when it knows the feature (ADR 0170), and the
       // mock answers it: its lane then draws builds, and each version it writes is one of them.
       canvas.builds = body?.builds === true
+      openBuild(canvas, prompt)
       const { chat_id: chatId } = canvas
       canvases.set(canvas.id, canvas)
       bySession.set(canvas.session_id, canvas)
