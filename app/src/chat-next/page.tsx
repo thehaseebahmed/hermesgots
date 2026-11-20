@@ -35,7 +35,7 @@ import { LOADING_ACTIVITY } from "@/lib/format"
 import { useRefusal } from "@/lib/use-refusal"
 import { tell } from "@/lib/tell"
 import { NOT_SENT } from "@/lib/words"
-import { onSessionMoved, useLive } from "@/lib/live"
+import { onSessionMoved, useLive, watchChat } from "@/lib/live"
 import {
   knownLiveRun,
   readLiveRunOf,
@@ -1201,10 +1201,14 @@ export function ChatNextThread({
   const busy =
     live || following || working || owed || starting || inQueue > 0 || handedOff || hostBusy
   // The children are worth asking for while one works, is owed its result or has yet to show, or the
-  // host says the session still has some; the queue while it holds a message or has just handed one
-  // over. A server that streams its changes says when either moves (`onSessionMoved`), so only a
-  // chat on one that doesn't keeps asking on every tick, as it always has.
+  // queue while it holds a message or has just handed one over. A server that streams its changes
+  // says when either moves (`onSessionMoved`), so only a chat on one that doesn't keeps asking on
+  // every tick, as it always has.
   const streamed = useLive(server && key ? { baseUrl: server, apiKey: key } : undefined)
+  // The chat on screen, so the shared poll's ended-run write leaves its clock to the thread's own
+  // flush: this is the screen every callable chat opens on, and without the mark the poll would
+  // write a clock past the reader's own.
+  useEffect(() => (chatId ? watchChat(chatId) : undefined), [chatId])
   useEffect(() => {
     wants.current = {
       agents: !streamed || listed === undefined || working || owed || starting || hostBusy,

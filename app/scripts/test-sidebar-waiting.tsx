@@ -7,10 +7,11 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { act } from "react"
-import { MemoryRouter } from "react-router"
+import { MemoryRouter, Route, Routes } from "react-router"
 
 import { ConversationList } from "@/components/conversation-list"
-import { connectionKey, noteChange } from "@/lib/live"
+import { ChatPage } from "@/routes/chat"
+import { chatOnScreen, connectionKey, noteChange } from "@/lib/live"
 import { db } from "@/lib/db"
 import { readLiveRuns } from "@/lib/waiting"
 import { markRead } from "@/lib/read-marks"
@@ -179,6 +180,8 @@ test("a run that ends while the app is open dots the bot's row", async () => {
     live = { sessions: {}, run_ids: {} }
     await act(async () => noteChange(connectionKey(bot), "runs"))
     await until(async () => Boolean(botDot()), "the bot row's unread dot")
+    const row = await db.conversations.get("chat-run")
+    assert.equal(row!.changedAt, 3, "the write stays on this device: sync carries no record of it")
   })
 })
 
@@ -249,4 +252,54 @@ test("a late answer from an older read is not read as a run that ended", async (
     )
     assert.ok(missing("[data-unread]"), "and the bot row holds no dot for it")
   })
+})
+
+test("the chat the reader has open keeps its own clock", async () => {
+  await seed()
+  markRead("chat-open", 4)
+  let live: Record<string, unknown> = {
+    sessions: { "gots-open-1": "running" },
+    run_ids: { "gots-open-1": "run-1" },
+  }
+  let reads = 0
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input instanceof Request ? input.url : input))
+    if (url.pathname.endsWith("/info")) return json({ version: "0.114.0", features: ["canvas"] })
+    if (url.pathname.endsWith("/plugins/gots/runs/live")) {
+      reads += 1
+      return json(live)
+    }
+    return json({ error: { message: "no route" } }, 404)
+  }) as unknown as typeof fetch
+  await seedSession("chat-open", "gots-open-1", "A chat the reader has open")
+  await db.messages.put({
+    id: "chat-open-0",
+    conversationId: "chat-open",
+    role: "user",
+    content: "Is it done?",
+    status: "done",
+    createdAt: 4,
+  })
+  await mount(
+    <MemoryRouter initialEntries={["/c/chat-open"]}>
+      <Path />
+      <Routes>
+        <Route path="/c/:id" element={<ChatPage slot="route" />} />
+      </Routes>
+      <ConversationList />
+    </MemoryRouter>,
+    async () => {
+      // The chat's own screen — chat-next, the one every callable chat opens on — is what marks
+      // the chat on screen, so the poll's write has to know it.
+      await until(async () => chatOnScreen("chat-open"), "the chat marked on screen")
+      const before = reads
+      live = { sessions: {}, run_ids: {} }
+      await act(async () => noteChange(connectionKey(bot), "runs"))
+      await until(async () => reads > before, "the poll to have read the host again")
+      await settle()
+      const row = await db.conversations.get("chat-open")
+      assert.equal(row!.updatedAt, 4, "the open chat's clock is the thread's own to move")
+      assert.equal(row!.changedAt, 3, "and no write left this device for it")
+    },
+  )
 })

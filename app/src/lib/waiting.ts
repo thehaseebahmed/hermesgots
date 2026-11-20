@@ -3,7 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 
 import { READ_TIMEOUT_MS, RUNS_MS, SAFETY_MS } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
-import { db, updateConversation } from "@/lib/db"
+import { db } from "@/lib/db"
 import { getLiveRuns, type LiveRunStatus, type LiveRuns, type WaitingReason } from "@/lib/hermes"
 import { chatOnScreen, connectionKey, isLive, onChanges } from "@/lib/live"
 import { closedSession, endedSessions } from "@/lib/session-work"
@@ -124,6 +124,13 @@ export async function readLiveRunOf(
  * open, which is the arrival a bot row's unread dot measures (`updatedAt` past this device's read
  * mark, ADR 0110): a chat's own reply is flushed by the thread that is open, and the plugin pushes
  * nothing to a device holding the events stream, so nothing else would say the run is over.
+ *
+ * The clock is written straight to the row, never through `updateConversation`: that stamps
+ * `changedAt`, which would push this record into the chat-list merge at a clock this device just
+ * invented — and a merge is newer-wins, so a record whose fields are stale would beat the host's
+ * newer one and carry its loss to every device (a rename, a pin, a resolve, a deletion). This
+ * device's own mark is the only reader of the moved clock, so the record stays here: a same-clock
+ * merge does not pull it back, and a strictly newer one carries a real clock over it.
  */
 async function noteEndedRuns(key: string, ended: string[]) {
   const bots = new Set(
@@ -138,7 +145,7 @@ async function noteEndedRuns(key: string, ended: string[]) {
   await db.transaction("rw", db.conversations, async () => {
     for (const chat of chats) {
       if (!bots.has(chat.profileId) || closedSession(chat) || chatOnScreen(chat.id)) continue
-      await updateConversation(chat.id, { updatedAt: Date.now() })
+      await db.conversations.update(chat.id, { updatedAt: Date.now() })
     }
   })
 }
@@ -314,7 +321,7 @@ export function useWaitingSessions(): WaitingSession[] {
             .toArray()
         : [],
     // The waiting ids as one string, so a different session waiting re-reads the query.
-    [ids.join("\n")],
+    [JSON.stringify(ids)],
   )
   // The query can lag a poll, so a session no longer waiting is skipped.
   return [...(sessions ?? [])]
