@@ -1,12 +1,12 @@
 /**
- * The Gots Charm on this phone: which one is paired, and a sync of every bot to it over BLE
- * (Android app only). The charm holds names and pictures, never a key or a host address, so
- * nothing here sends either.
+ * The Gots Charm on this phone: which one is paired, whether one of its bots lives there as a pet,
+ * and a sync of every bot to it over BLE (Android app only). The charm holds names and pictures,
+ * never a key or a host address, so nothing here sends either.
  */
 import { BleClient, type BleDevice } from "@capacitor-community/bluetooth-le"
 import { useSyncExternalStore } from "react"
 
-import { botImage } from "@/components/bots"
+import { BOT_MOODS, DEFAULT_MOOD, botImage, type BotMood } from "@/components/bots"
 import { findBot } from "@/components/bot"
 import { labelOf } from "@/lib/bot-name"
 import type { Profile } from "@/lib/db"
@@ -20,9 +20,16 @@ import {
   parseStatus,
   rgb565,
   type CharmBot,
+  type CharmPetChoice,
+  type CharmPose,
   type CharmStatus,
 } from "./charm-protocol.ts"
-import { syncCharm, type CharmTransport, type SyncProgress } from "./charm-sync.ts"
+import {
+  syncCharm,
+  type CharmTransport,
+  type SyncProgress,
+  type SyncOptions,
+} from "./charm-sync.ts"
 
 export interface PairedCharm {
   deviceId: string
@@ -30,6 +37,8 @@ export interface PairedCharm {
   /** When the last sync finished, and how many bots it left on the charm. */
   syncedAt?: number
   syncedBots?: number
+  /** Pet mode: which bot lives on the charm, and whether it does at all. Off until set. */
+  pet?: CharmPetChoice
 }
 
 const KEY = "gots.charm"
@@ -104,10 +113,19 @@ export function forgetCharm() {
   write(null)
 }
 
-/** A bot's charm picture: its happy pose on black, as a square JPEG for the round screen. */
-export async function charmPicture(botId: string, px = CHARM_PICTURE_PX): Promise<Uint8Array> {
+/** Turns pet mode on or off, or changes the bot that is the pet. The next sync carries it over. */
+export function setCharmPet(pet: CharmPetChoice) {
+  if (paired) write({ ...paired, pet })
+}
+
+/** A bot's charm picture: one pose on black, as a square JPEG for the round screen. */
+export async function charmPicture(
+  botId: string,
+  mood: BotMood = DEFAULT_MOOD,
+  px = CHARM_PICTURE_PX,
+): Promise<Uint8Array> {
   const image = new Image()
-  image.src = botImage(findBot(botId))
+  image.src = botImage(findBot(botId), mood)
   await image.decode()
   const canvas = document.createElement("canvas")
   canvas.width = canvas.height = px
@@ -123,6 +141,23 @@ export async function charmPicture(botId: string, px = CHARM_PICTURE_PX): Promis
   )
   if (!blob) throw new Error("Couldn't make the bot's picture")
   return new Uint8Array(await blob.arrayBuffer())
+}
+
+// The pictures are the character's, so they never go stale and one set serves every sync.
+const poseSets = new Map<string, Promise<CharmPose[]>>()
+
+/**
+ * The pet's pictures: one for each mood the app draws. A mood with no art of its own is left to the
+ * charm's fallbacks, which is why hungry, sad and the rest are not sent.
+ */
+export function charmPoses(botId: string): Promise<CharmPose[]> {
+  const known = poseSets.get(botId)
+  if (known) return known
+  const set = Promise.all(
+    BOT_MOODS.map(async ({ id }) => ({ mood: id, image: await charmPicture(botId, id) })),
+  )
+  poseSets.set(botId, set)
+  return set
 }
 
 /** What the charm gets for this phone's bots: a name and a picture each, in the order shown. */
@@ -207,13 +242,14 @@ async function openTransport(
 export async function syncToCharm(
   bots: CharmBot[],
   onProgress?: (progress: SyncProgress) => void,
+  options: SyncOptions = {},
 ): Promise<SyncProgress> {
   const charm = paired
   if (!charm) throw new Error("No charm paired")
   await ready()
   const link = await openTransport(charm.deviceId)
   try {
-    const result = await syncCharm(link, bots, onProgress)
+    const result = await syncCharm(link, bots, onProgress, options)
     if (paired?.deviceId === charm.deviceId)
       write({ ...paired, syncedAt: Date.now(), syncedBots: result.total })
     return result
