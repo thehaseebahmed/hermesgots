@@ -165,10 +165,10 @@ export function ChatSettings({
    */
   onDeleted?: () => void
   /**
-   * Where to go once a chat or a run is archived. An archive is a way out of the conversation, so the
-   * press closes this sheet and the screen takes the step back onto the bot's list — the move the
-   * bar's back control answers with (ADR 0154). An unarchive names none: a row coming back is a
-   * reason to stay, so the sheet stands.
+   * Where to go once a chat, a room or a run is archived. An archive is a way out of the
+   * conversation, so the press closes this sheet and the screen takes the step back onto the bot's
+   * list — the move the bar's back control answers with (ADR 0154). An unarchive names none: a row
+   * coming back is a reason to stay, so the sheet stands.
    */
   onArchived?: () => void
 }) {

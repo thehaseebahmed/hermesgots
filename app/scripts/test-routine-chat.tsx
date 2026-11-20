@@ -230,8 +230,7 @@ test("the way back is the bot's list, not the chat the run was opened from", asy
 /**
  * Archiving a run is the same move it is on a chat and in a room: the mark is written at once, the
  * sheet closes and the screen takes the step back onto the bot's list — the move the bar's back
- * control answers with (ADR 0154). A run's archive is the reader's own mark on this device, since
- * its host advertises no features to be asked (ADR 0159).
+ * control answers with (ADR 0154).
  */
 test("the run's Archive puts it away and steps back onto the list", async () => {
   ownRun("archive")

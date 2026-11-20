@@ -79,8 +79,7 @@ export function useChatLead({
   }, [list, up])
   /**
    * Steps back onto the list, or home where no list holds this screen — the move a press that
-   * leaves a conversation answers with. The fallback lives here rather than inside `ontoList`
-   * because the platform's guard needs that one to no-op where no list is held.
+   * leaves a conversation answers with.
    */
   const stepBack = useCallback(() => {
     if (list) up(list)
