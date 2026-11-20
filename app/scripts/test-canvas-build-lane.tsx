@@ -48,6 +48,34 @@ const BUILD = {
   requests: ["make the heading say Split the bill"],
 }
 
+/** The builds the host answers, newest first, as `builds.py`'s listing does (G10). */
+const BUILDS = [
+  {
+    id: "b2",
+    session: "canvas-build-2",
+    phase: "building",
+    activity: "Building the page",
+    requests: ["and make it blue too"],
+    summary: null,
+    flag: null,
+    version: null,
+    at: 3,
+    created_at: 3,
+  },
+  {
+    id: "b1",
+    session: "canvas-build-1",
+    phase: "published",
+    activity: null,
+    requests: ["make the heading say Split the bill"],
+    summary: "The heading now says Split the bill.",
+    flag: "passing",
+    version: 3,
+    at: 2,
+    created_at: 1,
+  },
+]
+
 /** What the host's one-canvas read answers, with the build a case wants it to carry. */
 const canvasAt = (build?: unknown) => ({
   id: "c1",
@@ -89,6 +117,8 @@ interface Host {
   posted: string[]
   /** The paths an Approve or a Stop was posted to. */
   acted: string[]
+  /** What the builds read answers; none for a canvas whose host holds no builds. */
+  builds?: unknown[]
 }
 
 function serve(host: Host) {
@@ -100,6 +130,9 @@ function serve(host: Host) {
     if (url.pathname.endsWith("/canvases")) {
       const { html: _page, ...record } = host.canvas
       return json({ object: "gots.canvases", canvases: [record] })
+    }
+    if (url.pathname.endsWith("/canvases/c1/builds")) {
+      return json({ object: "gots.canvas.builds", builds: host.builds ?? [] })
     }
     if (url.pathname.endsWith("/canvases/c1")) {
       return json({ object: "gots.canvas", canvas: host.canvas })
@@ -203,6 +236,71 @@ test(
         "the request is queued on the build's session",
       )
       assert.equal(host.posted.length, 0, "no run is posted")
+    })
+  }),
+)
+
+test(
+  "the lane draws builds and opens a build's transcript from Details",
+  laptop(async () => {
+    const host: Host = {
+      canvas: canvasAt({ ...BUILD, phase: "building", activity: "Building the page" }),
+      items: [],
+      queued: [],
+      read: [],
+      posted: [],
+      acted: [],
+      builds: BUILDS,
+    }
+    serve(host)
+    await seed()
+    const bot = (await db.profiles.get("bot-1"))!
+    await drawLane(host, async () => {
+      await act(async () => {
+        await refreshCanvas("c1")
+        await noteChange(connectionKey(bot), "canvas")
+      })
+      await until(
+        () => Boolean(findText("button", "Details")),
+        "the lane's builds to draw",
+      )
+      const drawn = document.body.textContent ?? ""
+      // A finished build is its request, its summary, its check flag and its version, newest at
+      // the foot: the transcript is not drawn at all.
+      assert.ok(
+        drawn.includes("make the heading say Split the bill"),
+        "the finished build's request is drawn",
+      )
+      assert.ok(
+        drawn.includes("The heading now says Split the bill."),
+        "its summary is drawn",
+      )
+      assert.ok(drawn.includes("Checks passed"), "its check flag is drawn")
+      assert.ok(drawn.includes("Version 3"), "the version it published is drawn")
+      // The lane draws builds in the thread's place: a chat's own message scroller is not there.
+      assert.ok(
+        document.querySelector("[data-canvas-builds]"),
+        "the lane draws its builds",
+      )
+      assert.ok(
+        !document.querySelector('[aria-label="Messages"]'),
+        "no transcript is drawn in the lane",
+      )
+      // The build working now is its phase and the line saying what it is doing.
+      assert.ok(drawn.includes("Building"), "the open build's phase is drawn")
+      assert.ok(drawn.includes("Building the page"), "and the line saying what it is doing")
+
+      // Details opens that build's transcript, read-only, over its own session.
+      await click(find('[data-canvas-build="b1"] [data-build-details]'))
+      await settle()
+      await until(
+        () => host.read.includes("canvas-build-1"),
+        "the build's transcript to be read",
+      )
+      assert.ok(
+        document.body.textContent?.includes("Build"),
+        "the transcript's sheet is open",
+      )
     })
   }),
 )

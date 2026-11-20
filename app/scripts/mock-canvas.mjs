@@ -216,6 +216,12 @@ function newCanvas({ title, prompt, version, versions, tools }) {
     tools,
     grants: [],
     prompt,
+    // A canvas the mock made through its create route is one whose requests are builds (ADR 0170),
+    // as the app's start says with `builds` — so its lane draws builds. A seeded fixture is a canvas
+    // from before builds and keeps its own chat's lane.
+    builds: false,
+    /** The builds this canvas has published, newest first, as `builds.py`'s listing answers them. */
+    buildRows: [],
   }
 }
 
@@ -270,6 +276,11 @@ export function createCanvasStore() {
     mark: c.mark ?? null,
     at: c.at,
     created_at: c.created_at,
+    // A record says whether its requests are builds (ADR 0170), and the plugin's listing carries it:
+    // the edit screen draws this row alone, so the lane's choice has to be on it — and the build
+    // working in it, so its phase and activity line draw there too.
+    builds: Boolean(c.builds),
+    ...(c.build ? { build: c.build } : {}),
   })
 
   // The pointer's version, not the newest stored one: an undo moves the pointer back and leaves the
@@ -288,6 +299,10 @@ export function createCanvasStore() {
       written_at: current?.at ?? c.at,
       can_undo: earlier !== null,
       data: inOrder(c.docs),
+      ...(c.builds ? { builds: true } : {}),
+      // The build working now, as the plugin's one-canvas read answers it (`builds.read`): its
+      // session, its phase and the line saying what it is doing.
+      ...(c.build ? { build: c.build } : {}),
     }
   }
 
@@ -308,6 +323,24 @@ function picture(canvas) {
 }
 
 /**
+ * Opens the build a request is worked in, as `builds.py` does when the queue hands a canvas chat's
+ * item to a build: the lane draws its phase and the line saying what it is doing until the version it
+ * writes publishes it. The mock works in one turn, so a build here goes straight to `building`, and
+ * the version `writeVersion` writes is what ends it `published`.
+ */
+function openBuild(canvas, request) {
+  if (!canvas.builds) return
+  canvas.build = {
+    id: `b_${randomUUID().slice(0, 8)}`,
+    session: `canvas-${randomUUID().slice(0, 8)}`,
+    phase: "building",
+    activity: "Building the page",
+    requests: [typeof request === "string" && request ? request : canvas.prompt],
+    at: Date.now(),
+  }
+}
+
+/**
  * Writes the canvas's next version, as `canvases.py`'s `_commit` does: the history above the record's
  * pointer goes first, so an undo leaves no redo and the pointer's version is the only row at its
  * number, then the page is built from what the version was asked to say. The canvas's data — the
@@ -325,6 +358,28 @@ function writeVersion(canvas, words) {
     tools: canvas.tools,
   })
   if (canvas.versions.length > KEEP) canvas.versions.shift()
+  // A canvas whose requests are builds publishes one per write, as `builds.py` does: the request it
+  // took, the summary it ended on, the check flag a host with no browser gives it, and the version it
+  // wrote. The build the request opened is the row it publishes, so the lane's working build becomes
+  // its history. The mock runs no checks of its own, so every build here is `unchecked`.
+  if (canvas.builds) {
+    const open = canvas.build
+    canvas.buildRows.unshift({
+      id: open?.id ?? `b_${randomUUID().slice(0, 8)}`,
+      session: open?.session ?? `canvas-${randomUUID().slice(0, 8)}`,
+      phase: "published",
+      activity: null,
+      requests: open?.requests ?? [edited || canvas.prompt],
+      summary: edited
+        ? `The page now says ${edited.replace(/[.!?]+$/, "")}.`
+        : "The page is written.",
+      flag: "unchecked",
+      version: canvas.version,
+      at: canvas.at,
+      created_at: open?.at ?? canvas.at,
+    })
+    canvas.build = null
+  }
 }
 
 /**
@@ -334,6 +389,7 @@ function writeVersion(canvas, words) {
 export function editCanvasSession(store, sessionId, words) {
   const canvas = store.bySession.get(sessionId)
   if (!canvas) return null
+  openBuild(canvas, words)
   writeVersion(canvas, words)
   return canvas
 }
@@ -564,6 +620,10 @@ export async function handleCanvas(
         // devtools console, or a canvas someone edits) meets the consent dialog.
         tools: ["files.search"],
       })
+      // The app says this canvas's requests are builds when it knows the feature (ADR 0170), and the
+      // mock answers it: its lane then draws builds, and each version it writes is one of them.
+      canvas.builds = body?.builds === true
+      openBuild(canvas, prompt)
       const { chat_id: chatId } = canvas
       canvases.set(canvas.id, canvas)
       bySession.set(canvas.session_id, canvas)
@@ -624,6 +684,23 @@ export async function handleCanvas(
       return true
     }
     fail(409, "This canvas has no build open.")
+    return true
+  }
+
+  const buildsPath = /^\/api\/plugins\/gots\/canvases\/([^/]+)\/builds$/.exec(path)
+  if (buildsPath) {
+    const canvas = canvases.get(decodeURIComponent(buildsPath[1]))
+    if (!canvas) {
+      fail(404, "There is no such canvas.")
+      return true
+    }
+    if (req.method !== "GET") {
+      fail(405, "A canvas's builds are a GET.")
+      return true
+    }
+    // A canvas from before builds answers an empty list rather than a refusal: its lane falls back to
+    // its own chat, which is what the app draws for a record with no `builds` flag anyway.
+    json(res, 200, { object: "gots.canvas.builds", builds: canvas.buildRows ?? [] })
     return true
   }
 

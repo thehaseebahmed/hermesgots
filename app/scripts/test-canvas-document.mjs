@@ -209,10 +209,20 @@ test("the tokens are read off the app's own theme, only the ones a canvas is tol
 })
 
 test("the tokens the page is given are the ones its guide names", () => {
-  // The guide is the only contract a bot has for what it may style with, and nothing else ties the
-  // two lists together: a token in one and not the other is a colour that never lands.
+  // The guide and the craft skill it sends a session to are the only contract a bot has for what it
+  // may style with, and nothing else ties the two lists together: a token in one and not the other
+  // is a colour that never lands.
   const guide = readFileSync(new URL("../../plugin/canvas/prompt.txt", import.meta.url), "utf8")
-  const named = new Set([...guide.matchAll(/--([a-z-]+)/g)].map((match) => match[1]))
+  const craft = readFileSync(
+    new URL("../../plugin/skills/canvas-craft/SKILL.md", import.meta.url),
+    "utf8",
+  )
+  const named = new Set(
+    [...`${guide}\n${craft}`.matchAll(/--([a-z-]+)/g)]
+      .map((match) => match[1])
+      // The skill's frontmatter is closed by a rule, not a token: `---` reads as `--` and `-`.
+      .filter((name) => name !== "-"),
+  )
   assert.deepEqual([...named].sort(), [...TOKENS].sort())
 })
 
@@ -450,10 +460,15 @@ test("the canvas section names exactly the bridge methods the app answers", () =
 })
 
 test("the canvas section names the skills it can load", () => {
-  // A canvas's session only hears of these three from the guide, and a name it can't load is a dead
+  // A canvas's session only hears of these from the guide, and a name it can't load is a dead
   // end: each one has to be a folder the plugin really ships, sharing it with the skill's own name.
   const guide = readFileSync(new URL("../../plugin/canvas/prompt.txt", import.meta.url), "utf8")
-  for (const name of ["impeccable", "web-design-guidelines", "transitions-dev"]) {
+  for (const name of [
+    "canvas-craft",
+    "impeccable",
+    "web-design-guidelines",
+    "transitions-dev",
+  ]) {
     assert.ok(guide.includes(`gots:${name}`), `the guide names gots:${name}`)
     const skill = new URL(`../../plugin/skills/${name}/SKILL.md`, import.meta.url)
     assert.ok(existsSync(skill), `plugin/skills/${name}/SKILL.md exists`)

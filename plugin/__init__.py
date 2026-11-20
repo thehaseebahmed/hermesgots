@@ -3812,11 +3812,23 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return web.json_response({"object": "gots.research.mission", "mission": found})
 
     async def list_canvases(request: "web.Request") -> "web.Response":
-        """Every canvas this bot has, drawn from its own record (canvases.py, ADR 0113)."""
+        """Every canvas this bot has, drawn from its own record (canvases.py, ADR 0113).
+
+        A record carries the build working in it, where one is: a phone's edit screen draws the
+        record and never the document, so the build's phase and its activity line have to ride it —
+        the one read both screens already poll.
+        """
         denied = unauthorized(request)
         if denied is not None:
             return denied
-        rows = await asyncio.to_thread(canvases.listing, store_path())
+        path = store_path()
+        rows = await asyncio.to_thread(canvases.listing, path)
+        working = await asyncio.to_thread(builds.open_map, path)
+        if working:
+            rows = [
+                {**row, **({"build": working[row["id"]]} if row["id"] in working else {})}
+                for row in rows
+            ]
         return web.json_response({"object": "gots.canvases", "canvases": rows})
 
     async def create_canvas(request: "web.Request") -> "web.Response":
@@ -3895,6 +3907,25 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return await canvas_answer(
             request, canvases.current, request.query.get("docs") != "none"
         )
+
+    async def canvas_builds(request: "web.Request") -> "web.Response":
+        """Every build this canvas has had, newest first, as the lane draws them (G10).
+
+        A build's row is its request, the summary it ended on, what its checks said and the
+        version it published — which is the lane's whole row — and a working build says where it
+        is and what it is doing now. The transcript is not here: it stays behind the build's own
+        session, which ``Details`` opens read-only.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            rows = await asyncio.to_thread(
+                builds.listing, store_path(), request.match_info["canvas_id"]
+            )
+        except canvases.CanvasError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "gots.canvas.builds", "builds": rows})
 
     async def canvas_data(request: "web.Request") -> "web.Response":
         """A canvas's data as a catalogue: one row a collection, and what the whole of it weighs.
@@ -4481,6 +4512,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/canvases", list_canvases)
     app.router.add_post(f"{PREFIX}/canvases", create_canvas)
     app.router.add_get(f"{PREFIX}/canvases/{{canvas_id}}", get_canvas)
+    app.router.add_get(f"{PREFIX}/canvases/{{canvas_id}}/builds", canvas_builds)
     app.router.add_get(f"{PREFIX}/canvases/{{canvas_id}}/data", canvas_data)
     app.router.add_get(f"{PREFIX}/canvases/{{canvas_id}}/data/{{collection}}", canvas_documents)
     app.router.add_post(f"{PREFIX}/canvases/{{canvas_id}}", update_canvas)

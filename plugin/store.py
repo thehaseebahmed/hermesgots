@@ -80,7 +80,9 @@ logger = logging.getLogger(__name__)
 # 80 keeps whether a build's wait on its plan has been pushed (the canvas builds plan's step 12,
 # `builds.py`): one column on the build record, so one wait is one push and a plan revised by a
 # message is the same wait.
-SCHEMA_VERSION = 80
+# 81 keeps where a build is and what it is doing (the canvas builds plan's step 13, `builds.py`):
+# its phase, the line the lane draws under it, and the version it published.
+SCHEMA_VERSION = 81
 
 
 def data_dir(hermes_home: Path) -> Path:
@@ -1140,6 +1142,22 @@ def _migrate(conn: sqlite3.Connection) -> None:
             build_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvas_builds)")}
             if "waiting" not in build_columns:
                 conn.execute("ALTER TABLE canvas_builds ADD COLUMN waiting INTEGER NOT NULL DEFAULT 0")
+        # v81: where a build is and what it is doing (the canvas builds plan's step 13, builds.py).
+        # `phase` now names the work a build is in — planning, waiting, building, checking,
+        # publishing, then published, failed or stopped — rather than a bare `open`, and `activity`
+        # is the one line the lane draws under it. `version` is the version the build published, so
+        # a lane's row names it without reading the canvas's whole history. A build left open by an
+        # older plugin is put in the phase its wait already said it was in.
+        if version < 81:
+            build_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvas_builds)")}
+            if "activity" not in build_columns:
+                conn.execute("ALTER TABLE canvas_builds ADD COLUMN activity TEXT")
+            if "version" not in build_columns:
+                conn.execute("ALTER TABLE canvas_builds ADD COLUMN version INTEGER")
+            conn.execute(
+                "UPDATE canvas_builds SET phase = CASE WHEN wait = 1 THEN 'waiting' ELSE 'building' END"
+                " WHERE phase = 'open'"
+            )
         # v61: the data a canvas keeps, one row per document of one collection. `value` is the
         # document as JSON and `at` is the host's clock when it was written, since the page owns the
         # data and a device's copy is only the page it was drawn from. No version or undo reads or

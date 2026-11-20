@@ -2490,6 +2490,28 @@ export async function getCanvas(
   return (await response.json())?.canvas as Record<string, unknown> | undefined
 }
 
+/**
+ * Every build one canvas has had, off `GET canvases/<id>/builds` (`builds.py`, G10): a finished
+ * build's request, summary, check flag and version, and a working one's phase and activity line.
+ *
+ * The lane draws these instead of the transcript, so the read is the canvas's own history rather
+ * than a session's rows — a build's transcript stays behind `Details`, one session at a time.
+ */
+export async function getCanvasBuilds(
+  config: HermesConfig,
+  id: string,
+  signal?: AbortSignal,
+) {
+  const response = await request(`${canvasRoot(config, id)}/builds`, {
+    headers: headers(config),
+    signal: signal
+      ? AbortSignal.any([signal, AbortSignal.timeout(READ_TIMEOUT_MS)])
+      : AbortSignal.timeout(READ_TIMEOUT_MS),
+  })
+  const body = await response.json()
+  return Array.isArray(body?.builds) ? (body.builds as Record<string, unknown>[]) : []
+}
+
 /** One collection of a canvas's data, as the host catalogues it: no document in it. */
 export interface CanvasCollection {
   collection: string

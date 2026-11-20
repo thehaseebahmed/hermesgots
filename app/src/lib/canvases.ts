@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 
 import { wireContent } from "@/lib/attachments"
@@ -60,6 +60,7 @@ import {
   createCanvas,
   deleteCanvas as deleteCanvasOnHost,
   getCanvas,
+  getCanvasBuilds,
   getPluginFeatures,
   grantCanvasTool as grantCanvasToolOnHost,
   HermesError,
@@ -156,6 +157,11 @@ export interface CanvasBuild {
   /** The Hermes session the build runs on, drawn in the canvas's lane while it works. */
   session: string
   phase: string
+  /**
+   * What the build is doing now, in one line: `Planning the change`, `Checking the rendered page`.
+   * Absent on a finished build, whose summary is the lane's line instead.
+   */
+  activity?: string
   /** The requests this build has taken, in the order they came. */
   requests: string[]
   /**
@@ -168,6 +174,45 @@ export interface CanvasBuild {
    * sent while it waits revises the plan; Approve builds it.
    */
   wait?: boolean
+}
+
+/**
+ * One build the lane draws (G10): the request it took, the summary it ended on, what its checks
+ * said and the version it published. A build still working has its phase and activity line.
+ */
+export interface CanvasBuildRow {
+  id: string
+  session: string
+  phase: string
+  /** What it is doing now; absent once it has finished. */
+  activity?: string
+  requests: string[]
+  summary?: string
+  /** `passing`, `failing` or `unchecked`, as the version it published says. */
+  flag?: string
+  /** The version it published, where it published one. */
+  version?: number
+  at: number
+}
+
+/** A canvas's builds read from the host, as the lane's rows (`builds.py`'s `listing`). */
+function buildRowOf(raw: Record<string, unknown>): CanvasBuildRow | undefined {
+  const id = typeof raw.id === "string" ? raw.id : ""
+  const session = typeof raw.session === "string" ? raw.session : ""
+  if (!id || !session) return undefined
+  return {
+    id,
+    session,
+    phase: typeof raw.phase === "string" ? raw.phase : "building",
+    ...(typeof raw.activity === "string" && raw.activity ? { activity: raw.activity } : {}),
+    requests: Array.isArray(raw.requests)
+      ? raw.requests.filter((one): one is string => typeof one === "string")
+      : [],
+    ...(typeof raw.summary === "string" && raw.summary ? { summary: raw.summary } : {}),
+    ...(typeof raw.flag === "string" ? { flag: raw.flag } : {}),
+    ...(typeof raw.version === "number" ? { version: raw.version } : {}),
+    at: typeof raw.at === "number" ? raw.at : 0,
+  }
 }
 
 /** A canvas as a list keeps it, and as the cache's list row keeps it (`canvas-cache.ts`). */
@@ -338,6 +383,7 @@ function buildOf(raw: unknown): CanvasBuild | undefined {
     id: String(build.id ?? ""),
     session,
     phase: typeof build.phase === "string" ? build.phase : "open",
+    ...(typeof build.activity === "string" && build.activity ? { activity: build.activity } : {}),
     requests: Array.isArray(build.requests)
       ? build.requests.filter((one): one is string => typeof one === "string")
       : [],
@@ -1004,6 +1050,38 @@ export function useCanvasRecord(id: string) {
     away: Boolean(state.missedAt[id]),
     loaded: state.loaded || Boolean(canvas),
   }
+}
+
+/**
+ * The builds of one canvas, newest first, kept fresh while a screen draws it (G10).
+ *
+ * A build is the lane's row: the request it took, the summary it ended on, its check flag and the
+ * version it published. A canvas made before builds has none and `enabled` is false there: its lane
+ * draws its own chat instead, exactly as it did before builds existed.
+ */
+export function useCanvasBuilds(id: string, bot: Profile | undefined, enabled: boolean) {
+  const [rows, setRows] = useState<CanvasBuildRow[]>([])
+  const live = useLive(bot)
+  const changes = useChanges("canvas", bot)
+  usePoll(
+    (signal) => {
+      if (!enabled || !bot) return
+      void getCanvasBuilds(serverConfig(bot), id, signal)
+        .then((raw) =>
+          setRows(raw.flatMap((one) => buildRowOf(one) ?? [])),
+        )
+        .catch(quietly("Reading a canvas's builds"))
+    },
+    live ? SAFETY_MS : LIST_MS,
+    [id, enabled, bot?.id, changes, live],
+    { active: enabled && Boolean(bot) },
+  )
+  useEffect(() => {
+    // A canvas whose requests stop being builds — another bot's row under the same id, or a canvas
+    // that never had them — must not keep the last canvas's rows on screen.
+    if (!enabled) setRows([])
+  }, [enabled, id])
+  return rows
 }
 
 /** The bot holding a canvas and the connection to call it with, or the refusal a page hears. */

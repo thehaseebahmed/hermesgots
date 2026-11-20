@@ -5,7 +5,7 @@
  * the generator the one writer, so a drift is a failed gate rather than a bot reading stale words.
  */
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import test from "node:test"
 
 import { CATALOGUE } from "../src/lib/canvas-catalogue.ts"
@@ -47,13 +47,23 @@ test("the guide states the cap the host really enforces", () => {
   )
 })
 
+test("the guide names the craft skill its method leans on", () => {
+  // The guide's floor and method are all a session is told outright; how a page is built — its
+  // document, tokens, classes, measures and the sandbox's refusals — rides in the bundled skill,
+  // which a session only finds by the name the guide gives it (G2, G3).
+  assert.match(rendered, /gots:canvas-craft/, "the guide names gots:canvas-craft")
+  const skill = new URL("../../plugin/skills/canvas-craft/SKILL.md", import.meta.url)
+  assert.ok(existsSync(skill), "plugin/skills/canvas-craft/SKILL.md exists")
+  assert.match(readFileSync(skill, "utf8"), /^name: canvas-craft$/m, "the folder is its name")
+})
+
 test("the guide keeps the length it shipped with", () => {
   // The number is the guide's own. If it moves, a canvas session is told different words — a
   // legitimate edit updates this pin on purpose, the way a version's tests hold their literal.
   assert.equal(
     rendered.length,
-    3_978,
-    "the canvas's guide is 3,978 characters and stays that way",
+    3_916,
+    "the canvas's guide is 3,916 characters and stays that way",
   )
 })
 

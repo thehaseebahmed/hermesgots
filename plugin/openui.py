@@ -9,9 +9,9 @@ nothing, so the next chat isn't told the library.
 written as plain HTML, so the library's vocabulary would be a language its page can't speak, and a
 canvas's session is told the guide instead of the library.
 
-The three design skills under ``skills/`` are registered in the same ``register`` call, so a canvas's
-session loads one with ``skill_view`` and the guide that names them is telling it about skills the
-host really holds.
+The skills under ``skills/`` — the canvas's craft and the three design skills — are registered in the
+same ``register`` call, so a canvas's session loads one with ``skill_view`` and the guide that names
+them is telling it about skills the host really holds.
 """
 
 from __future__ import annotations
@@ -28,10 +28,11 @@ SECTION = "openui"
 POSITION = "after_memory"
 CANVAS_SECTION = "canvas"
 CANVAS_ARTIFACT = Path(__file__).parent / "canvas" / "prompt.txt"
-# The design skills a canvas's session may load, bundled under `plugin/skills/` and registered with
-# Hermes so `skill_view` finds them. The guide names these three, so the names here are the names it
-# names: renaming one is renaming it in both places.
-SKILLS = ("impeccable", "web-design-guidelines", "transitions-dev")
+# The skills a canvas's session may load, bundled under `plugin/skills/` and registered with Hermes
+# so `skill_view` finds them. `canvas-craft` carries the how of building a page, which the guide
+# names and no longer repeats; the other three are the design skills. The guide names these, so the
+# names here are the names it names: renaming one is renaming it in both places.
+SKILLS = ("canvas-craft", "impeccable", "web-design-guidelines", "transitions-dev")
 SKILLS_ROOT = Path(__file__).parent / "skills"
 # A skill's own description, as its frontmatter writes it — the line Hermes lists it by.
 _DESCRIPTION = re.compile(r"^description:\s*(.+)$", re.M)

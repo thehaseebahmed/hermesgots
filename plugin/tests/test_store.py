@@ -169,10 +169,13 @@ class ABuildKeepsItsPlanColumns(unittest.TestCase):
             self.assertEqual(
                 tuple(
                     conn.execute(
-                        "SELECT phase, requests, plan, wait FROM canvas_builds WHERE id = 'b1'"
+                        "SELECT phase, requests, activity, version FROM canvas_builds "
+                        "WHERE id = 'b1'"
                     ).fetchone()
                 ),
-                ("open", json.dumps(["make it blue"]), None, 0),
+                # An `open` build of the older store is put where its own wait said it was: this
+                # one was building, with no activity line and no version behind it yet.
+                ("building", json.dumps(["make it blue"]), None, None),
             )
         finally:
             conn.close()

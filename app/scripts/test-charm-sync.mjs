@@ -10,11 +10,18 @@ import {
   CharmCode,
   beginMessage,
   botMessage,
+  charmMood,
   chunkSize,
   crc32,
   imageChunks,
   parseStatus,
+  petSettingsFrom,
+  petSettingsMessage,
+  poseImageEndMessage,
+  poseImageMessage,
+  poseMessage,
   rgb565,
+  timeMessage,
   utf8Clip,
 } from "../src/lib/charm-protocol.ts"
 import { CharmRefused, syncCharm } from "../src/lib/charm-sync.ts"
@@ -66,6 +73,73 @@ test("messages are laid out as the firmware reads them", () => {
   )
 })
 
+const u32 = (v) => [v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff]
+
+test("the pet's messages are laid out as the firmware reads them", () => {
+  assert.deepEqual([...timeMessage(1795176000)], [1, 11, ...u32(1795176000)])
+
+  const on = petSettingsMessage({
+    enabled: true,
+    petBotId: "nova",
+    bedStart: 22,
+    bedEnd: 7,
+    utcOffsetMin: -300,
+  })
+  // -300 as a little-endian i16 is 0xfed4.
+  assert.deepEqual([...on], [1, 7, 1, 22, 7, 0xd4, 0xfe, 4, 0x6e, 0x6f, 0x76, 0x61])
+  assert.deepEqual(
+    [
+      ...petSettingsMessage({
+        enabled: false,
+        petBotId: "",
+        bedStart: 22,
+        bedEnd: 7,
+        utcOffsetMin: 0,
+      }),
+    ],
+    [1, 7, 0, 22, 7, 0, 0, 0],
+  )
+  // A pet with no bot, or a night that is not hours, never reaches the radio.
+  assert.throws(
+    () =>
+      petSettingsMessage({ enabled: true, petBotId: "", bedStart: 22, bedEnd: 7, utcOffsetMin: 0 }),
+    /Choose a bot to be the pet/,
+  )
+  assert.throws(
+    () =>
+      petSettingsMessage({
+        enabled: true,
+        petBotId: "nova",
+        bedStart: 24,
+        bedEnd: 7,
+        utcOffsetMin: 0,
+      }),
+    /two hours of the day/,
+  )
+
+  assert.equal(charmMood("hungry"), 6)
+  assert.equal(charmMood("asleep"), 9)
+  const image = new Uint8Array([1, 2, 3])
+  assert.deepEqual([...poseMessage("hungry", image)], [1, 8, 6, 3, 0, 0, 0, ...u32(crc32(image))])
+  assert.deepEqual([...poseImageMessage("hungry")], [1, 9, 6])
+  assert.deepEqual([...poseImageEndMessage("hungry")], [1, 10, 6])
+})
+
+test("pet mode is off until the sheet says otherwise, and off again when its bot goes", () => {
+  const off = petSettingsFrom(undefined, ["nova"], 60)
+  assert.deepEqual(off, {
+    enabled: false,
+    petBotId: "",
+    bedStart: 22,
+    bedEnd: 7,
+    utcOffsetMin: 60,
+  })
+  assert.equal(petSettingsFrom({ enabled: true, botId: "nova" }, ["nova"], 0).enabled, true)
+  // A pet whose bot has been deleted, or disabled out of the sync, cannot be sent.
+  assert.equal(petSettingsFrom({ enabled: true, botId: "gone" }, ["nova"], 0).enabled, false)
+  assert.equal(petSettingsFrom({ enabled: true, botId: "nova" }, [], 0).petBotId, "")
+})
+
 test("chunks carry their offset and fit the link", () => {
   const image = new Uint8Array(1000).map((_, i) => i & 0xff)
   const size = chunkSize(247)
@@ -83,18 +157,31 @@ test("chunks carry their offset and fit the link", () => {
 })
 
 /** A charm in memory, following the firmware's sync session. */
-function fakeCharm({ corruptOnce = false, refuseCommit = false } = {}) {
+function fakeCharm({
+  corruptOnce = false,
+  refuseCommit = false,
+  corruptPoseOnce = false,
+  refusePet = false,
+} = {}) {
   const held = new Map() // crc -> len
   let shown = []
   let pending = []
   let image = []
   let corrupted = !corruptOnce
   const imagesSent = []
+  const pet = { enabled: false, petBotId: "", bedStart: 0, bedEnd: 0, utcOffsetMin: 0, clock: 0 }
+  const poses = new Map() // mood -> crc
+  let posePending = null
+  let poseDamaged = !corruptPoseOnce
+  const ops = []
   const answer = (code, op, needImage = false) =>
     parseStatus(new DataView(new Uint8Array([1, code, op, needImage ? 1 : 0]).buffer))
   return {
     held,
     imagesSent,
+    ops,
+    pet,
+    poses,
     get shown() {
       return shown
     },
@@ -103,6 +190,7 @@ function fakeCharm({ corruptOnce = false, refuseCommit = false } = {}) {
       async control(m) {
         const v = new DataView(m.buffer, m.byteOffset, m.byteLength)
         const op = m[1]
+        ops.push(op)
         if (op === 1) {
           pending = new Array(m[2])
           return answer(0, op)
@@ -139,6 +227,45 @@ function fakeCharm({ corruptOnce = false, refuseCommit = false } = {}) {
           return answer(0, op)
         }
         if (op === 6) return answer(0, op)
+        if (op === 7) {
+          const idLen = m[7]
+          pet.enabled = m[2] === 1
+          pet.bedStart = m[3]
+          pet.bedEnd = m[4]
+          pet.utcOffsetMin = v.getInt16(5, true)
+          pet.petBotId = new TextDecoder().decode(m.subarray(8, 8 + idLen))
+          return answer(0, op)
+        }
+        if (op === 8) {
+          const mood = m[2]
+          const len = v.getUint32(3, true)
+          const crc = v.getUint32(7, true)
+          posePending = { mood, len, crc }
+          return answer(0, op, len > 0 && poses.get(mood) !== crc)
+        }
+        if (op === 9) {
+          image = []
+          return answer(0, op)
+        }
+        if (op === 10) {
+          const mood = m[2]
+          const bytes = new Uint8Array(image)
+          if (!poseDamaged) {
+            poseDamaged = true
+            bytes[0] ^= 0xff
+          }
+          if (!posePending || posePending.mood !== mood) return answer(CharmCode.BadIndex, op)
+          if (bytes.length !== posePending.len || crc32(bytes) !== posePending.crc)
+            return answer(CharmCode.BadImage, op, true)
+          poses.set(mood, posePending.crc)
+          return answer(0, op)
+        }
+        if (op === 11) {
+          // A charm on firmware from before pet mode answers the first pet op this way.
+          if (refusePet) return answer(CharmCode.BadMessage, op)
+          pet.clock = v.getUint32(2, true)
+          return answer(0, op)
+        }
         return answer(CharmCode.BadMessage, op)
       },
       async data(chunk) {
@@ -174,6 +301,79 @@ test("a sync sends every bot, then only what changed", async () => {
     charm.shown.map((b) => b.name),
     ["Pix", "Nova", "Plain"],
   )
+})
+
+const nova = { id: "nova", name: "Nova", accent: 1, image: picture(1) }
+const petOn = { enabled: true, petBotId: "nova", bedStart: 22, bedEnd: 7, utcOffsetMin: 120 }
+
+test("pet mode lands after the bots' commit, its pictures before the toggle", async () => {
+  const charm = fakeCharm()
+  const poses = [
+    { mood: "happy", image: picture(11, 900) },
+    { mood: "hungry", image: picture(12, 900) },
+  ]
+  await syncCharm(charm.link, [nova], undefined, {
+    pet: { settings: petOn, poses },
+    now: 1795176000 * 1000,
+  })
+  assert.equal(charm.pet.enabled, true)
+  assert.equal(charm.pet.petBotId, "nova")
+  assert.equal(charm.pet.bedStart, 22)
+  assert.equal(charm.pet.utcOffsetMin, 120)
+  assert.equal(charm.pet.clock, 1795176000)
+  assert.deepEqual([...charm.poses.keys()], [0, 6])
+  assert.equal(charm.shown.length, 1)
+  // The bots' commit lands before the pet's toggle, so an older charm still takes its bots.
+  assert.ok(charm.ops.indexOf(5) < charm.ops.indexOf(7))
+  assert.equal(charm.ops.at(-1), 7)
+
+  // Nothing the charm already holds goes over again, the pet's pictures included.
+  const before = charm.imagesSent.length
+  await syncCharm(charm.link, [nova], undefined, {
+    pet: { settings: petOn, poses },
+    now: 1795176000 * 1000,
+  })
+  assert.equal(charm.imagesSent.length, before)
+  assert.equal(charm.poses.size, 2)
+})
+
+test("a charm with no pet mode still keeps the bots, and says so", async () => {
+  const charm = fakeCharm({ refusePet: true })
+  const result = await syncCharm(charm.link, [nova], undefined, {
+    pet: { settings: petOn, poses: [{ mood: "hungry", image: picture(12, 900) }] },
+    now: 1795176000 * 1000,
+  })
+  assert.equal(result.petRefused, true)
+  assert.deepEqual(
+    charm.shown.map((b) => b.name),
+    ["Nova"],
+  )
+  assert.equal(charm.pet.enabled, false)
+})
+
+test("pet mode off sends the toggle and no pictures", async () => {
+  const charm = fakeCharm()
+  await syncCharm(charm.link, [nova], undefined, {
+    pet: {
+      settings: { ...petOn, enabled: false },
+      poses: [{ mood: "hungry", image: picture(12, 900) }],
+    },
+    now: 1795176000 * 1000,
+  })
+  assert.equal(charm.pet.enabled, false)
+  assert.equal(charm.poses.size, 0)
+  // The clock still goes over: the phone is the charm's only source of time.
+  assert.equal(charm.pet.clock, 1795176000)
+})
+
+test("a damaged pet picture is sent again", async () => {
+  const charm = fakeCharm({ corruptPoseOnce: true })
+  await syncCharm(charm.link, [nova], undefined, {
+    pet: { settings: petOn, poses: [{ mood: "hungry", image: picture(12, 900) }] },
+    now: 1795176000 * 1000,
+  })
+  assert.equal(charm.poses.size, 1)
+  assert.equal(charm.shown.length, 1)
 })
 
 test("a damaged picture is sent again", async () => {
@@ -222,6 +422,14 @@ test("the charm's row says whether it is paired and when it last synced", async 
     charmSubtitle({ name: "Gots Charm", syncedAt: now - 3 * 3_600_000 }, now),
     "Gots Charm · Synced 3 h ago",
   )
+})
+
+test("the pet row says which bot lives on the charm", async () => {
+  const { petSubtitle } = await import("../src/lib/charm-words.ts")
+  assert.equal(petSubtitle(undefined), "Your bots only, as they are now")
+  assert.equal(petSubtitle({ enabled: false, botId: "nova" }), "Your bots only, as they are now")
+  assert.equal(petSubtitle({ enabled: true }), "Choose the bot that lives there")
+  assert.equal(petSubtitle({ enabled: true, botId: "nova" }, "Nova"), "Lives on the charm")
 })
 
 test("the paired charm's own row says only when it last synced", async () => {
