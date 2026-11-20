@@ -77,6 +77,18 @@ class Host:
         self.settings = settings
         self.root = plugin_root(settings.base)
         self.server = server_root(settings.base)
+        self._features: Optional[List[str]] = None
+
+    def builds(self) -> bool:
+        """Whether this host's requests are builds, which is the path the bench measures now.
+
+        An app that knows `canvas_builds` queues its request on the canvas's chat and the plugin
+        hands it to a build (ADR 0170); a host without it still takes a first build on the canvas's
+        own session, which is the "before" path the baseline was taken on.
+        """
+        if self._features is None:
+            self._features = list(self.info().get("features") or ())
+        return "canvas_builds" in self._features
 
     def _ask(self, url: str, method: str = "GET", body: Optional[Dict[str, Any]] = None):
         headers = {"Content-Type": "application/json"}
@@ -120,6 +132,9 @@ class Host:
                 "prompt": prompt,
                 **({"profile_id": self.settings.profile} if self.settings.profile else {}),
                 "body": body,
+                # Where the host holds builds, the canvas is made the way the app makes one: its
+                # requests are builds, so the prompt opens the first of them (ADR 0170).
+                **({"builds": True} if self.builds() else {}),
             },
         )
         canvas = answer.get("canvas")
@@ -162,7 +177,12 @@ class Host:
         return held
 
     def turn(self, session_id: str, prompt: str) -> str:
-        """A follow-up on the canvas's own session: one run posted to Hermes's own route."""
+        """A follow-up on the canvas's chat: one request queued there, as the app sends one.
+
+        Where the host holds builds the queue hands it to the canvas's open build, or opens one, so
+        the prompt is measured on the path a reader's request takes. A host without builds takes the
+        request as a run of the canvas's own session, which is the "before" path.
+        """
         body: Dict[str, Any] = {
             "session_id": session_id,
             "input": [{"type": "text", "text": prompt}],
@@ -171,6 +191,12 @@ class Host:
             body["provider"] = self.settings.provider
         if self.settings.model:
             body["model"] = self.settings.model
+        if self.builds():
+            answer = self._ask(f"{self.root}/sessions/{session_id}/queue", "POST", body)
+            item = answer.get("item")
+            if not isinstance(item, dict) or not item.get("id"):
+                raise HostError("the host answered a queued request with no item")
+            return str(item["id"])
         answer = self._ask(f"{self.server}/v1/runs", "POST", body)
         run_id = answer.get("run_id")
         if not (isinstance(run_id, str) and run_id):
@@ -181,23 +207,32 @@ class Host:
         """The canvas this run made, taken back: a bench leaves nothing on the host it graded."""
         self._ask(f"{self.root}/canvases/{canvas_id}", "DELETE")
 
-    def wait(self, canvas_id: str) -> Tuple[Dict[str, Any], bool]:
+    def wait(self, canvas_id: str, since: Optional[int] = None) -> Tuple[Dict[str, Any], bool]:
         """The record once its run has ended, and whether it ended inside the wait's own bound.
 
         A run's end is read the way a bench can read it: the record's version and its clock stop
-        moving for the quiet window. A page still being written when the bound runs out is answered
-        as unfinished rather than graded as it stood, and the record says so.
+        moving for the quiet window. Where the host holds builds, the build's own record says when
+        it is open, and a build that opened after ``since`` has to have published a version past it
+        before stillness counts — a record that has not moved yet is a build that has not started.
+        A page still being written when the bound runs out is answered as unfinished rather than
+        graded as it stood, and the record says so.
         """
         started = time.monotonic()
         last: Tuple[Any, Any] = (None, None)
         still_since: Optional[float] = None
         canvas = self.read(canvas_id)
         while True:
+            moved = since is None or (canvas.get("version") or 0) > since
             now = (canvas.get("version"), canvas.get("at"))
-            if now != last:
+            if self.builds() and canvas.get("build"):
+                # A build working is a record that has not ended, however still its version is.
+                last, still_since = now, None
+            elif now != last:
                 last, still_since = now, time.monotonic()
-            elif still_since is not None and (time.monotonic() - still_since) * 1000 >= (
-                self.settings.quiet_ms
+            elif (
+                still_since is not None
+                and moved
+                and (time.monotonic() - still_since) * 1000 >= (self.settings.quiet_ms)
             ):
                 return canvas, True
             if time.monotonic() - started >= self.settings.max_wait_s:

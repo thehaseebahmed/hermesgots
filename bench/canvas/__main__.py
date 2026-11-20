@@ -273,7 +273,10 @@ def run_prompts(
                 canvas = canvases[prompt.on]
                 host.turn(canvas["session_id"], prompt.text)
             canvas_id = canvas["id"]
-            settled, ended = host.wait(canvas_id)
+            before = canvas.get("version") or 0
+            settled, ended = host.wait(
+                canvas_id, since=before if host.builds() else None
+            )
             wall_ms = int((time.monotonic() - started) * 1000)
             data = host.sweep(canvas_id)
             folder = shots_root / prompt.name
@@ -312,8 +315,13 @@ def _check_of(entry: Dict[str, Any]) -> str:
     return "passing" if entry.get("passed") == entry.get("of") else "failing"
 
 
-def table(record: Dict[str, Any]) -> List[str]:
-    """The run, as a reader reads it: one line per prompt, then its totals and its verdict."""
+def table(record: Dict[str, Any], baseline: Optional[Dict[str, Any]] = None) -> List[str]:
+    """The run, as a reader reads it: one line per prompt, then its totals and its verdict.
+
+    Where a baseline is in hand, each prompt's line carries the baseline's own count and the delta
+    between them — the "before" and "after" columns the plan's step 14 asks for — so a run is read
+    prompt by prompt rather than only in its totals.
+    """
     asked = len(record["entries"])
     of_set = (
         f"{asked} of {record['prompts']['count']} prompts"
@@ -327,6 +335,13 @@ def table(record: Dict[str, Any]) -> List[str]:
         if record["browser"] == "ready"
         else f"no browser: {record['browser']}"
     )
+    before = {
+        entry.get("name"): entry for entry in (baseline or {}).get("entries") or ()
+    }
+    columns = f"{'prompt':<18} {'kind':<6} {'passed':>7}"
+    if baseline is not None:
+        columns += f" {'before':>7} {'delta':>5}"
+    columns += f" {'turns':>6} {'wall':>7} {'warn':>5} {'version':>8}  check"
     lines = [
         "Canvas bench — "
         + (f"{of_set}, dry run" if record["dry"] else of_set)
@@ -344,17 +359,28 @@ def table(record: Dict[str, Any]) -> List[str]:
         f"prompts sha256 {record['prompts']['sha256'][:16]}… "
         f"({record['prompts']['count']} prompts)",
         "",
-        f"{'prompt':<18} {'kind':<6} {'passed':>7} {'turns':>6} {'wall':>7} "
-        f"{'warn':>5} {'version':>8}  check",
+        columns,
     ]
     for entry in record["entries"]:
-        lines.append(
+        line = (
             f"{entry['name']:<18} {entry['kind']:<6} "
-            f"{str(entry['passed']) + ' / ' + str(entry['of']):>7} {entry['turns']:>6} "
+            f"{str(entry['passed']) + ' / ' + str(entry['of']):>7}"
+        )
+        if baseline is not None:
+            was = before.get(entry["name"])
+            if was is None:
+                line += f" {'-':>7} {'-':>5}"
+            else:
+                said = f"{was.get('passed', 0)} / {was.get('of', 0)}"
+                moved = int(entry["passed"]) - int(was.get("passed", 0))
+                line += f" {said:>7} {format(moved, '+'):>5}"
+        line += (
+            f" {entry['turns']:>6} "
             f"{_dur(entry['wall_ms']):>7} {len(entry['warnings']):>5} "
             f"{str(entry.get('version') if entry.get('version') is not None else '-'):>8}  "
             f"{_check_of(entry)}"
         )
+        lines.append(line)
         if entry.get("unfinished"):
             lines.append(f"{'':<18} the wait ran out before the record went still")
         for one in entry["assertions"]:
@@ -367,10 +393,17 @@ def table(record: Dict[str, Any]) -> List[str]:
         if entry.get("shots"):
             lines.append(f"{'':<18} screenshots: {Path(entry['shots'][0]).parent}")
     totals = record["totals"]
-    lines.append(
-        f"{'totals':<18} {'':<6} {str(totals['passed']) + ' / ' + str(totals['of']):>7} "
-        f"{totals['turns']:>6} {_dur(totals['wall_ms']):>7}"
+    total_line = (
+        f"{'totals':<18} {'':<6} "
+        f"{str(totals['passed']) + ' / ' + str(totals['of']):>7}"
     )
+    if baseline is not None:
+        was = (baseline.get("totals") or {}).get("passed")
+        said = f"{was} / {(baseline.get('totals') or {}).get('of')}" if was is not None else "-"
+        moved = int(totals["passed"]) - int(was) if was is not None else None
+        total_line += f" {said:>7} {(format(moved, '+') if moved is not None else '-'):>5}"
+    total_line += f" {totals['turns']:>6} {_dur(totals['wall_ms']):>7}"
+    lines.append(total_line)
     if record["dry"]:
         lines.append(
             "a dry run reaches no host: the grade, the turns and the wall time are the canned "
@@ -485,6 +518,12 @@ def _baseline_problems() -> List[str]:
     moved["entries"][0]["assertions"][0]["ok"] = not moved["entries"][0]["assertions"][0]["ok"]
     if not baseline_module.differences(replica, moved):
         problems.append("the baseline rule: an assertion that changed its answer isn't reported")
+    # The table read against a baseline prints the before column and the delta for each prompt, which
+    # is the plan's step 14 read: a grade is printed beside the one it moved from, never instead.
+    read = "\n".join(table(record, replica))
+    header = read.split("\n\n")[1].splitlines()[0]
+    if "before" not in header or "delta" not in header:
+        problems.append("the table: a baseline's column isn't headed beside the run's")
     return problems
 
 
@@ -720,8 +759,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.json:
         print(json.dumps(record, indent=2))
     else:
-        for line in table(record):
+        # The baseline's own column rides the table where there is one to read: each prompt's grade
+        # beside the "before" run's, with its delta (the plan's step 14). A run with no baseline —
+        # or one taken on other terms — still prints its own column, and the verdict below says why
+        # it can't be read.
+        baseline_path = args.baseline or BASELINE
+        compared: Optional[Dict[str, Any]] = None
+        if baseline_path.exists():
+            try:
+                compared = baseline_module.load(baseline_path)
+            except (OSError, ValueError):
+                compared = None
+        for line in table(record, compared):
             print(line)
+        if compared is not None:
+            print(f"\nread against {baseline_path.name}: before, after, and the delta")
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
         args.out.write_text(json.dumps(record, indent=2) + "\n")
