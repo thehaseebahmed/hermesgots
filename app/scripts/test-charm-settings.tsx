@@ -48,3 +48,18 @@ test("the web offers no test alert, since only the phone can write one", async (
     assert.ok(!text().includes("Buzzes your charm"), "and its line is drawn nowhere beside it")
   })
 })
+
+test("Developer ends with a Charm tests group holding one row per moment", async () => {
+  await seedSettings({ developer: true })
+  await mount(at("/settings/developer"), async () => {
+    await settle()
+    const page = text()
+    assert.ok(page.includes("Charm tests"), "the group is named")
+    assert.ok(page.includes("Test Approval Alert"), "an approval can be drawn on demand")
+    assert.ok(page.includes("Test Question Alert"), "and so can a question")
+    // Each row says what the charm will draw, so the developer knows which card is coming: the
+    // approval's pair and the handoff, or the handoff alone.
+    assert.ok(page.includes("Allow once, Deny and Show on Phone"), "the approval's buttons are named")
+    assert.ok(page.includes("Show on Phone alone"), "and the question's one")
+  })
+})

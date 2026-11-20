@@ -663,9 +663,15 @@ test("the charm's buttons are the tray's own", () => {
 })
 
 /** The page's share of the same rule: a test alert draws the pair a real approval's notice draws. */
-test("a test alert carries an approval's two buttons", () => {
+test("a test alert carries an approval's two buttons, and a question's none", () => {
   const frozen = functionText("src/lib/charm.ts", "sendTestAlert")
-  assert.match(frozen, /actions: charmButtons\(\[\{ label: "Allow once" \}, \{ label: "Deny" \}\]\)/)
+  assert.match(
+    frozen,
+    /charmButtons\(\[\{ label: "Allow once" \}, \{ label: "Deny" \}\]\)/,
+    "an approval's pair, as the tray draws it",
+  )
+  assert.match(frozen, /charmButtons\(\[\]\)/, "and a question's notice, which carries no buttons")
+  assert.match(frozen, /reason === "approval"/, "both drawn from the one reason the row sends")
   const page = functionText("src/lib/charm-alert.ts", "charmButtons")
   assert.match(page, /slice\(0, CHARM_MAX_ACTIONS\)/, "two at most")
   assert.match(page, /id: String\(at\)/, "each answering by its place in the notice's list")

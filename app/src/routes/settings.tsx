@@ -89,7 +89,7 @@ import {
 import { wordsLabel } from "@/lib/dictation-log"
 import { useDictationTotals } from "@/lib/dictations"
 import { useLiveStatus, type LiveStatus } from "@/lib/live"
-import { charmAvailable, usePairedCharm } from "@/lib/charm"
+import { charmAvailable, sendTestAlert, usePairedCharm, type TestAlertReason } from "@/lib/charm"
 import { CHARM, charmSubtitle } from "@/lib/charm-words"
 import { chatLayout } from "@/lib/chat-layout"
 import { useLarge } from "@/lib/media"
@@ -809,6 +809,7 @@ export function DeveloperSettings() {
           subtitle="The blocks a bot can draw"
         />
       </Group>
+      <CharmTests bots={bots ?? []} />
       <Button
         variant="ghost"
         className="h-11 rounded-full"
@@ -820,6 +821,62 @@ export function DeveloperSettings() {
     </>
   )
 }
+
+/**
+ * Developer > Charm tests: one row per moment a charm can draw, so the card can be looked at
+ * without waiting for a bot to need something. Each row sends the alert the plugin would send — the
+ * same title, body and buttons — for the first bot the charm holds, since the charm has to know the
+ * bot before it can draw it.
+ */
+function CharmTests({ bots }: { bots: Profile[] }) {
+  const labels = useBotLabels()
+  const [busy, setBusy] = useState<TestAlertReason | null>(null)
+  const refusal = useScreenRefusal()
+  const first = botsByLabel(bots, labels).filter((bot) => !bot.disabled)[0]
+  const send = async (reason: TestAlertReason) => {
+    if (!first) return
+    setBusy(reason)
+    if (await refusal.write(`send the ${reason} alert`, () => sendTestAlert(first, reason)))
+      tell.note(reason === "approval" ? "Sent an approval" : "Sent a question")
+    setBusy(null)
+  }
+  return (
+    <>
+      <p className="px-5 text-sm text-muted-foreground">Charm tests</p>
+      <Group>
+        {TEST_ALERTS.map(({ reason, title, subtitle }) => (
+          <button
+            key={reason}
+            type="button"
+            className={rowClass}
+            onClick={() => void send(reason)}
+            disabled={busy !== null || !first}
+          >
+            <BellRingIcon className="size-5 shrink-0 text-muted-foreground" />
+            <RowText
+              title={busy === reason ? "Sending…" : title}
+              subtitle={first ? subtitle : "No bots on your charm to test with"}
+            />
+          </button>
+        ))}
+      </Group>
+    </>
+  )
+}
+
+/** The two moments, in the words the developer page uses for them. */
+const TEST_ALERTS: { reason: TestAlertReason; title: string; subtitle: string }[] = [
+  {
+    reason: "approval",
+    title: "Test Approval Alert",
+    subtitle: "Allow once, Deny and Show on Phone, as an approval draws them",
+  },
+  {
+    reason: "question",
+    title: "Test Question Alert",
+    subtitle: "Show on Phone alone, as a question draws it",
+  },
+]
 
 function TestPushRow() {
   const { on } = usePush()

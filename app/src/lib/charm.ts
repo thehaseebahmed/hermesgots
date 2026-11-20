@@ -341,24 +341,32 @@ export async function syncToCharm(
 /** What a test alert is keyed by: no session's, so it clears only when the reader dismisses it. */
 export const TEST_ALERT_SUBJECT = "test-alert"
 
+/** The two moments a charm can be made to draw, as its card's own words. */
+export type TestAlertReason = "approval" | "question"
+
 /**
- * Settings → Charm's test row: an approval for the first bot the charm holds, through the same
- * plugin a push goes through. A phone with no charm, Bluetooth off or the grant gone writes nothing
- * and answers nothing — the row's own words are all it can promise.
+ * Settings → Charm's test row, and Developer's Charm tests: one of the two moments, for the first
+ * bot the charm holds, written the way a push writes it.
  *
- * Its words are the ones a real approval's notice carries (`WORDS.approval` in
- * `netlify/lib/fcm.ts`), so what the charm draws for the test is what it draws for a push.
+ * The words are the ones a real notice carries — an approval's title, body and its pair of buttons
+ * (`LABELS` in `plugin/answers.py`), and a question's, which carries none — so what the charm draws
+ * for a test is what it draws for a push.
  */
-export async function sendTestAlert(bot: Profile) {
+export async function sendTestAlert(bot: Profile, reason: TestAlertReason = "approval") {
   if (!charmBridge()) throw new Error("A test alert needs the Android app")
+  const approval = reason === "approval"
   await Charm.alert({
     botId: await charmIdFor(bot),
-    reason: "approval",
-    subject: TEST_ALERT_SUBJECT,
-    title: "Test alert",
-    body: "Waiting for your approval",
-    // The pair an approval's notice carries (`LABELS` in `plugin/answers.py`), so the charm draws
-    // and answers through the buttons a real push draws.
-    actions: charmButtons([{ label: "Allow once" }, { label: "Deny" }]),
+    reason,
+    subject: `${TEST_ALERT_SUBJECT}-${reason}`,
+    title: approval ? "Test alert" : "Nova has a question",
+    body: approval
+      ? "Waiting for your approval"
+      : "Which region should the migration run in, eu-west or us-east?",
+    // An approval's notice carries the pair the tray draws, so the charm draws and answers through
+    // the buttons a real push draws; a question's carries none, so the card draws only the handoff.
+    actions: approval
+      ? charmButtons([{ label: "Allow once" }, { label: "Deny" }])
+      : charmButtons([]),
   })
 }
