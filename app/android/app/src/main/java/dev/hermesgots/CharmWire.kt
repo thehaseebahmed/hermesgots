@@ -66,6 +66,9 @@ object CharmWire {
      */
     data class Action(val id: String, val label: String)
 
+    /** What the charm answers a handoff ask with: the button pressed, and the session it was on. */
+    data class Tap(val action: String, val subject: String)
+
     /**
      * An alert: which bot, which of the two moments it is, the minute of the day the frame was built,
      * the words the tray entry shows, and the buttons it draws — the same title, body and two buttons
@@ -113,18 +116,29 @@ object CharmWire {
     }
 
     /**
-     * The subject a handoff ask was answered with, or null for an answer with nothing pending and for
-     * anything that is not this answer at all. A status is exactly four bytes and this answer is five
+     * The button a handoff ask was answered with, or null for an answer with nothing pending and for
+     * anything that is not this answer at all. A status is exactly four bytes and this answer is seven
      * or more, so the two are never read for each other: a status whose third byte happened to be
      * `0x22` is still a status, and this answers null for it.
+     *
+     * The answer is `[version][code][0x22][actionLen][action][subjectLen][subject]`, so the button's
+     * length is the byte after the op and the session's follows the button itself.
      */
-    fun handoffAnswer(bytes: ByteArray?): String? {
-        if (bytes == null || bytes.size < 5) return null
+    fun handoffAnswer(bytes: ByteArray?): Tap? {
+        if (bytes == null || bytes.size < 7) return null
         if ((bytes[2].toInt() and 0xff) != OP_HANDOFF) return null
-        val length = bytes[3].toInt() and 0xff
-        // Nothing was pending, or the subject the charm announced never arrived: either way, none.
-        if (length == 0 || bytes.size < 4 + length) return null
-        return String(bytes, 4, length, Charsets.UTF_8)
+        // Nothing was pending, or a button longer than an id this phone draws: either way, none.
+        val actionBytes = bytes[3].toInt() and 0xff
+        if (actionBytes == 0 || actionBytes > ACTION_ID_BYTES) return null
+        if (bytes.size < 5 + actionBytes) return null
+        // The session the button was pressed on never arrived: no answer, not half of one.
+        val subjectBytes = bytes[4 + actionBytes].toInt() and 0xff
+        if (subjectBytes == 0 || subjectBytes > FIELD_BYTES) return null
+        if (bytes.size < 5 + actionBytes + subjectBytes) return null
+        return Tap(
+            action = String(bytes, 4, actionBytes, Charsets.UTF_8),
+            subject = String(bytes, 5 + actionBytes, subjectBytes, Charsets.UTF_8),
+        )
     }
 
     /** `[version u8][op]`, the head every control write but the ask wears. */

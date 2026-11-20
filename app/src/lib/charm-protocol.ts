@@ -338,19 +338,41 @@ export function alertMessage(alert: CharmAlert): Uint8Array {
 export const handoffMessage = () => new Uint8Array([CharmOp.Handoff])
 
 /**
- * The subject a handoff ask was answered with, or null for an answer with nothing pending — and for
- * anything that is not this answer at all. A status is exactly four bytes and this answer is five or
- * more, so the two can never be read for each other; a status whose third byte happened to be `0x22`
- * still reads as no answer here.
+ * The answer to the ask: which button was pressed on the charm, and the session it was pressed on.
+ * The button is the alert's own action id, so a phone that still holds the notice knows which link
+ * the press stands for.
  */
-export function parseHandoff(view: DataView): string | null {
-  if (view.byteLength < 5) return null
+export interface HandoffTap {
+  /** The button pressed: the alert's own action id, which is its place in the notice's list. */
+  action: string
+  /** The session the button was pressed on: the subject the alert named. */
+  subject: string
+}
+
+/**
+ * The button a handoff ask was answered with, or null for an answer with nothing pending — and for
+ * anything that is not this answer at all. A status is exactly four bytes and this answer is seven
+ * or more, so the two can never be read for each other; a status whose third byte happened to be
+ * `0x22` still reads as no answer here.
+ */
+export function parseHandoff(view: DataView): HandoffTap | null {
+  if (view.byteLength < 7) return null
   if (view.getUint8(2) !== CharmOp.Handoff) return null
-  const length = view.getUint8(3)
-  // Nothing was pending, or the subject the charm announced never arrived: either way, no subject.
-  if (length === 0 || view.byteLength < 4 + length) return null
-  const bytes = new Uint8Array(view.buffer, view.byteOffset + 4, length)
-  return new TextDecoder().decode(bytes)
+  const actionLength = view.getUint8(3)
+  // Nothing was pending, or a button longer than the id this phone drew: either way, none.
+  if (actionLength === 0 || actionLength > CHARM_MAX_ACTION_ID_BYTES) return null
+  if (view.byteLength < 5 + actionLength) return null
+  const subjectLength = view.getUint8(4 + actionLength)
+  // The session the button was pressed on never arrived: no answer, not half of one.
+  if (subjectLength === 0 || subjectLength > MAX_ID_BYTES) return null
+  if (view.byteLength < 5 + actionLength + subjectLength) return null
+  const decoder = new TextDecoder()
+  return {
+    action: decoder.decode(new Uint8Array(view.buffer, view.byteOffset + 4, actionLength)),
+    subject: decoder.decode(
+      new Uint8Array(view.buffer, view.byteOffset + 5 + actionLength, subjectLength),
+    ),
+  }
 }
 
 export function petSettingsMessage(settings: CharmPetSettings): Uint8Array {

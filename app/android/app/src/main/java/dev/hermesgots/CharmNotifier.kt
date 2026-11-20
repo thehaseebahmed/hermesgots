@@ -352,21 +352,30 @@ object CharmNotifier {
          * never be taken for each other.
          */
         private fun heard(value: ByteArray?) {
-            val subject = CharmWire.handoffAnswer(value) ?: return
-            show(subject)
+            val tap = CharmWire.handoffAnswer(value) ?: return
+            applyCharmAction(tap.action, tap.subject)
             close()
         }
 
         /**
-         * The one chat, by the link a tap on the tray opens: the page looks the session up and opens its
-         * screen (`linkedPush` and `openPush` in `src/lib/push.ts`), so a charm's answer lands where a
-         * tap on the notice would.
+         * The one place a button pressed on the charm is applied. For now every button opens the phone
+         * at the approval or the chat the press named, by the same link a tap on the tray entry opens
+         * (`NoticeOpen.link`), so a press on the wrist lands where a press on the notice would. Android
+         * 10 and later refuse an activity start from the background unless the app holds an overlay
+         * grant, which is the one the Bubble asks for; a phone without it refuses the start, and the
+         * notice's own tap still opens the same chat.
          *
-         * Android 10 and later refuse an activity start from the background unless the app holds an
-         * overlay grant, which is the one the Bubble asks for; a phone without that grant refuses the
-         * start, and the notice's own tap still opens the same chat.
+         * The alternative is what the charm's buttons are for — answering the approval from the wrist,
+         * with the phone still in a pocket — and it would post the button's own one-shot link straight
+         * back to the plugin: the signed link `answers.mint` in `plugin/answers.py` mints for an
+         * approval's tray buttons (`{base}/answers/{token}`, one choice, one press), which is the same
+         * press the tray's own button already makes. Flipping it is this function alone, and it needs
+         * two things no part of this alert has yet: the alert's links kept somewhere a later
+         * connection can find them (a token outlives the notice that carried it), and the owner's
+         * decision that a tap on a wrist may spend an approval. Until then `action` is carried only so
+         * a press can say which button it was.
          */
-        private fun show(subject: String) {
+        private fun applyCharmAction(action: String, subject: String) {
             runCatching { app.startActivity(NoticeOpen.link(null, subject)) }
         }
 

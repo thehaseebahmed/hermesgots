@@ -72,6 +72,14 @@ const WIRE = {
   ],
   /** `[subjectLen u8][subject]`. */
   clearPayload: [["field", "subject"]],
+  /**
+   * The answer to the ask: which button the charm was pressed on, and the session it was about —
+   * `[actionLen u8][action][subjectLen u8][subject]`, after the version and the op.
+   */
+  handoffAnswer: [
+    ["field", "action"],
+    ["field", "subject"],
+  ],
   /** `kMaxActions`: an approval's two, and no more. */
   actions: 2,
   /** `kMaxActionIdLen`: the id a press answers by. */
@@ -416,23 +424,57 @@ test("the handoff ask is one byte, and one ask is the whole of it", () => {
   assert.deepEqual([...handoffMessage()], [WIRE.handoff])
 })
 
-test("the charm's answer names the session to open", () => {
+/** The answer the charm sends when a button is pressed: the button, then the session to open. */
+test("the charm's answer names the button and the session", () => {
+  const action = new TextEncoder().encode("0")
   const subject = new TextEncoder().encode("s-1ab")
-  const answer = new Uint8Array([WIRE.version, 0, WIRE.handoff, subject.length, ...subject])
-  assert.equal(parseHandoff(bytesOf(answer)), "s-1ab")
+  const answer = new Uint8Array([
+    WIRE.version,
+    0,
+    WIRE.handoff,
+    action.length,
+    ...action,
+    subject.length,
+    ...subject,
+  ])
+  assert.deepEqual(parseHandoff(bytesOf(answer)), { action: "0", subject: "s-1ab" })
 })
 
 test("an answer with nothing pending is none", () => {
-  assert.equal(parseHandoff(bytesOf(new Uint8Array([1, 0, WIRE.handoff, 0]))), null)
+  assert.equal(parseHandoff(bytesOf(new Uint8Array([1, 0, WIRE.handoff, 0, 0]))), null)
 })
 
 /** The two answers share a characteristic, so the shorter one can never be read as the longer. */
 test("no status is ever read as a handoff answer", () => {
   // A four-byte status whose op happens to be 0x22 is still a status: a status is exactly four.
   assert.equal(parseHandoff(bytesOf(new Uint8Array([1, 0, WIRE.handoff, 1]))), null)
-  assert.equal(parseHandoff(bytesOf(new Uint8Array([1, 0, WIRE.clear, 2, 0x68, 0x69]))), null)
-  // A handoff answer whose subject never arrived is no subject, not half of one.
-  assert.equal(parseHandoff(bytesOf(new Uint8Array([1, 0, WIRE.handoff, 4, 0x68, 0x69]))), null)
+  assert.equal(parseHandoff(bytesOf(new Uint8Array([1, 0, WIRE.clear, 2, 0x68, 0x69, 1, 0x73]))), null)
+  // An answer whose session never arrived is no answer, not half of one.
+  assert.equal(
+    parseHandoff(bytesOf(new Uint8Array([1, 0, WIRE.handoff, 1, 0x30, 4, 0x68, 0x69]))),
+    null,
+  )
+  // And one whose button is longer than an id could be is not a button this phone drew.
+  const long = new Uint8Array(WIRE.actionIdBytes + 1).fill(0x30)
+  assert.equal(
+    parseHandoff(bytesOf(new Uint8Array([1, 0, WIRE.handoff, long.length, ...long, 1, 0x73]))),
+    null,
+  )
+})
+
+/**
+ * The answer is read as the button and then the session, the order the wire documents: the button's
+ * length is the byte after the op, and the session's follows the button itself.
+ */
+test("the answer's two fields are read in the order the wire writes them", () => {
+  const body = bodyOf("handoffAnswer")
+  const button = body.indexOf("val actionBytes")
+  const session = body.indexOf("val subjectBytes")
+  assert.ok(button >= 0 && session > button, "the button first, then the session")
+  assert.match(body, /bytes\[3\]/, "the button's length is the byte after the op")
+  assert.match(body, /bytes\[4 \+ actionBytes\]/, "the session's length follows the button")
+  assert.match(body, /String\(bytes, 4, actionBytes/, "the button's bytes start where its length ends")
+  assert.match(body, /String\(bytes, 5 \+ actionBytes, subjectBytes/, "and the session's after it")
 })
 
 /** An app source file as the page asks for a clear in it. */
@@ -605,4 +647,21 @@ test("the phone asks for a pending handoff, and waits for a tap", () => {
   assert.match(notifier, /setCharacteristicNotification/, "with the answers subscribed to")
   assert.match(notifier, /CharmWire\.handoffAnswer/, "and the answer read as what it is")
   assert.match(notifier, /NoticeOpen\.link/, "opening the session by the link a tap opens")
+})
+
+/**
+ * A returned button is applied in one function, and only one: for now every press opens the phone at
+ * the approval or the chat, the same route the charm's own "Show on phone" takes. The alternative —
+ * answering from the wrist — is named there in full, so turning it on is that function alone.
+ */
+test("the charm's answer is applied in one place", () => {
+  const notifier = sourceOf("android/app/src/main/java/dev/hermesgots/CharmNotifier.kt")
+  const applied = [...notifier.matchAll(/fun applyCharmAction\(/g)]
+  assert.equal(applied.length, 1, "one function, however many buttons exist")
+  const body = kotlinBody(notifier, "applyCharmAction")
+  assert.match(body, /NoticeOpen\.link\(null, subject\)/, "the route a tap on the notice opens")
+  assert.match(notifier, /applyCharmAction\(tap\.action, tap\.subject\)/, "asked with both the button and the session")
+  // The alternative the comment must name, so flipping it is a single change.
+  assert.match(notifier, /answers\.py/, "the plugin's signed link, named where it would be posted")
+  assert.match(notifier, /answers\.mint/, "and the mint that makes it")
 })
