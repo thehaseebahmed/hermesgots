@@ -17,6 +17,7 @@ import { markRead } from "@/lib/read-marks"
 import {
   Path,
   botProfile,
+  find,
   json,
   missing,
   mount,
@@ -70,8 +71,8 @@ const sidebar = () => (
   </MemoryRouter>
 )
 
-const waitingNav = () => document.querySelector('nav[aria-labelledby="waiting-heading"]')
-const botDot = () => document.querySelector("[data-unread]")
+const waitingNav = () => find('nav[aria-labelledby="waiting-heading"]')
+const botDot = () => find("[data-unread]")
 
 test("a project session that waits on a question is listed in Waiting for input", async () => {
   await seed()
@@ -87,7 +88,9 @@ test("a project session that waits on a question is listed in Waiting for input"
 
 test("a side chat that waits on an approval is listed in Waiting for input", async () => {
   await seed()
-  serveLive(() => ({ waiting: { "gots-waiting-chat": { kind: "approval", command: "rm -rf build" } } }))
+  serveLive(() => ({
+    waiting: { "gots-waiting-chat": { kind: "approval", command: "rm -rf build" } },
+  }))
   await seedSession("waiting-chat", "gots-waiting-chat", "A chat that waits")
   await mount(sidebar(), async () => {
     await until(async () => Boolean(waitingNav()), "the waiting section")
@@ -160,11 +163,14 @@ test("a run that ends while the app is open dots the bot's row", async () => {
   await seed()
   // This device has read the chat as of its last turn, so its row starts clear.
   markRead("chat-run", 4)
-  let live: Record<string, unknown> = { sessions: { "gots-run-1": "running" }, run_ids: { "gots-run-1": "run-1" } }
+  let live: Record<string, unknown> = {
+    sessions: { "gots-run-1": "running" },
+    run_ids: { "gots-run-1": "run-1" },
+  }
   serveLive(() => live)
   await seedSession("chat-run", "gots-run-1", "A chat whose run ends")
   await mount(sidebar(), async () => {
-    await until(async () => Boolean(document.querySelector('nav[aria-labelledby="bots-heading"] a')), "the bot's row")
+    await until(async () => Boolean(find('nav[aria-labelledby="bots-heading"] a')), "the bot's row")
     assert.ok(missing("[data-unread]"), "nothing new yet: the run is still in flight")
     // The run ends on the host and the stream says runs changed. No push reaches this device — the
     // app is open — so the bot row's own unread mark is what has to say the run is done.

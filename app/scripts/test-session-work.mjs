@@ -11,6 +11,7 @@ import test from "node:test"
 
 import {
   closedSession,
+  endedSessions,
   isUnread,
   lastActivityAt,
   rowTone,
@@ -356,4 +357,28 @@ test("a run is in flight when the host says so, and otherwise when a reply is ar
   assert.equal(runInFlight(undefined, { streaming: true, waiting: true }), false, "unless it waits")
   assert.equal(runInFlight(undefined, {}), false, "nothing at all")
   assert.equal(runInFlight(undefined, undefined), false, "and a chat with no turn read")
+})
+
+/** One `runs/live` answer, as the poll holds it: the maps the rule reads, and nothing else. */
+const answer = (sessions, subagents = {}, waking = {}) => ({
+  sessions,
+  run_ids: {},
+  waiting: {},
+  subagents,
+  waking,
+})
+
+test("a run ended between two answers is the session gone with nothing still at work", () => {
+  assert.deepEqual(
+    endedSessions(answer({ s1: "running", s2: "waiting_for_approval" }), answer({ s2: "waiting_for_approval" })),
+    ["s1"],
+    "the session the answer no longer holds, with the one still waiting left out",
+  )
+  // A turn that ended over subagents still working has not ended: the plugin holds its news until
+  // they are gone, and the wake turn it is still owed says the same.
+  assert.deepEqual(endedSessions(answer({ s1: "running" }), answer({}, { s1: 2 })), [], "a subagent of it still works")
+  assert.deepEqual(endedSessions(answer({ s1: "running" }), answer({}, {}, { s1: 1 })), [], "a wake turn is still owed")
+  // Nothing held in flight before is nothing that ended, and a first answer has no before at all.
+  assert.deepEqual(endedSessions(answer({}), answer({})), [], "nothing ran before")
+  assert.deepEqual(endedSessions(answer({ s1: "running" }), answer({ s1: "running" })), [], "still running")
 })

@@ -272,7 +272,7 @@ function Bots({ onNavigate, collapsed = false }: { onNavigate?: () => void; coll
   )
 }
 
-/** Project sessions, across every project, that wait on the user. Hidden when there are none. */
+/** Sessions of every kind, across every project, that wait on the user. Hidden when there are none. */
 function Waiting({
   onNavigate,
   collapsed = false,

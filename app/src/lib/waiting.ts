@@ -6,6 +6,7 @@ import { quietly } from "@/lib/report"
 import { db, updateConversation } from "@/lib/db"
 import { getLiveRuns, type LiveRunStatus, type LiveRuns, type WaitingReason } from "@/lib/hermes"
 import { chatOnScreen, connectionKey, isLive, onChanges } from "@/lib/live"
+import { closedSession, endedSessions } from "@/lib/session-work"
 import { markResume } from "@/lib/resume-trace"
 
 export type { WaitingReason }
@@ -108,20 +109,6 @@ export async function readLiveRunOf(
 }
 
 /**
- * The sessions whose run ended between a server's answer and the next one: held in flight before,
- * gone now, with no subagent of theirs still at work and no wake turn still owed — the app's own
- * `runFinished` rule, and the hold the plugin keeps a finished run's news behind until its
- * subagents are gone (`plugin/alerts.py`). A turn that ended over subagents still working has not
- * ended, so it is none of these.
- */
-function endedSessions(before: LiveRuns, next: LiveRuns) {
-  return Object.keys(before.sessions).filter(
-    (sessionId) =>
-      !next.sessions[sessionId] && !next.subagents[sessionId] && !next.waking[sessionId],
-  )
-}
-
-/**
  * Moves the clock of every conversation of the runs that ended on this server while the app was
  * open, which is the arrival a bot row's unread dot measures (`updatedAt` past this device's read
  * mark, ADR 0110): a chat's own reply is flushed by the thread that is open, and the plugin pushes
@@ -133,16 +120,16 @@ async function noteEndedRuns(key: string, ended: string[]) {
       .filter((profile) => connectionKey(profile) === key)
       .map((profile) => profile.id),
   )
-  for (const sessionId of ended) {
-    const chats = await db.conversations.where("hermesSessionId").equals(sessionId).toArray()
+  const chats = await db.conversations.where("hermesSessionId").anyOf(ended).toArray()
+  // Another bot's chat, a closed one and the chat on screen are all left alone: an open thread's
+  // own activity is what marks it. One transaction for the whole batch, so a host restart's dozens
+  // of ended runs are one write rather than one each.
+  await db.transaction("rw", db.conversations, async () => {
     for (const chat of chats) {
-      // Another bot's chat, one that is resolved or discarded and the chat on screen are all left
-      // alone: an open thread's own activity is what marks it.
-      if (!bots.has(chat.profileId) || chat.resolvedAt || chat.discardedAt) continue
-      if (chatOnScreen(chat.id)) continue
+      if (!bots.has(chat.profileId) || closedSession(chat) || chatOnScreen(chat.id)) continue
       await updateConversation(chat.id, { updatedAt: Date.now() })
     }
-  }
+  })
 }
 
 async function poll(only: Server[] = servers) {
