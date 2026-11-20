@@ -11,7 +11,6 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Rect
-import android.net.Uri
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.Person
@@ -53,11 +52,36 @@ class GotsMessagingService : FirebaseMessagingService() {
         val subject = Notice.clearSubject(message.data)
         if (subject != null) {
             NoticeDrawer.clearSubject(this, subject)
+            // The charm's record goes with the tray's: another device settled this subject, so the
+            // face it still holds is no longer news. Asked after the tray is clear, and where a
+            // charm that cannot be written throws nothing into that work — a phone with no charm
+            // saved, Bluetooth off or a lost grant all leave the tray entry exactly as it is.
+            runCatching { CharmNotifier.clear(this, subject) }
             return
         }
         val notice = Notice.from(message.data, getString(R.string.app_name)) ?: return
         channelFor(notice.channel, notice.category)
         NoticeDrawer.post(this, notice.tag, entry(notice, pictureOf(notice)))
+        // The moment the notice reports, on the charm as well as in the tray. It is asked for after
+        // the entry is drawn and can never throw into it: an alert for a wrist is a bonus beside the
+        // notice, never a reason to lose one.
+        charmAlert(notice)
+    }
+
+    /**
+     * Hands a notice that carries both a bot and a reason to the charm. The subject is the id the
+     * notice is about — the one a clear for it names — so the record and its clear cannot disagree.
+     * The title, the body and the buttons are the ones the tray entry shows, so the charm reads like
+     * the notification and its buttons are the entry's own. A notice with either field missing, or
+     * with neither, is tray news only.
+     */
+    private fun charmAlert(notice: Notice) {
+        val bot = notice.charm ?: return
+        val reason = notice.charmReason ?: return
+        if (notice.id.isBlank()) return
+        runCatching {
+            CharmNotifier.alert(this, bot, reason, notice.id, notice.title, notice.body, notice.charmActions)
+        }
     }
 
     /**
@@ -170,20 +194,8 @@ class GotsMessagingService : FirebaseMessagingService() {
     private fun openIntent(kind: String, id: String, tag: String): PendingIntent =
         PendingIntent.getActivity(this, tag.hashCode(), openLink(kind, id), pendingFlags())
 
-    /** The `gots://open` link a tap and a chat's shortcut both open. */
-    private fun openLink(kind: String, id: String): Intent {
-        val link = Uri.Builder()
-            .scheme("gots")
-            .authority("open")
-            .appendQueryParameter("kind", kind)
-            .appendQueryParameter("id", id)
-            .build()
-        return Intent(Intent.ACTION_VIEW, link).apply {
-            // Gots is one task (`launchMode="singleTask"`), so a tap from the tray lands in the app that
-            // is already there, which is what hands the link to the page (Capacitor's `appUrlOpen`).
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-        }
-    }
+    /** The `gots://open` link a tap and a chat's shortcut both open, built in one place with the charm. */
+    private fun openLink(kind: String, id: String): Intent = NoticeOpen.link(kind, id)
 
     /** A button's broadcast, carrying the one link a press is allowed to post. */
     private fun answerIntent(tag: String, index: Int, url: String): PendingIntent {

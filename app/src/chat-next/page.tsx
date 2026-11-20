@@ -26,6 +26,7 @@ import { stopSubagents } from "@/lib/agents"
 import { attempt } from "@/lib/attempt"
 import type { Attempted } from "@/lib/refusal"
 import { readPace, sendTimeoutMs } from "@/lib/away"
+import { clearCharm } from "@/lib/charm"
 import type { SummaryRows } from "@/lib/compaction-seam"
 import { connectionKey } from "@/lib/connection"
 import { usePluginFeature, usePluginFeatureOn } from "@/lib/features"
@@ -1865,6 +1866,11 @@ export function ChatNextThread({
             }
           : {}),
       })
+      // The device that answered is skipped by the account's own clear fan-out
+      // (`plugin/push.py`), so this page settles the charm itself: the record this session raised
+      // goes now the run is moving again. Asked after the card, and never awaited — a radio must
+      // not hold an answer on screen.
+      clearCharm(session)
     } catch (error) {
       if (error instanceof RunGone) void catchUp(true)
       // The app's own cards say a refusal where the reader is, and take their form back on it.

@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from unittest import mock
 
-from plugin import alerts, chats, delegation, push, sessions
+from plugin import alerts, chats, delegation, link, push, sessions
 from plugin.store import connect, db_path
 from plugin.tests._helpers import subscribed
 
@@ -725,3 +725,121 @@ class OnScreen(unittest.TestCase):
                 [{"label": "Allow once", "url": "https://bot.example/once"}],
                 "the button a press posts back",
             )
+
+
+class TheCharm(unittest.TestCase):
+    """Which bot a push is for, and one word for why: the charm's own two fields.
+
+    The charm holds one record — a bot's face and one of two reasons — so the relay names this
+    profile's registry bot id and the reason for the moments a bot is waiting on the reader, a
+    question and an approval with a plan waiting being one. A finished run asks the reader for
+    nothing, so it is news the tray carries and the charm stays as it was; every other kind is news
+    about something that is not a bot's face there. A clear names its subject and nothing else: a
+    clear is not a moment, it is the end of one.
+    """
+
+    PROFILE = "work"
+    REASONS = ("approval", "question")
+    # The kinds that reach the charm: the ones that wait on the reader for an action. A plan waiting
+    # is an approval. Nothing else does — not a finished run, not a failure, not a room's, a
+    # research project's, a routine's or a meeting's news. The charm is for an action, never for news.
+    ACTIONABLE = frozenset({"approval", "plan", "question"})
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.path = Path(self.tmp.name) / "gots.db"
+        self.state = {"token": "token", "site": "https://app.example", "hostId": "host-1"}
+
+    def relayed(self, kind, state=None):
+        """The body the relay posts to the registry for one kind of news."""
+        bodies = []
+
+        def call(site, method, route, **kwargs):
+            bodies.append(kwargs.get("body"))
+            return {}
+
+        with mock.patch.object(
+            push.link, "load_state", lambda home: state or self.state
+        ), mock.patch.object(push.link, "call", call):
+            push._relay(self.path, kind, "chat_input", "gots-1", {})
+        self.assertEqual(len(bodies), 1, "a linked profile tells the registry once")
+        return bodies[0]
+
+    def test_a_push_names_the_bot_the_charm_holds_and_its_reason(self):
+        self.state["botId"] = link.bot_id(self.state, self.PROFILE)
+        body = self.relayed("question")
+        self.assertEqual(
+            body["charm"],
+            link.bot_id(self.state, self.PROFILE),
+            "the id `link.bot_id` computes, which the charm's own bots are named by",
+        )
+        self.assertEqual(body["charm_reason"], "question")
+
+    def test_a_plan_waiting_is_an_approval(self):
+        self.state["botId"] = link.bot_id(self.state, self.PROFILE)
+        self.assertEqual(self.relayed("plan")["charm_reason"], "approval")
+
+    def test_a_finished_run_names_no_moment(self):
+        self.state["botId"] = link.bot_id(self.state, self.PROFILE)
+        body = self.relayed("run_done")
+        self.assertNotIn("charm", body, "a finished run asks the reader for nothing")
+        self.assertNotIn("charm_reason", body, "so the charm stays on its carousel")
+
+    def test_the_kinds_that_reach_the_charm_are_exactly_the_actionable_ones(self):
+        self.state["botId"] = link.bot_id(self.state, self.PROFILE)
+        carried = {kind for kind in push.KINDS if "charm" in self.relayed(kind)}
+        self.assertEqual(
+            carried,
+            self.ACTIONABLE,
+            "a question and an approval, and nothing else: the charm is for an action, never for news",
+        )
+        # Both fields or neither: an id with no reason draws nothing, and a reason with no bot
+        # belongs to no record the charm holds.
+        for kind in push.KINDS:
+            body = self.relayed(kind)
+            with self.subTest(kind=kind):
+                self.assertEqual(
+                    "charm" in body,
+                    "charm_reason" in body,
+                    "a moment names both fields",
+                )
+        # And the word it draws is the reason, never the kind's own name.
+        self.assertEqual(
+            {kind: self.relayed(kind)["charm_reason"] for kind in carried},
+            {"question": "question", "approval": "approval", "plan": "approval"},
+        )
+
+    def test_a_reason_is_only_ever_one_of_the_two(self):
+        self.state["botId"] = link.bot_id(self.state, self.PROFILE)
+        for kind in push.KINDS:
+            reason = self.relayed(kind).get("charm_reason")
+            if reason is not None:
+                with self.subTest(kind=kind):
+                    self.assertIn(reason, self.REASONS, "the charm draws one of two words")
+
+    def test_a_link_that_holds_no_bot_id_names_none(self):
+        body = self.relayed("question")
+        self.assertNotIn("charm", body, "an id this profile never computed is not guessed at")
+        self.assertNotIn("charm_reason", body, "a reason without a bot it belongs to")
+
+    def test_a_clear_names_no_reason(self):
+        subscribed(self.path, '["chat_input"]')
+        sent, told = [], []
+
+        def call(site, method, route, **kwargs):
+            told.append((route, kwargs.get("body")))
+            return {}
+
+        with mock.patch.object(
+            push, "send", lambda row, payload, topic: sent.append(payload) or 201
+        ), mock.patch.object(push.link, "load_state", lambda home: self.state), mock.patch.object(
+            push.link, "call", call
+        ):
+            push.dismissed(self.path, "gots-1")
+        self.assertEqual(
+            sent,
+            [{"kind": "clear", "session_id": "gots-1"}],
+            "a clear is the end of a moment, not one: it names what to clear and no reason",
+        )
+        self.assertEqual(told, [("push/dismiss", {"session_id": "gots-1"})])

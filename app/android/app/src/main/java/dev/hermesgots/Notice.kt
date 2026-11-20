@@ -31,6 +31,13 @@ data class Notice(
     val read: Boolean = false,
     /** The host's moment (ms) of the activity the notice reports, which a Mark as read covers. */
     val at: Long? = null,
+    /**
+     * The id the charm holds this bot by (`link.bot_id` in the plugin): what an alert names. Not the
+     * data's `bot` ([bundled]), which is the bot *character* — its face, and two bots can wear one.
+     */
+    val charm: String? = null,
+    /** Why that bot needs the reader: a question or an approval, and nothing else. */
+    val charmReason: String? = null,
 ) {
     /**
      * A notice about a chat is drawn as that chat's conversation — the bot as its Person, a
@@ -48,6 +55,14 @@ data class Notice(
     /** Mark as read moves a chat's read mark, so only a notice naming its chat offers it. */
     val markAsRead: Boolean get() = conversation && read
 
+    /**
+     * The buttons the charm draws, from the tray's own: the same labels, in the same order, at most
+     * two, each answering by its place in that list — the id the tray's own press carries
+     * ([GotsMessagingService]'s per-index answer), so a press on the wrist and a press on the entry
+     * name the same button.
+     */
+    val charmActions: List<CharmWire.Action> get() = charmActionsOf(actions)
+
     /** A conversation already wears the face as its Person; a large icon would draw it twice. */
     val largeIcon: Boolean get() = !conversation
 
@@ -59,6 +74,12 @@ data class Notice(
 
         /** A chat's id as the plugin keeps them and the registry bounds them (`chatId` in `fcm.ts`). */
         private val CHAT = Regex("^[A-Za-z0-9._-]{1,256}$")
+
+        /** A bot's id on the charm, as `link.bot_id` mints it and `charmId` in `fcm.ts` bounds it. */
+        private val CHARM = Regex("^[0-9a-f]{16}$")
+
+        /** The moments a charm draws, the only reasons `fcm.ts` forwards (`CHARM_REASONS`). */
+        private val CHARM_REASONS = setOf("question", "approval")
 
         /**
          * The notice a message carries, or null for one with nothing to say: the filter the service is
@@ -89,6 +110,8 @@ data class Notice(
                 reply = data[KEY_REPLY]?.trim()?.takeIf(::isLink),
                 read = data[KEY_READ] == "true",
                 at = data[KEY_AT]?.trim()?.toLongOrNull()?.takeIf { it > 0 },
+                charm = data[KEY_CHARM]?.trim()?.takeIf { CHARM.matches(it) },
+                charmReason = data[KEY_CHARM_REASON]?.takeIf { it in CHARM_REASONS },
             )
         }
 
@@ -123,6 +146,16 @@ data class Notice(
         fun subjectOf(tag: String): String? {
             val colon = tag.lastIndexOf(':')
             return if (colon < 0) null else tag.substring(colon + 1).takeIf { it.isNotBlank() }
+        }
+
+        /**
+         * The buttons the charm draws from a notice's own, which is the one rule both read: at most
+         * two, each with the label the tray draws and the id a press answers by — its place in the
+         * notice's list, since a button the plugin sent has no id of its own on the wire.
+         */
+        fun charmActionsOf(actions: List<NoticeAction>): List<CharmWire.Action> {
+            return actions.take(CharmWire.ACTION_LIMIT)
+                .mapIndexed { at, one -> CharmWire.Action(at.toString(), one.label) }
         }
 
         /** Whether a tray entry's tag is about [subject], which is what a clear cancels by. */
@@ -168,6 +201,8 @@ data class Notice(
         private const val KEY_REPLY = "reply"
         private const val KEY_READ = "read"
         private const val KEY_AT = "at"
+        private const val KEY_CHARM = "charm"
+        private const val KEY_CHARM_REASON = "charm_reason"
     }
 }
 

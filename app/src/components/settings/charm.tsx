@@ -5,7 +5,13 @@
  */
 import { useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { BluetoothIcon, PawPrintIcon, RefreshCwIcon, UnlinkIcon } from "lucide-react"
+import {
+  BellRingIcon,
+  BluetoothIcon,
+  PawPrintIcon,
+  RefreshCwIcon,
+  UnlinkIcon,
+} from "lucide-react"
 
 import { Banner } from "@/components/banner"
 import { ConfirmDestructive } from "@/components/confirm-destructive"
@@ -27,6 +33,7 @@ import {
   charmPoses,
   forgetCharm,
   pairCharm,
+  sendTestAlert,
   setCharmPet,
   syncToCharm,
   usePairedCharm,
@@ -45,7 +52,7 @@ export function CharmSettings() {
   const charm = usePairedCharm()
   const profiles = useLiveQuery(listProfiles, [])
   const labels = useBotLabels()
-  const [busy, setBusy] = useState<"pair" | "sync" | null>(null)
+  const [busy, setBusy] = useState<"pair" | "sync" | "test" | null>(null)
   const [progress, setProgress] = useState<SyncProgress | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const [forgetting, setForgetting] = useState(false)
@@ -137,6 +144,23 @@ export function CharmSettings() {
 
   const count = sources.length
 
+  // The first bot the charm holds, which is the one a test alert names: the same order a sync sends.
+  const first = botsByLabel(profiles ?? [], labels).filter((profile) => !profile.disabled)[0]
+
+  const test = async () => {
+    if (!first) return
+    setBusy("test")
+    setFailure(null)
+    try {
+      await sendTestAlert(first)
+      tell.success("Sent a test alert")
+    } catch (error) {
+      setFailure(message(error))
+    } finally {
+      setBusy(null)
+    }
+  }
+
   return (
     <>
       {failure && <Banner tone="error">{failure}</Banner>}
@@ -171,6 +195,7 @@ export function CharmSettings() {
             </button>
           </Group>
           <Group>
+
             <SwitchRow
               id="charm-pet-mode"
               icon={PawPrintIcon}
@@ -190,6 +215,22 @@ export function CharmSettings() {
                 disabled={busy !== null}
               />
             )}
+            <button
+              type="button"
+              className={rowClass}
+              onClick={test}
+              disabled={busy !== null || !first}
+            >
+              <BellRingIcon className="size-5 shrink-0 text-muted-foreground" />
+              <RowText
+                title={busy === "test" ? "Sending…" : "Send a test alert"}
+                subtitle={
+                  first
+                    ? "Buzzes your charm as if your first bot needed an approval"
+                    : "No bots on your charm to test with"
+                }
+              />
+            </button>
           </Group>
           <Group>
             <ActionRow

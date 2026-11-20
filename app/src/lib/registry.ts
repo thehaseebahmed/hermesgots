@@ -118,7 +118,14 @@ export async function removeHost(hostId: string) {
 /** The registry id behind a bot: its own id, unless it adopted a bot added by hand. */
 const registryIds = new Map<string, string>()
 
-async function registryId(profile: Profile) {
+/**
+ * The id the registry knows this bot by, which is the id a push names it with, so the id the charm
+ * holds has to be this one.
+ *
+ * The `?? profile.id` fallback is deliberate rather than an oversight: a bot the registry does not
+ * hold receives no push at all, so nothing ever names it and its charm entry never needs to match.
+ */
+export async function registryId(profile: Profile) {
   if (!registryIds.has(profile.id)) await syncRegistry()
   return registryIds.get(profile.id) ?? profile.id
 }

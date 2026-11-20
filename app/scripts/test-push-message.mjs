@@ -36,6 +36,8 @@ const approval = {
 
 const NOW = Date.UTC(2026, 10, 17, 9)
 const USER_ID = "u1"
+/** The id `link.bot_id` mints for a bot — `sha256(hostId:profile)[:16]` — which the charm holds. */
+const CHARM = "9f2c41aa0b7d5e63"
 const TOKEN = "mh_push_message_test"
 const HOST_ID = "3f1c2a4e-5b6d-4e7f-8a9b-0c1d2e3f4a5b"
 const KEY_ID = "0123456789abcdef"
@@ -273,6 +275,67 @@ test("the registry forwards read only as a boolean, with the moment it covers", 
   const none = message("t", "run_done", "chat_run_done", "gots-1").message.data
   assert.equal(none.read, undefined, "a notice with no read carries none")
   assert.equal(none.at, undefined)
+})
+
+test("a push carries the bot and its reason", () => {
+  const { data } = message("t", "approval", "chat_input", "gots-1", {
+    ...approval,
+    charm: CHARM,
+    charmReason: "approval",
+  }).message
+  assert.equal(data.charm, CHARM, "the id the charm holds this bot by, which is what it draws with")
+  assert.equal(data.charm_reason, "approval", "and one word for why it needs the reader")
+})
+
+test("an alert with no reason carries none", () => {
+  // Every other kind is news about something that is not a bot's face on the charm.
+  const { data } = message("t", "run_failed", "chat_run_failed", "gots-2", { bot: "nova" }).message
+  assert.equal(data.bot, "nova", "a picture to wear, and no reason to be up")
+  assert.equal(data.charm, undefined, "a notice naming no bot of the charm's names none")
+  assert.equal(data.charm_reason, undefined, "and says nothing about a charm")
+})
+
+test("the registry bounds the charm's bot and its reason", async () => {
+  const notice = { kind: "approval", category: "chat_input", session_id: "gots-1", title: "Trip" }
+  const kept = await relay(await setup(), { ...notice, charm: ` ${CHARM} `, charm_reason: "approval" })
+  assert.equal(kept.status, 200)
+  assert.equal(kept.detail.charm, CHARM, "the bot id the plugin mints (`link.bot_id`)")
+  assert.equal(kept.detail.charmReason, "approval", "with the word for the moment")
+  const { data } = message("t", "approval", "chat_input", "gots-1", kept.detail).message
+  assert.equal(data.charm, CHARM, "and both ride the message to the phone")
+  assert.equal(data.charm_reason, "approval")
+  for (const reason of ["question", "approval"]) {
+    const { detail } = await relay(await setup(), { ...notice, charm: CHARM, charm_reason: reason })
+    assert.equal(detail.charmReason, reason, `"${reason}" is a moment the charm draws`)
+  }
+  // A finished run asks the reader for nothing, so the charm is never told about one.
+  {
+    const { status, detail } = await relay(await setup(), {
+      ...notice,
+      charm: CHARM,
+      charm_reason: "finished",
+    })
+    assert.equal(status, 200, "it costs the notice nothing")
+    assert.equal(detail.charmReason, undefined, "a finished run names no reason")
+  }
+  // The shape `link.bot_id` makes and nothing else: 16 lowercase hex characters.
+  for (const charm of ["9f2c41aa0b7d5e6", "9f2c41aa0b7d5e633", "9F2C41AA0B7D5E63", "xyz", "  ", 42, ""]) {
+    const { status, detail } = await relay(await setup(), {
+      ...notice,
+      charm,
+      charm_reason: "approval",
+    })
+    assert.equal(status, 200, "an id that isn't one costs the notice nothing")
+    assert.equal(detail.charm, undefined, `${JSON.stringify(charm)} is no bot id`)
+  }
+  for (const charm_reason of ["waiting", "Approval", "finished", "finished run", 1, "", null]) {
+    const { status, detail } = await relay(await setup(), { ...notice, charm: CHARM, charm_reason })
+    assert.equal(status, 200, "a reason that isn't a moment costs the notice nothing")
+    assert.equal(detail.charmReason, undefined, `${JSON.stringify(charm_reason)} is no reason`)
+  }
+  const absent = await relay(await setup(), notice)
+  assert.equal(absent.detail.charm, undefined, "a notice about no charm moment names neither field")
+  assert.equal(absent.detail.charmReason, undefined)
 })
 
 test("the dev mock answers a tray's button the way the plugin does", () => {

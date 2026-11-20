@@ -29,9 +29,34 @@ export const CharmOp = {
   PoseImage: 0x09,
   PoseImageEnd: 0x0a,
   Time: 0x0b,
+  // The moments. These go over with no Begin either: they are not a sync at all.
+  Alert: 0x20,
+  Handoff: 0x22,
 } as const
 
 type CharmOp = (typeof CharmOp)[keyof typeof CharmOp]
+
+/**
+ * The byte each reason an alert carries is on the wire, as `REASON_QUESTION` and `REASON_APPROVAL`
+ * are in `CharmWire.kt`. Only a moment that needs an action from the reader has one.
+ */
+export const CharmReasonByte = {
+  question: 1,
+  approval: 2,
+} as const
+
+/** What an alert's title and body may measure, as `kMaxTitleLen` and `kMaxBodyLen` do. */
+export const CHARM_MAX_TITLE_BYTES = 64
+export const CHARM_MAX_BODY_BYTES = 128
+
+/**
+ * What an alert's buttons may measure, as `kMaxActions`, `kMaxActionIdLen` and
+ * `kMaxActionLabelLen` do: an approval's two at most, an id a press answers by, and the words the
+ * charm draws on it.
+ */
+export const CHARM_MAX_ACTIONS = 2
+export const CHARM_MAX_ACTION_ID_BYTES = 16
+export const CHARM_MAX_ACTION_LABEL_BYTES = 32
 
 export const CharmCode = {
   Ok: 0,
@@ -138,8 +163,10 @@ export interface CharmBot {
   name: string
   /** RGB565, shown on the charm when there is no picture. */
   accent: number
-  /** A baseline JPEG, or empty for none. */
+  /** A baseline JPEG, or empty for none: the bot at rest, which the carousel draws. */
   image: Uint8Array
+  /** A baseline JPEG, or empty for none: the face an alert draws, since a bot waiting is curious. */
+  waiting: Uint8Array
 }
 
 export interface CharmStatus {
@@ -158,6 +185,25 @@ export function utf8Clip(text: string, max: number): Uint8Array {
   let end = max
   // Step back over continuation bytes (10xxxxxx) so the cut lands on a character's start.
   while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--
+  return bytes.slice(0, end)
+}
+
+/**
+ * Text as the charm shows it: at most `max` bytes, cut where a word ends rather than inside one, and
+ * never inside a character. A cut mid-word reads as a typo on a round screen, and a cut mid-character
+ * is a broken tail the charm would draw as a box.
+ */
+export function clampText(text: string, max: number): Uint8Array {
+  const bytes = encoder.encode(text)
+  if (bytes.length <= max) return bytes
+  let end = max
+  // A character's continuation bytes are 10xxxxxx: step back to the start of the one the cut split.
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--
+  // Then back to the space that ended the last whole word, since a space is one byte and so is never
+  // inside a character. Text with no space in it keeps the character cut: half a word beats nothing.
+  let space = end
+  while (space > 0 && bytes[space - 1] !== 0x20) space--
+  if (space > 1) end = space - 1
   return bytes.slice(0, end)
 }
 
@@ -222,6 +268,113 @@ export const abortMessage = () => control(CharmOp.Abort).done()
 /** UTC seconds, which the charm keeps in its RTC so the pet's meters know the time that passed. */
 export const timeMessage = (epochSeconds: number) => control(CharmOp.Time).u32(epochSeconds).done()
 
+export interface CharmAlertAction {
+  /**
+   * What the charm answers with when the button is pressed: the button's place in the notice's own
+   * list, which is the id the tray's press carries too.
+   */
+  id: string
+  /** The words on the button, the notice's own: `Allow once`, `Deny`. */
+  label: string
+}
+
+export interface CharmAlert {
+  /** `CharmReasonByte`: only the two moments a bot needs the reader for reach the charm. */
+  reason: number
+  /** Minutes since local midnight at the moment this frame was built, as the reader's clock reads. */
+  minute: number
+  /** The notice's title: the first line the tray entry shows. May be none. */
+  title: string
+  /** The notice's body: what the bot said. May be none, and one cut for the link drops it whole. */
+  body: string
+  /** The notice's own buttons, at most two: an approval's Allow once and Deny, a question's none. */
+  actions?: CharmAlertAction[]
+  /** The session the alert is about: what a clear and a handoff answer name. */
+  subject: string
+  /** The bot's id on the charm, the one a push carries. */
+  botId: string
+}
+
+/**
+ * A bot needs the reader, with what the notification said and the buttons it drew. The charm draws
+ * it with the phone away, so it carries the words the tray shows and the same two buttons, rather
+ * than an id the reader would have to look up and a choice they would have to remember.
+ *
+ * The longest one is 430 bytes — 64 of title, 128 of body, two buttons of 16 and 32 bytes each, and
+ * 64 of subject and of bot id — which is why the writer asks for a larger MTU before it writes one.
+ */
+export function alertMessage(alert: CharmAlert): Uint8Array {
+  if (alert.reason !== CharmReasonByte.question && alert.reason !== CharmReasonByte.approval)
+    throw new Error("A charm alert is a question or an approval")
+  const subject = utf8Clip(alert.subject, MAX_ID_BYTES)
+  if (subject.length === 0) throw new Error("An alert names the session it is about")
+  const botId = utf8Clip(alert.botId, MAX_ID_BYTES)
+  if (botId.length === 0) throw new Error("An alert names the bot it is about")
+  const actions = (alert.actions ?? []).slice(0, CHARM_MAX_ACTIONS).map((action) => ({
+    id: clampText(action.id, CHARM_MAX_ACTION_ID_BYTES),
+    label: clampText(action.label, CHARM_MAX_ACTION_LABEL_BYTES),
+  }))
+  // A button with no id answers nothing and one with no label says nothing: neither is drawn.
+  for (const action of actions) {
+    if (action.id.length === 0 || action.label.length === 0)
+      throw new Error("A charm button carries an id and a label")
+  }
+  const frame = control(CharmOp.Alert)
+    .u8(alert.reason)
+    .u16(alert.minute)
+    .str(clampText(alert.title, CHARM_MAX_TITLE_BYTES))
+    .str(clampText(alert.body, CHARM_MAX_BODY_BYTES))
+    .u8(actions.length)
+  for (const action of actions) frame.str(action.id).str(action.label)
+  return frame.str(subject).str(botId).done()
+}
+
+/**
+ * The ask: whether the reader tapped "Show on phone" while the phone was away. One byte, with no
+ * version in front of it — the charm reads a one-byte control write as this ask alone, and answers
+ * in its status characteristic. One ask consumes the answer, so a pending tap is answered once and
+ * then gone.
+ */
+export const handoffMessage = () => new Uint8Array([CharmOp.Handoff])
+
+/**
+ * The answer to the ask: which button was pressed on the charm, and the session it was pressed on.
+ * The button is the alert's own action id, so a phone that still holds the notice knows which link
+ * the press stands for.
+ */
+export interface HandoffTap {
+  /** The button pressed: the alert's own action id, which is its place in the notice's list. */
+  action: string
+  /** The session the button was pressed on: the subject the alert named. */
+  subject: string
+}
+
+/**
+ * The button a handoff ask was answered with, or null for an answer with nothing pending — and for
+ * anything that is not this answer at all. A status is exactly four bytes and this answer is seven
+ * or more, so the two can never be read for each other; a status whose third byte happened to be
+ * `0x22` still reads as no answer here.
+ */
+export function parseHandoff(view: DataView): HandoffTap | null {
+  if (view.byteLength < 7) return null
+  if (view.getUint8(2) !== CharmOp.Handoff) return null
+  const actionLength = view.getUint8(3)
+  // Nothing was pending, or a button longer than the id this phone drew: either way, none.
+  if (actionLength === 0 || actionLength > CHARM_MAX_ACTION_ID_BYTES) return null
+  if (view.byteLength < 5 + actionLength) return null
+  const subjectLength = view.getUint8(4 + actionLength)
+  // The session the button was pressed on never arrived: no answer, not half of one.
+  if (subjectLength === 0 || subjectLength > MAX_ID_BYTES) return null
+  if (view.byteLength < 5 + actionLength + subjectLength) return null
+  const decoder = new TextDecoder()
+  return {
+    action: decoder.decode(new Uint8Array(view.buffer, view.byteOffset + 4, actionLength)),
+    subject: decoder.decode(
+      new Uint8Array(view.buffer, view.byteOffset + 5 + actionLength, subjectLength),
+    ),
+  }
+}
+
 export function petSettingsMessage(settings: CharmPetSettings): Uint8Array {
   const id = utf8Clip(settings.petBotId, MAX_ID_BYTES)
   // The charm refuses these too; catching them here keeps the failure in words the sheet can show.
@@ -253,11 +406,15 @@ export const poseImageEndMessage = (mood: CharmMood) =>
 export function botMessage(index: number, bot: CharmBot): Uint8Array {
   const id = utf8Clip(bot.id, MAX_ID_BYTES)
   if (id.length === 0) throw new Error("A bot needs an id")
+  // Two pictures, the carousel's and the one an alert draws, each announced by its own length and
+  // CRC. A zero length is no picture.
   return control(CharmOp.Bot)
     .u8(index)
     .u16(bot.accent)
     .u32(bot.image.length)
     .u32(bot.image.length ? crc32(bot.image) : 0)
+    .u32(bot.waiting.length)
+    .u32(bot.waiting.length ? crc32(bot.waiting) : 0)
     .str(id)
     .str(utf8Clip(bot.name, MAX_NAME_BYTES))
     .done()
@@ -303,7 +460,10 @@ export function checkPoses(poses: CharmPose[]) {
 export function checkBots(bots: CharmBot[]) {
   if (bots.length > CHARM_MAX_BOTS)
     throw new Error(`The charm holds at most ${CHARM_MAX_BOTS} bots`)
-  for (const bot of bots)
+  for (const bot of bots) {
     if (bot.image.length > CHARM_MAX_IMAGE_BYTES)
       throw new Error(`${bot.name}'s picture is too big for the charm`)
+    if (bot.waiting.length > CHARM_MAX_IMAGE_BYTES)
+      throw new Error(`${bot.name}'s waiting picture is too big for the charm`)
+  }
 }

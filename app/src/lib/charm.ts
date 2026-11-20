@@ -4,6 +4,7 @@
  * never a key or a host address, so nothing here sends either.
  */
 import { BleClient, type BleDevice } from "@capacitor-community/bluetooth-le"
+import { Capacitor, registerPlugin } from "@capacitor/core"
 import { useSyncExternalStore } from "react"
 
 import { BOT_MOODS, DEFAULT_MOOD, botImage, type BotMood } from "@/components/bots"
@@ -11,7 +12,10 @@ import { findBot } from "@/components/bot"
 import { labelOf } from "@/lib/bot-name"
 import type { Profile } from "@/lib/db"
 import { isNative } from "@/lib/platform"
+import { quietly } from "@/lib/report"
+import { registryId } from "@/lib/registry"
 
+import { charmBotId, charmButtons } from "./charm-alert.ts"
 import {
   CHARM_CONTROL,
   CHARM_DATA,
@@ -19,6 +23,7 @@ import {
   CHARM_STATUS,
   parseStatus,
   rgb565,
+  type CharmAlertAction,
   type CharmBot,
   type CharmPetChoice,
   type CharmPose,
@@ -42,6 +47,36 @@ export interface PairedCharm {
 }
 
 const KEY = "gots.charm"
+
+/** The native sender's registration name, as `MainActivity` registers it. */
+const CHARM_PLUGIN = "Charm"
+
+/**
+ * The moments a charm draws, as `docs/PROTOCOL.md` names them and the plugin reads them: only the
+ * ones that need an action from the reader. A finished run asks for nothing, so it draws no alert.
+ */
+export type CharmReason = "question" | "approval"
+
+interface CharmBridge {
+  save(options: { deviceId: string }): Promise<void>
+  forget(): Promise<void>
+  alert(options: {
+    botId: string
+    reason: CharmReason
+    subject: string
+    /** The words the notice carries: the same title and body the tray entry shows. */
+    title: string
+    body: string
+    /** The buttons the notice draws, at most two: the same labels and ids the tray's own press has. */
+    actions: CharmAlertAction[]
+  }): Promise<void>
+  clear(options: { subject: string }): Promise<void>
+}
+
+const Charm = registerPlugin<CharmBridge>(CHARM_PLUGIN)
+
+/** Only the Android app carries the plugin: a browser has no radio and no sender behind it. */
+const charmBridge = () => isNative() && Capacitor.isPluginAvailable(CHARM_PLUGIN)
 
 /** The charm draws its picture in a box half the 466 px screen wide. */
 export const CHARM_PICTURE_PX = 233
@@ -106,11 +141,36 @@ export async function pairCharm(): Promise<PairedCharm> {
   }
   const next = { deviceId: device.deviceId, name: device.name ?? "Gots Charm" }
   write(next)
+  await keepCharm(next.deviceId)
   return next
+}
+
+/**
+ * The phone is told which charm to write to, so a push can reach it with the app closed: the page's
+ * own store is a WebView's, and nothing native reads it. Every failure is quiet — a charm that is
+ * paired and won't be written to is still a charm the reader paired.
+ */
+async function keepCharm(deviceId: string) {
+  if (!charmBridge()) return
+  await Charm.save({ deviceId }).catch(quietly("saving the charm on the phone"))
 }
 
 export function forgetCharm() {
   write(null)
+  if (charmBridge()) void Charm.forget().catch(quietly("forgetting the charm on the phone"))
+}
+
+/**
+ * The bot settled: the alert keyed by this session goes, and the charm goes back to its carousel.
+ *
+ * Asked where the reader answers a prompt, because the account's own clear fan-out skips the device
+ * that answered (`plugin/push.py`). A page with no session, a phone with no charm paired and an app
+ * with no plugin behind it all ask nothing — the charm is already where this would leave it.
+ */
+export function clearCharm(session: string | null | undefined) {
+  const subject = session?.trim()
+  if (!subject || !charmBridge()) return
+  void Charm.clear({ subject }).catch(quietly("clearing the charm's alert"))
 }
 
 /** Turns pet mode on or off, or changes the bot that is the pet. The next sync carries it over. */
@@ -160,25 +220,40 @@ export function charmPoses(botId: string): Promise<CharmPose[]> {
   return set
 }
 
-/** What the charm gets for this phone's bots: a name and a picture each, in the order shown. */
+/**
+ * The id a bot's charm entry carries. The registry's when it answers — that is the id a push names
+ * and an alert is matched against — and the bot's own when it doesn't, because a charm sync must
+ * not fail because the registry is away: the bots still sync, under the id they had before.
+ */
+async function charmIdFor(bot: Profile): Promise<string> {
+  const held = await registryId(bot).catch(() => undefined)
+  return charmBotId(bot.id, held)
+}
+
+/** What the charm gets for this phone's bots: a name and two pictures each, in the order shown. */
 export async function charmBots(
   profiles: Profile[],
   labels: Parameters<typeof labelOf>[0],
 ): Promise<CharmBot[]> {
-  // Pictures are the bot character's, so two bots on one character share one picture.
+  // Pictures are the bot character's, so two bots on one character share one picture — and each bot
+  // announces two: the face the carousel draws and the one an alert draws, which is `curious`.
   const pictures = new Map<string, Promise<Uint8Array>>()
-  const picture = (botId: string) => {
-    if (!pictures.has(botId)) pictures.set(botId, charmPicture(botId))
-    return pictures.get(botId)!
+  const picture = (botId: string, mood: BotMood) => {
+    const key = `${botId}\n${mood}`
+    if (!pictures.has(key)) pictures.set(key, charmPicture(botId, mood))
+    return pictures.get(key)!
   }
   return Promise.all(
     profiles
       .filter((profile) => !profile.disabled)
       .map(async (profile) => ({
-        id: profile.id,
+        // The id a push names, so an alert for this bot matches the entry the charm holds.
+        id: await charmIdFor(profile),
         name: labelOf(labels, profile),
         accent: rgb565(ACCENT),
-        image: await picture(profile.botId),
+        image: await picture(profile.botId, DEFAULT_MOOD),
+        // `curious` is "Waiting on you" in the app's moods, which is the face an alert draws.
+        waiting: await picture(profile.botId, "curious"),
       })),
   )
 }
@@ -250,10 +325,48 @@ export async function syncToCharm(
   const link = await openTransport(charm.deviceId)
   try {
     const result = await syncCharm(link, bots, onProgress, options)
-    if (paired?.deviceId === charm.deviceId)
+    if (paired?.deviceId === charm.deviceId) {
       write({ ...paired, syncedAt: Date.now(), syncedBots: result.total })
+      // Said again after every sync: the page's store and the phone's can part ways (an app's data
+      // cleared, a charm forgotten in Android's Bluetooth settings) and the next push must still
+      // find the charm this sync just reached.
+      await keepCharm(charm.deviceId)
+    }
     return result
   } finally {
     await link.close()
   }
+}
+
+/** What a test alert is keyed by: no session's, so it clears only when the reader dismisses it. */
+export const TEST_ALERT_SUBJECT = "test-alert"
+
+/** The two moments a charm can be made to draw, as its card's own words. */
+export type TestAlertReason = "approval" | "question"
+
+/**
+ * Settings → Charm's test row, and Developer's Charm tests: one of the two moments, for the first
+ * bot the charm holds, written the way a push writes it.
+ *
+ * The words are the ones a real notice carries — an approval's title, body and its pair of buttons
+ * (`LABELS` in `plugin/answers.py`), and a question's, which carries none — so what the charm draws
+ * for a test is what it draws for a push.
+ */
+export async function sendTestAlert(bot: Profile, reason: TestAlertReason = "approval") {
+  if (!charmBridge()) throw new Error("A test alert needs the Android app")
+  const approval = reason === "approval"
+  await Charm.alert({
+    botId: await charmIdFor(bot),
+    reason,
+    subject: `${TEST_ALERT_SUBJECT}-${reason}`,
+    title: approval ? "Test alert" : "Nova has a question",
+    body: approval
+      ? "Waiting for your approval"
+      : "Which region should the migration run in, eu-west or us-east?",
+    // An approval's notice carries the pair the tray draws, so the charm draws and answers through
+    // the buttons a real push draws; a question's carries none, so the card draws only the handoff.
+    actions: approval
+      ? charmButtons([{ label: "Allow once" }, { label: "Deny" }])
+      : charmButtons([]),
+  })
 }

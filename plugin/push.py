@@ -10,7 +10,10 @@ character to show, never what was asked; the push service can't read it either.
 
 The Android app has no Push API, so for it the plugin asks the Gots registry (``link.py``) to send
 through Firebase, since the service account key can't live on every host: the message is the same, so
-the registry and Firebase see the title, never what was asked.
+the registry and Firebase see the title, never what was asked. For the moments a bot waits on the
+reader for an answer — a question, and an approval (a plan waiting is one) — the relay also names
+this profile's bot id and one word for why, which is what a charm draws with the phone in a pocket;
+a finished run asks for nothing, so it stays the tray's news, and every other kind names neither.
 
 A device that has the app open (it holds an ``events`` stream) is skipped: it already knows. A
 session another surface started is no device's news at all: a push about a session goes only when
@@ -310,12 +313,30 @@ def _on_screen_devices(path: Path) -> List[str]:
         return [device for (db, device) in _open if db == str(path)]
 
 
+# The moments a charm shows, and the one word it draws for each: a plan waiting is an approval.
+# The charm is for an action, never for news: only a question or an approval waiting on the reader
+# reaches it. A finished run, a failure, and a room's, a research project's, a routine's or a
+# meeting's news all ask for nothing, so the charm is left as it was and the tray carries them; those
+# kinds carry neither field, and the charm is never asked to draw one.
+CHARM_REASONS: Dict[str, str] = {
+    "question": "question",
+    "approval": "approval",
+    "plan": "approval",
+}
+
+
 def _relay(path: Path, kind: str, category: str, session_id: str, notice: Notice) -> None:
     """Asks the registry to push to the account's Android installs, if this profile is linked."""
     state = _link_state(path)
     if state is None:
         return
     fields = carried(notice)
+    # The charm draws one bot's own face and one word for why, so it is told both for the moments a
+    # bot is waiting on the reader: this profile's bot id, which the link already holds, and the
+    # reason. Every other kind is news about something that is not a bot's face there.
+    reason = CHARM_REASONS.get(kind)
+    held = state.get("botId")
+    charm = {"charm": held, "charm_reason": reason} if reason and held else {}
     # The chat it is about and the buttons that act on it: only the phone's own tray can draw them.
     conversation = notice.conversation if isinstance(notice, Notice) else {}
     # The phone draws the notice itself (a notification payload is Android's to draw, and its drawing
@@ -340,6 +361,7 @@ def _relay(path: Path, kind: str, category: str, session_id: str, notice: Notice
                     "skip": list(dict.fromkeys(_on_screen_devices(path) + ntfy.devices(path)))[:50],
                     **fields,
                     **conversation,
+                    **charm,
                     **({"icon": picture} if picture else {}),
                 },
             )
