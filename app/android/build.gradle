@@ -1,7 +1,8 @@
 // Top-level build file where you can add configuration options common to all sub-projects/modules.
 
 buildscript {
-    
+    apply from: "variables.gradle"
+
     repositories {
         google()
         mavenCentral()
@@ -9,8 +10,9 @@ buildscript {
     dependencies {
         classpath 'com.android.tools.build:gradle:8.13.0'
         classpath 'com.google.gms:google-services:4.4.4'
-        // The Bubble and the service behind it are Kotlin; the plugins beside them stay Java.
-        classpath 'org.jetbrains.kotlin:kotlin-gradle-plugin:2.0.21'
+        // The Bubble and the service behind it are Kotlin, and so is the Bluetooth LE plugin the
+        // charm syncs through; one Kotlin for all of them, `kotlin_version` in variables.gradle.
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
 
         // NOTE: Do not place your application dependencies here; they belong
         // in the individual module build.gradle files
