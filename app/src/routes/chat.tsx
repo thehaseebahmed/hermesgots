@@ -509,7 +509,7 @@ function NextChat({ id, slot }: { id: string; slot: HoldSlot }) {
               open={settingsOpen}
               onOpenChange={setSettingsOpen}
               onDeleted={() => (session ? up("/code") : root("/"))}
-              onArchived={() => (lead.list ? lead.ontoList() : root("/"))}
+              onArchived={lead.stepBack}
               code={
                 session
                   ? {
@@ -1374,7 +1374,7 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
           onDeleted={() => (session ? up("/code") : root("/"))}
-          onArchived={() => (lead.list ? lead.ontoList() : root("/"))}
+          onArchived={lead.stepBack}
           code={
             session && profile
               ? {

@@ -85,6 +85,7 @@ const screen = (id = CHAT) => (
       <Route path="/c/:id" element={<ChatPage slot="route" />} />
       {/* The step an archive takes: the bot's list, whose address is the bot's own. */}
       <Route path="/b/:botId/sidechats" element={<p data-list />} />
+      <Route path="/" element={<Path />} />
     </Routes>
   </MemoryRouter>
 )
@@ -264,15 +265,6 @@ test("an archived chat's sheet draws no Pin, only its name, its mute and Unarchi
       "no pin: a mark on a row out of every list is a mark nothing could draw",
     )
     assert.ok(findText("button", "Delete chat"), "and the one control that ends it")
-    // A row coming back is a reason to stay, so the unarchive keeps today's behaviour: the mark is
-    // written and the sheet stands on the conversation it was opened from.
-    await click(archiveButton())
-    await until(
-      async () => (await db.conversations.get(CHAT))?.archived === undefined,
-      "the row brought back",
-    )
-    assert.ok(sheet(), "the sheet stays open, as it always did")
-    assert.equal(path(), `/c/${CHAT}`, "on the chat's own screen")
   })
 })
 

@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import {
   ArchiveIcon,
   ArchiveXIcon,
@@ -183,6 +183,8 @@ export function ChatSettings({
   const [deleting, setDeleting] = useState(false)
   const [discarding, setDiscarding] = useState(false)
   const [disbanding, setDisbanding] = useState(false)
+  /** Whether this sheet's archive has already been pressed, while it stands through its exit. */
+  const archiving = useRef(false)
   /** Asks the host to close the session, and moves on: the close runs there (ADR 0080). */
   const closeSession = () => {
     if (!code) return
@@ -369,13 +371,18 @@ export function ChatSettings({
                   data-chat-archive
                   className="h-11 rounded-full"
                   onClick={() => {
+                    const on = !chat.archived
+                    // The sheet stays interactive through its exit, so the archive press latches:
+                    // a second tap would step back twice, or read the refreshed row and quietly
+                    // unarchive what was put away.
+                    if (on) {
+                      if (archiving.current) return
+                      archiving.current = true
+                    }
                     // The mark is written at once, as it always was, and the host's flag is asked
-                    // for behind it (ADR 0159). An archive is then a way out of the conversation —
-                    // the sheet closes and the screen takes the step back onto the bot's list the
-                    // bar's back control answers with (ADR 0154) — while an unarchive is a row
-                    // coming back, which is a reason to stay, so the sheet stands.
-                    void setArchived(chat.id, !chat.archived)
-                    if (chat.archived) return
+                    // for behind it (ADR 0159).
+                    void setArchived(chat.id, on).catch(quietly("Archiving a chat"))
+                    if (!on) return
                     setSheetOpen(false)
                     onArchived?.()
                   }}

@@ -30,7 +30,6 @@ import { db, type Message } from "@/lib/db"
 import { COMPOSER_SLOT, THREAD_GUTTER } from "@/lib/layout"
 import { cn } from "@/lib/utils"
 import { useChatLead } from "@/lib/chat-lead"
-import { useNav } from "@/lib/nav"
 import { useDraws } from "@/lib/openui-draws"
 import { markRead } from "@/lib/read-marks"
 import { RUN_GONE, RUN_UNREAD, ranOn, useRoutineTranscript } from "@/lib/routine-transcript"
@@ -59,7 +58,6 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
     [chat?.profileId],
   )
   const ready = Boolean(chat && bot && chat.id === id)
-  const { root } = useNav()
   // The list this run was opened from is the bot's, never the chat a delivery arrived in: a routine's
   // row is the bot's own, so its bar's leading control steps back to where its row stands.
   const lead = useChatLead({ bot: chat?.profileId })
@@ -87,6 +85,9 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
     chat && hasServer(bot) ? (
       <ContextRing usage={usage} onClick={() => setUsageOpen(true)} />
     ) : undefined
+  // A run that is gone and a run that is put away are both left the same way: the step back onto
+  // the bot's list, or home where no list holds it.
+  const leave = lead.stepBack
 
   return (
     <div
@@ -146,8 +147,8 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
             chat={chat}
             open={settingsOpen}
             onOpenChange={setSettingsOpen}
-            onDeleted={() => (lead.list ? lead.ontoList() : root("/"))}
-            onArchived={() => (lead.list ? lead.ontoList() : root("/"))}
+            onDeleted={leave}
+            onArchived={leave}
           />
         </>
       ) : (
