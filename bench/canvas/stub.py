@@ -183,6 +183,14 @@ def serve(stub: Stub) -> Tuple[ThreadingHTTPServer, threading.Thread]:
                     run_id = outer.post_run(body.get("session_id") or "")
                 return self._answer(200, {"object": "gots.run", "run_id": run_id})
             if path == "/api/plugins/gots/canvases":
+                # The plugin queues the app's own run body as the canvas's first turn, so a start
+                # whose body the host would refuse is refused here too: that body is the one the
+                # bench got wrong and no other check sees, since /v1/runs is never posted for it.
+                asked = body.get("body")
+                if not isinstance(asked, dict) or not user_message(asked.get("input")):
+                    return self._answer(
+                        400, {"error": {"message": "No user message found in input"}}
+                    )
                 with outer.lock:
                     canvas = outer.start()
                 return self._answer(202, {"object": "gots.canvas", "canvas": canvas})
