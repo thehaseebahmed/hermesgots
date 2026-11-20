@@ -7,6 +7,7 @@ import {
   MessageCircleQuestionIcon,
   PencilLineIcon,
   RotateCcwIcon,
+  SquareIcon,
   TimerOffIcon,
   ZapIcon,
 } from "lucide-react"
@@ -122,6 +123,69 @@ export function PlanReadyCard({
             <Button {...button("accept_edits")}>Approve</Button>
           </div>
         )}
+      </CardFooter>
+    </Card>
+  )
+}
+
+/**
+ * In the composer's place while a canvas's build waits on its plan (G6): the plan's own words,
+ * with Approve building it and Stop ending the build with nothing published. The composer stays
+ * under the card, since a message sent while the plan waits revises it — so the card takes the
+ * controls' place, and the field is how the plan is answered with words instead of a press.
+ */
+export function BuildPlanCard({
+  plan,
+  onApprove,
+  onStop,
+}: {
+  /** What the build said it will change, as its plan tool filed it. */
+  plan: string
+  /** Approves the plan: the draft opens and the build carries on. */
+  onApprove: () => Promise<unknown>
+  /** Stops the build: nothing is published and the draft is kept. */
+  onStop: () => Promise<unknown>
+}) {
+  const [pending, setPending] = useState<"approve" | "stop" | null>(null)
+  const refusal = useRefusal()
+  const press = (which: "approve" | "stop", action: () => Promise<unknown>) => {
+    setPending(which)
+    void refusal
+      .write(which === "approve" ? "approve that plan" : "stop that build", action)
+      .finally(() => setPending(null))
+  }
+  const button = (which: "approve" | "stop") => ({
+    size: "lg" as const,
+    className: "h-11",
+    disabled: pending !== null,
+    onClick: () => press(which, which === "approve" ? onApprove : onStop),
+  })
+  return (
+    <Card size="sm" className={CARD}>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-base">
+          <MapIcon className="size-5 text-primary" />
+          Plan ready
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="text-[15px]">{plan}</p>
+        <p className="mt-2 text-[13px] text-muted-foreground">
+          Approve to let the build write the page, or send a message to revise the plan.
+        </p>
+      </CardContent>
+      <Refusal hold={refusal} className="mx-(--card-spacing)" />
+      <CardFooter className="flex flex-col items-stretch gap-2">
+        <div className="grid grid-cols-2 gap-2">
+          <Button {...button("approve")}>
+            <CheckCircle2Icon data-icon="inline-start" />
+            Approve
+          </Button>
+          <Button variant="outline" {...button("stop")}>
+            <SquareIcon data-icon="inline-start" />
+            Stop
+          </Button>
+        </div>
       </CardFooter>
     </Card>
   )

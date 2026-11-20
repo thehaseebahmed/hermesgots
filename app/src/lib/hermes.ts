@@ -2599,6 +2599,34 @@ export async function undoCanvas(config: HermesConfig, id: string) {
 }
 
 /**
+ * Approve the canvas's waiting build plan: the draft opens, and the plugin queues the approval turn
+ * on the build's own session (G6). A canvas with no build open, and a build whose plan is not
+ * waiting, are refused in the host's own words. The build as it now is rides the answer.
+ */
+export async function approveCanvasBuild(config: HermesConfig, id: string) {
+  const response = await request(`${canvasRoot(config, id)}/build/approve`, {
+    method: "POST",
+    headers: headers(config),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return (await response.json())?.build as Record<string, unknown> | undefined
+}
+
+/**
+ * Stop the canvas's build: nothing is published and the draft is kept for the next request (G6). A
+ * canvas with no build open is refused in the host's own words. The build as it ended rides the
+ * answer.
+ */
+export async function stopCanvasBuild(config: HermesConfig, id: string) {
+  const response = await request(`${canvasRoot(config, id)}/build/stop`, {
+    method: "POST",
+    headers: headers(config),
+    signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
+  })
+  return (await response.json())?.build as Record<string, unknown> | undefined
+}
+
+/**
  * A canvas's own record changed — its title, whether it is pinned to the sidebar, whether it is
  * hidden from the list, whether its data is backed up — kept on the host, so every device agrees on
  * the shape of the list. A title also renames the chat the canvas is edited in. The host answers the

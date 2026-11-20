@@ -12,7 +12,11 @@ nowhere else, and the canvas is found from a run's session by walking the chat's
 ``canvas_list``, ``canvas_data_read`` and ``canvas_data_write`` reach every session — a session
 with no canvas of its own is exactly who has to look one up, and a chat that wants a canvas's data
 shouldn't have to become that canvas's session — while ``canvas_write``, ``canvas_edit`` and
-``canvas_read`` are equipped in the canvas's own session and nowhere else. The two data tools name
+``canvas_read`` are equipped in the canvas's own session and nowhere else. ``canvas_memory`` and
+``canvas_plan`` are a build's alone: the requirements and decisions a build remembers are the
+canvas's own file in its folder, which every build's seed reads, and the plan a build files is what
+opens its draft — nothing is written to it before a plan is filed, and a plan that waits holds it
+closed until the reader approves (ADR 0170, builds.py). The two data tools name
 a canvas by its title or its id (``resolve``), and all three answer ``names``, never a record's
 picture.
 
@@ -115,10 +119,13 @@ FILE_BYTES = 256 * 1024
 FILE_NAME_CHARS = 64
 FOLDER_BYTES = 4 * 1024 * 1024
 # The two files a build keeps in a canvas's folder (ADR 0170, builds.py): the page it is writing and
-# the requirements and decisions the canvas keeps. Both are the store's names rather than the
-# build's, so a write of either goes through the same cap and the same delete.
+# the requirements and decisions the canvas keeps. Both names are the store's, so a write of either
+# goes through the same cap and the same delete.
 DRAFT = "draft.html"
 MEMORY = "memory.md"
+# The tests a build's plan filed, kept in the folder as the check runner reads them (step 10): one
+# JSON list of named scripts, written whole by the plan tool like the memory is.
+TESTS = "tests.json"
 # A start's files are one queued turn's attachments, and the queue keeps `outbox.MAX_FILES` of
 # them; a longer list is refused rather than trimmed without a word.
 
@@ -144,6 +151,8 @@ TOOL_LIST = "canvas_list"
 TOOL_WRITE = "canvas_write"
 TOOL_EDIT = "canvas_edit"
 TOOL_READ = "canvas_read"
+TOOL_MEMORY = "canvas_memory"
+TOOL_PLAN = "canvas_plan"
 TOOL_DATA_READ = "canvas_data_read"
 TOOL_DATA_WRITE = "canvas_data_write"
 
@@ -2216,6 +2225,75 @@ READ_SCHEMA = {
     "parameters": {"type": "object", "properties": {}},
 }
 
+MEMORY_SCHEMA = {
+    "name": TOOL_MEMORY,
+    "description": (
+        "Build sessions only: replaces what this canvas remembers — the requirements and "
+        "decisions every build of it is told at its start. Write the whole memory each time, as "
+        "markdown: what the canvas is for and what has been decided about it, kept short and "
+        "current. An empty string forgets everything. It is capped like every other file in the "
+        "canvas's folder, and a canvas that is deleted takes it with it."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "memory": {
+                "type": "string",
+                "description": "The whole memory, as markdown. An empty string forgets everything.",
+            },
+        },
+        "required": ["memory"],
+    },
+}
+
+PLAN_SCHEMA = {
+    "name": TOOL_PLAN,
+    "description": (
+        "Build sessions only: files this build's plan before anything is written to the draft — "
+        "what will change, how it will be checked, and whether it waits for the reader's Approve. "
+        "File it again to revise the plan, including while one waits. A clear tweak does not wait; "
+        "a vague or structural change does. The checks are the tests the host runs against the "
+        "draft when this build is checked."
+    ),
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "changes": {
+                "type": "string",
+                "description": "What this build will change, in a sentence or two.",
+            },
+            "checks": {
+                "type": "array",
+                "description": (
+                    "The tests that check the draft, each a named script the host runs in the "
+                    "harness page. Leave it out where the change needs no test."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "What the test checks, in a few words.",
+                        },
+                        "script": {
+                            "type": "string",
+                            "description": "The script itself, run in the page.",
+                        },
+                    },
+                    "required": ["name", "script"],
+                },
+            },
+            "wait": {
+                "type": "boolean",
+                "description": (
+                    "Whether the plan waits for the reader's Approve before anything is written."
+                ),
+            },
+        },
+        "required": ["changes", "wait"],
+    },
+}
+
 EDIT_SCHEMA = {
     "name": TOOL_EDIT,
     "description": (
@@ -2541,6 +2619,59 @@ def handle_read(args: Any, task_id: Optional[str] = None, session_id: Optional[s
     )
 
 
+def handle_memory(
+    args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any
+) -> str:
+    """The tool: what a build's canvas remembers, replaced whole.
+
+    A build's session is the only one that carries this tool and the only one it answers: the
+    canvas's own session writes versions, and every other session has no canvas to remember for.
+    The memory is the store's own file in the canvas's folder — the one every build's seed reads —
+    so it is written through ``keep``, capped and deleted with the canvas like the rest of them.
+    """
+    args = args if isinstance(args, dict) else {}
+    build, path = _call_build(task_id, session_id)
+    if build is None or path is None:
+        return json.dumps({"error": f"{TOOL_MEMORY} only works in a build's session."})
+    try:
+        keep(path, build["canvas_id"], MEMORY, args.get("memory") or "")
+    except CanvasError as refused:
+        return json.dumps({"error": str(refused)})
+    except (sqlite3.Error, OSError):
+        logger.debug("gots: %s couldn't write the memory", TOOL_MEMORY, exc_info=True)
+        return _unreadable(TOOL_MEMORY)
+    return json.dumps({"id": build["canvas_id"], "remembered": True})
+
+
+def handle_plan(
+    args: Any, task_id: Optional[str] = None, session_id: Optional[str] = None, **_: Any
+) -> str:
+    """The tool: files the calling build's plan — what will change, its checks, and whether it
+    waits for the reader's Approve.
+
+    A build's session is the only one that carries this tool, as it is the only one with a plan to
+    file. The plan and its wait flag are the build record's, which is what the lane draws and what
+    holds the draft closed; the checks are the folder's own file, written whole like the memory is.
+    Filing a plan again revises it, waiting or not (G6).
+    """
+    args = args if isinstance(args, dict) else {}
+    build, path = _call_build(task_id, session_id)
+    if build is None or path is None:
+        return json.dumps({"error": f"{TOOL_PLAN} only works in a build's session."})
+    try:
+        # Imported here rather than at the top: builds reads this module for the store's own write
+        # and folder rules, so the two would otherwise import each other.
+        from . import builds as _builds
+
+        waiting = _builds.plan(path, build["id"], args)
+    except CanvasError as refused:
+        return json.dumps({"error": str(refused)})
+    except (sqlite3.Error, OSError):
+        logger.debug("gots: %s couldn't file the plan", TOOL_PLAN, exc_info=True)
+        return _unreadable(TOOL_PLAN)
+    return json.dumps({"id": build["canvas_id"], "planned": True, "wait": waiting})
+
+
 def _call_build(
     task_id: Optional[str], session_id: Optional[str]
 ) -> tuple[Optional[Dict[str, Any]], Optional[Path]]:
@@ -2680,25 +2811,62 @@ def handle_data_write(
 BLOCKED_TOOLS = {"pull_request", "library_add", "afk_gate"}
 
 
+def _draft_block(
+    task_id: Optional[str], session_id: Optional[str]
+) -> Optional[Dict[str, str]]:
+    """Why a build's draft write is refused, or None where it may go.
+
+    A build files its plan before it writes anything, and a plan that waits holds the draft closed
+    until the reader approves it (G6, builds.py). The canvas's own session writes versions exactly
+    as it always did: it is no build's, so nothing here answers for it.
+    """
+    build, _path = _call_build(task_id, session_id)
+    if build is None:
+        return None
+    if not build.get("plan"):
+        return {
+            "action": "block",
+            "message": (
+                f"File a plan first with {TOOL_PLAN}: what will change, how it will be checked, "
+                "and whether it waits for the reader's Approve. Nothing reaches the draft before "
+                "a plan is filed."
+            ),
+        }
+    if build.get("wait"):
+        return {
+            "action": "block",
+            "message": (
+                "This build's plan is waiting for the reader's Approve. A message revises the "
+                "plan; the draft opens when the reader approves it."
+            ),
+        }
+    return None
+
+
 def before_tool(**kwargs: Any) -> Optional[Dict[str, str]]:
-    """The ``pre_tool_call`` hook: keeps a canvas's session to the canvas's own tools."""
-    if kwargs.get("tool_name") not in BLOCKED_TOOLS:
-        return None
-    if not _canvas_of_call(kwargs.get("task_id"), kwargs.get("session_id")):
-        return None
-    return {
-        "action": "block",
-        "message": (
-            f"This is a canvas's session: change the canvas with {TOOL_WRITE}, {TOOL_EDIT} and "
-            f"{TOOL_READ}, and its data with {TOOL_DATA_READ} and {TOOL_DATA_WRITE}. It can't "
-            "ship a pull request, file a library item or take a task."
-        ),
-    }
+    """The ``pre_tool_call`` hook: keeps a canvas's session to the canvas's own tools, and a
+    build's draft behind its plan."""
+    tool = kwargs.get("tool_name")
+    if tool in BLOCKED_TOOLS:
+        if not _canvas_of_call(kwargs.get("task_id"), kwargs.get("session_id")):
+            return None
+        return {
+            "action": "block",
+            "message": (
+                f"This is a canvas's session: change the canvas with {TOOL_WRITE}, {TOOL_EDIT} and "
+                f"{TOOL_READ}, and its data with {TOOL_DATA_READ} and {TOOL_DATA_WRITE}. It can't "
+                "ship a pull request, file a library item or take a task."
+            ),
+        }
+    if tool in (TOOL_WRITE, TOOL_EDIT):
+        return _draft_block(kwargs.get("task_id"), kwargs.get("session_id"))
+    return None
 
 
 def register(plugin_ctx: Any) -> bool:
-    """Keeps the context and registers the canvas's six tools — the list and the two data tools
-    every session carries, and the three more a canvas's own session is given."""
+    """Keeps the context and registers the canvas's eight tools — the list and the two data tools
+    every session carries, the three more a canvas's own session is given, and the memory and the
+    plan a build's session is given."""
     global ctx, _registered
     ctx = plugin_ctx
     register_tool = getattr(plugin_ctx, "register_tool", None)
@@ -2710,6 +2878,8 @@ def register(plugin_ctx: Any) -> bool:
         (TOOL_WRITE, WRITE_SCHEMA, handle_write),
         (TOOL_EDIT, EDIT_SCHEMA, handle_edit),
         (TOOL_READ, READ_SCHEMA, handle_read),
+        (TOOL_MEMORY, MEMORY_SCHEMA, handle_memory),
+        (TOOL_PLAN, PLAN_SCHEMA, handle_plan),
         (TOOL_DATA_READ, DATA_READ_SCHEMA, handle_data_read),
         (TOOL_DATA_WRITE, DATA_WRITE_SCHEMA, handle_data_write),
     ):
@@ -2724,18 +2894,34 @@ def register(plugin_ctx: Any) -> bool:
 
 
 def wire(api_adapter: Any) -> bool:
-    """Gives every agent the list and the two data tools, and a canvas's agents the rest.
+    """Gives every agent the list and the two data tools, a canvas's agents the document tools,
+    and a build's agents the memory and the plan.
 
     Those three are wired with no ``when``: a session with no canvas of its own is exactly who needs
     to look one up, one that isn't a canvas's reads or writes a canvas's data by naming it, and a
     canvas's own session leaves the name out to mean itself. The three document tools stay in the
-    session the canvas is edited in.
+    session the canvas is edited in, and the memory and the plan in a build's: the canvas's own
+    session writes versions, and it is a build that remembers and plans.
     """
     global adapter, _wired
     adapter = api_adapter
 
     def is_canvas(session: Optional[str]) -> bool:
         return _session_canvas(session) is not None
+
+    def is_build(session: Optional[str]) -> bool:
+        # Imported here rather than at the top: builds reads this module for the store's own write
+        # and folder rules, so the two would otherwise import each other.
+        from . import builds as _builds
+
+        if not isinstance(session, str) or not session.startswith(_builds.SESSION_PREFIX):
+            return False
+        try:
+            path, _home = sessions._paths()
+        except Exception:
+            logger.debug("gots: couldn't find the store a build lives in", exc_info=True)
+            return False
+        return _builds.of_session(path, session) is not None
 
     took = True
     for tool, schema, when in (
@@ -2745,6 +2931,8 @@ def wire(api_adapter: Any) -> bool:
         (TOOL_WRITE, WRITE_SCHEMA, is_canvas),
         (TOOL_EDIT, EDIT_SCHEMA, is_canvas),
         (TOOL_READ, READ_SCHEMA, is_canvas),
+        (TOOL_MEMORY, MEMORY_SCHEMA, is_build),
+        (TOOL_PLAN, PLAN_SCHEMA, is_build),
     ):
         if not tools_common.wire_tool(api_adapter, tool, schema, tool, when=when):
             took = False

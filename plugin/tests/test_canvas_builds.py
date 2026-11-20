@@ -11,9 +11,9 @@ import unittest
 from typing import Any, Dict, List, Optional
 from unittest import mock
 
-from plugin import builds, canvases, outbox, progress
+from plugin import PREFIX, builds, canvases, outbox, progress
 from plugin.store import db_path, put_setting
-from plugin.tests._helpers import RouteAdapter, temp_hermes_home, wire
+from plugin.tests._helpers import FakeWeb, RouteAdapter, temp_hermes_home, route, wire
 
 PROMPT = "A tip calculator for a restaurant bill, in the app's own colours"
 BODY = {"model": "m", "input": [{"role": "user", "content": PROMPT}]}
@@ -27,6 +27,17 @@ DOCUMENT = """<!doctype html>
 
 TWEAKED = DOCUMENT.replace("<h1>Tip</h1>", "<h1>Split the bill</h1>")
 SUMMARY = "The heading now says Split the bill."
+
+
+class _Url:
+    """A request's URL, as far as a route reads one."""
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+        self.query: Dict[str, Any] = {}
+
+    def __str__(self) -> str:
+        return f"http://host{self.path}"
 
 
 class Adapter:
@@ -92,8 +103,8 @@ class Host:
     def id(self) -> str:
         return self.canvas["id"]
 
-    def tick(self) -> None:
-        asyncio.run(outbox.tick(self.adapter, self.session, None, self.path))
+    def tick(self, session: Optional[str] = None) -> None:
+        asyncio.run(outbox.tick(self.adapter, session or self.session, None, self.path))
 
     def queue(self, text: str) -> dict:
         return outbox.add(
@@ -381,6 +392,190 @@ class BuildSessionTest(unittest.TestCase):
             canvases.draft(self.host.path, self.host.id), DOCUMENT.replace("<h1>Tip</h1>", "<h1>Split</h1>")
         )
         self.assertEqual(self.host.version(), 1, "the published page is untouched")
+
+
+class MemoryToolTest(unittest.TestCase):
+    """The plan's step 8 check: a build remembers, and the next build's seed carries it.
+
+    The memory file itself was already read by every build's seed (step 7); what the tool adds is
+    the one way a build writes it — the requirements and decisions a canvas keeps are the store's
+    own file, capped and deleted with the canvas like the rest of the folder.
+    """
+
+    def setUp(self) -> None:
+        self.host = Host(self)
+
+    def test_a_second_builds_seed_holds_what_the_first_remembered(self) -> None:
+        build = self.host.start()
+        answered = json.loads(
+            canvases.handle_memory(
+                {"memory": "Split at the table."}, session_id=build["session_id"]
+            )
+        )
+        self.assertTrue(answered["remembered"])
+        self.host.end(build["session_id"], completed=True)
+
+        self.host.queue("add a tip percentage")
+        self.host.tick()
+        self.assertIsNotNone(self.host.build(), "the next request opened a build")
+        self.assertIn("Split at the table.", builds.seed(self.host.path, self.host.id))
+
+    def test_the_memory_file_is_refused_past_its_cap(self) -> None:
+        build = self.host.start()
+        answered = json.loads(
+            canvases.handle_memory(
+                {"memory": "x" * (canvases.FILE_BYTES + 1)}, session_id=build["session_id"]
+            )
+        )
+        self.assertIn("error", answered)
+        self.assertIn("256 KB", answered["error"], "the refusal names the cap")
+
+    def test_only_a_builds_session_remembers(self) -> None:
+        build = self.host.start()
+        # The canvas's own session writes versions, not memory, and neither does a plain one.
+        for session in (self.host.session, "plain"):
+            with self.subTest(session=session):
+                answered = json.loads(
+                    canvases.handle_memory({"memory": "Split at the table."}, session_id=session)
+                )
+                self.assertIn("error", answered)
+        self.assertIsNone(
+            canvases.draft(self.host.path, self.host.id), "the refused calls wrote nothing"
+        )
+        memory = canvases.folder_of(self.host.home, self.host.id) / canvases.MEMORY
+        self.assertFalse(memory.exists(), "no memory file is made by a refused call")
+
+
+class PlanWaitingTest(unittest.TestCase):
+    """The plan's step 9 checks: a build plans first, a waiting plan is revised by a message and
+    built on Approve, a draft write before a plan is refused, and Stop publishes nothing.
+
+    The plan tool is the one way a build opens its draft: what will change, the checks it will be
+    run against, and whether it waits for the reader's Approve (G6). While one waits the build
+    holds open — a message revises it and Approve builds it — and a stop ends it with nothing
+    published.
+    """
+
+    def setUp(self) -> None:
+        self.host = Host(self)
+
+    def file(self, session: str, **plan: Any) -> Dict[str, Any]:
+        return json.loads(canvases.handle_plan(plan, session_id=session))
+
+    def ask(self, path: str, method: str = "POST") -> Dict[str, Any]:
+        """One request through the plugin's own wiring, answered as the route answers it."""
+        request = FakeWeb.Request()
+        request.headers = {}
+        request.match_info = {"canvas_id": self.host.id}
+        request.query = {}
+        request.content_length = None
+        request.path = path
+        request.url = _Url(path)
+        return asyncio.run(route(self.host.app, path, method)(request))
+
+    def test_a_plan_that_waits_is_revised_by_a_message_and_built_on_approve(self) -> None:
+        build = self.host.start()
+        filed = self.file(
+            build["session_id"], changes="The heading says Split the bill.", checks=[], wait=True
+        )
+        self.assertTrue(filed["planned"])
+        self.assertTrue(filed["wait"])
+
+        # The run's end holds the build open: a plan that waits publishes nothing.
+        self.host.end(build["session_id"], completed=True)
+        self.assertEqual(self.host.version(), 0, "a waiting plan publishes nothing")
+        self.assertEqual(self.host.build()["phase"], builds.OPEN, "the build waits")
+
+        # A message while it waits is posted as the build's next turn, and the plan is revised.
+        self.host.adapter.run("run_1", build["session_id"], "completed", 3)
+        self.host.queue("and make it blue too")
+        self.host.tick()
+        self.assertEqual(self.host.posted[-1]["body"]["session_id"], build["session_id"])
+        revised = self.file(
+            build["session_id"],
+            changes="The heading says Split the bill, and the page is blue.",
+            checks=[],
+            wait=True,
+        )
+        self.assertTrue(revised["wait"])
+        self.host.adapter.run("run_2", build["session_id"], "completed", 4)
+        self.host.end(build["session_id"], completed=True)
+        self.assertEqual(self.host.version(), 0, "still waiting")
+
+        # Approve clears the wait and queues the approval turn on the build's own session.
+        answered = self.ask(f"{PREFIX}/canvases/{{canvas_id}}/build/approve")["payload"]
+        self.assertFalse(answered["build"]["wait"], "the draft opens on Approve")
+        self.host.tick(build["session_id"])
+        self.assertEqual(self.host.posted[-1]["body"]["session_id"], build["session_id"])
+        self.assertEqual(
+            self.host.build()["requests"],
+            [PROMPT, "and make it blue too"],
+            "the approval turn is not a request the build took",
+        )
+
+        # The draft opens, and the run's end publishes one version carrying both requests.
+        written = self.host.write(build["session_id"])
+        self.assertTrue(written["written"])
+        self.host.end(build["session_id"], completed=True)
+        self.assertEqual(self.host.version(), 1)
+        self.assertEqual(self.host.record()["requests"], [PROMPT, "and make it blue too"])
+
+    def test_a_plan_that_does_not_wait_builds_straight_away(self) -> None:
+        build = self.host.start()
+        filed = self.file(
+            build["session_id"], changes="The heading says Split the bill.", checks=[], wait=False
+        )
+        self.assertFalse(filed["wait"])
+        self.assertIsNone(
+            canvases.before_tool(tool_name="canvas_write", session_id=build["session_id"]),
+            "a plan that does not wait leaves the draft open",
+        )
+        written = self.host.write(build["session_id"])
+        self.assertTrue(written["written"])
+        self.host.end(build["session_id"], completed=True)
+        self.assertEqual(self.host.version(), 1)
+
+    def test_a_draft_write_before_a_plan_is_refused(self) -> None:
+        build = self.host.start()
+        blocked = canvases.before_tool(tool_name="canvas_write", session_id=build["session_id"])
+        self.assertIsNotNone(blocked, "nothing reaches the draft before a plan is filed")
+        self.assertEqual(blocked["action"], "block")
+        self.assertIn("canvas_plan", blocked["message"])
+        self.assertIsNotNone(
+            canvases.before_tool(tool_name="canvas_edit", session_id=build["session_id"]),
+            "an edit is a draft write too",
+        )
+        self.assertIsNone(canvases.draft(self.host.path, self.host.id))
+
+        # Filing the plan opens the draft, and a plan that waits closes it again until Approve.
+        self.file(build["session_id"], changes="A tweak.", checks=[], wait=False)
+        self.assertIsNone(
+            canvases.before_tool(tool_name="canvas_write", session_id=build["session_id"])
+        )
+        self.file(build["session_id"], changes="A structural change.", checks=[], wait=True)
+        waiting = canvases.before_tool(tool_name="canvas_write", session_id=build["session_id"])
+        self.assertIsNotNone(waiting, "a plan that waits holds the draft closed")
+        self.assertIn("Approve", waiting["message"])
+
+        # The canvas's own session is not a build's: it writes versions as it always did.
+        self.assertIsNone(canvases.before_tool(tool_name="canvas_write", session_id=self.host.session))
+
+    def test_stop_publishes_nothing(self) -> None:
+        build = self.host.start()
+        self.file(build["session_id"], changes="A structural change.", checks=[], wait=True)
+        answered = self.ask(f"{PREFIX}/canvases/{{canvas_id}}/build/stop")["payload"]
+        self.assertEqual(answered["build"]["phase"], builds.STOPPED)
+        self.assertEqual(self.host.version(), 0, "stop publishes nothing")
+        self.assertIsNone(self.host.build(), "the build is closed")
+
+        # The run that was waiting ends after the stop, and still publishes nothing.
+        self.host.end(build["session_id"], completed=True)
+        self.assertEqual(self.host.version(), 0)
+        self.assertEqual(self.host.newest()["phase"], builds.STOPPED)
+
+    def test_the_seed_names_the_plan_tool(self) -> None:
+        seeded = builds.seed(self.host.path, self.host.id)
+        self.assertIn("canvas_plan", seeded, "a build is told to plan before it writes")
 
 
 class OneSessionPathTest(unittest.TestCase):

@@ -604,7 +604,14 @@ async def tick(adapter: Any, session_id: str, profile: Optional[str], path: Path
     # A canvas chat's item goes to the canvas's build rather than to the canvas's own session: a
     # build is a session of its own, seeded once, that publishes one version at its end (ADR 0170).
     canvas_id = _canvas_of(path, session_id)
-    build = await asyncio.to_thread(builds.enter, path, canvas_id, row["text"] or "") if canvas_id else None
+    build = None
+    if canvas_id:
+        if _approves(row):
+            # The approval turn the approve route queued on the build's own session: it is the
+            # build's next turn, not a request the build took, so it is posted without being taken.
+            build = await asyncio.to_thread(builds.of_session, path, session_id)
+        else:
+            build = await asyncio.to_thread(builds.enter, path, canvas_id, row["text"] or "")
     if build is not None:
         working = session_runs(adapter, await session_ids(adapter, build["session_id"]))
         if any(run.get("status") in ACTIVE for run in working):
@@ -638,6 +645,16 @@ async def tick(adapter: Any, session_id: str, profile: Optional[str], path: Path
     events.note("runs", session_id, path, True)
 
 
+def _approves(row: Any) -> bool:
+    """Whether a queued item is a build's approval turn — the turn the approve route queued on the
+    build's own session, marked in its body, which the build takes as a turn rather than as one of
+    the requests it rode its version with."""
+    try:
+        return bool(json.loads(row["body"] or "{}").get("approval"))
+    except (TypeError, ValueError):
+        return False
+
+
 def _canvas_of(path: Path, session_id: str) -> Optional[str]:
     """The canvas a queued session belongs to, where it is one whose requests are builds.
 
@@ -664,8 +681,11 @@ def _run_body(row: Any, target: str, build: Optional[Dict[str, Any]], path: Path
     A build's first turn carries the build's seed as its ``instructions`` — the page, the canvas's
     memory and its newest summaries — so the method and the page are told once per build rather
     than once per turn (ADR 0170). A later turn of the same build carries its own body as it came.
+    An approval turn's marker is taken out: it is the dispatcher's, and a run is posted with the
+    words alone.
     """
     run = json.loads(row["body"])
+    run.pop("approval", None)
     run["session_id"] = target
     if build is not None and not build["requests"][1:]:
         from . import builds

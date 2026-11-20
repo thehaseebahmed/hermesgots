@@ -94,6 +94,13 @@ export interface ChatBodyProps {
    * what it reads is its own: a canvas re-reads the page its session has just written.
    */
   afterSettled?: NonNullable<ComponentProps<typeof ChatNextThread>["onSettled"]>
+  /**
+   * What the screen that owns this chat draws in the composer's place while it waits on the
+   * reader: a canvas build's plan, with Approve and Stop in the controls' place. The composer
+   * stays under it, so a message sent there still goes where the screen sends it — a canvas's
+   * waiting plan is revised by message.
+   */
+  composerPlace?: ReactNode
 }
 
 /**
@@ -111,6 +118,7 @@ export function ChatBody({
   session,
   queueSends,
   afterSettled,
+  composerPlace,
 }: ChatBodyProps) {
   const id = chat.id
   const botKey = bot.id
@@ -122,9 +130,14 @@ export function ChatBody({
   const composer = useMemo(
     () =>
       function ChatNextComposer({ controls }: { controls: ComposerControls }) {
-        return <NextComposer controls={controls} chatId={id} botId={botKey} />
+        return (
+          <>
+            {composerPlace}
+            <NextComposer controls={controls} chatId={id} botId={botKey} />
+          </>
+        )
       },
-    [id, botKey],
+    [id, botKey, composerPlace],
   )
   return (
     <LimitContext.Provider value={limit}>

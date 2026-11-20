@@ -71,7 +71,10 @@ logger = logging.getLogger(__name__)
 # phase, the requests it took and its summary; the two columns a published version carries them in;
 # and the flag saying this canvas's requests are builds rather than writes on its own session. A
 # canvas an older store holds takes no flag, so it keeps the one-session path it was made with.
-SCHEMA_VERSION = 77
+# 78 keeps the plan a build filed and whether it waits for the reader's Approve (ADR 0170,
+# `builds.py`): two columns on the build record, so a build that predates the plan tool simply has
+# none filed and waits on nothing.
+SCHEMA_VERSION = 78
 
 
 def data_dir(hermes_home: Path) -> Path:
@@ -1094,6 +1097,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS canvas_builds_canvas ON canvas_builds (canvas_id, at)"
             )
+        # v78: the plan a build filed and whether it waits for the reader's Approve (ADR 0170,
+        # builds.py). A build files its plan before it writes, and a plan that waits holds the
+        # build open until the reader approves it — so the plan's words ride the build record the
+        # lane reads, and the wait flag is what the publish path asks before it publishes.
+        if version < 78:
+            build_columns = {row[1] for row in conn.execute("PRAGMA table_info(canvas_builds)")}
+            if "plan" not in build_columns:
+                conn.execute("ALTER TABLE canvas_builds ADD COLUMN plan TEXT")
+            if "wait" not in build_columns:
+                conn.execute(
+                    "ALTER TABLE canvas_builds ADD COLUMN wait INTEGER NOT NULL DEFAULT 0"
+                )
         # v61: the data a canvas keeps, one row per document of one collection. `value` is the
         # document as JSON and `at` is the host's clock when it was written, since the page owns the
         # data and a device's copy is only the page it was drawn from. No version or undo reads or

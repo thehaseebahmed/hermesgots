@@ -3920,6 +3920,54 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         """Moves a canvas back one version, which is what the app's Undo asks (canvases.py)."""
         return await canvas_answer(request, canvases.undo)
 
+    async def approve_build(request: "web.Request") -> "web.Response":
+        """Approves the canvas's waiting plan: the draft opens, and the approval turn is queued on
+        the build's own session (builds.py, G6).
+
+        The turn is queued rather than posted so a run still working when the reader approves holds
+        it behind that run, exactly as a message does. It rides the build's session rather than the
+        canvas chat's, and the dispatcher posts it without taking it as a request: every request a
+        build took rides the version it publishes, and an approval is not one.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        canvas_id = request.match_info["canvas_id"]
+        try:
+            found = await asyncio.to_thread(builds.approve, store_path(), canvas_id)
+        except canvases.CanvasError as error:
+            return _error(web, str(error), error.status)
+        if found is None:
+            return _error(web, "There is no such canvas.", 404)
+        session = found["session_id"]
+        try:
+            await asyncio.to_thread(
+                outbox.add,
+                store_path(),
+                session,
+                _request_profile(),
+                builds.APPROVAL,
+                [],
+                {"input": [{"role": "user", "content": builds.APPROVAL}], "approval": found["id"]},
+            )
+        except ValueError as error:
+            return _error(web, str(error), 400)
+        follow_queue(request, session, store_path())
+        return web.json_response({"object": "gots.canvas.build", "build": found})
+
+    async def stop_build(request: "web.Request") -> "web.Response":
+        """Stops the canvas's build: nothing is published and the draft is kept (builds.py, G6)."""
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        try:
+            found = await asyncio.to_thread(builds.stop, store_path(), request.match_info["canvas_id"])
+        except canvases.CanvasError as error:
+            return _error(web, str(error), error.status)
+        if found is None:
+            return _error(web, "There is no such canvas.", 404)
+        return web.json_response({"object": "gots.canvas.build", "build": found})
+
     async def update_canvas(request: "web.Request") -> "web.Response":
         """A canvas's name and its place in the list, written on the host so every device agrees.
 
@@ -4429,6 +4477,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/canvases/{{canvas_id}}", update_canvas)
     app.router.add_delete(f"{PREFIX}/canvases/{{canvas_id}}", delete_canvas)
     app.router.add_post(f"{PREFIX}/canvases/{{canvas_id}}/undo", undo_canvas)
+    app.router.add_post(f"{PREFIX}/canvases/{{canvas_id}}/build/approve", approve_build)
+    app.router.add_post(f"{PREFIX}/canvases/{{canvas_id}}/build/stop", stop_build)
     app.router.add_post(f"{PREFIX}/canvases/{{canvas_id}}/call", call_canvas)
     app.router.add_post(f"{PREFIX}/canvases/{{canvas_id}}/grants", grant_canvas)
     app.router.add_get(f"{PREFIX}/research/{{mission_id}}", get_research)

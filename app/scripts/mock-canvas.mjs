@@ -610,6 +610,23 @@ export async function handleCanvas(
     return true
   }
 
+  // A build's approve and stop (ADR 0170, G6). This mock holds no build lifecycle — a canvas it
+  // made keeps the one-session path, and its read answers no build — so both answer the plugin's
+  // own refusal for a canvas with no build open, in the shape the app reads one in.
+  const build = /^\/api\/plugins\/gots\/canvases\/([^/]+)\/build\/(approve|stop)$/.exec(path)
+  if (build) {
+    if (!canvases.has(decodeURIComponent(build[1]))) {
+      fail(404, "There is no such canvas.")
+      return true
+    }
+    if (req.method !== "POST") {
+      fail(405, "A build's approve and stop are POSTs.")
+      return true
+    }
+    fail(409, "This canvas has no build open.")
+    return true
+  }
+
   const match = /^\/api\/plugins\/gots\/canvases\/([^/]+)$/.exec(path)
   if (!match) return false
   const canvas = canvases.get(decodeURIComponent(match[1]))
