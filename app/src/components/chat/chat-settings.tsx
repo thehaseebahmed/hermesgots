@@ -1,4 +1,4 @@
-import { useRef, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   ArchiveIcon,
   ArchiveXIcon,
@@ -183,8 +183,12 @@ export function ChatSettings({
   const [deleting, setDeleting] = useState(false)
   const [discarding, setDiscarding] = useState(false)
   const [disbanding, setDisbanding] = useState(false)
-  /** Whether this sheet's archive has already been pressed, while it stands through its exit. */
-  const archiving = useRef(false)
+  /** Whether this sheet's Archive has been pressed, while the sheet stands through its exit. */
+  const pressed = useRef(false)
+  // A sheet opened again asks its own question: the latch held the exit window, not the record.
+  useEffect(() => {
+    if (open) pressed.current = false
+  }, [open])
   /** Asks the host to close the session, and moves on: the close runs there (ADR 0080). */
   const closeSession = () => {
     if (!code) return
@@ -376,8 +380,8 @@ export function ChatSettings({
                     // a second tap would step back twice, or read the refreshed row and quietly
                     // unarchive what was put away.
                     if (on) {
-                      if (archiving.current) return
-                      archiving.current = true
+                      if (pressed.current) return
+                      pressed.current = true
                     }
                     // The mark is written at once, as it always was, and the host's flag is asked
                     // for behind it (ADR 0159).
