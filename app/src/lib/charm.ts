@@ -15,7 +15,7 @@ import { isNative } from "@/lib/platform"
 import { quietly } from "@/lib/report"
 import { registryId } from "@/lib/registry"
 
-import { charmBotId } from "./charm-alert.ts"
+import { charmBotId, charmButtons } from "./charm-alert.ts"
 import {
   CHARM_CONTROL,
   CHARM_DATA,
@@ -23,6 +23,7 @@ import {
   CHARM_STATUS,
   parseStatus,
   rgb565,
+  type CharmAlertAction,
   type CharmBot,
   type CharmPetChoice,
   type CharmPose,
@@ -66,6 +67,8 @@ interface CharmBridge {
     /** The words the notice carries: the same title and body the tray entry shows. */
     title: string
     body: string
+    /** The buttons the notice draws, at most two: the same labels and ids the tray's own press has. */
+    actions: CharmAlertAction[]
   }): Promise<void>
   clear(options: { subject: string }): Promise<void>
 }
@@ -354,5 +357,8 @@ export async function sendTestAlert(bot: Profile) {
     subject: TEST_ALERT_SUBJECT,
     title: "Test alert",
     body: "Waiting for your approval",
+    // The pair an approval's notice carries (`LABELS` in `plugin/answers.py`), so the charm draws
+    // and answers through the buttons a real push draws.
+    actions: charmButtons([{ label: "Allow once" }, { label: "Deny" }]),
   })
 }

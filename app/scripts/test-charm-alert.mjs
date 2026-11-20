@@ -11,6 +11,7 @@ import ts from "typescript"
 
 import { charmBotId, minuteOfDay } from "../src/lib/charm-alert.ts"
 import {
+  CHARM_MAX_ACTION_LABEL_BYTES,
   CHARM_MAX_BODY_BYTES,
   CHARM_MAX_TITLE_BYTES,
   alertMessage,
@@ -55,20 +56,28 @@ const WIRE = {
    */
   reasons: { QUESTION: 1, APPROVAL: 2 },
   /**
-   * `[reason u8][minute u16 LE][titleLen u8][title][bodyLen u8][body][subjectLen u8][subject]
-   * [idLen u8][botId]`, every string UTF-8. A title or a body may be none at all; a subject and a
-   * bot id are 1 to 64 bytes.
+   * `[reason u8][minute u16 LE][titleLen u8][title][bodyLen u8][body][actionCount u8][per action:
+   * idLen u8, id, labelLen u8, label][subjectLen u8][subject][idLen u8][botId]`, every string
+   * UTF-8. A title, a body and the button list may be none at all; a button's id and label, a
+   * subject and a bot id are not.
    */
   alertPayload: [
     ["u8", "reason"],
     ["u16", "minute"],
     ["field", "title"],
     ["field", "body"],
+    ["actions", "actions"],
     ["field", "subject"],
     ["field", "botId"],
   ],
   /** `[subjectLen u8][subject]`. */
   clearPayload: [["field", "subject"]],
+  /** `kMaxActions`: an approval's two, and no more. */
+  actions: 2,
+  /** `kMaxActionIdLen`: the id a press answers by. */
+  actionIdBytes: 16,
+  /** `kMaxActionLabelLen`: the words a charm's button draws. */
+  actionLabelBytes: 32,
   /** `kMaxTitleLen`: a longer title is cut, at a word, never mid-character. */
   titleBytes: 64,
   /** `kMaxBodyLen`. */
@@ -105,7 +114,7 @@ function bodyOf(name) {
 
 /** The writes a builder makes, in the order it makes them: a byte, or a length and its bytes. */
 function payloadOf(name) {
-  return [...bodyOf(name).matchAll(/\.(u8|u16|field|words)\((\w+)/g)].map((match) => [
+  return [...bodyOf(name).matchAll(/\.(u8|u16|field|words|actions)\((\w+)/g)].map((match) => [
     match[1] === "words" ? "field" : match[1],
     match[2],
   ])
@@ -121,6 +130,9 @@ test("the frames are the ones PROTOCOL.md documents", () => {
   }
   // A finished run no longer taps the reader on the shoulder, so the charm has no byte for it.
   assert.doesNotMatch(WIRE_SOURCE, /REASON_FINISHED/, "a finished run is no charm moment")
+  assert.equal(constant("ACTION_LIMIT"), WIRE.actions, "an alert carries at most two buttons")
+  assert.equal(constant("ACTION_ID_BYTES"), WIRE.actionIdBytes, "a button's id is 1 to 16 bytes")
+  assert.equal(constant("ACTION_LABEL_BYTES"), WIRE.actionLabelBytes, "a label is 1 to 32 bytes")
   assert.equal(constant("TITLE_BYTES"), WIRE.titleBytes, "a title is 0 to 64 bytes")
   assert.equal(constant("BODY_BYTES"), WIRE.bodyBytes, "a body is 0 to 128 bytes")
   assert.equal(constant("FIELD_BYTES"), WIRE.fieldBytes, "a subject or a bot id is 1 to 64 bytes")
@@ -149,45 +161,194 @@ test("a minute of the day is the local one", () => {
   assert.equal(minuteOfDay(new Date(2026, 10, 20, 23, 59)), 1439)
 })
 
-/**
- * The alert, byte by byte: the reason, the minute the frame was built (little endian, as the
- * firmware reads its other 16-bit fields), then the words the tray shows, then what a clear and a
- * handoff name.
- */
-test("an alert is the frame the firmware reads, at every offset", () => {
-  const frame = alertMessage({
-    reason: WIRE.reasons.APPROVAL,
-    minute: minuteOfDay(MORNING),
-    title: "Hi",
-    body: "Go",
-    subject: "s-1",
-    botId: "ab",
-  })
-  const minute = minuteOfDay(MORNING)
-  const expected = [
-    ["version", WIRE.version],
-    ["op", WIRE.alert],
-    ["reason", WIRE.reasons.APPROVAL],
-    ["minute, low byte", minute & 0xff],
-    ["minute, high byte", minute >> 8],
-    ["title length", 2],
-    ["title 0", 0x48],
-    ["title 1", 0x69],
-    ["body length", 2],
-    ["body 0", 0x47],
-    ["body 1", 0x6f],
-    ["subject length", 3],
-    ["subject 0", 0x73],
-    ["subject 1", 0x2d],
-    ["subject 2", 0x31],
-    ["bot id length", 2],
-    ["bot id 0", 0x61],
-    ["bot id 1", 0x62],
-  ]
+/** A frame's bytes, one by one, against what the charm reads each of them as. */
+function expectBytes(frame, expected) {
   assert.equal(frame.length, expected.length, "nothing else is in it")
   for (const [at, [label, value]] of expected.entries()) {
     assert.equal(frame[at], value, `byte ${at} carries the ${label}`)
   }
+}
+
+/** A string's UTF-8 bytes, spread into a table of offsets so a test says what the wire carries. */
+const spell = (text, what) =>
+  [...new TextEncoder().encode(text)].map((value, at) => [`${what} ${at}`, value])
+
+/** The bytes every alert opens with: its head, and the words the tray shows. */
+const ALERT_HEAD = (frameOf) => [
+  ["version", WIRE.version],
+  ["op", WIRE.alert],
+  ["reason", frameOf.reason],
+  ["minute, low byte", frameOf.minute & 0xff],
+  ["minute, high byte", frameOf.minute >> 8],
+  ["title length", new TextEncoder().encode(frameOf.title).length],
+  ...spell(frameOf.title, "title"),
+  ["body length", new TextEncoder().encode(frameOf.body).length],
+  ...spell(frameOf.body, "body"),
+]
+
+/** The bytes every alert ends with: the session a clear names, and the bot whose face it draws. */
+const ALERT_TAIL = (frameOf) => [
+  ["subject length", frameOf.subject.length],
+  ...spell(frameOf.subject, "subject"),
+  ["bot id length", frameOf.botId.length],
+  ...spell(frameOf.botId, "bot id"),
+]
+
+/**
+ * The alert, byte by byte: the reason, the minute the frame was built (little endian, as the
+ * firmware reads its other 16-bit fields), the words the tray shows, the buttons the tray draws,
+ * then what a clear and a handoff name.
+ */
+test("an alert with no buttons says so, at every offset", () => {
+  const alert = {
+    reason: WIRE.reasons.QUESTION,
+    minute: minuteOfDay(MORNING),
+    title: "Hi",
+    body: "Go",
+    actions: [],
+    subject: "s-1",
+    botId: "ab",
+  }
+  expectBytes(alertMessage(alert), [
+    ...ALERT_HEAD(alert),
+    ["no buttons", 0],
+    ...ALERT_TAIL(alert),
+  ])
+})
+
+test("an alert carries one button after its body, at every offset", () => {
+  const alert = {
+    reason: WIRE.reasons.APPROVAL,
+    minute: minuteOfDay(MORNING),
+    title: "Hi",
+    body: "Go",
+    actions: [{ id: "0", label: "Allow once" }],
+    subject: "s-1",
+    botId: "ab",
+  }
+  expectBytes(alertMessage(alert), [
+    ...ALERT_HEAD(alert),
+    ["one button", 1],
+    ["id length", 1],
+    ...spell("0", "id"),
+    ["label length", 10],
+    ...spell("Allow once", "label"),
+    ...ALERT_TAIL(alert),
+  ])
+})
+
+test("an alert carries an approval's two buttons, at every offset", () => {
+  const alert = {
+    reason: WIRE.reasons.APPROVAL,
+    minute: minuteOfDay(MORNING),
+    title: "Hi",
+    body: "Go",
+    actions: [
+      { id: "0", label: "Allow once" },
+      { id: "1", label: "Deny" },
+    ],
+    subject: "s-1",
+    botId: "ab",
+  }
+  expectBytes(alertMessage(alert), [
+    ...ALERT_HEAD(alert),
+    ["two buttons", 2],
+    ["first id length", 1],
+    ...spell("0", "first id"),
+    ["first label length", 10],
+    ...spell("Allow once", "first label"),
+    ["second id length", 1],
+    ...spell("1", "second id"),
+    ["second label length", 4],
+    ...spell("Deny", "second label"),
+    ...ALERT_TAIL(alert),
+  ])
+})
+
+/** A charm holds one alert of two buttons, so a third is dropped rather than written. */
+test("a third button is dropped, and the two that stay keep their order", () => {
+  const alert = { reason: WIRE.reasons.APPROVAL, minute: 0, title: "", body: "", subject: "s", botId: "b" }
+  const pair = [
+    { id: "0", label: "Allow once" },
+    { id: "1", label: "Deny" },
+  ]
+  const frame = alertMessage({ ...alert, actions: [...pair, { id: "2", label: "Never" }] })
+  assert.deepEqual([...frame], [...alertMessage({ ...alert, actions: pair })])
+  assert.equal(frame[7], WIRE.actions, "two buttons, and no third")
+})
+
+test("a button's own fields are cut to the wire's bounds", () => {
+  const label = "a label that runs on past what a round screen can draw"
+  const frame = alertMessage({
+    reason: 2,
+    minute: 0,
+    title: "",
+    body: "",
+    actions: [
+      { id: "x".repeat(30), label: "Allow once" },
+      { id: "1", label },
+    ],
+    subject: "s",
+    botId: "b",
+  })
+  assert.equal(frame[7], 2, "two buttons")
+  assert.equal(frame[8], WIRE.actionIdBytes, "an id is cut to its sixteen bytes")
+  assert.equal(frame[9 + WIRE.actionIdBytes], 10, "the first label follows its own id")
+  const second = 9 + WIRE.actionIdBytes + 1 + 10
+  assert.equal(frame[second], 1, "the second id is one byte")
+  const length = frame[second + 2]
+  const cut = new TextDecoder().decode(frame.subarray(second + 3, second + 3 + length))
+  assert.ok(length <= WIRE.actionLabelBytes, "a label is cut to its thirty-two bytes")
+  assert.ok(label.startsWith(cut) && label[cut.length] === " ", "at a word, not inside one")
+  assert.equal(frame[second + 3 + length], 1, "and the session follows it")
+  assert.equal(frame[second + 4 + length], 0x73, "the session the clear names")
+})
+
+test("a label longer than the wire allows is cut at a word", () => {
+  const label = "Allow once for this whole release and everything after it"
+  const frame = alertMessage({
+    reason: 2,
+    minute: 0,
+    title: "",
+    body: "",
+    actions: [{ id: "0", label }],
+    subject: "s",
+    botId: "b",
+  })
+  // The count, the id's length and its one byte: the label's own length comes next.
+  const at = 10
+  const text = new TextDecoder().decode(frame.subarray(at + 1, at + 1 + frame[at]))
+  assert.ok(frame[at] <= CHARM_MAX_ACTION_LABEL_BYTES, "within the wire's own bound")
+  assert.ok(text.length > 0 && text.length < label.length, "cut, not dropped")
+  assert.ok(label.startsWith(text), "the start of what was said")
+  assert.equal(label[text.length], " ", "and the cut lands on the space after a whole word")
+  assert.ok(!text.endsWith(" "), "carrying no trailing space")
+})
+
+test("a label cut never lands inside a character", () => {
+  // 1 + 2 × 20 = 41 bytes: the 32nd byte falls halfway through one of the `é`s.
+  const label = "a" + "é".repeat(20)
+  const frame = alertMessage({
+    reason: 2,
+    minute: 0,
+    title: "",
+    body: "",
+    actions: [{ id: "0", label }],
+    subject: "s",
+    botId: "b",
+  })
+  const cut = frame.subarray(11, 11 + frame[10])
+  assert.ok(cut.length <= CHARM_MAX_ACTION_LABEL_BYTES)
+  // A fatal decoder throws on a split character, which is the promise this keeps.
+  assert.equal(new TextDecoder("utf-8", { fatal: true }).decode(cut).length, 16)
+  assert.equal(cut.length, 31, "one `a` and 15 whole `é`s")
+})
+
+test("a button with no id or no label is no button the charm could answer", () => {
+  const alert = (actions) => () =>
+    alertMessage({ reason: 2, minute: 0, title: "", body: "", actions, subject: "s", botId: "b" })
+  assert.throws(alert([{ id: "", label: "Allow once" }]), /id and a label/)
+  assert.throws(alert([{ id: "0", label: "" }]), /id and a label/)
 })
 
 test("a title and a body may be none at all, and a subject and a bot id may not", () => {
@@ -397,9 +558,39 @@ test("the charm reads like the notification", () => {
   const branch = kotlinBody(SERVICE_SOURCE, "charmAlert")
   assert.match(
     branch,
-    /CharmNotifier\.alert\(this, bot, reason, notice\.id, notice\.title, notice\.body\)/,
-    "the session, then the words the tray shows",
+    /CharmNotifier\.alert\(this, bot, reason, notice\.id, notice\.title, notice\.body, notice\.charmActions\)/,
+    "the session, the words the tray shows, and the buttons it draws",
   )
+})
+
+/**
+ * The buttons the charm draws are the tray's own: the same labels, in the same order, at most two,
+ * and each answering by its place in that list — the id the tray's own press carries (`answerIntent`'s
+ * index), since a button the plugin sends has no id of its own (`actions_wire` in `plugin/notice.py`).
+ */
+test("the charm's buttons are the tray's own", () => {
+  const notice = sourceOf("android/app/src/main/java/dev/hermesgots/Notice.kt")
+  const branch = kotlinBody(notice, "charmActionsOf")
+  assert.match(branch, /actions\.take\(CharmWire\.ACTION_LIMIT\)/, "at most two")
+  assert.match(
+    branch,
+    /mapIndexed \{ at, one -> CharmWire\.Action\(at\.toString\(\), one\.label\) \}/,
+    "each keeping its place and the words the tray draws",
+  )
+  assert.match(
+    notice,
+    /val charmActions: List<CharmWire\.Action> get\(\) = charmActionsOf\(actions\)/,
+    "read from the notice's own buttons",
+  )
+})
+
+/** The page's share of the same rule: a test alert draws the pair a real approval's notice draws. */
+test("a test alert carries an approval's two buttons", () => {
+  const frozen = functionText("src/lib/charm.ts", "sendTestAlert")
+  assert.match(frozen, /actions: charmButtons\(\[\{ label: "Allow once" \}, \{ label: "Deny" \}\]\)/)
+  const page = functionText("src/lib/charm-alert.ts", "charmButtons")
+  assert.match(page, /slice\(0, CHARM_MAX_ACTIONS\)/, "two at most")
+  assert.match(page, /id: String\(at\)/, "each answering by its place in the notice's list")
 })
 
 /**

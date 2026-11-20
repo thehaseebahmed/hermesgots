@@ -71,15 +71,16 @@ class GotsMessagingService : FirebaseMessagingService() {
     /**
      * Hands a notice that carries both a bot and a reason to the charm. The subject is the id the
      * notice is about — the one a clear for it names — so the record and its clear cannot disagree.
-     * The title and the body are the words the tray entry shows, so the charm reads like the
-     * notification. A notice with either field missing, or with neither, is tray news only.
+     * The title, the body and the buttons are the ones the tray entry shows, so the charm reads like
+     * the notification and its buttons are the entry's own. A notice with either field missing, or
+     * with neither, is tray news only.
      */
     private fun charmAlert(notice: Notice) {
         val bot = notice.charm ?: return
         val reason = notice.charmReason ?: return
         if (notice.id.isBlank()) return
         runCatching {
-            CharmNotifier.alert(this, bot, reason, notice.id, notice.title, notice.body)
+            CharmNotifier.alert(this, bot, reason, notice.id, notice.title, notice.body, notice.charmActions)
         }
     }
 

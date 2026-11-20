@@ -111,10 +111,10 @@ object CharmNotifier {
     }
 
     /**
-     * A bot needs the reader: which bot, why, and the words the tray entry shows — the notice's own
-     * title and body, so the charm reads like the notification rather than like a retelling of it.
-     * The subject is what a later clear names and what a tap on the charm answers with, so it is the
-     * session the notice is about.
+     * A bot needs the reader: which bot, why, the words the tray entry shows — the notice's own title
+     * and body, so the charm reads like the notification rather than like a retelling of it — and the
+     * buttons that entry draws, so the reader can answer from the wrist. The subject is what a later
+     * clear names and what a tap on the charm answers with, so it is the session the notice is about.
      */
     fun alert(
         context: Context,
@@ -123,6 +123,7 @@ object CharmNotifier {
         subject: String?,
         title: String?,
         body: String?,
+        actions: List<CharmWire.Action>,
     ) {
         val why = reasonOf(reason) ?: return
         val minute = minuteOfDay()
@@ -130,12 +131,12 @@ object CharmNotifier {
         val said = body.orEmpty()
         val session = subject.orEmpty()
         val bot = botId.orEmpty()
-        val full = runCatching { CharmWire.alert(why, minute, words, said, session, bot) }
+        val full = runCatching { CharmWire.alert(why, minute, words, said, actions, session, bot) }
             .getOrNull() ?: return
         // The same alert without its body. A link that negotiated less than the whole frame needs still
-        // carries what the bot is waiting for and whose face it is — the title, the session and the bot
-        // — where dropping the alert would carry nothing at all.
-        val brief = runCatching { CharmWire.alert(why, minute, words, "", session, bot) }
+        // carries what the bot is waiting for and whose face it is — the title, the buttons, the
+        // session and the bot — where dropping the alert would carry nothing at all.
+        val brief = runCatching { CharmWire.alert(why, minute, words, "", actions, session, bot) }
             .getOrNull() ?: return
         send(context, full, brief, HOLD_MS)
     }

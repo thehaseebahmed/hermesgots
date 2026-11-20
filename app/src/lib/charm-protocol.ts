@@ -49,6 +49,15 @@ export const CharmReasonByte = {
 export const CHARM_MAX_TITLE_BYTES = 64
 export const CHARM_MAX_BODY_BYTES = 128
 
+/**
+ * What an alert's buttons may measure, as `kMaxActions`, `kMaxActionIdLen` and
+ * `kMaxActionLabelLen` do: an approval's two at most, an id a press answers by, and the words the
+ * charm draws on it.
+ */
+export const CHARM_MAX_ACTIONS = 2
+export const CHARM_MAX_ACTION_ID_BYTES = 16
+export const CHARM_MAX_ACTION_LABEL_BYTES = 32
+
 export const CharmCode = {
   Ok: 0,
   BadVersion: 1,
@@ -259,6 +268,16 @@ export const abortMessage = () => control(CharmOp.Abort).done()
 /** UTC seconds, which the charm keeps in its RTC so the pet's meters know the time that passed. */
 export const timeMessage = (epochSeconds: number) => control(CharmOp.Time).u32(epochSeconds).done()
 
+export interface CharmAlertAction {
+  /**
+   * What the charm answers with when the button is pressed: the button's place in the notice's own
+   * list, which is the id the tray's press carries too.
+   */
+  id: string
+  /** The words on the button, the notice's own: `Allow once`, `Deny`. */
+  label: string
+}
+
 export interface CharmAlert {
   /** `CharmReasonByte`: only the two moments a bot needs the reader for reach the charm. */
   reason: number
@@ -268,6 +287,8 @@ export interface CharmAlert {
   title: string
   /** The notice's body: what the bot said. May be none, and one cut for the link drops it whole. */
   body: string
+  /** The notice's own buttons, at most two: an approval's Allow once and Deny, a question's none. */
+  actions?: CharmAlertAction[]
   /** The session the alert is about: what a clear and a handoff answer name. */
   subject: string
   /** The bot's id on the charm, the one a push carries. */
@@ -275,11 +296,12 @@ export interface CharmAlert {
 }
 
 /**
- * A bot needs the reader, with what the notification said. The charm draws it with the phone away,
- * so it carries the words the tray shows rather than an id the reader would have to look up.
+ * A bot needs the reader, with what the notification said and the buttons it drew. The charm draws
+ * it with the phone away, so it carries the words the tray shows and the same two buttons, rather
+ * than an id the reader would have to look up and a choice they would have to remember.
  *
- * The longest one is 335 bytes (64 of title, 128 of body, 64 of subject and of bot id), which is why
- * the writer asks for a larger MTU before it writes one.
+ * The longest one is 335 bytes plus the buttons (16 and 32 bytes each, of two), which is why the
+ * writer asks for a larger MTU before it writes one.
  */
 export function alertMessage(alert: CharmAlert): Uint8Array {
   if (alert.reason !== CharmReasonByte.question && alert.reason !== CharmReasonByte.approval)
@@ -288,14 +310,23 @@ export function alertMessage(alert: CharmAlert): Uint8Array {
   if (subject.length === 0) throw new Error("An alert names the session it is about")
   const botId = utf8Clip(alert.botId, MAX_ID_BYTES)
   if (botId.length === 0) throw new Error("An alert names the bot it is about")
-  return control(CharmOp.Alert)
+  const actions = (alert.actions ?? []).slice(0, CHARM_MAX_ACTIONS).map((action) => ({
+    id: clampText(action.id, CHARM_MAX_ACTION_ID_BYTES),
+    label: clampText(action.label, CHARM_MAX_ACTION_LABEL_BYTES),
+  }))
+  // A button with no id answers nothing and one with no label says nothing: neither is drawn.
+  for (const action of actions) {
+    if (action.id.length === 0 || action.label.length === 0)
+      throw new Error("A charm button carries an id and a label")
+  }
+  const frame = control(CharmOp.Alert)
     .u8(alert.reason)
     .u16(alert.minute)
     .str(clampText(alert.title, CHARM_MAX_TITLE_BYTES))
     .str(clampText(alert.body, CHARM_MAX_BODY_BYTES))
-    .str(subject)
-    .str(botId)
-    .done()
+    .u8(actions.length)
+  for (const action of actions) frame.str(action.id).str(action.label)
+  return frame.str(subject).str(botId).done()
 }
 
 /**

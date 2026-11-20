@@ -55,6 +55,14 @@ data class Notice(
     /** Mark as read moves a chat's read mark, so only a notice naming its chat offers it. */
     val markAsRead: Boolean get() = conversation && read
 
+    /**
+     * The buttons the charm draws, from the tray's own: the same labels, in the same order, at most
+     * two, each answering by its place in that list — the id the tray's own press carries
+     * ([GotsMessagingService]'s per-index answer), so a press on the wrist and a press on the entry
+     * name the same button.
+     */
+    val charmActions: List<CharmWire.Action> get() = charmActionsOf(actions)
+
     /** A conversation already wears the face as its Person; a large icon would draw it twice. */
     val largeIcon: Boolean get() = !conversation
 
@@ -138,6 +146,16 @@ data class Notice(
         fun subjectOf(tag: String): String? {
             val colon = tag.lastIndexOf(':')
             return if (colon < 0) null else tag.substring(colon + 1).takeIf { it.isNotBlank() }
+        }
+
+        /**
+         * The buttons the charm draws from a notice's own, which is the one rule both read: at most
+         * two, each with the label the tray draws and the id a press answers by — its place in the
+         * notice's list, since a button the plugin sent has no id of its own on the wire.
+         */
+        fun charmActionsOf(actions: List<NoticeAction>): List<CharmWire.Action> {
+            return actions.take(CharmWire.ACTION_LIMIT)
+                .mapIndexed { at, one -> CharmWire.Action(at.toString(), one.label) }
         }
 
         /** Whether a tray entry's tag is about [subject], which is what a clear cancels by. */

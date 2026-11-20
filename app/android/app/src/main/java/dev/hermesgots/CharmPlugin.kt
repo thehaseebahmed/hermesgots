@@ -37,7 +37,10 @@ class CharmPlugin : Plugin() {
         call.resolve()
     }
 
-    /** A bot needs the reader — a question or an approval — with the subject a clear names. */
+    /**
+     * A bot needs the reader — a question or an approval — with the subject a clear names, the words
+     * the tray shows, and the buttons it draws.
+     */
     @PluginMethod
     fun alert(call: PluginCall) {
         val botId = call.getString("botId").orEmpty().trim()
@@ -50,8 +53,8 @@ class CharmPlugin : Plugin() {
             call.reject("A charm alert is a question or an approval.")
             return
         }
-        // The words the page's own notice carries, so a test alert reads on the charm as a real one
-        // does: the title over the body, at the minute the frame is built.
+        // The words and the buttons the page's own notice carries, so a test alert reads and answers
+        // on the charm as a real one does: the title over the body, at the minute the frame is built.
         CharmNotifier.alert(
             context,
             botId,
@@ -59,8 +62,27 @@ class CharmPlugin : Plugin() {
             call.getString("subject").orEmpty(),
             call.getString("title").orEmpty(),
             call.getString("body").orEmpty(),
+            buttonsOf(call),
         )
         call.resolve()
+    }
+
+    /**
+     * The buttons the page sent, each an id and a label — the two fields a charm answers and draws
+     * by. A row with either missing is dropped rather than written, since a button with no id
+     * answers nothing and one with no label says nothing.
+     */
+    private fun buttonsOf(call: PluginCall): List<CharmWire.Action> {
+        val rows = call.getArray("actions") ?: return emptyList()
+        val buttons = ArrayList<CharmWire.Action>(rows.length())
+        for (at in 0 until rows.length()) {
+            val row = rows.optJSONObject(at) ?: continue
+            val id = row.optString("id").trim()
+            val label = row.optString("label").trim()
+            if (id.isEmpty() || label.isEmpty()) continue
+            buttons.add(CharmWire.Action(id, label))
+        }
+        return buttons
     }
 
     /** The bot is settled: the record the subject names goes, and nothing else on the charm moves. */
