@@ -35,6 +35,13 @@ RUN install -d -m 755 /etc/apt/keyrings \
 # externally managed, hence --break-system-packages.
 RUN python3 -m pip install --no-cache-dir --break-system-packages cryptography
 
+# PlatformIO Core, for the Gots Charm firmware (hermesgots-charm, ESP32-S3 / M5Stack StopWatch).
+# Installed into the system interpreter for the same login-shell reason as above. The ESP32
+# toolchain and libraries are not baked in: PlatformIO fetches them per project on first
+# `pio run` into $PLATFORMIO_CORE_DIR, which a user can point at a persistent volume.
+RUN python3 -m pip install --no-cache-dir --break-system-packages platformio \
+ && pio --version
+
 # pnpm 10, installed the way CI installs it. Not corepack: neither package.json carries a
 # `packageManager` field for corepack to pin from, so it would resolve an unpinned version.
 RUN npm install -g --cache /tmp/npm-cache pnpm@10 \
@@ -43,7 +50,7 @@ RUN npm install -g --cache /tmp/npm-cache pnpm@10 \
 # The e2e flows drive the app in headless Chromium. `app/scripts/e2e/cli.mjs` resolves Playwright
 # from `app/node_modules` or the global node_modules, so it is installed globally here.
 #
-# Playwright is one version, 1.65.0, because two tools in the image drive a browser and a browser
+# Playwright is one version, 1.65.1, because two tools in the image drive a browser and a browser
 # build belongs to the Playwright revision that asks for it: Reticle bundles its own Playwright
 # (`@reticlehq/server` depends on `^1.63.0`, which resolves to this version), and a second one would
 # mean a second Chromium — fetched at first launch, mid-session, into the root-owned browsers root.
@@ -52,7 +59,7 @@ RUN npm install -g --cache /tmp/npm-cache pnpm@10 \
 # `chromium.executablePath()` — the full build — before it will drive anything, and Playwright's
 # headless launches then use the headless shell that ships beside it. Shell-only left Reticle
 # believing no browser existed and reaching for a download at runtime.
-RUN npm install -g --cache /tmp/npm-cache playwright@1.65.0 \
+RUN npm install -g --cache /tmp/npm-cache playwright@1.65.1 \
  && playwright install --with-deps chromium \
  && rm -rf /tmp/npm-cache /var/lib/apt/lists/*
 
@@ -62,7 +69,7 @@ RUN npm install -g --cache /tmp/npm-cache playwright@1.65.0 \
 # check fails the build rather than letting a rebuild quietly fetch a second browser that Reticle
 # would then want and not find.
 RUN npm install -g --cache /tmp/npm-cache @reticlehq/server@3.9.0 \
- && node -e "const v = require('/usr/local/lib/node_modules/@reticlehq/server/node_modules/playwright/package.json').version; if (v !== '1.65.0') { console.error('reticle bundles playwright ' + v + ' but this image pins 1.65.0; bump the pin above so one chromium build serves both'); process.exit(1) }" \
+ && node -e "const v = require('/usr/local/lib/node_modules/@reticlehq/server/node_modules/playwright/package.json').version; if (v !== '1.65.1') { console.error('reticle bundles playwright ' + v + ' but this image pins 1.65.1; bump the pin above so one chromium build serves both'); process.exit(1) }" \
  && rm -rf /tmp/npm-cache
 
 # Warm the store from the lockfiles, so an install inside the container is quick and works
@@ -78,7 +85,7 @@ RUN cd /tmp/warm/app && pnpm fetch \
 ARG BUILD_REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/thehaseebahmed/hermesgots" \
       org.opencontainers.image.title="Gots development container" \
-      org.opencontainers.image.description="Node 22, pnpm 10, Python 3.13, Chromium, the GitHub CLI and the Reticle verification CLI for developing the Gots app, plugin and website" \
+      org.opencontainers.image.description="Node 22, pnpm 10, Python 3.13, Chromium, PlatformIO, the GitHub CLI and the Reticle verification CLI for developing the Gots app, plugin and website" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.revision=$BUILD_REVISION
 
