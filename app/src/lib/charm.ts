@@ -138,6 +138,19 @@ export function forgetCharm() {
   if (charmBridge()) void Charm.forget().catch(quietly("forgetting the charm on the phone"))
 }
 
+/**
+ * The bot settled: the alert keyed by this session goes, and the charm goes back to its carousel.
+ *
+ * Asked where the reader answers a prompt, because the account's own clear fan-out skips the device
+ * that answered (`plugin/push.py`). A page with no session, a phone with no charm paired and an app
+ * with no plugin behind it all ask nothing — the charm is already where this would leave it.
+ */
+export function clearCharm(session: string | null | undefined) {
+  const subject = session?.trim()
+  if (!subject || !charmBridge()) return
+  void Charm.clear({ subject }).catch(quietly("clearing the charm's alert"))
+}
+
 /** A bot's charm picture: its happy pose on black, as a square JPEG for the round screen. */
 export async function charmPicture(botId: string, px = CHARM_PICTURE_PX): Promise<Uint8Array> {
   const image = new Image()

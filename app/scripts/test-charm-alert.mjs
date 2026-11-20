@@ -7,7 +7,10 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 
+import ts from "typescript"
+
 import { charmBotId } from "../src/lib/charm-alert.ts"
+import { parseSource, sourceFiles } from "./source-tree.mjs"
 
 test("a bot's charm id is its registry id", () => {
   assert.equal(charmBotId("bot-1", "9f2c4a1b7d3e5f60"), "9f2c4a1b7d3e5f60")
@@ -91,4 +94,74 @@ test("the frames are the ones PROTOCOL.md documents", () => {
   assert.match(bodyOf("clear"), /frame\(OP_CLEAR\)/, "a clear is the Clear op")
   // `[version u8][op][payload]`: the version leads and the op follows, on every control write.
   assert.match(bodyOf("frame"), /u8\(VERSION\)[\s\S]*u8\(op\)/, "version first, then the op")
+})
+
+/** An app source file as the page asks for a clear in it. */
+const sourceOf = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8")
+
+/** A function's own text in a source file, its braces matched by the parser, not a pattern. */
+function functionText(path, name) {
+  const source = sourceOf(path)
+  const tree = parseSource(source, path)
+  let found
+  const visit = (node) => {
+    if (found) return
+    if (ts.isFunctionDeclaration(node) && node.name?.text === name) found = node.getText(tree)
+    else ts.forEachChild(node, visit)
+  }
+  ts.forEachChild(tree, visit)
+  assert.ok(found, `${path} declares ${name}`)
+  return found
+}
+
+/**
+ * The one place the app answers a prompt is `answer` in the chat screen: an approval and a
+ * question are one call there, whichever of the screen's cards was tapped. The subject is the
+ * session the notice was about, since that is the key the alert's record and its clear share.
+ */
+test("the page asks for a clear where a prompt is answered", () => {
+  const asked = [
+    ...functionText("src/chat-next/page.tsx", "answer").matchAll(/clearCharm\(([^)]*)\)/g),
+  ].map((match) => match[1].trim())
+  assert.deepEqual(asked, ["session"], "one clear, naming the session and nothing else")
+})
+
+/**
+ * The answering device is skipped by the account's own clear fan-out (`plugin/push.py`), so the
+ * page is the only thing that settles the charm for the prompt it just answered. A second call
+ * site would clear a session some other screen is not answering.
+ */
+test("the clear is asked from that one place and nowhere else", () => {
+  const callers = sourceFiles(new URL("../src/", import.meta.url))
+    // The bridge's own definition lives beside the call it makes, not among its askers.
+    .filter((path) => path !== "lib/charm.ts")
+    .filter((path) => /(?<!\w)clearCharm\s*\(/.test(sourceOf(`src/${path}`)))
+  assert.deepEqual(callers, ["chat-next/page.tsx"])
+})
+
+const SERVICE_SOURCE = sourceOf(
+  "android/app/src/main/java/dev/hermesgots/GotsMessagingService.kt",
+)
+
+/**
+ * A clear that arrives as a push: another device settled the subject, so this phone's tray and its
+ * charm both drop it. The charm is asked for after the tray's entry is gone, and where a failure
+ * cannot throw into that work — the notifier is the one writer, and a phone with no charm saved
+ * does nothing at all.
+ */
+test("a clear push hands its subject to the charm, after the tray", () => {
+  const from = SERVICE_SOURCE.indexOf("val subject = Notice.clearSubject")
+  assert.ok(from >= 0, "the clear branch reads its subject before anything else")
+  const branch = SERVICE_SOURCE.slice(from, SERVICE_SOURCE.indexOf("return", from))
+  assert.match(branch, /NoticeDrawer\.clearSubject\(this, subject\)/, "the tray goes first")
+  assert.match(branch, /CharmNotifier\.clear\(this, subject\)/, "then the charm, by that subject")
+  assert.ok(
+    branch.indexOf("NoticeDrawer.clearSubject") < branch.indexOf("CharmNotifier.clear"),
+    "the tray's work is not waiting on a radio",
+  )
+  assert.match(
+    branch,
+    /runCatching \{[^}]*CharmNotifier\.clear\(this, subject\)[^}]*\}/,
+    "a charm that cannot be written loses no tray entry",
+  )
 })

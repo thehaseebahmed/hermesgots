@@ -53,6 +53,11 @@ class GotsMessagingService : FirebaseMessagingService() {
         val subject = Notice.clearSubject(message.data)
         if (subject != null) {
             NoticeDrawer.clearSubject(this, subject)
+            // The charm's record goes with the tray's: another device settled this subject, so the
+            // face it still holds is no longer news. Asked after the tray is clear, and where a
+            // charm that cannot be written throws nothing into that work — a phone with no charm
+            // saved, Bluetooth off or a lost grant all leave the tray entry exactly as it is.
+            runCatching { CharmNotifier.clear(this, subject) }
             return
         }
         val notice = Notice.from(message.data, getString(R.string.app_name)) ?: return
