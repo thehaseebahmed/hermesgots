@@ -138,12 +138,13 @@ jobs:
         run: |
           docker run --rm "${{ steps.subject.outputs.tag }}" bash -lc '
             set -e
-            for tool in gh pnpm python3 playwright reticle; do
+            for tool in gh pnpm python3 playwright reticle pio; do
               command -v "$tool" > /dev/null || { echo "missing from PATH: $tool"; exit 1; }
             done
             gh --version | head -1
             pnpm --version
             python3 -c "import cryptography"
+            pio --version
           '
 
       # The app's gates, the plugin's tests and the website's build, run inside the image against the
