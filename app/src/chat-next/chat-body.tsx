@@ -101,6 +101,12 @@ export interface ChatBodyProps {
    * waiting plan is revised by message.
    */
   composerPlace?: ReactNode
+  /**
+   * What draws the thread, where a container draws something other than its turns: a canvas's lane
+   * with builds draws the builds (G9) and keeps its composer, so the thread is still the machine
+   * that reads and sends. Absent draws a chat's turns, as every chat does.
+   */
+  view?: ComponentProps<typeof ChatNextThread>["View"]
 }
 
 /**
@@ -119,6 +125,7 @@ export function ChatBody({
   queueSends,
   afterSettled,
   composerPlace,
+  view,
 }: ChatBodyProps) {
   const id = chat.id
   const botKey = bot.id
@@ -153,6 +160,7 @@ export function ChatBody({
           apiKey={bot.apiKey}
           session={thread}
           queueSends={queueSends}
+          View={view}
           prepareTurn={(text, attachments, at) => prepareTurn(id, text, attachments, at)}
           queueTurn={async (text, attachments, on) =>
             void (await queueTurn(id, text, attachments, on))

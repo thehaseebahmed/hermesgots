@@ -176,6 +176,17 @@ await flow(
     await field.fill(EDIT)
     await field.press(SEND_CHORD)
     await page.getByText("v2", { exact: true }).waitFor({ timeout: 40_000 })
+    // The lane is builds, not the transcript (G9, G10): the request it took is the row's line, and
+    // the version it wrote is the row's version, drawn on the edit screen itself.
+    const builds = page.locator("[data-canvas-builds]")
+    await builds.waitFor({ timeout: 20_000 })
+    await builds.getByText(EDIT, { exact: true }).waitFor({ timeout: 20_000 })
+    assert.equal(
+      await page.locator("[data-canvas-builds] [data-build-details]").count() > 0,
+      true,
+      "each build offers Details",
+    )
+    pass("the edit screen: the lane draws the build's request and the version it published")
     await shot("edited")
     pass("the edit screen: an edit sent from its chat lands as version 2")
 

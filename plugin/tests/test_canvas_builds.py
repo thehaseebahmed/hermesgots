@@ -282,7 +282,7 @@ class ARequestSentMidBuildTest(unittest.TestCase):
         # publishing under it, and the request becomes the build's next turn.
         self.host.adapter.run("run_1", build["session_id"], "completed", 3)
         builds.ended(session_id=build["session_id"], completed=True)
-        self.assertEqual(self.host.build()["phase"], builds.OPEN)
+        self.assertIn(self.host.build()["phase"], builds.WORKING, "the build is still open")
         self.host.tick()
         self.assertEqual(len(self.host.posted), 2)
         self.assertEqual(self.host.posted[-1]["body"]["session_id"], build["session_id"])
@@ -516,7 +516,7 @@ class PlanWaitingTest(unittest.TestCase):
         # The run's end holds the build open: a plan that waits publishes nothing.
         self.host.end(build["session_id"], completed=True)
         self.assertEqual(self.host.version(), 0, "a waiting plan publishes nothing")
-        self.assertEqual(self.host.build()["phase"], builds.OPEN, "the build waits")
+        self.assertEqual(self.host.build()["phase"], builds.WAITING, "the build waits")
 
         # A message while it waits is posted as the build's next turn, and the plan is revised.
         self.host.adapter.run("run_1", build["session_id"], "completed", 3)
@@ -769,6 +769,105 @@ class CheckedBeforePublishTest(unittest.TestCase):
             )
             for width, mode in ((390, "light"), (390, "dark"), (768, "light"), (768, "dark")):
                 self.assertIn(f"{width}-{mode}.png", content)
+
+
+class WhereABuildIsTest(unittest.TestCase):
+    """The plan's step 13 check, on the host's side: a build says what it is doing now.
+
+    The lane draws builds rather than the transcript, so the record has to carry the phase it is in
+    and a line saying what is happening, and a canvas's read has to hand back the builds it has
+    finished — each with the request, the summary, the check flag and the version it published.
+    """
+
+    def setUp(self) -> None:
+        self.host = Host(self)
+
+    def test_a_build_moves_from_planning_to_waiting_to_building(self) -> None:
+        build = self.host.start()
+        self.assertEqual(build["phase"], builds.PLANNING)
+        self.assertEqual(build["activity"], builds.ACTIVITY[builds.PLANNING])
+
+        self.host.plan(
+            build["session_id"],
+            changes="The heading says Split the bill.",
+            checks=[],
+            wait=True,
+        )
+        waiting = self.host.build()
+        self.assertEqual(waiting["phase"], builds.WAITING)
+        self.assertEqual(waiting["activity"], builds.ACTIVITY[builds.WAITING])
+
+        self.host.ask(f"{PREFIX}/canvases/{{canvas_id}}/build/approve")
+        building = self.host.build()
+        self.assertEqual(building["phase"], builds.BUILDING)
+        self.assertEqual(building["activity"], builds.ACTIVITY[builds.BUILDING])
+
+    def test_a_clear_plan_builds_straight_away(self) -> None:
+        build = self.host.start()
+        self.host.plan(
+            build["session_id"], changes="The heading says Split the bill.", checks=[], wait=False
+        )
+        self.assertEqual(self.host.build()["phase"], builds.BUILDING)
+
+    def test_a_build_says_checking_and_publishing_as_it_does_them(self) -> None:
+        planted = plant_runner(passing_answer)
+        self.addCleanup(planted.stop)
+        seen: List[str] = []
+        writing = canvases.write
+        with planted:
+
+            def watched(*args: Any, **kwargs: Any) -> Any:
+                found = builds.of_canvas(self.host.path, self.host.id) or {}
+                seen.append(str(found.get("phase")))
+                return writing(*args, **kwargs)
+
+            build = self.host.start()
+            session = build["session_id"]
+            self.host.plan(
+                session,
+                changes="The heading says Split the bill.",
+                checks=[{"name": "the heading is split", "script": "return 1"}],
+                wait=False,
+            )
+            self.host.write(session, TWEAKED)
+            self.host.adapter.run("run_1", session, "completed", 3)
+            with patch.object(canvases, "write", watched):
+                self.host.end(session, completed=True)
+            self.assertEqual(
+                self.host.newest()["phase"], builds.CHECKING, "the build is checking, not published"
+            )
+            self.assertEqual(self.host.newest()["activity"], builds.ACTIVITY[builds.CHECKING])
+
+            # The turn that changes nothing ends the loop: the version is written while the build
+            # says it is publishing, and the record then says it published.
+            self.host.tick(session)
+            self.host.adapter.run("run_2", session, "completed", 4)
+            with patch.object(canvases, "write", watched):
+                self.host.end(session, completed=True)
+        self.assertEqual(seen, [builds.PUBLISHING], "the record says publishing as it publishes")
+        published = self.host.newest()
+        self.assertEqual(published["phase"], builds.PUBLISHED)
+        self.assertEqual(published["version"], 1)
+
+    def test_the_builds_read_answers_every_build_newest_first(self) -> None:
+        build = self.host.start()
+        session = build["session_id"]
+        self.host.plan(session, changes="The heading says Split the bill.", checks=[], wait=False)
+        self.host.write(session, TWEAKED)
+        self.host.adapter.run("run_1", session, "completed", 3)
+        self.host.end(session, completed=True)
+
+        answer = self.host.ask(f"{PREFIX}/canvases/{{canvas_id}}/builds", "GET")["payload"]
+        self.assertEqual(answer["object"], "gots.canvas.builds")
+        self.assertEqual(len(answer["builds"]), 1)
+        one = answer["builds"][0]
+        self.assertEqual(one["session"], session)
+        self.assertEqual(one["phase"], builds.PUBLISHED)
+        self.assertEqual(one["requests"], [PROMPT])
+        self.assertEqual(one["summary"], SUMMARY)
+        self.assertEqual(one["version"], 1)
+        self.assertEqual(one["flag"], canvas_checks.UNCHECKED)
+        self.assertIsNone(one["activity"], "a finished build has nothing going on")
 
 
 class ClosedAppTest(unittest.TestCase):

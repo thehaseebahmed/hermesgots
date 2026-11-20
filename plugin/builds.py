@@ -52,14 +52,34 @@ DRAFT = canvases.DRAFT
 MEMORY = canvases.MEMORY
 
 # A build's phases (step 13 stamps the ones a build passes through while it works). A canvas has at
-# most one open build, so `open` is what a read looks for; `stopped` is the reader ending a build
-# through its stop route, which publishes nothing and keeps the draft (G6).
-OPEN = "open"
+# most one working build, so `WORKING` is what a read looks for; `stopped` is the reader ending a
+# build through its stop route, which publishes nothing and keeps the draft (G6).
+PLANNING = "planning"
+WAITING = "waiting"
+BUILDING = "building"
+CHECKING = "checking"
+PUBLISHING = "publishing"
 PUBLISHED = "published"
 FAILED = "failed"
 STOPPED = "stopped"
 
-PHASES = (OPEN, PUBLISHED, FAILED, STOPPED)
+# The phases a build is still working in: one at a time, and the one a canvas's read answers.
+WORKING = (PLANNING, WAITING, BUILDING, CHECKING, PUBLISHING)
+# The phases a build never comes back from: a version published, a run that failed, or the reader's
+# Stop. A finished build is a row of the lane's history, never a canvas's open build.
+FINISHED = (PUBLISHED, FAILED, STOPPED)
+
+PHASES = (*WORKING, *FINISHED)
+
+# The one line the lane draws under a working build's phase: what is going on now, said for a reader
+# rather than for the record. A finished build has none — its summary is the row's line.
+ACTIVITY = {
+    PLANNING: "Planning the change",
+    WAITING: "Waiting for your approval",
+    BUILDING: "Building the page",
+    CHECKING: "Checking the rendered page",
+    PUBLISHING: "Publishing the version",
+}
 
 # The turn the approve route queues on the build's own session once the reader has approved its
 # plan: the words the agent is told the approval in, since the build's next turn is what carries it.
@@ -121,7 +141,8 @@ def of_session(path: Path, session_id: Optional[str]) -> Optional[Dict[str, Any]
         conn = _open(path)
         try:
             row = conn.execute(
-                "SELECT * FROM canvas_builds WHERE session_id = ? AND phase = ?", (root, OPEN)
+                "SELECT * FROM canvas_builds WHERE session_id = ? AND phase NOT IN (?, ?, ?)",
+                (root, *FINISHED),
             ).fetchone()
         finally:
             conn.close()
@@ -145,9 +166,9 @@ def of_canvas(path: Path, canvas_id: str) -> Optional[Dict[str, Any]]:
 def _of_canvas(conn: sqlite3.Connection, canvas_id: str) -> Optional[Dict[str, Any]]:
     """This canvas's open build over a connection the caller holds, or None when it has none."""
     row = conn.execute(
-        """SELECT * FROM canvas_builds WHERE canvas_id = ? AND phase = ?
+        """SELECT * FROM canvas_builds WHERE canvas_id = ? AND phase NOT IN (?, ?, ?)
            ORDER BY created_at DESC LIMIT 1""",
-        (canvas_id, OPEN),
+        (canvas_id, *FINISHED),
     ).fetchone()
     return _build(row) if row else None
 
@@ -167,6 +188,34 @@ def builds_of(path: Path, canvas_id: str) -> List[Dict[str, Any]]:
     return [_build(row) for row in rows]
 
 
+def listing(path: Path, canvas_id: str) -> List[Dict[str, Any]]:
+    """Every build a canvas has had, newest first, as the lane draws them (G10).
+
+    A finished build carries the request it took, the summary it ended on, what its checks said and
+    the version it published; a working one carries its phase and the line saying what it is doing
+    now. The lane shows the second as the build in progress and the first as its history, so both
+    ride one read rather than the app guessing which is which.
+    """
+    record = canvases.record(path, canvas_id)
+    if record is None:
+        raise canvases.CanvasError("There is no such canvas.", 404)
+    return [
+        {
+            "id": one["id"],
+            "session": one["session_id"],
+            "phase": one["phase"],
+            "activity": one.get("activity"),
+            "requests": one["requests"],
+            "summary": one.get("summary"),
+            "flag": one.get("flag"),
+            "version": one.get("version"),
+            "at": one["at"],
+            "created_at": one["created_at"],
+        }
+        for one in builds_of(path, canvas_id)
+    ]
+
+
 def waiting(path: Path) -> Dict[str, Dict[str, Any]]:
     """Each canvas chat whose build waits on a plan, as ``runs/live`` reports a wait (step 12).
 
@@ -180,8 +229,8 @@ def waiting(path: Path) -> Dict[str, Dict[str, Any]]:
     try:
         rows = conn.execute(
             """SELECT c.session_id FROM canvas_builds b JOIN canvases c ON c.id = b.canvas_id
-               WHERE b.phase = ? AND b.wait = 1""",
-            (OPEN,),
+               WHERE b.phase NOT IN (?, ?, ?) AND b.wait = 1""",
+            FINISHED,
         ).fetchall()
     finally:
         conn.close()
@@ -209,14 +258,15 @@ def open_build(path: Path, canvas_id: str, request: str) -> Dict[str, Any]:
     conn = _open(path)
     try:
         conn.execute(
-            """INSERT INTO canvas_builds (id, canvas_id, session_id, phase, requests, summary, run_id,
-                                          at, created_at)
-               VALUES (?, ?, ?, ?, ?, NULL, NULL, ?, ?)""",
+            """INSERT INTO canvas_builds (id, canvas_id, session_id, phase, activity, requests, summary,
+                                          run_id, at, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)""",
             (
                 build_id,
                 canvas_id,
                 session_of(build_id),
-                OPEN,
+                PLANNING,
+                ACTIVITY[PLANNING],
                 json.dumps([request] if request else []),
                 now,
                 now,
@@ -235,7 +285,8 @@ def take(path: Path, build_id: str, request: str) -> None:
     conn = _open(path)
     try:
         row = conn.execute(
-            "SELECT requests FROM canvas_builds WHERE id = ? AND phase = ?", (build_id, OPEN)
+            "SELECT requests FROM canvas_builds WHERE id = ? AND phase NOT IN (?, ?, ?)",
+            (build_id, *FINISHED),
         ).fetchone()
         if row is None:
             return
@@ -255,7 +306,15 @@ def take(path: Path, build_id: str, request: str) -> None:
 
 
 def note_run(path: Path, build_id: str, run_id: Optional[str]) -> None:
-    """The run this build's session is working on, so a later end can be told from an older one."""
+    """The run this build's session is working on, so a later end can be told from an older one.
+
+    A run starting is the build working again: a build whose plan is filed says it is building,
+    and one that has filed none is still planning. A plan that waits keeps saying so, since the
+    reader's Approve is what opens the draft — a message sent while it waits only revises it.
+    """
+    build = _by_id(path, build_id)
+    if build is None:
+        return
     conn = _open(path)
     try:
         conn.execute(
@@ -263,6 +322,8 @@ def note_run(path: Path, build_id: str, run_id: Optional[str]) -> None:
         )
     finally:
         conn.close()
+    if not build.get("wait"):
+        _place(path, build_id, BUILDING if build.get("plan") else PLANNING)
 
 
 def plan(path: Path, build_id: str, args: Dict[str, Any]) -> bool:
@@ -293,11 +354,12 @@ def plan(path: Path, build_id: str, args: Dict[str, Any]) -> bool:
     if build is None:
         raise canvases.CanvasError("There is no such build.", 404)
     canvases.keep(path, build["canvas_id"], canvases.TESTS, json.dumps(checks))
+    phase = WAITING if wait else BUILDING
     conn = _open(path)
     try:
         conn.execute(
-            "UPDATE canvas_builds SET plan = ?, wait = ?, at = ? WHERE id = ?",
-            (changes, 1 if wait else 0, now_ms(), build_id),
+            "UPDATE canvas_builds SET plan = ?, wait = ?, phase = ?, activity = ?, at = ? WHERE id = ?",
+            (changes, 1 if wait else 0, phase, ACTIVITY[phase], now_ms(), build_id),
         )
     finally:
         conn.close()
@@ -322,8 +384,9 @@ def approve(path: Path, canvas_id: str) -> Optional[Dict[str, Any]]:
         # The wait is over, so the marker a push left behind is cleared with it: a plan filed to
         # wait again after this approval is a new wait and new news (step 12).
         conn.execute(
-            "UPDATE canvas_builds SET wait = 0, waiting = 0, at = ? WHERE id = ?",
-            (now_ms(), build["id"]),
+            "UPDATE canvas_builds SET wait = 0, waiting = 0, phase = ?, activity = ?, at = ? "
+            "WHERE id = ?",
+            (BUILDING, ACTIVITY[BUILDING], now_ms(), build["id"]),
         )
     finally:
         conn.close()
@@ -640,6 +703,7 @@ def _checked(
     read's bound — stamps ``unchecked`` and publishes, because a build never stalls on its checks.
     """
     number = build["rounds"] + 1
+    _place(path, build["id"], CHECKING)
     try:
         snapshot = _snapshot(path, build["canvas_id"])
     except canvases.CanvasError:
@@ -722,11 +786,15 @@ def publish(path: Path, home: Path, build_id: str, summary: str) -> Optional[Dic
     reading the transcript. A build that wrote nothing publishes nothing: there is no draft, so
     there is no version to make, and the build still ends — a request that needed no change is not
     a failure.
+
+    The record says ``publishing`` while the version is written, so a lane watching it draws what
+    is really happening, and the version it wrote rides the finished record as its number.
     """
     build = _by_id(path, build_id)
     if build is None:
         return None
     document = canvases.draft(path, build["canvas_id"])
+    _place(path, build_id, PUBLISHING)
     answer = None
     if document:
         answer = canvases.write(
@@ -740,7 +808,7 @@ def publish(path: Path, home: Path, build_id: str, summary: str) -> Optional[Dic
             },
         )
         canvases.drop_draft(path, build["canvas_id"])
-    _phase(path, build_id, PUBLISHED, summary or None)
+    _phase(path, build_id, PUBLISHED, summary or None, (answer or {}).get("version"))
     _note(path, build["canvas_id"])
     _pushed_published(path, build["canvas_id"], summary)
     return answer
@@ -764,12 +832,36 @@ def _by_id(path: Path, build_id: str) -> Optional[Dict[str, Any]]:
     return _build(row) if row else None
 
 
-def _phase(path: Path, build_id: str, phase: str, summary: Optional[str]) -> None:
+def _phase(
+    path: Path,
+    build_id: str,
+    phase: str,
+    summary: Optional[str],
+    version: Optional[int] = None,
+) -> None:
+    """Ends a build in ``phase``: its summary, the version it published, and no activity line.
+
+    A finished build has nothing going on, so the line a working build carries is cleared — its
+    summary is what the lane's row says instead.
+    """
     conn = _open(path)
     try:
         conn.execute(
-            "UPDATE canvas_builds SET phase = ?, summary = ?, at = ? WHERE id = ?",
-            (phase, summary, now_ms(), build_id),
+            "UPDATE canvas_builds SET phase = ?, summary = ?, version = COALESCE(?, version), "
+            "activity = NULL, at = ? WHERE id = ?",
+            (phase, summary, version, now_ms(), build_id),
+        )
+    finally:
+        conn.close()
+
+
+def _place(path: Path, build_id: str, phase: str) -> None:
+    """Stamps where a working build is and the one line the lane draws under it."""
+    conn = _open(path)
+    try:
+        conn.execute(
+            "UPDATE canvas_builds SET phase = ?, activity = ?, at = ? WHERE id = ?",
+            (phase, ACTIVITY.get(phase), now_ms(), build_id),
         )
     finally:
         conn.close()
@@ -800,6 +892,8 @@ def read(conn: sqlite3.Connection, canvas_id: str) -> Optional[Dict[str, Any]]:
         "phase": found["phase"],
         "requests": found["requests"],
     }
+    if found.get("activity"):
+        answer["activity"] = found["activity"]
     if found.get("plan"):
         answer["plan"] = found["plan"]
     if found.get("wait"):

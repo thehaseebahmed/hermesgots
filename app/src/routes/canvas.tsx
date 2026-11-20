@@ -61,6 +61,7 @@ import {
   undoCanvas,
   updateCanvas,
   useCanvas,
+  useCanvasBuilds,
   useCanvasEnabled,
   useCanvasRecord,
   useCanvases,
@@ -73,6 +74,7 @@ import { MAX_ATTACHMENTS } from "@/lib/attachment-caps"
 import { serverConfig } from "@/lib/connection"
 import { usePluginFeature, usePluginFeatureOn } from "@/lib/features"
 import { BuildPlanCard } from "@/components/chat/session-cards"
+import { CanvasBuildsLane, CanvasBuildsView } from "@/components/canvas-builds"
 import { HEADER_BUTTON, PAGE_BODY, COLUMN } from "@/lib/layout"
 import { cn } from "@/lib/utils"
 import type { CanvasPoint } from "@/lib/point-marker"
@@ -88,6 +90,9 @@ import { useNow } from "@/lib/threads"
  * The two Canvas routes: `/canvas` lists every bot's pages beside the prompt that makes one, and
  * `/canvas/:id` draws one page in a sandboxed frame (ADR 0114).
  */
+
+/** The phases a build never comes back from: the rows of the lane's history (`builds.py`). */
+const FINISHED = new Set(["published", "failed", "stopped"])
 
 /** How the tiles are laid out: a phone holds two, a tablet three, a desktop four. */
 const TILES = "grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4"
@@ -1075,6 +1080,15 @@ function CanvasChat({
 }) {
   const chatId = canvas?.chatId
   const chat = useLiveQuery(() => (chatId ? db.conversations.get(chatId) : undefined), [chatId])
+  // The lane draws builds, not the transcript (G9, G10): every build this canvas has had, newest
+  // first from the host and turned the right way up here — a build asked for earlier stands above
+  // the one asked for later. A canvas made before builds has none, and keeps its own chat's lane.
+  const builds = Boolean(canvas?.builds)
+  const records = useCanvasBuilds(canvas?.id ?? "", bot, builds)
+  const buildsShown = useMemo(
+    () => records.filter((row) => FINISHED.has(row.phase)).reverse(),
+    [records],
+  )
   const [usageOpen, setUsageOpen] = useState(false)
   const view = useCallback(() => setUsageOpen(true), [])
   const { summaries, usage, providerUsage, limit } = useChatSurface(chat, bot, view)
@@ -1085,31 +1099,34 @@ function CanvasChat({
   const waiting = canvas.build?.wait ? canvas.build : undefined
   const body = (
     <PreviewerProvider>
-      <ChatBody
-        chat={chat}
-        bot={bot}
-        summaries={summaries}
-        limit={limit}
-        {...(canvas.build ? { session: canvas.build.session } : {})}
-        queueSends={Boolean(canvas.builds)}
-        {...(waiting
-          ? {
-              composerPlace: (
-                <BuildPlanCard
-                  plan={waiting.plan ?? ""}
-                  onApprove={() => approveBuild(canvas.id)}
-                  onStop={() => stopBuild(canvas.id)}
-                />
-              ),
-            }
-          : {})}
-        afterSettled={() => {
-          // Every turn's end re-reads what this screen draws: a stream can be open and silent (a
-          // buffering proxy), so the event is never the only news. A read already in flight is joined
-          // and one more is owed, so the edit's event and this cost one read between them.
-          void reread(canvas.id).catch(() => undefined)
-        }}
-      />
+      <CanvasBuildsLane rows={buildsShown} open={canvas.build} bot={bot} chatId={canvas.chatId}>
+        <ChatBody
+          chat={chat}
+          bot={bot}
+          summaries={summaries}
+          limit={limit}
+          {...(canvas.build ? { session: canvas.build.session } : {})}
+          queueSends={Boolean(canvas.builds)}
+          {...(builds ? { view: CanvasBuildsView } : {})}
+          {...(waiting
+            ? {
+                composerPlace: (
+                  <BuildPlanCard
+                    plan={waiting.plan ?? ""}
+                    onApprove={() => approveBuild(canvas.id)}
+                    onStop={() => stopBuild(canvas.id)}
+                  />
+                ),
+              }
+            : {})}
+          afterSettled={() => {
+            // Every turn's end re-reads what this screen draws: a stream can be open and silent (a
+            // buffering proxy), so the event is never the only news. A read already in flight is joined
+            // and one more is owed, so the edit's event and this cost one read between them.
+            void reread(canvas.id).catch(() => undefined)
+          }}
+        />
+      </CanvasBuildsLane>
     </PreviewerProvider>
   )
   return (
