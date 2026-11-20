@@ -35,6 +35,13 @@ RUN install -d -m 755 /etc/apt/keyrings \
 # externally managed, hence --break-system-packages.
 RUN python3 -m pip install --no-cache-dir --break-system-packages cryptography
 
+# PlatformIO Core, for the Gots Charm firmware (hermesgots-charm, ESP32-S3 / M5Stack StopWatch).
+# Installed into the system interpreter for the same login-shell reason as above. The ESP32
+# toolchain and libraries are not baked in: PlatformIO fetches them per project on first
+# `pio run` into $PLATFORMIO_CORE_DIR, which a user can point at a persistent volume.
+RUN python3 -m pip install --no-cache-dir --break-system-packages platformio \
+ && pio --version
+
 # pnpm 10, installed the way CI installs it. Not corepack: neither package.json carries a
 # `packageManager` field for corepack to pin from, so it would resolve an unpinned version.
 RUN npm install -g --cache /tmp/npm-cache pnpm@10 \
@@ -78,7 +85,7 @@ RUN cd /tmp/warm/app && pnpm fetch \
 ARG BUILD_REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/thehaseebahmed/hermesgots" \
       org.opencontainers.image.title="Gots development container" \
-      org.opencontainers.image.description="Node 22, pnpm 10, Python 3.13, Chromium, the GitHub CLI and the Reticle verification CLI for developing the Gots app, plugin and website" \
+      org.opencontainers.image.description="Node 22, pnpm 10, Python 3.13, Chromium, PlatformIO, the GitHub CLI and the Reticle verification CLI for developing the Gots app, plugin and website" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.revision=$BUILD_REVISION
 
