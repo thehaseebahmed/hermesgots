@@ -11,6 +11,7 @@ import ts from "typescript"
 
 import { charmBotId, minuteOfDay } from "../src/lib/charm-alert.ts"
 import {
+  CHARM_MAX_ACTION_ID_BYTES,
   CHARM_MAX_ACTION_LABEL_BYTES,
   CHARM_MAX_BODY_BYTES,
   CHARM_MAX_TITLE_BYTES,
@@ -275,7 +276,14 @@ test("an alert carries an approval's two buttons, at every offset", () => {
 
 /** A charm holds one alert of two buttons, so a third is dropped rather than written. */
 test("a third button is dropped, and the two that stay keep their order", () => {
-  const alert = { reason: WIRE.reasons.APPROVAL, minute: 0, title: "", body: "", subject: "s", botId: "b" }
+  const alert = {
+    reason: WIRE.reasons.APPROVAL,
+    minute: 0,
+    title: "",
+    body: "",
+    subject: "s",
+    botId: "b",
+  }
   const pair = [
     { id: "0", label: "Allow once" },
     { id: "1", label: "Deny" },
@@ -357,6 +365,34 @@ test("a button with no id or no label is no button the charm could answer", () =
     alertMessage({ reason: 2, minute: 0, title: "", body: "", actions, subject: "s", botId: "b" })
   assert.throws(alert([{ id: "", label: "Allow once" }]), /id and a label/)
   assert.throws(alert([{ id: "0", label: "" }]), /id and a label/)
+})
+
+/**
+ * The longest alert a phone can build is still one write at the MTU its notifier asks for, which is
+ * why the write asks for a larger link at all: 430 bytes against the 514 a 517-byte MTU leaves
+ * after ATT's three header bytes.
+ */
+test("the longest alert fits one write", () => {
+  const frame = alertMessage({
+    reason: WIRE.reasons.APPROVAL,
+    minute: 1439,
+    title: "t".repeat(CHARM_MAX_TITLE_BYTES),
+    body: "b".repeat(CHARM_MAX_BODY_BYTES),
+    actions: [
+      {
+        id: "0".repeat(CHARM_MAX_ACTION_ID_BYTES),
+        label: "y".repeat(CHARM_MAX_ACTION_LABEL_BYTES),
+      },
+      {
+        id: "1".repeat(CHARM_MAX_ACTION_ID_BYTES),
+        label: "z".repeat(CHARM_MAX_ACTION_LABEL_BYTES),
+      },
+    ],
+    subject: "s".repeat(WIRE.fieldBytes),
+    botId: "a".repeat(WIRE.fieldBytes),
+  })
+  assert.equal(frame.length, 430, "the sum of every field at its bound")
+  assert.ok(frame.length <= 517 - 3, "one write carries it")
 })
 
 test("a title and a body may be none at all, and a subject and a bot id may not", () => {

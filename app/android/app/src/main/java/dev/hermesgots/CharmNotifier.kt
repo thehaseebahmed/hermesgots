@@ -48,7 +48,7 @@ object CharmNotifier {
     /** The descriptor a characteristic's notifications are switched on through, as Bluetooth numbers it. */
     private val NOTIFY = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
-    /** The MTU the charm asks for: an alert measures up to 335 bytes, more than a default link carries. */
+    /** The MTU the charm asks for: an alert measures up to 430 bytes, more than a default link carries. */
     private const val MTU = 517
 
     /** What a link carries when the stack takes no MTU request: ATT's default, less its three header bytes. */

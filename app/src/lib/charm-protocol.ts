@@ -300,8 +300,8 @@ export interface CharmAlert {
  * it with the phone away, so it carries the words the tray shows and the same two buttons, rather
  * than an id the reader would have to look up and a choice they would have to remember.
  *
- * The longest one is 335 bytes plus the buttons (16 and 32 bytes each, of two), which is why the
- * writer asks for a larger MTU before it writes one.
+ * The longest one is 430 bytes — 64 of title, 128 of body, two buttons of 16 and 32 bytes each, and
+ * 64 of subject and of bot id — which is why the writer asks for a larger MTU before it writes one.
  */
 export function alertMessage(alert: CharmAlert): Uint8Array {
   if (alert.reason !== CharmReasonByte.question && alert.reason !== CharmReasonByte.approval)
