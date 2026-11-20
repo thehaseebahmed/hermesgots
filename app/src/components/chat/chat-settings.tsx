@@ -166,9 +166,9 @@ export function ChatSettings({
   onDeleted?: () => void
   /**
    * Where to go once a chat, a room or a run is archived. An archive is a way out of the
-   * conversation, so the press closes this sheet and the screen takes the step back onto the bot's
-   * list — the move the bar's back control answers with (ADR 0154). An unarchive names none: a row
-   * coming back is a reason to stay, so the sheet stands.
+   * conversation, so once the write has answered the screen takes the step back onto the bot's
+   * list — the move the bar's back control answers with (ADR 0154) — and the sheet goes with the
+   * screen. An unarchive names none: a row coming back is a reason to stay, so the sheet stands.
    */
   onArchived?: () => void
 }) {
@@ -376,19 +376,28 @@ export function ChatSettings({
                   className="h-11 rounded-full"
                   onClick={() => {
                     const on = !chat.archived
-                    // The sheet stays interactive through its exit, so the archive press latches:
-                    // a second tap would step back twice, or read the refreshed row and quietly
-                    // unarchive what was put away.
+                    // The sheet stays interactive while the write is out, so the archive press
+                    // latches: one press is one write and one step back, and a second tap would
+                    // write the mark twice and step back twice.
                     if (on) {
                       if (pressed.current) return
                       pressed.current = true
                     }
                     // The mark is written at once, as it always was, and the host's flag is asked
-                    // for behind it (ADR 0159).
-                    void setArchived(chat.id, on).catch(quietly("Archiving a chat"))
-                    if (!on) return
-                    setSheetOpen(false)
-                    onArchived?.()
+                    // for behind it (ADR 0159); the step back waits for the write's answer, since
+                    // a row that was never put away is no way out of the conversation.
+                    void setArchived(chat.id, on)
+                      .catch(quietly("Archiving a chat"))
+                      .then((stood) => {
+                        if (!on) return
+                        if (!stood) {
+                          // A refused write is visible as the row simply not archived: the row is
+                          // back as it was, so the sheet stands and the press may be made again.
+                          pressed.current = false
+                          return
+                        }
+                        onArchived?.()
+                      })
                   }}
                 >
                   <ArchiveIcon data-icon="inline-start" />

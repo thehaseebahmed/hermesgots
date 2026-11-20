@@ -177,6 +177,37 @@ test("a host whose store can't hold the flag still leaves the chat archived here
   })
 })
 
+/**
+ * A host that refuses the flag (409) is the truth about the row: the mark written here first comes
+ * back off it, and the press takes no step — a row that was never put away is no way out of the
+ * conversation. The sheet stands on the chat it was opened from, the latch is cleared with the
+ * refusal, and the press may be made again.
+ */
+test("a host that refuses the flag leaves the chat where it was, and the press may be made again", async () => {
+  await seed("archive-refused-409", {}, ["chats", "session_archive"])
+  refuse = true
+  await mount(screen(), async () => {
+    await pressArchive()
+    await until(async () => posts.length === 1, "the archive was asked for")
+    await until(
+      async () => (await db.conversations.get(CHAT))?.archived === undefined,
+      "the row reverts to unarchived",
+    )
+    await settle()
+    assert.equal(
+      path(),
+      `/c/${CHAT}`,
+      "and the address is unchanged: the step back waits for the mark to stand",
+    )
+    assert.ok(sheet(), "the sheet stands on the chat it was opened from")
+    // The latch cleared with the refusal, so the press may be made again.
+    await click(archiveButton())
+    await until(async () => posts.length === 2, "a second press is accepted")
+    assert.deepEqual(posts[1].body, { archived: true }, "asking the same write again")
+    assert.ok(sheet(), "and the sheet still stands")
+  })
+})
+
 test("a room's archive is still the reader's own mark, and no session flag is written", async () => {
   const room = "room-archive"
   const bot = await seed("archive-room", {}, ["chats", "session_archive"])
