@@ -37,7 +37,7 @@ class CharmPlugin : Plugin() {
         call.resolve()
     }
 
-    /** A bot needs the reader — question, approval or finished run — with the subject a clear names. */
+    /** A bot needs the reader — a question or an approval — with the subject a clear names. */
     @PluginMethod
     fun alert(call: PluginCall) {
         val botId = call.getString("botId").orEmpty().trim()
@@ -47,7 +47,7 @@ class CharmPlugin : Plugin() {
         }
         val reason = call.getString("reason").orEmpty().trim()
         if (CharmNotifier.reasonOf(reason) == null) {
-            call.reject("A charm alert is a question, an approval or a finished run.")
+            call.reject("A charm alert is a question or an approval.")
             return
         }
         CharmNotifier.alert(context, botId, reason, call.getString("subject").orEmpty())

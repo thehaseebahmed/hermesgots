@@ -22,26 +22,26 @@ object CharmWire {
     /** `Clear`: this bot is settled, so the record keyed by the subject goes. */
     const val OP_CLEAR = 0x21
 
-    // The three moments a charm draws. Nothing else is forwarded to it: a failure, a room or a
-    // routine's news is not a bot's face waiting on you.
+    // The moments a charm draws: a question, and an approval a plan waiting is. Nothing else is
+    // forwarded to it — a finished run, a failure, a room or a routine's news is not a bot's face
+    // waiting on you.
     const val REASON_QUESTION = 1
     const val REASON_APPROVAL = 2
-    const val REASON_FINISHED = 3
 
     /** What a subject or a bot id may measure, as the charm's `kMaxSubjectLen` does. */
     const val FIELD_BYTES = 64
 
-    private val REASONS = setOf(REASON_QUESTION, REASON_APPROVAL, REASON_FINISHED)
+    private val REASONS = setOf(REASON_QUESTION, REASON_APPROVAL)
 
     /**
-     * An alert: which bot, and which of the three moments it is. The subject is what a later clear
+     * An alert: which bot, and which of the two moments it is. The subject is what a later clear
      * names, so it is the one field a record and its clear cannot spell differently.
      *
-     * A reason outside the three is refused here rather than written, since the charm would answer
+     * A reason outside the two is refused here rather than written, since the charm would answer
      * `BadMessage` and the reader would never learn a bot had asked anything.
      */
     fun alert(reason: Int, subject: String, botId: String): ByteArray {
-        require(reason in REASONS) { "A charm alert is a question, an approval or a finished run" }
+        require(reason in REASONS) { "A charm alert is a question or an approval" }
         return frame(OP_ALERT)
             .u8(reason)
             .field(subject)

@@ -304,9 +304,19 @@ test("the registry bounds the charm's bot and its reason", async () => {
   const { data } = message("t", "approval", "chat_input", "gots-1", kept.detail).message
   assert.equal(data.charm, CHARM, "and both ride the message to the phone")
   assert.equal(data.charm_reason, "approval")
-  for (const reason of ["question", "approval", "finished"]) {
+  for (const reason of ["question", "approval"]) {
     const { detail } = await relay(await setup(), { ...notice, charm: CHARM, charm_reason: reason })
-    assert.equal(detail.charmReason, reason, `"${reason}" is one of the three`)
+    assert.equal(detail.charmReason, reason, `"${reason}" is a moment the charm draws`)
+  }
+  // A finished run asks the reader for nothing, so the charm is never told about one.
+  {
+    const { status, detail } = await relay(await setup(), {
+      ...notice,
+      charm: CHARM,
+      charm_reason: "finished",
+    })
+    assert.equal(status, 200, "it costs the notice nothing")
+    assert.equal(detail.charmReason, undefined, "a finished run names no reason")
   }
   // The shape `link.bot_id` makes and nothing else: 16 lowercase hex characters.
   for (const charm of ["9f2c41aa0b7d5e6", "9f2c41aa0b7d5e633", "9F2C41AA0B7D5E63", "xyz", "  ", 42, ""]) {
@@ -318,9 +328,9 @@ test("the registry bounds the charm's bot and its reason", async () => {
     assert.equal(status, 200, "an id that isn't one costs the notice nothing")
     assert.equal(detail.charm, undefined, `${JSON.stringify(charm)} is no bot id`)
   }
-  for (const charm_reason of ["waiting", "Approval", "finished run", 1, "", null]) {
+  for (const charm_reason of ["waiting", "Approval", "finished", "finished run", 1, "", null]) {
     const { status, detail } = await relay(await setup(), { ...notice, charm: CHARM, charm_reason })
-    assert.equal(status, 200, "a reason that isn't one of the three costs the notice nothing")
+    assert.equal(status, 200, "a reason that isn't a moment costs the notice nothing")
     assert.equal(detail.charmReason, undefined, `${JSON.stringify(charm_reason)} is no reason`)
   }
   const absent = await relay(await setup(), notice)

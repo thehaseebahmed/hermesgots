@@ -414,8 +414,9 @@ export async function handleRegistry(req: Request, ctx: RegistryContext) {
       const at = momentOf(input?.at)
       if (at) detail.at = at
       // A bot's id on the charm is 16 lowercase hex characters or it names no bot there, and a
-      // reason is one of the three moments or the charm has nothing to draw: both were written by
-      // the plugin, so both are dropped rather than trusted, and neither costs the notice a 400.
+      // reason is one of the moments that needs an action or the charm has nothing to draw: both
+      // were written by the plugin, so both are dropped rather than trusted, and neither costs the
+      // notice a 400.
       const charm = charmId(input?.charm)
       if (charm) detail.charm = charm
       const charmReason = charmReasonOf(input?.charm_reason)

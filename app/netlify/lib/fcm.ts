@@ -74,11 +74,12 @@ export interface PushAction {
 }
 
 /**
- * The three moments a charm draws a bot for, as the plugin names them (`CHARM_REASONS` in
- * `plugin/push.py`): a question, an approval, or a finished run. Every other kind is news about
- * something that is not a bot's face on the charm, so it carries neither of the two fields below.
+ * The moments a charm draws a bot for, as the plugin names them (`CHARM_REASONS` in
+ * `plugin/push.py`): a question and an approval, a plan waiting being one. The charm is for an
+ * action, never for news — a finished run, a failure, a room's or a routine's news asks for nothing
+ * — so any other kind carries neither field below.
  */
-export const CHARM_REASONS = ["question", "approval", "finished"] as const
+export const CHARM_REASONS = ["question", "approval"] as const
 export type CharmReason = (typeof CHARM_REASONS)[number]
 
 /** What the plugin tells about a push beyond its kind (0.33): the chat's title, and what it says. */

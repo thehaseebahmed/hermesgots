@@ -36,7 +36,11 @@ const WIRE = {
   alert: 0x20,
   /** `Clear`: the bot is settled. */
   clear: 0x21,
-  reasons: { QUESTION: 1, APPROVAL: 2, FINISHED: 3 },
+  /**
+   * Only a moment that needs an action from the reader reaches the charm: a question and an
+   * approval, a plan waiting being one. A finished run asks for nothing, so it names no reason.
+   */
+  reasons: { QUESTION: 1, APPROVAL: 2 },
   /** `[reason u8][subjectLen u8][subject][idLen u8][botId]`, both strings UTF-8, 1 to 64 bytes. */
   alertPayload: [
     ["u8", "reason"],
@@ -87,6 +91,8 @@ test("the frames are the ones PROTOCOL.md documents", () => {
   for (const [name, value] of Object.entries(WIRE.reasons)) {
     assert.equal(constant(`REASON_${name}`), value, `${name} is ${value}`)
   }
+  // A finished run no longer taps the reader on the shoulder, so the charm has no byte for it.
+  assert.doesNotMatch(WIRE_SOURCE, /REASON_FINISHED/, "a finished run is no charm moment")
   assert.equal(constant("FIELD_BYTES"), WIRE.fieldBytes, "a subject or a bot id is 1 to 64 bytes")
   assert.deepEqual(payloadOf("alert"), WIRE.alertPayload, "an alert's payload, field by field")
   assert.deepEqual(payloadOf("clear"), WIRE.clearPayload, "a clear's payload, field by field")
@@ -142,6 +148,50 @@ test("the clear is asked from that one place and nowhere else", () => {
 const SERVICE_SOURCE = sourceOf(
   "android/app/src/main/java/dev/hermesgots/GotsMessagingService.kt",
 )
+
+/** A Kotlin function's body, its braces matched, so a test reads what the code writes. */
+function kotlinBody(source, name) {
+  const from = source.indexOf(`fun ${name}(`)
+  assert.ok(from >= 0, `${name} is declared`)
+  const open = source.indexOf("{", from)
+  let depth = 0
+  for (let at = open; at < source.length; at++) {
+    if (source[at] === "{") depth++
+    else if (source[at] === "}" && --depth === 0) return source.slice(open + 1, at)
+  }
+  assert.fail(`${name}'s body closes`)
+}
+
+/**
+ * The charm is for an action, never for news: a push that names no bot or no reason draws nothing
+ * there, so a finished run, a failure or a room's news leaves the face it holds exactly as it is.
+ */
+test("the phone writes nothing to the charm for news", () => {
+  const branch = kotlinBody(SERVICE_SOURCE, "charmAlert")
+  assert.match(branch, /notice\.charm \?: return/, "no bot, no write")
+  assert.match(branch, /notice\.charmReason \?: return/, "no reason, no write")
+  const wrote = branch.indexOf("CharmNotifier.alert")
+  assert.ok(wrote >= 0, "both fields in hand is the one write")
+  assert.ok(
+    wrote > branch.indexOf("notice.charmReason"),
+    "nothing is written before both are known",
+  )
+})
+
+/**
+ * The reasons a phone accepts are the wire's own: a finished run's word would reach no record, since
+ * `CharmWire` refuses it, and a name the wire gains has to be taken here too.
+ */
+test("the phone accepts the wire's reasons and no others", () => {
+  const notice = sourceOf("android/app/src/main/java/dev/hermesgots/Notice.kt")
+  const found = notice.match(/CHARM_REASONS = setOf\(([^)]*)\)/)
+  assert.ok(found, "Notice.kt names the reasons it accepts")
+  const names = [...found[1].matchAll(/"(\w+)"/g)].map((match) => match[1]).sort()
+  const wire = Object.keys(WIRE.reasons)
+    .map((name) => name.toLowerCase())
+    .sort()
+  assert.deepEqual(names, wire)
+})
 
 /**
  * A clear that arrives as a push: another device settled the subject, so this phone's tray and its

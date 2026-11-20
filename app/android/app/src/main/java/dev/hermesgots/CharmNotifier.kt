@@ -74,13 +74,12 @@ object CharmNotifier {
         prefs(context).getString(DEVICE, null)?.trim()?.takeIf { it.isNotEmpty() }
 
     /**
-     * The reason byte a name stands for, or null for anything that is not one of the three moments
-     * the charm draws. One rule, asked by both the plugin and a push.
+     * The reason byte a name stands for, or null for anything that is not one of the moments the
+     * charm draws. One rule, asked by both the plugin and a push.
      */
     fun reasonOf(name: String?): Int? = when (name) {
         "question" -> CharmWire.REASON_QUESTION
         "approval" -> CharmWire.REASON_APPROVAL
-        "finished" -> CharmWire.REASON_FINISHED
         else -> null
     }
 

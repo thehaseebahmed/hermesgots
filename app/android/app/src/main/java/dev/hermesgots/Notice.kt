@@ -36,7 +36,7 @@ data class Notice(
      * data's `bot` ([bundled]), which is the bot *character* — its face, and two bots can wear one.
      */
     val charm: String? = null,
-    /** Why that bot needs the reader: a question, an approval or a finished run, and nothing else. */
+    /** Why that bot needs the reader: a question or an approval, and nothing else. */
     val charmReason: String? = null,
 ) {
     /**
@@ -70,8 +70,8 @@ data class Notice(
         /** A bot's id on the charm, as `link.bot_id` mints it and `charmId` in `fcm.ts` bounds it. */
         private val CHARM = Regex("^[0-9a-f]{16}$")
 
-        /** The three moments a charm draws, the only reasons `fcm.ts` forwards (`CHARM_REASONS`). */
-        private val CHARM_REASONS = setOf("question", "approval", "finished")
+        /** The moments a charm draws, the only reasons `fcm.ts` forwards (`CHARM_REASONS`). */
+        private val CHARM_REASONS = setOf("question", "approval")
 
         /**
          * The notice a message carries, or null for one with nothing to say: the filter the service is

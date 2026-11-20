@@ -730,15 +730,20 @@ class OnScreen(unittest.TestCase):
 class TheCharm(unittest.TestCase):
     """Which bot a push is for, and one word for why: the charm's own two fields.
 
-    The charm holds one record — a bot's face and one of three reasons — so the relay names this
-    profile's registry bot id and the reason for the three moments a bot is waiting on the reader.
-    A plan waiting is an approval; every other kind is news about something that is not a bot's face
-    on the charm, and carrying a reason it has no word for would make the charm draw a lie. A clear
-    names its subject and nothing else: a clear is not a moment, it is the end of one.
+    The charm holds one record — a bot's face and one of two reasons — so the relay names this
+    profile's registry bot id and the reason for the moments a bot is waiting on the reader, a
+    question and an approval with a plan waiting being one. A finished run asks the reader for
+    nothing, so it is news the tray carries and the charm stays as it was; every other kind is news
+    about something that is not a bot's face there. A clear names its subject and nothing else: a
+    clear is not a moment, it is the end of one.
     """
 
     PROFILE = "work"
-    REASONS = ("finished", "approval", "question")
+    REASONS = ("approval", "question")
+    # The kinds that reach the charm: the ones that wait on the reader for an action. A plan waiting
+    # is an approval. Nothing else does — not a finished run, not a failure, not a room's, a
+    # research project's, a routine's or a meeting's news. The charm is for an action, never for news.
+    ACTIONABLE = frozenset({"approval", "plan", "question"})
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -775,35 +780,43 @@ class TheCharm(unittest.TestCase):
         self.state["botId"] = link.bot_id(self.state, self.PROFILE)
         self.assertEqual(self.relayed("plan")["charm_reason"], "approval")
 
-    def test_a_finished_run_is_finished(self):
+    def test_a_finished_run_names_no_moment(self):
         self.state["botId"] = link.bot_id(self.state, self.PROFILE)
-        self.assertEqual(self.relayed("run_done")["charm_reason"], "finished")
+        body = self.relayed("run_done")
+        self.assertNotIn("charm", body, "a finished run asks the reader for nothing")
+        self.assertNotIn("charm_reason", body, "so the charm stays on its carousel")
 
-    def test_only_the_three_moments_are_a_bot_on_the_charm(self):
+    def test_the_kinds_that_reach_the_charm_are_exactly_the_actionable_ones(self):
         self.state["botId"] = link.bot_id(self.state, self.PROFILE)
-        moments = {
-            "approval": "approval",
-            "plan": "approval",
-            "question": "question",
-            "run_done": "finished",
-        }
+        carried = {kind for kind in push.KINDS if "charm" in self.relayed(kind)}
+        self.assertEqual(
+            carried,
+            self.ACTIONABLE,
+            "a question and an approval, and nothing else: the charm is for an action, never for news",
+        )
+        # Both fields or neither: an id with no reason draws nothing, and a reason with no bot
+        # belongs to no record the charm holds.
         for kind in push.KINDS:
             body = self.relayed(kind)
             with self.subTest(kind=kind):
-                if kind in moments:
-                    self.assertEqual(body["charm"], self.state["botId"])
-                    self.assertEqual(body["charm_reason"], moments[kind])
-                else:
-                    self.assertNotIn("charm", body, "not a bot's face on the charm")
-                    self.assertNotIn("charm_reason", body, "not a bot's face on the charm")
+                self.assertEqual(
+                    "charm" in body,
+                    "charm_reason" in body,
+                    "a moment names both fields",
+                )
+        # And the word it draws is the reason, never the kind's own name.
+        self.assertEqual(
+            {kind: self.relayed(kind)["charm_reason"] for kind in carried},
+            {"question": "question", "approval": "approval", "plan": "approval"},
+        )
 
-    def test_a_reason_is_only_ever_one_of_the_three(self):
+    def test_a_reason_is_only_ever_one_of_the_two(self):
         self.state["botId"] = link.bot_id(self.state, self.PROFILE)
         for kind in push.KINDS:
             reason = self.relayed(kind).get("charm_reason")
             if reason is not None:
                 with self.subTest(kind=kind):
-                    self.assertIn(reason, self.REASONS, "the charm draws one of three words")
+                    self.assertIn(reason, self.REASONS, "the charm draws one of two words")
 
     def test_a_link_that_holds_no_bot_id_names_none(self):
         body = self.relayed("question")

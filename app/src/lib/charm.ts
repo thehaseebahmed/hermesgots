@@ -50,8 +50,11 @@ const KEY = "gots.charm"
 /** The native sender's registration name, as `MainActivity` registers it. */
 const CHARM_PLUGIN = "Charm"
 
-/** The three moments a charm draws, as `docs/PROTOCOL.md` names them and the plugin reads them. */
-export type CharmReason = "question" | "approval" | "finished"
+/**
+ * The moments a charm draws, as `docs/PROTOCOL.md` names them and the plugin reads them: only the
+ * ones that need an action from the reader. A finished run asks for nothing, so it draws no alert.
+ */
+export type CharmReason = "question" | "approval"
 
 interface CharmBridge {
   save(options: { deviceId: string }): Promise<void>
