@@ -58,7 +58,7 @@ export function useChatLead({
 }) {
   const layout = useChatLayout()
   const pane = useBotChatsPane()
-  const { up } = useNav()
+  const { up, root } = useNav()
   // The label this device's lists give that bot, so a bot whose namesake answers elsewhere is told
   // apart in this control too (ADR 0149). Read off the one map every list draws from rather than from
   // the bot's own row: the screens this leads already hold that row, and a second read of it would
@@ -77,6 +77,14 @@ export function useChatLead({
   const ontoList = useCallback(() => {
     if (list) up(list)
   }, [list, up])
+  /**
+   * Steps back onto the list, or home where no list holds this screen — the move a press that
+   * leaves a conversation answers with.
+   */
+  const stepBack = useCallback(() => {
+    if (list) up(list)
+    else root("/")
+  }, [list, up, root])
   // `useNav` hands back a fresh move whenever the address does, while the guard must not re-register
   // with it: the guard reads the move it was made with.
   const step = useRef(ontoList)
@@ -112,6 +120,8 @@ export function useChatLead({
     list,
     /** Steps back onto that list, which is what a room's and a run's control answers with. */
     ontoList,
+    /** Steps back onto the list, or home where none holds this screen: what a leaving press takes. */
+    stepBack,
     /**
      * The bar's leading control: the way back onto that list where it is not beside this screen, or
      * to Code for a session under it.

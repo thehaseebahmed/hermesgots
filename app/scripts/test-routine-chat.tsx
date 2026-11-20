@@ -227,6 +227,36 @@ test("the way back is the bot's list, not the chat the run was opened from", asy
   })
 })
 
+/**
+ * Archiving a run is the same move it is on a chat and in a room: the mark is written at once, the
+ * sheet closes and the screen takes the step back onto the bot's list — the move the bar's back
+ * control answers with (ADR 0154).
+ */
+test("the run's Archive puts it away and steps back onto the list", async () => {
+  ownRun("archive")
+  host()
+  await seed()
+  await mount(screen(), async () => {
+    await until(async () => drew(ANSWER), "the run's own transcript")
+    assert.equal(path(), `/c/${rowOf()}`, "the run's own screen, until the press")
+    await click(find("[data-chat-settings-open]"))
+    await until(async () => Boolean(findText("[role=dialog]", "Edit chat")), "the run's sheet")
+    await until(async () => Boolean(find("[data-chat-archive]")), "its Archive control")
+    await click(find("[data-chat-archive]"))
+
+    await until(
+      async () => (await db.conversations.get(rowOf()))?.archived === true,
+      "the row archived on this device",
+    )
+    assert.equal(missing("[data-chat-archive]"), true, "the sheet closed with the press")
+    absent("[role=dialog]", "and nothing of the sheet is left drawn")
+    await until(
+      async () => path() === `/b/${bot.id}/sidechats`,
+      "the bot's list, the step the bar's back control takes",
+    )
+  })
+})
+
 test("a run the host no longer holds says so, rather than spinning", async () => {
   ownRun("gone")
   host({ rows: null })

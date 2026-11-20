@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   ArchiveIcon,
   ArchiveXIcon,
@@ -134,6 +134,7 @@ export function ChatSettings({
   open,
   onOpenChange,
   onDeleted,
+  onArchived,
   code,
 }: {
   chat: Conversation
@@ -163,6 +164,13 @@ export function ChatSettings({
    * screen that holds it already steps off a room it no longer holds (`room-chat.tsx`).
    */
   onDeleted?: () => void
+  /**
+   * Where to go once a chat, a room or a run is archived. An archive is a way out of the
+   * conversation, so once the write has answered the screen takes the step back onto the bot's
+   * list — the move the bar's back control answers with (ADR 0154) — and the sheet goes with the
+   * screen. An unarchive names none: a row coming back is a reason to stay, so the sheet stands.
+   */
+  onArchived?: () => void
 }) {
   const room = Boolean(chat.room)
   // A bot's Main is the host's record with the host's title: it may not be renamed, pinned, archived or
@@ -175,6 +183,12 @@ export function ChatSettings({
   const [deleting, setDeleting] = useState(false)
   const [discarding, setDiscarding] = useState(false)
   const [disbanding, setDisbanding] = useState(false)
+  /** Whether this sheet's Archive has been pressed, while the sheet stands through its exit. */
+  const pressed = useRef(false)
+  // A sheet opened again asks its own question: the latch held the exit window, not the record.
+  useEffect(() => {
+    if (open) pressed.current = false
+  }, [open])
   /** Asks the host to close the session, and moves on: the close runs there (ADR 0080). */
   const closeSession = () => {
     if (!code) return
@@ -360,7 +374,31 @@ export function ChatSettings({
                   variant="outline"
                   data-chat-archive
                   className="h-11 rounded-full"
-                  onClick={() => void setArchived(chat.id, !chat.archived)}
+                  onClick={() => {
+                    const on = !chat.archived
+                    // The sheet stays interactive while the write is out, so the archive press
+                    // latches: one press is one write and one step back, and a second tap would
+                    // write the mark twice and step back twice.
+                    if (on) {
+                      if (pressed.current) return
+                      pressed.current = true
+                    }
+                    // The mark is written at once, as it always was, and the host's flag is asked
+                    // for behind it (ADR 0159); the step back waits for the write's answer, since
+                    // a row that was never put away is no way out of the conversation.
+                    void setArchived(chat.id, on)
+                      .catch(quietly("Archiving a chat"))
+                      .then((stood) => {
+                        if (!on) return
+                        if (!stood) {
+                          // A refused write is visible as the row simply not archived: the row is
+                          // back as it was, so the sheet stands and the press may be made again.
+                          pressed.current = false
+                          return
+                        }
+                        onArchived?.()
+                      })
+                  }}
                 >
                   <ArchiveIcon data-icon="inline-start" />
                   {chat.archived ? "Unarchive" : "Archive"}

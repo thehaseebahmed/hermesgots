@@ -30,6 +30,7 @@ import {
   leave,
   missing,
   mount,
+  path,
   seedSettings,
   settle,
   shutSheet,
@@ -139,10 +140,11 @@ const screen = () => (
     <Path />
     <Routes>
       <Route path="/c/:id" element={<RoomChat id={ROOM} slot="route" />} />
+      {/* The list an archive steps back onto: the bot's own, at the address the sides layout gives it. */}
+      <Route path="/b/:botId/sidechats" element={<p data-list />} />
     </Routes>
   </MemoryRouter>
 )
-const where = () => find("[data-path]")?.textContent
 
 /** The room's name, as the one press its bar answers with. */
 const titlePress = () => find("[data-chat-settings-open]")
@@ -228,6 +230,29 @@ test("a Host that cannot write rooms draws no Name and no Disband, but draws Pin
   })
 })
 
+test("the room's Archive puts it away and steps back onto the list", async () => {
+  const bot = await fresh(OPEN)
+  await mount(screen(), async () => {
+    await openSheet()
+    await until(async () => Boolean(find("[data-chat-archive]")), "the Archive control")
+    assert.equal(path(), `/c/${ROOM}`, "the room's own screen, until the press")
+    await click(find("[data-chat-archive]"))
+
+    // A room's archive is the reader's own mark on this device, never a write to the Host: the row
+    // keeps its place and only the Archived pill hides it (ADR 0159).
+    await until(
+      async () => (await db.conversations.get(ROOM))?.archived === true,
+      "the row archived on this device",
+    )
+    assert.equal(posted.length, 0, "and nothing posted: the mark is this device's own")
+    assert.equal(missing("[data-chat-archive]"), true, "the sheet closed with the press")
+    await until(
+      async () => path() === `/b/${bot.id}/sidechats`,
+      "the bot's list, the step the bar's back control takes",
+    )
+  })
+})
+
 test("disband asks first, and the room's row goes as the Host's deletion", async () => {
   await fresh(OPEN)
   await mount(screen(), async () => {
@@ -241,7 +266,7 @@ test("disband asks first, and the room's row goes as the Host's deletion", async
     const sent = posted.find((one) => one.path.endsWith("/disband"))
     assert.equal(typeof sent?.body.cancel_id, "string", "the stop carries an id of its own")
     await until(async () => (await db.conversations.get(ROOM)) === undefined, "the row to go")
-    await until(async () => where() === "/", "the screen to leave for the list")
+    await until(async () => path() === "/", "the screen to leave for the list")
   })
 })
 
@@ -251,7 +276,7 @@ test("a room open on a device leaves when its row goes", async () => {
     await until(async () => text().includes("Planning"), "the room")
     // A disband on another device reaches this one as the record's deletion: the row goes.
     await db.conversations.delete(ROOM)
-    await until(async () => where() === "/", "the screen to leave rather than draw a gone chat")
+    await until(async () => path() === "/", "the screen to leave rather than draw a gone chat")
   })
 })
 
@@ -324,6 +349,6 @@ test("a room whose row goes leaves its own address for the list", async () => {
   await mount(page(), async () => {
     await until(async () => text().includes("Planning"), "the room's screen")
     await db.conversations.delete(ROOM)
-    await until(async () => where() === "/", "the room's screen to leave for the list")
+    await until(async () => path() === "/", "the room's screen to leave for the list")
   })
 })

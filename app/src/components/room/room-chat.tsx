@@ -259,6 +259,9 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
           answerer={answerer}
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
+          // An archive keeps the row, so the effect above never fires: the step back is the
+          // press's own.
+          onArchived={lead.stepBack}
         />
       )}
     </div>

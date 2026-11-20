@@ -119,6 +119,8 @@ const screen = (entry: string, also?: { to: string }) => (
     {also && <SwitchTo to={also.to} />}
     <Routes>
       <Route path="c/:id" element={<ChatPage slot="route" />} />
+      {/* The flat layout's list is the bot's own address, so a chat's way back lands there. */}
+      <Route path="b/:profileId" element={<p data-list />} />
     </Routes>
   </MemoryRouter>
 )
@@ -464,6 +466,12 @@ test("a flat-layout chat is offered Archive, since that layout has the pill too"
     await until(
       async () => (await db.conversations.get("flat-kept"))?.archived === true,
       "the mark it wrote",
+    )
+    // The press leaves the conversation the same way on either layout: the flat layout's list is
+    // the bot's own address, so that is where the step back lands.
+    await until(
+      async () => path() === `/b/${bot.id}`,
+      "the bot's own address, the flat layout's list, the step the bar's back control takes",
     )
   })
 })

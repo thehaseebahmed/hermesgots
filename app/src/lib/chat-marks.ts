@@ -72,8 +72,12 @@ export async function setPinned(id: string, on: boolean): Promise<boolean> {
  * A host that **refuses** the write — a 409, the one answer that says this chat may not be marked
  * so — takes the mark back off the row: the refusal is the truth, and a mark left behind it is a row
  * out of every list that no surface can bring back.
+ *
+ * The answer is whether the mark stood: `false` where the write was refused — Main's, a Host's 409,
+ * or a row this device no longer holds, so nothing was written — which is what lets a caller that
+ * steps the reader off the conversation hold the step for a row that was never put away.
  */
-export async function setArchived(id: string, on: boolean) {
+export async function setArchived(id: string, on: boolean): Promise<boolean> {
   const now = Date.now()
   const marks = on
     ? { archived: true, pinned: undefined, pinnedAt: undefined }
@@ -84,11 +88,17 @@ export async function setArchived(id: string, on: boolean) {
   // **unarchive** is always allowed, though: a device that put a Main away before the plugin's flag
   // reached it would otherwise be stranded under the Archived pill, with no list that could bring
   // the row back.
-  if (row?.main && on) return
+  if (row?.main && on) return false
   const room = row?.room
-  if (row && room) return markRoom(row, room, marks, now)
+  // A room's mark is this device's own and is never refused: the row is written, and the pass that
+  // carries it is fired behind the press.
+  if (row && room) {
+    await markRoom(row, room, marks, now)
+    return true
+  }
   await updateConversation(id, marks)
-  if (!row) return
+  // A row this device no longer holds: nothing was written, so no mark stands.
+  if (!row) return false
   if (await writeSessionArchive(row, on)) {
     // Refused: the row goes back to the marks it carried, in one write, so the switch the press
     // turned reads what every surface reads.
@@ -97,7 +107,9 @@ export async function setArchived(id: string, on: boolean) {
       pinned: row.pinned,
       pinnedAt: row.pinnedAt,
     })
+    return false
   }
+  return true
 }
 
 /**

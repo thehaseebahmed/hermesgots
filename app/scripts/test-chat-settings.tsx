@@ -80,17 +80,11 @@ async function seedPins(count: number, patch: Partial<Conversation> = {}) {
 
 const screen = (id = CHAT) => (
   <MemoryRouter initialEntries={[`/c/${id}`]}>
+    <Path />
     <Routes>
-      <Route
-        path="/c/:id"
-        element={
-          <>
-            <ChatPage slot="route" />
-            <Path />
-          </>
-        }
-      />
-      <Route path="/code" element={<Path />} />
+      <Route path="/c/:id" element={<ChatPage slot="route" />} />
+      {/* The step an archive takes: the bot's list, whose address is the bot's own. */}
+      <Route path="/b/:botId/sidechats" element={<p data-list />} />
       <Route path="/" element={<Path />} />
     </Routes>
   </MemoryRouter>
@@ -214,10 +208,12 @@ test("the sheet's pin writes the flag and its clock, and clears both when turned
 })
 
 /**
- * A pin behind the Archived pill could not be turned off from any list, so archiving takes it in the
- * same write — and the control says what pressing it again would do.
+ * Archiving is a way out of the conversation: the mark is written at once, the sheet closes and the
+ * screen takes the step back onto the bot's list — the move the bar's back control answers with
+ * (ADR 0154). A pin behind the Archived pill could not be turned off from any list, so archiving
+ * takes it in the same write.
  */
-test("Archive takes the pin with it, and Unarchive clears the archive", async () => {
+test("Archive closes the sheet and steps back onto the list", async () => {
   await seed({ pinned: true, pinnedAt: 7, updatedAt: 11 })
   globalThis.fetch = async () => json({})
   await mount(screen(), async () => {
@@ -225,21 +221,21 @@ test("Archive takes the pin with it, and Unarchive clears the archive", async ()
     await click(titlePress())
     await until(async () => Boolean(sheet()), "the chat's settings")
     await until(async () => Boolean(archiveButton()), "the Archive control, above Delete")
-    assert.equal(archiveButton()?.textContent, "Archive", "a chat of the list is archived, not unarchived")
+    assert.equal(
+      archiveButton()?.textContent,
+      "Archive",
+      "a chat of the list is archived, not unarchived",
+    )
+    assert.equal(path(), `/c/${CHAT}`, "the chat's own screen, until the press")
     await click(archiveButton())
     await until(async () => {
       const row = await db.conversations.get(CHAT)
       return row?.archived === true && row.pinned === undefined && row.pinnedAt === undefined
-    }, "archived, with no pin left stranded behind the pill")
-    await settle()
+    }, "archived at once, with no pin left stranded behind the pill")
+    await until(async () => missing("[data-chat-archive]"), "the sheet closed with the press")
     await until(
-      async () => archiveButton()?.textContent === "Unarchive",
-      "the control naming what it now does",
-    )
-    await click(archiveButton())
-    await until(
-      async () => (await db.conversations.get(CHAT))?.archived === undefined,
-      "unarchived again",
+      async () => path() === `/b/${bot.id}/sidechats`,
+      "the bot's list, the step the bar's back control takes",
     )
   })
 })
