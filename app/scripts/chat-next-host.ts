@@ -240,6 +240,8 @@ export function fakeHost(
   const saved: { name: string; path: string; size: number }[] = []
   /** The attachment route as a test can drive it: how many uploads came, and a gate to hold them. */
   const saving: { asked: number; gate?: Promise<void> } = { asked: 0 }
+  /** The plugin's queue route as a test can drive it: a gate to hold the message it is asked to keep. */
+  const queueing: { gate?: Promise<void> } = {}
   /** Pages the host holds back until released, and pages it fails with a 500, by offset. */
   const gates = new Map<number, { wait: Promise<void>; release: () => void }>()
   const failing = new Set<number>()
@@ -719,7 +721,12 @@ export function fakeHost(
     }
     // The plugin's attachment route: the file is saved under the session's own folder, and the path
     // it answers is what the message names it by.
-    if (plugin && uploads && path === `/api/plugins/gots/sessions/${session}/attachments` && init?.method === "POST") {
+    if (
+      plugin &&
+      uploads &&
+      path === `/api/plugins/gots/sessions/${session}/attachments` &&
+      init?.method === "POST"
+    ) {
       const name = url.searchParams.get("name") ?? "file"
       if (!(init.body instanceof Blob))
         return reply({ error: { message: "an attachment needs its bytes" } }, 400)
@@ -778,6 +785,7 @@ export function fakeHost(
     const queueRoute = `/api/plugins/gots/sessions/${session}/queue`
     if (plugin && path === queueRoute && init?.method === "POST") {
       const body = JSON.parse(String(init.body))
+      await queueing.gate
       const item = {
         id: `q${++queued}`,
         text: body.text,
@@ -1128,6 +1136,21 @@ export function fakeHost(
   }
 
   /**
+   * Holds the plugin's queue route: the message it is asked to keep waits, as it does on a host busy
+   * in a tool call, until `release`.
+   */
+  function holdQueue() {
+    let release = () => {}
+    queueing.gate = new Promise<void>((resolve) => (release = resolve))
+    return {
+      release: () => {
+        release()
+        queueing.gate = undefined
+      },
+    }
+  }
+
+  /**
    * The children a cooperative stop asked for reach their boundary and end, closed the way core
    * closes a stopped child: `agent_close` on its own row, whatever the turn went on to do.
    */
@@ -1148,6 +1171,7 @@ export function fakeHost(
     saved,
     saving,
     holdUploads,
+    holdQueue,
     hold,
     holdRuns,
     fail,

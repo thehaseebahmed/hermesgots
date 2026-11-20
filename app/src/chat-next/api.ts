@@ -370,6 +370,35 @@ export interface Queued {
   files: QueuedFile[]
   /** Why the plugin couldn't start it; it waits until it's sent again. */
   error?: string
+  /**
+   * The row this device drew at the press, which the plugin has not answered yet. Nothing of the
+   * plugin's is behind it, so nothing can act on it: Remove and Send now belong to an item the plugin
+   * holds (`queue-item`), and the echo goes when that item lands.
+   */
+  pending?: boolean
+}
+
+/**
+ * One queued message as the plugin lists it, or as its answer to a post names it. One reader for
+ * both, since a row drawn from the answer and the same row drawn from a read must look the same.
+ */
+export function queuedItem(raw: {
+  id?: unknown
+  text?: unknown
+  attachments?: { name?: unknown; type?: unknown; size?: unknown; path?: unknown }[]
+  error?: unknown
+}): Queued {
+  return {
+    id: String(raw.id),
+    text: typeof raw.text === "string" ? raw.text : "",
+    files: (Array.isArray(raw.attachments) ? raw.attachments : []).map((file) => ({
+      name: String(file?.name ?? "file"),
+      type: String(file?.type ?? ""),
+      size: Number(file?.size ?? 0),
+      ...(typeof file?.path === "string" && file.path ? { path: file.path } : {}),
+    })),
+    ...(typeof raw.error === "string" && raw.error ? { error: raw.error } : {}),
+  }
 }
 
 /**
@@ -402,17 +431,7 @@ export async function readQueue(
     if (!Array.isArray(body.items)) return undefined
     return {
       paused: Boolean(body.paused),
-      items: body.items.map((item) => ({
-        id: String(item.id),
-        text: typeof item.text === "string" ? item.text : "",
-        files: (Array.isArray(item.attachments) ? item.attachments : []).map((file) => ({
-          name: String(file?.name ?? "file"),
-          type: String(file?.type ?? ""),
-          size: Number(file?.size ?? 0),
-          ...(typeof file?.path === "string" && file.path ? { path: file.path } : {}),
-        })),
-        ...(typeof item.error === "string" && item.error ? { error: item.error } : {}),
-      })),
+      items: body.items.map((item) => queuedItem(item)),
     }
   } catch {
     return undefined

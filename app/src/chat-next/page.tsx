@@ -623,14 +623,23 @@ function PlainView({
             points={held.points}
           >
             <span data-queued-state>{item.error ?? "Queued"}</span>
-            {queue.paused || item.error ? (
-              <button type="button" data-send-queued onClick={() => queue.act(item.id, "send")}>
-                Send now
-              </button>
-            ) : null}
-            <button type="button" data-remove-queued onClick={() => queue.act(item.id, "remove")}>
-              Remove
-            </button>
+            {/* A row the plugin has not answered yet has no item to act on: the marks wait for it. */}
+            {!item.pending && (
+              <>
+                {queue.paused || item.error ? (
+                  <button type="button" data-send-queued onClick={() => queue.act(item.id, "send")}>
+                    Send now
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  data-remove-queued
+                  onClick={() => queue.act(item.id, "remove")}
+                >
+                  Remove
+                </button>
+              </>
+            )}
           </HeldRow>
         )
       })}
@@ -730,8 +739,9 @@ interface ThreadOptions {
   /** Builds a turn as the app sends one; without it, the message is posted as plain text. */
   /** `at` is when the reader sent it, which a thread's first turn is stamped with. */
   prepareTurn?: (text: string, attachments: Attachment[], at?: number) => Promise<PreparedTurn>
-  /** Queues a message on the plugin, as the app builds one; without it, nothing can be queued. */
-  queueTurn?: (text: string, attachments: Attachment[], on?: string) => Promise<void>
+  /** Queues a message on the plugin, as the app builds one; without it, nothing can be queued. It
+   * answers the item the plugin took, as the queue route draws it. */
+  queueTurn?: (text: string, attachments: Attachment[], on?: string) => Promise<Queued | undefined>
   /**
    * Whether every send of this thread is queued on the plugin rather than posted as a run: a
    * canvas whose requests are builds (ADR 0170) sends that way, because the queue is what hands a
@@ -1204,6 +1214,12 @@ export function ChatNextThread({
   // prompt it has not been told about reports nothing running, and the page then slows to its idle
   // pace — a chat that only catches up when it is opened again.
   const [live, setLive] = useState(false)
+  /**
+   * The messages this page has sent into the plugin's queue and not yet had an item for, drawn at the
+   * end of the thread where they will wait. They live here rather than in the thread's state because
+   * they are this press's alone: a reload makes no post, so there is nothing to draw again (ADR 0173).
+   */
+  const [echoed, setEchoed] = useState<Queued[]>([])
 
   const busy =
     live || following || working || owed || starting || inQueue > 0 || handedOff || hostBusy
@@ -1739,10 +1755,26 @@ export function ChatNextThread({
 
   async function queueMessage(text: string, attachments: Attachment[]) {
     if (!queueTurn) throw new Error("This bot can't hold a message until the reply is over.")
-    // The session the item is filed under is the one this thread is drawn from: the canvas chat's
-    // own, or the build's where one is running, which is where the queue has to hold it.
-    await queueTurn(text, attachments, session ?? undefined)
-    void catchUp()
+    // The row stands at the press, as a send's and a steer's do (ADR 0071, ADR 0163): the plugin is
+    // one round trip away at best and answers late while the host is busy in a tool call, and the
+    // composer has already cleared. Until it answers, the row is this device's own and carries no
+    // action, since there is no item of the plugin's behind it.
+    const send = randomId()
+    setEchoed((rows) => [
+      ...rows,
+      { id: send, text, files: attachments.map(sentFileOf), pending: true },
+    ])
+    try {
+      // The session the item is filed under is the one this thread is drawn from: the canvas chat's
+      // own, or the build's where one is running, which is where the queue has to hold it.
+      const item = await queueTurn(text, attachments, session ?? undefined)
+      if (item) dispatch({ type: "queue-item", item })
+      void catchUp()
+    } finally {
+      // Whatever the answer was, the row is the plugin's own from here or it is gone: a refusal hands
+      // the words back to the field, where the composer draws its own notice.
+      setEchoed((rows) => rows.filter((row) => row.id !== send))
+    }
   }
 
   async function steerMessage(text: string, attachments: Attachment[]) {
@@ -2003,8 +2035,12 @@ export function ChatNextThread({
             : undefined
         }
         queue={
-          held?.queue?.items.length
-            ? { items: held.queue.items, paused: held.queue.paused, act: onQueued }
+          held?.queue?.items.length || echoed.length
+            ? {
+                items: [...(held?.queue?.items ?? []), ...echoed],
+                paused: held?.queue?.paused ?? false,
+                act: onQueued,
+              }
             : undefined
         }
         unsent={unsentView}

@@ -59,6 +59,7 @@ import {
   refreshPrs,
   setSessionMode,
 } from "@/lib/workspace"
+import { queuedItem } from "./api"
 import type { ComposerControls } from "./page"
 import { prepareTurn, queueTurn, steerTurn } from "./turn"
 import type { BlankView } from "./app-view"
@@ -162,9 +163,12 @@ export function ChatBody({
           queueSends={queueSends}
           View={view}
           prepareTurn={(text, attachments, at) => prepareTurn(id, text, attachments, at)}
-          queueTurn={async (text, attachments, on) =>
-            void (await queueTurn(id, text, attachments, on))
-          }
+          queueTurn={async (text, attachments, on) => {
+            // The item the plugin took, as the queue route draws it, so the thread's row is the
+            // plugin's own the moment the answer lands (ADR 0173).
+            const { item } = await queueTurn(id, text, attachments, on)
+            return queuedItem(item)
+          }}
           steerTurn={(text, attachments) => steerTurn(id, text, attachments)}
           // What the plugin holds beside the transcript — the title, the context, the todos, a
           // session's workspace, pull requests and library — read as every chat reads it, and then
