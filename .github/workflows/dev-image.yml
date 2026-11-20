@@ -138,13 +138,16 @@ jobs:
         run: |
           docker run --rm "${{ steps.subject.outputs.tag }}" bash -lc '
             set -e
-            for tool in gh pnpm python3 playwright reticle pio; do
+            for tool in gh pnpm python3 playwright reticle pio java sdkmanager adb; do
               command -v "$tool" > /dev/null || { echo "missing from PATH: $tool"; exit 1; }
             done
             gh --version | head -1
             pnpm --version
             python3 -c "import cryptography"
             pio --version
+            java -version
+            test -d "$ANDROID_HOME/platforms/android-36" || { echo "missing: Android platform 36"; exit 1; }
+            sdkmanager --list_installed
           '
 
       # The app's gates, the plugin's tests and the website's build, run inside the image against the
@@ -156,6 +159,21 @@ jobs:
         run: |
           docker run --rm -v "$PWD:/workspace" -w /workspace -e ASTRO_TELEMETRY_DISABLED=1 \
             "${{ steps.subject.outputs.tag }}" bash .github/scripts/checks.sh all
+
+      # The Android app's Gradle checks, the ones `android.yml` runs on a pull request, inside the
+      # image: what proves the JDK and the SDK above are enough to build the app, not just present.
+      # The web assets come first because Capacitor copies them into the Android project.
+      - name: Verify the image builds the Android app
+        if: github.event_name != 'pull_request' || needs.changes.outputs.image == 'true'
+        run: |
+          docker run --rm -v "$PWD:/workspace" -w /workspace/app \
+            "${{ steps.subject.outputs.tag }}" bash -lc '
+            set -e
+            pnpm install --frozen-lockfile
+            pnpm build:android
+            cd android
+            ./gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon
+          '
 
       - name: Publish the image
         id: publish

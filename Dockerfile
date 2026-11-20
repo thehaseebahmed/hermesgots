@@ -42,6 +42,40 @@ RUN python3 -m pip install --no-cache-dir --break-system-packages cryptography
 RUN python3 -m pip install --no-cache-dir --break-system-packages platformio \
  && pio --version
 
+# The Android app (`app/android`): JDK 21 and the Android SDK, the versions `android.yml` builds
+# with (temurin 21 there, Debian's OpenJDK 21 here), so `./gradlew testDebugUnitTest lintDebug
+# assembleDebug` runs here as it runs there. The SDK holds what the Gradle build asks for: the
+# platform `compileSdkVersion` names in `app/android/variables.gradle` (36), the build tools the
+# Android Gradle Plugin 8.13 defaults to (35.0.0) and the newest for that platform (36.0.0), and
+# platform-tools for adb. Bump them with `compileSdkVersion` and the AGP version.
+#
+# The SDK lives at /opt/android-sdk and is made world-writable, because Gradle installs a missing
+# SDK package into it on first use rather than failing. sdkmanager, avdmanager and adb are linked
+# into /usr/local/bin since a login shell drops ENV PATH entries (see the python note above);
+# ANDROID_HOME and JAVA_HOME are plain variables, which a login shell keeps.
+ENV ANDROID_HOME=/opt/android-sdk \
+    ANDROID_SDK_ROOT=/opt/android-sdk \
+    JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+ARG ANDROID_CMDLINE_TOOLS=16111833
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openjdk-21-jdk-headless \
+ && rm -rf /var/lib/apt/lists/* \
+ && curl -fsSL -o /tmp/cmdline-tools.zip \
+      "https://dl.google.com/android/repository/commandlinetools-linux-${ANDROID_CMDLINE_TOOLS}_latest.zip" \
+ && mkdir -p "$ANDROID_HOME/cmdline-tools" \
+ && unzip -q /tmp/cmdline-tools.zip -d /tmp/cmdline-tools \
+ && mv /tmp/cmdline-tools/cmdline-tools "$ANDROID_HOME/cmdline-tools/latest" \
+ && rm -rf /tmp/cmdline-tools /tmp/cmdline-tools.zip \
+ && ln -s "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" /usr/local/bin/sdkmanager \
+ && ln -s "$ANDROID_HOME/cmdline-tools/latest/bin/avdmanager" /usr/local/bin/avdmanager \
+ && (yes || true) | sdkmanager --licenses > /dev/null \
+ && sdkmanager --install "platform-tools" "platforms;android-36" \
+      "build-tools;35.0.0" "build-tools;36.0.0" > /dev/null \
+ && ln -s "$ANDROID_HOME/platform-tools/adb" /usr/local/bin/adb \
+ && chmod -R a+rwX "$ANDROID_HOME" \
+ && java -version \
+ && sdkmanager --list_installed
+
 # pnpm 10, installed the way CI installs it. Not corepack: neither package.json carries a
 # `packageManager` field for corepack to pin from, so it would resolve an unpinned version.
 RUN npm install -g --cache /tmp/npm-cache pnpm@10 \
@@ -85,7 +119,7 @@ RUN cd /tmp/warm/app && pnpm fetch \
 ARG BUILD_REVISION=unknown
 LABEL org.opencontainers.image.source="https://github.com/thehaseebahmed/hermesgots" \
       org.opencontainers.image.title="Gots development container" \
-      org.opencontainers.image.description="Node 22, pnpm 10, Python 3.13, Chromium, PlatformIO, the GitHub CLI and the Reticle verification CLI for developing the Gots app, plugin and website" \
+      org.opencontainers.image.description="Node 22, pnpm 10, Python 3.13, JDK 21, the Android SDK, Chromium, PlatformIO, the GitHub CLI and the Reticle verification CLI for developing the Gots app, plugin and website" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image.revision=$BUILD_REVISION
 
