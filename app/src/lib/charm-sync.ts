@@ -94,9 +94,14 @@ export async function syncCharm(
     onProgress?.({ ...progress })
     for (const [index, bot] of bots.entries()) {
       const { needImage } = await ask(link, botMessage(index, bot))
+      // One bit answers for both pictures, so each the bot announced goes when it says one is
+      // missing: the charm keeps a picture by its CRC and already has the other.
       if (needImage) {
-        await sendImage(link, index, bot.image, size)
-        progress.sent++
+        for (const image of [bot.image, bot.waiting]) {
+          if (image.length === 0) continue
+          await sendImage(link, index, image, size)
+          progress.sent++
+        }
       }
       progress.done++
       onProgress?.({ ...progress })

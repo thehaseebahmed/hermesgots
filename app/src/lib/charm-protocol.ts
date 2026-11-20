@@ -138,8 +138,10 @@ export interface CharmBot {
   name: string
   /** RGB565, shown on the charm when there is no picture. */
   accent: number
-  /** A baseline JPEG, or empty for none. */
+  /** A baseline JPEG, or empty for none: the bot at rest, which the carousel draws. */
   image: Uint8Array
+  /** A baseline JPEG, or empty for none: the face an alert draws, since a bot waiting is curious. */
+  waiting: Uint8Array
 }
 
 export interface CharmStatus {
@@ -253,11 +255,15 @@ export const poseImageEndMessage = (mood: CharmMood) =>
 export function botMessage(index: number, bot: CharmBot): Uint8Array {
   const id = utf8Clip(bot.id, MAX_ID_BYTES)
   if (id.length === 0) throw new Error("A bot needs an id")
+  // Two pictures, the carousel's and the one an alert draws, each announced by its own length and
+  // CRC. A zero length is no picture.
   return control(CharmOp.Bot)
     .u8(index)
     .u16(bot.accent)
     .u32(bot.image.length)
     .u32(bot.image.length ? crc32(bot.image) : 0)
+    .u32(bot.waiting.length)
+    .u32(bot.waiting.length ? crc32(bot.waiting) : 0)
     .str(id)
     .str(utf8Clip(bot.name, MAX_NAME_BYTES))
     .done()
@@ -303,7 +309,10 @@ export function checkPoses(poses: CharmPose[]) {
 export function checkBots(bots: CharmBot[]) {
   if (bots.length > CHARM_MAX_BOTS)
     throw new Error(`The charm holds at most ${CHARM_MAX_BOTS} bots`)
-  for (const bot of bots)
+  for (const bot of bots) {
     if (bot.image.length > CHARM_MAX_IMAGE_BYTES)
       throw new Error(`${bot.name}'s picture is too big for the charm`)
+    if (bot.waiting.length > CHARM_MAX_IMAGE_BYTES)
+      throw new Error(`${bot.name}'s waiting picture is too big for the charm`)
+  }
 }

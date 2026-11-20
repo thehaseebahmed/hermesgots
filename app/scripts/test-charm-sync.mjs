@@ -7,10 +7,12 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
+  CHARM_MAX_IMAGE_BYTES,
   CharmCode,
   beginMessage,
   botMessage,
   charmMood,
+  checkBots,
   chunkSize,
   crc32,
   imageChunks,
@@ -43,11 +45,13 @@ test("utf8Clip never splits a character", () => {
   assert.deepEqual([...clipped], [0x61, 0xc3, 0xa9])
 })
 
+const u32 = (v) => [v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff]
+
 test("messages are laid out as the firmware reads them", () => {
   assert.deepEqual([...beginMessage(3)], [1, 1, 3])
   const image = new Uint8Array([1, 2, 3])
-  const m = botMessage(2, { id: "ab", name: "N", accent: 0x1234, image })
-  const crc = crc32(image)
+  const waiting = new Uint8Array([4, 5])
+  const m = botMessage(2, { id: "ab", name: "N", accent: 0x1234, image, waiting })
   assert.deepEqual(
     [...m],
     [
@@ -56,14 +60,10 @@ test("messages are laid out as the firmware reads them", () => {
       2,
       0x34,
       0x12,
-      3,
-      0,
-      0,
-      0,
-      crc & 0xff,
-      (crc >>> 8) & 0xff,
-      (crc >>> 16) & 0xff,
-      crc >>> 24,
+      ...u32(3),
+      ...u32(crc32(image)),
+      ...u32(2),
+      ...u32(crc32(waiting)),
       2,
       0x61,
       0x62,
@@ -71,9 +71,13 @@ test("messages are laid out as the firmware reads them", () => {
       0x4e,
     ],
   )
+  // A bot with no waiting picture announces none: a zero length and no CRC, which is what says so.
+  const none = botMessage(0, { id: "a", name: "N", accent: 0, image, waiting: new Uint8Array() })
+  assert.deepEqual(
+    [...none.subarray(5, 21)],
+    [...u32(3), ...u32(crc32(image)), ...u32(0), ...u32(0)],
+  )
 })
-
-const u32 = (v) => [v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff]
 
 test("the pet's messages are laid out as the firmware reads them", () => {
   assert.deepEqual([...timeMessage(1795176000)], [1, 11, ...u32(1795176000)])
@@ -199,11 +203,20 @@ function fakeCharm({
           const index = m[2]
           const len = v.getUint32(5, true)
           const crc = v.getUint32(9, true)
-          const idLen = m[13]
-          const id = new TextDecoder().decode(m.subarray(14, 14 + idLen))
-          const name = new TextDecoder().decode(m.subarray(15 + idLen, 15 + idLen + m[14 + idLen]))
-          pending[index] = { id, name, len, crc }
-          return answer(0, op, len > 0 && held.get(crc) !== len)
+          const waitLen = v.getUint32(13, true)
+          const waitCrc = v.getUint32(17, true)
+          const idLen = m[21]
+          const id = new TextDecoder().decode(m.subarray(22, 22 + idLen))
+          const name = new TextDecoder().decode(m.subarray(23 + idLen, 23 + idLen + m[22 + idLen]))
+          // The two pictures a bot announces, the carousel's and the one an alert draws. A zero
+          // length announces none.
+          const pictures = [
+            { len, crc },
+            { len: waitLen, crc: waitCrc },
+          ].filter((picture) => picture.len > 0)
+          pending[index] = { id, name, pictures }
+          const missing = pictures.some((picture) => held.get(picture.crc) !== picture.len)
+          return answer(0, op, missing)
         }
         if (op === 3) {
           image = []
@@ -216,8 +229,13 @@ function fakeCharm({
             corrupted = true
             bytes[0] ^= 0xff
           }
-          if (bytes.length !== bot.len || crc32(bytes) !== bot.crc) return answer(7, op, true)
-          held.set(bot.crc, bot.len)
+          // A picture is one of the two the bot announced: the charm knows it by length and CRC,
+          // which is also what tells the two apart when they are the same size.
+          const asked = bot.pictures.find(
+            (picture) => picture.len === bytes.length && crc32(bytes) === picture.crc,
+          )
+          if (!asked) return answer(7, op, true)
+          held.set(asked.crc, asked.len)
           imagesSent.push(bot.id)
           return answer(0, op)
         }
@@ -280,30 +298,59 @@ const picture = (seed, n = 3000) => new Uint8Array(n).map((_, i) => (i * 7 + see
 test("a sync sends every bot, then only what changed", async () => {
   const charm = fakeCharm()
   const bots = [
-    { id: "nova", name: "Nova", accent: 1, image: picture(1) },
-    { id: "pixel", name: "Pixel", accent: 2, image: picture(2) },
-    { id: "plain", name: "Plain", accent: 3, image: new Uint8Array() },
+    { id: "nova", name: "Nova", accent: 1, image: picture(1), waiting: picture(5) },
+    { id: "pixel", name: "Pixel", accent: 2, image: picture(2), waiting: picture(6) },
+    { id: "plain", name: "Plain", accent: 3, image: new Uint8Array(), waiting: new Uint8Array() },
   ]
   const seen = []
   const first = await syncCharm(charm.link, bots, (p) => seen.push(p.done))
-  assert.deepEqual(first, { done: 3, total: 3, sent: 2 })
+  // Two pictures a bot: the carousel's face and the one an alert draws. Plain has neither.
+  assert.deepEqual(first, { done: 3, total: 3, sent: 4 })
   assert.deepEqual(seen, [0, 1, 2, 3])
   assert.deepEqual(
     charm.shown.map((b) => b.name),
     ["Nova", "Pixel", "Plain"],
   )
 
-  const renamed = [{ ...bots[1], name: "Pix" }, bots[0], { ...bots[2], image: picture(9) }]
+  const renamed = [
+    { ...bots[1], name: "Pix" },
+    bots[0],
+    { ...bots[2], image: picture(9), waiting: picture(10) },
+  ]
   const second = await syncCharm(charm.link, renamed)
-  assert.equal(second.sent, 1)
-  assert.deepEqual(charm.imagesSent, ["nova", "pixel", "plain"])
+  assert.equal(second.sent, 2, "the two pictures the plain bot just gained")
+  assert.equal(charm.imagesSent.length, 6, "the rest the charm already held")
   assert.deepEqual(
     charm.shown.map((b) => b.name),
     ["Pix", "Nova", "Plain"],
   )
 })
 
-const nova = { id: "nova", name: "Nova", accent: 1, image: picture(1) }
+test("a bot's two pictures go over, and one the charm holds does not", async () => {
+  const charm = fakeCharm()
+  const nova = { id: "nova", name: "Nova", accent: 1, image: picture(1), waiting: picture(5) }
+  const first = await syncCharm(charm.link, [nova])
+  assert.equal(first.sent, 2, "the carousel's face and the one an alert draws")
+  assert.equal(charm.held.size, 2)
+
+  // The charm lost the carousel's face: its one bit sends both, and the one it holds is cheap.
+  charm.held.delete(crc32(nova.image))
+  const second = await syncCharm(charm.link, [nova])
+  assert.equal(second.sent, 2, "an answer about either picture sends the pair")
+  assert.ok(charm.held.has(crc32(nova.image)))
+  assert.ok(charm.held.has(crc32(nova.waiting)))
+})
+
+test("a bot with no waiting picture announces one picture", async () => {
+  const charm = fakeCharm()
+  const result = await syncCharm(charm.link, [
+    { id: "nova", name: "Nova", accent: 1, image: picture(1), waiting: new Uint8Array() },
+  ])
+  assert.equal(result.sent, 1)
+  assert.equal(charm.held.size, 1)
+})
+
+const nova = { id: "nova", name: "Nova", accent: 1, image: picture(1), waiting: picture(5) }
 const petOn = { enabled: true, petBotId: "nova", bedStart: 22, bedEnd: 7, utcOffsetMin: 120 }
 
 test("pet mode lands after the bots' commit, its pictures before the toggle", async () => {
@@ -379,16 +426,18 @@ test("a damaged pet picture is sent again", async () => {
 test("a damaged picture is sent again", async () => {
   const charm = fakeCharm({ corruptOnce: true })
   const result = await syncCharm(charm.link, [
-    { id: "nova", name: "Nova", accent: 1, image: picture(1) },
+    { id: "nova", name: "Nova", accent: 1, image: picture(1), waiting: picture(5) },
   ])
-  assert.equal(result.sent, 1)
+  assert.equal(result.sent, 2)
   assert.equal(charm.shown.length, 1)
 })
 
 test("a refusal throws in words and leaves the charm's list alone", async () => {
   const charm = fakeCharm({ refuseCommit: true })
   await assert.rejects(
-    syncCharm(charm.link, [{ id: "nova", name: "Nova", accent: 1, image: picture(1) }]),
+    syncCharm(charm.link, [
+      { id: "nova", name: "Nova", accent: 1, image: picture(1), waiting: picture(5) },
+    ]),
     (error) => error instanceof CharmRefused && /storage/.test(error.message),
   )
   assert.deepEqual(charm.shown, [])
@@ -401,8 +450,23 @@ test("too many bots never reach the radio", async () => {
     name: `B${i}`,
     accent: 0,
     image: new Uint8Array(),
+    waiting: new Uint8Array(),
   }))
   await assert.rejects(syncCharm(charm.link, many), /at most 32/)
+})
+
+test("a picture too big for the charm never reaches the radio", () => {
+  const big = new Uint8Array(CHARM_MAX_IMAGE_BYTES + 1)
+  const bot = { id: "nova", name: "Nova", accent: 1 }
+  assert.throws(
+    () => checkBots([{ ...bot, image: big, waiting: new Uint8Array() }]),
+    /Nova's picture is too big for the charm/,
+  )
+  assert.throws(
+    () => checkBots([{ ...bot, image: new Uint8Array(), waiting: big }]),
+    /Nova's waiting picture is too big for the charm/,
+  )
+  checkBots([{ ...bot, image: new Uint8Array(0), waiting: new Uint8Array(0) }])
 })
 
 test("the charm's row says whether it is paired and when it last synced", async () => {

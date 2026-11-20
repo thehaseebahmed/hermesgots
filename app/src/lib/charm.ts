@@ -217,16 +217,18 @@ async function charmIdFor(bot: Profile): Promise<string> {
   return charmBotId(bot.id, held)
 }
 
-/** What the charm gets for this phone's bots: a name and a picture each, in the order shown. */
+/** What the charm gets for this phone's bots: a name and two pictures each, in the order shown. */
 export async function charmBots(
   profiles: Profile[],
   labels: Parameters<typeof labelOf>[0],
 ): Promise<CharmBot[]> {
-  // Pictures are the bot character's, so two bots on one character share one picture.
+  // Pictures are the bot character's, so two bots on one character share one picture — and each bot
+  // announces two: the face the carousel draws and the one an alert draws, which is `curious`.
   const pictures = new Map<string, Promise<Uint8Array>>()
-  const picture = (botId: string) => {
-    if (!pictures.has(botId)) pictures.set(botId, charmPicture(botId))
-    return pictures.get(botId)!
+  const picture = (botId: string, mood: BotMood) => {
+    const key = `${botId}\n${mood}`
+    if (!pictures.has(key)) pictures.set(key, charmPicture(botId, mood))
+    return pictures.get(key)!
   }
   return Promise.all(
     profiles
@@ -236,7 +238,9 @@ export async function charmBots(
         id: await charmIdFor(profile),
         name: labelOf(labels, profile),
         accent: rgb565(ACCENT),
-        image: await picture(profile.botId),
+        image: await picture(profile.botId, DEFAULT_MOOD),
+        // `curious` is "Waiting on you" in the app's moods, which is the face an alert draws.
+        waiting: await picture(profile.botId, "curious"),
       })),
   )
 }
