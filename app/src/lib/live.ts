@@ -184,6 +184,11 @@ export function watchChat(conversationId: string) {
   }
 }
 
+/** Whether this device has the chat named open right now, where its own activity marks it. */
+export function chatOnScreen(conversationId: string) {
+  return openChats.has(conversationId)
+}
+
 const catchingUp = new Set<string>()
 const catchUpAgain = new Set<string>()
 

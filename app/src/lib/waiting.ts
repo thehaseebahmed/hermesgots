@@ -5,14 +5,15 @@ import { READ_TIMEOUT_MS, RUNS_MS, SAFETY_MS } from "@/lib/freshness"
 import { quietly } from "@/lib/report"
 import { db } from "@/lib/db"
 import { getLiveRuns, type LiveRunStatus, type LiveRuns, type WaitingReason } from "@/lib/hermes"
-import { connectionKey, isLive, onChanges } from "@/lib/live"
+import { chatOnScreen, connectionKey, isLive, onChanges } from "@/lib/live"
+import { closedSession, endedSessions } from "@/lib/session-work"
 import { markResume } from "@/lib/resume-trace"
 
 export type { WaitingReason }
 // The wait's sentence is a rule of its own (`wait-text.ts`), so a screen with no DOM can read it too.
 export { reasonText } from "@/lib/wait-text"
 
-/** A project session, in any project, that waits for the user. */
+/** A session of any kind — a project's, a chat's, a canvas's — that waits for the user. */
 export interface WaitingSession {
   sessionId: string
   title: string
@@ -71,12 +72,23 @@ export function readLiveRuns(
   // began would answer for a moment that has passed.
   const out = join ? asking.get(key) : undefined
   if (out) return out
+  // The order this read was asked in, per server: an answer from an older read must neither
+  // overwrite a newer one nor be read as the runs that ended between the two. A caller about to act
+  // on "no run" asks afresh (`join: false`) while the shared poll's read is still out, and the two
+  // can land in either order — the fresh one asked later holds the newer answer.
+  const order = (asked.get(key) ?? 0) + 1
+  asked.set(key, order)
   const read = getLiveRuns(server, AbortSignal.timeout(READ_TIMEOUT_MS))
     .catch(quietly("Reading runs/live"))
     .then((next) => {
-      if (next) {
+      if (next && order >= (applied.get(key) ?? 0)) {
+        applied.set(key, order)
+        const before = answers.get(key)
         answers.set(key, next)
         notify()
+        const ended = before ? endedSessions(before, next) : []
+        // Fire and forget: nothing about the answer waits on a chat's clock moving.
+        if (ended.length) void noteEndedRuns(key, ended).catch(quietly("Noting ended runs"))
       }
       return next ?? undefined
     })
@@ -89,6 +101,10 @@ export function readLiveRuns(
 
 /** The reads still out, by server, so a second ask joins the first. */
 const asking = new Map<string, Promise<LiveRuns | undefined>>()
+/** The order each server's reads were asked in, and the newest one applied, so a late answer from
+ * an older read is left where it belongs: out of the shared answer, and out of the ended-run diff. */
+const asked = new Map<string, number>()
+const applied = new Map<string, number>()
 
 /**
  * The run the host has in flight for a session, asked through the shared read so every screen gets
@@ -101,6 +117,37 @@ export async function readLiveRunOf(
 ): Promise<string | null | undefined> {
   const answer = await readLiveRuns(server, options)
   return answer ? (answer.runIds[sessionId] ?? null) : undefined
+}
+
+/**
+ * Moves the clock of every conversation of the runs that ended on this server while the app was
+ * open, which is the arrival a bot row's unread dot measures (`updatedAt` past this device's read
+ * mark, ADR 0110): a chat's own reply is flushed by the thread that is open, and the plugin pushes
+ * nothing to a device holding the events stream, so nothing else would say the run is over.
+ *
+ * The clock is written straight to the row, never through `updateConversation`: that stamps
+ * `changedAt`, which would push this record into the chat-list merge at a clock this device just
+ * invented — and a merge is newer-wins, so a record whose fields are stale would beat the host's
+ * newer one and carry its loss to every device (a rename, a pin, a resolve, a deletion). This
+ * device's own mark is the only reader of the moved clock, so the record stays here: a same-clock
+ * merge does not pull it back, and a strictly newer one carries a real clock over it.
+ */
+async function noteEndedRuns(key: string, ended: string[]) {
+  const bots = new Set(
+    (await db.profiles.toArray())
+      .filter((profile) => connectionKey(profile) === key)
+      .map((profile) => profile.id),
+  )
+  const chats = await db.conversations.where("hermesSessionId").anyOf(ended).toArray()
+  // Another bot's chat, a closed one and the chat on screen are all left alone: an open thread's
+  // own activity is what marks it. One transaction for the whole batch, so a host restart's dozens
+  // of ended runs are one write rather than one each.
+  await db.transaction("rw", db.conversations, async () => {
+    for (const chat of chats) {
+      if (!bots.has(chat.profileId) || closedSession(chat) || chatOnScreen(chat.id)) continue
+      await db.conversations.update(chat.id, { updatedAt: Date.now() })
+    }
+  })
 }
 
 async function poll(only: Server[] = servers) {
@@ -257,21 +304,24 @@ export function useLiveRunId(
   )
 }
 
-/** Project sessions, across every bot, waiting on the user, newest first. Needs the plugin. */
+/** Sessions of every kind, across every bot, waiting on the user, newest first. Needs the plugin. */
 export function useWaitingSessions(): WaitingSession[] {
   const waiting = useWaiting()
-  const any = Object.keys(waiting).length > 0
-  // Every open project session, matched to what waits below, so the query needn't follow the ids.
+  // The conversations of the sessions the poll says wait, read by Hermes session id: a project's,
+  // a plain chat's and a canvas's alike. A session with no conversation here has no row to open,
+  // and is correctly absent.
+  const ids = Object.keys(waiting)
   const sessions = useLiveQuery(
     () =>
-      any
+      ids.length
         ? db.conversations
-            .where("projectId")
-            .above("")
+            .where("hermesSessionId")
+            .anyOf(ids)
             .filter((c) => !c.resolvedAt && !c.discardedAt)
             .toArray()
         : [],
-    [any],
+    // The waiting ids as one string, so a different session waiting re-reads the query.
+    [JSON.stringify(ids)],
   )
   // The query can lag a poll, so a session no longer waiting is skipped.
   return [...(sessions ?? [])]

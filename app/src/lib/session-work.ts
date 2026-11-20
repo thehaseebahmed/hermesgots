@@ -26,6 +26,7 @@
  */
 
 import { prChecksWait, prIsLive } from "./pull-state.ts"
+import type { LiveRuns } from "./hermes.ts"
 import type { Conversation } from "@/lib/db"
 
 export type SessionState = "working" | "waiting" | "idle" | "resolved" | "discarded"
@@ -140,6 +141,20 @@ export function runInFlight(live?: LiveTurn, local?: LocalTurn): boolean {
 export function runFinished(facts: Pick<SessionFacts, "live" | "local" | "subagents">): boolean {
   const inFlight = facts.live !== undefined || Boolean(facts.local?.streaming)
   return !inFlight && !working(facts.subagents)
+}
+
+/**
+ * The sessions whose run ended between one `runs/live` answer and the next: held in flight before,
+ * gone now, with no subagent of theirs still at work and no wake turn still owed — the hold the
+ * plugin keeps a finished run's news behind until its subagents are gone (`plugin/alerts.py`), read
+ * over the two snapshots rather than at one moment. A turn that ended over subagents still working
+ * has not ended, so it is none of these.
+ */
+export function endedSessions(before: LiveRuns, next: LiveRuns) {
+  return Object.keys(before.sessions).filter(
+    (sessionId) =>
+      !next.sessions[sessionId] && !next.subagents[sessionId] && !next.waking[sessionId],
+  )
 }
 
 /** The slice of a session `sessionGroup` reads: its closure and wait marks, and its pull requests. */
