@@ -37,6 +37,23 @@ DOCUMENTS = [
 ]
 
 
+def user_message(raw: Any) -> str:
+    """The text a ``POST /v1/runs`` body carries, read the way the host reads it.
+
+    Hermes takes ``input`` as a string, or as a list whose last message holds ``content``
+    (``_run_user_message`` in ``gateway/platforms/api_server_runs``). Anything else is a run with no
+    user message, which the host refuses with a 400 rather than starting — so the stub refuses it
+    too, and a client that sends the wrong shape fails here instead of against a live host.
+    """
+    if not raw:
+        return ""
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, list) and isinstance(raw[-1], dict):
+        return str(raw[-1].get("content") or "")
+    return ""
+
+
 class Stub:
     """One stub host: its canvases, the runs posted at them, and the writes each run left."""
 
@@ -158,6 +175,10 @@ def serve(stub: Stub) -> Tuple[ThreadingHTTPServer, threading.Thread]:
             body = json.loads(self.rfile.read(length) or b"{}")
             path = urllib.parse.urlparse(self.path).path
             if path == "/v1/runs":
+                if not user_message(body.get("input")):
+                    return self._answer(
+                        400, {"error": {"message": "No user message found in input"}}
+                    )
                 with outer.lock:
                     run_id = outer.post_run(body.get("session_id") or "")
                 return self._answer(200, {"object": "gots.run", "run_id": run_id})

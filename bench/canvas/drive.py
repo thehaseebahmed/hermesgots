@@ -185,7 +185,11 @@ class Host:
         """
         body: Dict[str, Any] = {
             "session_id": session_id,
-            "input": [{"type": "text", "text": prompt}],
+            # The host reads `input` as a string, or as a list whose last message carries `content`
+            # (`_run_user_message` in Hermes's `api_server_runs`). A `{"type": "text"}` part has no
+            # `content`, so the host answers 400 "No user message found in input" and no run ever
+            # starts: send the turn the way the app sends one.
+            "input": [{"role": "user", "content": prompt}],
         }
         if self.settings.provider:
             body["provider"] = self.settings.provider
