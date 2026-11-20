@@ -73,6 +73,14 @@ export interface PushAction {
   url: string
 }
 
+/**
+ * The three moments a charm draws a bot for, as the plugin names them (`CHARM_REASONS` in
+ * `plugin/push.py`): a question, an approval, or a finished run. Every other kind is news about
+ * something that is not a bot's face on the charm, so it carries neither of the two fields below.
+ */
+export const CHARM_REASONS = ["question", "approval", "finished"] as const
+export type CharmReason = (typeof CHARM_REASONS)[number]
+
 /** What the plugin tells about a push beyond its kind (0.33): the chat's title, and what it says. */
 export interface PushDetail {
   title?: string
@@ -91,6 +99,10 @@ export interface PushDetail {
   read?: boolean
   /** The host's moment (ms) of the activity the notice reports: what a Mark as read covers. */
   at?: number
+  /** The bot's id on the charm (`link.bot_id` in the plugin), which is how the charm holds a bot. */
+  charm?: string
+  /** Why that bot is on the charm: the moment it is waiting on the reader for. */
+  charmReason?: CharmReason
 }
 
 export interface FcmSender {
@@ -187,6 +199,22 @@ export function momentOf(value: unknown) {
 export function chatId(value: unknown) {
   const one = typeof value === "string" ? value.trim() : ""
   return /^[A-Za-z0-9._-]{1,256}$/.test(one) ? one : undefined
+}
+
+/**
+ * A bot's id on the charm, in the one shape `link.bot_id` makes: `sha256(hostId:profile)[:16]`,
+ * sixteen lowercase hex characters and nothing else. The charm holds its bots by this id and matches
+ * an alert against them, so another shape names no bot there — it is dropped rather than repaired,
+ * since a value cut or case-folded into shape would name a bot the reader never saw.
+ */
+export function charmId(value: unknown) {
+  const one = typeof value === "string" ? value.trim() : ""
+  return /^[0-9a-f]{16}$/.test(one) ? one : undefined
+}
+
+/** A charm reason as the plugin names one (`CHARM_REASONS`), or nothing for any other value. */
+export function charmReasonOf(value: unknown): CharmReason | undefined {
+  return CHARM_REASONS.includes(value as CharmReason) ? (value as CharmReason) : undefined
 }
 
 /**
@@ -295,8 +323,9 @@ async function accessToken(account: ServiceAccount, cache: { token?: string; exp
  * ours running — and Android's own drawing has no room for a button. So the message carries the
  * notice instead and the app draws it (`GotsMessagingService`): the title and body, the bot's
  * picture, the chat it is about, the link its Reply posts to and whether it offers Mark as read,
- * the category's channel, the tag a newer notice of the same thing replaces, and the two links an
- * approval carries as JSON, since a data value can be nothing but a string.
+ * the category's channel, the tag a newer notice of the same thing replaces, the two links an
+ * approval carries as JSON, since a data value can be nothing but a string, and — for the moments
+ * a charm draws — that bot's id on the charm and the one word for why.
  */
 export function message(
   token: string,
@@ -312,6 +341,8 @@ export function message(
   const chat = chatId(detail.chat)
   const reply = httpLink(detail.reply)
   const at = momentOf(detail.at)
+  const charm = charmId(detail.charm)
+  const charmReason = charmReasonOf(detail.charmReason)
   return {
     message: {
       token,
@@ -333,6 +364,8 @@ export function message(
         ...(reply ? { reply } : {}),
         ...(detail.read === true ? { read: "true" } : {}),
         ...(at ? { at: String(at) } : {}),
+        ...(charm ? { charm } : {}),
+        ...(charmReason ? { charm_reason: charmReason } : {}),
       },
       android: { priority: "HIGH", ttl: "600s" },
     },

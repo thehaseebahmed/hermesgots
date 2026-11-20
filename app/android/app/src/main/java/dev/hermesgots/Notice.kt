@@ -31,6 +31,13 @@ data class Notice(
     val read: Boolean = false,
     /** The host's moment (ms) of the activity the notice reports, which a Mark as read covers. */
     val at: Long? = null,
+    /**
+     * The id the charm holds this bot by (`link.bot_id` in the plugin): what an alert names. Not the
+     * data's `bot` ([bundled]), which is the bot *character* — its face, and two bots can wear one.
+     */
+    val charm: String? = null,
+    /** Why that bot needs the reader: a question, an approval or a finished run, and nothing else. */
+    val charmReason: String? = null,
 ) {
     /**
      * A notice about a chat is drawn as that chat's conversation — the bot as its Person, a
@@ -59,6 +66,12 @@ data class Notice(
 
         /** A chat's id as the plugin keeps them and the registry bounds them (`chatId` in `fcm.ts`). */
         private val CHAT = Regex("^[A-Za-z0-9._-]{1,256}$")
+
+        /** A bot's id on the charm, as `link.bot_id` mints it and `charmId` in `fcm.ts` bounds it. */
+        private val CHARM = Regex("^[0-9a-f]{16}$")
+
+        /** The three moments a charm draws, the only reasons `fcm.ts` forwards (`CHARM_REASONS`). */
+        private val CHARM_REASONS = setOf("question", "approval", "finished")
 
         /**
          * The notice a message carries, or null for one with nothing to say: the filter the service is
@@ -89,6 +102,8 @@ data class Notice(
                 reply = data[KEY_REPLY]?.trim()?.takeIf(::isLink),
                 read = data[KEY_READ] == "true",
                 at = data[KEY_AT]?.trim()?.toLongOrNull()?.takeIf { it > 0 },
+                charm = data[KEY_CHARM]?.trim()?.takeIf { CHARM.matches(it) },
+                charmReason = data[KEY_CHARM_REASON]?.takeIf { it in CHARM_REASONS },
             )
         }
 
@@ -168,6 +183,8 @@ data class Notice(
         private const val KEY_REPLY = "reply"
         private const val KEY_READ = "read"
         private const val KEY_AT = "at"
+        private const val KEY_CHARM = "charm"
+        private const val KEY_CHARM_REASON = "charm_reason"
     }
 }
 
