@@ -1,8 +1,32 @@
 import { getUser, verifyRequestOrigin } from "@netlify/identity"
 
+import { githubIdOf } from "./github-id.ts"
+
+/**
+ * Who called, as far as Identity vouches for it, read from `app_metadata` alone. GoTrue lets any
+ * signed-in user rewrite their own `user_metadata` (`PUT /user` `{ data }`), so the avatar, the name
+ * and anything else read from it is the caller's own say-so and never an identity or a privilege;
+ * `app_metadata` only an admin writes (docs/adr/0166).
+ */
+export interface Caller {
+  id: string
+  /** The GitHub account the signup hook stamped, absent on an account from before it. */
+  githubId?: string
+  /** `app_metadata.roles`, set from Netlify's Identity settings. */
+  roles: string[]
+}
+
+function callerOf(id: string, appMetadata: unknown): Caller {
+  const meta = (appMetadata ?? {}) as { roles?: unknown }
+  const roles = Array.isArray(meta.roles)
+    ? meta.roles.filter((role): role is string => typeof role === "string")
+    : []
+  return { id, githubId: githubIdOf(appMetadata), roles }
+}
+
 /** What Identity's own answer about a Bearer token amounts to. */
 type BearerCheck =
-  | { kind: "user"; user: { id: string; pictureUrl?: string } }
+  | { kind: "user"; user: Caller }
   /** Identity declined this token: the caller is not signed in. */
   | { kind: "declined" }
   /** Identity couldn't be asked (a hiccup, a rate limit, no answer): no verdict about the token. */
@@ -21,13 +45,9 @@ async function bearerUser(req: Request, authorization: string): Promise<BearerCh
   // Only Identity's own refusal is a verdict about the token; anything else is us failing to ask.
   if (response.status === 401 || response.status === 403) return { kind: "declined" }
   if (!response.ok) return { kind: "unreachable" }
-  const user = (await response.json()) as { id?: string; user_metadata?: { avatar_url?: unknown } }
-  const picture = user.user_metadata?.avatar_url
-  if (!user.id) return { kind: "unreachable" }
-  return {
-    kind: "user",
-    user: { id: user.id, pictureUrl: typeof picture === "string" ? picture : undefined },
-  }
+  const user = (await response.json()) as { id?: unknown; app_metadata?: unknown }
+  if (typeof user.id !== "string" || !user.id) return { kind: "unreachable" }
+  return { kind: "user", user: callerOf(user.id, user.app_metadata) }
 }
 
 /** What a caller without a session gets, whether it carried no token or Identity declined one. */
@@ -39,9 +59,7 @@ function signInFirst() {
  * The signed-in user behind a request, or an error response. Writes need the site's own origin
  * unless they carry a Bearer header.
  */
-export async function requireUser(
-  req: Request,
-): Promise<{ id: string; pictureUrl?: string } | Response> {
+export async function requireUser(req: Request): Promise<Caller | Response> {
   const authorization = req.headers.get("authorization") ?? ""
   const bearer = /^Bearer\s/i.test(authorization)
   const cookie = await getUser()
@@ -64,5 +82,5 @@ export async function requireUser(
       return Response.json({ error: "Cross-origin request refused" }, { status: 403 })
     }
   }
-  return cookie
+  return callerOf(cookie.id, cookie.appMetadata)
 }

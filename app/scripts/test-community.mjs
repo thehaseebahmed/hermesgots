@@ -23,16 +23,22 @@ function setup() {
   return { store, registry }
 }
 
-async function call(env, caller, method, route, body, github = async () => "octocat") {
+/** GitHub's `GET /user/<id>`, over the accounts a test names. */
+const logins = (map = { 583231: "octocat" }) => async (id) => map[id] ?? null
+
+async function call(env, caller, method, route, body, github = logins(), now = NOW) {
   const req = new Request(`https://x.test/api?route=${route}`, {
     method,
     body: body ? JSON.stringify(body) : undefined,
   })
-  const res = await handleCommunity(req, { ...env, caller, github, now: NOW })
+  const res = await handleCommunity(req, { ...env, caller, github, now })
   return { status: res.status, body: await res.json() }
 }
 
-const user = { kind: "user", userId: "u1", pictureUrl: "https://avatars.githubusercontent.com/u/583231?v=4" }
+/** A signed-in caller whose signup hook stamped octocat's GitHub id on their sign-in. */
+const user = { kind: "user", userId: "u1", githubId: "583231" }
+
+const join = (env, caller, github) => call(env, caller, "POST", "join", null, github)
 
 async function hostToken(env) {
   const token = "mh_abc"
@@ -75,12 +81,19 @@ test("join derives the username, report needs a join, leave erases everything", 
     403,
   )
 
-  const joined = await call(env, user, "POST", "join")
-  assert.deepEqual(joined.body, { joined: true, login: "octocat", totals: { today: 0, week: 0, month: 0 } })
+  const joined = await join(env, user)
+  assert.deepEqual(joined.body, {
+    joined: true,
+    verified: true,
+    login: "octocat",
+    totals: { today: 0, week: 0, month: 0 },
+  })
   assert.equal((await call(env, host, "GET", "community")).body.enabled, true)
 
   const report = await call(env, host, "POST", "report", {
-    days: { "2026-10-15": { "Anthropic/Claude-Opus-5-5": { plan: counts(100), auto: counts(300) } } },
+    days: {
+      "2026-10-15": { "Anthropic/Claude-Opus-5-5": { plan: counts(100), auto: counts(300) } },
+    },
     providers: { "2026-10-15": { openrouter: { "Anthropic/Claude-Opus-5-5": 800 } } },
   })
   assert.equal(report.status, 200)
@@ -113,7 +126,7 @@ test("join derives the username, report needs a join, leave erases everything", 
 test("a stored report row inside the half minute is the whole gap", async () => {
   const env = setup()
   const host = await hostToken(env)
-  await call(env, user, "POST", "join")
+  await join(env, user)
   // A host that reported ten seconds ago, and no key of its own to agree with it.
   env.registry.data.set("community/reports/u1/h1", { days: {}, at: NOW - 10_000 })
 
@@ -129,7 +142,7 @@ test("a stored report row inside the half minute is the whole gap", async () => 
 test("a report the rules refuse costs no gap", async () => {
   const env = setup()
   const host = await hostToken(env)
-  await call(env, user, "POST", "join")
+  await join(env, user)
 
   const bad = await call(env, host, "POST", "report", { days: "nope" })
   assert.equal(bad.status, 400)
@@ -141,17 +154,149 @@ test("a report the rules refuse costs no gap", async () => {
 
 test("a GitHub account can't be claimed by a second sign-in; failures are reported", async () => {
   const env = setup()
-  await call(env, user, "POST", "join")
-  const other = { ...user, userId: "u2" }
-  assert.equal((await call(env, other, "POST", "join")).status, 409)
-  assert.equal(
-    (await call(env, { ...user, userId: "u3", pictureUrl: "https://x/y.png" }, "POST", "join")).status,
-    422,
-  )
+  await join(env, user)
+  assert.equal((await join(env, { ...user, userId: "u2" })).status, 409)
   const failing = async () => {
     throw new Error("down")
   }
-  assert.equal((await call(env, { ...user, userId: "u4" }, "POST", "join", null, failing)).status, 502)
+  assert.equal((await join(env, { ...user, userId: "u4" }, failing)).status, 502)
+})
+
+test("the username is the one the stamped id names, whatever the sign-in's avatar says", async () => {
+  const env = setup()
+  // The caller dressed their Identity avatar as octocat's (`PUT /user` lets anyone write their own
+  // user_metadata); the stamp from their signup names their own account, and that is what counts.
+  const dressed = {
+    kind: "user",
+    userId: "u9",
+    githubId: "9001",
+    pictureUrl: "https://avatars.githubusercontent.com/u/583231?v=4",
+  }
+  const out = await join(env, dressed, logins({ 583231: "octocat", 9001: "mallory" }))
+  assert.equal(out.body.login, "mallory")
+  assert.equal(env.registry.data.has("community/owners/octocat"), false)
+  assert.equal(env.registry.data.get("community/owners/mallory").userId, "u9")
+})
+
+test("a sign-in with no stamped GitHub id can't join, and writes nothing", async () => {
+  const env = setup()
+  const unstamped = { kind: "user", userId: "u3" }
+  const out = await join(env, unstamped)
+  assert.equal(out.status, 403)
+  assert.equal(env.registry.data.size, 0)
+  assert.equal(env.store.data.size, 0)
+})
+
+test("an avatar's join stays private until it verifies, and a verified claim takes it back", async () => {
+  const env = setup()
+  const host = await hostToken(env)
+  // u1 joined before the stamp, under the login its avatar named: octocat's.
+  env.registry.data.set("users/u1/community", { login: "octocat", joinedAt: NOW - 86_400_000 })
+  env.registry.data.set("community/owners/octocat", { userId: "u1" })
+  env.store.data.set("users/octocat", {
+    login: "octocat",
+    days: { "2026-10-15": { "claude-x": { auto: counts(10) } } },
+    updatedAt: NOW - 60_000,
+  })
+
+  // Its hosts keep reporting, but nothing of it is public.
+  assert.equal((await call(env, host, "GET", "community")).body.enabled, true)
+  const report = await call(env, host, "POST", "report", {
+    days: { "2026-10-15": { "claude-x": { auto: counts(50) } } },
+  })
+  assert.equal(report.status, 200)
+  const board = await call(env, null, "GET", "board")
+  assert.equal(board.body.periods.today.tokens.length, 0)
+  assert.equal(env.store.data.has("users/octocat"), false)
+  const legacy = { kind: "user", userId: "u1" }
+  assert.deepEqual((await call(env, legacy, "GET", "me")).body, {
+    joined: true,
+    verified: false,
+    login: "octocat",
+    totals: { today: 0, week: 0, month: 0 },
+  })
+
+  // The real octocat joins from another sign-in: the avatar's claim gives way, its reports go.
+  const real = { kind: "user", userId: "u7", githubId: "583231" }
+  const out = await join(env, real)
+  assert.equal(out.body.verified, true)
+  assert.equal(env.registry.data.get("community/owners/octocat").userId, "u7")
+  assert.equal(env.registry.data.has("users/u1/community"), false)
+  assert.equal(env.registry.data.has("community/reports/u1/h1"), false)
+  assert.equal((await call(env, host, "GET", "community")).body.enabled, false)
+})
+
+test("an avatar's join that verifies keeps its counts, under the username GitHub names", async () => {
+  const env = setup()
+  const host = await hostToken(env)
+  env.registry.data.set("users/u1/community", { login: "someone-else", joinedAt: NOW - 1 })
+  env.registry.data.set("community/owners/someone-else", { userId: "u1" })
+  await call(env, host, "POST", "report", {
+    days: { "2026-10-15": { "claude-x": { auto: counts(50) } } },
+  })
+  const out = await join(env, user)
+  assert.equal(out.body.login, "octocat")
+  assert.equal(out.body.totals.today, 100)
+  assert.equal(env.registry.data.has("community/owners/someone-else"), false)
+  const board = await call(env, null, "GET", "board")
+  assert.equal(board.body.periods.today.tokens[0].login, "octocat")
+})
+
+/** Identity's admin API over a list of accounts, recording what it stamped. */
+function identityOf(accounts) {
+  const stamped = []
+  return {
+    stamped,
+    list: async () => accounts,
+    get: async (id) => accounts.find((account) => account.id === id) ?? null,
+    stamp: async (id, githubId) => {
+      stamped.push([id, githubId])
+    },
+  }
+}
+
+async function adminCall(env, caller, method, route, body) {
+  const req = new Request(`https://x.test/api?route=${route}`, {
+    method,
+    body: body ? JSON.stringify(body) : undefined,
+  })
+  const res = await handleCommunity(req, { ...env, caller, github: logins(), now: NOW })
+  return { status: res.status, body: await res.json() }
+}
+
+test("only an admin lists the unstamped accounts and stamps one", async () => {
+  const identity = identityOf([
+    { id: "u1", email: "a@x.test", provider: "github", claimedGithubId: "583231" },
+    { id: "u2", email: "b@x.test", provider: "github", githubId: "42" },
+  ])
+  const env = { ...setup(), identity }
+  const admin = { kind: "user", userId: "u0", admin: true }
+
+  assert.equal((await adminCall(env, user, "GET", "unstamped")).status, 403)
+  assert.equal((await adminCall(env, user, "POST", "stamp", { userId: "u1", githubId: "1" })).status, 403)
+
+  const listed = await adminCall(env, admin, "GET", "unstamped")
+  assert.deepEqual(
+    listed.body.accounts.map((account) => account.id),
+    ["u1"],
+  )
+
+  const bad = await adminCall(env, admin, "POST", "stamp", { userId: "u1", githubId: "octocat" })
+  assert.equal(bad.status, 400)
+  const missing = await adminCall(env, admin, "POST", "stamp", { userId: "u9", githubId: "1" })
+  assert.equal(missing.status, 404)
+  // An id already stamped, by the hook or by hand, is changed only when asked to.
+  const kept = await adminCall(env, admin, "POST", "stamp", { userId: "u2", githubId: "43" })
+  assert.equal(kept.status, 409)
+
+  const done = await adminCall(env, admin, "POST", "stamp", { userId: "u1", githubId: "583231" })
+  assert.equal(done.status, 200)
+  assert.deepEqual(identity.stamped, [["u1", "583231"]])
+})
+
+test("the backfill answers that it can't reach Identity where the function has no admin access", async () => {
+  const admin = { kind: "user", userId: "u0", admin: true }
+  assert.equal((await adminCall(setup(), admin, "GET", "unstamped")).status, 503)
 })
 
 test("buildBoard ranks by total", () => {
@@ -372,6 +517,7 @@ test("a cached board asks the catalogue nothing", async () => {
   const env = { ...setup(), catalog: async () => LISTED }
   env.store.data.set("users/octocat", {
     login: "octocat",
+    verified: true,
     days: { "2026-10-15": { "claude-opus-5-5": { chat: counts(1) } } },
     updatedAt: NOW,
   })
@@ -396,7 +542,7 @@ const LISTED = {
 test("a report's unlisted models and custom providers are not stored", async () => {
   const env = { ...setup(), catalog: async () => LISTED }
   const host = await hostToken(env)
-  await call(env, user, "POST", "join")
+  await join(env, user)
   const report = await call(env, host, "POST", "report", {
     days: {
       "2026-10-15": {
@@ -431,6 +577,7 @@ test("a member stored before the rules serves no custom provider or unlisted mod
   // sits under a real provider too, so every panel has to know what the catalogue lists.
   env.store.data.set("users/octocat", {
     login: "octocat",
+    verified: true,
     days: {
       "2026-10-15": {
         "claude-opus-5-5": { chat: counts(100) },
@@ -446,8 +593,9 @@ test("a member stored before the rules serves no custom provider or unlisted mod
     },
     updatedAt: NOW,
   })
-  // The account is on the leaderboard; only its record is older than the rules.
-  await call(env, user, "POST", "join")
+  // The account is on the leaderboard, verified; only its record is older than the rules.
+  env.registry.data.set("users/u1/community", { login: "octocat", joinedAt: NOW, verifiedAt: NOW })
+  env.registry.data.set("community/owners/octocat", { userId: "u1", verified: true })
   const board = await call(env, null, "GET", "board")
   const today = board.body.periods.today
   assert.deepEqual(today.models.map((row) => row.model), ["claude-opus-5-5"])

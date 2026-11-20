@@ -5,7 +5,13 @@ import { Banner } from "@/components/banner"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
-import { LEADERBOARD_URL, joinCommunity, leaveCommunity, useCommunity } from "@/lib/community"
+import {
+  LEADERBOARD_URL,
+  joinCommunity,
+  leaveCommunity,
+  onBoard,
+  useCommunity,
+} from "@/lib/community"
 import { tell } from "@/lib/tell"
 
 const SHARED = [
@@ -38,6 +44,7 @@ export function CommunitySettings() {
   const { me, setMe } = useCommunity()
   const [busy, setBusy] = useState(false)
   const joined = me?.joined === true
+  const shown = onBoard(me)
 
   const change = async (join: boolean) => {
     setBusy(true)
@@ -62,8 +69,11 @@ export function CommunitySettings() {
         <TrophyIcon className="size-5 shrink-0 text-muted-foreground" />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-base">Join the leaderboard</span>
-          {joined && (
+          {shown && (
             <span className="truncate text-sm text-muted-foreground">Shown as @{me.login}</span>
+          )}
+          {joined && !shown && (
+            <span className="truncate text-sm text-muted-foreground">Not on the board yet</span>
           )}
         </span>
         <Switch
@@ -73,7 +83,16 @@ export function CommunitySettings() {
           onCheckedChange={(checked) => void change(checked)}
         />
       </label>
-      {joined ? (
+      {joined && !shown ? (
+        <Button
+          size="lg"
+          className="h-11 rounded-full"
+          disabled={busy}
+          onClick={() => void change(true)}
+        >
+          Confirm your GitHub username
+        </Button>
+      ) : onBoard(me) ? (
         <>
           <dl className="grid grid-cols-3 gap-px overflow-hidden rounded-3xl bg-border ring-1 ring-foreground/10">
             {(

@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { signIn } from "@/lib/account"
-import { joinCommunity, leaveCommunity, useCommunity } from "@/lib/community"
+import { joinCommunity, leaveCommunity, onBoard, useCommunity } from "@/lib/community"
 import { db, getActiveProfile, getSettings, saveSettings } from "@/lib/db"
 import {
   needsBotSetup,
@@ -261,9 +261,10 @@ function CommunityStep({ hold, onDone }: { hold: RefusalHold; onDone: () => void
     setBusy(true)
     const landed = await hold.write("change the leaderboard", async () => {
       // A read that failed leaves nothing to compare, so the choice is sent as it stands.
-      if (me !== undefined && on !== joined) {
-        setMe(on ? await joinCommunity() : await leaveCommunity())
-      }
+      if (me === undefined) return
+      // An account on the list but not yet on the board joins again, which is what proves it.
+      if (on && !onBoard(me)) setMe(await joinCommunity())
+      else if (!on && joined) setMe(await leaveCommunity())
     })
     setBusy(false)
     if (landed) onDone()
@@ -281,7 +282,7 @@ function CommunityStep({ hold, onDone }: { hold: RefusalHold; onDone: () => void
         <TrophyIcon className="size-5 shrink-0 text-muted-foreground" />
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-base">Join the leaderboard</span>
-          {joined && me.login && (
+          {onBoard(me) && (
             <span className="truncate text-sm text-muted-foreground">Shown as @{me.login}</span>
           )}
         </span>

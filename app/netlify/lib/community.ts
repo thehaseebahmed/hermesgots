@@ -2,9 +2,11 @@
  * The community leaderboard: who spent the most tokens, and which models people run, by day.
  *
  * Only a GitHub username is ever kept about a person. A signed-in user joins with `POST join`, which
- * reads their GitHub account id from the avatar GitHub gave Netlify Identity and asks GitHub for the
- * username, so nobody types one in and nobody can claim another's. Their hosts (the Gots plugin)
- * then report counts: tokens by day, model and permission mode, never a prompt, a repo or a path.
+ * takes the GitHub account id the signup hook stamped on their sign-in's `app_metadata` and asks
+ * GitHub for the username, so nobody types one in and nobody can claim another's: the avatar the
+ * sign-in also carries sits in `user_metadata`, which the user can rewrite, and is never read
+ * (docs/adr/0166). Their hosts (the Gots plugin) then report counts: tokens by day, model and
+ * permission mode, never a prompt, a repo or a path.
  *
  * Two stores keep it apart. The registry store holds what must stay private (which account joined,
  * and each host's own report); the community store holds the public aggregate, one record per
@@ -12,6 +14,7 @@
  * person, and leaving deletes the lot.
  */
 
+import { isGithubId } from "./github-id.ts"
 import { modelKeys, type Catalog } from "./models-dev.ts"
 import { sha256, type RegistryStore } from "./registry.ts"
 
@@ -45,12 +48,41 @@ export interface Member {
   /** Absent on a record from before providers were counted, and for a host on an older plugin. */
   providers?: ProviderDays
   updatedAt: number
+  /**
+   * Written by a member whose username GitHub vouched for. A record without it is from before the
+   * device flow, when the username was read off a self-written avatar, and the board drops it.
+   */
+  verified?: true
 }
 
 export type Caller =
-  | { kind: "user"; userId: string; pictureUrl?: string }
+  | {
+      kind: "user"
+      userId: string
+      /** From `app_metadata.github_id`, which the signup hook writes and the user cannot. */
+      githubId?: string
+      /** Holds the Identity role `admin`, which only Netlify's settings grant. */
+      admin?: boolean
+    }
   | { kind: "host"; token: string }
   | null
+
+/** An Identity account as the backfill sees it: who it is, and what its sign-in claims. */
+export interface IdentityAccount {
+  id: string
+  email?: string
+  provider?: string
+  githubId?: string
+  /** The id its avatar names: the user's own say-so, shown for the operator to confirm. */
+  claimedGithubId?: string
+}
+
+/** Netlify Identity's admin API, for stamping accounts that signed up before the hook. */
+export interface IdentityAdmin {
+  list: () => Promise<IdentityAccount[]>
+  get: (userId: string) => Promise<IdentityAccount | null>
+  stamp: (userId: string, githubId: string) => Promise<void>
+}
 
 export interface CommunityContext {
   /** Public aggregates: `users/<login>` and the cached `board`. */
@@ -60,6 +92,8 @@ export interface CommunityContext {
   caller: Caller
   /** The username behind a GitHub account id; null when GitHub doesn't know it. */
   github: (id: string) => Promise<string | null>
+  /** Absent where the function has no admin access to Identity. */
+  identity?: IdentityAdmin
   /**
    * The model ids models.dev lists, or null when the catalogue couldn't be read — in which case
    * nothing is filtered and a report is taken as it always was. Absent in a caller with no
@@ -123,13 +157,24 @@ const MAX_MODELS_PER_DAY = 24
 const MAX_DAY_TOKENS = 5_000_000_000
 const MAX_DAY_CALLS = 2_000_000
 const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/
-const AVATAR_ID = /^https:\/\/avatars\.githubusercontent\.com\/u\/(\d{1,12})(?:[?/]|$)/
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 const MODEL = /^[a-z0-9][a-z0-9._:+-]{0,63}$/
 
 interface Account {
   login: string
   joinedAt: number
+  /**
+   * When GitHub vouched for `login`. Absent on an account that joined before the device flow: its
+   * login is what its avatar said, so its hosts still report but nothing of it is public until it
+   * verifies.
+   */
+  verifiedAt?: number
+}
+
+/** Who holds a username. `verified` is absent on a claim an avatar made, which a verified one beats. */
+interface Owner {
+  userId: string
+  verified?: true
 }
 
 interface Report {
@@ -529,6 +574,7 @@ async function recompute(
     days: mergeReports(reports, now),
     providers: mergeProviders(providers, now),
     updatedAt: now,
+    verified: true,
   }
   await ctx.store.setJSON(memberKey(login), member)
 }
@@ -545,6 +591,12 @@ async function board(ctx: CommunityContext, now: number): Promise<Board> {
   for (const { key } of (await ctx.store.list({ prefix: "users/" })).blobs) {
     const member = await read<Member>(ctx.store, key)
     if (!member) continue
+    // A username an avatar claimed may be someone else's: off the board, and out of the public
+    // store, until its account verifies — the counts stay private and come back then.
+    if (member.verified !== true) {
+      await ctx.store.delete(key)
+      continue
+    }
     const live = Object.keys(member.days).some((date) => date >= oldest)
     if (live) members.push(member)
     // Nothing in the window: the host stopped reporting, so the record is only weight.
@@ -576,6 +628,11 @@ function standing(member: Member | null, now: number, catalog?: Catalog | null) 
     out[period] = total
   }
   return out
+}
+
+async function removeReports(ctx: CommunityContext, userId: string) {
+  const prefix = `community/reports/${userId}/`
+  for (const { key } of (await ctx.registry.list({ prefix })).blobs) await ctx.registry.delete(key)
 }
 
 export async function handleCommunity(req: Request, ctx: CommunityContext) {
@@ -619,7 +676,7 @@ export async function handleCommunity(req: Request, ctx: CommunityContext) {
         providers: cleanProviders(input.providers, now, catalog),
         at: now,
       } satisfies Report)
-      await recompute(ctx, userId, account.login, now, catalog)
+      if (account.verifiedAt) await recompute(ctx, userId, account.login, now, catalog)
       return json({ ok: true, heldBack: cleaned.heldBack })
     }
 
@@ -630,20 +687,34 @@ export async function handleCommunity(req: Request, ctx: CommunityContext) {
   const { userId } = caller
   const account = await read<Account>(ctx.registry, accountKey(userId))
 
-  const joined = async (login: string) => {
-    const member = await read<Member>(ctx.store, memberKey(login))
-    return json({ joined: true, login, totals: standing(member, now, await catalogOf(ctx)) })
+  const me = async (current: Account | null) => {
+    if (!current) return { joined: false as const }
+    // An account an avatar joined has no public record to stand on until it verifies.
+    if (!current.verifiedAt) {
+      return {
+        joined: true as const,
+        verified: false,
+        login: current.login,
+        totals: standing(null, now),
+      }
+    }
+    const member = await read<Member>(ctx.store, memberKey(current.login))
+    return {
+      joined: true as const,
+      verified: true,
+      login: current.login,
+      totals: standing(member, now, await catalogOf(ctx)),
+    }
   }
 
-  if (op === "GET me") {
-    if (!account) return json({ joined: false })
-    return joined(account.login)
-  }
+  if (op === "GET me") return json(await me(account))
 
   if (op === "POST join") {
-    if (account) return joined(account.login)
-    const id = AVATAR_ID.exec(caller.pictureUrl ?? "")?.[1]
-    if (!id) return error("Couldn't read your GitHub account from your sign-in.", 422)
+    if (account?.verifiedAt) return json(await me(account))
+    const id = caller.githubId
+    if (!id) {
+      return error("This sign-in has no GitHub account on record yet, so it can't join.", 403)
+    }
     let login: string | null
     try {
       login = await ctx.github(id)
@@ -651,28 +722,69 @@ export async function handleCommunity(req: Request, ctx: CommunityContext) {
       return error("GitHub didn't answer. Try again in a minute.", 502)
     }
     if (!login || !LOGIN.test(login)) return error("Couldn't read your GitHub username.", 502)
-    // One GitHub account, one place on the board, however many Netlify sign-ins it has.
-    const owner = await read<{ userId: string }>(ctx.registry, ownerKey(login))
+
+    // One GitHub account, one place on the board, however many Netlify sign-ins it has. A claim an
+    // avatar made gives way: it was never proof, and may have been someone wearing this one's face.
+    const owner = await read<Owner>(ctx.registry, ownerKey(login))
     if (owner && owner.userId !== userId) {
-      return error("This GitHub account is already on the leaderboard from another sign-in.", 409)
+      if (owner.verified) {
+        return error("This GitHub account is already on the leaderboard from another sign-in.", 409)
+      }
+      const evicted = await read<Account>(ctx.registry, accountKey(owner.userId))
+      if (evicted && evicted.login.toLowerCase() === login.toLowerCase()) {
+        // Out of the leaderboard as Leave would take it: its hosts are told to stop on their next
+        // check-in, and what they sent goes with it.
+        await removeReports(ctx, owner.userId)
+        await ctx.registry.delete(accountKey(owner.userId))
+      }
     }
-    await ctx.registry.setJSON(ownerKey(login), { userId })
-    await ctx.registry.setJSON(accountKey(userId), { login, joinedAt: now } satisfies Account)
-    return joined(login)
+    // An avatar may have named another username for this account: that claim goes with it.
+    if (account && account.login.toLowerCase() !== login.toLowerCase()) {
+      const held = await read<Owner>(ctx.registry, ownerKey(account.login))
+      if (held?.userId === userId) await ctx.registry.delete(ownerKey(account.login))
+      await ctx.store.delete(memberKey(account.login))
+    }
+    await ctx.registry.setJSON(ownerKey(login), { userId, verified: true } satisfies Owner)
+    const verified: Account = { login, joinedAt: account?.joinedAt ?? now, verifiedAt: now }
+    await ctx.registry.setJSON(accountKey(userId), verified)
+    // The record under this username was the avatar's claim; this account's own reports replace it.
+    await recompute(ctx, userId, login, now, await catalogOf(ctx))
+    await ctx.store.delete("board")
+    return json(await me(verified))
   }
 
   if (op === "POST leave") {
     if (account) {
       await ctx.store.delete(memberKey(account.login))
       await ctx.store.delete("board")
-      const prefix = `community/reports/${userId}/`
-      for (const { key } of (await ctx.registry.list({ prefix })).blobs) {
-        await ctx.registry.delete(key)
-      }
-      await ctx.registry.delete(ownerKey(account.login))
+      await removeReports(ctx, userId)
+      const owner = await read<Owner>(ctx.registry, ownerKey(account.login))
+      if (owner?.userId === userId) await ctx.registry.delete(ownerKey(account.login))
       await ctx.registry.delete(accountKey(userId))
     }
     return json({ joined: false })
+  }
+
+  // The backfill: an account from before the signup hook carries no GitHub id, and nothing it
+  // holds can be trusted to give one, so an admin who knows the person writes it.
+  if (op === "GET unstamped" || op === "POST stamp") {
+    if (!caller.admin) return error("Only an admin can do that", 403)
+    if (!ctx.identity) return error("This site's Identity admin access isn't available.", 503)
+    if (op === "GET unstamped") {
+      const accounts = (await ctx.identity.list()).filter((account) => !account.githubId)
+      return json({ accounts })
+    }
+    const input = await body(req)
+    const target = typeof input?.userId === "string" ? input.userId : ""
+    const githubId = input?.githubId
+    if (!target || !isGithubId(githubId)) return error("Name an account and a GitHub id", 400)
+    const found = await ctx.identity.get(target)
+    if (!found) return error("No such account", 404)
+    if (found.githubId && found.githubId !== githubId && input?.replace !== true) {
+      return error("That account already has a GitHub id; send replace to change it", 409)
+    }
+    await ctx.identity.stamp(target, githubId)
+    return json({ id: target, githubId })
   }
 
   return error("Not found", 404)
