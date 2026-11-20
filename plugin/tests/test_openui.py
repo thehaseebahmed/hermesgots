@@ -103,7 +103,7 @@ class SkillRegistrationTest(SectionState):
         openui.register(ctx)
         self.assertEqual(
             [skill["name"] for skill in ctx.skills],
-            ["impeccable", "web-design-guidelines", "transitions-dev"],
+            ["canvas-craft", "impeccable", "web-design-guidelines", "transitions-dev"],
         )
         self.assertEqual(tuple(openui.SKILLS), tuple(skill["name"] for skill in ctx.skills))
         for skill in ctx.skills:

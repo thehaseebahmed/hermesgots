@@ -25,8 +25,9 @@ SPEC = ROOT / "DESIGN.md"
 PLUGIN_COPY = ROOT / "plugin" / "canvas" / "DESIGN.md"
 SKILLS = ROOT / "plugin" / "skills"
 
-# The three the canvas guide names, in the order `openui.py` registers them.
-BUNDLED = ("impeccable", "web-design-guidelines", "transitions-dev")
+# The skills the canvas guide names, in the order `openui.py` registers them: the craft the guide
+# used to carry whole, and the three design skills it points at.
+BUNDLED = ("canvas-craft", "impeccable", "web-design-guidelines", "transitions-dev")
 # An extension a host could load and run, and the shebang that makes a suffixless file one anyway.
 RUNNABLE = {".py", ".js", ".mjs", ".sh"}
 
@@ -115,9 +116,9 @@ def _frontmatter_name(text: str) -> Optional[str]:
 
 
 class BundledSkillsTest(unittest.TestCase):
-    """The three design skills, as the plugin ships them."""
+    """The skills the canvas guide names, as the plugin ships them."""
 
-    def test_the_three_folders_are_there(self) -> None:
+    def test_the_folders_are_there(self) -> None:
         for name in BUNDLED:
             skill = SKILLS / name / "SKILL.md"
             self.assertTrue(
