@@ -259,6 +259,10 @@ export function RoomChat({ id, slot }: { id: string; slot?: string }) {
           answerer={answerer}
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
+          // An archive keeps the row, so the effect above never fires: the step back onto the
+          // bot's list is the press's own — the move the bar's back control answers with
+          // (ADR 0154), and home where no list holds this room.
+          onArchived={() => (lead.list ? lead.ontoList() : root("/"))}
         />
       )}
     </div>

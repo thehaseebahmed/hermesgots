@@ -139,6 +139,8 @@ const screen = () => (
     <Path />
     <Routes>
       <Route path="/c/:id" element={<RoomChat id={ROOM} slot="route" />} />
+      {/* The list an archive steps back onto: the bot's own, at the address the sides layout gives it. */}
+      <Route path="/b/:botId/sidechats" element={<p data-list />} />
     </Routes>
   </MemoryRouter>
 )
@@ -225,6 +227,29 @@ test("a Host that cannot write rooms draws no Name and no Disband, but draws Pin
     absentText("button", "Disband room")
     await until(async () => Boolean(find("[data-chat-pin]")), "its pin, a mark of the reader's own")
     await until(async () => Boolean(find("[data-chat-archive]")), "and its archive, which is too")
+  })
+})
+
+test("the room's Archive puts it away and steps back onto the list", async () => {
+  const bot = await fresh(OPEN)
+  await mount(screen(), async () => {
+    await openSheet()
+    await until(async () => Boolean(find("[data-chat-archive]")), "the Archive control")
+    assert.equal(where(), `/c/${ROOM}`, "the room's own screen, until the press")
+    await click(find("[data-chat-archive]"))
+
+    // A room's archive is the reader's own mark on this device, never a write to the Host: the row
+    // keeps its place and only the Archived pill hides it (ADR 0159).
+    await until(
+      async () => (await db.conversations.get(ROOM))?.archived === true,
+      "the row archived on this device",
+    )
+    assert.equal(posted.length, 0, "and nothing posted: the mark is this device's own")
+    assert.equal(missing("[data-chat-archive]"), true, "the sheet closed with the press")
+    await until(
+      async () => where() === `/b/${bot.id}/sidechats`,
+      "the bot's list, the step the bar's back control takes",
+    )
   })
 })
 
