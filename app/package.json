@@ -29,6 +29,7 @@
   "dependencies": {
     "@alpinejs/csp": "^3.17.5",
     "@base-ui/react": "^1.8.0",
+    "@capacitor-community/bluetooth-le": "^8.4.0",
     "@capacitor/android": "^8.5.2",
     "@capacitor/app": "^8.1.2",
     "@capacitor/browser": "^8.0.5",
