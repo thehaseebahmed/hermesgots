@@ -606,9 +606,10 @@ async def tick(adapter: Any, session_id: str, profile: Optional[str], path: Path
     canvas_id = _canvas_of(path, session_id)
     build = None
     if canvas_id:
-        if _approves(row):
-            # The approval turn the approve route queued on the build's own session: it is the
-            # build's next turn, not a request the build took, so it is posted without being taken.
+        if session_id.startswith(builds.SESSION_PREFIX):
+            # A turn the plugin queued on the build's own session — the approve route's approval,
+            # or a check's report — is the build's next turn, not one of the canvas chat's
+            # requests, so it is posted without being taken.
             build = await asyncio.to_thread(builds.of_session, path, session_id)
         else:
             build = await asyncio.to_thread(builds.enter, path, canvas_id, row["text"] or "")
@@ -643,16 +644,6 @@ async def tick(adapter: Any, session_id: str, profile: Optional[str], path: Path
     await asyncio.to_thread(mark, path, row["id"], run_id)
     events.note("session", session_id, path, True)
     events.note("runs", session_id, path, True)
-
-
-def _approves(row: Any) -> bool:
-    """Whether a queued item is a build's approval turn — the turn the approve route queued on the
-    build's own session, marked in its body, which the build takes as a turn rather than as one of
-    the requests it rode its version with."""
-    try:
-        return bool(json.loads(row["body"] or "{}").get("approval"))
-    except (TypeError, ValueError):
-        return False
 
 
 def _canvas_of(path: Path, session_id: str) -> Optional[str]:

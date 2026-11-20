@@ -748,7 +748,7 @@ def resolve(path: Path, name: Any) -> str:
 def _version(conn: sqlite3.Connection, canvas_id: str, number: int) -> Optional[Dict[str, Any]]:
     """One version's document and the tools it declared, over a connection the caller holds."""
     row = conn.execute(
-        "SELECT version, html, tools, at, requests, summary FROM canvas_versions"
+        "SELECT version, html, tools, at, requests, summary, flag FROM canvas_versions"
         " WHERE canvas_id = ? AND version = ?",
         (canvas_id, number),
     ).fetchone()
@@ -760,14 +760,15 @@ def _version(conn: sqlite3.Connection, canvas_id: str, number: int) -> Optional[
         "tools": json.loads(row[2]) if row[2] else [],
         "written_at": row[3],
         # What a build's publish carries on the version it wrote (ADR 0170, builds.py): the
-        # requests that made it and its own summary. Both are absent for a version a canvas's own
-        # session wrote, which no build made.
-        **(_fields(row[4], row[5])),
+        # requests that made it, its own summary, and what its checks said of it (ADR 0171).
+        # All three are absent for a version a canvas's own session wrote, which no build made.
+        **(_fields(row[4], row[5], row[6])),
     }
 
 
-def _fields(requests: Any, summary: Any) -> Dict[str, Any]:
-    """A version's build fields, where it has any: the requests that made it and its summary."""
+def _fields(requests: Any, summary: Any, flag: Any = None) -> Dict[str, Any]:
+    """A version's build fields, where it has any: the requests that made it, its summary, and
+    what its checks said of it (passing, failing or unchecked — ``canvas_checks``)."""
     found: Dict[str, Any] = {}
     if requests:
         try:
@@ -778,6 +779,8 @@ def _fields(requests: Any, summary: Any) -> Dict[str, Any]:
             found["requests"] = held
     if summary:
         found["summary"] = summary
+    if flag:
+        found["flag"] = flag
     return found
 
 
