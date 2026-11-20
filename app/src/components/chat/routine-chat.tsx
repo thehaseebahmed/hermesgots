@@ -147,6 +147,7 @@ export function RoutineChat({ id, slot }: { id: string; slot: HoldSlot }) {
             open={settingsOpen}
             onOpenChange={setSettingsOpen}
             onDeleted={() => (lead.list ? lead.ontoList() : root("/"))}
+            onArchived={() => (lead.list ? lead.ontoList() : root("/"))}
           />
         </>
       ) : (
