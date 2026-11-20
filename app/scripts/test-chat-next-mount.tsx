@@ -400,6 +400,32 @@ test("a queued message stands in the thread the moment it is sent, before the pl
       () => Boolean(find("[data-remove-queued]")),
       "and the row is the plugin's own, offering Remove",
     )
+    assert.equal(
+      findAll("[data-queued]").filter((row) => row.textContent?.includes("And then this")).length,
+      1,
+      "one row for it: the drawn one went, and the plugin's item is what stands",
+    )
+  })
+})
+
+test("a queued message the plugin refuses goes back to the field, and leaves no row", async () => {
+  const { host } = await onChatNext("c-queue-refused", {}, { plugin: true })
+  await mount(chatScreen("c-queue-refused"), async () => {
+    await midReply(host, "First question")
+    const answer = globalThis.fetch
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) =>
+      new URL(String(input)).pathname.endsWith("/queue") && init?.method === "POST"
+        ? new Response(JSON.stringify({ error: { message: "The queue is full." } }), {
+            status: 500,
+          })
+        : answer(input, init)) as typeof fetch
+    await type(composerField(), "And then this")
+    await sendPress()
+    await until(
+      () => composerField()?.value === "And then this",
+      "the words are handed back to the field, as a send the host refused is",
+    )
+    assert.ok(missing("[data-queued]"), "and the row the press drew is taken back")
   })
 })
 

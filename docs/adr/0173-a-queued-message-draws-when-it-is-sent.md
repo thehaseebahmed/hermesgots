@@ -19,8 +19,9 @@ thread before it asks the host anything — the words, the files as they came, t
 takes it back if the post fails, which is where the composer's own handback already puts the words
 back in the field with the refusal above it. The row carries no Remove and no Send now until the
 plugin answers: both act on an item id, and this device has none yet. When the answer comes its item
-is drawn at once (`queue-item`, in the reducer) and the drawn row goes, so the row never falls out of
-the thread between the echo leaving and the next queue read landing.
+is drawn at once (`queue-item`, in the reducer) and the drawn row goes with it, so the thread is never
+waiting on a queue read for a row it already has: the drawn copy is the thread's own state, and the
+page draws it a frame after the answer lands at most.
 
 The row is the page's own, not the thread's state: `ThreadState` is kept on the device, and a reload
 mid-post would draw a message no one is posting. The reducer holds only what the plugin really took,

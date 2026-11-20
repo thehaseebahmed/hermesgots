@@ -899,9 +899,10 @@ test("the item the plugin took for a queued message is drawn at once, behind the
     reduce(state, {
       type: "queue",
       items: [queued("q1", "first"), queued("q2", "sent a moment ago")],
-    }).queue?.items.length,
-    2,
-    "a read that already holds it says the same queue",
+      paused: false,
+    }),
+    state,
+    "a read that holds the same queue changes nothing, so the page draws nothing again",
   )
 })
 
