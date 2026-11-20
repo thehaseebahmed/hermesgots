@@ -27,11 +27,14 @@ function since(at: number, now: number) {
   return new Date(at).toLocaleDateString()
 }
 
-/** Under the pet mode switch: what it does, and which bot it is, without naming a bot twice. */
+/**
+ * Under the pet mode switch. The row beneath names the pet, so this line says what the switch does
+ * rather than repeating the name it sits above.
+ */
 export function petSubtitle(
   choice: { enabled: boolean; botId?: string } | undefined,
   petName?: string,
 ) {
   if (!choice?.enabled) return "Your bots only, as they are now"
-  return petName ? `${petName} lives on the charm` : "Choose the bot that lives there"
+  return petName ? "Lives on the charm" : "Choose the bot that lives there"
 }

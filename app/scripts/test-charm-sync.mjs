@@ -88,17 +88,32 @@ test("the pet's messages are laid out as the firmware reads them", () => {
   // -300 as a little-endian i16 is 0xfed4.
   assert.deepEqual([...on], [1, 7, 1, 22, 7, 0xd4, 0xfe, 4, 0x6e, 0x6f, 0x76, 0x61])
   assert.deepEqual(
-    [...petSettingsMessage({ enabled: false, petBotId: "", bedStart: 22, bedEnd: 7, utcOffsetMin: 0 })],
+    [
+      ...petSettingsMessage({
+        enabled: false,
+        petBotId: "",
+        bedStart: 22,
+        bedEnd: 7,
+        utcOffsetMin: 0,
+      }),
+    ],
     [1, 7, 0, 22, 7, 0, 0, 0],
   )
   // A pet with no bot, or a night that is not hours, never reaches the radio.
   assert.throws(
-    () => petSettingsMessage({ enabled: true, petBotId: "", bedStart: 22, bedEnd: 7, utcOffsetMin: 0 }),
+    () =>
+      petSettingsMessage({ enabled: true, petBotId: "", bedStart: 22, bedEnd: 7, utcOffsetMin: 0 }),
     /Choose a bot to be the pet/,
   )
   assert.throws(
     () =>
-      petSettingsMessage({ enabled: true, petBotId: "nova", bedStart: 24, bedEnd: 7, utcOffsetMin: 0 }),
+      petSettingsMessage({
+        enabled: true,
+        petBotId: "nova",
+        bedStart: 24,
+        bedEnd: 7,
+        utcOffsetMin: 0,
+      }),
     /two hours of the day/,
   )
 
@@ -284,7 +299,7 @@ test("a sync sends every bot, then only what changed", async () => {
 const nova = { id: "nova", name: "Nova", accent: 1, image: picture(1) }
 const petOn = { enabled: true, petBotId: "nova", bedStart: 22, bedEnd: 7, utcOffsetMin: 120 }
 
-test("pet mode goes over before the bots, pictures first", async () => {
+test("pet mode lands after the bots' commit, its pictures before the toggle", async () => {
   const charm = fakeCharm()
   const poses = [
     { mood: "happy", image: picture(11, 900) },
@@ -393,7 +408,7 @@ test("the pet row says which bot lives on the charm", async () => {
   assert.equal(petSubtitle(undefined), "Your bots only, as they are now")
   assert.equal(petSubtitle({ enabled: false, botId: "nova" }), "Your bots only, as they are now")
   assert.equal(petSubtitle({ enabled: true }), "Choose the bot that lives there")
-  assert.equal(petSubtitle({ enabled: true, botId: "nova" }, "Nova"), "Nova lives on the charm")
+  assert.equal(petSubtitle({ enabled: true, botId: "nova" }, "Nova"), "Lives on the charm")
 })
 
 test("the paired charm's own row says only when it last synced", async () => {

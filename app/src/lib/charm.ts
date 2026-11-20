@@ -143,14 +143,21 @@ export async function charmPicture(
   return new Uint8Array(await blob.arrayBuffer())
 }
 
+// The pictures are the character's, so they never go stale and one set serves every sync.
+const poseSets = new Map<string, Promise<CharmPose[]>>()
+
 /**
  * The pet's pictures: one for each mood the app draws. A mood with no art of its own is left to the
  * charm's fallbacks, which is why hungry, sad and the rest are not sent.
  */
-export async function charmPoses(botId: string): Promise<CharmPose[]> {
-  return Promise.all(
+export function charmPoses(botId: string): Promise<CharmPose[]> {
+  const known = poseSets.get(botId)
+  if (known) return known
+  const set = Promise.all(
     BOT_MOODS.map(async ({ id }) => ({ mood: id, image: await charmPicture(botId, id) })),
   )
+  poseSets.set(botId, set)
+  return set
 }
 
 /** What the charm gets for this phone's bots: a name and a picture each, in the order shown. */

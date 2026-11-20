@@ -73,7 +73,8 @@ export function CharmSettings() {
     }
   }
 
-  const sources = (profiles ?? []).filter((p) => !p.disabled)
+  // The charm's own order, so the picker lists bots as the carousel does.
+  const sources = botsByLabel(profiles ?? [], labels).filter((p) => !p.disabled)
   const pet = charm?.pet
   const petProfile = sources.find((p) => p.id === pet?.botId)
   const petName = petProfile ? labelOf(labels, petProfile) : undefined
@@ -85,12 +86,12 @@ export function CharmSettings() {
     setFailure(null)
     setProgress(null)
     try {
-      const bots = await charmBots(botsByLabel(profiles ?? [], labels), labels)
+      const bots = await charmBots(sources, labels)
       const settings = petSettingsFrom(
         choice ?? pet,
         sources.map((p) => p.id),
       )
-      // The pet's pictures come from its character, and only one of them is the pet.
+      // Pictures are the character's, so the pet's are drawn from its profile's botId.
       const petBot = sources.find((p) => p.id === settings.petBotId)
       const poses = settings.enabled && petBot ? await charmPoses(petBot.botId) : []
       const done = await syncToCharm(bots, setProgress, { pet: { settings, poses } })
@@ -103,23 +104,28 @@ export function CharmSettings() {
     }
   }
 
-  const choosePet = async (botId: string) => {
-    setPicking(false)
-    const choice = { enabled: true, botId }
+  const applyPet = async (choice: CharmPetChoice) => {
     setCharmPet(choice)
     await sync(choice)
   }
 
-  /** Off to on needs a bot to be the pet; the first one is a sensible answer to a bare tap. */
+  const choosePet = async (botId: string) => {
+    setPicking(false)
+    await applyPet({ enabled: true, botId })
+  }
+
+  // A bare tap on with no pet picked takes the first bot; a pet whose bot has gone is not one.
   const togglePet = async (on: boolean) => {
-    const botId = pet?.botId ?? sources[0]?.id
+    const botId =
+      petSettingsFrom(
+        pet,
+        sources.map((p) => p.id),
+      ).petBotId || sources[0]?.id
     if (on && !botId) {
       setFailure("Add a bot first: the pet is one of your bots.")
       return
     }
-    const choice = { enabled: on, botId }
-    setCharmPet(choice)
-    await sync(choice)
+    await applyPet({ enabled: on, botId })
   }
 
   const count = sources.length

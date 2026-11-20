@@ -79,6 +79,8 @@ export async function syncCharm(
   options: SyncOptions = {},
 ): Promise<SyncProgress> {
   checkBots(bots)
+  // Refused before anything goes over: the bots are the part of a sync that must land.
+  if (options.pet?.settings.enabled) checkPoses(options.pet.poses)
   const progress: SyncProgress = { done: 0, total: bots.length, sent: 0 }
   const size = chunkSize(link.mtu)
   try {
@@ -94,7 +96,6 @@ export async function syncCharm(
       onProgress?.({ ...progress })
     }
     await ask(link, commitMessage())
-    // The bots go first, so a charm with older firmware still takes them when pet mode is refused.
     await sendPet(link, size, options)
     return progress
   } catch (error) {
@@ -104,13 +105,11 @@ export async function syncCharm(
   }
 }
 
-/** The clock, the pet's pictures and then the toggle, in the order the charm needs them. */
 async function sendPet(link: CharmTransport, size: number, options: SyncOptions) {
   if (!options.pet) return
   const { settings, poses } = options.pet
   await ask(link, timeMessage(Math.floor((options.now ?? Date.now()) / 1000)))
   if (settings.enabled) {
-    checkPoses(poses)
     for (const pose of poses) {
       if (!(await ask(link, poseMessage(pose.mood, pose.image))).needImage) continue
       await sendPicture(

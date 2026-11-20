@@ -80,15 +80,15 @@ export const CHARM_MOODS = [
   "playing",
 ] as const
 
-/** The moods the app has a picture for; the rest are drawn by the charm's fallbacks. */
+/** A mood the charm knows by number. The app draws six of the eleven; the charm poses the rest. */
 export type CharmMood = (typeof CHARM_MOODS)[number]
 
 export const charmMood = (mood: CharmMood) => CHARM_MOODS.indexOf(mood)
 
 export interface CharmPetSettings {
-  /** Off by default: a charm with pet mode off is the Phase 1 carousel and nothing else. */
+  /** Off by default: the charm shows the bots' carousel, as it did before pet mode. */
   enabled: boolean
-  /** The bot that lives on the charm. Required when `enabled` is on. */
+  /** The pet as a Profile id: the id the charm's bot list carries. Required when `enabled` is on. */
   petBotId: string
   /** The user's night, in local hours: it sleeps at `bedStart` and wakes at `bedEnd`. */
   bedStart: number
@@ -294,7 +294,6 @@ export function parseStatus(view: DataView): CharmStatus {
 /** Checks the pet's pictures before any of them goes over the air. */
 export function checkPoses(poses: CharmPose[]) {
   for (const pose of poses) {
-    if (!CHARM_MOODS.includes(pose.mood)) throw new Error(`${pose.mood} is not a mood`)
     if (pose.image.length > CHARM_MAX_IMAGE_BYTES)
       throw new Error(`The pet's ${pose.mood} picture is too big for the charm`)
   }
