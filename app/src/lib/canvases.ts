@@ -68,6 +68,8 @@ import {
   runRequest,
   undoCanvas as undoCanvasOnHost,
   updateCanvas as updateCanvasOnHost,
+  approveCanvasBuild as approveCanvasBuildOnHost,
+  stopCanvasBuild as stopCanvasBuildOnHost,
   type CanvasChanges,
   type CanvasFile,
 } from "@/lib/hermes"
@@ -156,6 +158,16 @@ export interface CanvasBuild {
   phase: string
   /** The requests this build has taken, in the order they came. */
   requests: string[]
+  /**
+   * The plan the build filed, where one waits: what will change, drawn in the composer's place
+   * with Approve and Stop beside it (G6). Absent until a plan is filed.
+   */
+  plan?: string
+  /**
+   * Whether the filed plan waits for the reader's Approve before anything is written. A message
+   * sent while it waits revises the plan; Approve builds it.
+   */
+  wait?: boolean
 }
 
 /** A canvas as a list keeps it, and as the cache's list row keeps it (`canvas-cache.ts`). */
@@ -329,6 +341,8 @@ function buildOf(raw: unknown): CanvasBuild | undefined {
     requests: Array.isArray(build.requests)
       ? build.requests.filter((one): one is string => typeof one === "string")
       : [],
+    ...(typeof build.plan === "string" && build.plan ? { plan: build.plan } : {}),
+    ...(build.wait === true ? { wait: true } : {}),
   }
 }
 
@@ -630,6 +644,48 @@ async function readRecord(id: string) {
  */
 export async function undoCanvas(id: string) {
   return readInto(id, (profile, canvasId) => undoCanvasOnHost(profile, canvasId))
+}
+
+/**
+ * Approve the canvas's waiting build plan (G6): the host clears the wait, queues the approval turn
+ * on the build's own session, and answers the build as it now is — which is folded over the copy
+ * this device draws, so the lane takes the plan card away at once rather than at the host's next
+ * change event. A canvas with no build open, and a build whose plan is not waiting, are refused in
+ * the host's own words.
+ */
+export async function approveBuild(id: string) {
+  return actOnBuild(id, (bot, canvasId) => approveCanvasBuildOnHost(bot, canvasId))
+}
+
+/**
+ * Stop the canvas's build (G6): nothing is published and the draft is kept for the next request. The
+ * host answers the build as it ended — stopped, which is no open build at all — so the copy it is
+ * folded over keeps none, exactly as the host's next read answers it.
+ */
+export async function stopBuild(id: string) {
+  return actOnBuild(id, (bot, canvasId) => stopCanvasBuildOnHost(bot, canvasId))
+}
+
+/**
+ * One write on a canvas's open build, answered with the build as it now is and folded over the copy
+ * this device draws. A build that is no longer open leaves the copy holding none; one still open is
+ * taken as it was answered. The host's own refusal is thrown as every other canvas write throws it.
+ */
+async function actOnBuild(
+  id: string,
+  call: (bot: Profile, canvasId: string) => Promise<Record<string, unknown> | undefined>,
+) {
+  const { profile, value } = await withHost(id, (bot) => call(bot, id), CANVAS_UNREACHABLE)
+  const build = (value ?? undefined) as CanvasBuild | undefined
+  const state = store.get()
+  const held = state.details[id]
+  if (held) {
+    const { build: _was, ...rest } = held
+    const next = build && build.phase === "open" ? { ...rest, build } : rest
+    store.set({ ...state, details: { ...state.details, [id]: next } })
+    keepCanvas(profile, next)
+  }
+  return build
 }
 
 /**

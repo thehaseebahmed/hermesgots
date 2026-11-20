@@ -19,6 +19,7 @@ import {
   click,
   composerField,
   find,
+  findText,
   json,
   laptop,
   mount,
@@ -86,6 +87,8 @@ interface Host {
   /** The sessions whose transcript was read, and the runs a send posted. */
   read: string[]
   posted: string[]
+  /** The paths an Approve or a Stop was posted to. */
+  acted: string[]
 }
 
 function serve(host: Host) {
@@ -100,6 +103,20 @@ function serve(host: Host) {
     }
     if (url.pathname.endsWith("/canvases/c1")) {
       return json({ object: "gots.canvas", canvas: host.canvas })
+    }
+    if (init?.method === "POST" && /\/build\/(approve|stop)$/.test(url.pathname)) {
+      host.acted.push(url.pathname)
+      // The host's own read follows the press, as the plugin's does: the wait is cleared on
+      // Approve, and a stopped build is no open build at all.
+      if (url.pathname.endsWith("/stop")) {
+        host.canvas = canvasAt()
+        return json({ object: "gots.canvas.build", build: { ...BUILD, phase: "stopped" } })
+      }
+      host.canvas = canvasAt({ ...BUILD, plan: "The heading says Split the bill.", wait: false })
+      return json({
+        object: "gots.canvas.build",
+        build: { ...BUILD, plan: "The heading says Split the bill.", wait: false },
+      })
     }
     const queue = /\/sessions\/([^/]+)\/queue$/.exec(url.pathname)
     if (queue) {
@@ -159,6 +176,7 @@ test(
       queued: [],
       read: [],
       posted: [],
+      acted: [],
     }
     serve(host)
     await seed()
@@ -198,6 +216,7 @@ test(
       queued: [],
       read: [],
       posted: [],
+      acted: [],
     }
     serve(host)
     await seed()
@@ -214,6 +233,102 @@ test(
       await sendInTheLane("and make it blue too")
       assert.equal(host.queued.length, 0, "nothing is queued on a canvas with no builds")
       assert.equal(host.posted.length, 1, "the request is posted as a run of the canvas's session")
+    })
+  }),
+)
+
+test(
+  "a waiting plan is drawn with Approve and Stop in the composer's place",
+  laptop(async () => {
+    const host: Host = {
+      canvas: canvasAt({ ...BUILD, plan: "The heading says Split the bill.", wait: true }),
+      items: [],
+      queued: [],
+      read: [],
+      posted: [],
+      acted: [],
+    }
+    serve(host)
+    await seed()
+    const bot = (await db.profiles.get("bot-1"))!
+    await drawLane(host, async () => {
+      await act(async () => {
+        await refreshCanvas("c1")
+        await noteChange(connectionKey(bot), "canvas")
+      })
+      await until(
+        () =>
+          Boolean(findText("button", "Approve")) &&
+          Boolean(findText("button", "Stop")) &&
+          Boolean(composerField()),
+        "the waiting plan's Approve and Stop, and the composer under them, to be drawn",
+      )
+      assert.ok(
+        document.body.textContent?.includes("The heading says Split the bill."),
+        "the plan's own words are drawn",
+      )
+      assert.ok(
+        composerField(),
+        "the composer stays under the card, so a message revises the plan",
+      )
+      // Approve posts to the host, and the card goes: the draft is open, so the lane draws the
+      // composer alone again.
+      await click(findText("button", "Approve"))
+      await settle()
+      assert.equal(
+        host.acted.filter((path) => path.endsWith("/build/approve")).length,
+        1,
+        "Approve was posted to the host",
+      )
+      assert.ok(
+        !document.body.textContent?.includes("Plan ready"),
+        "the plan card is taken away",
+      )
+      assert.ok(composerField(), "the composer is what the lane draws again")
+    })
+  }),
+)
+
+test(
+  "Stop ends the build and the lane draws the canvas's own session again",
+  laptop(async () => {
+    const host: Host = {
+      canvas: canvasAt({ ...BUILD, plan: "The heading says Split the bill.", wait: true }),
+      items: [],
+      queued: [],
+      read: [],
+      posted: [],
+      acted: [],
+    }
+    serve(host)
+    await seed()
+    const bot = (await db.profiles.get("bot-1"))!
+    await drawLane(host, async () => {
+      await act(async () => {
+        await refreshCanvas("c1")
+        await noteChange(connectionKey(bot), "canvas")
+      })
+      await until(
+        () => Boolean(findText("button", "Stop")),
+        "the waiting plan's Stop to be drawn",
+      )
+      await click(findText("button", "Stop"))
+      await settle()
+      assert.equal(
+        host.acted.filter((path) => path.endsWith("/build/stop")).length,
+        1,
+        "Stop was posted to the host",
+      )
+      assert.ok(
+        !document.body.textContent?.includes("Plan ready"),
+        "the plan card is taken away",
+      )
+      // A stopped build is no open build: the lane reads the canvas's own session again, as a
+      // canvas with no build going does.
+      await until(
+        () => host.read.includes("gots-chat-1"),
+        "the canvas's own session to be read again",
+      )
     })
   }),
 )

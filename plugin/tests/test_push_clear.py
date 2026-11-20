@@ -25,7 +25,7 @@ from unittest import mock
 
 import plugin
 from plugin import answers, chats, link, ntfy, push
-from plugin.store import connect, db_path
+from plugin.store import SCHEMA_VERSION, connect, db_path
 from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
 
 BASE = "https://bot.example/api/plugins/gots"
@@ -142,7 +142,7 @@ class Schema(unittest.TestCase):
         connect(path).close()
         conn = sqlite3.connect(path)
         try:
-            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], 77)
+            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION)
             tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
             self.assertIn(
                 "push_live",

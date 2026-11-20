@@ -48,6 +48,7 @@ import {
 import { librarySource, loadLibraries } from "@/lib/canvas-library-sources"
 import { keepPoint, takePoint } from "@/lib/canvas-point-pick"
 import {
+  approveBuild,
   callCanvasCall,
   canvasReader,
   deleteCanvas,
@@ -56,6 +57,7 @@ import {
   refreshCanvas,
   refreshCanvases,
   startCanvas,
+  stopBuild,
   undoCanvas,
   updateCanvas,
   useCanvas,
@@ -70,6 +72,7 @@ import { db, getActiveProfile, type Attachment, type Profile } from "@/lib/db"
 import { MAX_ATTACHMENTS } from "@/lib/attachment-caps"
 import { serverConfig } from "@/lib/connection"
 import { usePluginFeature, usePluginFeatureOn } from "@/lib/features"
+import { BuildPlanCard } from "@/components/chat/session-cards"
 import { HEADER_BUTTON, PAGE_BODY, COLUMN } from "@/lib/layout"
 import { cn } from "@/lib/utils"
 import type { CanvasPoint } from "@/lib/point-marker"
@@ -1077,6 +1080,9 @@ function CanvasChat({
   const { summaries, usage, providerUsage, limit } = useChatSurface(chat, bot, view)
   const { tracked, tokens, window: windowSize, model } = usage
   if (!canvas || !chat || !bot) return null
+  // A build whose plan waits holds the lane's controls: the plan's words with Approve and Stop in
+  // the composer's place, the field staying under it so a message revises the plan (G6).
+  const waiting = canvas.build?.wait ? canvas.build : undefined
   const body = (
     <PreviewerProvider>
       <ChatBody
@@ -1086,6 +1092,17 @@ function CanvasChat({
         limit={limit}
         {...(canvas.build ? { session: canvas.build.session } : {})}
         queueSends={Boolean(canvas.builds)}
+        {...(waiting
+          ? {
+              composerPlace: (
+                <BuildPlanCard
+                  plan={waiting.plan ?? ""}
+                  onApprove={() => approveBuild(canvas.id)}
+                  onStop={() => stopBuild(canvas.id)}
+                />
+              ),
+            }
+          : {})}
         afterSettled={() => {
           // Every turn's end re-reads what this screen draws: a stream can be open and silent (a
           // buffering proxy), so the event is never the only news. A read already in flight is joined

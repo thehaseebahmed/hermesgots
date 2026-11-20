@@ -12,7 +12,7 @@ import unittest
 from pathlib import Path
 
 import plugin
-from plugin import canvases
+from plugin import builds, canvases
 from plugin.store import SCHEMA_VERSION, connect, db_path
 from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
 
@@ -138,6 +138,48 @@ class ACanvasKeepsItsGrants(unittest.TestCase):
         self.assertEqual(answered["grants"], [answered["grant"]])
         self.assertEqual(
             canvases.current(path, "c1")["grants"], [answered["grant"]]
+        )
+
+
+class ABuildKeepsItsPlanColumns(unittest.TestCase):
+    """A v77 store gains the plan columns on its builds, and keeps the builds it holds."""
+
+    def test_a_v77_store_upgrades_keeping_its_builds(self) -> None:
+        path = db_path(temp_hermes_home(self))
+        old = connect(path)
+        old.execute(
+            "INSERT INTO canvases (id, title, session_id, chat_id, version, pinned, archived, at,"
+            " created_at) VALUES ('c1', 'Tip', 's1', 'chat-1', 1, 0, 0, 7, 5)"
+        )
+        old.execute(
+            "INSERT INTO canvas_builds (id, canvas_id, session_id, phase, requests, summary,"
+            " run_id, at, created_at) VALUES ('b1', 'c1', 'canvas-b1', 'open', ?," 
+            " NULL, NULL, 7, 5)",
+            (json.dumps(["make it blue"]),),
+        )
+        # A store of the build before this one: no plan columns, and the version it stops at.
+        old.execute("ALTER TABLE canvas_builds DROP COLUMN plan")
+        old.execute("ALTER TABLE canvas_builds DROP COLUMN wait")
+        old.execute("PRAGMA user_version = 77")
+        old.close()
+
+        conn = connect(path)
+        try:
+            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION)
+            self.assertEqual(
+                tuple(
+                    conn.execute(
+                        "SELECT phase, requests, plan, wait FROM canvas_builds WHERE id = 'b1'"
+                    ).fetchone()
+                ),
+                ("open", json.dumps(["make it blue"]), None, 0),
+            )
+        finally:
+            conn.close()
+        # The build the store holds is still the one its canvas reads, and a plan may be filed on it.
+        self.assertEqual(builds.of_canvas(path, "c1")["id"], "b1")
+        self.assertTrue(
+            builds.plan(path, "b1", {"changes": "Blue.", "checks": [], "wait": True})
         )
 
 

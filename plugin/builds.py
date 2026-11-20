@@ -11,7 +11,9 @@ that fails or is interrupted publishes nothing and keeps the draft for the next 
 The canvas's chat record stays the request inbox (its model pin, drafts, start files, mute and the
 queue), and the outbox routes its items into builds — so the send path is not rebuilt and no new
 request route exists. ``enter`` is the door the outbox knocks on; ``ended`` is the one Hermes's
-``on_session_end`` knocks on.
+``on_session_end`` knocks on. A build files its plan before it writes — what will change, how it
+will be checked, and whether it waits for the reader's Approve — and a plan that waits holds the
+build open until the reader approves it or stops it (G6).
 
 Run: python3 -m unittest plugin.tests.test_canvas_builds -v
 """
@@ -48,12 +50,18 @@ DRAFT = canvases.DRAFT
 MEMORY = canvases.MEMORY
 
 # A build's phases (step 13 stamps the ones a build passes through while it works). A canvas has at
-# most one open build, so `open` is what a read looks for.
+# most one open build, so `open` is what a read looks for; `stopped` is the reader ending a build
+# through its stop route, which publishes nothing and keeps the draft (G6).
 OPEN = "open"
 PUBLISHED = "published"
 FAILED = "failed"
+STOPPED = "stopped"
 
-PHASES = (OPEN, PUBLISHED, FAILED)
+PHASES = (OPEN, PUBLISHED, FAILED, STOPPED)
+
+# The turn the approve route queues on the build's own session once the reader has approved its
+# plan: the words the agent is told the approval in, since the build's next turn is what carries it.
+APPROVAL = "The plan is approved. Build it."
 
 # The newest summaries a build's seed carries: a build is told what the canvas has lately been asked
 # for and what came of it, not its whole history.
@@ -229,6 +237,84 @@ def note_run(path: Path, build_id: str, run_id: Optional[str]) -> None:
         conn.close()
 
 
+def plan(path: Path, build_id: str, args: Dict[str, Any]) -> bool:
+    """Files a build's plan — what will change, its checks, and whether it waits — and answers
+    whether it waits.
+
+    The plan's words and its wait flag are the build record's: the words are what the lane draws
+    while the build waits, and the flag is what holds the draft closed and keeps the build open at
+    its run's end. The checks are the folder's own file, written whole like the memory is, since
+    the check runner reads them off the folder when the build is checked (step 10). Filing again
+    revises the plan, waiting or not (G6).
+    """
+    changes = args.get("changes")
+    if not isinstance(changes, str) or not changes.strip():
+        raise canvases.CanvasError("A plan says what will change.")
+    checks = args.get("checks") or []
+    if not isinstance(checks, list) or not all(
+        isinstance(one, dict)
+        and isinstance(one.get("name"), str)
+        and isinstance(one.get("script"), str)
+        for one in checks
+    ):
+        raise canvases.CanvasError("A plan's checks are named scripts, each a name and a script.")
+    wait = args.get("wait")
+    if not isinstance(wait, bool):
+        raise canvases.CanvasError("A plan says whether it waits for the reader's Approve.")
+    build = _by_id(path, build_id)
+    if build is None:
+        raise canvases.CanvasError("There is no such build.", 404)
+    canvases.keep(path, build["canvas_id"], canvases.TESTS, json.dumps(checks))
+    conn = _open(path)
+    try:
+        conn.execute(
+            "UPDATE canvas_builds SET plan = ?, wait = ?, at = ? WHERE id = ?",
+            (changes, 1 if wait else 0, now_ms(), build_id),
+        )
+    finally:
+        conn.close()
+    _note(path, build["canvas_id"])
+    return wait
+
+
+def approve(path: Path, canvas_id: str) -> Optional[Dict[str, Any]]:
+    """Approves the waiting plan: the draft opens, and the build is answered as it now is.
+
+    The approval turn itself is queued by the route, on the build's own session, so a run still
+    working when the reader approves holds it behind that run. A canvas with no build open, and a
+    build whose plan is not waiting, are refused in the module's own words.
+    """
+    build = of_canvas(path, canvas_id)
+    if build is None:
+        raise canvases.CanvasError("This canvas has no build open.", 409)
+    if not build.get("wait"):
+        raise canvases.CanvasError("This build's plan isn't waiting for approval.", 409)
+    conn = _open(path)
+    try:
+        conn.execute(
+            "UPDATE canvas_builds SET wait = 0, at = ? WHERE id = ?", (now_ms(), build["id"])
+        )
+    finally:
+        conn.close()
+    _note(path, canvas_id)
+    return _by_id(path, build["id"])
+
+
+def stop(path: Path, canvas_id: str) -> Optional[Dict[str, Any]]:
+    """Ends the build `stopped`: nothing is published and the draft is kept for the next request.
+
+    A waiting plan needs a way out other than Approve, and a build nobody wants is not a failure
+    of the host's — the draft stays where the next request takes it up, exactly as a failed run
+    leaves it (G6).
+    """
+    build = of_canvas(path, canvas_id)
+    if build is None:
+        raise canvases.CanvasError("This canvas has no build open.", 409)
+    _phase(path, build["id"], STOPPED, None)
+    _note(path, canvas_id)
+    return _by_id(path, build["id"])
+
+
 def seed(path: Path, canvas_id: str) -> str:
     """What a build is told before it starts: the page, the canvas's memory and its newest builds.
 
@@ -240,7 +326,9 @@ def seed(path: Path, canvas_id: str) -> str:
     """
     parts: List[str] = [
         "You are working on a canvas in a build: one request, one session, one version published "
-        "at its end. Write the page with canvas_write and canvas_edit — they land in this canvas's "
+        "at its end. Start by filing a plan with canvas_plan — what will change, how it will be "
+        "checked, and whether it waits for the reader's Approve; a clear tweak does not wait. "
+        "Write the page with canvas_write and canvas_edit — they land in this canvas's "
         "draft, which becomes the version when your run ends — and read what is there with "
         "canvas_read. Nothing you write reaches the reader before then."
     ]
@@ -314,6 +402,10 @@ def _ended(kwargs: Dict[str, Any]) -> None:
     # A request that arrived while this run worked is the build's next turn rather than a second
     # build, so the build carries on instead of publishing under it.
     if _owed(path, build):
+        return
+    # A plan that waits holds the build open: the reader's Approve is what opens the draft, and
+    # the build publishes when a run ends after that (G6).
+    if build.get("wait"):
         return
     publish(path, home, build["id"], _summary(session_id))
 
@@ -396,19 +488,26 @@ def _note(path: Path, canvas_id: str) -> None:
 
 
 def read(conn: sqlite3.Connection, canvas_id: str) -> Optional[Dict[str, Any]]:
-    """What an app is told of this canvas's open build: its session, its phase and its requests.
+    """What an app is told of this canvas's open build: its session, its phase, its requests, and
+    the plan it has filed where one waits.
 
     The session is what the lane draws while a build runs — a build's work is its own transcript,
     behind the canvas's chat — so the app reads the build's session here rather than guessing one.
-    ``conn`` is a connection the caller holds, so a canvas's own read answers this without opening
-    a second one.
+    The plan and its wait flag are what the lane draws in the composer's place while the build
+    waits, with Approve and Stop beside them (G6). ``conn`` is a connection the caller holds, so a
+    canvas's own read answers this without opening a second one.
     """
     found = _of_canvas(conn, canvas_id)
     if found is None:
         return None
-    return {
+    answer = {
         "id": found["id"],
         "session": found["session_id"],
         "phase": found["phase"],
         "requests": found["requests"],
     }
+    if found.get("plan"):
+        answer["plan"] = found["plan"]
+    if found.get("wait"):
+        answer["wait"] = True
+    return answer
