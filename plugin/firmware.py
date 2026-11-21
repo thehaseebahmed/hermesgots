@@ -50,7 +50,9 @@ ANNOTATIONS = (
     ("size", SIZE_ANNOTATION, "size"),
 )
 DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
-VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
+# Three numbers, dotted, and an optional prerelease after a dash: the name the app compares with the
+# charm's own answer, so `0.1.0-beta` is a version and `0.1.0.1` or `latest` are not.
+VERSION_RE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
 
 # A manifest is a few hundred bytes; an image is a megabyte and a half, and a slow server may take
 # its time over the blob without the small reads ever waiting that long.
@@ -146,7 +148,8 @@ def describe(manifest: Any) -> Dict[str, Any]:
         said[key] = value.strip()
     if not VERSION_RE.match(said["version"]):
         raise FirmwareError(
-            "The published charm firmware's version isn't three numbers separated by dots."
+            "The published charm firmware's version isn't three numbers separated by dots, "
+            "optionally with a prerelease like 0.1.0-beta."
         )
     if not DIGEST_RE.match(said["sha256"]):
         raise FirmwareError("The published charm firmware's SHA-256 isn't a lowercase hex digest.")

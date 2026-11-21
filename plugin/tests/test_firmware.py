@@ -155,11 +155,18 @@ class AnnotationsTest(unittest.TestCase):
             firmware.describe(manifest(**{firmware.SHA256_ANNOTATION: "NOT-A-DIGEST"}))
         self.assertIn("SHA-256", str(raised.exception))
 
-    def test_a_version_that_isnt_three_numbers_is_refused(self):
-        for version in ("latest", "0.2.0-rc1", "0.2.0.1"):
+    def test_a_version_that_is_not_a_version_is_refused(self):
+        for version in ("latest", "0.2.0.1", "0.2.0-"):
             with self.assertRaises(firmware.FirmwareError) as raised:
                 firmware.describe(manifest(**{firmware.VERSION_ANNOTATION: version}))
             self.assertIn("three numbers", str(raised.exception), version)
+
+    def test_a_prerelease_is_a_version_the_row_can_compare(self):
+        # `0.1.0-beta` is what the beta firmware answers over op 0x36, so the package that offers it
+        # has to be readable rather than refused as a version nobody wrote.
+        for version in ("0.1.0-beta", "0.2.0-rc.1", "1.0.0-beta.2"):
+            described = firmware.describe(manifest(**{firmware.VERSION_ANNOTATION: version}))
+            self.assertEqual(described["version"], version)
 
     def test_a_manifest_with_no_layer_names_nothing_to_send(self):
         said = manifest()
