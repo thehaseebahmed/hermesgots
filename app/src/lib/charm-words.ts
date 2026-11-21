@@ -84,10 +84,14 @@ export function wifiReasonWords(reason: number): string {
   }
 }
 
-/** What the phone remembers of a network the charm took, when the charm itself has not answered. */
+/**
+ * What the phone remembers of a network the charm took, when the charm itself has not answered. A
+ * record is written only for a yes, so `saved` means kept; whether the secret can be read off the
+ * chip is the code's business, and its words are the warning, not this line.
+ */
 function recordWords(record?: CharmWifiRecord) {
   if (!record) return "Not set"
-  return record.saved ? `Saved ${record.ssid}` : `${record.ssid}, kept for this boot only`
+  return record.saved ? `Saved ${record.ssid}` : `${record.ssid}, not saved`
 }
 
 /** The tailnet line: whether the charm is on it, and its own name for it. */
@@ -177,11 +181,12 @@ export const PUBLISHED_CHANGED =
   "The published image isn't the one the version names — it may have been replaced. Try again."
 
 /**
- * Under the Firmware row, once: a first encrypted boot is irreversible, so it is said before the
- * button, not after.
+ * Under the Firmware row, once: the image published there is the ordinary, unsealed build, so it is
+ * safe over the air; a sealed charm is the one that refuses it, and the charm's own reason is what
+ * the row draws when it does.
  */
 export const FIRMWARE_CAPTION =
-  "The published image is the encrypted build. The first one a board boots burns its flash-encryption key for good: that board runs an encrypted image from then on."
+  "The published image is the everyday build, not a sealed one: it installs over the air on any charm whose flash isn't sealed. A sealed charm refuses it, and says so in its own words."
 
 /** The row's word that an image went, while the charm is still coming back. */
 export const FIRMWARE_SENT = "Sent. The charm is restarting on it."
@@ -204,6 +209,10 @@ export function updateReasonWords(reason: number): string {
       return "the charm couldn't write it"
     case CharmUpdateReason.Cancelled:
       return "it was cancelled"
+    case CharmUpdateReason.WrongScheme:
+      // The charm refuses an image built for the other kind of board, and one that states no kind
+      // at all: the phone says which, because "the charm didn't say why" would read as a fault.
+      return "that image was built for a different kind of charm"
     default:
       return "the charm didn't say why"
   }

@@ -82,6 +82,7 @@ import {
   CHARM_SLOT_BYTES,
   CharmCode,
   CharmUpdateState,
+  charmKept,
   charmWakeOf,
   codeWords,
   hexOf,
@@ -357,9 +358,10 @@ export function CharmNetwork({
     setSaid(null)
     try {
       const code = await run()
-      // SavedToRam is a yes the charm will forget: the words say that rather than a plain "Saved".
+      // A refusal gets the code's words. A plaintext charm's 11 is a yes whose words are the warning
+      // that anyone holding the charm can read the secret off the chip, so it says them too.
       setSaid(code === CharmCode.Ok ? null : codeWords(code))
-      if (code === CharmCode.Ok || code === CharmCode.SavedToRam) {
+      if (charmKept(code)) {
         const { report: next, update: progress } = await snapshot()
         if (next) setReport(next)
         if (progress) setUpdate(progress)
@@ -606,8 +608,10 @@ export function CharmNetwork({
       <Caption>{FIRMWARE_CAPTION}</Caption>
       {update && update.state !== CharmUpdateState.Idle && <Caption>{updateWords(update)}</Caption>}
       <Caption>
-        A passphrase stays on the charm: unless its flash is encrypted it keeps it only until the
-        next boot, and says so.
+        The image goes over the charm's own link, and the charm checks it against the SHA-256 it was
+        given before it keeps it. A passphrase stays on the charm across a reboot: a charm whose
+        flash isn't sealed says so, and warns that anyone holding it can read the passphrase off the
+        chip.
       </Caption>
     </>
   )

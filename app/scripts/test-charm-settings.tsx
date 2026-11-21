@@ -166,6 +166,21 @@ test("a passphrase is sent once and never drawn as a label", async () => {
   })
 })
 
+test("a charm that kept the secret readable says so, in its own words", async () => {
+  // 11 on the wire: the charm kept the network and warns that the chip gives it away.
+  const api = radio({ saveWifi: async () => 11 })
+  await mount(<CharmNetwork api={api} />, async () => {
+    await type(find("#charm-wifi-ssid"), "Home")
+    await type(find("#charm-wifi-pass"), "correct horse battery")
+    await submit(find("#charm-wifi-pass"))
+    assert.ok(
+      text().includes("The charm kept it, but anyone holding the charm can read it off the chip"),
+      "the row says the secret is readable, not that the charm will forget it",
+    )
+    assert.ok(!text().includes("will forget this"), "no promise a reboot wipes it")
+  })
+})
+
 /** The first button on screen with these words: the row's own control. */
 const button = (label: string) => findText("button", label)
 
@@ -337,6 +352,22 @@ test("a failed upload is drawn with the reason the charm gave", async () => {
     await settle()
     await pick("charm.bin", 8)
     assert.ok(text().includes("The update failed: it was cancelled"))
+  })
+})
+
+test("an image the charm refuses for its build is drawn in the charm's own reason", async () => {
+  // 7 on the wire is the charm's `WrongScheme`: the image was built for the other kind of board, so
+  // the row draws that reason rather than "the charm didn't say why".
+  const api = radio({
+    updateStatus: async () => ({ state: CharmUpdateState.Failed, percent: 0, reason: 7 }),
+  })
+  await mount(<CharmNetwork api={api} />, async () => {
+    await until(
+      async () =>
+        text().includes("Update failed: that image was built for a different kind of charm"),
+      "the charm's reason in words",
+    )
+    assert.ok(!text().includes("didn't say why"), "the reason is named, not left unnamed")
   })
 })
 
@@ -515,11 +546,15 @@ test("the same file can be picked again after a failed upload", async () => {
   })
 })
 
-test("the firmware group warns once that the published image is the encrypted build", async () => {
+test("the firmware group says the published image is the everyday build, once", async () => {
   await mount(<CharmNetwork api={radio()} />, async () => {
     await settle()
-    const warnings = (text().match(/flash-encryption key for good/g) ?? []).length
+    const warnings = (text().match(/everyday build/g) ?? []).length
     assert.equal(warnings, 1, "said once, not beside every control")
+    assert.ok(
+      text().includes("A sealed charm refuses it"),
+      "and what a sealed charm does with it is said too",
+    )
   })
 })
 

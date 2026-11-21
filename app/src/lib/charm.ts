@@ -31,6 +31,7 @@ import {
   CHARM_STATUS,
   CharmCode,
   batteryMessage,
+  charmKept,
   firmwareMessage,
   forgetMessage,
   hexBytes,
@@ -74,8 +75,8 @@ export interface PairedCharm {
   /** Pet mode: which bot lives on the charm, and whether it does at all. Off until set. */
   pet?: CharmPetChoice
   /**
-   * The Wi-Fi it was told to join: the name, and whether the charm will still have it after a
-   * reboot. The passphrase is never part of it — the charm holds it, or held it in RAM.
+   * The Wi-Fi it was told to join: the name, and whether the charm keeps it. The passphrase is never
+   * part of it — the charm holds it from the write on, and only the charm can read it back.
    */
   wifi?: CharmWifiRecord
   /** Whether the charm has a tailnet key. The key itself is the charm's, and is never kept here. */
@@ -406,16 +407,13 @@ async function askCharm(message: Uint8Array): Promise<{ status: CharmStatus; byt
   return { status: parseStatus(bytes), bytes }
 }
 
-/** The one answer a network write takes as a yes: written to flash, or kept for this boot only. */
-const kept = (code: number) => code === CharmCode.Ok || code === CharmCode.SavedToRam
-
 /**
  * Tells the charm which network to join, and keeps only the name and the charm's word about keeping
  * it. The passphrase is in the write and nowhere else: no store, no log, no record.
  */
 export async function setCharmWifi(ssid: string, pass: string): Promise<number> {
   const { status } = await askCharm(wifiMessage(ssid, pass))
-  if (paired && kept(status.code)) write({ ...paired, wifi: wifiRecord(ssid, status.code) })
+  if (paired && charmKept(status.code)) write({ ...paired, wifi: wifiRecord(ssid, status.code) })
   return status.code
 }
 
@@ -441,7 +439,7 @@ export async function charmNetwork(): Promise<CharmNetworkReport> {
  */
 export async function setCharmTailnetKey(key: string): Promise<number> {
   const { status } = await askCharm(tailnetMessage(key))
-  if (paired && kept(status.code)) write({ ...paired, tailnet: true })
+  if (paired && charmKept(status.code)) write({ ...paired, tailnet: true })
   return status.code
 }
 
