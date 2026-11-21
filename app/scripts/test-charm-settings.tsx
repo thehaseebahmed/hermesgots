@@ -13,7 +13,18 @@ import { CharmNetwork, type CharmNetworkApi } from "@/components/settings/charm"
 import { CharmLinkState } from "@/lib/charm-protocol"
 import { db } from "@/lib/db"
 import { SettingsPage } from "@/routes/settings"
-import { Path, find, mount, seedSettings, settle, text, type } from "./component-kit.tsx"
+import { BatteryRow, WakingGroup } from "@/components/settings/charm"
+import {
+  Path,
+  click,
+  find,
+  findText,
+  mount,
+  seedSettings,
+  settle,
+  text,
+  type,
+} from "./component-kit.tsx"
 
 const at = (entry: string) => (
   <MemoryRouter initialEntries={[entry]}>
@@ -166,5 +177,67 @@ test("the update row shows the hash as it will go over the wire", async () => {
     await type(find("#charm-update-sha"), "AB".repeat(32))
     assert.ok(text().includes("32 of 32 bytes"), "a whole hash is measured")
     assert.ok(text().includes("ab".repeat(32)), "and drawn lowercase, as it is sent")
+  })
+})
+
+/** The first button whose words contain `label`: the sheet's rows are buttons. */
+const rowButton = (label: string) => findText("button", label)
+
+test("the waking group offers the switch, the three windows and what off leaves", async () => {
+  const changes: CharmWake[] = []
+  await mount(
+    <WakingGroup
+      wake={{ doubleTap: true, quietSeconds: 15 }}
+      busy={false}
+      onChange={(next) => changes.push(next)}
+    />,
+    async () => {
+      await settle()
+      assert.ok(text().includes("Double tap to wake"))
+      assert.ok(text().includes("Two taps on the glass wake it"))
+      assert.ok(text().includes("15 seconds"))
+
+      // The row opens the picker, and the window the reader picks is the whole change.
+      await click(rowButton("15 seconds"))
+      await click(rowButton("60 seconds"))
+      assert.deepEqual(changes, [{ doubleTap: true, quietSeconds: 60 }])
+    },
+  )
+
+  // With the switch off the row says what is left rather than repeating the switch.
+  await mount(
+    <WakingGroup
+      wake={{ doubleTap: false, quietSeconds: 30 }}
+      busy={false}
+      onChange={() => {}}
+    />,
+    async () => {
+      await settle()
+      assert.ok(text().includes("Only the buttons wake it"))
+      assert.ok(text().includes("30 seconds"))
+    },
+  )
+})
+
+test("the battery row says the level, the charger and how old the reading is", async () => {
+  let asked = 0
+  await mount(
+    <BatteryRow
+      reading={{ percent: 82, charging: true, at: Date.now() }}
+      busy={false}
+      onRefresh={() => asked++}
+    />,
+    async () => {
+      await settle()
+      assert.match(text(), /82% · Charging · just now/)
+      await click(rowButton("Battery"))
+      assert.equal(asked, 1)  // tapping the row asks the charm again
+    },
+  )
+
+  // A reading nobody has asked for is not a battery at zero.
+  await mount(<BatteryRow busy={false} onRefresh={() => {}} />, async () => {
+    await settle()
+    assert.ok(text().includes("Not read yet"))
   })
 })

@@ -29,6 +29,11 @@ export const CharmOp = {
   PoseImage: 0x09,
   PoseImageEnd: 0x0a,
   Time: 0x0b,
+  // The glass's own settings: whether a double tap wakes it, and one of its quiet windows. Kept
+  // apart from pet mode, which is a different question about a different thing.
+  SleepSettings: 0x0c,
+  // "What is your battery?": one ask, answered with a level and a charging flag.
+  Battery: 0x0d,
   // The moments. These go over with no Begin either: they are not a sync at all.
   Alert: 0x20,
   Handoff: 0x22,
@@ -107,6 +112,43 @@ export const CHARM_MAX_PASS_BYTES = 63
 export const CHARM_MAX_URL_BYTES = 180
 export const CHARM_MAX_KEY_BYTES = 96
 export const CHARM_SHA256_BYTES = 32
+/** The quiet windows the charm runs, in seconds. It refuses anything else, so the app offers these. */
+export const CHARM_QUIET_PRESETS = [15, 30, 60] as const
+export type CharmQuiet = (typeof CHARM_QUIET_PRESETS)[number]
+
+/** The glass's own settings, as the sheet keeps them and the charm knows them. */
+export interface CharmWake {
+  /** Whether two taps on the glass wake it. Off leaves the two buttons as the one way back. */
+  doubleTap: boolean
+  /** How long the glass stays lit after the last deliberate act. */
+  quietSeconds: CharmQuiet
+}
+
+export const CHARM_WAKE_DEFAULT: CharmWake = { doubleTap: true, quietSeconds: 15 }
+
+/**
+ * One reading of the charm's battery, as op 0x0d answers with it. A percent of -1 is a charm that
+ * could not read its own charge: unknown, which is not the same as empty and must never be drawn as
+ * 0%.
+ */
+export interface CharmBattery {
+  percent: number
+  charging: boolean
+}
+
+/** The last reading the phone keeps: the reading, and when the charm gave it. */
+export interface CharmBatterySeen extends CharmBattery {
+  at: number
+}
+
+/** The glass's settings as the sheet holds them, with anything it does not understand put back. */
+export function charmWakeOf(choice?: Partial<CharmWake> | null): CharmWake {
+  const quietSeconds = CHARM_QUIET_PRESETS.find((seconds) => seconds === choice?.quietSeconds)
+  return {
+    doubleTap: choice?.doubleTap ?? CHARM_WAKE_DEFAULT.doubleTap,
+    quietSeconds: quietSeconds ?? CHARM_WAKE_DEFAULT.quietSeconds,
+  }
+}
 
 export const CharmCode = {
   Ok: 0,
@@ -420,9 +462,8 @@ export interface HandoffTap {
 
 /**
  * The button a handoff ask was answered with, or null for an answer with nothing pending — and for
- * anything that is not this answer at all. A status is exactly four bytes and this answer is seven
- * or more, so the two can never be read for each other; a status whose third byte happened to be
- * `0x22` still reads as no answer here.
+ * anything that is not this answer at all. A handoff answer is seven bytes or more and names its own
+ * op, so a status whose third byte happened to be `0x22` still reads as no answer here.
  */
 export function parseHandoff(view: DataView): HandoffTap | null {
   if (view.byteLength < 7) return null
@@ -509,12 +550,25 @@ export const chunkSize = (mtu: number) => Math.max(23, Math.min(512, mtu - 3))
 
 export function parseStatus(view: DataView): CharmStatus {
   if (view.byteLength < 4) throw new Error("The charm sent a short answer")
-  return {
+  const status: CharmStatus = {
     version: view.getUint8(0),
     code: view.getUint8(1),
     op: view.getUint8(2),
     needImage: view.getUint8(3) === 1,
   }
+  return status
+}
+
+/**
+ * The `Battery` answer, read off `[extraLen][extra]` as the network's is: the level, then the charger.
+ * A level of -1 is a charm that could not read its own charge — unknown, which is not a battery at 0%
+ * — and anything shorter, longer-prefixed or from another op is no answer at all.
+ */
+export function parseBattery(view: DataView): CharmBattery | null {
+  if (view.byteLength < 7) return null
+  if (view.getUint8(2) !== CharmOp.Battery) return null
+  if (view.getUint8(4) !== 2) return null
+  return { percent: view.getInt8(5), charging: view.getUint8(6) === 1 }
 }
 
 /**
@@ -662,6 +716,15 @@ export function parseUpdateStatus(view: DataView): CharmUpdateStatus | null {
   if (extra < 3 || view.byteLength < 5 + extra) return null
   return { state: view.getUint8(5), percent: view.getUint8(6), reason: view.getUint8(7) }
 }
+/** The glass's settings: [doubleTap u8][quietSeconds u8], one of the three windows or nothing. */
+export function wakeMessage(wake: CharmWake): Uint8Array {
+  if (!CHARM_QUIET_PRESETS.includes(wake.quietSeconds))
+    throw new Error("The charm runs 15, 30 or 60 seconds")
+  return control(CharmOp.SleepSettings).u8(wake.doubleTap ? 1 : 0).u8(wake.quietSeconds).done()
+}
+
+/** The battery ask: no payload, because the ask is the message, as the handoff's is. */
+export const batteryMessage = () => control(CharmOp.Battery).done()
 
 /** Checks the pet's pictures before any of them goes over the air. */
 export function checkPoses(poses: CharmPose[]) {

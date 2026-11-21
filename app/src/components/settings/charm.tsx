@@ -13,12 +13,14 @@ import {
 } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
+  BatteryMediumIcon,
   BellRingIcon,
   BluetoothIcon,
   CloudDownloadIcon,
   EyeIcon,
   EyeOffIcon,
   NetworkIcon,
+  HandIcon,
   PawPrintIcon,
   RefreshCwIcon,
   UnlinkIcon,
@@ -61,30 +63,47 @@ import {
   forgetCharm,
   forgetCharmWifi,
   pairCharm,
+  readCharmBattery,
   sendTestAlert,
   setCharmPet,
   setCharmTailnetKey,
   setCharmWifi,
+  setCharmWake,
   syncToCharm,
   updateCharm,
   usePairedCharm,
 } from "@/lib/charm"
 import {
+  CHARM_QUIET_PRESETS,
   CharmCode,
   CharmUpdateState,
   charmKept,
+  charmWakeOf,
   codeWords,
   hexBytes,
   hexOf,
   petSettingsFrom,
+  type CharmBatterySeen,
   type CharmNetworkReport,
   type CharmPetChoice,
   type CharmUpdateStatus,
+  type CharmWake,
   type CharmWifiRecord,
 } from "@/lib/charm-protocol"
 import type { SyncProgress } from "@/lib/charm-sync"
 import { listProfiles } from "@/lib/db"
-import { charmSynced, petSubtitle, tailnetWords, updateWords, wifiWords } from "@/lib/charm-words"
+import {
+  batteryWords,
+  charmSynced,
+  doubleTapSubtitle,
+  petSubtitle,
+  QUIET_TITLE,
+  quietWords,
+  tailnetWords,
+  updateWords,
+  wifiWords,
+} from "@/lib/charm-words"
+import { quietly } from "@/lib/report"
 import { tell } from "@/lib/tell"
 import { useBotLabels } from "@/lib/use-bot-labels"
 
@@ -468,12 +487,60 @@ export function CharmSettings() {
   const charm = usePairedCharm()
   const profiles = useLiveQuery(listProfiles, [])
   const labels = useBotLabels()
-  const [busy, setBusy] = useState<"pair" | "sync" | "test" | null>(null)
+  const [busy, setBusy] = useState<"pair" | "sync" | "test" | "wake" | "battery" | null>(null)
   const [progress, setProgress] = useState<SyncProgress | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
+  const [batteryNote, setBatteryNote] = useState<string | undefined>(undefined)
   const [forgetting, setForgetting] = useState(false)
   const [picking, setPicking] = useState(false)
   const sending = useRef(false)
+
+  // The glass's own settings as this phone holds them, put back to the charm's defaults where the
+  // stored copy says something it could not have chosen.
+  const wake = charmWakeOf(charm?.wake)
+
+  // A change goes at once, in its own connection: a switch that waited for the next sync would look
+  // broken for as long as the reader does not sync. The phone's copy is written first, so the switch
+  // stays where the reader put it even when the charm is out of reach.
+  const applyWake = async (next: CharmWake) => {
+    setBusy("wake")
+    setFailure(null)
+    try {
+      await setCharmWake(next)
+    } catch (error) {
+      setFailure(message(error))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  // A failed read is the row's own line, not the page's banner: the battery is the only thing that
+  // row is about, and a charm whose firmware predates the op should say so where the level goes.
+  const refreshBattery = async () => {
+    if (!charm || sending.current) return
+    sending.current = true
+    setBusy("battery")
+    try {
+      await readCharmBattery()
+      setBatteryNote(undefined)
+    } catch (error) {
+      setBatteryNote(message(error))
+    } finally {
+      sending.current = false
+      setBusy(null)
+    }
+  }
+
+  // One reading when the section opens: the charm is the only thing that knows its charge, and an
+  // old reading is drawn with its age rather than pretended to be now. The row's tap asks again, and
+  // a sync asks after it finishes.
+  const deviceId = charm?.deviceId
+  useEffect(() => {
+    if (!deviceId) return
+    void readCharmBattery()
+      .then(() => setBatteryNote(undefined))
+      .catch((error) => setBatteryNote(message(error)))
+  }, [deviceId])
 
   if (!charmAvailable())
     return (
@@ -525,6 +592,9 @@ export function CharmSettings() {
       tell.success(done.total === 1 ? "1 bot on your charm" : `${done.total} bots on your charm`)
       if (done.petRefused && settings.enabled)
         tell.info("Your bots synced. This charm's firmware has no pet mode yet.")
+      // A sync just spent a connection and the charm is awake on the other end: the battery is
+      // cheap to ask now, and the row is one sync fresher for it.
+      await readCharmBattery().catch(quietly("reading the charm's battery"))
     } catch (error) {
       setFailure(message(error))
     } finally {
@@ -587,6 +657,12 @@ export function CharmSettings() {
               <BluetoothIcon className="size-5 shrink-0 text-muted-foreground" />
               <RowText title={charm.name} subtitle={charmSynced(charm)} />
             </div>
+            <BatteryRow
+              reading={charm.battery}
+              note={batteryNote}
+              busy={busy !== null}
+              onRefresh={refreshBattery}
+            />
             <button
               type="button"
               className={rowClass}
@@ -610,6 +686,7 @@ export function CharmSettings() {
               />
             </button>
           </Group>
+          <WakingGroup wake={wake} busy={busy !== null} onChange={applyWake} />
           <Group>
             <SwitchRow
               id="charm-pet-mode"
@@ -700,5 +777,82 @@ export function CharmSettings() {
         </>
       )}
     </>
+  )
+}
+
+/**
+ * The glass's own settings: whether two taps wake it, and how long it stays lit. Its own component
+ * so a test can mount it with props and no radio, as the chrome's rows already are.
+ */
+export function WakingGroup({
+  wake,
+  busy,
+  onChange,
+}: {
+  wake: CharmWake
+  busy: boolean
+  onChange: (wake: CharmWake) => void
+}) {
+  const [picking, setPicking] = useState(false)
+  return (
+    <>
+      <Group>
+        <SwitchRow
+          id="charm-double-tap"
+          icon={HandIcon}
+          title="Double tap to wake"
+          subtitle={doubleTapSubtitle(wake.doubleTap)}
+          checked={wake.doubleTap}
+          disabled={busy}
+          onCheckedChange={(on) => onChange({ ...wake, doubleTap: on })}
+        />
+        <ValueRow
+          title={QUIET_TITLE}
+          purpose="After your last tap, flick or button"
+          value={quietWords(wake.quietSeconds)}
+          onClick={() => setPicking(true)}
+          disabled={busy}
+        />
+      </Group>
+      <PickSurface open={picking} onOpenChange={setPicking} title={QUIET_TITLE}>
+        <PickList
+          label="Quiet time"
+          searchable={false}
+          selected={String(wake.quietSeconds)}
+          options={CHARM_QUIET_PRESETS.map((seconds) => ({
+            id: String(seconds),
+            label: quietWords(seconds),
+          }))}
+          onPick={(id) => {
+            setPicking(false)
+            const picked = CHARM_QUIET_PRESETS.find((seconds) => String(seconds) === id)
+            if (picked && picked !== wake.quietSeconds) onChange({ ...wake, quietSeconds: picked })
+          }}
+        />
+      </PickSurface>
+    </>
+  )
+}
+
+/**
+ * What the charm last said its charge was. Tapping it asks again, because the reading is the charm's
+ * and this row only remembers it.
+ */
+export function BatteryRow({
+  reading,
+  note,
+  busy,
+  onRefresh,
+}: {
+  reading?: CharmBatterySeen
+  note?: string
+  busy: boolean
+  onRefresh: () => void
+}) {
+  return (
+    <button type="button" className={rowClass} onClick={onRefresh} disabled={busy}>
+      <BatteryMediumIcon className="size-5 shrink-0 text-muted-foreground" />
+      <RowText title="Battery" subtitle={note ?? batteryWords(reading)} />
+    </button>
   )
 }

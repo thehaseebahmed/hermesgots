@@ -21,6 +21,8 @@ import {
   beginMessage,
   botMessage,
   charmMood,
+  charmWakeOf,
+  batteryMessage,
   checkBots,
   chunkSize,
   codeWords,
@@ -30,6 +32,7 @@ import {
   hexOf,
   imageChunks,
   networkMessage,
+  parseBattery,
   parseNetworkReport,
   parseStatus,
   parseUpdateStatus,
@@ -46,8 +49,10 @@ import {
   utf8Clip,
   wifiMessage,
   wifiRecord,
+  wakeMessage,
 } from "../src/lib/charm-protocol.ts"
 import { CharmRefused, syncCharm } from "../src/lib/charm-sync.ts"
+import { batteryWords, refusalWords } from "../src/lib/charm-words.ts"
 
 test("crc32 is zlib's", () => {
   assert.equal(crc32(new TextEncoder().encode("123456789")), 0xcbf43926)
@@ -187,6 +192,8 @@ function fakeCharm({
   refuseCommit = false,
   corruptPoseOnce = false,
   refusePet = false,
+  refuseWake = false,
+  battery = { percent: 85, charging: false },
 } = {}) {
   const held = new Map() // crc -> len
   let shown = []
@@ -195,6 +202,7 @@ function fakeCharm({
   let corrupted = !corruptOnce
   const imagesSent = []
   const pet = { enabled: false, petBotId: "", bedStart: 0, bedEnd: 0, utcOffsetMin: 0, clock: 0 }
+  const wake = { doubleTap: true, quietSeconds: 15 }
   const poses = new Map() // mood -> crc
   let posePending = null
   let poseDamaged = !corruptPoseOnce
@@ -206,6 +214,7 @@ function fakeCharm({
     imagesSent,
     ops,
     pet,
+    wake,
     poses,
     get shown() {
       return shown
@@ -216,6 +225,20 @@ function fakeCharm({
         const v = new DataView(m.buffer, m.byteOffset, m.byteLength)
         const op = m[1]
         ops.push(op)
+        if (op === 0x0c) {
+          if (refuseWake) return answer(2, op)
+          wake.doubleTap = m[2] === 1
+          wake.quietSeconds = m[3]
+          return answer(0, op)
+        }
+        if (op === 0x0d) {
+          // Six bytes, as the firmware answers: the op byte is what makes the shape unmistakable.
+          return parseStatus(
+            new DataView(
+              new Uint8Array([1, 0, op, 0, battery.percent & 0xff, battery.charging ? 1 : 0]).buffer,
+            ),
+          )
+        }
         if (op === 1) {
           pending = new Array(m[2])
           return answer(0, op)
@@ -771,4 +794,58 @@ test("the record a Wi-Fi write leaves is the name and whether the charm keeps it
   // A refusal is not kept, and the record never says it was.
   assert.deepEqual(wifiRecord("Home", CharmCode.StorageFailed), { ssid: "Home", saved: false })
   assert.deepEqual(Object.keys(wifiRecord("Home", CharmCode.Ok)).sort(), ["saved", "ssid"])
+})
+test("the glass's messages are laid out as the firmware reads them", () => {
+  assert.deepEqual([...wakeMessage({ doubleTap: true, quietSeconds: 60 })], [1, 0x0c, 1, 60])
+  assert.deepEqual([...wakeMessage({ doubleTap: false, quietSeconds: 15 })], [1, 0x0c, 0, 15])
+  // A window the charm does not run is refused here, before it reaches the radio.
+  assert.throws(() => wakeMessage({ doubleTap: true, quietSeconds: 20 }))
+  assert.deepEqual([...batteryMessage()], [1, 0x0d])
+})
+
+test("the battery answer is a level and a charger, and an unread one is unknown", () => {
+  const bytes = (list) => new DataView(new Uint8Array(list).buffer)
+  // Two bytes of extra behind a length, as the network's report is: the level, then the charger.
+  assert.deepEqual(parseBattery(bytes([1, 0, 0x0d, 0, 2, 85, 1])), { percent: 85, charging: true })
+  assert.deepEqual(parseBattery(bytes([1, 0, 0x0d, 0, 2, 85, 0])), { percent: 85, charging: false })
+  // A four-byte answer is a charm that never heard the op; -1 is a charm that could not read itself,
+  // which is unknown rather than empty and is kept so the row can say so.
+  assert.equal(parseBattery(bytes([1, 0, 0x0d, 0])), null)
+  assert.equal(parseBattery(bytes([1, 0, 0x0d, 0, 3, 85, 1, 0])), null)
+  assert.equal(parseBattery(bytes([1, 0, 0x20, 0, 2, 85, 1])), null)
+  assert.deepEqual(parseBattery(bytes([1, 0, 0x0d, 0, 2, 0xff, 0])), { percent: -1, charging: false })
+})
+
+test("an old charm's refusal is said in words a reader can act on", () => {
+  // A charm whose firmware predates the op answers BadMessage to every op it never heard of.
+  assert.match(refusalWords(CharmCode.BadMessage), /older than the app/)
+})
+
+test("the battery ask is one op with no payload", () => {
+  assert.deepEqual([...batteryMessage()], [1, 0x0d])
+})
+
+test("a stored choice the charm could not have is put back to the defaults", () => {
+  assert.deepEqual(charmWakeOf(undefined), { doubleTap: true, quietSeconds: 15 })
+  assert.deepEqual(charmWakeOf({ doubleTap: false, quietSeconds: 60 }), {
+    doubleTap: false,
+    quietSeconds: 60,
+  })
+  // A window outside the three, or a field that is not a boolean, is no choice at all.
+  assert.deepEqual(charmWakeOf({ quietSeconds: 20 }), { doubleTap: true, quietSeconds: 15 })
+  assert.deepEqual(charmWakeOf({ doubleTap: false, quietSeconds: "60" }), {
+    doubleTap: false,
+    quietSeconds: 15,
+  })
+})
+
+test("the battery row's words keep unknown apart from empty, and show the reading's age", () => {
+  const now = 1_800_000_000_000
+  assert.equal(batteryWords(undefined, now), "Not read yet")
+  assert.equal(batteryWords({ percent: -1, charging: false, at: now }, now), "Unknown")
+  assert.equal(batteryWords({ percent: 0, charging: false, at: now }, now), "0% · just now")
+  assert.equal(
+    batteryWords({ percent: 82, charging: true, at: now - 5 * 60_000 }, now),
+    "82% · Charging · 5 min ago",
+  )
 })
