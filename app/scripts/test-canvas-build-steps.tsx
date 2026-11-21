@@ -20,7 +20,6 @@ import {
   missing,
   mount,
   seedSettings,
-  settle,
   shutSheet,
   until,
   wordsOf,
@@ -122,39 +121,6 @@ const WAITING = {
   ],
 }
 
-const UNRECORDED_WAITING = {
-  id: "b6",
-  session: "canvas-build-6",
-  phase: "waiting",
-  activity: "Waiting for your approval",
-  requests: ["and make it blue too"],
-  summary: null,
-  flag: null,
-  version: null,
-  at: 6,
-  created_at: 6,
-}
-
-/** A build whose last visit that did work has closed: it is publishing, and draws no open marker. */
-const PUBLISHING = {
-  id: "b7",
-  session: "canvas-build-7",
-  phase: "publishing",
-  activity: "Publishing the version",
-  requests: ["and make it blue too"],
-  summary: null,
-  flag: "passing",
-  version: null,
-  at: 7,
-  created_at: 7,
-  steps: [
-    { phase: "planning", start: 0, end: 2_000 },
-    { phase: "building", start: 2_000, end: 90_000 },
-    { phase: "checking", start: 90_000, end: 91_000, flag: "passing" },
-    { phase: "publishing", start: 91_000 },
-  ],
-}
-
 /** The whole second the sheet's build ran on, as a session's rows are stamped by the host. */
 const RAN_AT = 1_760_000_000
 
@@ -172,28 +138,36 @@ const VISITED = {
   steps: [
     { phase: "planning", start: RAN_AT * 1_000, end: (RAN_AT + 10) * 1_000 },
     { phase: "building", start: (RAN_AT + 10) * 1_000, end: (RAN_AT + 20) * 1_000 },
-    { phase: "checking", start: (RAN_AT + 20) * 1_000, end: (RAN_AT + 30) * 1_000, flag: "failing" },
+    {
+      phase: "checking",
+      start: (RAN_AT + 20) * 1_000,
+      end: (RAN_AT + 30) * 1_000,
+      flag: "failing",
+    },
     { phase: "building", start: (RAN_AT + 30) * 1_000, end: (RAN_AT + 40) * 1_000 },
-    { phase: "checking", start: (RAN_AT + 40) * 1_000, end: (RAN_AT + 50) * 1_000, flag: "passing" },
+    {
+      phase: "checking",
+      start: (RAN_AT + 40) * 1_000,
+      end: (RAN_AT + 50) * 1_000,
+      flag: "passing",
+    },
   ],
 }
 
-/** The build the sheet opens over a transcript with turns after it: its own session, so the read
- *  starts from nothing and its first visits really are on a page the reader has not reached. */
-const UNREAD = { ...VISITED, id: "b8", session: "canvas-build-8" }
-
+/** The build's own session, as the host stamps its rows: a request and its reply, a turn a pair. */
 const VISITED_ROWS = [
   { id: 1, role: "user", content: "make the heading say Split the bill", timestamp: RAN_AT + 2 },
-  { id: 2, role: "assistant", content: "The heading now says Split the bill.", timestamp: RAN_AT + 2 },
+  {
+    id: 2,
+    role: "assistant",
+    content: "The heading now says Split the bill.",
+    timestamp: RAN_AT + 2,
+  },
   { id: 3, role: "user", content: "and make it blue too", timestamp: RAN_AT + 12 },
   { id: 4, role: "assistant", content: "The heading is blue now.", timestamp: RAN_AT + 12 },
   { id: 5, role: "user", content: "check the tips", timestamp: RAN_AT + 22 },
   { id: 6, role: "assistant", content: "the tips look right", timestamp: RAN_AT + 22 },
-  // Stamped in the second the last checking visit began: a phase change is placed by the floored
-  // second, so this turn belongs to the visit that just began.
   { id: 7, role: "user", content: "look at the tips once more", timestamp: RAN_AT + 40 },
-  // Stamped in the second that visit closed in, which the build's own last second holds: a sheet
-  // that ended at the visit's floor would leave this turn nowhere at all.
   { id: 8, role: "assistant", content: "the tips are good now", timestamp: RAN_AT + 50 },
 ]
 
@@ -212,17 +186,6 @@ const CANVAS = {
   tools: [],
   builds: true,
 }
-
-/**
- * The rows the sheet's transcript has after the build published: enough of them that the build's
- * own first visits sit on a page of the host's transcript the reader has not read yet.
- */
-const LATER_ROWS = Array.from({ length: ROWS_PER_PAGE - 4 }, (_, at) => ({
-  id: 9 + at,
-  role: at % 2 === 0 ? "user" : "assistant",
-  content: at % 2 === 0 ? `a later request ${at}` : `a later reply ${at}`,
-  timestamp: RAN_AT + 60 + at,
-}))
 
 function serve(
   builds: readonly unknown[] = BUILDS,
@@ -296,364 +259,203 @@ async function drawLane(
   )
 }
 
+/**
+ * Draws the lane over these builds, opens one of them as a reader pressing its row does, and runs
+ * `inspect` with that sheet on the screen — the pop-up is part of the tree `mount` tears down, so
+ * every assertion about it stands inside the body that drew it.
+ */
+async function openBuild(
+  builds: readonly unknown[],
+  rows: readonly unknown[],
+  id: string,
+  inspect: () => Promise<void>,
+) {
+  await drawLane(
+    builds,
+    async () => {
+      await laneDrew(id)
+      await click(find(`[data-canvas-build="${id}"] [data-build-details]`))
+      await until(
+        () => Boolean(find('[data-popup-form] [data-slot="build-transcript"]')),
+        "the build's run to open",
+      )
+      await inspect()
+    },
+    rows,
+  )
+}
+
+/**
+ * Draws the lane and announces the canvas's change, until the build `id` names is on the screen: what
+ * every test here does before it reads a row, so a seed that forgets the change fails in one place.
+ */
+async function laneDrew(id: string) {
+  const bot = (await db.profiles.get("bot-1"))!
+  await act(async () => {
+    await refreshCanvas("c1")
+    await noteChange(connectionKey(bot), "canvas")
+  })
+  await until(() => Boolean(find(`[data-canvas-build="${id}"]`)), "the lane's build to draw")
+}
+
+/** The state a build's row says, without the flag that rides beside it. */
+const stateOf = (row: Element | null) => wordsOf(row?.querySelector("[data-build-state]") ?? null)
+
+/** The messages a build's sheet has drawn, by the words a row of the thread reads them with. */
+const sheetMessages = () =>
+  findAll('[data-popup-form] [data-slot="message"]').map((one) => wordsOf(one))
+
 test(
-  "a finished build reads as a request, its markers and a reply",
+  "the lane draws a build as one row, under its request, with the version it published",
   laptop(async () => {
     await drawLane(BUILDS, async () => {
-      const bot = (await db.profiles.get("bot-1"))!
-      await act(async () => {
-        await refreshCanvas("c1")
-        await noteChange(connectionKey(bot), "canvas")
-      })
-      await until(
-        () => Boolean(find('[data-canvas-build="b1"]')),
-        "the lane's finished build to draw",
-      )
-      const markers = findAll('[data-canvas-build="b1"] [data-build-step]')
+      await laneDrew("b1")
       assert.deepEqual(
-        markers.map((one) => one.getAttribute("data-build-step")),
-        ["planning", "building", "checking", "building", "checking"],
-        "a build that checked, fixed and checked again draws five markers, in order",
+        findAll("[data-canvas-build]").map((one) => one.getAttribute("data-canvas-build")),
+        ["b1", "b2"],
+        "the builds stand oldest first, the newest at the foot",
       )
-      assert.deepEqual(
-        markers.map(wordsOf),
-        [
-          "Planning · 2.0s",
-          "Building · 30.5s",
-          "Checking · Checks failed · 0.5s",
-          "Building · 9.0s",
-          "Checking · Checks passed · 1.5s",
-        ],
-        "each marker says its phase, then the span it took, and the checks say what they found",
-      )
-      const first = markers[0]
-      assert.ok(first.querySelector('[data-slot="work-label"]'), "the marker is a work row")
-      assert.ok(first.querySelector('[data-slot="work-mark"]'), "wearing the thread's chevron")
-      const request = find('[data-canvas-build="b1"] [data-build-request]')
-      const reply = find('[data-canvas-build="b1"] [data-build-summary]')
-      assert.ok(request && reply, "the request and the reply are drawn")
-      assert.ok(
-        request.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING,
-        "the first marker stands under the request",
-      )
-      assert.ok(
-        markers[markers.length - 1].compareDocumentPosition(reply) &
-          Node.DOCUMENT_POSITION_FOLLOWING,
-        "and the last one over the reply",
-      )
-      assert.equal(markers[2].getAttribute("data-build-flag"), "failing")
-      assert.equal(markers[4].getAttribute("data-build-flag"), "passing")
-      const line = find('[data-canvas-build="b1"] [data-build-version]')?.parentElement
-      assert.ok(line, "the reply's line is still drawn")
-      assert.deepEqual(
-        [...line.children].map((one) => wordsOf(one)),
-        ["Version 3 ready", ""],
-        "the line is one row reading the version and ready, and no flag",
-      )
+      const finished = find('[data-canvas-build="b1"]')
+      const request = finished?.querySelector("[data-build-request]")
+      assert.ok(request, "the finished build's request is drawn")
+      assert.ok(request.closest('[data-slot="bubble"]'), "in the chat's own user bubble")
       assert.equal(
-        line.querySelector("[data-build-flag]"),
-        null,
-        "the flag has left the reply's line",
+        request.closest('[data-slot="message"]')?.getAttribute("data-align"),
+        "end",
+        "on the right, where a chat draws what was said to the bot",
       )
-      assert.ok(
-        missing('[data-canvas-build="b2"] [data-build-step]'),
-        "a build with no steps draws none",
-      )
-      // A build from before the record has no marker to read its flag on, so its reply's line keeps
-      // it — where there is a marker, the marker is what says it.
-      const olderLine = find('[data-canvas-build="b2"] [data-build-details]')
-      assert.ok(olderLine, "a build with no markers still draws its reply's line")
-      assert.deepEqual(
-        [...olderLine.children].map((one) => wordsOf(one)),
-        ["Checks failed", "ready", ""],
-        "the flag reads on the line only because no marker holds it, then ready",
-      )
+      const summary = finished?.querySelector("[data-build-summary]")
+      assert.ok(summary, "its summary is drawn")
+      assert.ok(summary.querySelector('[data-slot="markdown"]'), "as the bot's own words")
+      assert.ok(!summary.closest('[data-slot="bubble"]'), "and wears no bubble")
+      const rows = findAll('[data-canvas-build="b1"] [data-build-details]')
+      assert.equal(rows.length, 1, "the build is one row")
+      assert.equal(stateOf(rows[0]), "Version 3 published", "saying the version it published")
       assert.equal(
-        olderLine.querySelector("[data-build-flag]")?.getAttribute("data-build-flag"),
-        "failing",
-        "and it is the flag the record carries",
+        wordsOf(rows[0].querySelector("[data-build-flag]")),
+        "Checks passed",
+        "and what its checks found",
       )
+      assert.ok(rows[0].querySelector('[data-slot="work-mark"]'), "wearing the thread's chevron")
       assert.ok(
-        find('[data-canvas-build="b2"] [data-build-summary]'),
-        "its reply is drawn as any build's is",
+        summary.compareDocumentPosition(rows[0]) & Node.DOCUMENT_POSITION_FOLLOWING,
+        "the row stands under the reply it belongs to",
       )
-      assert.ok(
-        find('[data-canvas-build="b2"] [data-build-details]'),
-        "and ready still opens the whole build",
+      const failed = find('[data-canvas-build="b2"]')
+      assert.equal(
+        wordsOf(failed?.querySelector("[data-build-summary]") ?? null),
+        "The build failed.",
+        "a build that failed says so where its summary would be",
+      )
+      const failedRow = failed?.querySelector("[data-build-details]") ?? null
+      assert.equal(stateOf(failedRow), "Failed", "and its row says the same in one word")
+      assert.equal(
+        wordsOf(failedRow?.querySelector("[data-build-flag]") ?? null),
+        "Checks failed",
+        "beside what its checks found",
       )
     })
   }),
 )
 
 test(
-  "the working build draws the step it is in, and the ones behind it",
+  "a build at work is one row saying what it is doing, and it says no version yet",
   laptop(async () => {
-    await drawLane([WORKING, ...BUILDS], async () => {
-      const bot = (await db.profiles.get("bot-1"))!
-      await act(async () => {
-        await refreshCanvas("c1")
-        await noteChange(connectionKey(bot), "canvas")
-      })
-      await until(
-        () => Boolean(find('[data-canvas-build="b3"]')),
-        "the lane's working build to draw",
-      )
-      const markers = findAll('[data-canvas-build="b3"] [data-build-step]')
-      assert.deepEqual(
-        markers.map((one) => one.getAttribute("data-build-step")),
-        ["planning", "building"],
-        "the working build draws the steps behind it and the one it is in",
-      )
-      assert.deepEqual(
-        markers.map(wordsOf),
-        ["Planning · 2.0s", "Building"],
-        "the step it is in says no span",
-      )
-      assert.deepEqual(
-        markers.map((one) => one.hasAttribute("data-working")),
-        [false, true],
-        "the last marker is the working one, and no other is",
-      )
-      const activity = find('[data-canvas-build="b3"] [data-build-activity]')
-      assert.ok(activity, "the working build says what it is doing")
-      assert.equal(wordsOf(activity), "Building the page", "in the host's own words")
-      assert.equal(
-        markers[1].nextElementSibling,
-        activity,
-        "the activity line hangs under the step it is in",
-      )
-      const request = find('[data-canvas-build="b3"] [data-build-request]')
-      assert.ok(request, "the working build's request is drawn")
-      assert.ok(
-        request.closest('[data-slot="bubble"]'),
-        "the request wears the chat's own user bubble",
-      )
-      assert.ok(
-        missing('[data-canvas-build="b3"] [data-build-summary]'),
-        "a build still at work draws no reply",
-      )
+    await drawLane([WORKING], async () => {
+      await laneDrew("b3")
+      assert.ok(missing("[data-build-step]"), "the build draws no row per visit")
+      const rows = findAll('[data-canvas-build="b3"] [data-build-details]')
+      assert.equal(rows.length, 1, "a build at work is one row")
+      assert.equal(stateOf(rows[0]), "Building the page", "in the host's own words")
+      assert.ok(rows[0].hasAttribute("data-working"), "its words pulse while it works")
+      assert.ok(!rows[0].hasAttribute("disabled"), "and it is pressable")
+      assert.ok(missing('[data-canvas-build="b3"] [data-build-summary]'), "no reply is drawn yet")
       assert.ok(
         !(document.body.textContent ?? "").includes("The build was stopped."),
-        "and is not said to have stopped",
+        "and it is not said to have stopped",
       )
-      assert.ok(missing("[data-canvas-build-open]"), "no open build is drawn beside the blocks")
-      assert.ok(
-        missing("[data-canvas-builds] .border-dashed"),
-        "and no dashed card is drawn",
-      )
-      assert.deepEqual(
-        markers.map((one) => one.hasAttribute("disabled")),
-        [false, true],
-        "the steps behind it are pressable, and the one it is in is not",
-      )
-      await click(markers[1])
-      await settle()
-      assert.ok(missing('[data-popup-form]'), "pressing the step it is in opens nothing")
+      assert.ok(missing("[data-canvas-builds] .border-dashed"), "no dashed card stands in the lane")
     })
   }),
 )
 
 test(
-  "a waiting build pulses nothing and says nothing it is doing",
+  "a build waiting on the reader states the wait without pulsing",
   laptop(async () => {
-    await drawLane([UNRECORDED_WAITING, WAITING, ...BUILDS], async () => {
-      const bot = (await db.profiles.get("bot-1"))!
-      await act(async () => {
-        await refreshCanvas("c1")
-        await noteChange(connectionKey(bot), "canvas")
-      })
-      await until(
-        () => Boolean(find('[data-canvas-build="b5"]')),
-        "the lane's waiting build to draw",
-      )
-      const markers = findAll('[data-canvas-build="b5"] [data-build-step]')
-      assert.deepEqual(
-        markers.map((one) => one.getAttribute("data-build-step")),
-        ["planning"],
-        "only the visit that did work draws a marker",
-      )
-      assert.ok(
-        missing('[data-canvas-build="b5"] [data-working]'),
-        "and the visit behind the wait does not pulse as the live one",
-      )
-      assert.ok(
-        missing('[data-canvas-build="b5"] [data-build-activity]'),
-        "nor does a line say what a waiting build is doing",
-      )
-      const unrecorded = find('[data-canvas-build="b6"]')
-      assert.ok(unrecorded, "the build the record predates is still drawn")
-      assert.ok(
-        missing('[data-canvas-build="b6"] [data-build-step]'),
-        "a waiting build with no recorded visits draws no marker",
-      )
-      assert.ok(
-        missing('[data-canvas-build="b6"] [data-build-activity]'),
-        "and no line under one",
-      )
-      assert.ok(
-        unrecorded.querySelector("[data-build-request]"),
-        "its request is drawn as any build's is",
-      )
+    await drawLane([WAITING], async () => {
+      await laneDrew("b5")
+      const row = find('[data-canvas-build="b5"] [data-build-details]')
+      assert.equal(stateOf(row), "Waiting for your approval", "the row says what it waits on")
+      assert.ok(!row?.hasAttribute("data-working"), "and a wait is not work: nothing pulses")
     })
   }),
 )
 
 test(
-  "a working build with no recorded steps draws the phase it is in",
+  "a build the record predates draws its one row from the phase it is in",
   laptop(async () => {
-    await drawLane([UNRECORDED, ...BUILDS], async () => {
-      const bot = (await db.profiles.get("bot-1"))!
-      await act(async () => {
-        await refreshCanvas("c1")
-        await noteChange(connectionKey(bot), "canvas")
-      })
-      await until(
-        () => Boolean(find('[data-canvas-build="b3"]')),
-        "the lane's working build to draw",
-      )
-      const markers = findAll('[data-canvas-build="b3"] [data-build-step]')
-      assert.equal(markers.length, 1, "one marker stands for the phase it is in")
-      assert.equal(markers[0].getAttribute("data-build-step"), "checking")
-      assert.equal(wordsOf(markers[0]), "Checking")
-      assert.ok(markers[0].hasAttribute("data-working"), "and it is the working one")
-      const activity = find('[data-canvas-build="b3"] [data-build-activity]')
-      assert.equal(
-        wordsOf(activity),
-        "Checking the rendered page",
-        "the activity line says what it is doing",
-      )
-      assert.equal(markers[0].nextElementSibling, activity, "hanging under the marker")
-      // The record holds no window for this marker — the host never wrote when the phase began — so
-      // the lane draws it open and unpressed, and the activity line is all that says what it is
-      // doing.
-      assert.ok(
-        markers[0].hasAttribute("disabled"),
-        "a step with no window the record wrote is nothing to press",
-      )
-      await click(markers[0])
-      await settle()
-      assert.ok(
-        missing('[data-popup-form]'),
-        "and pressing it opens no sheet, since there are no turns it could hold",
-      )
+    await drawLane([UNRECORDED], async () => {
+      await laneDrew("b3")
+      const row = find('[data-canvas-build="b3"] [data-build-details]')
+      assert.equal(stateOf(row), "Checking the rendered page", "the line the record holds")
+      assert.ok(missing("[data-build-step]"), "with no visit rows to draw")
     })
   }),
 )
 
 test(
-  "a build publishing draws its line under the last step that did work",
+  "pressing a build at work opens the run as far as it has got",
   laptop(async () => {
-    await drawLane([PUBLISHING, ...BUILDS], async () => {
-      const bot = (await db.profiles.get("bot-1"))!
-      await act(async () => {
-        await refreshCanvas("c1")
-        await noteChange(connectionKey(bot), "canvas")
-      })
-      await until(
-        () => Boolean(find('[data-canvas-build="b7"]')),
-        "the lane's publishing build to draw",
-      )
-      const markers = findAll('[data-canvas-build="b7"] [data-build-step]')
-      assert.deepEqual(
-        markers.map((one) => one.getAttribute("data-build-step")),
-        ["planning", "building", "checking"],
-        "the visits that did work are drawn, and publishing is not one of them",
-      )
-      assert.ok(
-        missing('[data-canvas-build="b7"] [data-working]'),
-        "no drawn step is open, so none of them pulses",
-      )
-      const activity = find('[data-canvas-build="b7"] [data-build-activity]')
-      assert.ok(activity, "the build still says what it is doing rather than ending in silence")
-      assert.equal(wordsOf(activity), "Publishing the version", "in the host's own words")
-      assert.equal(
-        markers[2].nextElementSibling,
-        activity,
-        "the line hangs under the last step that did work",
-      )
-      assert.ok(
-        missing('[data-canvas-build="b7"] [data-build-summary]'),
-        "and no reply is drawn before it has published one",
-      )
-    })
-  }),
-)
-
-test(
-  "pressing a marker opens that visit's turns, and ready opens the whole build",
-  laptop(async () => {
-    await drawLane([VISITED], async () => {
-      const bot = (await db.profiles.get("bot-1"))!
-      const sheetMessages = () =>
-        findAll('[data-popup-form] [data-slot="message"]').map(wordsOf)
-      await act(async () => {
-        await refreshCanvas("c1")
-        await noteChange(connectionKey(bot), "canvas")
-      })
-      await until(
-        () => Boolean(find('[data-canvas-build="b4"]')),
-        "the lane's build to draw",
-      )
-      const markers = findAll('[data-canvas-build="b4"] [data-build-step]')
-      assert.deepEqual(
-        markers.map((one) => one.getAttribute("data-build-step")),
-        ["planning", "building", "checking", "building", "checking"],
-        "the build's five visits, a marker each",
-      )
-      await click(markers[1])
-      await until(
-        () => sheetMessages().length > 0,
-        "the second visit's turn to be read and drawn",
-      )
-      const second = sheetMessages()
-      assert.equal(second.length, 2, "one turn, drawn as a request and its reply")
-      assert.ok(
-        second.some((words) => words.includes("and make it blue too")),
-        "the visit's own request is drawn",
-      )
-      assert.ok(
-        second.some((words) => words.includes("The heading is blue now.")),
-        "and the answer it was given",
-      )
-      assert.ok(
-        !second.some((words) => words.includes("The heading now says Split the bill.")),
-        "the turn of the visit before is left out",
-      )
-      assert.ok(
-        !second.some((words) => words.includes("check the tips")),
-        "and so is the turn of the visit after it",
-      )
-      assert.ok(
-        !second.some((words) => words.includes("look at the tips once more")),
-        "and the one of the visit after that",
-      )
-      assert.equal(
-        find("[data-popup-form]")?.getAttribute("data-popup-form"),
-        "drawer",
-        "a laptop opens the step in the standard drawer a subagent's row opens",
-      )
+    const turns = [
+      { id: 1, role: "user", content: "make the heading say Split the bill", timestamp: RAN_AT },
+      {
+        id: 2,
+        role: "assistant",
+        content: "Filed the plan and wrote the draft.",
+        timestamp: RAN_AT + 2,
+      },
+    ]
+    await openBuild([WORKING], turns, "b3", async () => {
       assert.equal(
         wordsOf(find('[data-popup-form] [data-slot="sheet-title"]')),
         "Building",
-        "the pop-up is titled by the step's phase word",
+        "a build at work is titled by what it is doing",
       )
       assert.equal(
         wordsOf(find('[data-popup-form] [data-slot="sheet-description"]')),
-        "make the heading say Split the bill",
-        "and describes the build by its first request",
+        "and make it blue too",
+        "and described by what it was asked for",
+      )
+      await until(() => sheetMessages().length > 0, "the run's turns to be read and drawn")
+      assert.ok(
+        sheetMessages().some((words) => words.includes("make the heading say Split the bill")),
+        "the run draws the request it began with",
+      )
+      assert.ok(
+        sheetMessages().some((words) => words.includes("Filed the plan and wrote the draft.")),
+        "and the work it has done so far",
       )
       assert.ok(
         find('[data-popup-form] [data-slot="build-transcript"] [data-slot="message-scroller"]'),
-        "the transcript the step narrows stands inside the pop-up's own box",
+        "the thread inside the pop-up keeps its own scroller",
       )
-      await shutSheet(() => find("[data-popup-form]"))
-      await click(find('[data-canvas-build="b4"] [data-build-details]'))
-      await until(
-        () => sheetMessages().length === 8,
-        "the whole build's transcript to be drawn",
+      assert.ok(missing("[data-build-window-empty]"), "and no step of a build is said to be empty")
+    })
+  }),
+)
+
+test(
+  "pressing a finished build opens the run it published",
+  laptop(async () => {
+    await openBuild([VISITED], VISITED_ROWS, "b4", async () => {
+      assert.equal(
+        wordsOf(find('[data-popup-form] [data-slot="sheet-title"]')),
+        "Build",
+        "a build that ended is titled by the build",
       )
-      const whole = sheetMessages()
-      for (const words of [
+      await until(() => sheetMessages().length === 8, "the run's turns to be read and drawn")
+      const run = sheetMessages().join("\n")
+      const said = [
         "make the heading say Split the bill",
         "The heading now says Split the bill.",
         "and make it blue too",
@@ -662,125 +464,209 @@ test(
         "the tips look right",
         "look at the tips once more",
         "the tips are good now",
-      ])
-        assert.ok(
-          whole.some((drawn) => drawn.includes(words)),
-          `the whole build draws "${words}"`,
-        )
-      assert.equal(
-        wordsOf(find('[data-slot="sheet-title"]')),
-        "Build",
-        "and the whole build's sheet is titled by the build",
-      )
-      await shutSheet(() => find("[data-popup-form]"))
-      await click(markers[3])
-      await until(
-        () => Boolean(find("[data-build-window-empty]")),
-        "the empty visit to say it holds nothing",
-      )
-      assert.equal(
-        wordsOf(find("[data-build-window-empty]")),
-        "No messages in this step of the build.",
-        "the sheet says the step holds no messages",
-      )
-      assert.equal(sheetMessages().length, 0, "and draws no message of another visit")
-      // The thread is drawn over the step's turns rather than beside them, so its own marks stand
-      // around the words; what it does not draw is the greeting a chat with nothing said wears.
-      assert.equal(
-        wordsOf(find('[data-popup-form] [aria-label="Messages"]')),
-        "No messages in this step of the build.",
-        "the thread reads as the step's own words, and not as a chat with nothing said",
-      )
-      // The last visit's window is tiled: it begins in the second its own turn was stamped in, and
-      // it holds the second the build closed in, which ends the visit after the next's floor.
-      await shutSheet(() => find("[data-popup-form]"))
-      await click(markers[4])
-      await until(
-        () => sheetMessages().length > 0,
-        "the last visit's turns to be read and drawn",
-      )
-      const last = sheetMessages()
-      assert.equal(last.length, 2, "the visit's window holds the two turns stamped inside it")
-      assert.ok(
-        last[0].includes("look at the tips once more"),
-        "the turn stamped in the second the visit began",
-      )
-      assert.ok(
-        last[1].includes("the tips are good now"),
-        "and the one stamped in the second the build closed in",
-      )
-      assert.ok(
-        !last.some((words) => words.includes("check the tips")),
-        "and nothing of the checking visit before it",
-      )
-    }, VISITED_ROWS)
+      ]
+      let at = -1
+      for (const words of said) {
+        const found = run.indexOf(words, at + 1)
+        assert.ok(found > at, `the whole run is drawn, in the order it happened: ${words}`)
+        at = found
+      }
+    })
   }),
 )
 
 test(
-  "a step's sheet keeps the thread's own word while its turns are on a page not read yet",
+  "a build that has said nothing yet says so in its sheet",
   laptop(async () => {
-    await drawLane(
-      [UNREAD],
-      async () => {
-        const bot = (await db.profiles.get("bot-1"))!
-        await act(async () => {
-          await refreshCanvas("c1")
-          await noteChange(connectionKey(bot), "canvas")
-        })
-        await until(
-          () => Boolean(find('[data-canvas-build="b8"] [data-build-step]')),
-          "the lane's build to draw",
-        )
-        await click(findAll('[data-canvas-build="b8"] [data-build-step]')[0])
-        // The thread the sheet opens reads the newest page before it can say anything at all.
-        await settle()
-        // The visit's turns are on a page above the newest one, which the thread has not read: the
-        // sheet says the step holds no messages until that page lands, and the reader is told the
-        // page is still to come rather than that the step is empty.
-        await until(
-          () => Boolean(find("[data-build-window-empty]")),
-          "the step to say it holds nothing yet",
-        )
-        const older = find('[data-popup-form] [data-older]')
-        assert.ok(older, "the sheet keeps the thread's own word that earlier messages are unread")
-        assert.equal(
-          older.getAttribute("data-older"),
-          "failed",
-          "and says so in the state the thread's read is in",
-        )
-        assert.ok(
-          find('[data-popup-form] [data-older-retry]'),
-          "offering the thread's own retry, so the step's turns can be read on from there",
-        )
+    await openBuild([WORKING], [], "b3", async () => {
+      await until(() => Boolean(find("[data-build-silent]")), "the run's own empty state")
+      assert.equal(
+        wordsOf(find("[data-build-silent]")),
+        "This build hasn't said anything yet.",
+        "the sheet says the build has said nothing, in its own words",
+      )
+    })
+  }),
+)
+
+/**
+ * A build as `builds.py` really walks a clear tweak: the request opens `planning`, the `canvas_plan`
+ * tool — called *inside* that run — moves the build to `building`, and the host moves it to
+ * `checking` when the run ends. One turn, then, whose reply was written across two steps.
+ */
+const TUNED_AT = 1_760_100_000
+
+test(
+  "a build that changed phase inside one turn still shows the work it did",
+  laptop(async () => {
+    const tweak = {
+      id: "b9",
+      session: "canvas-build-9",
+      phase: "published",
+      activity: null,
+      requests: ["make the heading blue"],
+      summary: "The heading is blue now.",
+      flag: "unchecked",
+      version: 5,
+      at: 9,
+      created_at: 9,
+      steps: [
+        { phase: "planning", start: TUNED_AT * 1_000, end: (TUNED_AT + 2) * 1_000 },
+        { phase: "building", start: (TUNED_AT + 2) * 1_000, end: (TUNED_AT + 40) * 1_000 },
+        { phase: "checking", start: (TUNED_AT + 40) * 1_000, end: (TUNED_AT + 41) * 1_000 },
+        { phase: "publishing", start: (TUNED_AT + 41) * 1_000 },
+      ],
+    }
+    const turns = [
+      { id: 1, role: "user", content: "make the heading blue", timestamp: TUNED_AT },
+      {
+        id: 2,
+        role: "assistant",
+        content: "Filed the plan and wrote the draft.",
+        timestamp: TUNED_AT + 1,
       },
-      [...VISITED_ROWS, ...LATER_ROWS],
-      { unreadOlder: true },
-    )
+      {
+        id: 3,
+        role: "assistant",
+        content: "The draft is written and read back.",
+        timestamp: TUNED_AT + 39,
+      },
+    ]
+    await openBuild([tweak], turns, "b9", async () => {
+      await until(() => sheetMessages().length === 2, "the run the build really had")
+      assert.ok(
+        sheetMessages().some((words) => words.includes("Filed the plan and wrote the draft.")),
+        "the work it did while it was planning and building is drawn",
+      )
+      assert.ok(
+        sheetMessages().some((words) => words.includes("The draft is written and read back.")),
+        "all of it, not only the turn that opened the build",
+      )
+      assert.ok(missing("[data-build-window-empty]"), "and no step of it is said to hold nothing")
+    })
+  }),
+)
+
+/**
+ * A build's record as the sheet tells it: a waiting plan, then the draft, then a check, then the
+ * version — five visits, two of them a turn of their own.
+ */
+const MARKED_AT = 1_760_200_000
+
+const MARKED = {
+  id: "b11",
+  session: "canvas-build-11",
+  phase: "published",
+  activity: null,
+  requests: ["make the heading blue"],
+  summary: "The heading is blue.",
+  flag: "passing",
+  version: 6,
+  at: 11,
+  created_at: 11,
+  steps: [
+    { phase: "planning", start: MARKED_AT * 1_000, end: (MARKED_AT + 2) * 1_000 },
+    { phase: "waiting", start: (MARKED_AT + 2) * 1_000, end: (MARKED_AT + 90) * 1_000 },
+    { phase: "building", start: (MARKED_AT + 90) * 1_000, end: (MARKED_AT + 130) * 1_000 },
+    {
+      phase: "checking",
+      start: (MARKED_AT + 130) * 1_000,
+      end: (MARKED_AT + 131) * 1_000,
+      flag: "passing",
+    },
+    { phase: "publishing", start: (MARKED_AT + 131) * 1_000 },
+  ],
+}
+
+const MARKED_ROWS = [
+  { id: 1, role: "user", content: "make the heading blue", timestamp: MARKED_AT },
+  { id: 2, role: "assistant", content: "Approved — writing the draft.", timestamp: MARKED_AT + 12 },
+  // The check's own report, which is the turn the checking visit began.
+  { id: 3, role: "user", content: "[check] the draft passes", timestamp: MARKED_AT + 130 },
+  { id: 4, role: "assistant", content: "Published.", timestamp: MARKED_AT + 131 },
+]
+
+test(
+  "a build's sheet marks where each visit began, above the turn that followed it",
+  laptop(async () => {
+    await openBuild([MARKED], MARKED_ROWS, "b11", async () => {
+      await until(
+        () => findAll("[data-popup-form] [data-build-mark]").length > 0,
+        "the visits the build made, marked in its run",
+      )
+      const marks = findAll("[data-popup-form] [data-build-mark]")
+      assert.deepEqual(
+        marks.map(wordsOf),
+        [
+          "Planning · 2.0s",
+          "Waiting · 1m 28s",
+          "Building · 40.0s",
+          "Checking · Checks passed · 1.0s",
+          "Publishing",
+        ],
+        "a marker a visit, in the order the build made them, saying what it found",
+      )
+      const drawn = findAll('[data-popup-form] [data-slot="message"]')
+      const request = drawn.find((one) => wordsOf(one).includes("make the heading blue"))
+      const report = drawn.find((one) => wordsOf(one).includes("[check] the draft passes"))
+      assert.ok(request && report, "the run draws the request and the check's report")
+      assert.ok(
+        marks[0].compareDocumentPosition(request) & Node.DOCUMENT_POSITION_FOLLOWING,
+        "the first marker stands above the request",
+      )
+      assert.ok(
+        marks[3].compareDocumentPosition(report) & Node.DOCUMENT_POSITION_FOLLOWING,
+        "the checking marker stands above the report that opened it",
+      )
+      assert.equal(
+        marks[3].getAttribute("data-build-flag"),
+        "passing",
+        "and carries what the check found",
+      )
+    })
   }),
 )
 
 test(
-  "a step's pop-up on a phone is the standard bottom sheet, with the thread as its one scroller",
+  "a build that published no version reads as an answer, not as a build to wait on",
+  laptop(async () => {
+    const answered = {
+      id: "b10",
+      session: "canvas-build-10",
+      phase: "published",
+      activity: null,
+      requests: ["what does the total do?"],
+      summary: "The total is what everyone at the table owes between them.",
+      flag: "unchecked",
+      version: null,
+      at: 10,
+      created_at: 10,
+      steps: [{ phase: "planning", start: 1_760_100_000_000, end: 1_760_100_003_000 }],
+    }
+    await drawLane([answered], async () => {
+      await laneDrew("b10")
+      assert.equal(
+        stateOf(find('[data-canvas-build="b10"] [data-build-details]')),
+        "Answered",
+        "a build that wrote nothing says it answered, not that a version is ready",
+      )
+    })
+  }),
+)
+
+test(
+  "a build's run on a phone is the standard bottom sheet, with the thread as its one scroller",
   atWidth(390, async () => {
     await drawLane(
-      [VISITED],
+      [WORKING],
       async () => {
-        const bot = (await db.profiles.get("bot-1"))!
-        await act(async () => {
-          await refreshCanvas("c1")
-          await noteChange(connectionKey(bot), "canvas")
-        })
-        await until(
-          () => Boolean(find('[data-canvas-build="b4"] [data-build-step]')),
-          "the lane's build to draw",
-        )
-        await click(findAll('[data-canvas-build="b4"] [data-build-step]')[0])
-        await until(() => Boolean(find("[data-popup-form]")), "the step's pop-up to open")
+        await laneDrew("b3")
+        await click(find('[data-canvas-build="b3"] [data-build-details]'))
+        await until(() => Boolean(find("[data-popup-form]")), "the run's pop-up to open")
         assert.equal(
           find("[data-popup-form]")?.getAttribute("data-popup-form"),
           "sheet",
-          "a phone draws the step in the standard bottom sheet a subagent's row opens",
+          "a phone draws the run in the standard bottom sheet a subagent's row opens",
         )
         assert.ok(
           find('[data-popup-form] [aria-label="Close"]'),
@@ -792,10 +678,58 @@ test(
           () => Boolean(box.querySelector('[data-slot="message-scroller-viewport"]')),
           "the thread's viewport, inside the pop-up's box rather than the pop-up's own scroller",
         )
+        await shutSheet(() => find("[data-popup-form]"))
+        assert.ok(missing("[data-popup-form]"), "and the sheet is put away as the pop-up does")
       },
-      VISITED_ROWS,
+      [],
       {},
       "/canvas/c1/edit",
     )
+  }),
+)
+
+test(
+  "a build's sheet follows the build to the version it publishes",
+  laptop(async () => {
+    await drawLane([WORKING], async () => {
+      await laneDrew("b3")
+      await click(find('[data-canvas-build="b3"] [data-build-details]'))
+      await until(() => Boolean(find("[data-popup-form]")), "the run's pop-up to open")
+      assert.equal(
+        wordsOf(find('[data-popup-form] [data-slot="sheet-title"]')),
+        "Building",
+        "a run opened while the build works is titled by what it is doing",
+      )
+      // The host publishes the build while its run is open: the row the lane holds its id by moves,
+      // and the sheet is about that row rather than about the one it was pressed as.
+      serve(
+        [
+          {
+            ...WORKING,
+            phase: "published",
+            activity: null,
+            summary: "The heading is blue.",
+            flag: "passing",
+            version: 4,
+            steps: [...WORKING.steps, { phase: "publishing", start: 1_760_000_400_000 }],
+          },
+        ],
+        [],
+      )
+      await act(async () => {
+        await refreshCanvas("c1")
+        await noteChange(connectionKey((await db.profiles.get("bot-1"))!), "canvas")
+      })
+      await until(
+        () => wordsOf(find('[data-popup-form] [data-slot="sheet-title"]')) === "Build",
+        "the sheet to follow the build to the version it published",
+      )
+      assert.ok(
+        findAll("[data-popup-form] [data-build-mark]").some((one) =>
+          wordsOf(one).startsWith("Publishing"),
+        ),
+        "and the visit the build ended in is marked in the run as it happens",
+      )
+    })
   }),
 )

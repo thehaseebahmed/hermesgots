@@ -488,12 +488,14 @@ def seed(path: Path, canvas_id: str) -> str:
     section.
     """
     parts: List[str] = [
-        "You are working on a canvas in a build: one request, one session, one version published "
-        "at its end. Start by filing a plan with canvas_plan — what will change, how it will be "
-        "checked, and whether it waits for the reader's Approve; a clear tweak does not wait. "
-        "Write the page with canvas_write and canvas_edit — they land in this canvas's "
-        "draft, which becomes the version when your run ends — and read what is there with "
-        "canvas_read. Nothing you write reaches the reader before then."
+        "You are working on a canvas in a build: one request, one session. First decide what the "
+        "request is. A question about the page — what it does, why, what next — is answered in "
+        "words: read the page, answer, file no plan and write nothing. A request to change it is a "
+        "build, and one version is published at its end: start by filing a plan with canvas_plan — "
+        "what will change, how it will be checked, and whether it waits for the reader's Approve; a "
+        "clear tweak does not wait. Write the page with canvas_write and canvas_edit — they land in "
+        "this canvas's draft, which becomes the version when your run ends — and read what is there "
+        "with canvas_read. Nothing you write reaches the reader before then."
     ]
     page = canvases.page(path, canvas_id)
     document = page.get("html") or ""
