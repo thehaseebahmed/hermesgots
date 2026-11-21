@@ -3,6 +3,7 @@ import test from "node:test"
 import { act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
+import { PAGE as ROWS_PER_PAGE } from "@/chat-next/pages"
 import { refreshCanvas } from "@/lib/canvases"
 import { db } from "@/lib/db"
 import { connectionKey, noteChange } from "@/lib/live"
@@ -175,6 +176,10 @@ const VISITED = {
   ],
 }
 
+/** The build the sheet opens over a transcript with turns after it: its own session, so the read
+ *  starts from nothing and its first visits really are on a page the reader has not reached. */
+const UNREAD = { ...VISITED, id: "b8", session: "canvas-build-8" }
+
 const VISITED_ROWS = [
   { id: 1, role: "user", content: "make the heading say Split the bill", timestamp: RAN_AT + 2 },
   { id: 2, role: "assistant", content: "The heading now says Split the bill.", timestamp: RAN_AT + 2 },
@@ -206,7 +211,22 @@ const CANVAS = {
   builds: true,
 }
 
-function serve(builds: readonly unknown[] = BUILDS, rows: readonly unknown[] = []) {
+/**
+ * The rows the sheet's transcript has after the build published: enough of them that the build's
+ * own first visits sit on a page of the host's transcript the reader has not read yet.
+ */
+const LATER_ROWS = Array.from({ length: ROWS_PER_PAGE - 4 }, (_, at) => ({
+  id: 9 + at,
+  role: at % 2 === 0 ? "user" : "assistant",
+  content: at % 2 === 0 ? `a later request ${at}` : `a later reply ${at}`,
+  timestamp: RAN_AT + 60 + at,
+}))
+
+function serve(
+  builds: readonly unknown[] = BUILDS,
+  rows: readonly unknown[] = [],
+  host: { unreadOlder?: boolean } = {},
+) {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
     if (url.pathname.endsWith("/info")) {
@@ -223,7 +243,12 @@ function serve(builds: readonly unknown[] = BUILDS, rows: readonly unknown[] = [
       return json({ object: "gots.canvas", canvas: CANVAS })
     }
     if (/\/api\/sessions\/[^/]+\/messages$/.test(url.pathname)) {
-      return json({ data: rows, total: rows.length })
+      // The host pages newest first: more rows than a page is the newest page read now and the
+      // rest above it, and `unreadOlder` is a host whose pages above never land.
+      const offset = Number(url.searchParams.get("offset") ?? 0)
+      if (offset > 0 && host.unreadOlder) return json({ error: "no older page" }, 503)
+      const end = Math.max(rows.length - offset, 0)
+      return json({ data: rows.slice(Math.max(end - ROWS_PER_PAGE, 0), end), total: rows.length })
     }
     return json({}, 404)
   }) as typeof fetch
@@ -252,8 +277,9 @@ async function drawLane(
   builds: readonly unknown[],
   body: () => Promise<void>,
   rows: readonly unknown[] = [],
+  host: { unreadOlder?: boolean } = {},
 ) {
-  serve(builds, rows)
+  serve(builds, rows, host)
   await seed()
   await mount(
     <MemoryRouter initialEntries={["/canvas/c1"]}>
@@ -493,6 +519,19 @@ test(
         "the activity line says what it is doing",
       )
       assert.equal(markers[0].nextElementSibling, activity, "hanging under the marker")
+      // The record holds no window for this marker — the host never wrote when the phase began — so
+      // the lane draws it open and unpressed, and the activity line is all that says what it is
+      // doing.
+      assert.ok(
+        markers[0].hasAttribute("disabled"),
+        "a step with no window the record wrote is nothing to press",
+      )
+      await click(markers[0])
+      await settle()
+      assert.ok(
+        missing('[data-slot="sheet-content"]'),
+        "and pressing it opens no sheet, since there are no turns it could hold",
+      )
     })
   }),
 )
@@ -634,9 +673,12 @@ test(
         "the sheet says the step holds no messages",
       )
       assert.equal(sheetMessages().length, 0, "and draws no message of another visit")
-      assert.ok(
-        missing('[data-slot="sheet-content"] [aria-label="Messages"]'),
-        "the thread is not drawn at all, so no empty state greets the reader",
+      // The thread is drawn over the step's turns rather than beside them, so its own marks stand
+      // around the words; what it does not draw is the greeting a chat with nothing said wears.
+      assert.equal(
+        wordsOf(find('[data-slot="sheet-content"] [aria-label="Messages"]')),
+        "No messages in this step of the build.",
+        "the thread reads as the step's own words, and not as a chat with nothing said",
       )
       // The last visit's window is tiled: it begins in the second its own turn was stamped in, and
       // it holds the second the build closed in, which ends the visit after the next's floor.
@@ -662,5 +704,48 @@ test(
         "and nothing of the checking visit before it",
       )
     }, VISITED_ROWS)
+  }),
+)
+
+test(
+  "a step's sheet keeps the thread's own word while its turns are on a page not read yet",
+  laptop(async () => {
+    await drawLane(
+      [UNREAD],
+      async () => {
+        const bot = (await db.profiles.get("bot-1"))!
+        await act(async () => {
+          await refreshCanvas("c1")
+          await noteChange(connectionKey(bot), "canvas")
+        })
+        await until(
+          () => Boolean(find('[data-canvas-build="b8"] [data-build-step]')),
+          "the lane's build to draw",
+        )
+        await click(findAll('[data-canvas-build="b8"] [data-build-step]')[0])
+        // The thread the sheet opens reads the newest page before it can say anything at all.
+        await settle()
+        // The visit's turns are on a page above the newest one, which the thread has not read: the
+        // sheet says the step holds no messages until that page lands, and the reader is told the
+        // page is still to come rather than that the step is empty.
+        await until(
+          () => Boolean(find("[data-build-window-empty]")),
+          "the step to say it holds nothing yet",
+        )
+        const older = find('[data-slot="sheet-content"] [data-older]')
+        assert.ok(older, "the sheet keeps the thread's own word that earlier messages are unread")
+        assert.equal(
+          older.getAttribute("data-older"),
+          "failed",
+          "and says so in the state the thread's read is in",
+        )
+        assert.ok(
+          find('[data-slot="sheet-content"] [data-older-retry]'),
+          "offering the thread's own retry, so the step's turns can be read on from there",
+        )
+      },
+      [...VISITED_ROWS, ...LATER_ROWS],
+      { unreadOlder: true },
+    )
   }),
 )

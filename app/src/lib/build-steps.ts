@@ -30,6 +30,21 @@ export function flagWords(flag: string) {
 }
 
 /**
+ * A visit a build's lane draws. The record's own visit (`canvases.ts`'s `CanvasBuildStep`) always
+ * names the clock it began at; the marker the lane draws for a build the record predates (I6) names
+ * none, because the host never wrote when that phase began and a lane must not date what it cannot
+ * know. Only a step that names its start can be given a window and pressed.
+ */
+export interface DrawnStep {
+  phase: string
+  startedAt?: number
+  /** When the build left the phase; absent while this is the build's current step. */
+  endedAt?: number
+  /** `passing`, `failing` or `unchecked`, on a checking visit the version's check stamped. */
+  flag?: string
+}
+
+/**
  * The visits a build's lane draws, in the order they happened: one marker per visit to a phase that
  * did work, never one per turn. Waiting and publishing are recorded but not drawn.
  */
@@ -48,19 +63,17 @@ export function atWork(build: { phase: string }) {
  *
  * The phase it is in is drawn only where a visit to it would be: a build waiting on its plan waits
  * in a phase the lane never draws a marker for, and inventing one for it would say the wait twice —
- * there, and on the plan's card in the composer's place.
+ * there, and on the plan's card in the composer's place. That marker is open and carries no start:
+ * the record holds no window for it, so the one under it — the activity line — is what says what is
+ * happening.
  */
-export function drawnSteps(build: {
-  phase: string
-  steps?: CanvasBuildStep[]
-  at: number
-}): CanvasBuildStep[] {
+export function drawnSteps(build: { phase: string; steps?: CanvasBuildStep[] }): DrawnStep[] {
   const steps = markersOf(build)
   if (steps.length || !atWork(build) || !DRAWN.has(build.phase)) return steps
-  return [{ phase: build.phase, startedAt: build.at }]
+  return [{ phase: build.phase }]
 }
 
-export function isOpen(step: CanvasBuildStep) {
+export function isOpen(step: DrawnStep) {
   return step.endedAt === undefined
 }
 
@@ -81,28 +94,35 @@ export interface StepWindow {
  *
  * The last drawn step is the one that holds the build's final second — a publishing visit after it
  * is not drawn — so it ends a second past the second the build closed in. While the build is at
- * work it has no end at all.
+ * work it has no end at all. A step with no start the record wrote down has no window either: there
+ * is nothing to tile from, and a lane that guessed one would place turns in a step they never ran in.
  */
-export function windowsOf(steps: CanvasBuildStep[], build: { phase: string }): StepWindow[] {
+export function windowsOf(
+  steps: DrawnStep[],
+  build: { phase: string },
+): (StepWindow | undefined)[] {
   const open = atWork(build)
   return steps.map((step, at) => {
+    if (step.startedAt === undefined) return undefined
     const start = Math.floor(step.startedAt / 1000)
     const next = steps[at + 1]
-    if (next) return { start, end: Math.floor(next.startedAt / 1000) }
+    if (next && next.startedAt !== undefined)
+      return { start, end: Math.floor(next.startedAt / 1000) }
     const end = step.endedAt
     return { start, end: open || end === undefined ? Infinity : Math.floor(end / 1000) + 1 }
   })
 }
 
-export function liveIndexOf(steps: CanvasBuildStep[]) {
+export function liveIndexOf(steps: DrawnStep[]) {
   return steps.findLastIndex((step) => isOpen(step))
 }
 
-export function stepWords(step: CanvasBuildStep) {
+export function stepWords(step: DrawnStep) {
   const words = [phaseWord(step.phase)]
   const flag = step.flag ? flagWords(step.flag) : undefined
   if (flag) words.push(flag)
-  if (step.endedAt !== undefined) words.push(formatDuration(step.endedAt - step.startedAt))
+  if (step.endedAt !== undefined && step.startedAt !== undefined)
+    words.push(formatDuration(step.endedAt - step.startedAt))
   return words.join(" · ")
 }
 

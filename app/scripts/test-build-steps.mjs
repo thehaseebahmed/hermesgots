@@ -85,27 +85,42 @@ test("a checking marker that is still open says the flag and no span", () => {
 test("a build at work in a phase it does not draw says that phase, and one that ended says nothing", () => {
   const visit = (phase) => ({ phase, startedAt: 0 })
   assert.deepEqual(
-    drawnSteps({ phase: "checking", at: 7 }).map((one) => one.phase),
+    drawnSteps({ phase: "checking" }).map((one) => one.phase),
     ["checking"],
     "a build the record never wrote down still says the phase it is in (I6)",
   )
   assert.deepEqual(
-    drawnSteps({ phase: "waiting", at: 7 }),
+    drawnSteps({ phase: "waiting" }),
     [],
     "but a wait's words are the plan card in the composer's place, so it draws no marker",
   )
   assert.deepEqual(
-    drawnSteps({ phase: "failed", at: 7 }),
+    drawnSteps({ phase: "failed" }),
     [],
     "and a build that ended with no recorded visits draws none",
   )
   assert.deepEqual(
-    drawnSteps({ phase: "building", at: 7, steps: [visit("planning"), visit("building")] }).map(
+    drawnSteps({ phase: "building", steps: [visit("planning"), visit("building")] }).map(
       (one) => one.phase,
     ),
     ["planning", "building"],
     "a recorded build draws its own visits, in order, and nothing invented",
   )
+})
+
+test("a build the record predates draws the phase it is in, and dates nothing", () => {
+  // I6: the host never wrote when this build entered the phase, so the lane draws the marker open
+  // and undated — the activity line under it is what says what is happening — rather than inventing
+  // a window out of the build's last clock.
+  const steps = drawnSteps({ phase: "checking" })
+  assert.deepEqual(
+    steps,
+    [{ phase: "checking" }],
+    "the phase alone, and no start the host never recorded",
+  )
+  assert.deepEqual(windowsOf(steps, { phase: "checking" }), [undefined], "so no window to slice")
+  assert.equal(isOpen(steps[0]), true, "open, so there is nothing of it to press")
+  assert.equal(stepWords(steps[0]), "Checking", "and it says its phase alone")
 })
 
 test("only a visit the build has not left is drawn live", () => {

@@ -35,7 +35,8 @@ import {
   windowsOf,
   type StepWindow,
 } from "@/lib/build-steps"
-import type { CanvasBuildRow, CanvasBuildStep } from "@/lib/canvases"
+import type { DrawnStep } from "@/lib/build-steps"
+import type { CanvasBuildRow } from "@/lib/canvases"
 import {
   COLUMN,
   COMPOSER_SLOT,
@@ -57,7 +58,7 @@ const WORKING_WORDS = "The build is working."
 /** What the lane draws, kept in a context so the view is one stable component. */
 interface Lane {
   rows: CanvasBuildRow[]
-  open: (build: CanvasBuildRow, step?: CanvasBuildStep, window?: StepWindow) => void
+  open: (build: CanvasBuildRow, step?: DrawnStep, window?: StepWindow) => void
 }
 
 const LaneOf = createContext<Lane | null>(null)
@@ -69,7 +70,7 @@ function StepRow({
   live = false,
   onPress,
 }: {
-  step: CanvasBuildStep
+  step: DrawnStep
   live?: boolean
   onPress?: () => void
 }) {
@@ -92,7 +93,7 @@ function BuildSteps({
   onStep,
 }: {
   row: CanvasBuildRow
-  onStep: (step: CanvasBuildStep, window: StepWindow) => void
+  onStep: (step: DrawnStep, window: StepWindow) => void
 }) {
   const steps = drawnSteps(row)
   const windows = windowsOf(steps, row)
@@ -105,18 +106,23 @@ function BuildSteps({
   if (!steps.length && !publishing) return null
   return (
     <div className={cn(REPLY_EDGE, "flex flex-col")}>
-      {steps.map((step, at) => (
-        <Fragment key={at}>
-          <StepRow
-            step={step}
-            live={at === live}
-            {...(isOpen(step) ? {} : { onPress: () => onStep(step, windows[at]) })}
-          />
-          {at === noteAt ? (
-            <WorkNote data-build-activity>{row.activity ?? WORKING_WORDS}</WorkNote>
-          ) : null}
-        </Fragment>
-      ))}
+      {steps.map((step, at) => {
+        // A step the record dated can be pressed for its turns; one the lane drew for a build the
+        // record predates has no window, and there is nothing of it to open.
+        const window = windows[at]
+        return (
+          <Fragment key={at}>
+            <StepRow
+              step={step}
+              live={at === live}
+              {...(isOpen(step) || !window ? {} : { onPress: () => onStep(step, window) })}
+            />
+            {at === noteAt ? (
+              <WorkNote data-build-activity>{row.activity ?? WORKING_WORDS}</WorkNote>
+            ) : null}
+          </Fragment>
+        )
+      })}
       {steps.length === 0 ? (
         <WorkNote data-build-activity>{row.activity ?? WORKING_WORDS}</WorkNote>
       ) : null}
@@ -172,7 +178,7 @@ function BuildBlock({
 }: {
   row: CanvasBuildRow
   onDetails: () => void
-  onStep: (step: CanvasBuildStep, window: StepWindow) => void
+  onStep: (step: DrawnStep, window: StepWindow) => void
 }) {
   return (
     <div data-canvas-build={row.id} className="flex flex-col gap-3">
@@ -225,7 +231,7 @@ function NoComposer() {
 
 interface Sight {
   build: CanvasBuildRow
-  step?: CanvasBuildStep
+  step?: DrawnStep
   window?: StepWindow
 }
 
@@ -236,15 +242,28 @@ function StepView(props: ThreadViewProps) {
     () => (window ? turnsInStep(turns, origin, window) : { turns, origin }),
     [window, turns, origin],
   )
-  if (window && !narrowed.turns.length && !props.firstReadOut)
-    return (
-      <p data-build-window-empty className={cn(COLUMN, "px-4 py-6 text-sm text-muted-foreground")}>
-        No messages in this step of the build.
-      </p>
-    )
+  // The thread is drawn over the step's turns rather than beside it, so the marks a thread carries —
+  // a page above still to be read, the archive, a failure — are the reader's here too. Where the
+  // step holds no turn, the sheet says so in the place the thread's own empty state would stand.
   return (
     <Suspense fallback={null}>
-      <AppThreadView {...props} turns={narrowed.turns} origin={narrowed.origin} />
+      <AppThreadView
+        {...props}
+        turns={narrowed.turns}
+        origin={narrowed.origin}
+        {...(window
+          ? {
+              noTurns: (
+                <p
+                  data-build-window-empty
+                  className={cn(COLUMN, "px-4 py-6 text-sm text-muted-foreground")}
+                >
+                  No messages in this step of the build.
+                </p>
+              ),
+            }
+          : {})}
+      />
     </Suspense>
   )
 }
