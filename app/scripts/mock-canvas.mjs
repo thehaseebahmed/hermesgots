@@ -362,9 +362,11 @@ const ACTIVITY = {
 /**
  * How long the mock's check takes. A visit's window is half-open in whole seconds (the app floors
  * both edges), so a check that ended in the second it began would hold no turn at all: the publish
- * that follows is held a beat, and the report it wrote is in the visit's window.
+ * that follows is held a beat, and the report it wrote is in the visit's window. The beat is also
+ * the window a flow reads the lane in while the build works, so it is long enough for a browser to
+ * be in it.
  */
-const CHECK_MS = 1100
+const CHECK_MS = 3000
 
 /**
  * What the mock's check answered: this host has no browser, so the one thing it can read is the page
@@ -402,6 +404,26 @@ function openBuild(store, canvas, request) {
     created_at: asked,
   }
   place(canvas.build, "building", at)
+}
+
+/**
+ * The build working now, as the lane's listing answers it: the same row a published build is, with
+ * the visits it has made so far and nothing it has not published yet.
+ */
+function workingRow(build) {
+  return {
+    id: build.id,
+    session: build.session,
+    phase: build.phase,
+    activity: build.activity ?? null,
+    requests: build.requests,
+    summary: null,
+    flag: null,
+    version: null,
+    steps: build.steps,
+    at: build.at,
+    created_at: build.created_at,
+  }
 }
 
 function publishBuild(store, canvas, version, edited) {
@@ -774,8 +796,15 @@ export async function handleCanvas(
       return true
     }
     // A canvas from before builds answers an empty list rather than a refusal: its lane falls back to
-    // its own chat, which is what the app draws for a record with no `builds` flag anyway.
-    json(res, 200, { object: "gots.canvas.builds", builds: canvas.buildRows ?? [] })
+    // its own chat, which is what the app draws for a record with no `builds` flag anyway. The build
+    // working now is a row of the list too, as `builds.py`'s `builds_of` answers every build the
+    // canvas has: the lane draws the block it is in while it works, and a list of finished ones alone
+    // would leave that block undrawn until the build ended. Publishing moves the same row into the
+    // published list, so no build is drawn twice.
+    json(res, 200, {
+      object: "gots.canvas.builds",
+      builds: [...(canvas.build ? [workingRow(canvas.build)] : []), ...(canvas.buildRows ?? [])],
+    })
     return true
   }
 

@@ -75,8 +75,9 @@ await flow(
     )
     await shot("edit-no-build")
     pass("the edit screen: a canvas made from a prompt lands on its chat, with no page and no Preview")
-    // The lane while the build works: its phase and the line saying what it is doing, over the
-    // composer. The mock publishes 2.5s after the start, so this is the one window it is drawn in.
+    // The lane while the build works: the block it is in — its request, the visits behind it and the
+    // line saying what it is doing — over the composer. The mock holds its check a beat, so this is
+    // the window it is drawn in.
     await shot("building")
 
     // The first version lands through the live record, so Preview is drawn without a reload, and
@@ -183,6 +184,31 @@ await flow(
     assert.equal(await page.locator(FRAME).count(), 0, "the edit screen draws no page")
     await field.fill(EDIT)
     await field.press(SEND_CHORD)
+    // The lane draws the build it is in while it works: the host's listing carries the working build,
+    // so its request, the visits it has made and the line under the one it is in are drawn before it
+    // publishes. The mock holds its check a beat, which is this window.
+    const working = page.locator("[data-canvas-build]").filter({ hasText: EDIT })
+    await working.locator("[data-build-activity]").waitFor({ timeout: 30_000 })
+    assert.deepEqual(
+      await working
+        .locator("[data-build-step]")
+        .evaluateAll((nodes) =>
+          nodes.map((node) => [
+            node.getAttribute("data-build-step"),
+            node.hasAttribute("data-working"),
+          ]),
+        ),
+      [
+        ["planning", false],
+        ["building", false],
+        ["checking", true],
+      ],
+      "the build draws the visits it made, and the one it is in is the live one",
+    )
+    await shot("edit-building")
+    pass(
+      "the edit screen: the working build draws its request, its steps, and the step it is in live",
+    )
     await page.getByText("v2", { exact: true }).waitFor({ timeout: 40_000 })
     // The lane is builds, not the transcript (G9, G10): the request it took is the row's line, and
     // the version it wrote is the row's version, drawn on the edit screen itself.
@@ -200,6 +226,8 @@ await flow(
     // the duration beside it.
     const build = builds.locator("[data-canvas-build]").filter({ hasText: EDIT })
     const markers = build.locator("[data-build-step]")
+    // The build publishes a beat after it checks, and only then is the step it checked in pressable.
+    await build.locator("[data-build-version]").waitFor({ timeout: 30_000 })
     await until(
       async () => (await markers.count()) === 3,
       20_000,
