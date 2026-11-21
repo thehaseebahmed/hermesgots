@@ -788,9 +788,9 @@ test(
         )
         const box = find('[data-popup-form] [data-slot="build-transcript"]')
         assert.ok(box, "the pop-up holds a box of its own for the thread")
-        assert.ok(
-          box.querySelector('[data-slot="message-scroller-viewport"]'),
-          "and the thread's viewport is the scroller inside it, not the pop-up's box",
+        await until(
+          () => Boolean(box.querySelector('[data-slot="message-scroller-viewport"]')),
+          "the thread's viewport, inside the pop-up's box rather than the pop-up's own scroller",
         )
       },
       VISITED_ROWS,
