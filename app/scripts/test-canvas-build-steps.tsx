@@ -347,8 +347,8 @@ test(
       assert.ok(line, "the reply's line is still drawn")
       assert.deepEqual(
         [...line.children].map((one) => wordsOf(one)),
-        ["Version 3", "ready"],
-        "the line keeps the version it published and ready, and no flag",
+        ["Version 3 ready", ""],
+        "the line is one row reading the version and ready, and no flag",
       )
       assert.equal(
         line.querySelector("[data-build-flag]"),
@@ -361,11 +361,11 @@ test(
       )
       // A build from before the record has no marker to read its flag on, so its reply's line keeps
       // it — where there is a marker, the marker is what says it.
-      const olderLine = find('[data-canvas-build="b2"] [data-build-details]')?.parentElement
+      const olderLine = find('[data-canvas-build="b2"] [data-build-details]')
       assert.ok(olderLine, "a build with no markers still draws its reply's line")
       assert.deepEqual(
         [...olderLine.children].map((one) => wordsOf(one)),
-        ["Checks failed", "ready"],
+        ["Checks failed", "ready", ""],
         "the flag reads on the line only because no marker holds it, then ready",
       )
       assert.equal(

@@ -229,18 +229,15 @@ await flow(
     await readyLine.waitFor({ timeout: 20_000 })
     assert.equal(
       (await readyLine.innerText()).trim(),
-      "Version 2",
-      "the line keeps the version the build published",
+      "Version 2 ready",
+      "the line is one row reading the version the build published and ready",
     )
     assert.equal(
-      await builds
-        .locator("[data-canvas-build]")
-        .filter({ hasText: EDIT })
-        .locator("[data-build-details]")
-        .first()
-        .innerText(),
-      "ready",
-      "and the press under it reads ready",
+      await page.locator("[data-build-details]").first().evaluate(
+        (one) => one.tagName,
+      ),
+      "BUTTON",
+      "and the whole row is the press, not a word inside it",
     )
     pass("the edit screen: the lane draws the build's request and the version it published")
 

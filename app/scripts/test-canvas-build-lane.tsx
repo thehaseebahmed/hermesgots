@@ -304,7 +304,7 @@ test(
         await noteChange(connectionKey(bot), "canvas")
       })
       await until(
-        () => Boolean(findText("button", "ready")),
+        () => Boolean(find("[data-build-details]")),
         "the lane's builds to draw",
       )
       const request = find('[data-canvas-build="b1"] [data-build-request]')
@@ -337,11 +337,11 @@ test(
       )
       assert.deepEqual(
         [...line.children].map((one) => wordsOf(one)),
-        ["Checks passed", "Version 3", "ready"],
-        "the line reads the flag this build has no marker to carry, then the version and ready",
+        ["Checks passed", "Version 3 ready", ""],
+        "the line is one row: the flag this build has no marker to carry, then the version and ready",
       )
       assert.ok(
-        line.querySelector('[data-build-details] [data-slot="work-mark"]'),
+        line.querySelector('[data-slot="work-mark"]'),
         "and ready wears the chevron a work row draws",
       )
       assert.ok(
@@ -355,7 +355,7 @@ test(
       const failed = find('[data-canvas-build="b2"] [data-build-summary]')
       assert.ok(failed, "a build with no summary still draws that place")
       assert.equal(wordsOf(failed), "The build failed.", "in the lane's own words")
-      const failedLine = find('[data-canvas-build="b2"] [data-build-details]')?.parentElement
+      const failedLine = find('[data-canvas-build="b2"] [data-build-details]')
       assert.ok(failedLine, "and still draws its line")
       assert.ok(
         missing('[data-canvas-build="b2"] [data-build-version]'),
@@ -363,7 +363,7 @@ test(
       )
       assert.deepEqual(
         [...failedLine.children].map((one) => wordsOf(one)),
-        ["ready"],
+        ["ready", ""],
         "a build with no version still offers ready on its line",
       )
       const working = find('[data-canvas-build="b3"]')

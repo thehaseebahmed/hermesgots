@@ -12,7 +12,6 @@ import {
 import { Markdown } from "@/components/chat/markdown"
 import { UserBubble } from "@/components/chat/user-bubble"
 import { WorkLabel, WorkMark, WorkNote, WorkRow } from "@/components/chat/work-row"
-import { Button } from "@/components/ui/button"
 import { Message as MessageRow, MessageContent } from "@/components/ui/message"
 import {
   Popup,
@@ -145,31 +144,15 @@ function BuildReply({ row, onReady }: { row: CanvasBuildRow; onReady: () => void
           {row.phase === "failed" ? "The build failed." : "The build was stopped."}
         </p>
       )}
-      <div
-        className={cn(
-          REPLY_EDGE,
-          "flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground",
-        )}
-      >
+      <WorkRow data-build-details onClick={onReady} className={cn(REPLY_EDGE, "text-[13px]")}>
         {flag ? <span data-build-flag={row.flag}>{flag}</span> : null}
         {row.version ? (
-          <span data-build-version>
-            Version {row.version}
-          </span>
-        ) : null}
-        {/* The version says what it published; ready opens the whole build's transcript, one press
-            of the line under the reply. `data-build-details` is the attribute the flow presses. */}
-        <Button
-          variant="ghost"
-          size="sm"
-          data-build-details
-          className="-ml-2 h-9 gap-1 px-2 font-normal"
-          onClick={onReady}
-        >
-          ready
-          <WorkMark />
-        </Button>
-      </div>
+          <WorkLabel data-build-version>{`Version ${row.version} ready`}</WorkLabel>
+        ) : (
+          <WorkLabel>ready</WorkLabel>
+        )}
+        <WorkMark />
+      </WorkRow>
     </>
   )
 }
