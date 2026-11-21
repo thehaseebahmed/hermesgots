@@ -1,7 +1,7 @@
 /**
  * A canvas's lane, drawn as builds rather than as a transcript (G9, G10): each finished build reads
- * as the chat it was — its request in the bubble a chat draws the reader's message in, its summary
- * as the bot's words, and under them one line saying what the checks found and the version it
+ * as the chat it was — its request in the bubble a chat draws the reader's message in, a marker for
+ * each step it took, its summary as the bot's words, and under them one line saying the version it
  * published, newest at the foot; the build working now is its phase and the line saying what it is
  * doing. The transcript is not drawn here at all — `Details` opens one build's session read-only.
  *
@@ -13,6 +13,7 @@ import { createContext, lazy, Suspense, useContext, useMemo, useState, type Reac
 
 import { Markdown } from "@/components/chat/markdown"
 import { UserBubble } from "@/components/chat/user-bubble"
+import { WorkLabel, WorkMark, WorkRow } from "@/components/chat/work-row"
 import { Button } from "@/components/ui/button"
 import { Message as MessageRow, MessageContent } from "@/components/ui/message"
 import {
@@ -23,7 +24,8 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import type { ThreadViewProps } from "@/chat-next/page"
-import type { CanvasBuild, CanvasBuildRow } from "@/lib/canvases"
+import { markersOf, PHASE_WORDS, stepWords } from "@/lib/build-steps"
+import type { CanvasBuild, CanvasBuildRow, CanvasBuildStep } from "@/lib/canvases"
 import {
   COLUMN,
   COMPOSER_SLOT,
@@ -48,30 +50,27 @@ interface Lane {
 
 const LaneOf = createContext<Lane | null>(null)
 
-/** The phase a working build is in, as the lane names it. */
-const PHASE_WORDS: Record<string, string> = {
-  planning: "Planning",
-  waiting: "Waiting",
-  building: "Building",
-  checking: "Checking",
-  publishing: "Publishing",
-}
-
-/** What a version's checks said, as the row's badge says it. */
-const FLAG_WORDS: Record<string, string> = {
-  passing: "Checks passed",
-  failing: "Checks failed",
-  unchecked: "Not checked",
+/**
+ * One marker: a visit the build made to a phase that did work, drawn as the thread's own work row —
+ * its phase's word, what a check found where it checked, and the span it took.
+ */
+function StepRow({ step }: { step: CanvasBuildStep }) {
+  return (
+    <WorkRow disabled data-build-step={step.phase} data-build-flag={step.flag} after={<WorkMark />}>
+      <WorkLabel>{stepWords(step, PHASE_WORDS[step.phase] ?? "Working")}</WorkLabel>
+    </WorkRow>
+  )
 }
 
 /**
  * One finished build, drawn as the chat it was: each request the reader's own message on the right,
- * the summary that ended it as the bot's words, and under them the one muted line — what the checks
- * said, the version it published and `Details`, which opens the whole build's transcript. A build
- * that published no version names none, and one that ended without a reply says so in its place.
+ * a marker per step it took, the summary that ended it as the bot's words, and under them the one
+ * muted line — the version it published and `Details`, which opens the whole build's transcript. A
+ * build that published no version names none, and one that ended without a reply says so in its
+ * place.
  */
 function BuildBlock({ row, onDetails }: { row: CanvasBuildRow; onDetails: () => void }) {
-  const flag = row.flag ? FLAG_WORDS[row.flag] : undefined
+  const steps = markersOf(row)
   return (
     <div data-canvas-build={row.id} className="flex flex-col gap-3">
       {row.requests.map((request, at) => (
@@ -81,6 +80,13 @@ function BuildBlock({ row, onDetails }: { row: CanvasBuildRow; onDetails: () => 
           </MessageContent>
         </MessageRow>
       ))}
+      {steps.length ? (
+        <div className={cn(REPLY_EDGE, "flex flex-col")}>
+          {steps.map((step, at) => (
+            <StepRow key={at} step={step} />
+          ))}
+        </div>
+      ) : null}
       {row.summary ? (
         <div data-build-summary className={REPLY_EDGE}>
           <Markdown className={REPLY_TEXT}>{row.summary}</Markdown>
@@ -96,7 +102,6 @@ function BuildBlock({ row, onDetails }: { row: CanvasBuildRow; onDetails: () => 
           "flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground",
         )}
       >
-        {flag ? <span data-build-flag={row.flag}>{flag}</span> : null}
         {row.version ? (
           <span data-build-version>
             Version {row.version}

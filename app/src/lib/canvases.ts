@@ -177,6 +177,19 @@ export interface CanvasBuild {
 }
 
 /**
+ * One visit a build made to a phase (`builds.py`'s `canvas_build_steps`): a row a visit, appended
+ * when the build entered the phase and closed when it left.
+ */
+export interface CanvasBuildStep {
+  phase: string
+  startedAt: number
+  /** When the build left the phase; absent while this is the build's current step. */
+  endedAt?: number
+  /** `passing`, `failing` or `unchecked`, on a checking visit the version's check stamped. */
+  flag?: string
+}
+
+/**
  * One build the lane draws (G10): the request it took, the summary it ended on, what its checks
  * said and the version it published. A build still working has its phase and activity line.
  */
@@ -192,7 +205,31 @@ export interface CanvasBuildRow {
   flag?: string
   /** The version it published, where it published one. */
   version?: number
+  /**
+   * Every visit it made to a phase, in the order it made them. Absent for a build the record
+   * predates — never an empty list, since a build that visited nothing is not one that was never
+   * recorded (I6).
+   */
+  steps?: CanvasBuildStep[]
   at: number
+}
+
+/** The visits a host's answer carries, or nothing where it sent none (I6). */
+function stepsOf(raw: unknown): CanvasBuildStep[] | undefined {
+  if (!Array.isArray(raw)) return undefined
+  const kept: CanvasBuildStep[] = []
+  for (const row of raw) {
+    if (!row || typeof row !== "object") continue
+    const { phase, start, end, flag } = row as Record<string, unknown>
+    if (typeof phase !== "string" || !phase || typeof start !== "number") continue
+    kept.push({
+      phase,
+      startedAt: start,
+      ...(typeof end === "number" ? { endedAt: end } : {}),
+      ...(typeof flag === "string" && flag ? { flag } : {}),
+    })
+  }
+  return kept.length ? kept : undefined
 }
 
 /** A canvas's builds read from the host, as the lane's rows (`builds.py`'s `listing`). */
@@ -200,6 +237,7 @@ function buildRowOf(raw: Record<string, unknown>): CanvasBuildRow | undefined {
   const id = typeof raw.id === "string" ? raw.id : ""
   const session = typeof raw.session === "string" ? raw.session : ""
   if (!id || !session) return undefined
+  const steps = stepsOf(raw.steps)
   return {
     id,
     session,
@@ -211,6 +249,7 @@ function buildRowOf(raw: Record<string, unknown>): CanvasBuildRow | undefined {
     ...(typeof raw.summary === "string" && raw.summary ? { summary: raw.summary } : {}),
     ...(typeof raw.flag === "string" ? { flag: raw.flag } : {}),
     ...(typeof raw.version === "number" ? { version: raw.version } : {}),
+    ...(steps ? { steps } : {}),
     at: typeof raw.at === "number" ? raw.at : 0,
   }
 }

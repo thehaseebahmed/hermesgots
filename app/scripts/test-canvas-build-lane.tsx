@@ -290,7 +290,8 @@ test(
         "and says what the build answered",
       )
       assert.ok(!summary.closest('[data-slot="bubble"]'), "the bot's words wear no bubble")
-      // Under the reply, one muted line: the flag the checks left, the version it published, Details.
+      // Under the reply, one muted line: the version it published and Details. The check flag reads on
+      // the marker that checked, and this build predates the record's visits, so it draws none.
       const line = find('[data-canvas-build="b1"] [data-build-version]')?.parentElement
       assert.ok(line, "the version's line is drawn")
       assert.ok(
@@ -299,8 +300,8 @@ test(
       )
       assert.deepEqual(
         [...line.children].map((one) => wordsOf(one)),
-        ["Checks passed", "Version 3", "Details"],
-        "the line reads the flag, then the version, then Details",
+        ["Version 3", "Details"],
+        "the line reads the version, then Details",
       )
       assert.ok(
         document.querySelector("[data-canvas-builds]"),

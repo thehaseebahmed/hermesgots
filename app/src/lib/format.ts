@@ -1,5 +1,5 @@
 import type { Message } from "@/lib/db"
-import { activityOf } from "@/lib/tools"
+import { activityOf } from "./tools.ts"
 
 export { formatRelative } from "./relative.ts"
 
