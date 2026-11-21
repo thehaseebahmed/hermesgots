@@ -11,12 +11,18 @@ import { useSyncExternalStore } from "react"
 import { BOT_MOODS, DEFAULT_MOOD, botImage, type BotMood } from "@/components/bots"
 import { findBot } from "@/components/bot"
 import { labelOf } from "@/lib/bot-name"
+import { hasServer, serverConfig } from "@/lib/connection"
 import type { Profile } from "@/lib/db"
+import type { PluginServer } from "@/lib/features"
+import { getCharmFirmware, type CharmFirmware, type HermesConfig } from "@/lib/hermes"
+import type { HostRoute } from "@/lib/host-record"
 import { isNative } from "@/lib/platform"
 import { quietly } from "@/lib/report"
 import { registryId } from "@/lib/registry"
 
 import { charmBotId, charmButtons } from "./charm-alert.ts"
+import { type FirmwareProgress, uploadFirmware } from "./charm-firmware.ts"
+import { oneAtATime } from "./charm-queue.ts"
 import { refusalWords } from "./charm-words.ts"
 import {
   CHARM_CONTROL,
@@ -26,16 +32,17 @@ import {
   CharmCode,
   batteryMessage,
   charmKept,
+  firmwareMessage,
   forgetMessage,
   hexBytes,
   networkMessage,
   parseBattery,
+  parseFirmware,
   parseNetworkReport,
   parseStatus,
   parseUpdateStatus,
   rgb565,
   tailnetMessage,
-  updateMessage,
   updateStatusMessage,
   wifiMessage,
   wifiRecord,
@@ -299,12 +306,15 @@ export async function charmBots(
 interface CharmLink extends CharmTransport {
   /** Writes one control message and answers the notification with the bytes the charm sent. */
   ask(message: Uint8Array): Promise<DataView>
+  /** Whether the charm refused the last data write for buffer room, once per refusal. */
+  refused(): boolean
   close(): Promise<void>
 }
 
 async function openTransport(deviceId: string): Promise<CharmLink> {
   let pending: { resolve: (answer: DataView) => void; reject: (e: Error) => void } | null = null
   let dropped = false
+  let refused = false
   await BleClient.connect(deviceId, () => {
     dropped = true
     pending?.reject(new Error("The charm went out of reach"))
@@ -315,6 +325,10 @@ async function openTransport(deviceId: string): Promise<CharmLink> {
     // Already bonded resolves at once; a charm that lost its bond asks for the passkey again.
     await BleClient.createBond(deviceId, { timeout: 60_000 })
     await BleClient.startNotifications(deviceId, CHARM_SERVICE, CHARM_STATUS, (answer) => {
+      // A `Busy` for op 0 is the charm refusing the data write just made, whether or not an ask is
+      // waiting: the upload resends that chunk rather than moving to an offset it would refuse.
+      if (answer.byteLength >= 3 && answer.getUint8(1) === CharmCode.Busy && answer.getUint8(2) === 0)
+        refused = true
       const waiting = pending
       pending = null
       waiting?.resolve(answer)
@@ -347,6 +361,11 @@ async function openTransport(deviceId: string): Promise<CharmLink> {
     // A sync's answers are a status and nothing more; a network ask's answer carries its own extra.
     control: async (message) => parseStatus(await ask(message)),
     ask,
+    refused() {
+      const was = refused
+      refused = false
+      return was
+    },
     data(chunk) {
       return BleClient.writeWithoutResponse(deviceId, CHARM_SERVICE, CHARM_DATA, view(chunk))
     },
@@ -424,15 +443,6 @@ export async function setCharmTailnetKey(key: string): Promise<number> {
   return status.code
 }
 
-/**
- * Asks the charm to fetch a firmware image from an https address and check it against the SHA-256
- * pasted here. The charm downloads it itself; this phone only says what to fetch.
- */
-export async function updateCharm(url: string, sha256Hex: string): Promise<number> {
-  const { status } = await askCharm(updateMessage(url, hexBytes(sha256Hex)))
-  return status.code
-}
-
 /** Where the charm's firmware download has got to. */
 export async function charmUpdateStatus(): Promise<CharmUpdateStatus> {
   const { status, bytes } = await askCharm(updateStatusMessage())
@@ -440,6 +450,74 @@ export async function charmUpdateStatus(): Promise<CharmUpdateStatus> {
   const update = parseUpdateStatus(bytes)
   if (!update) throw new Error("The charm's update answer was too short")
   return update
+}
+
+/**
+ * Which firmware the charm runs, like `0.1.0`, or null for a charm whose own firmware predates the
+ * ask. Null is a charm to offer its first update by cable, not a failure to draw.
+ */
+export async function charmFirmwareVersion(): Promise<string | null> {
+  const { bytes } = await askCharm(firmwareMessage())
+  return parseFirmware(bytes)
+}
+
+/**
+ * Sends the charm a whole firmware image over one link — the begin, every byte, the end — and
+ * answers where it got to. One link for the lot, as a sync holds one for its duration: a megabyte
+ * is minutes, and every answer rides on the same notification queue.
+ */
+export async function uploadCharmFirmware(
+  image: Uint8Array,
+  sha256Hex: string,
+  onProgress?: (progress: FirmwareProgress) => void,
+): Promise<FirmwareProgress> {
+  // Read here, so a hash that is not one is refused before a connection is opened.
+  const sha256 = hexBytes(sha256Hex)
+  return withCharm((link) => uploadFirmware(link, image, sha256, onProgress))
+}
+
+/**
+ * What the host says about the firmware GitHub Packages publishes as `latest`: the package's own
+ * answer, or the sentence it refused with. The charm cannot reach a registry that asks for a token,
+ * so which image exists is a thing the phone asks the server it already talks to; a refusal — no
+ * package yet, a token without `read:packages` — is that host's answer too, in its own words.
+ */
+export type PublishedFirmware =
+  | { state: "published"; firmware: CharmFirmware }
+  | { state: "refused"; said: string }
+
+/**
+ * The published firmware as one of the host's own records: read when the row opens, kept for its
+ * next open, and read again when a merge may have moved the tag. The plugin advertises the route as
+ * `charm_firmware`, so a host older than it offers no published version at all.
+ */
+export const PUBLISHED_FIRMWARE: HostRoute<PublishedFirmware | undefined> = {
+  feature: "charm_firmware",
+  label: "the published charm firmware",
+  read: async (server, signal) => {
+    try {
+      return { state: "published", firmware: await getCharmFirmware(server, signal) }
+    } catch (error) {
+      // A read that ran out of time never reached an answer: the record's own failed state says
+      // that, rather than the row drawing a timeout as the host's refusal.
+      if (error instanceof DOMException) throw error
+      return { state: "refused", said: said(error) }
+    }
+  },
+}
+
+/** A host's sentence about a read it refused, or the one line that stands in for a bare throw. */
+const said = (error: unknown) =>
+  error instanceof Error && error.message ? error.message : "The host couldn't be read."
+
+/**
+ * The host a charm's firmware is read from: the row's own bot, since a charm's firmware is one
+ * host's answer — the one that holds the registry token.
+ */
+export function hostForActiveBot(profile: PluginServer): HermesConfig {
+  if (!hasServer(profile))
+    throw new Error("Add a bot first: the charm's firmware is published on its host.")
+  return serverConfig(profile)
 }
 
 /** What a test alert is keyed by: no session's, so it clears only when the reader dismisses it. */
@@ -502,15 +580,19 @@ function rethrowOlderFirmware(error: unknown): never {
   throw error
 }
 
-/** One short connection: connect, one op, one answer, disconnect. */
+/** One short connection: connect, one op, one answer, disconnect — one caller at a time. */
 async function withCharm<T>(run: (link: CharmLink) => Promise<T>): Promise<T> {
   const charm = paired
   if (!charm) throw new Error("No charm paired")
-  await ready()
-  const link = await openTransport(charm.deviceId)
-  try {
-    return await run(link)
-  } finally {
-    await link.close()
-  }
+  // A second caller waits for this link to close rather than connecting over it: the charm holds
+  // one, and its `close()` disconnects the device whoever opened it.
+  return oneAtATime(async () => {
+    await ready()
+    const link = await openTransport(charm.deviceId)
+    try {
+      return await run(link)
+    } finally {
+      await link.close()
+    }
+  })
 }

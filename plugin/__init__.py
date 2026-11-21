@@ -51,6 +51,7 @@ from . import (
     meetings,
     events,
     failures,
+    firmware,
     general,
     github,
     host_model,
@@ -661,6 +662,11 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # How often a bot is asked to say what it is doing: a row on its General page
                     # (progress.py). An app that predates the row draws nothing for it.
                     "progress_reminders",
+                    # The firmware GitHub Packages publishes for a Gots Charm, read from the host
+                    # that holds the registry token (`charm/firmware`, firmware.py). Advertised so
+                    # the phone's Firmware row can take its answer as the host's own record: an
+                    # older plugin has no route, and the row draws no published version at all.
+                    "charm_firmware",
                     # How long a Research or Meetings model call may take, per bot (model_timeout.py).
                     "model_timeout",
                     # A project's ready tasks, read from its repositories' GitHub issues; see tasks.py.
@@ -1955,6 +1961,34 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), error.status)
         return web.json_response({"object": "gots.github.repos", "repos": rows})
 
+    async def charm_firmware(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        # The home is read on the loop thread, where the request's profile scope is visible.
+        home = hermes_home()
+        try:
+            answer = await asyncio.to_thread(firmware.latest, home)
+        except firmware.FirmwareError as error:
+            return _error(web, str(error), error.status)
+        return web.json_response({"object": "gots.charm_firmware", **answer})
+
+    async def charm_firmware_image(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        home = hermes_home()
+        try:
+            found = await asyncio.to_thread(firmware.image, home)
+        except firmware.FirmwareError as error:
+            return _error(web, str(error), error.status)
+        # The length is stated rather than left to the body, since what the app hands the charm is
+        # measured against the size it read; the type is the layer's own, whole and unread.
+        return web.Response(
+            body=found["data"],
+            headers={"Content-Type": found["type"], "Content-Length": str(len(found["data"]))},
+        )
+
     async def create_project(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -2949,6 +2983,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_post(f"{PREFIX}/model-timeout", set_model_timeout)
     app.router.add_get(f"{PREFIX}/github", github_status)
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)
+    app.router.add_get(f"{PREFIX}/charm/firmware", charm_firmware)
+    app.router.add_get(f"{PREFIX}/charm/firmware/image", charm_firmware_image)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/context", session_context)
     app.router.add_get(f"{PREFIX}/usage", account_usage)

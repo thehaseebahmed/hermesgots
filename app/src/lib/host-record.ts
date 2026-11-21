@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 
 import { connectionKey } from "@/lib/connection"
 import type { Profile } from "@/lib/db"
@@ -14,7 +14,8 @@ export interface HostRoute<T> {
   feature: string
   label: string
   read: (server: Server, signal: AbortSignal) => Promise<T>
-  write: (server: Server, value: T, signal: AbortSignal) => Promise<T>
+  /** The route's write, where it has one: a route the host only reads has none. */
+  write?: (server: Server, value: T, signal: AbortSignal) => Promise<T>
 }
 
 type Held<T> = { supported: true; held: T } | { supported: false }
@@ -48,32 +49,47 @@ export function useHostRecord<T>(
   const [state, setState] = useState<{ key: string; held: Held<T> }>()
   const [pending, setPending] = useState<{ key: string; value: T }>()
   const [copy, setCopy] = useState<{ key: string; value: T }>()
+  /** Whether the page still holds this record: a read that lands after it has gone writes nothing. */
+  const live = useRef(false)
+
+  /**
+   * Reads the route and keeps the answer: what the field draws once it lands, and the copy this
+   * device keeps for its next open. A read the host refused leaves the record off rather than
+   * holding a value nobody answered with, and the answer is handed back for a caller that asked
+   * for it — a tag read again before it is sent, say.
+   */
+  const reload = useCallback(async (): Promise<T | undefined> => {
+    if (!baseUrl) return undefined
+    const held = await readHost({ baseUrl, apiKey }, route).catch((error: unknown) => {
+      // A read that fails leaves the field off; the rest of the bot's settings still work.
+      noteFailure(`Reading ${route.label}`, error)
+      return { supported: false } as const
+    })
+    if (live.current) {
+      // A read for a connection the page has since left must not put its answer over the newer one.
+      setState((now) => (now && now.key !== key ? now : { key, held }))
+      if (held.supported) void keepHost({ baseUrl, apiKey }, route.feature, { value: held.held })
+    }
+    return held.supported ? held.held : undefined
+  }, [key, baseUrl, apiKey, route])
 
   useEffect(() => {
     if (!baseUrl) return
-    let cancelled = false
+    live.current = true
     let landed = false
     // The field opens on the last answer this host gave this device (ADR 0132), shut until the
     // host's own answer lands.
     void cachedHost<{ value: T }>({ baseUrl, apiKey }, route.feature).then((held) => {
-      if (!cancelled && !landed && held) setCopy({ key, value: held.value })
+      if (!live.current || landed || !held) return
+      setCopy((now) => (now && now.key !== key ? now : { key, value: held.value }))
     })
-    void readHost({ baseUrl, apiKey }, route)
-      .then((held) => {
-        landed = true
-        if (cancelled) return
-        setState({ key, held })
-        if (held.supported) void keepHost({ baseUrl, apiKey }, route.feature, { value: held.held })
-      })
-      .catch((error: unknown) => {
-        // A read that fails leaves the field off; the rest of the bot's settings still work.
-        noteFailure(`Reading ${route.label}`, error)
-        if (!cancelled) setState({ key, held: { supported: false } })
-      })
+    void reload().finally(() => {
+      landed = true
+    })
     return () => {
-      cancelled = true
+      live.current = false
     }
-  }, [key, baseUrl, apiKey, route])
+  }, [reload, key, baseUrl, apiKey, route])
 
   const held = state?.key === key ? state.held : undefined
   const copyHere = !held && copy?.key === key ? copy : undefined
@@ -81,6 +97,7 @@ export function useHostRecord<T>(
 
   const save = useCallback(
     async (value: T) => {
+      if (!route.write) throw new Error(`${route.label} is read only.`)
       setPending({ key, value })
       try {
         const stored = await route.write(
@@ -93,18 +110,13 @@ export function useHostRecord<T>(
       } catch (error) {
         // A write that ran out of time may still have landed, so read what the host holds now: the
         // field must not sit on a value it may not have, and the control comes back either way.
-        if (timedOut(error))
-          await readHost({ baseUrl, apiKey }, route)
-            .then((now) => setState({ key, held: now }))
-            .catch((failed: unknown) => {
-              noteFailure(`Reading ${route.label} after a write`, failed)
-            })
+        if (timedOut(error)) await reload()
         throw error
       } finally {
         setPending((now) => (now?.key === key ? undefined : now))
       }
     },
-    [key, baseUrl, apiKey, route],
+    [key, baseUrl, apiKey, route, reload],
   )
 
   return {
@@ -125,5 +137,7 @@ export function useHostRecord<T>(
     /** A write is on its way, or only the device's copy is drawn: the field greys out until the host's answer lands. */
     saving: pendingHere !== undefined || copyHere !== undefined,
     save,
+    /** The route read again, for a page whose answer a write elsewhere may have moved. */
+    reload,
   }
 }

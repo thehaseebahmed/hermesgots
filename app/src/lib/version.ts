@@ -1,3 +1,5 @@
+import { versionParts } from "./version-compare.ts"
+
 /** This build: `<package version> · <short commit>`. */
 export const APP_VERSION = __APP_VERSION__
 
@@ -14,15 +16,10 @@ export const APP_VERSION = __APP_VERSION__
  * the app names, with the files it saved for it (ADR 0131). */
 export const MIN_PLUGIN_VERSION = "0.116.0"
 
-function parts(version: string) {
-  const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(version.trim())
-  return match ? match.slice(1).map(Number) : null
-}
-
 /** Whether a plugin version is older than the app needs; an unknown or unreadable one isn't. */
 export function pluginOutdated(version: string | undefined) {
-  const have = version ? parts(version) : null
-  const need = parts(MIN_PLUGIN_VERSION)
+  const have = version ? versionParts(version) : null
+  const need = versionParts(MIN_PLUGIN_VERSION)
   if (!have || !need) return false
   for (let i = 0; i < 3; i++) {
     if (have[i] !== need[i]) return have[i] < need[i]

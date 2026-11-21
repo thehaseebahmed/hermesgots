@@ -9,6 +9,7 @@ import {
   type CharmWifiRecord,
 } from "./charm-protocol.ts"
 import { CharmCode, codeWords, type CharmBatterySeen } from "./charm-protocol.ts"
+import { compareVersions } from "./version-compare.ts"
 export interface CharmSeen {
   name: string
   syncedAt?: number
@@ -112,6 +113,86 @@ export function updateWords(update: CharmUpdateStatus | null | undefined): strin
   if (update.state === CharmUpdateState.Ready) return "Ready: the charm is restarting"
   return `Update failed: ${updateReasonWords(update.reason)}`
 }
+
+/**
+ * What the charm's own version read has said. Its firmware may predate the ask — a board to flash by
+ * cable once, never a failure — and a link that never opened is another fact again.
+ */
+export type CharmRunning =
+  /** The ask is out; nothing has answered it yet. */
+  | { state: "reading" }
+  /** The link did not open: not the charm having nothing to say. */
+  | { state: "unreachable" }
+  /** Its firmware predates the version ask: the first update is by cable. */
+  | { state: "too-old" }
+  | { state: "says"; version: string }
+
+/**
+ * What the Firmware row has read: the build the charm runs and the one the package publishes.
+ * `answered` says whether the host's read is over, so nothing published is a refusal to say rather
+ * than a wait.
+ */
+export interface CharmFirmwareSeen {
+  running: CharmRunning
+  published?: string
+  answered: boolean
+}
+
+/**
+ * The row's line: both versions when they can be compared, otherwise the one fact worth saying.
+ */
+export function firmwareWords({ running, published, answered }: CharmFirmwareSeen): string {
+  if (running.state === "unreachable")
+    return published ? `${published} published · couldn't reach the charm` : "Couldn't reach the charm"
+  if (running.state === "too-old")
+    return "This charm can't say which version it runs — the first update is by cable"
+  if (!answered)
+    return running.state === "says" ? `Charm ${running.version}` : "Reading the versions…"
+  if (!published)
+    return running.state === "says"
+      ? `Charm ${running.version} · couldn't check for a newer one`
+      : "Couldn't check for a newer one"
+  if (running.state === "reading") return `${published} published · the charm didn't say`
+  const order = compareVersions(running.version, published)
+  if (order === null) return `Charm ${running.version} · can't tell if ${published} is newer`
+  if (order === 0) return `Charm ${running.version} · up to date`
+  return order < 0
+    ? `Charm ${running.version} · ${published} available`
+    : `Charm ${running.version} · newer than ${published}`
+}
+
+/** Whether the row offers the published image: only ever a version ahead of the charm's own. */
+export function firmwareOffers({ running, published, answered }: CharmFirmwareSeen): boolean {
+  if (!answered || !published || running.state !== "says") return false
+  return compareVersions(running.version, published) === -1
+}
+
+/** The update as it runs, from the phone's own count of the bytes it has written. */
+export function updateProgressWords(progress: { sent: number; total: number }): string {
+  const percent = progress.total > 0 ? Math.round((progress.sent / progress.total) * 100) : 0
+  return `Updating… ${percent}%`
+}
+
+/** A file a reader picked that cannot fit a slot, refused here rather than a minute into a stream. */
+export const FILE_TOO_BIG = "That file is larger than a slot, so the charm could not hold it."
+
+/** The bytes the host served are not the ones the version it named describes. */
+export const PUBLISHED_CHANGED =
+  "The published image isn't the one the version names — it may have been replaced. Try again."
+
+/**
+ * Under the Firmware row, once: the image published there is the ordinary, unsealed build, so it is
+ * safe over the air; a sealed charm is the one that refuses it, and the charm's own reason is what
+ * the row draws when it does.
+ */
+export const FIRMWARE_CAPTION =
+  "The published image is the everyday build, not a sealed one: it installs over the air on any charm whose flash isn't sealed. A sealed charm refuses it, and says so in its own words."
+
+/** The row's word that an image went, while the charm is still coming back. */
+export const FIRMWARE_SENT = "Sent. The charm is restarting on it."
+
+/** The row's word when the charm never answered on the build it was sent. */
+export const FIRMWARE_NOT_BACK = "The charm didn't come back on the new build."
 
 /** Why a download failed, as the charm's code means it. */
 export function updateReasonWords(reason: number): string {

@@ -44,6 +44,10 @@ export const CharmOp = {
   Tailnet: 0x33,
   Update: 0x34,
   UpdateStatus: 0x35,
+  // The build the charm runs, and an image the phone sends itself rather than one it fetches.
+  Firmware: 0x36,
+  UpdateBegin: 0x37,
+  UpdateEnd: 0x38,
 } as const
 
 type CharmOp = (typeof CharmOp)[keyof typeof CharmOp]
@@ -112,6 +116,13 @@ export const CHARM_MAX_PASS_BYTES = 63
 export const CHARM_MAX_URL_BYTES = 180
 export const CHARM_MAX_KEY_BYTES = 96
 export const CHARM_SHA256_BYTES = 32
+
+/**
+ * One firmware slot, as the partition table sizes it: an image larger than this cannot be received
+ * at all, so the phone refuses it rather than spending minutes streaming bytes to a `TooBig`.
+ */
+export const CHARM_SLOT_BYTES = 0x640000
+
 /** The quiet windows the charm runs, in seconds. It refuses anything else, so the app offers these. */
 export const CHARM_QUIET_PRESETS = [15, 30, 60] as const
 export type CharmQuiet = (typeof CHARM_QUIET_PRESETS)[number]
@@ -531,22 +542,26 @@ export function botMessage(index: number, bot: CharmBot): Uint8Array {
 }
 
 /** A picture as `data` writes: `[offset u32][bytes]`, each at most `size` bytes long. */
-export function imageChunks(image: Uint8Array, size: number): Uint8Array[] {
+export function* imageChunks(image: Uint8Array, size: number): Generator<Uint8Array> {
   const room = size - 4
   if (room < 1) throw new Error("Chunks too small")
-  const out: Uint8Array[] = []
+  // One chunk at a time: a firmware image is over a megabyte, and a second copy of it held in
+  // chunks is what a phone with the image already in memory cannot afford.
   for (let at = 0; at < image.length; at += room) {
     const part = image.subarray(at, Math.min(image.length, at + room))
     const chunk = new Uint8Array(4 + part.length)
     new DataView(chunk.buffer).setUint32(0, at, true)
     chunk.set(part, 4)
-    out.push(chunk)
+    yield chunk
   }
-  return out
 }
 
-/** The largest `data` write a link carries: the MTU less ATT's 3 bytes, capped at 512. */
-export const chunkSize = (mtu: number) => Math.max(23, Math.min(512, mtu - 3))
+/**
+ * The largest `data` write a link carries: the MTU less ATT's 3 bytes, capped at 512. The floor is
+ * the smallest payload an ATT link can carry (MTU 23), so a chunk never outgrows the link and the
+ * four-byte offset always leaves a byte of image behind it.
+ */
+export const chunkSize = (mtu: number) => Math.max(20, Math.min(512, mtu - 3))
 
 export function parseStatus(view: DataView): CharmStatus {
   if (view.byteLength < 4) throw new Error("The charm sent a short answer")
@@ -583,6 +598,22 @@ const decoder = new TextDecoder()
 export const forgetMessage = () => control(CharmOp.Forget).done()
 export const networkMessage = () => control(CharmOp.Network).done()
 export const updateStatusMessage = () => control(CharmOp.UpdateStatus).done()
+
+/** Which build the charm runs: the ask is the message, as the battery's and the handoff's are. */
+export const firmwareMessage = () => control(CharmOp.Firmware).done()
+
+/**
+ * An image the phone sends itself: its length and the SHA-256 it must hash to. The writes that
+ * follow are the image's, `[offset u32][bytes]` in order from the first, as a picture's are.
+ */
+export function updateBeginMessage(size: number, sha256: Uint8Array): Uint8Array {
+  if (sha256.length !== CHARM_SHA256_BYTES)
+    throw new Error("An upload carries the image's 32-byte SHA-256")
+  return control(CharmOp.UpdateBegin).u32(size).raw(sha256).done()
+}
+
+/** The image is whole: the charm checks the length and the hash, then makes the slot bootable. */
+export const updateEndMessage = () => control(CharmOp.UpdateEnd).done()
 
 /**
  * The network to join. A passphrase of none is an open network, which the charm reads as such rather
@@ -716,11 +747,29 @@ export function parseUpdateStatus(view: DataView): CharmUpdateStatus | null {
   if (extra < 3 || view.byteLength < 5 + extra) return null
   return { state: view.getUint8(5), percent: view.getUint8(6), reason: view.getUint8(7) }
 }
+
+/**
+ * The `Firmware` answer: `[extraLen][version]`, text like `0.1.0`. Null for anything else — a charm
+ * whose firmware predates the op answers `BadMessage` with no extra at all, and that is a charm to
+ * offer an update to rather than a failure to draw.
+ */
+export function parseFirmware(view: DataView): string | null {
+  if (view.byteLength < 5) return null
+  if (view.getUint8(1) !== CharmCode.Ok) return null
+  if (view.getUint8(2) !== CharmOp.Firmware) return null
+  const length = view.getUint8(4)
+  if (length === 0 || view.byteLength < 5 + length) return null
+  return decoder.decode(new Uint8Array(view.buffer, view.byteOffset + 5, length))
+}
+
 /** The glass's settings: [doubleTap u8][quietSeconds u8], one of the three windows or nothing. */
 export function wakeMessage(wake: CharmWake): Uint8Array {
   if (!CHARM_QUIET_PRESETS.includes(wake.quietSeconds))
     throw new Error("The charm runs 15, 30 or 60 seconds")
-  return control(CharmOp.SleepSettings).u8(wake.doubleTap ? 1 : 0).u8(wake.quietSeconds).done()
+  return control(CharmOp.SleepSettings)
+    .u8(wake.doubleTap ? 1 : 0)
+    .u8(wake.quietSeconds)
+    .done()
 }
 
 /** The battery ask: no payload, because the ask is the message, as the handoff's is. */
