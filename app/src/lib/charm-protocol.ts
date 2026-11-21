@@ -116,8 +116,12 @@ export const CharmCode = {
   MissingImage: 8,
   StorageFailed: 9,
   BadMood: 10,
-  /** The charm joined a network but keeps it in RAM: its flash is not encrypted. */
-  SavedToRam: 11,
+  /**
+   * The charm kept it, but anyone holding the charm can read it off the chip: its flash is not
+   * sealed. A success with a warning rather than a refusal — the secret survives a reboot either
+   * way, and only a sealed charm keeps it to itself.
+   */
+  KeptReadable: 11,
   /** The charm is not on Wi-Fi, which a firmware download needs. */
   Offline: 12,
   /** The charm is already updating, or a bot sync is in flight. */
@@ -135,8 +139,8 @@ const CODE_WORDS: Record<number, string> = {
   [CharmCode.MissingImage]: "A picture never arrived",
   [CharmCode.StorageFailed]: "The charm's storage is full or failing",
   [CharmCode.BadMood]: "The charm runs older firmware, which has no pet mode",
-  [CharmCode.SavedToRam]:
-    "This charm's flash isn't encrypted, so it will forget this at the next boot",
+  [CharmCode.KeptReadable]:
+    "The charm kept it, but anyone holding the charm can read it off the chip",
   [CharmCode.Offline]: "The charm isn't on Wi-Fi",
   [CharmCode.Busy]: "The charm is busy; try again when it's done",
 }
@@ -574,10 +578,21 @@ export function hexBytes(hex: string): Uint8Array {
 export const hexOf = (bytes: Uint8Array) =>
   [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("")
 
+/**
+ * The codes a network write takes as a yes: a sealed charm's `Ok`, and `KeptReadable` — a plaintext
+ * charm keeps the secret too, and says in words that anyone holding it can read the secret off the
+ * chip. One rule, so the record, the store's write and the settings write cannot disagree about
+ * whether the charm kept it.
+ */
+export const charmKept = (code: number) => code === CharmCode.Ok || code === CharmCode.KeptReadable
+
 /** What this phone keeps about the charm's Wi-Fi: the network, and whether the charm keeps it. */
 export interface CharmWifiRecord {
   ssid: string
-  /** The charm wrote it to encrypted flash, so it survives a reboot. False when it kept it in RAM. */
+  /**
+   * The charm kept it, so it outlives a reboot. Only a yes writes a record, and 11 is one of them:
+   * a secret kept readable is still kept, and its warning is the code's words rather than this row's.
+   */
   saved: boolean
 }
 
@@ -587,7 +602,7 @@ export interface CharmWifiRecord {
  */
 export const wifiRecord = (ssid: string, code: number): CharmWifiRecord => ({
   ssid,
-  saved: code === CharmCode.Ok,
+  saved: charmKept(code),
 })
 
 /** The charm's link, as it answers the `Network` ask. */

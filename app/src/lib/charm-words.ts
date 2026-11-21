@@ -83,10 +83,14 @@ export function wifiReasonWords(reason: number): string {
   }
 }
 
-/** What the phone remembers of a network the charm took, when the charm itself has not answered. */
+/**
+ * What the phone remembers of a network the charm took, when the charm itself has not answered. A
+ * record is written only for a yes, so `saved` means kept; whether the secret can be read off the
+ * chip is the code's business, and its words are the warning, not this line.
+ */
 function recordWords(record?: CharmWifiRecord) {
   if (!record) return "Not set"
-  return record.saved ? `Saved ${record.ssid}` : `${record.ssid}, kept for this boot only`
+  return record.saved ? `Saved ${record.ssid}` : `${record.ssid}, not saved`
 }
 
 /** The tailnet line: whether the charm is on it, and its own name for it. */

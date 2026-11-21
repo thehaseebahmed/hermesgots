@@ -722,10 +722,8 @@ test("the network lines are the charm's own state in words", async () => {
   assert.equal(wifiReasonWords(5), "Dropped off the network")
   // Before the charm answers, the line is what this phone last told it.
   assert.equal(wifiWords(undefined, { ssid: "Home", saved: true }), "Saved Home")
-  assert.equal(
-    wifiWords(undefined, { ssid: "Home", saved: false }),
-    "Home, kept for this boot only",
-  )
+  // A record is written only for a yes, so the warning about a readable secret is the code's words.
+  assert.equal(wifiWords(undefined, { ssid: "Home", saved: false }), "Home, not saved")
 
   assert.equal(tailnetWords(undefined), "Not set")
   assert.equal(tailnetWords({ state: 2, ip: "" }), "On your tailnet")
@@ -746,17 +744,23 @@ test("the network lines are the charm's own state in words", async () => {
 })
 
 test("the new codes say what they mean", () => {
+  // The number is the wire's: an app in the field already reads 11 as a yes with a warning.
+  assert.equal(CharmCode.KeptReadable, 11)
   assert.equal(
-    codeWords(CharmCode.SavedToRam),
-    "This charm's flash isn't encrypted, so it will forget this at the next boot",
+    codeWords(CharmCode.KeptReadable),
+    "The charm kept it, but anyone holding the charm can read it off the chip",
   )
+
   assert.match(codeWords(CharmCode.Offline), /isn't on Wi-Fi/)
   assert.match(codeWords(CharmCode.Busy), /busy/)
 })
 
 test("the record a Wi-Fi write leaves is the name and whether the charm keeps it", () => {
   assert.deepEqual(wifiRecord("Home", CharmCode.Ok), { ssid: "Home", saved: true })
-  // Kept in RAM is a yes the charm forgets, so the record says it is not saved.
-  assert.deepEqual(wifiRecord("Home", CharmCode.SavedToRam), { ssid: "Home", saved: false })
+  // 11 is a yes as well: the charm kept it, and only the warning about reading it differs.
+  assert.deepEqual(wifiRecord("Home", CharmCode.KeptReadable), { ssid: "Home", saved: true })
+  assert.deepEqual(wifiRecord("Home", 11), { ssid: "Home", saved: true })
+  // A refusal is not kept, and the record never says it was.
+  assert.deepEqual(wifiRecord("Home", CharmCode.StorageFailed), { ssid: "Home", saved: false })
   assert.deepEqual(Object.keys(wifiRecord("Home", CharmCode.Ok)).sort(), ["saved", "ssid"])
 })
