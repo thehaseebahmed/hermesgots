@@ -113,6 +113,13 @@ export const CHARM_MAX_PASS_BYTES = 63
 export const CHARM_MAX_URL_BYTES = 180
 export const CHARM_MAX_KEY_BYTES = 96
 export const CHARM_SHA256_BYTES = 32
+
+/**
+ * One firmware slot, as the partition table sizes it: an image larger than this cannot be received
+ * at all, so the phone refuses it rather than spending minutes streaming bytes to a `TooBig`.
+ */
+export const CHARM_SLOT_BYTES = 0x640000
+
 /** The quiet windows the charm runs, in seconds. It refuses anything else, so the app offers these. */
 export const CHARM_QUIET_PRESETS = [15, 30, 60] as const
 export type CharmQuiet = (typeof CHARM_QUIET_PRESETS)[number]

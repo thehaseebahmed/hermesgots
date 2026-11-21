@@ -11,7 +11,14 @@ import { useSyncExternalStore } from "react"
 import { BOT_MOODS, DEFAULT_MOOD, botImage, type BotMood } from "@/components/bots"
 import { findBot } from "@/components/bot"
 import { labelOf } from "@/lib/bot-name"
-import type { Profile } from "@/lib/db"
+import { hasServer, serverConfig } from "@/lib/connection"
+import { getActiveProfile, type Profile } from "@/lib/db"
+import {
+  getCharmFirmware,
+  getCharmFirmwareImage,
+  type CharmFirmware,
+  type HermesConfig,
+} from "@/lib/hermes"
 import { isNative } from "@/lib/platform"
 import { quietly } from "@/lib/report"
 import { registryId } from "@/lib/registry"
@@ -469,6 +476,32 @@ export async function uploadCharmFirmware(
   // Read here, so a hash that is not one is refused before a connection is opened.
   const sha256 = hexBytes(sha256Hex)
   return withCharm((link) => uploadFirmware(link, image, sha256, onProgress))
+}
+
+/**
+ * Which firmware GitHub Packages publishes as `latest`, read from this app's own host: the charm
+ * cannot reach a registry that asks for a token, so which image exists is a thing the phone asks the
+ * server it already talks to. A refusal is that host's sentence, drawn as it is.
+ */
+export async function publishedCharmFirmware(): Promise<CharmFirmware> {
+  return getCharmFirmware(await hostForFirmware())
+}
+
+/** The published image's bytes, read from the same host that names it. */
+export async function charmFirmwareImage(): Promise<Uint8Array> {
+  return getCharmFirmwareImage(await hostForFirmware())
+}
+
+/**
+ * The connection a package is read over: the app's own bot, the one its push and its bubble already
+ * name. The charm is one device, so the firmware it should run is one host's answer rather than
+ * whichever bot happens to be open.
+ */
+async function hostForFirmware(): Promise<HermesConfig> {
+  const bot = await getActiveProfile()
+  if (!bot || !hasServer(bot))
+    throw new Error("Add a bot first: the charm's firmware is published on its host.")
+  return serverConfig(bot)
 }
 
 /** What a test alert is keyed by: no session's, so it clears only when the reader dismisses it. */

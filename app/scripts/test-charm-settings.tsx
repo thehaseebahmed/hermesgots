@@ -10,7 +10,7 @@ import { act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { CharmNetwork, type CharmNetworkApi } from "@/components/settings/charm"
-import { CharmLinkState } from "@/lib/charm-protocol"
+import { CHARM_SLOT_BYTES, CharmLinkState } from "@/lib/charm-protocol"
 import { db } from "@/lib/db"
 import { SettingsPage } from "@/routes/settings"
 import { BatteryRow, WakingGroup } from "@/components/settings/charm"
@@ -93,8 +93,15 @@ function radio(overrides: Partial<CharmNetworkApi> = {}): CharmNetworkApi {
     saveWifi: async () => 0,
     forget: async () => 0,
     saveTailnet: async () => 0,
-    update: async () => 0,
     updateStatus: async () => ({ state: 0, percent: 0, reason: 0 }),
+    version: async () => "0.1.0",
+    published: async () => ({ version: "0.1.0", size: 4, sha256: "ab".repeat(32) }),
+    image: async () => new Uint8Array([1, 2, 3, 4]),
+    upload: async (image, _sha256Hex, onProgress) => {
+      const done = { sent: image.length, total: image.length, percent: 100 }
+      onProgress?.(done)
+      return done
+    },
     ...overrides,
   }
 }
@@ -155,13 +162,167 @@ test("a passphrase is sent once and never drawn as a label", async () => {
   })
 })
 
-test("the update row shows the hash as it will go over the wire", async () => {
+/** The first button on screen with these words: the row's own control. */
+const button = (label: string) => findText("button", label)
+
+/** Hands the row a file the way the WebView hands it one: the input's change, with the file on it. */
+async function pick(name: string, size: number) {
+  const input = find("#charm-update-file") as HTMLInputElement | null
+  assert.ok(input, "the file picker is on screen")
+  const file = new File([new Uint8Array(size)], name, { type: "application/octet-stream" })
+  Object.defineProperty(input, "files", { value: [file], configurable: true })
+  await act(async () => {
+    input.dispatchEvent(new Event("change", { bubbles: true }))
+  })
+  await settle()
+}
+
+const PUBLISHED = { version: "0.2.0", size: 4, sha256: "cd".repeat(32) }
+
+test("the firmware row offers the published one when the charm is older", async () => {
+  await mount(
+    <CharmNetwork api={radio({ published: async () => PUBLISHED })} />,
+    async () => {
+      await settle()
+      assert.ok(text().includes("Charm 0.1.0 · 0.2.0 available"), "both versions on the row")
+      assert.ok(button("Update to 0.2.0"), "the newer one is offered")
+      assert.ok(button("Choose a file…"), "and a file is always taken")
+    },
+  )
+})
+
+test("the firmware row says the charm is up to date when the versions match", async () => {
   await mount(<CharmNetwork api={radio()} />, async () => {
-    await type(find("#charm-update-sha"), "not a hash")
-    assert.ok(text().includes("64 hexadecimal characters"), "a paste that is not a hash says so")
-    await type(find("#charm-update-sha"), "AB".repeat(32))
-    assert.ok(text().includes("32 of 32 bytes"), "a whole hash is measured")
-    assert.ok(text().includes("ab".repeat(32)), "and drawn lowercase, as it is sent")
+    await settle()
+    assert.ok(text().includes("Charm 0.1.0 · up to date"))
+    assert.ok(!button("Update to"), "nothing to offer")
+    assert.ok(button("Choose a file…"), "but a file is still taken")
+  })
+})
+
+test("a charm ahead of the package is said, and never offered a downgrade", async () => {
+  const api = radio({
+    version: async () => "0.3.0",
+    published: async () => ({ version: "0.2.0", size: 4, sha256: "cd".repeat(32) }),
+  })
+  await mount(<CharmNetwork api={api} />, async () => {
+    await settle()
+    assert.ok(text().includes("Charm 0.3.0 · newer than 0.2.0"), "the row says the charm is ahead")
+    assert.ok(!find("#charm-update-start"), "and offers no update")
+  })
+})
+
+test("a charm too old to say its version is not compared with the package", async () => {
+  const api = radio({
+    version: async () => null,
+    published: async () => PUBLISHED,
+  })
+  await mount(<CharmNetwork api={api} />, async () => {
+    await settle()
+    assert.ok(text().includes("can't say which version it runs"), "the row says what it heard")
+    assert.ok(text().includes("cable"), "and how the first one gets there")
+    assert.ok(!find("#charm-update-start"), "nothing is offered over the air")
+    assert.ok(button("Choose a file…"), "the picker still works")
+  })
+})
+
+test("a host that can't answer says it couldn't check, in its own words", async () => {
+  const said = "GitHub refused this server's token for the charm firmware."
+  const api = radio({
+    published: async () => {
+      throw new Error(said)
+    },
+  })
+  await mount(<CharmNetwork api={api} />, async () => {
+    await settle()
+    assert.ok(text().includes("couldn't check for a newer one"), "the row says the check failed")
+    assert.ok(text().includes(said), "with the host's own sentence")
+    assert.ok(button("Choose a file…"), "and the picker is not held hostage to it")
+  })
+})
+
+test("a picked file larger than a slot is refused before anything is written", async () => {
+  const asked: number[] = []
+  const api = radio({
+    upload: async (image) => {
+      asked.push(image.length)
+      return { sent: image.length, total: image.length, percent: 100 }
+    },
+  })
+  await mount(<CharmNetwork api={api} />, async () => {
+    await settle()
+    await pick("too-big.bin", CHARM_SLOT_BYTES + 1)
+    assert.ok(text().includes("larger than a slot"), "the row refuses it in words")
+    assert.deepEqual(asked, [], "and no control write reached the charm")
+  })
+})
+
+test("a picked file is sent with the hash the phone computes over it", async () => {
+  const sent: { bytes: Uint8Array; sha256: string }[] = []
+  const api = radio({
+    upload: async (image, sha256Hex) => {
+      sent.push({ bytes: image, sha256: sha256Hex })
+      return { sent: image.length, total: image.length, percent: 100 }
+    },
+  })
+  await mount(<CharmNetwork api={api} />, async () => {
+    await settle()
+    await pick("charm.bin", 8)
+    assert.equal(sent.length, 1, "one image went")
+    assert.equal(sent[0].bytes.length, 8)
+    // The hash of eight zero bytes, computed here rather than trusted from the picker.
+    assert.equal(
+      sent[0].sha256,
+      "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc",
+      "the SHA-256 of the file itself",
+    )
+  })
+})
+
+test("a failed upload is drawn with the reason the charm gave", async () => {
+  const api = radio({
+    upload: async () => {
+      throw new Error("The update failed: it was cancelled")
+    },
+  })
+  await mount(<CharmNetwork api={api} />, async () => {
+    await settle()
+    await pick("charm.bin", 8)
+    assert.ok(text().includes("The update failed: it was cancelled"))
+  })
+})
+
+test("Update sends the published image and reads the version once the charm is back", async () => {
+  const sent: { bytes: Uint8Array; sha256: string }[] = []
+  let reads = 0
+  const api = radio({
+    published: async () => PUBLISHED,
+    // The charm answers its old version until the upload lands, then the new one.
+    version: async () => (++reads > 1 ? "0.2.0" : "0.1.0"),
+    image: async () => new Uint8Array([9, 9, 9, 9]),
+    upload: async (image, sha256Hex, onProgress) => {
+      sent.push({ bytes: image, sha256: sha256Hex })
+      const done = { sent: image.length, total: image.length, percent: 100 }
+      onProgress?.(done)
+      return done
+    },
+  })
+  await mount(<CharmNetwork api={api} />, async () => {
+    await settle()
+    await click(button("Update to 0.2.0"))
+    await settle()
+    assert.equal(sent.length, 1, "the published image went")
+    assert.deepEqual([...sent[0].bytes], [9, 9, 9, 9], "the bytes the host served")
+    assert.equal(sent[0].sha256, PUBLISHED.sha256, "with the hash the host named for them")
+    assert.ok(text().includes("Charm 0.2.0 · up to date"), "and the charm's new version is read")
+  })
+})
+
+test("the firmware group warns once that the published image is the encrypted build", async () => {
+  await mount(<CharmNetwork api={radio()} />, async () => {
+    await settle()
+    const warnings = (text().match(/flash-encryption key for good/g) ?? []).length
+    assert.equal(warnings, 1, "said once, not beside every control")
   })
 })
 

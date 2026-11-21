@@ -109,6 +109,82 @@ export function updateWords(update: CharmUpdateStatus | null | undefined): strin
   return `Update failed: ${updateReasonWords(update.reason)}`
 }
 
+/**
+ * What the Firmware row has read: the build the charm runs and the one the package publishes.
+ * `running` is null for a charm whose own firmware has no version op — a board to flash by cable
+ * once, never a failure — and undefined while it has not answered. `answered` says whether the
+ * host's read is over, so nothing published is a refusal to say rather than a wait.
+ */
+export interface CharmFirmwareSeen {
+  running?: string | null
+  published?: string
+  answered: boolean
+}
+
+/**
+ * The Firmware row's line: both versions when they can be compared, and otherwise the one fact worth
+ * saying. Three answers are not a comparison — a charm too old to say its version, a charm ahead of
+ * the package (a build the reader flashed themself, which is not an update waiting to happen), and a
+ * host that could not say what it publishes.
+ */
+export function firmwareWords({ running, published, answered }: CharmFirmwareSeen): string {
+  if (running === null)
+    return "This charm can't say which version it runs — the first update is by cable"
+  if (!answered) return running ? `Charm ${running}` : "Reading the versions…"
+  if (!published)
+    return running
+      ? `Charm ${running} · couldn't check for a newer one`
+      : "Couldn't check for a newer one"
+  if (running === undefined) return `${published} published · the charm didn't say`
+  const order = versionOrder(running, published)
+  if (order === null) return `Charm ${running} · can't tell if ${published} is newer`
+  if (order === 0) return `Charm ${running} · up to date`
+  return order < 0
+    ? `Charm ${running} · ${published} available`
+    : `Charm ${running} · newer than ${published}`
+}
+
+/** Whether the row offers the published image: only ever a version ahead of the charm's own. */
+export function firmwareOffers({ running, published, answered }: CharmFirmwareSeen): boolean {
+  if (!answered || !published || typeof running !== "string") return false
+  return versionOrder(running, published) === -1
+}
+
+/**
+ * Two versions as they are ordered, or null for words that aren't three numbers: a build the reader
+ * hand-flashed is nobody's promise, so nothing is offered on a comparison that can't be made.
+ */
+function versionOrder(one: string, other: string): number | null {
+  const parts = (version: string) => {
+    const match = /^(\d+)\.(\d+)\.(\d+)/.exec(version.trim())
+    return match ? match.slice(1).map(Number) : null
+  }
+  const mine = parts(one)
+  const theirs = parts(other)
+  if (!mine || !theirs) return null
+  for (let i = 0; i < 3; i += 1) if (mine[i] !== theirs[i]) return mine[i] < theirs[i] ? -1 : 1
+  return 0
+}
+
+/** The update as it runs, from the phone's own count of the bytes it has written. */
+export function updateProgressWords(progress: { sent: number; total: number }): string {
+  const percent = progress.total > 0 ? Math.round((progress.sent / progress.total) * 100) : 0
+  return `Updating… ${percent}%`
+}
+
+/** A file a reader picked that cannot fit a slot, refused here rather than a minute into a stream. */
+export const FILE_TOO_BIG = "That file is larger than a slot, so the charm could not hold it."
+
+/**
+ * Under the Firmware row, once: the image the package publishes is the encrypted build, and a board's
+ * first boot of one spends an eFuse on a key nobody can read back.
+ */
+export const FIRMWARE_CAPTION =
+  "The published image is the encrypted build. The first one a board boots burns its flash-encryption key for good: that board runs an encrypted image from then on."
+
+/** The row's word that an image went, while the charm is still coming back. */
+export const FIRMWARE_SENT = "Sent. The charm is restarting on it."
+
 /** Why a download failed, as the charm's code means it. */
 export function updateReasonWords(reason: number): string {
   switch (reason) {

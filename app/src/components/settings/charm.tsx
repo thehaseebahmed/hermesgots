@@ -19,6 +19,7 @@ import {
   CloudDownloadIcon,
   EyeIcon,
   EyeOffIcon,
+  FileUpIcon,
   NetworkIcon,
   HandIcon,
   PawPrintIcon,
@@ -57,12 +58,15 @@ import { botsByLabel, labelOf } from "@/lib/bot-name"
 import {
   charmAvailable,
   charmBots,
+  charmFirmwareImage,
+  charmFirmwareVersion,
   charmNetwork,
   charmPoses,
   charmUpdateStatus,
   forgetCharm,
   forgetCharmWifi,
   pairCharm,
+  publishedCharmFirmware,
   readCharmBattery,
   sendTestAlert,
   setCharmPet,
@@ -70,16 +74,16 @@ import {
   setCharmWifi,
   setCharmWake,
   syncToCharm,
-  updateCharm,
+  uploadCharmFirmware,
   usePairedCharm,
 } from "@/lib/charm"
 import {
   CHARM_QUIET_PRESETS,
+  CHARM_SLOT_BYTES,
   CharmCode,
   CharmUpdateState,
   charmWakeOf,
   codeWords,
-  hexBytes,
   hexOf,
   petSettingsFrom,
   type CharmBatterySeen,
@@ -89,17 +93,25 @@ import {
   type CharmWake,
   type CharmWifiRecord,
 } from "@/lib/charm-protocol"
+import type { FirmwareProgress } from "@/lib/charm-firmware"
 import type { SyncProgress } from "@/lib/charm-sync"
 import { listProfiles } from "@/lib/db"
+import type { CharmFirmware } from "@/lib/hermes"
 import {
   batteryWords,
   charmSynced,
   doubleTapSubtitle,
+  FILE_TOO_BIG,
+  FIRMWARE_CAPTION,
+  FIRMWARE_SENT,
+  firmwareOffers,
+  firmwareWords,
   petSubtitle,
   QUIET_TITLE,
   quietWords,
   tailnetWords,
   updateWords,
+  updateProgressWords,
   wifiWords,
 } from "@/lib/charm-words"
 import { quietly } from "@/lib/report"
@@ -113,16 +125,35 @@ const message = (error: unknown) =>
 const UPDATE_POLL_MS = 2_000
 
 /**
+ * How long a charm takes to come back after an upload, and how many times the row waits that out:
+ * the slot is bootable when the upload ends, and the restart is the moment after it.
+ */
+const REBOOT_MS = 3_000
+const REBOOT_TRIES = 4
+
+/**
  * The Network section's radio, as the page reaches it: every call is one control ask over the
- * charm's own link. It is an interface so a test can draw the section's answers without a radio.
+ * charm's own link, or one read of the host that publishes its firmware. It is an interface so a
+ * test can draw the section's answers without a radio.
  */
 export interface CharmNetworkApi {
   status(): Promise<CharmNetworkReport>
   saveWifi(ssid: string, pass: string): Promise<number>
   forget(): Promise<number>
   saveTailnet(key: string): Promise<number>
-  update(url: string, sha256Hex: string): Promise<number>
   updateStatus(): Promise<CharmUpdateStatus>
+  /** Which build the charm runs; null for a firmware too old to have the ask. */
+  version(): Promise<string | null>
+  /** What the package publishes, as the phone's host reads it for the charm. */
+  published(): Promise<CharmFirmware>
+  /** The published image's bytes. */
+  image(): Promise<Uint8Array>
+  /** One image over the charm's link, drawing where the phone has got to. */
+  upload(
+    image: Uint8Array,
+    sha256Hex: string,
+    onProgress?: (progress: FirmwareProgress) => void,
+  ): Promise<FirmwareProgress>
 }
 
 /** The one implementation: the phone's own functions. */
@@ -131,8 +162,11 @@ const RADIO: CharmNetworkApi = {
   saveWifi: setCharmWifi,
   forget: forgetCharmWifi,
   saveTailnet: setCharmTailnetKey,
-  update: updateCharm,
   updateStatus: charmUpdateStatus,
+  version: charmFirmwareVersion,
+  published: publishedCharmFirmware,
+  image: charmFirmwareImage,
+  upload: uploadCharmFirmware,
 }
 
 /** One form's body in a group: the card's own fill, under the row that heads it. */
@@ -214,10 +248,11 @@ function SecretField({
 }
 
 /**
- * Settings → Charm's network: the Wi-Fi the charm joins, the tailnet key it joins with, and a
- * firmware image it fetches itself. Every row draws the charm's own answer rather than what was
- * sent, and a passphrase or a key clears the moment the write has gone: neither is ever drawn
- * again, and neither is kept on this phone.
+ * Settings → Charm's network: the Wi-Fi the charm joins, the tailnet key it joins with, and the
+ * firmware it runs — the version it says it has beside the one the package publishes, an update when
+ * that one is newer, and a file the reader picks. Every row draws the charm's own answer rather than
+ * what was sent, and a passphrase or a key clears the moment the write has gone: neither is ever
+ * drawn again, and neither is kept on this phone.
  */
 export function CharmNetwork({
   api = RADIO,
@@ -236,11 +271,22 @@ export function CharmNetwork({
   const [ssid, setSsid] = useState("")
   const [pass, setPass] = useState("")
   const [key, setKey] = useState("")
-  const [url, setUrl] = useState("")
-  const [sha, setSha] = useState("")
+  /** Which build the charm runs: null is a firmware too old to say, undefined one not read yet. */
+  const [running, setRunning] = useState<string | null | undefined>(undefined)
+  /** What the host says `latest` holds, or null once its read has been refused. */
+  const [published, setPublished] = useState<CharmFirmware | null>(null)
+  /** Whether the host's read is over: nothing published after it is a refusal, not a wait. */
+  const [checked, setChecked] = useState(false)
+  const [checkSaid, setCheckSaid] = useState<string | null>(null)
+  const [progress, setProgress] = useState<FirmwareProgress | null>(null)
   const [busy, setBusy] = useState<"wifi" | "forget" | "tailnet" | "update" | null>(null)
   const [said, setSaid] = useState<string | null>(null)
   const [watching, setWatching] = useState(false)
+  const file = useRef<HTMLInputElement | null>(null)
+
+  /** The two versions the row compares: the charm's own, and the package's as its host reads it. */
+  const versions = { running, published: published?.version, answered: checked }
+  const offers = firmwareOffers(versions)
 
   /** What the charm says about its links and its firmware, read in one go: both or neither. */
   const snapshot = useCallback(async () => {
@@ -251,11 +297,36 @@ export function CharmNetwork({
     return { report, update }
   }, [api])
 
+  /**
+   * Both versions, read side by side when the row opens: the charm's over its link, and the
+   * package's through the host that holds a registry token. A version the charm can't say stays
+   * unsaid rather than guessed, and the host's refusal is kept in its own words for the row to draw.
+   */
+  useEffect(() => {
+    void Promise.all([
+      api.version().then(setRunning, () => setRunning(undefined)),
+      api.published().then(
+        (found) => {
+          setPublished(found)
+          setCheckSaid(null)
+        },
+        (error) => {
+          setPublished(null)
+          setCheckSaid(message(error))
+        },
+      ),
+    ]).then(() => setChecked(true))
+  }, [api])
+
   // The section's first line is the charm's own: read once on opening, and again after each write.
   useEffect(() => {
     void snapshot().then(({ report, update }) => {
       if (report) setReport(report)
-      if (update) setUpdate(update)
+      if (update) {
+        setUpdate(update)
+        // A download already running when the row opens is followed to its end, as one it started was.
+        if (update.state === CharmUpdateState.Downloading) setWatching(true)
+      }
     })
   }, [snapshot])
 
@@ -320,21 +391,62 @@ export function CharmNetwork({
     if (code !== null) setKey("")
   }
 
-  const startUpdate = async () => {
-    const code = await write("update", () => api.update(url.trim(), sha))
-    if (code !== CharmCode.Ok) return
-    setUpdate({ state: CharmUpdateState.Downloading, percent: 0, reason: 0 })
-    setWatching(true)
+  /**
+   * The version again once the charm is back. It reboots the moment the slot is bootable, so the
+   * answer to the first ask may still be the build it is leaving: the one it started on is kept,
+   * and the ask is repeated over the restart rather than a screen waiting on it.
+   */
+  const readBack = async (was: string | null | undefined) => {
+    for (let attempt = 0; attempt < REBOOT_TRIES; attempt += 1) {
+      try {
+        const now = await api.version()
+        if (now !== was) return setRunning(now)
+      } catch {
+        // The link is going down under it, which is the reboot itself.
+      }
+      await new Promise((done) => setTimeout(done, REBOOT_MS))
+    }
   }
 
-  // The hash as it will go over the wire, so a paste in capitals or with spaces is shown as it reads.
-  const hash = (() => {
+  /**
+   * One image over the link, however the phone came by it, and the versions read again once the
+   * charm is back. `load` is where the bytes and the hash come from: the host's package, or a file
+   * the reader picked.
+   */
+  const send = async (load: () => Promise<{ image: Uint8Array; sha256Hex: string }>) => {
+    setBusy("update")
+    setSaid(null)
+    setProgress(null)
     try {
-      return hexOf(hexBytes(sha))
-    } catch {
-      return ""
+      const { image, sha256Hex } = await load()
+      setProgress({ sent: 0, total: image.length, percent: -1 })
+      await api.upload(image, sha256Hex, setProgress)
+      setSaid(FIRMWARE_SENT)
+      void readBack(running)
+    } catch (error) {
+      setSaid(message(error))
+    } finally {
+      setBusy(null)
+      setProgress(null)
     }
-  })()
+  }
+
+  /**
+   * A file from the phone: its bytes, and the SHA-256 computed here over them — that hash is the
+   * whole trust anchor, so what the charm checks is what this phone read. A file too big for a slot
+   * is refused before a byte goes over the link.
+   */
+  const sendFile = async (picked: File) => {
+    if (picked.size > CHARM_SLOT_BYTES) {
+      setSaid(FILE_TOO_BIG)
+      return
+    }
+    await send(async () => {
+      const image = new Uint8Array(await picked.arrayBuffer())
+      const sha256Hex = hexOf(new Uint8Array(await crypto.subtle.digest("SHA-256", image)))
+      return { image, sha256Hex }
+    })
+  }
 
   return (
     <>
@@ -423,59 +535,54 @@ export function CharmNetwork({
       <Group>
         <div className={headerRowClass}>
           <CloudDownloadIcon className="size-5 shrink-0 text-muted-foreground" />
-          <RowText title="Firmware" subtitle={updateWords(update)} />
+          <RowText title="Firmware" subtitle={firmwareWords(versions)} />
         </div>
-        <form
-          className={formRowClass}
-          onSubmit={(event) => {
-            event.preventDefault()
-            void startUpdate()
-          }}
-        >
-          <Field
-            id="charm-update-url"
-            label="Image address"
-            type="url"
-            inputMode="url"
-            placeholder="https://…"
-            autoCapitalize="none"
-            autoCorrect="off"
-            value={url}
-            disabled={busy !== null}
-            onChange={(event) => setUrl(event.target.value)}
-          />
-          <Field
-            id="charm-update-sha"
-            label="SHA-256"
-            placeholder="64 hexadecimal characters"
-            autoCapitalize="none"
-            autoCorrect="off"
-            value={sha}
-            disabled={busy !== null}
-            onChange={(event) => setSha(event.target.value)}
-            hint={
-              sha.trim() === ""
-                ? undefined
-                : hash
-                  ? `${hash.length / 2} of 32 bytes · ${hash}`
-                  : "A SHA-256 is 64 hexadecimal characters"
-            }
-          />
-          <div className="flex items-center gap-2">
+        <div className={formRowClass}>
+          <div className="flex flex-wrap items-center gap-2">
+            {offers && published && (
+              <Button
+                id="charm-update-start"
+                type="button"
+                disabled={busy !== null}
+                onClick={() =>
+                  void send(async () => ({ image: await api.image(), sha256Hex: published.sha256 }))
+                }
+              >
+                {busy === "update" && progress
+                  ? updateProgressWords(progress)
+                  : `Update to ${published.version}`}
+              </Button>
+            )}
             <Button
-              id="charm-update-start"
-              type="submit"
-              disabled={busy !== null || url.trim() === "" || !hash}
+              id="charm-update-pick"
+              type="button"
+              variant="ghost"
+              disabled={busy !== null}
+              onClick={() => file.current?.click()}
             >
-              {busy === "update" ? "Asking…" : "Update"}
+              <FileUpIcon />
+              Choose a file…
             </Button>
+            {/* A web file input is the whole Android picker: the WebView opens the system's own. */}
+            <input
+              ref={file}
+              id="charm-update-file"
+              type="file"
+              className="hidden"
+              onChange={(event) => {
+                const picked = event.target.files?.[0]
+                if (picked) void sendFile(picked)
+              }}
+            />
           </div>
-        </form>
+        </div>
       </Group>
+      {checkSaid && <Caption>{checkSaid}</Caption>}
+      <Caption>{FIRMWARE_CAPTION}</Caption>
+      {update && update.state !== CharmUpdateState.Idle && <Caption>{updateWords(update)}</Caption>}
       <Caption>
-        The charm fetches the image itself, over https, and checks it against the SHA-256 before it
-        writes it. A passphrase stays on the charm: unless its flash is encrypted it keeps it only
-        until the next boot, and says so.
+        A passphrase stays on the charm: unless its flash is encrypted it keeps it only until the
+        next boot, and says so.
       </Caption>
     </>
   )

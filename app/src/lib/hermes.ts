@@ -2881,6 +2881,52 @@ export async function getResearchWriters(config: HermesConfig) {
   return { model: Boolean(writers?.model), provider: Boolean(writers?.provider) }
 }
 
+/** What the charm firmware's package holds: the version, the image's length and its SHA-256. */
+export interface CharmFirmware {
+  version: string
+  size: number
+  sha256: string
+}
+
+/** A firmware image is a megabyte and a half, and the host has to fetch it from the registry first. */
+const FIRMWARE_IMAGE_TIMEOUT_MS = 120_000
+
+/**
+ * The charm firmware GitHub Packages publishes as `latest`. The host is the reader: it holds the
+ * registry token, and a private package is reachable no other way. A refusal is the host's own
+ * sentence — no package yet, a token without `read:packages` — which the row draws as it is.
+ */
+export async function getCharmFirmware(
+  config: HermesConfig,
+  signal?: AbortSignal,
+): Promise<CharmFirmware> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/charm/firmware`, {
+    headers: headers(config),
+    signal,
+  })
+  const body = await response.json()
+  if (
+    typeof body?.version !== "string" ||
+    typeof body?.size !== "number" ||
+    typeof body?.sha256 !== "string"
+  )
+    throw new HermesError("The host's answer about the charm firmware was unreadable")
+  return { version: body.version, size: body.size, sha256: body.sha256 }
+}
+
+/**
+ * The published image's bytes, read from the same host: the tag is resolved again there, so what the
+ * phone sends is the image the version it just read names, even when a merge published another one
+ * in between.
+ */
+export async function getCharmFirmwareImage(config: HermesConfig): Promise<Uint8Array> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/charm/firmware/image`, {
+    headers: headers(config),
+    signal: AbortSignal.timeout(FIRMWARE_IMAGE_TIMEOUT_MS),
+  })
+  return new Uint8Array(await response.arrayBuffer())
+}
+
 /** What the plugin's media route answers a mint: where the file can be read, and what it is. */
 export interface MediaUrlAnswer {
   url: string
