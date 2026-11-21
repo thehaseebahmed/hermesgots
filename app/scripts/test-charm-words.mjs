@@ -8,19 +8,28 @@ import test from "node:test"
 import { firmwareOffers, firmwareWords } from "../src/lib/charm-words.ts"
 import { compareVersions } from "../src/lib/version-compare.ts"
 
-test("a version that isn't three plain numbers can't be compared, so nothing is offered", () => {
+test("a prerelease is ordered below its release, and a name that isn't a version can't be compared", () => {
   assert.equal(compareVersions("0.1.0", "0.2.0"), -1)
   assert.equal(compareVersions("0.9.0", "0.10.0"), -1, "compared as numbers, not text")
   assert.equal(compareVersions("0.2.0", "0.2.0"), 0)
-  // A prerelease and a fourth part are builds nobody's publish wrote: no comparison is made.
-  assert.equal(compareVersions("0.2.0-rc1", "0.2.0"), null)
+  // The beta firmware answers `0.1.0-beta`, and it is older than the release it leads to.
+  assert.equal(compareVersions("0.1.0-beta", "0.1.0"), -1)
+  assert.equal(compareVersions("0.1.0", "0.1.0-beta"), 1)
+  assert.equal(compareVersions("0.1.0-beta.2", "0.1.0-beta.10"), -1, "compared as numbers")
+  assert.equal(compareVersions("0.1.0-beta", "0.1.0-beta"), 0)
+  // A fourth part and a name that is not a version are builds nobody's publish wrote: no comparison.
   assert.equal(compareVersions("0.1.0.9", "0.1.0"), null)
+  assert.equal(compareVersions("latest", "0.1.0"), null)
 
-  const prerelease = { state: "says", version: "0.2.0-rc1" }
-  assert.equal(firmwareOffers({ running: prerelease, published: "0.2.0", answered: true }), false)
+  const running = { state: "says", version: "0.2.0-beta" }
+  assert.equal(firmwareOffers({ running, published: "0.2.0", answered: true }), true)
   assert.equal(
-    firmwareWords({ running: prerelease, published: "0.2.0", answered: true }),
-    "Charm 0.2.0-rc1 · can't tell if 0.2.0 is newer",
+    firmwareWords({ running, published: "0.2.0", answered: true }),
+    "Charm 0.2.0-beta · 0.2.0 available",
+  )
+  assert.equal(
+    firmwareWords({ running, published: "0.2.0-beta", answered: true }),
+    "Charm 0.2.0-beta · up to date",
   )
   assert.equal(
     firmwareWords({
