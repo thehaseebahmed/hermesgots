@@ -17,15 +17,18 @@ import { quietly } from "@/lib/report"
 import { registryId } from "@/lib/registry"
 
 import { charmBotId, charmButtons } from "./charm-alert.ts"
+import { refusalWords } from "./charm-words.ts"
 import {
   CHARM_CONTROL,
   CHARM_DATA,
   CHARM_SERVICE,
   CHARM_STATUS,
   CharmCode,
+  batteryMessage,
   forgetMessage,
   hexBytes,
   networkMessage,
+  parseBattery,
   parseNetworkReport,
   parseStatus,
   parseUpdateStatus,
@@ -36,6 +39,8 @@ import {
   wifiMessage,
   wifiRecord,
   type CharmAlertAction,
+  type CharmBattery,
+  type CharmBatterySeen,
   type CharmBot,
   type CharmNetworkReport,
   type CharmPetChoice,
@@ -44,6 +49,7 @@ import {
   type CharmUpdateStatus,
   type CharmWifiRecord,
 } from "./charm-protocol.ts"
+import { type CharmWake, wakeMessage } from "./charm-protocol.ts"
 import {
   CharmRefused,
   syncCharm,
@@ -67,6 +73,13 @@ export interface PairedCharm {
   wifi?: CharmWifiRecord
   /** Whether the charm has a tailnet key. The key itself is the charm's, and is never kept here. */
   tailnet?: boolean
+  /** The glass's own settings, as the reader last chose them here. */
+  wake?: CharmWake
+  /**
+   * The last battery reading the charm gave, and when it gave it: a percentage with no age would be
+   * read as the charge right now, and a read taken a day ago is not that.
+   */
+  battery?: CharmBatterySeen
 }
 
 const KEY = "gots.charm"
@@ -351,9 +364,7 @@ export async function syncToCharm(
 ): Promise<SyncProgress> {
   const charm = paired
   if (!charm) throw new Error("No charm paired")
-  await ready()
-  const link = await openTransport(charm.deviceId)
-  try {
+  return withCharm(async (link) => {
     const result = await syncCharm(link, bots, onProgress, options)
     if (paired?.deviceId === charm.deviceId) {
       write({ ...paired, syncedAt: Date.now(), syncedBots: result.total })
@@ -363,9 +374,7 @@ export async function syncToCharm(
       await keepCharm(charm.deviceId)
     }
     return result
-  } finally {
-    await link.close()
-  }
+  })
 }
 
 /**
@@ -374,16 +383,8 @@ export async function syncToCharm(
  * way a sync does.
  */
 async function askCharm(message: Uint8Array): Promise<{ status: CharmStatus; bytes: DataView }> {
-  const charm = paired
-  if (!charm) throw new Error("No charm paired")
-  await ready()
-  const link = await openTransport(charm.deviceId)
-  try {
-    const bytes = await link.ask(message)
-    return { status: parseStatus(bytes), bytes }
-  } finally {
-    await link.close()
-  }
+  const bytes = await withCharm((link) => link.ask(message))
+  return { status: parseStatus(bytes), bytes }
 }
 
 /** The one answer a network write takes as a yes: written to flash, or kept for this boot only. */
@@ -474,4 +475,44 @@ export async function sendTestAlert(bot: Profile, reason: TestAlertReason = "app
       ? charmButtons([{ label: "Allow once" }, { label: "Deny" }])
       : charmButtons([]),
   })
+}
+
+/**
+ * The glass's own settings, sent at once in a connection of their own rather than saved up for a
+ * sync — a switch that waited for the next sync would look broken until the reader synced. The
+ * phone's copy is written first so the switch stays where the reader put it; the send's failure is
+ * the row's to say, and a second tap on the switch tries again.
+ */
+export async function setCharmWake(wake: CharmWake): Promise<void> {
+  if (paired) write({ ...paired, wake })
+  const { status } = await askCharm(wakeMessage(wake)).catch(rethrowOlderFirmware)
+  if (status.code !== CharmCode.Ok) throw new Error(refusalWords(status.code))
+}
+
+/** Asks the charm what its battery is, and keeps the answer with its age. */
+export async function readCharmBattery(): Promise<CharmBattery | undefined> {
+  const { status, bytes } = await askCharm(batteryMessage()).catch(rethrowOlderFirmware)
+  if (status.code !== CharmCode.Ok) throw new Error(refusalWords(status.code))
+  const reading = parseBattery(bytes)
+  if (reading && paired) write({ ...paired, battery: { ...reading, at: Date.now() } })
+  return reading ?? undefined
+}
+
+/** A charm that does not know the op is a charm whose firmware is older than this app. */
+function rethrowOlderFirmware(error: unknown): never {
+  if (error instanceof CharmRefused) throw new Error(refusalWords(error.code))
+  throw error
+}
+
+/** One short connection: connect, one op, one answer, disconnect. */
+async function withCharm<T>(run: (link: CharmLink) => Promise<T>): Promise<T> {
+  const charm = paired
+  if (!charm) throw new Error("No charm paired")
+  await ready()
+  const link = await openTransport(charm.deviceId)
+  try {
+    return await run(link)
+  } finally {
+    await link.close()
+  }
 }
