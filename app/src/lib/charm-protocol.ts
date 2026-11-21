@@ -44,6 +44,10 @@ export const CharmOp = {
   Tailnet: 0x33,
   Update: 0x34,
   UpdateStatus: 0x35,
+  // The build the charm runs, and an image the phone sends itself rather than one it fetches.
+  Firmware: 0x36,
+  UpdateBegin: 0x37,
+  UpdateEnd: 0x38,
 } as const
 
 type CharmOp = (typeof CharmOp)[keyof typeof CharmOp]
@@ -577,6 +581,22 @@ export const forgetMessage = () => control(CharmOp.Forget).done()
 export const networkMessage = () => control(CharmOp.Network).done()
 export const updateStatusMessage = () => control(CharmOp.UpdateStatus).done()
 
+/** Which build the charm runs: the ask is the message, as the battery's and the handoff's are. */
+export const firmwareMessage = () => control(CharmOp.Firmware).done()
+
+/**
+ * An image the phone sends itself: its length and the SHA-256 it must hash to. The writes that
+ * follow are the image's, `[offset u32][bytes]` in order from the first, as a picture's are.
+ */
+export function updateBeginMessage(size: number, sha256: Uint8Array): Uint8Array {
+  if (sha256.length !== CHARM_SHA256_BYTES)
+    throw new Error("An upload carries the image's 32-byte SHA-256")
+  return control(CharmOp.UpdateBegin).u32(size).raw(sha256).done()
+}
+
+/** The image is whole: the charm checks the length and the hash, then makes the slot bootable. */
+export const updateEndMessage = () => control(CharmOp.UpdateEnd).done()
+
 /**
  * The network to join. A passphrase of none is an open network, which the charm reads as such rather
  * than as a blank password.
@@ -698,11 +718,29 @@ export function parseUpdateStatus(view: DataView): CharmUpdateStatus | null {
   if (extra < 3 || view.byteLength < 5 + extra) return null
   return { state: view.getUint8(5), percent: view.getUint8(6), reason: view.getUint8(7) }
 }
+
+/**
+ * The `Firmware` answer: `[extraLen][version]`, text like `0.1.0`. Null for anything else — a charm
+ * whose firmware predates the op answers `BadMessage` with no extra at all, and that is a charm to
+ * offer an update to rather than a failure to draw.
+ */
+export function parseFirmware(view: DataView): string | null {
+  if (view.byteLength < 5) return null
+  if (view.getUint8(1) !== CharmCode.Ok) return null
+  if (view.getUint8(2) !== CharmOp.Firmware) return null
+  const length = view.getUint8(4)
+  if (length === 0 || view.byteLength < 5 + length) return null
+  return decoder.decode(new Uint8Array(view.buffer, view.byteOffset + 5, length))
+}
+
 /** The glass's settings: [doubleTap u8][quietSeconds u8], one of the three windows or nothing. */
 export function wakeMessage(wake: CharmWake): Uint8Array {
   if (!CHARM_QUIET_PRESETS.includes(wake.quietSeconds))
     throw new Error("The charm runs 15, 30 or 60 seconds")
-  return control(CharmOp.SleepSettings).u8(wake.doubleTap ? 1 : 0).u8(wake.quietSeconds).done()
+  return control(CharmOp.SleepSettings)
+    .u8(wake.doubleTap ? 1 : 0)
+    .u8(wake.quietSeconds)
+    .done()
 }
 
 /** The battery ask: no payload, because the ask is the message, as the handoff's is. */

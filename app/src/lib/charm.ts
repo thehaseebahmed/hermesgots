@@ -17,6 +17,7 @@ import { quietly } from "@/lib/report"
 import { registryId } from "@/lib/registry"
 
 import { charmBotId, charmButtons } from "./charm-alert.ts"
+import { type FirmwareProgress, uploadFirmware } from "./charm-firmware.ts"
 import { refusalWords } from "./charm-words.ts"
 import {
   CHARM_CONTROL,
@@ -25,10 +26,12 @@ import {
   CHARM_STATUS,
   CharmCode,
   batteryMessage,
+  firmwareMessage,
   forgetMessage,
   hexBytes,
   networkMessage,
   parseBattery,
+  parseFirmware,
   parseNetworkReport,
   parseStatus,
   parseUpdateStatus,
@@ -442,6 +445,30 @@ export async function charmUpdateStatus(): Promise<CharmUpdateStatus> {
   const update = parseUpdateStatus(bytes)
   if (!update) throw new Error("The charm's update answer was too short")
   return update
+}
+
+/**
+ * Which firmware the charm runs, like `0.1.0`, or null for a charm whose own firmware predates the
+ * ask. Null is a charm to offer its first update by cable, not a failure to draw.
+ */
+export async function charmFirmwareVersion(): Promise<string | null> {
+  const { bytes } = await askCharm(firmwareMessage())
+  return parseFirmware(bytes)
+}
+
+/**
+ * Sends the charm a whole firmware image over one link — the begin, every byte, the end — and
+ * answers where it got to. One link for the lot, as a sync holds one for its duration: a megabyte
+ * is minutes, and every answer rides on the same notification queue.
+ */
+export async function uploadCharmFirmware(
+  image: Uint8Array,
+  sha256Hex: string,
+  onProgress?: (progress: FirmwareProgress) => void,
+): Promise<FirmwareProgress> {
+  // Read here, so a hash that is not one is refused before a connection is opened.
+  const sha256 = hexBytes(sha256Hex)
+  return withCharm((link) => uploadFirmware(link, image, sha256, onProgress))
 }
 
 /** What a test alert is keyed by: no session's, so it clears only when the reader dismisses it. */
