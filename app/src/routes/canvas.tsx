@@ -964,8 +964,10 @@ export function CanvasEdit() {
     }),
     [id, navigate],
   )
-  // A record that hasn't landed yet: nothing of the canvas is known, so the body says it is reading.
-  const reading = !canvas && !loaded
+  // A record that hasn't landed yet: nothing of the canvas is known, so the body says it is reading —
+  // and it keeps saying so until the store has a record or a verdict, since one sweep that missed the
+  // canvas is not yet a bot without it.
+  const reading = !canvas && !missing && !awayNow
   /**
    * The one line this screen says above its chat, if any: a canvas no bot holds is gone, a record that
    * hasn't landed is being read, and a canvas with no version whose bot isn't answering says so rather

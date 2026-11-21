@@ -133,6 +133,8 @@ interface Host {
   failUndo?: string
   /** Answers nothing at all, the way a host this device can't reach does: no features, no list. */
   failAll?: boolean
+  /** Ids the bot holds no canvas by: its own read answers 404, as a canvas deleted since does. */
+  absent?: string[]
 }
 
 /**
@@ -188,6 +190,9 @@ function serveCanvases(host: Host) {
     const one = /\/canvases\/([^/]+)$/.exec(url.pathname)
     if (one) {
       host.reads!.push(url.pathname)
+      if (host.absent?.includes(one[1])) {
+        return json({ error: { message: "This canvas is gone." } }, 404)
+      }
       // A case may hand the screen a page of its own — one that asks for a library this file's page
       // does not — and the version it draws is that page: the host answers the record it holds.
       const answer = (docs: CanvasDoc[] | undefined) => {
@@ -865,7 +870,8 @@ test(
   "a canvas the host called gone keeps its options once its list names a record",
   atWidth(390, async () => {
     const GONE_ID = "c3"
-    const host: Host = { version: 3, undos: 0, listed: [] }
+    // The bot holds no canvas by that id — its own read answers 404 — and its list names none.
+    const host: Host = { version: 3, undos: 0, listed: [], absent: [GONE_ID] }
     serveCanvases(host)
     await seedCanvasChat(GONE_ID)
     // No record anywhere: the address is called gone, and there is nothing to manage.
@@ -873,15 +879,13 @@ test(
       await until(() => /This canvas is gone/.test(text()), "the gone sentence")
       assert.ok(missing("[data-canvas-options-open]"), "no record, so no control to open them with")
     })
-    // The host answered gone for the record, and its list names one all the same: a record exists to
-    // rename, pin, archive or delete, so the body's sentence is not the whole of what the header knows.
+    // Its list names a record all the same: a record exists to rename, pin, archive or delete, so the
+    // body's sentence is not the whole of what the header knows.
     host.listed = [GONE_ID]
     await refreshCanvases()
     await drawCanvas([`/canvas/${GONE_ID}`], async () => {
-      await until(() => /This canvas is gone/.test(text()), "the gone sentence")
-      const control = find("[data-canvas-options-open]")
-      assert.ok(control, "a record's options are still offered")
-      await click(control)
+      await until(() => Boolean(find("[data-canvas-options-open]")), "the record's options")
+      await click(find("[data-canvas-options-open]"))
       await until(() => Boolean(find("[data-canvas-options]")), "the options to open")
     })
   }),
@@ -1541,7 +1545,7 @@ test(
     // the preview's own words rather than drawing an empty chat (ADR 0130).
     serveCanvases({ version: 3, undos: 0 })
     await seedCanvasChat(CANVAS.id)
-    await drawCanvas(["/canvas/c8/edit"], async () => {
+    await drawCanvas(["/canvas/c9/edit"], async () => {
       await until(() => /This canvas is gone/.test(text()), "the gone sentence")
     })
     // A host that doesn't answer: the preview's header says so, and the edit screen's is that row.
@@ -2079,5 +2083,30 @@ test(
       serveCanvases({ version: 3, undos: 0 })
       await refreshCanvas(CANVAS.id)
     }
+  }),
+)
+
+test(
+  "a cold open reads the canvas before it calls it gone",
+  laptop(async () => {
+    // The phone opens a canvas it has never drawn, from a notification: the device holds the chat
+    // that names the canvas and no record of the canvas itself, and the bot's list — read by the
+    // open's own sweep — comes back without it for this answer.
+    const host: Host = { version: 3, undos: 0, listed: ["c2"] }
+    serveCanvases(host)
+    await seedCanvasChat("c1")
+    await drawCanvas(["/canvas/c1"], async () => {
+      await until(() => Boolean(find("[data-canvas-page]")), "the screen to open")
+      // The bot holds the canvas, and its own read answers it: what is on the screen while that
+      // read is out is the one state a reader can be told, and never that the canvas is gone.
+      await until(
+        () => Boolean(find("iframe[data-canvas-frame]")),
+        "the canvas's own read to answer and its page to be drawn",
+      )
+      assert.ok(
+        !text().includes("This canvas is gone"),
+        "a canvas the bot holds is never called gone",
+      )
+    })
   }),
 )

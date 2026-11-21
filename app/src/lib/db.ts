@@ -1966,6 +1966,17 @@ db.version(51).upgrade((tx) =>
 )
 
 /**
+ * v52: a canvas opened on a phone that has never drawn it. The chat a canvas was made with is the
+ * record that names it and the bot holding it, so it is an index probe rather than a sweep of every
+ * bot before the canvas can be read (`canvases.ts`'s `botHolding`) — and a sweep is what could call
+ * a canvas gone before its own read was ever made.
+ */
+db.version(52).stores({
+  conversations:
+    "id, updatedAt, [profileId+updatedAt], projectId, hermesSessionId, changedAt, canvasId",
+})
+
+/**
  * How many rows of one room's log this device keeps: the page a reader can scroll back through.
  * A room's log lives on its Host and is read by sequence, so a page is what a screen needs and no
  * more — without a bound, every fold and every read mark would pay for the room's whole history.

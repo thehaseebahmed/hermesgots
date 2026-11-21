@@ -639,6 +639,11 @@ async function botHolding(id: string): Promise<string | null> {
   // finds the bot without a sweep that a host which isn't answering could never finish.
   const kept = await keptBot(id)
   if (kept) return kept
+  // A canvas this device never read may still be one it holds the chat of: the chat names the canvas
+  // and the bot that holds it, so a phone opening one from a notification finds the bot here rather
+  // than by sweeping every bot — the sweep that used to call it gone before its own read was made.
+  const chat = await db.conversations.where("canvasId").equals(id).first()
+  if (chat?.profileId && (await db.profiles.get(chat.profileId))) return chat.profileId
   const complete = await refreshCanvases()
   const found = profileOf(id)
   if (found) return found
