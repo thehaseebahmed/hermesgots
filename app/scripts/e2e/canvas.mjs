@@ -185,30 +185,22 @@ await flow(
     await field.fill(EDIT)
     await field.press(SEND_CHORD)
     // The lane draws the build it is in while it works: the host's listing carries the working build,
-    // so its request, the visits it has made and the line under the one it is in are drawn before it
-    // publishes. The mock holds its check a beat, which is this window.
+    // so its request and the one row saying what it is doing are drawn before it publishes. The mock
+    // holds its check a beat, which is this window.
     const working = page.locator("[data-canvas-build]").filter({ hasText: EDIT })
-    await working.locator("[data-build-activity]").waitFor({ timeout: 30_000 })
-    assert.deepEqual(
-      await working
-        .locator("[data-build-step]")
-        .evaluateAll((nodes) =>
-          nodes.map((node) => [
-            node.getAttribute("data-build-step"),
-            node.hasAttribute("data-working"),
-          ]),
-        ),
-      [
-        ["planning", false],
-        ["building", false],
-        ["checking", true],
-      ],
-      "the build draws the visits it made, and the one it is in is the live one",
+    await working.locator("[data-build-details]").waitFor({ timeout: 30_000 })
+    assert.equal(
+      await working.locator("[data-build-step]").count(),
+      0,
+      "the build draws one row, never a row for each visit it made",
+    )
+    assert.match(
+      (await working.locator("[data-build-state]").innerText()).trim(),
+      /^(Planning|Building|Checking|Publishing)\b/,
+      "and that row says what the build is doing",
     )
     await shot("edit-building")
-    pass(
-      "the edit screen: the working build draws its request, its steps, and the step it is in live",
-    )
+    pass("the edit screen: the working build is one row saying what it is doing")
     await page.getByText("v2", { exact: true }).waitFor({ timeout: 40_000 })
     // The lane is builds, not the transcript (G9, G10): the request it took is the row's line, and
     // the version it wrote is the row's version, drawn on the edit screen itself.
@@ -220,17 +212,18 @@ await flow(
       true,
       "each build offers ready",
     )
-    // The line under the reply keeps the version and offers ready: one press opens the whole build.
+    // The row the build was while it worked becomes the version it published: one press opens the
+    // whole run, before or after that.
     const readyLine = builds
       .locator("[data-canvas-build]")
       .filter({ hasText: EDIT })
-      .locator("[data-build-version]")
+      .locator("[data-build-details]")
       .first()
     await readyLine.waitFor({ timeout: 20_000 })
     assert.equal(
-      (await readyLine.innerText()).trim(),
-      "Version 2 ready",
-      "the line is one row reading the version the build published and ready",
+      (await readyLine.locator("[data-build-state]").innerText()).trim(),
+      "Version 2 published",
+      "the row it was while it worked becomes the version it published",
     )
     assert.equal(
       await page.locator("[data-build-details]").first().evaluate(
@@ -241,47 +234,24 @@ await flow(
     )
     pass("the edit screen: the lane draws the build's request and the version it published")
 
-    // A visit's span is the mock's clock, so a marker is read by the mark it carries and never by
-    // the duration beside it.
     const build = builds.locator("[data-canvas-build]").filter({ hasText: EDIT })
-    const markers = build.locator("[data-build-step]")
-    // The build publishes a beat after it checks, and only then is the step it checked in pressable.
-    await build.locator("[data-build-version]").waitFor({ timeout: 30_000 })
-    await until(
-      async () => (await markers.count()) === 3,
-      20_000,
-      "the lane to draw a marker for each of the build's three drawn steps",
-    )
-    assert.deepEqual(
-      await markers.evaluateAll((nodes) =>
-        nodes.map((node) => node.getAttribute("data-build-step")),
-      ),
-      ["planning", "building", "checking"],
-      "the markers are the visits the build made, in the order it made them",
-    )
-    assert.ok(
-      (await markers.nth(2).innerText()).includes("Checks passed"),
-      "the visit that checked says what its check found",
-    )
     assert.equal(
       await builds.getByText(checkReport(2)).count(),
       0,
       "the build's checking turn is not drawn in the lane",
     )
-    pass(
-      "the edit screen: the lane draws a marker per step the build took, with the check's flag on the one that checked",
-    )
+    pass("the edit screen: the lane draws the build's request and the version it published")
 
-    await markers.nth(2).click()
-    // The step opens in the pop-up a subagent's row opens: the standard bottom sheet on a phone,
+    await readyLine.click()
+    // The run opens in the pop-up a subagent's row opens: the standard bottom sheet on a phone,
     // which rests at the foot of the screen and is dragged by its handle.
     const stepSheet = page.locator('[data-popup-form="sheet"]')
     await stepSheet.waitFor({ timeout: 20_000 })
     await stepSheet.getByText(checkReport(2)).waitFor({ timeout: 20_000 })
     assert.equal(
       (await stepSheet.locator('[data-slot="sheet-title"]').innerText()).trim(),
-      "Checking",
-      "the sheet is titled for the step whose marker was pressed",
+      "Build",
+      "the sheet is titled by the build whose row was pressed",
     )
     assert.equal(
       (await stepSheet.locator('[data-slot="sheet-description"]').innerText()).trim(),
@@ -291,7 +261,7 @@ await flow(
     assert.equal(
       await stepSheet.getByText(checkReport(1)).count(),
       0,
-      "the build before this one checked too, and its report is not in this step's window",
+      "the build before this one checked too, and its report is not in this build's run",
     )
     // One scroller, not two: the pop-up's box holds the thread, and the thread's own viewport is
     // what moves, so a long step never scrolls its header away inside a second scroller.
@@ -1009,8 +979,8 @@ await flow(
     // 1024 is where a pop-up turns from a bottom sheet into the side drawer, and a step's transcript
     // takes that same standard form: full height on the right, not a sheet over the lane.
     const narrowBuild = page.locator("[data-canvas-build]").first()
-    await narrowBuild.locator("[data-build-version]").first().waitFor({ timeout: 40_000 })
-    await narrowBuild.locator("[data-build-step]").last().click()
+    await narrowBuild.locator("[data-build-details]").first().waitFor({ timeout: 40_000 })
+    await narrowBuild.locator("[data-build-details]").last().click()
     const narrowStep = page.locator('[data-popup-form="drawer"]')
     await narrowStep.waitFor({ timeout: 20_000 })
     // The drawer slides in from the right; only at rest is its edge the screen's.

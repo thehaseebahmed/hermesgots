@@ -18,38 +18,16 @@ const FLAG_WORDS: Record<string, string> = {
 
 const ENDED = new Set(["published", "failed", "stopped"])
 
-const DRAWN = new Set(["planning", "building", "checking"])
+/** What a build's row says while the host has written no activity line for it. */
+export const WORKING_WORDS = "The build is working."
 
 export function phaseWord(phase: string) {
   return PHASE_WORDS[phase] ?? "Working"
 }
 
-/** What a version's checks said, as a marker or a reply's line says it. */
+/** What a version's checks said, as a row's line says it. */
 export function flagWords(flag: string) {
   return FLAG_WORDS[flag]
-}
-
-/**
- * A visit a build's lane draws. The record's own visit (`canvases.ts`'s `CanvasBuildStep`) always
- * names the clock it began at; the marker the lane draws for a build the record predates (I6) names
- * none, because the host never wrote when that phase began and a lane must not date what it cannot
- * know. Only a step that names its start can be given a window and pressed.
- */
-export interface DrawnStep {
-  phase: string
-  startedAt?: number
-  /** When the build left the phase; absent while this is the build's current step. */
-  endedAt?: number
-  /** `passing`, `failing` or `unchecked`, on a checking visit the version's check stamped. */
-  flag?: string
-}
-
-/**
- * The visits a build's lane draws, in the order they happened: one marker per visit to a phase that
- * did work, never one per turn. Waiting and publishing are recorded but not drawn.
- */
-export function markersOf(build: { steps?: CanvasBuildStep[] }): CanvasBuildStep[] {
-  return (build.steps ?? []).filter((step) => DRAWN.has(step.phase))
 }
 
 export function atWork(build: { phase: string }) {
@@ -57,105 +35,50 @@ export function atWork(build: { phase: string }) {
 }
 
 /**
- * The steps a build's block draws: the visits it made, in the order it made them — or, for a build
- * the record never wrote down (I6) that is still at work, the phase it is in, so a plugin upgraded
- * mid-build says what it is doing rather than drawing an empty row.
- *
- * The phase it is in is drawn only where a visit to it would be: a build waiting on its plan waits
- * in a phase the lane never draws a marker for, and inventing one for it would say the wait twice —
- * there, and on the plan's card in the composer's place. That marker is open and carries no start:
- * the record holds no window for it, so the one under it — the activity line — is what says what is
- * happening.
+ * One visit a build made to a phase, as a marker in its run: the record's own `canvas_build_steps`
+ * row (`builds.py`), which always names the clock it began at.
  */
-export function drawnSteps(build: { phase: string; steps?: CanvasBuildStep[] }): DrawnStep[] {
-  const steps = markersOf(build)
-  if (steps.length || !atWork(build) || !DRAWN.has(build.phase)) return steps
-  return [{ phase: build.phase }]
+export interface BuildVisit {
+  phase: string
+  startedAt: number
+  /** When the build left the phase; absent while this is the build's current step. */
+  endedAt?: number
+  /** `passing`, `failing` or `unchecked`, on a checking visit the version's check stamped. */
+  flag?: string
 }
 
-export function isOpen(step: DrawnStep) {
-  return step.endedAt === undefined
+/** The visits a build made, in the order it made them, as its record holds them. */
+export function visitsOf(build: { steps?: CanvasBuildStep[] }): BuildVisit[] {
+  return (build.steps ?? []).map((step) => ({
+    phase: step.phase,
+    startedAt: step.startedAt,
+    ...(step.endedAt !== undefined ? { endedAt: step.endedAt } : {}),
+    ...(step.flag !== undefined ? { flag: step.flag } : {}),
+  }))
 }
 
-/** The whole seconds a drawn step's sheet reads, half-open. */
-export interface StepWindow {
-  /** The first second the step holds. */
-  start: number
-  /** The first second it does not; `Infinity` while the build is at work. */
-  end: number
-}
-
-/**
- * The windows a build's drawn steps hold their turns in, in whole seconds and tiled (I2): a step
- * ends where the next drawn step begins, so a turn stamped in the second a phase changed belongs to
- * the step that just began and none falls between two. A visit can be shorter than the second it
- * began in, and a step whose next one begins in that same second holds nothing of its own: what it
- * could not hold reads in the step beside it rather than nowhere.
- *
- * The last drawn step is the one that holds the build's final second — a publishing visit after it
- * is not drawn — so it ends a second past the second the build closed in. While the build is at
- * work it has no end at all. A step with no start the record wrote down has no window either: there
- * is nothing to tile from, and a lane that guessed one would place turns in a step they never ran in.
- */
-export function windowsOf(
-  steps: DrawnStep[],
-  build: { phase: string },
-): (StepWindow | undefined)[] {
-  const open = atWork(build)
-  return steps.map((step, at) => {
-    if (step.startedAt === undefined) return undefined
-    const start = Math.floor(step.startedAt / 1000)
-    const next = steps[at + 1]
-    if (next && next.startedAt !== undefined)
-      return { start, end: Math.floor(next.startedAt / 1000) }
-    const end = step.endedAt
-    return { start, end: open || end === undefined ? Infinity : Math.floor(end / 1000) + 1 }
-  })
-}
-
-export function liveIndexOf(steps: DrawnStep[]) {
-  return steps.findLastIndex((step) => isOpen(step))
-}
-
-export function stepWords(step: DrawnStep) {
-  const words = [phaseWord(step.phase)]
-  const flag = step.flag ? flagWords(step.flag) : undefined
+/** What one visit's marker says: its phase, what a check found, and how long it took. */
+export function visitWords(visit: BuildVisit) {
+  const words = [phaseWord(visit.phase)]
+  const flag = visit.flag ? flagWords(visit.flag) : undefined
   if (flag) words.push(flag)
-  if (step.endedAt !== undefined && step.startedAt !== undefined)
-    words.push(formatDuration(step.endedAt - step.startedAt))
+  if (visit.endedAt !== undefined) words.push(formatDuration(visit.endedAt - visit.startedAt))
   return words.join(" · ")
 }
 
 /**
- * Whether a turn began inside a window in whole seconds — `windowsOf`' own space, which is what a
- * row's `timestamp` and a visit's millisecond clock are reconciled in, so a turn stamped in the same
- * second as a phase change belongs to the visit that just began. A turn nothing dates can only be
- * placed in a visit that has no end yet, which is where the turn still being written runs.
+ * What a build's one row says: what it is doing while it works — the host's own activity line — and
+ * once it has ended, the version it published, or that it answered when it published none. A build
+ * that failed or was stopped says so rather than claiming a version.
  */
-function beganIn(at: number | undefined, start: number, end: number) {
-  if (at === undefined) return end === Infinity
-  const second = Math.floor(at / 1000)
-  return second >= start && second < end
-}
-
-/**
- * The turns of a thread that one visit's sheet shows (G3): the ones that began inside the visit's
- * half-open window — and `origin` moved to the first kept turn's place, since a message's id is that
- * origin plus the turn's place (`chat-next/messages.ts`). A narrowed thread that left `origin` alone
- * would hand its turns the ids of the ones it dropped.
- */
-export function turnsInStep<T extends { at?: number }>(
-  turns: T[],
-  origin: number,
-  window: StepWindow,
-): { turns: T[]; origin: number } {
-  const { start, end } = window
-  const kept: T[] = []
-  let first = -1
-  turns.forEach((turn, place) => {
-    if (!beganIn(turn.at, start, end)) return
-    if (first < 0) first = place
-    kept.push(turn)
-  })
-  return { turns: kept, origin: first < 0 ? origin : origin + first }
+export function rowWords(build: {
+  phase: string
+  activity?: string
+  version?: number
+  summary?: string
+}) {
+  if (atWork(build)) return build.activity ?? WORKING_WORDS
+  if (build.phase === "failed") return "Failed"
+  if (build.phase === "stopped") return "Stopped"
+  return build.version ? `Version ${build.version} published` : "Answered"
 }

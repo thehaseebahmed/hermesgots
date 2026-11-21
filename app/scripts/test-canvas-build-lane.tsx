@@ -254,17 +254,16 @@ test(
         working.querySelector('[data-build-request]')?.closest('[data-slot="bubble"]'),
         "its request wears the chat's own user bubble",
       )
-      assert.deepEqual(
-        findAll('[data-canvas-build="b3"] [data-build-step]').map((one) =>
-          one.getAttribute("data-build-step"),
-        ),
-        ["planning", "building"],
-        "and its steps are drawn, the last one still open",
-      )
+      const rowAtWork = working.querySelector("[data-build-details]")
       assert.equal(
-        wordsOf(working.querySelector("[data-build-activity]")),
+        wordsOf(rowAtWork?.querySelector("[data-build-state]") ?? null),
         "Building the page",
-        "with the line saying what it is doing",
+        "and its one row says what it is doing",
+      )
+      assert.ok(rowAtWork?.hasAttribute("data-working"), "pulsing while the host works")
+      assert.ok(
+        missing('[data-canvas-build="b3"] [data-build-step]'),
+        "one row, never a row per visit",
       )
       assert.ok(
         missing("[data-canvas-builds] .border-dashed"),
@@ -329,20 +328,25 @@ test(
         "and says what the build answered",
       )
       assert.ok(!summary.closest('[data-slot="bubble"]'), "the bot's words wear no bubble")
-      const line = find('[data-canvas-build="b1"] [data-build-version]')?.parentElement
-      assert.ok(line, "the version's line is drawn")
+      const line = find('[data-canvas-build="b1"] [data-build-details]')
+      assert.ok(line, "the build's one row is drawn")
       assert.ok(
         summary.nextElementSibling === line,
-        "the line stands directly under the reply it belongs to",
+        "and stands directly under the reply it belongs to",
       )
-      assert.deepEqual(
-        [...line.children].map((one) => wordsOf(one)),
-        ["Checks passed", "Version 3 ready", ""],
-        "the line is one row: the flag this build has no marker to carry, then the version and ready",
+      assert.equal(
+        wordsOf(line.querySelector("[data-build-state]")),
+        "Version 3 published",
+        "the row says the version the build published",
+      )
+      assert.equal(
+        wordsOf(line.querySelector("[data-build-flag]")),
+        "Checks passed",
+        "and what its checks found",
       )
       assert.ok(
         line.querySelector('[data-slot="work-mark"]'),
-        "and ready wears the chevron a work row draws",
+        "wearing the chevron a work row draws",
       )
       assert.ok(
         document.querySelector("[data-canvas-builds]"),
@@ -356,27 +360,22 @@ test(
       assert.ok(failed, "a build with no summary still draws that place")
       assert.equal(wordsOf(failed), "The build failed.", "in the lane's own words")
       const failedLine = find('[data-canvas-build="b2"] [data-build-details]')
-      assert.ok(failedLine, "and still draws its line")
-      assert.ok(
-        missing('[data-canvas-build="b2"] [data-build-version]'),
-        "a build that published no version names none",
+      assert.ok(failedLine, "and still draws its row")
+      assert.equal(
+        wordsOf(failedLine.querySelector("[data-build-state]")),
+        "Failed",
+        "a build that failed says so in one word",
       )
-      assert.deepEqual(
-        [...failedLine.children].map((one) => wordsOf(one)),
-        ["ready", ""],
-        "a build with no version still offers ready on its line",
+      assert.ok(
+        missing('[data-canvas-build="b2"] [data-build-flag]'),
+        "and carries no flag, since the record stamped none on it",
       )
       const working = find('[data-canvas-build="b3"]')
       assert.ok(working, "the working build is drawn as a block of the lane")
       assert.equal(
-        wordsOf(working.querySelector('[data-build-step][data-working="true"]')),
-        "Building",
-        "the phase it is in is its working marker",
-      )
-      assert.equal(
-        wordsOf(working.querySelector("[data-build-activity]")),
+        wordsOf(working.querySelector("[data-build-details] [data-build-state]")),
         "Building the page",
-        "and the line saying what it is doing hangs under it",
+        "and its row says what it is doing",
       )
 
       // ready opens that build's transcript, read-only, over its own session, in the pop-up a
