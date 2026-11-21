@@ -62,8 +62,8 @@ test("the guide keeps the length it shipped with", () => {
   // legitimate edit updates this pin on purpose, the way a version's tests hold their literal.
   assert.equal(
     rendered.length,
-    3_958,
-    "the canvas's guide is 3,958 characters and stays that way",
+    3_964,
+    "the canvas's guide is 3,964 characters and stays that way",
   )
 })
 

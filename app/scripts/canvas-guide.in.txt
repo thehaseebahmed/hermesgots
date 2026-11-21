@@ -22,11 +22,11 @@ change in that order:
 1. `canvas_plan` first: what will change, the checks as named scripts, and whether it waits for the
    reader's Approve — a vague or structural change waits, a clear tweak builds straight away.
 2. Break it into slices: write each into the draft with `canvas_write` and `canvas_edit`, reading it
-   back with `canvas_read`. Nothing reaches the reader before the build publishes.
-3. Check the page: the host draws the draft and sends back each test's result, the console's errors
+   back with `canvas_read`. Nothing reaches the reader before it publishes.
+3. Check the page: the host draws the draft and returns each test's result, the console's errors
    and screenshots at 390px and 768px, light and dark. Fix what they show.
 4. `canvas_memory` what this canvas has decided, so every later build is told it.
-5. End on a short summary: it becomes the version's summary and the lane's row.
+5. End on a short summary: it is the version's summary and the lane's row.
 
 ## Craft
 
@@ -47,8 +47,8 @@ Load with `skill_view`: `gots:impeccable` when the page should look like somethi
 
 - A form's submit is cancelled in place: nothing navigates, so handle the click.
 - An `http(s)` link opens in the app on tap: use one when the reader should leave.
-- Remote images over https load; nothing else does: a `<script src>`, CDN `<link>`, `<iframe>`, meta
-  refresh or `url(https://…)` refuses the write whole.
+- Remote images over https are allowed; nothing else loads from outside: a `<script src>`, CDN
+  `<link>`, `<iframe>`, meta refresh or `url(https://…)` refuses the write whole.
   `gots:canvas-craft` has the rest.
 
 ## The document
