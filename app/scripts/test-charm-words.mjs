@@ -16,25 +16,39 @@ test("a version that isn't three plain numbers can't be compared, so nothing is 
   assert.equal(compareVersions("0.2.0-rc1", "0.2.0"), null)
   assert.equal(compareVersions("0.1.0.9", "0.1.0"), null)
 
-  assert.equal(firmwareOffers({ running: "0.2.0-rc1", published: "0.2.0", answered: true }), false)
+  const prerelease = { state: "says", version: "0.2.0-rc1" }
+  assert.equal(firmwareOffers({ running: prerelease, published: "0.2.0", answered: true }), false)
   assert.equal(
-    firmwareWords({ running: "0.2.0-rc1", published: "0.2.0", answered: true }),
+    firmwareWords({ running: prerelease, published: "0.2.0", answered: true }),
     "Charm 0.2.0-rc1 · can't tell if 0.2.0 is newer",
   )
   assert.equal(
-    firmwareWords({ running: "0.1.0", published: "0.1.0.9", answered: true }),
+    firmwareWords({
+      running: { state: "says", version: "0.1.0" },
+      published: "0.1.0.9",
+      answered: true,
+    }),
     "Charm 0.1.0 · can't tell if 0.1.0.9 is newer",
   )
 })
 
 test("a link that never opened is not a charm that had nothing to say", () => {
   assert.equal(
-    firmwareWords({ running: undefined, published: "0.2.0", answered: true, reachFailed: true }),
+    firmwareWords({
+      running: { state: "unreachable" },
+      published: "0.2.0",
+      answered: true,
+    }),
     "0.2.0 published · couldn't reach the charm",
   )
   assert.equal(
-    firmwareWords({ running: undefined, published: "0.2.0", answered: true }),
+    firmwareWords({ running: { state: "reading" }, published: "0.2.0", answered: true }),
     "0.2.0 published · the charm didn't say",
     "not read yet is still its own answer",
+  )
+  assert.equal(
+    firmwareWords({ running: { state: "too-old" }, published: "0.2.0", answered: true }),
+    "This charm can't say which version it runs — the first update is by cable",
+    "and a firmware too old to say is said in the row's own words",
   )
 })

@@ -39,8 +39,8 @@ export interface FirmwareProgress {
   /** Bytes the phone has written, and the image's whole length. */
   sent: number
   total: number
-  /** The charm's own count, in whole percent, as its last status answer said: -1 until it does. */
-  percent: number
+  /** The charm's own count, in whole percent, once a status answer has said one. */
+  percent?: number
 }
 
 /** An upload the charm refused, or one it started and then failed. */
@@ -80,12 +80,12 @@ export async function uploadFirmware(
   sha256: Uint8Array,
   onProgress?: (progress: FirmwareProgress) => void,
 ): Promise<FirmwareProgress> {
-  const progress: FirmwareProgress = { sent: 0, total: image.length, percent: -1 }
+  const progress: FirmwareProgress = { sent: 0, total: image.length }
   const begin = parseStatus(await link.ask(updateBeginMessage(image.length, sha256)))
   if (begin.code !== CharmCode.Ok) throw new FirmwareRefused(begin.code)
   // The row is redrawn for each whole percent, not for each chunk: a megabyte is thousands of
   // writes, and nothing on screen changes between one percent and the next.
-  let shown = -1
+  let shown: number | undefined
   const report = () => {
     const whole = progress.total > 0 ? Math.round((progress.sent / progress.total) * 100) : 0
     if (whole === shown) return
@@ -112,7 +112,8 @@ export async function uploadFirmware(
     if (sinceAsk < STATUS_BYTES) continue
     sinceAsk = 0
     const status = await updateStatusOf(link)
-    // A stray notice is not progress and not a failure: see `updateStatusOf`.
+    // A stray notice answers the ask with no status of its own, which is no progress and no
+    // failure: `test-charm-upload.mjs` holds that rule, over a charm that strays once.
     if (!status) continue
     if (status.state === CharmUpdateState.Failed)
       throw new FirmwareRefused(CharmCode.Ok, status.reason)
@@ -131,13 +132,14 @@ export async function uploadFirmware(
 
 /**
  * The version the charm answers once it is back after an upload, or the one it never left: `read`
- * is asked `tries` times, `waitMs` apart, and a change is what says the new build booted.
+ * is asked `tries` times, `waitMs` apart, and a change is what says the new build booted. `was` is
+ * the build the row read before the upload — null where it read none, so any answer is a change.
  */
 export async function versionAfterReboot(
   read: () => Promise<string | null>,
-  was: string | null | undefined,
+  was: string | null,
   { tries = REBOOT_TRIES, waitMs = REBOOT_MS } = {},
-): Promise<{ changed: boolean; version: string | null | undefined }> {
+): Promise<{ changed: boolean; version: string | null }> {
   for (let attempt = 0; attempt < tries; attempt += 1) {
     try {
       const now = await read()

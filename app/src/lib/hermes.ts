@@ -2886,6 +2886,11 @@ export interface CharmFirmware {
   version: string
   size: number
   sha256: string
+  /**
+   * The app partition's size, where the release names one: what a picked file is measured against.
+   * A package from before that annotation carries none, and the app uses its own constant.
+   */
+  slot?: number
 }
 
 /** A firmware image is a megabyte and a half, and the host has to fetch it from the registry first. */
@@ -2911,7 +2916,12 @@ export async function getCharmFirmware(
     typeof body?.sha256 !== "string"
   )
     throw new HermesError("The host's answer about the charm firmware was unreadable")
-  return { version: body.version, size: body.size, sha256: body.sha256 }
+  // A package from before the slot annotation names none: the app has its own, and a host that
+  // names one says how big the app partition is.
+  const slot = body.slot
+  if (slot !== undefined && (typeof slot !== "number" || !Number.isInteger(slot) || slot <= 0))
+    throw new HermesError("The host's answer about the charm firmware was unreadable")
+  return { version: body.version, size: body.size, sha256: body.sha256, slot }
 }
 
 /**

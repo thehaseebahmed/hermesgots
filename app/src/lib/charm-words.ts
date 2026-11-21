@@ -111,50 +111,56 @@ export function updateWords(update: CharmUpdateStatus | null | undefined): strin
 }
 
 /**
+ * What the charm's own version read has said. Its firmware may predate the ask — a board to flash by
+ * cable once, never a failure — and a link that never opened is another fact again.
+ */
+export type CharmRunning =
+  /** The ask is out; nothing has answered it yet. */
+  | { state: "reading" }
+  /** The link did not open: not the charm having nothing to say. */
+  | { state: "unreachable" }
+  /** Its firmware predates the version ask: the first update is by cable. */
+  | { state: "too-old" }
+  | { state: "says"; version: string }
+
+/**
  * What the Firmware row has read: the build the charm runs and the one the package publishes.
- * `running` is null for a charm whose own firmware has no version op — a board to flash by cable
- * once, never a failure — and undefined while it has not answered. `answered` says whether the
- * host's read is over, so nothing published is a refusal to say rather than a wait. `reachFailed`
- * is a link that did not open, which is a different fact from a charm that had nothing to say.
+ * `answered` says whether the host's read is over, so nothing published is a refusal to say rather
+ * than a wait.
  */
 export interface CharmFirmwareSeen {
-  running?: string | null
+  running: CharmRunning
   published?: string
   answered: boolean
-  reachFailed?: boolean
 }
 
 /**
  * The row's line: both versions when they can be compared, otherwise the one fact worth saying.
  */
-export function firmwareWords({
-  running,
-  published,
-  answered,
-  reachFailed,
-}: CharmFirmwareSeen): string {
-  if (reachFailed)
+export function firmwareWords({ running, published, answered }: CharmFirmwareSeen): string {
+  if (running.state === "unreachable")
     return published ? `${published} published · couldn't reach the charm` : "Couldn't reach the charm"
-  if (running === null)
+  if (running.state === "too-old")
     return "This charm can't say which version it runs — the first update is by cable"
-  if (!answered) return running ? `Charm ${running}` : "Reading the versions…"
+  if (!answered)
+    return running.state === "says" ? `Charm ${running.version}` : "Reading the versions…"
   if (!published)
-    return running
-      ? `Charm ${running} · couldn't check for a newer one`
+    return running.state === "says"
+      ? `Charm ${running.version} · couldn't check for a newer one`
       : "Couldn't check for a newer one"
-  if (running === undefined) return `${published} published · the charm didn't say`
-  const order = compareVersions(running, published)
-  if (order === null) return `Charm ${running} · can't tell if ${published} is newer`
-  if (order === 0) return `Charm ${running} · up to date`
+  if (running.state === "reading") return `${published} published · the charm didn't say`
+  const order = compareVersions(running.version, published)
+  if (order === null) return `Charm ${running.version} · can't tell if ${published} is newer`
+  if (order === 0) return `Charm ${running.version} · up to date`
   return order < 0
-    ? `Charm ${running} · ${published} available`
-    : `Charm ${running} · newer than ${published}`
+    ? `Charm ${running.version} · ${published} available`
+    : `Charm ${running.version} · newer than ${published}`
 }
 
 /** Whether the row offers the published image: only ever a version ahead of the charm's own. */
 export function firmwareOffers({ running, published, answered }: CharmFirmwareSeen): boolean {
-  if (!answered || !published || typeof running !== "string") return false
-  return compareVersions(running, published) === -1
+  if (!answered || !published || running.state !== "says") return false
+  return compareVersions(running.version, published) === -1
 }
 
 /** The update as it runs, from the phone's own count of the bytes it has written. */

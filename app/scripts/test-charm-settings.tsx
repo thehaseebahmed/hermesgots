@@ -13,18 +13,22 @@ import { MemoryRouter, Route, Routes } from "react-router"
 import { CharmNetwork, type CharmNetworkApi } from "@/components/settings/charm"
 import { CHARM_SLOT_BYTES, CharmLinkState, CharmUpdateState } from "@/lib/charm-protocol"
 import { db } from "@/lib/db"
+import type { CharmFirmware } from "@/lib/hermes"
 import { SettingsPage } from "@/routes/settings"
 import { BatteryRow, WakingGroup } from "@/components/settings/charm"
 import {
   Path,
   click,
+  connection,
   find,
   findText,
+  json,
   mount,
   seedSettings,
   settle,
   text,
   type,
+  until,
 } from "./component-kit.tsx"
 
 const at = (entry: string) => (
@@ -82,8 +86,9 @@ test("Developer ends with a Charm tests group holding one row per moment", async
 })
 
 /**
- * The Network section's radio, as the phone would answer it. Each call is one control ask over BLE;
- * this stands in for the charm, since nothing here can drive a real radio.
+ * The Network section's own link, as the phone would answer it. Each call is one control ask over
+ * BLE; this stands in for the charm, since nothing here can drive a real radio. What the host says
+ * about the published firmware is not the charm's: that is `serveFirmware` below.
  */
 function radio(overrides: Partial<CharmNetworkApi> = {}): CharmNetworkApi {
   return {
@@ -96,8 +101,6 @@ function radio(overrides: Partial<CharmNetworkApi> = {}): CharmNetworkApi {
     saveTailnet: async () => 0,
     updateStatus: async () => ({ state: 0, percent: 0, reason: 0 }),
     version: async () => "0.1.0",
-    published: async () => ({ version: "0.1.0", size: 4, sha256: "ab".repeat(32) }),
-    image: async () => new Uint8Array([1, 2, 3, 4]),
     upload: async (image, _sha256Hex, onProgress) => {
       const done = { sent: image.length, total: image.length, percent: 100 }
       onProgress?.(done)
@@ -185,47 +188,67 @@ const IMAGE = new Uint8Array([9, 9, 9, 9])
 const IMAGE_SHA = createHash("sha256").update(IMAGE).digest("hex")
 const IMAGE_PUBLISHED = { version: "0.2.0", size: IMAGE.length, sha256: IMAGE_SHA }
 
+/**
+ * A bot's host, as the app's own reader asks it for a charm's firmware: the plugin's feature list,
+ * the tag's answer, and the image's bytes. `published` is that answer — a package, or the sentence
+ * the host refuses with — and a function is asked once per read, so a tag that moved is one test's
+ * own. The connection is named, since what a host answered is remembered per connection.
+ */
+function serveFirmware(
+  name: string,
+  published: CharmFirmware | string | ((reads: number) => CharmFirmware | string),
+  image = new Uint8Array(),
+) {
+  const profile = connection(name)
+  let reads = 0
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input instanceof Request ? input.url : input))
+    if (url.pathname.endsWith("/plugins/gots/info"))
+      return json({ name: "gots", version: "1.0.0", features: ["charm_firmware"] })
+    if (url.pathname.endsWith("/charm/firmware/image")) return new Response(image)
+    if (url.pathname.endsWith("/charm/firmware")) {
+      reads += 1
+      const answer = typeof published === "function" ? published(reads) : published
+      if (typeof answer === "string") return json({ error: { message: answer } }, 403)
+      return json(answer)
+    }
+    return json({ error: { message: "no route" } }, 404)
+  }) as unknown as typeof fetch
+  return { profile, reads: () => reads }
+}
+
 test("the firmware row offers the published one when the charm is older", async () => {
-  await mount(
-    <CharmNetwork api={radio({ published: async () => PUBLISHED })} />,
-    async () => {
-      await settle()
-      assert.ok(text().includes("Charm 0.1.0 · 0.2.0 available"), "both versions on the row")
-      assert.ok(button("Update to 0.2.0"), "the newer one is offered")
-      assert.ok(button("Choose a file…"), "and a file is always taken")
-    },
-  )
+  const host = serveFirmware("firmware-offered", PUBLISHED)
+  await mount(<CharmNetwork api={radio()} profile={host.profile} />, async () => {
+    await until(async () => text().includes("Charm 0.1.0 · 0.2.0 available"), "the host's answer")
+    assert.ok(button("Update to 0.2.0"), "the newer one is offered")
+    assert.ok(button("Choose a file…"), "and a file is always taken")
+  })
 })
 
 test("the firmware row says the charm is up to date when the versions match", async () => {
-  await mount(<CharmNetwork api={radio()} />, async () => {
-    await settle()
-    assert.ok(text().includes("Charm 0.1.0 · up to date"))
+  const host = serveFirmware("firmware-current", { ...PUBLISHED, version: "0.1.0" })
+  await mount(<CharmNetwork api={radio()} profile={host.profile} />, async () => {
+    await until(async () => text().includes("Charm 0.1.0 · up to date"), "the host's answer")
     assert.ok(!button("Update to"), "nothing to offer")
     assert.ok(button("Choose a file…"), "but a file is still taken")
   })
 })
 
 test("a charm ahead of the package is said, and never offered a downgrade", async () => {
-  const api = radio({
-    version: async () => "0.3.0",
-    published: async () => ({ version: "0.2.0", size: 4, sha256: "cd".repeat(32) }),
-  })
-  await mount(<CharmNetwork api={api} />, async () => {
-    await settle()
-    assert.ok(text().includes("Charm 0.3.0 · newer than 0.2.0"), "the row says the charm is ahead")
+  const api = radio({ version: async () => "0.3.0" })
+  const host = serveFirmware("firmware-behind", PUBLISHED)
+  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
+    await until(async () => text().includes("Charm 0.3.0 · newer than 0.2.0"), "the two versions")
     assert.ok(!find("#charm-update-start"), "and offers no update")
   })
 })
 
 test("a charm too old to say its version is not compared with the package", async () => {
-  const api = radio({
-    version: async () => null,
-    published: async () => PUBLISHED,
-  })
-  await mount(<CharmNetwork api={api} />, async () => {
-    await settle()
-    assert.ok(text().includes("can't say which version it runs"), "the row says what it heard")
+  const api = radio({ version: async () => null })
+  const host = serveFirmware("firmware-too-old", PUBLISHED)
+  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
+    await until(async () => text().includes("can't say which version it runs"), "the row's line")
     assert.ok(text().includes("cable"), "and how the first one gets there")
     assert.ok(!find("#charm-update-start"), "nothing is offered over the air")
     assert.ok(button("Choose a file…"), "the picker still works")
@@ -234,15 +257,10 @@ test("a charm too old to say its version is not compared with the package", asyn
 
 test("a host that can't answer says it couldn't check, in its own words", async () => {
   const said = "GitHub refused this server's token for the charm firmware."
-  const api = radio({
-    published: async () => {
-      throw new Error(said)
-    },
-  })
-  await mount(<CharmNetwork api={api} />, async () => {
-    await settle()
+  const host = serveFirmware("firmware-refused", said)
+  await mount(<CharmNetwork api={radio()} profile={host.profile} />, async () => {
+    await until(async () => text().includes(said), "the host's sentence")
     assert.ok(text().includes("couldn't check for a newer one"), "the row says the check failed")
-    assert.ok(text().includes(said), "with the host's own sentence")
     assert.ok(button("Choose a file…"), "and the picker is not held hostage to it")
   })
 })
@@ -255,11 +273,33 @@ test("a picked file larger than a slot is refused before anything is written", a
       return { sent: image.length, total: image.length, percent: 100 }
     },
   })
-  await mount(<CharmNetwork api={api} />, async () => {
+  const host = serveFirmware("firmware-no-slot", PUBLISHED)
+  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
     await settle()
     await pick("too-big.bin", CHARM_SLOT_BYTES + 1)
     assert.ok(text().includes("larger than a slot"), "the row refuses it in words")
     assert.deepEqual(asked, [], "and no control write reached the charm")
+  })
+})
+
+test("a file over the slot the host publishes is refused, under it goes", async () => {
+  // The package names its own partition, which is smaller than this phone's constant: what the
+  // host says wins, since the slot is the board's and only its build knows it.
+  const asked: number[] = []
+  const api = radio({
+    upload: async (image) => {
+      asked.push(image.length)
+      return { sent: image.length, total: image.length, percent: 100 }
+    },
+  })
+  const host = serveFirmware("firmware-slot", { ...PUBLISHED, version: "0.1.0", slot: 8 })
+  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
+    await until(async () => text().includes("0.1.0 · up to date"), "the host's answer")
+    await pick("over-slot.bin", 9)
+    assert.ok(text().includes("larger than a slot"), "a byte over the published slot is refused")
+    assert.deepEqual(asked, [], "and nothing went over the link")
+    await pick("fits.bin", 8)
+    assert.deepEqual(asked, [8], "the file the slot holds is sent")
   })
 })
 
@@ -271,7 +311,8 @@ test("a picked file is sent with the hash the phone computes over it", async () 
       return { sent: image.length, total: image.length, percent: 100 }
     },
   })
-  await mount(<CharmNetwork api={api} />, async () => {
+  const host = serveFirmware("firmware-hashed", PUBLISHED)
+  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
     await settle()
     await pick("charm.bin", 8)
     assert.equal(sent.length, 1, "one image went")
@@ -291,7 +332,8 @@ test("a failed upload is drawn with the reason the charm gave", async () => {
       throw new Error("The update failed: it was cancelled")
     },
   })
-  await mount(<CharmNetwork api={api} />, async () => {
+  const host = serveFirmware("firmware-failed", PUBLISHED)
+  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
     await settle()
     await pick("charm.bin", 8)
     assert.ok(text().includes("The update failed: it was cancelled"))
@@ -301,11 +343,9 @@ test("a failed upload is drawn with the reason the charm gave", async () => {
 test("Update sends the published image and reads the version once the charm is back", async () => {
   const sent: { bytes: Uint8Array; sha256: string }[] = []
   let reads = 0
+  // The charm answers its old version until the upload lands, then the new one.
   const api = radio({
-    published: async () => IMAGE_PUBLISHED,
-    // The charm answers its old version until the upload lands, then the new one.
     version: async () => (++reads > 1 ? "0.2.0" : "0.1.0"),
-    image: async () => IMAGE,
     upload: async (image, sha256Hex, onProgress) => {
       sent.push({ bytes: image, sha256: sha256Hex })
       const done = { sent: image.length, total: image.length, percent: 100 }
@@ -313,8 +353,9 @@ test("Update sends the published image and reads the version once the charm is b
       return done
     },
   })
-  await mount(<CharmNetwork api={api} />, async () => {
-    await settle()
+  const host = serveFirmware("firmware-sent", IMAGE_PUBLISHED, IMAGE)
+  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
+    await until(async () => Boolean(button("Update to 0.2.0")), "the offer")
     await click(button("Update to 0.2.0"))
     await settle()
     assert.equal(sent.length, 1, "the published image went")
@@ -331,16 +372,15 @@ test("Update sends the published image and reads the version once the charm is b
 test("an image that is not the one the version names is refused before it goes", async () => {
   const uploads: Uint8Array[] = []
   const api = radio({
-    published: async () => IMAGE_PUBLISHED,
-    // A truncated body, an error page, or a tag that moved: not the bytes the version described.
-    image: async () => new Uint8Array([1, 2, 3, 4]),
     upload: async (image) => {
       uploads.push(image)
       return { sent: image.length, total: image.length, percent: 100 }
     },
   })
-  await mount(<CharmNetwork api={api} />, async () => {
-    await settle()
+  // A truncated body, an error page, or a tag that moved: not the bytes the version described.
+  const host = serveFirmware("firmware-mismatch", IMAGE_PUBLISHED, new Uint8Array([1, 2, 3, 4]))
+  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
+    await until(async () => Boolean(button("Update to 0.2.0")), "the offer")
     await click(button("Update to 0.2.0"))
     await settle()
     assert.deepEqual(uploads, [], "no UpdateBegin reached the charm")
@@ -349,19 +389,21 @@ test("an image that is not the one the version names is refused before it goes",
 })
 
 test("a version that moved between the reads is read again, and its image goes", async () => {
-  let reads = 0
   const sent: { sha256: string }[] = []
   const api = radio({
-    // The row read the old version on opening; a merge published a new one before the tap.
-    published: async () => (++reads === 1 ? PUBLISHED : IMAGE_PUBLISHED),
-    image: async () => IMAGE,
     upload: async (_image, sha256Hex) => {
       sent.push({ sha256: sha256Hex })
       return { sent: IMAGE.length, total: IMAGE.length, percent: 100 }
     },
   })
-  await mount(<CharmNetwork api={api} />, async () => {
-    await settle()
+  // The row read the old version on opening; a merge published a new one before the tap.
+  const host = serveFirmware(
+    "firmware-moved",
+    (reads) => (reads === 1 ? PUBLISHED : IMAGE_PUBLISHED),
+    IMAGE,
+  )
+  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
+    await until(async () => Boolean(button("Update to 0.2.0")), "the offer")
     await click(button("Update to 0.2.0"))
     await settle()
     assert.equal(sent.length, 1, "the image that arrived is sent")
@@ -371,16 +413,15 @@ test("a version that moved between the reads is read again, and its image goes",
 
 test("a charm that cannot be reached is not a charm that didn't say", async () => {
   const api = radio({
-    published: async () => PUBLISHED,
     version: async () => {
       throw new Error("The charm went out of reach")
     },
   })
-  await mount(<CharmNetwork api={api} />, async () => {
-    await settle()
-    assert.ok(
-      text().includes("0.2.0 published · couldn't reach the charm"),
-      "the link's failure is its own sentence",
+  const host = serveFirmware("firmware-unreachable", PUBLISHED)
+  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
+    await until(
+      async () => text().includes("0.2.0 published · couldn't reach the charm"),
+      "the link's own sentence",
     )
     assert.ok(!text().includes("didn't say"), "not blamed on the charm's firmware")
     assert.ok(!find("#charm-update-start"), "and nothing is offered on a version nobody read")
@@ -392,9 +433,7 @@ test("starting an update stops the two-second status poll", async () => {
   let landed = false
   let releaseUpload: (() => void) | undefined
   const api = radio({
-    published: async () => IMAGE_PUBLISHED,
     version: async () => (landed ? "0.2.0" : "0.1.0"),
-    image: async () => IMAGE,
     // A download already running when the row opens starts the poll.
     updateStatus: async () => {
       polls += 1
@@ -406,8 +445,9 @@ test("starting an update stops the two-second status poll", async () => {
       return { sent: IMAGE.length, total: IMAGE.length, percent: 100 }
     },
   })
-  await mount(<CharmNetwork api={api} />, async () => {
-    await settle()
+  const host = serveFirmware("firmware-poll", IMAGE_PUBLISHED, IMAGE)
+  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
+    await until(async () => Boolean(button("Update to 0.2.0")), "the offer")
     const before = polls
     assert.ok(before >= 1, "the row's own snapshot asked")
     await click(button("Update to 0.2.0"))
@@ -422,19 +462,14 @@ test("starting an update stops the two-second status poll", async () => {
 })
 
 test("a charm that does not come back on the new build is said, and the offer is read again", async () => {
-  let publishedReads = 0
   const api = radio({
-    published: async () => {
-      publishedReads += 1
-      return IMAGE_PUBLISHED
-    },
     // The charm answers the build it started on, however often it is asked.
     version: async () => "0.1.0",
-    image: async () => IMAGE,
     upload: async () => ({ sent: IMAGE.length, total: IMAGE.length, percent: 100 }),
   })
-  await mount(<CharmNetwork api={api} />, async () => {
-    await settle()
+  const host = serveFirmware("firmware-not-back", IMAGE_PUBLISHED, IMAGE)
+  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
+    await until(async () => Boolean(button("Update to 0.2.0")), "the offer")
     await click(button("Update to 0.2.0"))
     // The row's four asks, 3 s apart: the charm never answers on the new build.
     await act(async () => {
@@ -445,7 +480,7 @@ test("a charm that does not come back on the new build is said, and the offer is
       text().includes("didn't come back on the new build"),
       "the success sentence is revised rather than left standing",
     )
-    assert.ok(publishedReads >= 2, "and what is published is read again")
+    assert.ok(host.reads() >= 2, "and what is published is read again")
   })
 })
 
@@ -457,7 +492,8 @@ test("the same file can be picked again after a failed upload", async () => {
       throw new Error("The update failed: it was cancelled")
     },
   })
-  await mount(<CharmNetwork api={api} />, async () => {
+  const host = serveFirmware("firmware-again", PUBLISHED)
+  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
     await settle()
     const input = find("#charm-update-file") as HTMLInputElement | null
     assert.ok(input, "the file picker is on screen")

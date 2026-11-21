@@ -12,13 +12,10 @@ import { BOT_MOODS, DEFAULT_MOOD, botImage, type BotMood } from "@/components/bo
 import { findBot } from "@/components/bot"
 import { labelOf } from "@/lib/bot-name"
 import { hasServer, serverConfig } from "@/lib/connection"
-import { getActiveProfile, type Profile } from "@/lib/db"
-import {
-  getCharmFirmware,
-  getCharmFirmwareImage,
-  type CharmFirmware,
-  type HermesConfig,
-} from "@/lib/hermes"
+import type { Profile } from "@/lib/db"
+import type { PluginServer } from "@/lib/features"
+import { getCharmFirmware, type CharmFirmware, type HermesConfig } from "@/lib/hermes"
+import type { HostRoute } from "@/lib/host-record"
 import { isNative } from "@/lib/platform"
 import { quietly } from "@/lib/report"
 import { registryId } from "@/lib/registry"
@@ -482,28 +479,47 @@ export async function uploadCharmFirmware(
 }
 
 /**
- * Which firmware GitHub Packages publishes as `latest`, read from this app's own host: the charm
- * cannot reach a registry that asks for a token, so which image exists is a thing the phone asks the
- * server it already talks to. A refusal is that host's sentence, drawn as it is.
+ * What the host says about the firmware GitHub Packages publishes as `latest`: the package's own
+ * answer, or the sentence it refused with. The charm cannot reach a registry that asks for a token,
+ * so which image exists is a thing the phone asks the server it already talks to; a refusal — no
+ * package yet, a token without `read:packages` — is that host's answer too, in its own words.
  */
-export async function publishedCharmFirmware(): Promise<CharmFirmware> {
-  return getCharmFirmware(await hostForFirmware())
-}
-
-/** The published image's bytes, read from the same host that names it. */
-export async function charmFirmwareImage(): Promise<Uint8Array> {
-  return getCharmFirmwareImage(await hostForFirmware())
-}
+export type PublishedFirmware =
+  | { state: "published"; firmware: CharmFirmware }
+  | { state: "refused"; said: string }
 
 /**
- * The connection a package is read over: the active bot's host, since a charm's firmware is one
- * host's answer.
+ * The published firmware as one of the host's own records: read when the row opens, kept for its
+ * next open, and read again when a merge may have moved the tag. The plugin advertises the route as
+ * `charm_firmware`, so a host older than it offers no published version at all.
  */
-async function hostForFirmware(): Promise<HermesConfig> {
-  const bot = await getActiveProfile()
-  if (!bot || !hasServer(bot))
+export const PUBLISHED_FIRMWARE: HostRoute<PublishedFirmware | undefined> = {
+  feature: "charm_firmware",
+  label: "the published charm firmware",
+  read: async (server, signal) => {
+    try {
+      return { state: "published", firmware: await getCharmFirmware(server, signal) }
+    } catch (error) {
+      // A read that ran out of time never reached an answer: the record's own failed state says
+      // that, rather than the row drawing a timeout as the host's refusal.
+      if (error instanceof DOMException) throw error
+      return { state: "refused", said: said(error) }
+    }
+  },
+}
+
+/** A host's sentence about a read it refused, or the one line that stands in for a bare throw. */
+const said = (error: unknown) =>
+  error instanceof Error && error.message ? error.message : "The host couldn't be read."
+
+/**
+ * The host a charm's firmware is read from: the row's own bot, since a charm's firmware is one
+ * host's answer — the one that holds the registry token.
+ */
+export function hostForActiveBot(profile: PluginServer): HermesConfig {
+  if (!hasServer(profile))
     throw new Error("Add a bot first: the charm's firmware is published on its host.")
-  return serverConfig(bot)
+  return serverConfig(profile)
 }
 
 /** What a test alert is keyed by: no session's, so it clears only when the reader dismisses it. */

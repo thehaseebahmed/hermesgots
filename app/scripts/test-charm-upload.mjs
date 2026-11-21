@@ -226,9 +226,10 @@ test("progress rises, and only the charm's own count is a percentage", async () 
   assert.equal(sent.at(-1), bytes.length)
   // One report per whole percent, plus the end's own: the row is not redrawn thousands of times.
   assert.ok(seen.length <= 102, `one report per percent (${seen.length} for 200 KB)`)
-  // Nothing is known as a percentage before the charm answers; after that it never falls.
-  assert.equal(seen[0].percent, -1)
-  const percents = seen.map((progress) => progress.percent).filter((percent) => percent >= 0)
+  // Nothing is known as a percentage before the charm answers, so nothing is said as one; after
+  // that it never falls.
+  assert.equal(seen[0].percent, undefined, "no percentage until the charm's own count arrives")
+  const percents = seen.map((progress) => progress.percent).filter((percent) => percent !== undefined)
   assert.deepEqual(
     percents,
     [...percents].sort((a, b) => a - b),

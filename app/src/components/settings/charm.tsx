@@ -58,15 +58,15 @@ import { botsByLabel, labelOf } from "@/lib/bot-name"
 import {
   charmAvailable,
   charmBots,
-  charmFirmwareImage,
   charmFirmwareVersion,
   charmNetwork,
   charmPoses,
   charmUpdateStatus,
   forgetCharm,
   forgetCharmWifi,
+  hostForActiveBot,
   pairCharm,
-  publishedCharmFirmware,
+  PUBLISHED_FIRMWARE,
   readCharmBattery,
   sendTestAlert,
   setCharmPet,
@@ -95,8 +95,10 @@ import {
 } from "@/lib/charm-protocol"
 import { type FirmwareProgress, versionAfterReboot } from "@/lib/charm-firmware"
 import type { SyncProgress } from "@/lib/charm-sync"
-import { listProfiles } from "@/lib/db"
-import type { CharmFirmware } from "@/lib/hermes"
+import { getActiveProfile, listProfiles } from "@/lib/db"
+import type { PluginServer } from "@/lib/features"
+import { getCharmFirmwareImage } from "@/lib/hermes"
+import { useHostRecord } from "@/lib/host-record"
 import {
   batteryWords,
   charmSynced,
@@ -115,6 +117,7 @@ import {
   updateWords,
   updateProgressWords,
   wifiWords,
+  type CharmRunning,
 } from "@/lib/charm-words"
 import { quietly } from "@/lib/report"
 import { tell } from "@/lib/tell"
@@ -134,8 +137,9 @@ const UPDATE_POLL_MS = 2_000
 
 /**
  * The Network section's radio, as the page reaches it: every call is one control ask over the
- * charm's own link, or one read of the host that publishes its firmware. It is an interface so a
- * test can draw the section's answers without a radio.
+ * charm's own link. It is an interface so a test can draw the section's answers without a radio.
+ * What the host says about the published firmware is not the charm's answer, and is not here: it is
+ * that host's own record, read by the row below.
  */
 export interface CharmNetworkApi {
   status(): Promise<CharmNetworkReport>
@@ -145,10 +149,6 @@ export interface CharmNetworkApi {
   updateStatus(): Promise<CharmUpdateStatus>
   /** Which build the charm runs; null for a firmware too old to have the ask. */
   version(): Promise<string | null>
-  /** What the package publishes, as the phone's host reads it for the charm. */
-  published(): Promise<CharmFirmware>
-  /** The published image's bytes. */
-  image(): Promise<Uint8Array>
   /** One image over the charm's link, drawing where the phone has got to. */
   upload(
     image: Uint8Array,
@@ -165,8 +165,6 @@ const RADIO: CharmNetworkApi = {
   saveTailnet: setCharmTailnetKey,
   updateStatus: charmUpdateStatus,
   version: charmFirmwareVersion,
-  published: publishedCharmFirmware,
-  image: charmFirmwareImage,
   upload: uploadCharmFirmware,
 }
 
@@ -257,11 +255,14 @@ function SecretField({
  */
 export function CharmNetwork({
   api = RADIO,
+  profile,
   record,
   tailnet,
 }: {
   /** The radio, or a stand-in under test. */
   api?: CharmNetworkApi
+  /** The bot whose host publishes the firmware: the row's read of it is that host's record. */
+  profile?: PluginServer
   /** The network this phone last told the charm to join, while the charm itself is not answering. */
   record?: CharmWifiRecord
   /** Whether a tailnet key was handed over before, while the charm itself is not answering. */
@@ -272,15 +273,18 @@ export function CharmNetwork({
   const [ssid, setSsid] = useState("")
   const [pass, setPass] = useState("")
   const [key, setKey] = useState("")
-  /** Which build the charm runs: null is a firmware too old to say, undefined one not read yet. */
-  const [running, setRunning] = useState<string | null | undefined>(undefined)
-  /** Whether the version read never opened its link, which is not the charm having nothing to say. */
-  const [reachFailed, setReachFailed] = useState(false)
-  /** What the host says `latest` holds, or null once its read has been refused. */
-  const [published, setPublished] = useState<CharmFirmware | null>(null)
-  /** Whether the host's read is over: nothing published after it is a refusal, not a wait. */
-  const [checked, setChecked] = useState(false)
-  const [checkSaid, setCheckSaid] = useState<string | null>(null)
+  /** Which build the charm runs, as its own answer says. */
+  const [running, setRunning] = useState<CharmRunning>({ state: "reading" })
+  /**
+   * What the host says `latest` holds, as one of its own records: read when the row opens, kept for
+   * its next open, and read again when a merge may have moved the tag. A plugin older than the route
+   * answers nothing, and the row says it couldn't check.
+   */
+  const firmware = useHostRecord(profile, PUBLISHED_FIRMWARE, undefined)
+  const seen = firmware.value
+  const published = seen?.state === "published" ? seen.firmware : undefined
+  /** The host's own sentence where its read was refused, which is not a charmed-nothing-said. */
+  const checkSaid = seen?.state === "refused" ? seen.said : null
   const [progress, setProgress] = useState<FirmwareProgress | null>(null)
   const [busy, setBusy] = useState<"wifi" | "forget" | "tailnet" | "update" | null>(null)
   const [said, setSaid] = useState<string | null>(null)
@@ -288,7 +292,7 @@ export function CharmNetwork({
   const file = useRef<HTMLInputElement | null>(null)
 
   /** The two versions the row compares: the charm's own, and the package's as its host reads it. */
-  const versions = { running, published: published?.version, answered: checked, reachFailed }
+  const versions = { running, published: published?.version, answered: firmware.settled }
   const offers = firmwareOffers(versions)
 
   /** What the charm says about its links and its firmware, read in one go: both or neither. */
@@ -300,39 +304,18 @@ export function CharmNetwork({
     return { report, update }
   }, [api])
 
-  /** What the package publishes, read again whenever a failed upload may have moved it. */
-  const readPublished = useCallback(async () => {
-    try {
-      const found = await api.published()
-      setPublished(found)
-      setCheckSaid(null)
-    } catch (error) {
-      setPublished(null)
-      setCheckSaid(message(error))
-    }
-  }, [api])
-
   /**
-   * Both versions, read side by side when the row opens: the charm's over its link, and the
-   * package's through the host that holds a registry token. A version the charm can't say stays
-   * unsaid rather than guessed, a link that never opened is its own fact, and the host's refusal is
-   * kept in its own words for the row to draw.
+   * The charm's own version when the row opens: a version it can't say stays unsaid rather than
+   * guessed, and a link that never opened is its own fact. What the package publishes is the host's
+   * record above, read alongside it.
    */
   useEffect(() => {
-    void Promise.all([
-      api.version().then(
-        (found) => {
-          setRunning(found)
-          setReachFailed(false)
-        },
-        () => {
-          setRunning(undefined)
-          setReachFailed(true)
-        },
-      ),
-      readPublished(),
-    ]).then(() => setChecked(true))
-  }, [api, readPublished])
+    void api.version().then(
+      (found) =>
+        setRunning(found === null ? { state: "too-old" } : { state: "says", version: found }),
+      () => setRunning({ state: "unreachable" }),
+    )
+  }, [api])
 
   // The section's first line is the charm's own: read once on opening, and again after each write.
   useEffect(() => {
@@ -409,11 +392,15 @@ export function CharmNetwork({
 
   /**
    * The version again once the charm is back: a change is what says the new build booted, and a
-   * charm that never answered on it is the row's to say rather than a success left standing.
+   * charm that never answered on it is the row's to say rather than a success left standing. The
+   * build compared against is the one the row read: null where it read none, so any answer is the
+   * change — a charm that could not say its build before is not a charm that came back on one.
    */
-  const readBack = async (was: string | null | undefined) => {
+  const readBack = async () => {
+    const was = running.state === "says" ? running.version : null
     const { changed, version } = await versionAfterReboot(() => api.version(), was)
-    if (changed) setRunning(version)
+    if (changed)
+      setRunning(version === null ? { state: "too-old" } : { state: "says", version })
     return changed
   }
 
@@ -430,14 +417,14 @@ export function CharmNetwork({
     setProgress(null)
     try {
       const { image, sha256Hex } = await load()
-      setProgress({ sent: 0, total: image.length, percent: -1 })
+      setProgress({ sent: 0, total: image.length })
       await api.upload(image, sha256Hex, setProgress)
       setSaid(FIRMWARE_SENT)
-      if (await readBack(running)) return
+      if (await readBack()) return
       // The charm never answered on the new build: the offer is read again too, since a merge may
       // have published another version while this one was being tried.
       setSaid(FIRMWARE_NOT_BACK)
-      await readPublished()
+      await firmware.reload()
     } catch (error) {
       setSaid(message(error))
     } finally {
@@ -454,28 +441,27 @@ export function CharmNetwork({
   const sendPublished = () =>
     send(async () => {
       if (!published) throw new Error("The published firmware is not known yet.")
-      const image = await api.image()
+      const image = await getCharmFirmwareImage(hostForActiveBot(profile))
       const sha256Hex = await sha256Of(image)
       if (image.length === published.size && sha256Hex === published.sha256)
         return { image, sha256Hex }
       // The tag may have moved between the row's read and this one: the version it names now is
       // the one these bytes have to match before anything goes over the link.
-      const again = await api.published().catch(() => null)
-      if (again && again.size === image.length && again.sha256 === sha256Hex) {
-        setPublished(again)
-        setCheckSaid(null)
+      const again = await firmware.reload()
+      const fresh = again?.state === "published" ? again.firmware : undefined
+      if (fresh && fresh.size === image.length && fresh.sha256 === sha256Hex)
         return { image, sha256Hex }
-      }
       throw new Error(PUBLISHED_CHANGED)
     })
 
   /**
    * A file from the phone: its bytes, and the SHA-256 computed here over them — that hash is the
    * whole trust anchor, so what the charm checks is what this phone read. A file too big for a slot
-   * is refused before a byte goes over the link.
+   * is refused before a byte goes over the link: the slot the host publishes where it names one, this
+   * phone's own constant otherwise.
    */
   const sendFile = async (picked: File) => {
-    if (picked.size > CHARM_SLOT_BYTES) {
+    if (picked.size > (published?.slot ?? CHARM_SLOT_BYTES)) {
       setSaid(FILE_TOO_BIG)
       return
     }
@@ -630,6 +616,8 @@ export function CharmNetwork({
 export function CharmSettings() {
   const charm = usePairedCharm()
   const profiles = useLiveQuery(listProfiles, [])
+  /** The bot whose host publishes the firmware: the row's own read of it is that host's record. */
+  const profile = useLiveQuery(getActiveProfile, [])
   const labels = useBotLabels()
   const [busy, setBusy] = useState<"pair" | "sync" | "test" | "wake" | "battery" | null>(null)
   const [progress, setProgress] = useState<SyncProgress | null>(null)
@@ -868,7 +856,7 @@ export function CharmSettings() {
               />
             </button>
           </Group>
-          <CharmNetwork record={charm.wifi} tailnet={charm.tailnet} />
+          <CharmNetwork profile={profile} record={charm.wifi} tailnet={charm.tailnet} />
           <Group>
             <ActionRow
               icon={UnlinkIcon}
