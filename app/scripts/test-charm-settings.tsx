@@ -155,6 +155,21 @@ test("a passphrase is sent once and never drawn as a label", async () => {
   })
 })
 
+test("a charm that kept the secret readable says so, in its own words", async () => {
+  // 11 on the wire: the charm kept the network and warns that the chip gives it away.
+  const api = radio({ saveWifi: async () => 11 })
+  await mount(<CharmNetwork api={api} />, async () => {
+    await type(find("#charm-wifi-ssid"), "Home")
+    await type(find("#charm-wifi-pass"), "correct horse battery")
+    await submit(find("#charm-wifi-pass"))
+    assert.ok(
+      text().includes("The charm kept it, but anyone holding the charm can read it off the chip"),
+      "the row says the secret is readable, not that the charm will forget it",
+    )
+    assert.ok(!text().includes("will forget this"), "no promise a reboot wipes it")
+  })
+})
+
 test("the update row shows the hash as it will go over the wire", async () => {
   await mount(<CharmNetwork api={radio()} />, async () => {
     await type(find("#charm-update-sha"), "not a hash")

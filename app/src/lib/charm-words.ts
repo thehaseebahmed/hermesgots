@@ -83,10 +83,14 @@ export function wifiReasonWords(reason: number): string {
   }
 }
 
-/** What the phone remembers of a network the charm took, when the charm itself has not answered. */
+/**
+ * What the phone remembers of a network the charm took, when the charm itself has not answered. A
+ * record is written only for a yes, so `saved` means kept; whether the secret can be read off the
+ * chip is the code's business, and its words are the warning, not this line.
+ */
 function recordWords(record?: CharmWifiRecord) {
   if (!record) return "Not set"
-  return record.saved ? `Saved ${record.ssid}` : `${record.ssid}, kept for this boot only`
+  return record.saved ? `Saved ${record.ssid}` : `${record.ssid}, not saved`
 }
 
 /** The tailnet line: whether the charm is on it, and its own name for it. */
@@ -124,6 +128,10 @@ export function updateReasonWords(reason: number): string {
       return "the charm couldn't write it"
     case CharmUpdateReason.Cancelled:
       return "it was cancelled"
+    case CharmUpdateReason.WrongScheme:
+      // The charm refuses an image built for the other kind of board, and one that states no kind
+      // at all: the phone says which, because "the charm didn't say why" would read as a fault.
+      return "that image was built for a different kind of charm"
     default:
       return "the charm didn't say why"
   }
