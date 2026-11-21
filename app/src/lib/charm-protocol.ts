@@ -79,6 +79,9 @@ export const CharmUpdateReason = {
   TooBig: 4,
   WriteFailed: 5,
   Cancelled: 6,
+  // The image was built for the other kind of charm, or states no kind at all: 7 is the firmware's
+  // `WrongScheme`, and an app that did not know it would read a refusal it cannot name.
+  WrongScheme: 7,
 } as const
 
 /** What an alert's title and body may measure, as `kMaxTitleLen` and `kMaxBodyLen` do. */

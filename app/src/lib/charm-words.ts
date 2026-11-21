@@ -128,6 +128,10 @@ export function updateReasonWords(reason: number): string {
       return "the charm couldn't write it"
     case CharmUpdateReason.Cancelled:
       return "it was cancelled"
+    case CharmUpdateReason.WrongScheme:
+      // The charm refuses an image built for the other kind of board, and one that states no kind
+      // at all: the phone says which, because "the charm didn't say why" would read as a fault.
+      return "that image was built for a different kind of charm"
     default:
       return "the charm didn't say why"
   }

@@ -16,6 +16,7 @@ import {
   CharmCode,
   CharmLinkState,
   CharmOp,
+  CharmUpdateReason,
   CharmUpdateState,
   beginMessage,
   botMessage,
@@ -740,6 +741,13 @@ test("the network lines are the charm's own state in words", async () => {
   assert.equal(
     updateWords({ state: 3, percent: 0, reason: 3 }),
     "Update failed: the image didn't match its SHA-256",
+  )
+  // 7 is the charm refusing an image built for the other kind of board, and one that states no kind:
+  // the reader is told which, rather than "the charm didn't say why".
+  assert.equal(CharmUpdateReason.WrongScheme, 7)
+  assert.equal(
+    updateWords({ state: 3, percent: 0, reason: CharmUpdateReason.WrongScheme }),
+    "Update failed: that image was built for a different kind of charm",
   )
 })
 
