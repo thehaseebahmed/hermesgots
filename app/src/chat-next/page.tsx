@@ -14,6 +14,7 @@ import { useLocation, useNavigate, useSearchParams } from "react-router"
 
 import { Refusal } from "@/components/banner"
 import { PointChips } from "@/components/chat/canvas-points"
+import type { ChatMark } from "@/lib/chat-flow"
 import type { TakenForm } from "@/lib/clarify-form"
 import { isPhoto } from "@/lib/attachment-caps"
 import { drawnCell } from "@/lib/media-kind"
@@ -429,11 +430,17 @@ export interface ThreadViewProps {
    */
   firstReadOut: boolean
   /**
-   * What this view draws where a thread with no turns draws its empty state: a build's step sheet
-   * says it holds no messages in place of the greeting a chat with nothing said wears. Absent, the
-   * thread draws its own empty state, as every thread that names none has always drawn it.
+   * What this view draws where a thread with no turns draws its empty state: a build's run says it has
+   * said nothing yet in place of the greeting a chat with nothing said wears. Absent, the thread draws
+   * its own empty state, as every thread that names none has always drawn it.
    */
   noTurns?: ReactNode
+  /**
+   * What a screen marks in this thread — a build's visits, in the canvas lane — placed above the
+   * message that followed each, in the order they happened. A view that draws turns rather than rows
+   * leaves them out, so only the app's thread draws a mark.
+   */
+  marks?: readonly ChatMark[]
   /**
    * Older pages of the transcript are being read (`reading`) or the last read failed (`failed`, and
    * `retry` reads on from there); absent once the chat is whole, so nothing is drawn for it then.

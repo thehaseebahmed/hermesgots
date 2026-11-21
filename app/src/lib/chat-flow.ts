@@ -5,9 +5,10 @@ import { compactionAt, type CompactionMarks } from "./compactions.ts"
 
 /**
  * The flow one chat draws, whichever screen draws it: its messages in the thread's own order, with a
- * compaction's divider above the message it sits over. What a screen adds around those entries — Main's
- * cards and moved markers, the day heading over the first thing each day holds — is that screen's
- * decoration, which is why this rule answers entries rather than rows (ADR 0097).
+ * compaction's divider above the message it sits over and any mark a screen names above the message
+ * that followed it. What a screen adds around those entries — Main's cards and moved markers, the day
+ * heading over the first thing each day holds — is that screen's decoration, which is why this rule
+ * answers entries rather than rows (ADR 0097).
  */
 
 /** A compaction's divider, as a flow draws it: the host's own time for it, and the compaction it marks. */
@@ -17,8 +18,26 @@ export interface CompactionEntry {
   compaction: Compaction
 }
 
-/** An entry one chat's flow draws: a message, or the divider of a compaction above one. */
-export type ChatFlowEntry = { kind: "message"; message: Message } | CompactionEntry
+/**
+ * Something a screen marks in a chat's flow — a build's visit, in the canvas lane — placed above the
+ * first message that came at or after it. It carries no node: this rule answers data, and the view
+ * that draws it decides what a mark looks like.
+ */
+export interface ChatMark {
+  /** When it happened, in ms, on the clock a message's `createdAt` keeps. */
+  at: number
+  /** What the mark says. */
+  words: string
+  /** What a check found, where the mark names one. */
+  flag?: string
+}
+
+export interface MarkEntry extends ChatMark {
+  kind: "mark"
+}
+
+/** An entry one chat's flow draws: a message, or a divider above one. */
+export type ChatFlowEntry = { kind: "message"; message: Message } | CompactionEntry | MarkEntry
 
 export const compactionEntry = (compaction: Compaction): CompactionEntry => ({
   kind: "compaction",
@@ -28,22 +47,37 @@ export const compactionEntry = (compaction: Compaction): CompactionEntry => ({
 
 /**
  * The entries a chat draws: each message, with the divider of whatever compaction the host placed
- * above it (`compactionMarks`), in the one order the thread holds. A compaction the record keeps off
- * the thread — one inside a reply, or with nothing drawn on a side of it — draws nothing here, and its
- * placement is `compactionMarks`' answer, not this fold's.
+ * above it (`compactionMarks`) and any mark the screen named that came before it, in the one order
+ * the thread holds. A compaction the record keeps off the thread — one inside a reply, or with nothing
+ * drawn on a side of it — draws nothing here, and its placement is `compactionMarks`' answer, not this
+ * fold's.
+ *
+ * A mark is placed by time, not by id, because what a screen marks happened while the chat was being
+ * written — `marks` are given in the order they happened, and are drawn in that order: a visit that began in the second a message was stamped stands above that message, and one
+ * that began after the last message read so far stands at the foot of what is drawn. A message the
+ * thread does not date (`createdAt` 0, a send this device is still holding) is later than every mark,
+ * since a held message is the newest thing the flow has.
  */
 export function chatFlow({
   thread,
   compacted,
+  marks,
 }: {
   thread?: readonly Message[]
   compacted?: CompactionMarks
+  marks?: readonly ChatMark[]
 }): ChatFlowEntry[] {
   const entries: ChatFlowEntry[] = []
+  const pending = [...(marks ?? [])]
   for (const message of thread ?? []) {
     const compaction = compacted?.before.get(message.id)
     if (compaction) entries.push(compactionEntry(compaction))
+    const at = message.createdAt
+    while (pending.length && (at === 0 || pending[0].at <= at)) {
+      entries.push({ kind: "mark", ...pending.shift()! })
+    }
     entries.push({ kind: "message", message })
   }
+  for (const mark of pending) entries.push({ kind: "mark", ...mark })
   return entries
 }

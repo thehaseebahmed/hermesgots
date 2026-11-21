@@ -77,3 +77,36 @@ test("no entry is a card, a day heading or a moved marker: a chat draws messages
     "one entry per message, plus the one divider: nothing is placed among them",
   )
 })
+
+test("a mark stands above the first message that came after it", () => {
+  // A build's visits are marks in its run: each one happened at a time the host stamped, and the
+  // message that follows it is where the work of that visit begins.
+  const thread = [message("m1", 10), message("m2", 20), message("m3", 30)]
+  const marks = [
+    { at: 5, words: "Planning · 2.0s" },
+    { at: 20, words: "Checking · Checks passed · 1.0s", flag: "passing" },
+  ]
+  const entries = chatFlow({ thread, marks })
+  assert.deepEqual(kinds(entries), ["mark", "message", "mark", "message", "message"])
+  assert.deepEqual(
+    entries.map((entry) =>
+      entry.kind === "message" ? entry.message.id : `|${entry.words}`,
+    ),
+    ["|Planning · 2.0s", "m1", "|Checking · Checks passed · 1.0s", "m2", "m3"],
+    "a mark before every message stands at the top, and one stamped in a message's own second stands above it",
+  )
+})
+
+test("a mark after every message stands at the foot of the run", () => {
+  const thread = [message("m1", 10)]
+  const entries = chatFlow({ thread, marks: [{ at: 40, words: "Publishing" }] })
+  assert.deepEqual(kinds(entries), ["message", "mark"])
+  assert.equal(entries[1].words, "Publishing", "the visit the run has not reached yet ends it")
+})
+
+test("a run with no marks is the flow it was, and a mark on a thread with nothing said still stands", () => {
+  assert.deepEqual(chatFlow({ thread: [message("m1", 10)] }), [
+    { kind: "message", message: message("m1", 10) },
+  ])
+  assert.deepEqual(kinds(chatFlow({ marks: [{ at: 5, words: "Planning" }] })), ["mark"])
+})

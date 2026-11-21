@@ -40,6 +40,7 @@ import { Spinner } from "@/components/ui/spinner"
 import { AgentsContext, runningAgents, type AgentsSource } from "@/lib/agents"
 import { isBackgroundSafeRunActive } from "@/lib/break-reminders"
 import { isPhoto } from "@/lib/attachment-caps"
+import { BuildMark } from "@/components/chat/build-mark"
 import { chatFlow } from "@/lib/chat-flow"
 import { markRequest } from "@/lib/request-text"
 import { compactionMarks } from "@/lib/compactions"
@@ -90,6 +91,7 @@ export function AppThreadView({
   failure,
   firstReadOut,
   noTurns,
+  marks,
   older,
   origin,
   earlier,
@@ -199,7 +201,10 @@ export function AppThreadView({
   )
   // What the chat draws: its messages, with a compaction's divider above the message it sits over,
   // and nothing else — a Main is drawn like any other chat.
-  const flow = useMemo(() => chatFlow({ thread: messages, compacted }), [messages, compacted])
+  const flow = useMemo(
+    () => chatFlow({ thread: messages, compacted, marks }),
+    [messages, compacted, marks],
+  )
   const { drawn, cut } = useFirstRows(chatId, flow, flow.length > 0)
   // A chat with nothing said, and nothing held for it — no message that didn't go, nothing queued, no
   // archive to offer — and whose read has answered, is offered its bot's greeting. One still being
@@ -209,7 +214,9 @@ export function AppThreadView({
   // The words a view says where it has no turn to draw, standing in the place the messages would:
   // the thread's own marks — a failure, a page above it still to be read, the archive — stay around
   // them rather than being replaced by the greeting a chat with nothing said wears.
-  const saysNothing = noTurns !== undefined && !flow.length
+  // A thread with no message to draw says what its view names for that, even where a mark stands in
+  // the flow: a build that has been asked for a page has visits to mark and nothing said yet.
+  const saysNothing = noTurns !== undefined && !messages.length
   const unstarted = Boolean(blank) && !messages.length && !streaming && !queue?.items.length
   // The one loader a thread has, over a thread held nowhere (ADR 0084). `flow` is what the thread
   // draws — messages and compaction dividers — so a thread the device holds any of is never loading.
@@ -289,6 +296,14 @@ export function AppThreadView({
                       if (entry.kind === "compaction")
                         return (
                           <Compacted key={`compaction-${entry.at}`} compaction={entry.compaction} />
+                        )
+                      if (entry.kind === "mark")
+                        return (
+                          <BuildMark
+                            key={`mark-${entry.at}-${entry.words}`}
+                            words={entry.words}
+                            {...(entry.flag ? { flag: entry.flag } : {})}
+                          />
                         )
                       const message = entry.message
                       // A model change is a project session's mark; a chat draws none (ADR 0087).

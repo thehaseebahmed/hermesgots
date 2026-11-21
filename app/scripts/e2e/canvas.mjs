@@ -258,6 +258,17 @@ await flow(
       EDIT,
       "and describes the build by its first request",
     )
+    // The run is marked where each visit began, so the phases the lane used to draw as five rows are
+    // read inside the work they were spent on.
+    assert.ok(
+      (await stepSheet.locator("[data-build-mark]").count()) > 0,
+      "the run is marked where each visit began",
+    )
+    assert.match(
+      (await stepSheet.locator("[data-build-mark]").first().innerText()).trim(),
+      /^Planning\b/,
+      "and its first mark is the planning visit the build began with",
+    )
     assert.equal(
       await stepSheet.getByText(checkReport(1)).count(),
       0,

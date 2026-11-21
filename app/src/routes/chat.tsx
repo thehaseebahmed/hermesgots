@@ -1139,6 +1139,9 @@ function CurrentChatPage({ slot, id: named }: ChatPageProps) {
                       return (
                         <Compacted key={`compaction-${entry.at}`} compaction={entry.compaction} />
                       )
+                    // This screen names no marks of its own: the canvas lane's run is the one thread
+                    // that does, and it draws them through the app view.
+                    if (entry.kind === "mark") return null
                     const message = entry.message
                     // A model change is a project session's mark; a chat draws none (ADR 0087).
                     const change = session ? changes.get(message.id) : undefined

@@ -12,7 +12,8 @@ import {
   PopupTitle,
 } from "@/components/popup"
 import type { ThreadViewProps } from "@/chat-next/page"
-import { atWork, flagWords, phaseWord, rowWords } from "@/lib/build-steps"
+import { atWork, flagWords, phaseWord, rowWords, visitWords, visitsOf } from "@/lib/build-steps"
+import type { ChatMark } from "@/lib/chat-flow"
 import type { CanvasBuildRow } from "@/lib/canvases"
 import { COLUMN, COMPOSER_SLOT, REPLY_EDGE, REPLY_TEXT, THREAD_GUTTER } from "@/lib/layout"
 import { cn } from "@/lib/utils"
@@ -34,6 +35,9 @@ interface Lane {
 }
 
 const LaneOf = createContext<Lane | null>(null)
+
+/** The visits a build's run is marked with, kept in a context so the view is one stable component. */
+const MarksOf = createContext<readonly ChatMark[]>([])
 
 /**
  * The one row a build draws (G1): what it is doing while it works, and the version it published once
@@ -123,10 +127,12 @@ function NoComposer() {
  * asked for a page has said nothing yet.
  */
 function SheetThread(props: ThreadViewProps) {
+  const marks = useContext(MarksOf)
   return (
     <Suspense fallback={null}>
       <AppThreadView
         {...props}
+        marks={marks}
         noTurns={
           <p data-build-silent className={cn(COLUMN, "px-4 py-6 text-sm text-muted-foreground")}>
             {NOTHING_YET}
@@ -135,6 +141,19 @@ function SheetThread(props: ThreadViewProps) {
       />
     </Suspense>
   )
+}
+
+/**
+ * The marks a build's run draws: one for every visit its record holds, saying what the build was
+ * doing, what a check found and how long the visit took — the history the lane used to draw as a row
+ * per step, now read inside the run it happened in.
+ */
+function marksOf(build: CanvasBuildRow): ChatMark[] {
+  return visitsOf(build).map((visit) => ({
+    at: visit.startedAt,
+    words: visitWords(visit),
+    ...(visit.flag ? { flag: visit.flag } : {}),
+  }))
 }
 
 /**
@@ -182,14 +201,16 @@ export function CanvasBuildsLane({
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             {sight ? (
               <Suspense fallback={null}>
-                <AppChatNextThread
-                  chatId={chatId}
-                  server={bot.baseUrl}
-                  apiKey={bot.apiKey ?? null}
-                  session={sight.session}
-                  View={SheetThread}
-                  Composer={NoComposer}
-                />
+                <MarksOf.Provider value={marksOf(sight)}>
+                  <AppChatNextThread
+                    chatId={chatId}
+                    server={bot.baseUrl}
+                    apiKey={bot.apiKey ?? null}
+                    session={sight.session}
+                    View={SheetThread}
+                    Composer={NoComposer}
+                  />
+                </MarksOf.Provider>
               </Suspense>
             ) : null}
           </div>
