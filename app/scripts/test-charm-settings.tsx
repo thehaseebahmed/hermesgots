@@ -11,18 +11,26 @@ import { act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { CharmNetwork, type CharmNetworkApi } from "@/components/settings/charm"
-import { CHARM_SLOT_BYTES, CharmLinkState, CharmUpdateState } from "@/lib/charm-protocol"
+import {
+  CHARM_SLOT_BYTES,
+  CharmLinkState,
+  CharmUpdateState,
+  type CharmNetworkReport,
+} from "@/lib/charm-protocol"
+import type { CharmRead } from "@/lib/charm-words"
 import { db } from "@/lib/db"
 import type { CharmFirmware } from "@/lib/hermes"
 import { SettingsPage } from "@/routes/settings"
-import { BatteryRow, WakingGroup } from "@/components/settings/charm"
+import { BatteryRow, CharmStatusRow, WakingGroup } from "@/components/settings/charm"
 import {
   Path,
   click,
   connection,
+  findAll,
   find,
   findText,
   json,
+  labelled,
   mount,
   seedSettings,
   settle,
@@ -80,7 +88,10 @@ test("Developer ends with a Charm tests group holding one row per moment", async
     assert.ok(page.includes("Test Question Alert"), "and so can a question")
     // Each row says what the charm will draw, so the developer knows which card is coming: the
     // approval's pair and the handoff, or the handoff alone.
-    assert.ok(page.includes("Allow once, Deny and Show on Phone"), "the approval's buttons are named")
+    assert.ok(
+      page.includes("Allow once, Deny and Show on Phone"),
+      "the approval's buttons are named",
+    )
     assert.ok(page.includes("Show on Phone alone"), "and the question's one")
   })
 })
@@ -584,17 +595,131 @@ test("the waking group offers the switch, the three windows and what off leaves"
 
   // With the switch off the row says what is left rather than repeating the switch.
   await mount(
-    <WakingGroup
-      wake={{ doubleTap: false, quietSeconds: 30 }}
-      busy={false}
-      onChange={() => {}}
-    />,
+    <WakingGroup wake={{ doubleTap: false, quietSeconds: 30 }} busy={false} onChange={() => {}} />,
     async () => {
       await settle()
       assert.ok(text().includes("Only the buttons wake it"))
       assert.ok(text().includes("30 seconds"))
     },
   )
+})
+
+/** The report the charm answers with, in the states its own wire names for each link. */
+const report = (wifi: number, tailnet: number) => ({
+  wifi: { state: wifi, reason: 0, ip: "", ssid: "" },
+  tailnet: { state: tailnet, ip: "" },
+})
+
+/** The marks a status row draws: one for each link that is down, wearing that link's own words. */
+const marks = () => findAll('[role="img"]')
+
+test("the page draws a mark for each link that is down and the level", async () => {
+  await mount(
+    <CharmStatusRow
+      charm={{ name: "Desk charm" }}
+      status={{ state: "read", value: report(CharmLinkState.Off, CharmLinkState.Failed) }}
+      battery={{ percent: 82, charging: false, at: Date.now() }}
+    />,
+    async () => {
+      await settle()
+      assert.ok(text().includes("Desk charm"), "the charm is named")
+      assert.ok(labelled('[role="img"]', "Wi-Fi is down"), "a mark for the Wi-Fi link")
+      assert.ok(labelled('[role="img"]', "Tailnet is down"), "a mark for the tailnet")
+      assert.equal(
+        labelled('[role="img"]', "Bluetooth is down"),
+        null,
+        "and none for the link the report itself arrived on",
+      )
+      assert.match(text(), /82%/, "the level is drawn beside them")
+    },
+  )
+})
+
+test("a link the page has not read draws nothing, and the level is drawn all the same", async () => {
+  // Nothing has answered yet: not one of the three is known to be down, and a mark for one would be
+  // a guess. The glass draws nothing for a fact it has not read either.
+  await mount(
+    <CharmStatusRow charm={{ name: "Desk charm" }} status={{ state: "reading" }} />,
+    async () => {
+      await settle()
+      assert.equal(marks().length, 0, "no mark for a fact nobody has read")
+      assert.ok(text().includes("Not read yet"), "and the level is still drawn, saying what it is")
+    },
+  )
+})
+
+test("a read that failed marks Bluetooth", async () => {
+  // The page's own ask did not open the link: that is the Bluetooth mark, and it is the one fact
+  // here the phone learns by asking rather than by being told.
+  await mount(
+    <CharmStatusRow charm={{ name: "Desk charm" }} status={{ state: "failed" }} />,
+    async () => {
+      await settle()
+      assert.equal(marks().length, 1, "one link is known to be down")
+      assert.ok(labelled('[role="img"]', "Bluetooth is down"))
+    },
+  )
+})
+
+test("a read that failed keeps the two links the charm last named", async () => {
+  // It answered once and left: the report it sent still stands, so all three are drawn — the phone's
+  // link and the charm's own. Nothing is forgotten because a later ask went unanswered.
+  await mount(
+    <CharmStatusRow
+      charm={{ name: "Desk charm" }}
+      status={{ state: "failed", last: report(CharmLinkState.Off, CharmLinkState.Off) }}
+    />,
+    async () => {
+      await settle()
+      assert.equal(marks().length, 3, "every link that is down, the two it named included")
+      assert.ok(labelled('[role="img"]', "Bluetooth is down"))
+      assert.ok(labelled('[role="img"]', "Wi-Fi is down"))
+      assert.ok(labelled('[role="img"]', "Tailnet is down"))
+    },
+  )
+})
+
+test("a link that is up draws no mark", async () => {
+  await mount(
+    <CharmStatusRow
+      charm={{ name: "Desk charm" }}
+      status={{ state: "read", value: report(CharmLinkState.Online, CharmLinkState.Online) }}
+      battery={{ percent: 64, charging: true, at: Date.now() }}
+    />,
+    async () => {
+      await settle()
+      assert.equal(marks().length, 0, "a band with nothing in it, as the glass draws one")
+      assert.match(text(), /64%/, "and the level, which a settings page always has room for")
+    },
+  )
+})
+
+test("the network section tells the row above what its own read found", async () => {
+  const reads: CharmRead<CharmNetworkReport>[] = []
+  await mount(<CharmNetwork api={radio()} onReport={(read) => reads.push(read)} />, async () => {
+    await until(async () => reads.some((read) => read.state === "read"), "the charm's answer")
+    const found = reads.find((read) => read.state === "read")
+    assert.ok(
+      found?.state === "read" && found.value.wifi.ssid === "Home",
+      "the report the charm answered, handed up as the row above draws it",
+    )
+  })
+})
+
+test("a read that failed is told as a failure, not as a charm that said nothing", async () => {
+  const reads: CharmRead<CharmNetworkReport>[] = []
+  const api = radio({
+    status: async () => {
+      throw new Error("The charm went out of reach")
+    },
+  })
+  await mount(<CharmNetwork api={api} onReport={(read) => reads.push(read)} />, async () => {
+    await until(async () => reads.some((read) => read.state === "failed"), "the failed read")
+    assert.ok(
+      !reads.some((read) => read.state === "read"),
+      "a read that never landed is not drawn as an answer",
+    )
+  })
 })
 
 test("the battery row says the level, the charger and how old the reading is", async () => {
@@ -609,7 +734,7 @@ test("the battery row says the level, the charger and how old the reading is", a
       await settle()
       assert.match(text(), /82% · Charging · just now/)
       await click(rowButton("Battery"))
-      assert.equal(asked, 1)  // tapping the row asks the charm again
+      assert.equal(asked, 1) // tapping the row asks the charm again
     },
   )
 

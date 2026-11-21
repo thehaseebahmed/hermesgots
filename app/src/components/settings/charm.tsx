@@ -25,6 +25,7 @@ import {
   PawPrintIcon,
   RefreshCwIcon,
   UnlinkIcon,
+  WaypointsIcon,
   WifiIcon,
   WifiOffIcon,
 } from "lucide-react"
@@ -102,7 +103,6 @@ import { getCharmFirmwareImage } from "@/lib/hermes"
 import { useHostRecord } from "@/lib/host-record"
 import {
   batteryWords,
-  charmSynced,
   doubleTapSubtitle,
   FILE_TOO_BIG,
   FIRMWARE_CAPTION,
@@ -110,15 +110,22 @@ import {
   FIRMWARE_SENT,
   firmwareOffers,
   firmwareWords,
+  LINK_DOWN_WORDS,
+  linksDown,
   petSubtitle,
   PUBLISHED_CHANGED,
   QUIET_TITLE,
   quietWords,
+  readFailed,
+  readValue,
   tailnetWords,
   updateWords,
   updateProgressWords,
   wifiWords,
+  type CharmLink,
+  type CharmRead,
   type CharmRunning,
+  type CharmSeen,
 } from "@/lib/charm-words"
 import { quietly } from "@/lib/report"
 import { tell } from "@/lib/tell"
@@ -127,11 +134,16 @@ import { useBotLabels } from "@/lib/use-bot-labels"
 const message = (error: unknown) =>
   error instanceof Error && error.message ? error.message : "Something went wrong"
 
+/**
+ * What a settled read leaves behind. A read that failed keeps what the one before it found: the
+ * charm is out of reach, not empty, and what it said while it was there still stands.
+ */
+const settledRead = <T,>(result: PromiseSettledResult<T>, before: CharmRead<T>): CharmRead<T> =>
+  result.status === "fulfilled" ? { state: "read", value: result.value } : readFailed(before)
+
 /** The SHA-256 of bytes this phone holds, as the lowercase hex the link takes. */
 const sha256Of = async (image: Uint8Array) =>
-  hexOf(
-    new Uint8Array(await crypto.subtle.digest("SHA-256", image as unknown as BufferSource)),
-  )
+  hexOf(new Uint8Array(await crypto.subtle.digest("SHA-256", image as unknown as BufferSource)))
 
 /** How often a running firmware download is asked where it has got to. */
 const UPDATE_POLL_MS = 2_000
@@ -259,6 +271,7 @@ export function CharmNetwork({
   profile,
   record,
   tailnet,
+  onReport,
 }: {
   /** The radio, or a stand-in under test. */
   api?: CharmNetworkApi
@@ -268,9 +281,11 @@ export function CharmNetwork({
   record?: CharmWifiRecord
   /** Whether a tailnet key was handed over before, while the charm itself is not answering. */
   tailnet?: boolean
+  /** The page's own read, told to the row above: the paired section's status draws it. */
+  onReport?: (read: CharmRead<CharmNetworkReport>) => void
 }) {
-  const [report, setReport] = useState<CharmNetworkReport | null>(null)
-  const [update, setUpdate] = useState<CharmUpdateStatus | null>(null)
+  const [report, setReport] = useState<CharmRead<CharmNetworkReport>>({ state: "reading" })
+  const [update, setUpdate] = useState<CharmRead<CharmUpdateStatus>>({ state: "reading" })
   const [ssid, setSsid] = useState("")
   const [pass, setPass] = useState("")
   const [key, setKey] = useState("")
@@ -296,14 +311,12 @@ export function CharmNetwork({
   const versions = { running, published: published?.version, answered: firmware.settled }
   const offers = firmwareOffers(versions)
 
+  /** What the charm last answered about its two links, and where its download had got to. */
+  const links = readValue(report)
+  const downloading = readValue(update)
+
   /** What the charm says about its links and its firmware, read in one go: both or neither. */
-  const snapshot = useCallback(async () => {
-    const [report, update] = await Promise.all([
-      api.status().catch(() => null),
-      api.updateStatus().catch(() => null),
-    ])
-    return { report, update }
-  }, [api])
+  const snapshot = useCallback(() => Promise.allSettled([api.status(), api.updateStatus()]), [api])
 
   /**
    * The charm's own version when the row opens: a version it can't say stays unsaid rather than
@@ -320,15 +333,21 @@ export function CharmNetwork({
 
   // The section's first line is the charm's own: read once on opening, and again after each write.
   useEffect(() => {
-    void snapshot().then(({ report, update }) => {
-      if (report) setReport(report)
-      if (update) {
-        setUpdate(update)
-        // A download already running when the row opens is followed to its end, as one it started was.
-        if (update.state === CharmUpdateState.Downloading) setWatching(true)
-      }
+    void snapshot().then(([report, update]) => {
+      setReport((before) => settledRead(report, before))
+      setUpdate((before) => settledRead(update, before))
+      // A download already running when the row opens is followed to its end, as one it started was.
+      const found = update.status === "fulfilled" ? update.value : undefined
+      if (found?.state === CharmUpdateState.Downloading) setWatching(true)
     })
   }, [snapshot])
+
+  // What the paired section's first row draws: it mirrors the band from this same read, which is the
+  // only ask the page makes about the charm's own links. Told on every change, so the row above is
+  // never a guess at a read it did not see.
+  useEffect(() => {
+    onReport?.(report)
+  }, [onReport, report])
 
   // A download that is running is asked where it has got to until it stops running.
   useEffect(() => {
@@ -339,11 +358,14 @@ export function CharmNetwork({
         .updateStatus()
         .then((next) => {
           if (!live) return
-          setUpdate(next)
+          setUpdate({ state: "read", value: next })
           if (next.state !== CharmUpdateState.Downloading) setWatching(false)
         })
         .catch(() => {
-          if (live) setWatching(false)
+          if (!live) return
+          // The charm stopped answering: the poll ends, and what it last said is still what it said.
+          setUpdate((before) => readFailed(before))
+          setWatching(false)
         })
     }, UPDATE_POLL_MS)
     return () => {
@@ -362,9 +384,9 @@ export function CharmNetwork({
       // that anyone holding the charm can read the secret off the chip, so it says them too.
       setSaid(code === CharmCode.Ok ? null : codeWords(code))
       if (charmKept(code)) {
-        const { report: next, update: progress } = await snapshot()
-        if (next) setReport(next)
-        if (progress) setUpdate(progress)
+        const [next, progress] = await snapshot()
+        setReport((before) => settledRead(next, before))
+        setUpdate((before) => settledRead(progress, before))
       }
       return code
     } catch (error) {
@@ -401,8 +423,7 @@ export function CharmNetwork({
   const readBack = async () => {
     const was = running.state === "says" ? running.version : null
     const { changed, version } = await versionAfterReboot(() => api.version(), was)
-    if (changed)
-      setRunning(version === null ? { state: "too-old" } : { state: "says", version })
+    if (changed) setRunning(version === null ? { state: "too-old" } : { state: "says", version })
     return changed
   }
 
@@ -479,7 +500,7 @@ export function CharmNetwork({
       <Group>
         <div className={headerRowClass}>
           <WifiIcon className="size-5 shrink-0 text-muted-foreground" />
-          <RowText title="Wi-Fi" subtitle={wifiWords(report?.wifi, record)} />
+          <RowText title="Wi-Fi" subtitle={wifiWords(links?.wifi, record)} />
         </div>
         <form
           className={formRowClass}
@@ -529,7 +550,7 @@ export function CharmNetwork({
       <Group>
         <div className={headerRowClass}>
           <NetworkIcon className="size-5 shrink-0 text-muted-foreground" />
-          <RowText title="Tailnet" subtitle={tailnetWords(report?.tailnet, tailnet)} />
+          <RowText title="Tailnet" subtitle={tailnetWords(links?.tailnet, tailnet)} />
         </div>
         <form
           className={formRowClass}
@@ -606,7 +627,9 @@ export function CharmNetwork({
       </Group>
       {checkSaid && <Caption>{checkSaid}</Caption>}
       <Caption>{FIRMWARE_CAPTION}</Caption>
-      {update && update.state !== CharmUpdateState.Idle && <Caption>{updateWords(update)}</Caption>}
+      {downloading && downloading.state !== CharmUpdateState.Idle && (
+        <Caption>{updateWords(downloading)}</Caption>
+      )}
       <Caption>
         The image goes over the charm's own link, and the charm checks it against the SHA-256 it was
         given before it keeps it. A passphrase stays on the charm across a reboot: a charm whose
@@ -617,6 +640,56 @@ export function CharmNetwork({
   )
 }
 
+/** The mark each link wears while it is down: Lucide's own, the same shapes the charm traces by hand. */
+const LINK_MARKS: Record<CharmLink, typeof BluetoothIcon> = {
+  bluetooth: BluetoothIcon,
+  wifi: WifiOffIcon,
+  tailnet: WaypointsIcon,
+}
+
+/**
+ * The paired section's first row: its name with a mark for each link that is down, then its level.
+ * Its own component so a test can draw it with props and no radio, as the battery row and the waking
+ * group already are. The level is drawn always, unlike the glass's, because a settings page has no
+ * band to pull — and a mark is drawn only for a link the page has read and found down, since a mark
+ * for a fact nobody has read would be a guess.
+ */
+export function CharmStatusRow({
+  charm,
+  status,
+  battery,
+}: {
+  charm: CharmSeen
+  /** The page's own read of the charm's link, and the last report it answered with. */
+  status: CharmRead<CharmNetworkReport>
+  /** What the charm last said its charge was. */
+  battery?: CharmBatterySeen
+}) {
+  return (
+    <div className={rowClass}>
+      <RowText
+        title={
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate">{charm.name}</span>
+            {linksDown(status).map((link) => {
+              const Mark = LINK_MARKS[link]
+              return (
+                <Mark
+                  key={link}
+                  role="img"
+                  aria-label={LINK_DOWN_WORDS[link]}
+                  className="size-4 shrink-0 text-muted-foreground"
+                />
+              )
+            })}
+          </span>
+        }
+      />
+      <span className="shrink-0 text-sm text-muted-foreground">{batteryWords(battery)}</span>
+    </div>
+  )
+}
+
 export function CharmSettings() {
   const charm = usePairedCharm()
   const profiles = useLiveQuery(listProfiles, [])
@@ -624,6 +697,8 @@ export function CharmSettings() {
   const profile = useLiveQuery(getActiveProfile, [])
   const labels = useBotLabels()
   const [busy, setBusy] = useState<"pair" | "sync" | "test" | "wake" | "battery" | null>(null)
+  /** The page's own read of the charm, as the network section reports it: the first row draws it. */
+  const [status, setStatus] = useState<CharmRead<CharmNetworkReport>>({ state: "reading" })
   const [progress, setProgress] = useState<SyncProgress | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const [batteryNote, setBatteryNote] = useState<string | undefined>(undefined)
@@ -789,10 +864,7 @@ export function CharmSettings() {
       {charm ? (
         <>
           <Group>
-            <div className={rowClass}>
-              <BluetoothIcon className="size-5 shrink-0 text-muted-foreground" />
-              <RowText title={charm.name} subtitle={charmSynced(charm)} />
-            </div>
+            <CharmStatusRow charm={charm} status={status} battery={charm.battery} />
             <BatteryRow
               reading={charm.battery}
               note={batteryNote}
@@ -860,7 +932,12 @@ export function CharmSettings() {
               />
             </button>
           </Group>
-          <CharmNetwork profile={profile} record={charm.wifi} tailnet={charm.tailnet} />
+          <CharmNetwork
+            profile={profile}
+            record={charm.wifi}
+            tailnet={charm.tailnet}
+            onReport={setStatus}
+          />
           <Group>
             <ActionRow
               icon={UnlinkIcon}

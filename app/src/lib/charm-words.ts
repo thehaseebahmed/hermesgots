@@ -106,6 +106,57 @@ export function tailnetWords(
   return saved ? "Key saved; not joined" : "Not set"
 }
 
+/**
+ * One fact the page has read from the charm: an ask that is still out, an ask that finished without an
+ * answer, and what an answer said. A failed read and one that never arrived were the same `null`
+ * before this, so nothing could tell "not yet" from "gone" — and a row that could not tell them apart
+ * could not draw a link that was down either. `last` is what an earlier read found, which is still
+ * true of the charm while the phone can't reach it: away is not amnesia.
+ */
+export type CharmRead<T> =
+  { state: "reading" } | { state: "failed"; last?: T } | { state: "read"; value: T }
+
+/** What a read holds: the answer, or the one an earlier read found before this one failed. */
+export function readValue<T>(read: CharmRead<T>): T | undefined {
+  if (read.state === "read") return read.value
+  return read.state === "failed" ? read.last : undefined
+}
+
+/** A read that finished without an answer, keeping what an earlier one found. */
+export function readFailed<T>(read: CharmRead<T>): CharmRead<T> {
+  const last = readValue(read)
+  return last === undefined ? { state: "failed" } : { state: "failed", last }
+}
+
+/** The three links the band marks, in the order it marks them. */
+export type CharmLink = "bluetooth" | "wifi" | "tailnet"
+
+/**
+ * What each mark says to a reader who cannot see it, kept here beside the charm's other words rather
+ * than in the row: the names the marks carry are read by the same test as the rule that draws them.
+ */
+export const LINK_DOWN_WORDS: Record<CharmLink, string> = {
+  bluetooth: "Bluetooth is down",
+  wifi: "Wi-Fi is down",
+  tailnet: "Tailnet is down",
+}
+
+/**
+ * Which links are down, from the page's own read of the charm and the last report it sent. The
+ * Bluetooth mark is the phone's own ask not opening — the one fact here the phone learns by asking
+ * rather than by being told; the other two are the charm's, and a link it named as anything but
+ * connected is down, as the glass marks it. A fact nobody has read is in neither list: a mark drawn
+ * from it would be a guess, and "not read yet" draws nothing on the glass too.
+ */
+export function linksDown(read: CharmRead<CharmNetworkReport>): CharmLink[] {
+  const down: CharmLink[] = read.state === "failed" ? ["bluetooth"] : []
+  const report = readValue(read)
+  if (!report) return down
+  if (report.wifi.state !== CharmLinkState.Online) down.push("wifi")
+  if (report.tailnet.state !== CharmLinkState.Online) down.push("tailnet")
+  return down
+}
+
 /** Where the charm's firmware download has got to, in one line. */
 export function updateWords(update: CharmUpdateStatus | null | undefined): string {
   if (!update || update.state === CharmUpdateState.Idle) return "No update running"
@@ -143,7 +194,9 @@ export interface CharmFirmwareSeen {
  */
 export function firmwareWords({ running, published, answered }: CharmFirmwareSeen): string {
   if (running.state === "unreachable")
-    return published ? `${published} published · couldn't reach the charm` : "Couldn't reach the charm"
+    return published
+      ? `${published} published · couldn't reach the charm`
+      : "Couldn't reach the charm"
   if (running.state === "too-old")
     return "This charm can't say which version it runs — the first update is by cable"
   if (!answered)
@@ -246,6 +299,7 @@ export function batteryWords(battery: CharmBatterySeen | undefined, now = Date.n
  * sync" of a switch would send the reader looking at the wrong thing.
  */
 export function refusalWords(code: number) {
-  if (code === CharmCode.BadMessage) return "This charm's firmware is older than the app — update it"
+  if (code === CharmCode.BadMessage)
+    return "This charm's firmware is older than the app — update it"
   return codeWords(code)
 }
