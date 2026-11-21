@@ -18,14 +18,13 @@ const FLAG_WORDS: Record<string, string> = {
 
 const ENDED = new Set(["published", "failed", "stopped"])
 
-/** What a build's row says while the host has written no activity line for it. */
 export const WORKING_WORDS = "The build is working."
 
 export function phaseWord(phase: string) {
   return PHASE_WORDS[phase] ?? "Working"
 }
 
-/** What a version's checks said, as a row's line says it. */
+/** What a version's checks said, in the words a build's row or a visit's mark reads it with. */
 export function flagWords(flag: string) {
   return FLAG_WORDS[flag]
 }
@@ -34,7 +33,6 @@ export function atWork(build: { phase: string }) {
   return !ENDED.has(build.phase)
 }
 
-/** What one visit's marker says: its phase, what a check found, and how long it took. */
 export function visitWords(visit: CanvasBuildStep) {
   const words = [phaseWord(visit.phase)]
   const flag = visit.flag ? flagWords(visit.flag) : undefined

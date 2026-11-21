@@ -26,7 +26,6 @@ export interface CompactionEntry {
 export interface ChatMark {
   /** When it happened, in ms, on the clock a message's `createdAt` keeps. */
   at: number
-  /** What the mark says. */
   words: string
   /** What a check found, where the mark names one. */
   flag?: string

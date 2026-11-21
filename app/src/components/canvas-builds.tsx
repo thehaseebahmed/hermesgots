@@ -19,7 +19,6 @@ const AppThreadView = lazy(() =>
   import("@/chat-next/app-view").then((module) => ({ default: module.AppThreadView })),
 )
 
-/** The words a build's sheet says when its run has said nothing yet. */
 const NOTHING_YET = "This build hasn't said anything yet."
 
 /** What the lane draws, kept in a context so the view is one stable component. */
@@ -30,7 +29,7 @@ interface Lane {
 
 const LaneOf = createContext<Lane | null>(null)
 
-/** The visits a build's run is marked with, kept in a context so the view is one stable component. */
+/** The marks a build's run stands in its thread: the visits its record holds, one array per build. */
 const MarksOf = createContext<readonly ChatMark[]>([])
 
 /** The marks of no build at all: one array, so a sheet with no build keeps one context value. */
@@ -38,8 +37,7 @@ const NO_MARKS: readonly ChatMark[] = []
 
 /**
  * The one row a build draws (G1): what it is doing while it works, and the version it published once
- * it has. Pressing it opens the build's run at any point — before, during or after — so a reader
- * never has to find the step of a build whose messages were written elsewhere in it.
+ * it has. Pressing it opens the build's run.
  */
 function BuildLine({ row, onOpen }: { row: CanvasBuildRow; onOpen: () => void }) {
   // A build waiting on the reader does no work: its words are the plan's card in the composer's
@@ -60,7 +58,6 @@ function BuildLine({ row, onOpen }: { row: CanvasBuildRow; onOpen: () => void })
   )
 }
 
-/** What a build that ended says in the reply's place: its summary, or the reason it has none. */
 function BuildReply({ row }: { row: CanvasBuildRow }) {
   return row.summary ? (
     <div data-build-summary className={REPLY_EDGE}>
@@ -140,11 +137,7 @@ function SheetThread(props: ThreadViewProps) {
   )
 }
 
-/**
- * The marks a build's run draws: one for every visit its record holds, saying what the build was
- * doing, what a check found and how long the visit took — the history the lane used to draw as a row
- * per step, now read inside the run it happened in.
- */
+/** A build's marks: one for every visit its record holds, saying what the visit was. */
 function marksOf(build: CanvasBuildRow): ChatMark[] {
   return (build.steps ?? []).map((visit) => ({
     at: visit.startedAt,

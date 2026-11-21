@@ -74,7 +74,9 @@ await flow(
       "the edit screen is the chat alone: nothing about the build, no page and no Preview",
     )
     await shot("edit-no-build")
-    pass("the edit screen: a canvas made from a prompt lands on its chat, with no page and no Preview")
+    pass(
+      "the edit screen: a canvas made from a prompt lands on its chat, with no page and no Preview",
+    )
     // The lane while the build works: the block it is in — its request, the visits behind it and the
     // line saying what it is doing — over the composer. The mock holds its check a beat, so this is
     // the window it is drawn in.
@@ -144,9 +146,11 @@ await flow(
     const before = page.url()
     // A mark in the document that answers: the page drawn again is a new document, so the mark's
     // absence is the proof that the frame really was replaced and the screen really redrew it.
-    await frame().locator("body").evaluate((body) => {
-      body.dataset.e2eProbe = "1"
-    })
+    await frame()
+      .locator("body")
+      .evaluate((body) => {
+        body.dataset.e2eProbe = "1"
+      })
     await frame().locator("#leave").click()
     await until(
       async () => (await frame().locator("body").getAttribute("data-e2e-probe")) !== "1",
@@ -157,11 +161,7 @@ await flow(
     assert.equal(page.url(), before, "the app stayed on the canvas's own address")
     await frame().locator("h1").waitFor({ timeout: 10_000 })
     const drawnFrame = await (await page.locator(FRAME).elementHandle())?.contentFrame()
-    assert.equal(
-      drawnFrame?.url(),
-      "about:srcdoc",
-      "the frame is the canvas's own document again",
-    )
+    assert.equal(drawnFrame?.url(), "about:srcdoc", "the frame is the canvas's own document again")
     await shot("held")
     pass(
       "the preview screen: a page that sets location to an outside URL stays put, and the app with it",
@@ -208,7 +208,7 @@ await flow(
     await builds.waitFor({ timeout: 20_000 })
     await builds.getByText(EDIT, { exact: true }).waitFor({ timeout: 20_000 })
     assert.equal(
-      await page.locator("[data-canvas-builds] [data-build-details]").count() > 0,
+      (await page.locator("[data-canvas-builds] [data-build-details]").count()) > 0,
       true,
       "each build offers ready",
     )
@@ -229,9 +229,10 @@ await flow(
       "the row it was while it worked to become the version it published",
     )
     assert.equal(
-      await page.locator("[data-build-details]").first().evaluate(
-        (one) => one.tagName,
-      ),
+      await page
+        .locator("[data-build-details]")
+        .first()
+        .evaluate((one) => one.tagName),
       "BUTTON",
       "and the whole row is the press, not a word inside it",
     )
@@ -259,8 +260,8 @@ await flow(
       EDIT,
       "and describes the build by its first request",
     )
-    // The run is marked where each visit began, so the phases the lane used to draw as five rows are
-    // read inside the work they were spent on.
+    // The run is marked where each visit began: a phase's divider stands over the turn that came
+    // after it, so the work a phase did is read inside the run it was spent on.
     assert.ok(
       (await stepSheet.locator("[data-build-mark]").count()) > 0,
       "the run is marked where each visit began",
@@ -331,7 +332,11 @@ await flow(
       true,
       "the version drawn holds the words the edit was asked with",
     )
-    await until(() => frame().locator("#done").isChecked(), 10_000, "the edit to keep the box ticked")
+    await until(
+      () => frame().locator("#done").isChecked(),
+      10_000,
+      "the edit to keep the box ticked",
+    )
     await shot("edited-page")
     pass("the preview screen: version 2 draws with the box still ticked")
 
@@ -380,7 +385,8 @@ await flow(
     // block opens the picker as a sheet on this phone, its search narrows lucide's own set, and what
     // is picked is the record's — an icon, then the app's own frame mark again. The other tab is the
     // thumbnail, which is one inline image on the same record.
-    const grid = () => page.locator('[data-slot="canvas-mark-picker"] [data-canvas-mark-grid="icons"]')
+    const grid = () =>
+      page.locator('[data-slot="canvas-mark-picker"] [data-canvas-mark-grid="icons"]')
     await page.locator("[data-canvas-mark-open]").click()
     // The icons are one chunk fetched the first time something draws one, so the grid is waited for
     // rather than asserted at once.
@@ -390,8 +396,8 @@ await flow(
     // Eight to a row, measured rather than read off a class: a wrapped cell is still a cell, and only
     // a box says which row it landed in.
     const gridBoxes = await page.evaluate(() => {
-      const ys = [...document.querySelectorAll('[data-canvas-mark-grid="icons"] button')].map((cell) =>
-        Math.round(cell.getBoundingClientRect().y),
+      const ys = [...document.querySelectorAll('[data-canvas-mark-grid="icons"] button')].map(
+        (cell) => Math.round(cell.getBoundingClientRect().y),
       )
       return { inRow: ys.filter((y) => y === ys[0]).length, total: ys.length }
     })
@@ -405,22 +411,33 @@ await flow(
     // The grid is the thing that scrolls: the way back to the app's own mark is pinned under it, so
     // clearing a mark is never a scroll past every icon to find.
     const pinnedClear = await page.evaluate(() => {
-      const picker = document.querySelector('[data-slot="canvas-mark-picker"]')?.closest("[data-popup-form]")
+      const picker = document
+        .querySelector('[data-slot="canvas-mark-picker"]')
+        ?.closest("[data-popup-form]")
       const clear = document.querySelector("[data-canvas-mark-unset]")
       if (!picker || !clear) return null
       const box = picker.getBoundingClientRect()
       const row = clear.getBoundingClientRect()
-      return { popup: Math.round(box.bottom), row: Math.round(row.bottom), top: Math.round(row.top), popupTop: Math.round(box.top) }
+      return {
+        popup: Math.round(box.bottom),
+        row: Math.round(row.bottom),
+        top: Math.round(row.top),
+        popupTop: Math.round(box.top),
+      }
     })
     assert.ok(
-      pinnedClear && pinnedClear.row <= pinnedClear.popup && pinnedClear.top >= pinnedClear.popupTop,
+      pinnedClear &&
+        pinnedClear.row <= pinnedClear.popup &&
+        pinnedClear.top >= pinnedClear.popupTop,
       `the clear row is inside the picker without scrolling (row ${JSON.stringify(pinnedClear)})`,
     )
     await shot("mark-picker")
     await page.getByRole("button", { name: "Heart", exact: true }).click()
     await page.locator("[data-canvas-mark-open] svg.lucide-heart").waitFor({ timeout: 20_000 })
     await shot("mark-icon")
-    pass("the options: the picker searches lucide's icons eight to a row, and the icon picked is the mark")
+    pass(
+      "the options: the picker searches lucide's icons eight to a row, and the icon picked is the mark",
+    )
 
     // Two ways and no third: the icon just picked, and the thumbnail beside it.
     await page.locator("[data-canvas-mark-open]").click()
@@ -447,7 +464,10 @@ await flow(
 
     // A press on the words of the line rather than on a box a component test painted: hit-testing
     // lands on the block that answers it, which only a browser can prove.
-    await page.locator('[data-slot="header-line"]').getByText(/^v\d+$/).click()
+    await page
+      .locator('[data-slot="header-line"]')
+      .getByText(/^v\d+$/)
+      .click()
     await optionsTitle.waitFor({ timeout: 10_000 })
     await page.keyboard.press("Escape")
     await optionsTitle.waitFor({ state: "detached", timeout: 10_000 })
@@ -562,7 +582,12 @@ await flow(
     await until(
       async () =>
         Boolean(
-          (await page.locator('[data-slot="header-title"]').innerText().catch(() => "")).trim(),
+          (
+            await page
+              .locator('[data-slot="header-title"]')
+              .innerText()
+              .catch(() => "")
+          ).trim(),
         ) && Boolean(await page.locator('[data-slot="header-line"]').count()),
       20_000,
       "the session's head to draw its title and line",
@@ -619,7 +644,9 @@ await flow(
       "a back press at the entry arms the app's exit, and the one after it leaves",
     )
     await shot("head-entry")
-    pass("the preview screen: a canvas the app opened leads with the drawer, and back arms the exit")
+    pass(
+      "the preview screen: a canvas the app opened leads with the drawer, and back arms the exit",
+    )
 
     // The list opens a canvas as its child, so the head leads back to it, named for the screen it
     // goes to, with no drawer drawn beside it — and the press steps there.
@@ -630,9 +657,8 @@ await flow(
     await settled(page)
     const pushedHead = await page.evaluate(() => ({
       back:
-        document
-          .querySelector('header [aria-label="All canvases"]')
-          ?.getAttribute("aria-label") ?? null,
+        document.querySelector('header [aria-label="All canvases"]')?.getAttribute("aria-label") ??
+        null,
       drawer: Boolean(document.querySelector('header [aria-label="Open conversations"]')),
     }))
     assert.deepEqual(
@@ -650,9 +676,8 @@ await flow(
     await settled(page)
     const chatHead = await page.evaluate(() => ({
       back:
-        document
-          .querySelector('header [aria-label="All canvases"]')
-          ?.getAttribute("aria-label") ?? null,
+        document.querySelector('header [aria-label="All canvases"]')?.getAttribute("aria-label") ??
+        null,
       drawer: Boolean(document.querySelector('header [aria-label="Open conversations"]')),
     }))
     assert.deepEqual(
@@ -733,7 +758,9 @@ await flow(
       `both centred in the pane (icon ${empty.icon?.middle} of ${paneMiddle})`,
     )
     await shot("wide-building")
-    pass("a wide screen: a canvas with no page says so over its Canvas icon, until the first version lands")
+    pass(
+      "a wide screen: a canvas with no page says so over its Canvas icon, until the first version lands",
+    )
 
     await page.locator(FRAME).waitFor({ timeout: 40_000 })
     await settled(page)
@@ -826,10 +853,7 @@ await flow(
         `middle ${measured.middle.width})`,
     )
     // The page is the screen's full height, and the frame's top inset is what says the header moved out.
-    assert.ok(
-      measured.page.y <= 1,
-      `the page pane starts at the screen's top (${measured.page.y})`,
-    )
+    assert.ok(measured.page.y <= 1, `the page pane starts at the screen's top (${measured.page.y})`)
     const inset = {
       left: measured.frame.x - measured.page.x,
       top: measured.frame.y - measured.page.y,
@@ -855,7 +879,9 @@ await flow(
       "and the two panes are the screen's own, named for this flow ([data-canvas-lane], [data-canvas-page])",
     )
     await shot("wide-two-panes")
-    pass("a wide screen: the chat's lane is the left pane, and the page fills the right with no header")
+    pass(
+      "a wide screen: the chat's lane is the left pane, and the page fills the right with no header",
+    )
 
     // The mark the sidebar's row draws (#1065), where a wide screen keeps that row docked: the picker
     // is a floating menu beside the Mark row, and the pin is what puts the marked row in the band.
@@ -878,7 +904,9 @@ await flow(
     await page.keyboard.press("Escape")
     await page.locator("a[data-canvas-pinned] svg.lucide-star").waitFor({ timeout: 20_000 })
     await shot("pinned-mark")
-    pass("a wide screen: the picker is a menu beside the mark's box, and the pinned row draws its mark")
+    pass(
+      "a wide screen: the picker is a menu beside the mark's box, and the pinned row draws its mark",
+    )
 
     // The scrollbar is the platform's own, and it is pinned here rather than styled: the page's
     // document is grown past its own viewport, and what is read is what the app does NOT force —
@@ -924,11 +952,12 @@ await flow(
       `the platform reserves no gutter of its own (${scrolled.reserved}px of ` +
         `${scrolled.viewport}px viewport width)`,
     )
-    pass("a wide screen: the page's document keeps the platform's own scrollbar, unstyled and unpinned")
+    pass(
+      "a wide screen: the page's document keeps the platform's own scrollbar, unstyled and unpinned",
+    )
   },
   { viewport: { width: 1440, height: 900 } },
 )
-
 
 await flow(
   "canvas-narrow",
@@ -992,9 +1021,7 @@ await flow(
     await narrowStep.waitFor({ timeout: 20_000 })
     // The drawer slides in from the right; only at rest is its edge the screen's.
     await settled(page)
-    await narrowStep
-      .locator('[data-slot="message-scroller-viewport"]')
-      .waitFor({ timeout: 20_000 })
+    await narrowStep.locator('[data-slot="message-scroller-viewport"]').waitFor({ timeout: 20_000 })
     const drawerBox = await page.evaluate(() => {
       const popup = document.querySelector('[data-popup-form="drawer"]')
       const box = popup?.querySelector('[data-slot="build-transcript"]')
@@ -1033,7 +1060,9 @@ await flow(
       `the thread's own viewport is the bounded scroller inside it (${drawerBox.viewport}px)`,
     )
     await shot("step-sheet-1024")
-    pass("a narrow screen: a step's transcript opens in the standard drawer, the thread its one scroller")
+    pass(
+      "a narrow screen: a step's transcript opens in the standard drawer, the thread its one scroller",
+    )
   },
   { viewport: { width: 1024, height: 900 } },
 )

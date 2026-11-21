@@ -305,7 +305,6 @@ const stateOf = (row: Element | null) => wordsOf(row?.querySelector("[data-build
 const sheetMessages = () =>
   findAll('[data-popup-form] [data-slot="message"]').map((one) => wordsOf(one))
 
-/** Draws the lane over these builds and opens one of them, as a reader pressing its row does. */
 test(
   "the lane draws a build as one row, under its request, with the version it published",
   laptop(async () => {
@@ -493,8 +492,7 @@ test(
 /**
  * A build as `builds.py` really walks a clear tweak: the request opens `planning`, the `canvas_plan`
  * tool — called *inside* that run — moves the build to `building`, and the host moves it to
- * `checking` when the run ends. One turn, then, whose reply was written across two steps, which is
- * what the lane's step rows used to leave out of every step but the first.
+ * `checking` when the run ends. One turn, then, whose reply was written across two steps.
  */
 const TUNED_AT = 1_760_100_000
 
