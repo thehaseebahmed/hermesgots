@@ -172,7 +172,7 @@ test("pet mode is off until the sheet says otherwise, and off again when its bot
 test("chunks carry their offset and fit the link", () => {
   const image = new Uint8Array(1000).map((_, i) => i & 0xff)
   const size = chunkSize(247)
-  const chunks = imageChunks(image, size)
+  const chunks = [...imageChunks(image, size)]
   assert.ok(chunks.every((c) => c.length <= size))
   const joined = []
   for (const c of chunks) {
@@ -181,7 +181,7 @@ test("chunks carry their offset and fit the link", () => {
     joined.push(...c.subarray(4))
   }
   assert.deepEqual(joined, [...image])
-  assert.equal(chunkSize(23), 23)
+  assert.equal(chunkSize(23), 20, "the whole ATT payload at the smallest MTU")
   assert.equal(chunkSize(1000), 512)
 })
 

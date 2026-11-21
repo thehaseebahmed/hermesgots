@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import unittest
 import urllib.error
 import urllib.request
@@ -136,6 +137,12 @@ class AnnotationsTest(unittest.TestCase):
             firmware.describe(manifest(**{firmware.SHA256_ANNOTATION: "NOT-A-DIGEST"}))
         self.assertIn("SHA-256", str(raised.exception))
 
+    def test_a_version_that_isnt_three_numbers_is_refused(self):
+        for version in ("latest", "0.2.0-rc1", "0.2.0.1"):
+            with self.assertRaises(firmware.FirmwareError) as raised:
+                firmware.describe(manifest(**{firmware.VERSION_ANNOTATION: version}))
+            self.assertIn("three numbers", str(raised.exception), version)
+
     def test_a_manifest_with_no_layer_names_nothing_to_send(self):
         said = manifest()
         said["layers"] = []
@@ -171,7 +178,7 @@ class LatestTest(unittest.TestCase):
 
     def test_the_three_requests_answer_the_version_size_and_sha(self):
         sent = Sent()
-        with patch.object(urllib.request, "urlopen", sent):
+        with patch.object(firmware, "_open", sent):
             answer = firmware.latest(self.home)
         self.assertEqual(
             sent.urls,
@@ -199,21 +206,29 @@ class LatestTest(unittest.TestCase):
             f"https://ghcr.io/v2/thehaseebahmed/hermesgots-charm/firmware/blobs/sha256:{SHA}",
         )
 
+    def test_the_package_name_is_configurable(self):
+        with patch.dict(os.environ, {firmware.IMAGE_ENV: "a-fork/charm/firmware"}):
+            self.assertEqual(
+                firmware.manifest_url(),
+                "https://ghcr.io/v2/a-fork/charm/firmware/manifests/latest",
+                "a fork reads its own package, not this repository's",
+            )
+
     def test_a_refused_token_is_the_read_packages_sentence(self):
-        with patch.object(urllib.request, "urlopen", serve(refuse={"/token?": 403})):
+        with patch.object(firmware, "_open", serve(refuse={"/token?": 403})):
             with self.assertRaises(firmware.FirmwareError) as raised:
                 firmware.latest(self.home)
         self.assertIn("read:packages", str(raised.exception))
         self.assertEqual(raised.exception.status, 403)
 
     def test_a_manifest_refused_at_401_is_the_same_sentence(self):
-        with patch.object(urllib.request, "urlopen", serve(refuse={"/manifests/": 401})):
+        with patch.object(firmware, "_open", serve(refuse={"/manifests/": 401})):
             with self.assertRaises(firmware.FirmwareError) as raised:
                 firmware.latest(self.home)
         self.assertIn("read:packages", str(raised.exception))
 
     def test_a_missing_package_is_no_published_firmware(self):
-        with patch.object(urllib.request, "urlopen", serve(refuse={"/manifests/": 404})):
+        with patch.object(firmware, "_open", serve(refuse={"/manifests/": 404})):
             with self.assertRaises(firmware.FirmwareError) as raised:
                 firmware.latest(self.home)
         self.assertEqual(str(raised.exception), "No charm firmware has been published yet.")
@@ -222,7 +237,7 @@ class LatestTest(unittest.TestCase):
     def test_a_host_with_no_github_account_asks_the_registry_nothing(self):
         sent = Sent()
         with patch.object(firmware.github, "token", lambda home: (None, None)):
-            with patch.object(urllib.request, "urlopen", sent):
+            with patch.object(firmware, "_open", sent):
                 with self.assertRaises(firmware.FirmwareError) as raised:
                     firmware.latest(self.home)
         self.assertEqual(str(raised.exception), "No GitHub account on the server.")
@@ -232,14 +247,16 @@ class LatestTest(unittest.TestCase):
         def down(request, timeout=None):
             raise urllib.error.URLError("no route to host")
 
-        with patch.object(urllib.request, "urlopen", down):
-            with self.assertRaises(firmware.FirmwareError) as raised:
-                firmware.latest(self.home)
+        with patch.object(firmware, "_open", down):
+            with self.assertLogs(firmware.logger, level="WARNING") as logged:
+                with self.assertRaises(firmware.FirmwareError) as raised:
+                    firmware.latest(self.home)
         self.assertIn("Couldn't reach GitHub Packages", str(raised.exception))
+        self.assertIn("couldn't reach GitHub Packages", "\n".join(logged.output))
 
     def test_the_image_is_the_blob_the_manifest_names(self):
         sent = Sent()
-        with patch.object(urllib.request, "urlopen", sent):
+        with patch.object(firmware, "_open", sent):
             answer = firmware.image(self.home)
         self.assertEqual(answer["data"], IMAGE)
         self.assertEqual(
@@ -248,6 +265,29 @@ class LatestTest(unittest.TestCase):
         )
         self.assertEqual(answer["sha256"], SHA, "the digest the app checks the bytes against")
         self.assertEqual(answer["size"], len(IMAGE))
+
+
+class RedirectTest(unittest.TestCase):
+    def test_a_redirect_to_another_host_is_refused_rather_than_carrying_the_token(self):
+        handler = firmware.RegistryRedirect()
+        request = urllib.request.Request(
+            "https://ghcr.io/v2/a/b/firmware/blobs/sha256:abc",
+            headers={"Authorization": f"Bearer {PULL_TOKEN}"},
+        )
+        self.assertIsNone(
+            handler.redirect_request(
+                request, None, 302, "Found", {}, "https://elsewhere.example/blob"
+            ),
+            "the pull token was minted for ghcr.io and is not sent anywhere else",
+        )
+
+    def test_a_redirect_within_the_registry_is_followed(self):
+        handler = firmware.RegistryRedirect()
+        request = urllib.request.Request("https://ghcr.io/v2/a/b/firmware/blobs/sha256:abc")
+        followed = handler.redirect_request(
+            request, None, 302, "Found", {}, "https://ghcr.io/v2/a/b/firmware/blobs/sha256:def"
+        )
+        self.assertEqual(followed.full_url, "https://ghcr.io/v2/a/b/firmware/blobs/sha256:def")
 
 
 class RouteTest(unittest.TestCase):
@@ -263,7 +303,7 @@ class RouteTest(unittest.TestCase):
         return asyncio.run(route(self.app, plugin.PREFIX + path)(request))
 
     def test_the_route_answers_the_version_size_and_sha_and_never_the_token(self):
-        with patch.object(urllib.request, "urlopen", serve()):
+        with patch.object(firmware, "_open", serve()):
             answer = self.call("/charm/firmware")
         self.assertEqual(answer["status"], 200)
         payload = answer["payload"]
@@ -274,7 +314,7 @@ class RouteTest(unittest.TestCase):
         self.assertNotIn(PULL_TOKEN, json.dumps(payload))
 
     def test_the_image_route_sends_the_bytes_and_their_length(self):
-        with patch.object(urllib.request, "urlopen", serve()):
+        with patch.object(firmware, "_open", serve()):
             answer = self.call("/charm/firmware/image")
         self.assertEqual(answer.body, IMAGE)
         headers = {k.lower(): v for k, v in answer.headers.items()}
@@ -282,13 +322,13 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(headers["content-type"], "application/octet-stream")
 
     def test_a_refusal_is_its_own_sentence_rather_than_a_bare_502(self):
-        with patch.object(urllib.request, "urlopen", serve(refuse={"/manifests/": 404})):
+        with patch.object(firmware, "_open", serve(refuse={"/manifests/": 404})):
             answer = self.call("/charm/firmware")
         self.assertEqual(answer["status"], 409)
         self.assertEqual(answer["payload"]["error"]["message"], "No charm firmware has been published yet.")
 
     def test_the_image_route_carries_the_same_sentence(self):
-        with patch.object(urllib.request, "urlopen", serve(refuse={"/token?": 403})):
+        with patch.object(firmware, "_open", serve(refuse={"/token?": 403})):
             answer = self.call("/charm/firmware/image")
         self.assertEqual(answer["status"], 403)
         self.assertIn("read:packages", answer["payload"]["error"]["message"])

@@ -535,22 +535,26 @@ export function botMessage(index: number, bot: CharmBot): Uint8Array {
 }
 
 /** A picture as `data` writes: `[offset u32][bytes]`, each at most `size` bytes long. */
-export function imageChunks(image: Uint8Array, size: number): Uint8Array[] {
+export function* imageChunks(image: Uint8Array, size: number): Generator<Uint8Array> {
   const room = size - 4
   if (room < 1) throw new Error("Chunks too small")
-  const out: Uint8Array[] = []
+  // One chunk at a time: a firmware image is over a megabyte, and a second copy of it held in
+  // chunks is what a phone with the image already in memory cannot afford.
   for (let at = 0; at < image.length; at += room) {
     const part = image.subarray(at, Math.min(image.length, at + room))
     const chunk = new Uint8Array(4 + part.length)
     new DataView(chunk.buffer).setUint32(0, at, true)
     chunk.set(part, 4)
-    out.push(chunk)
+    yield chunk
   }
-  return out
 }
 
-/** The largest `data` write a link carries: the MTU less ATT's 3 bytes, capped at 512. */
-export const chunkSize = (mtu: number) => Math.max(23, Math.min(512, mtu - 3))
+/**
+ * The largest `data` write a link carries: the MTU less ATT's 3 bytes, capped at 512. The floor is
+ * the smallest payload an ATT link can carry (MTU 23), so a chunk never outgrows the link and the
+ * four-byte offset always leaves a byte of image behind it.
+ */
+export const chunkSize = (mtu: number) => Math.max(20, Math.min(512, mtu - 3))
 
 export function parseStatus(view: DataView): CharmStatus {
   if (view.byteLength < 4) throw new Error("The charm sent a short answer")

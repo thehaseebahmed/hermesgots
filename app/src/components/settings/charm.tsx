@@ -93,7 +93,7 @@ import {
   type CharmWake,
   type CharmWifiRecord,
 } from "@/lib/charm-protocol"
-import type { FirmwareProgress } from "@/lib/charm-firmware"
+import { type FirmwareProgress, versionAfterReboot } from "@/lib/charm-firmware"
 import type { SyncProgress } from "@/lib/charm-sync"
 import { listProfiles } from "@/lib/db"
 import type { CharmFirmware } from "@/lib/hermes"
@@ -103,10 +103,12 @@ import {
   doubleTapSubtitle,
   FILE_TOO_BIG,
   FIRMWARE_CAPTION,
+  FIRMWARE_NOT_BACK,
   FIRMWARE_SENT,
   firmwareOffers,
   firmwareWords,
   petSubtitle,
+  PUBLISHED_CHANGED,
   QUIET_TITLE,
   quietWords,
   tailnetWords,
@@ -121,15 +123,14 @@ import { useBotLabels } from "@/lib/use-bot-labels"
 const message = (error: unknown) =>
   error instanceof Error && error.message ? error.message : "Something went wrong"
 
+/** The SHA-256 of bytes this phone holds, as the lowercase hex the link takes. */
+const sha256Of = async (image: Uint8Array) =>
+  hexOf(
+    new Uint8Array(await crypto.subtle.digest("SHA-256", image as unknown as BufferSource)),
+  )
+
 /** How often a running firmware download is asked where it has got to. */
 const UPDATE_POLL_MS = 2_000
-
-/**
- * How long a charm takes to come back after an upload, and how many times the row waits that out:
- * the slot is bootable when the upload ends, and the restart is the moment after it.
- */
-const REBOOT_MS = 3_000
-const REBOOT_TRIES = 4
 
 /**
  * The Network section's radio, as the page reaches it: every call is one control ask over the
@@ -273,6 +274,8 @@ export function CharmNetwork({
   const [key, setKey] = useState("")
   /** Which build the charm runs: null is a firmware too old to say, undefined one not read yet. */
   const [running, setRunning] = useState<string | null | undefined>(undefined)
+  /** Whether the version read never opened its link, which is not the charm having nothing to say. */
+  const [reachFailed, setReachFailed] = useState(false)
   /** What the host says `latest` holds, or null once its read has been refused. */
   const [published, setPublished] = useState<CharmFirmware | null>(null)
   /** Whether the host's read is over: nothing published after it is a refusal, not a wait. */
@@ -285,7 +288,7 @@ export function CharmNetwork({
   const file = useRef<HTMLInputElement | null>(null)
 
   /** The two versions the row compares: the charm's own, and the package's as its host reads it. */
-  const versions = { running, published: published?.version, answered: checked }
+  const versions = { running, published: published?.version, answered: checked, reachFailed }
   const offers = firmwareOffers(versions)
 
   /** What the charm says about its links and its firmware, read in one go: both or neither. */
@@ -297,26 +300,39 @@ export function CharmNetwork({
     return { report, update }
   }, [api])
 
+  /** What the package publishes, read again whenever a failed upload may have moved it. */
+  const readPublished = useCallback(async () => {
+    try {
+      const found = await api.published()
+      setPublished(found)
+      setCheckSaid(null)
+    } catch (error) {
+      setPublished(null)
+      setCheckSaid(message(error))
+    }
+  }, [api])
+
   /**
    * Both versions, read side by side when the row opens: the charm's over its link, and the
    * package's through the host that holds a registry token. A version the charm can't say stays
-   * unsaid rather than guessed, and the host's refusal is kept in its own words for the row to draw.
+   * unsaid rather than guessed, a link that never opened is its own fact, and the host's refusal is
+   * kept in its own words for the row to draw.
    */
   useEffect(() => {
     void Promise.all([
-      api.version().then(setRunning, () => setRunning(undefined)),
-      api.published().then(
+      api.version().then(
         (found) => {
-          setPublished(found)
-          setCheckSaid(null)
+          setRunning(found)
+          setReachFailed(false)
         },
-        (error) => {
-          setPublished(null)
-          setCheckSaid(message(error))
+        () => {
+          setRunning(undefined)
+          setReachFailed(true)
         },
       ),
+      readPublished(),
     ]).then(() => setChecked(true))
-  }, [api])
+  }, [api, readPublished])
 
   // The section's first line is the charm's own: read once on opening, and again after each write.
   useEffect(() => {
@@ -392,20 +408,13 @@ export function CharmNetwork({
   }
 
   /**
-   * The version again once the charm is back. It reboots the moment the slot is bootable, so the
-   * answer to the first ask may still be the build it is leaving: the one it started on is kept,
-   * and the ask is repeated over the restart rather than a screen waiting on it.
+   * The version again once the charm is back: a change is what says the new build booted, and a
+   * charm that never answered on it is the row's to say rather than a success left standing.
    */
   const readBack = async (was: string | null | undefined) => {
-    for (let attempt = 0; attempt < REBOOT_TRIES; attempt += 1) {
-      try {
-        const now = await api.version()
-        if (now !== was) return setRunning(now)
-      } catch {
-        // The link is going down under it, which is the reboot itself.
-      }
-      await new Promise((done) => setTimeout(done, REBOOT_MS))
-    }
+    const { changed, version } = await versionAfterReboot(() => api.version(), was)
+    if (changed) setRunning(version)
+    return changed
   }
 
   /**
@@ -414,6 +423,8 @@ export function CharmNetwork({
    * the reader picked.
    */
   const send = async (load: () => Promise<{ image: Uint8Array; sha256Hex: string }>) => {
+    // The status poll holds a link of its own every two seconds; an upload needs the charm to itself.
+    setWatching(false)
     setBusy("update")
     setSaid(null)
     setProgress(null)
@@ -422,7 +433,11 @@ export function CharmNetwork({
       setProgress({ sent: 0, total: image.length, percent: -1 })
       await api.upload(image, sha256Hex, setProgress)
       setSaid(FIRMWARE_SENT)
-      void readBack(running)
+      if (await readBack(running)) return
+      // The charm never answered on the new build: the offer is read again too, since a merge may
+      // have published another version while this one was being tried.
+      setSaid(FIRMWARE_NOT_BACK)
+      await readPublished()
     } catch (error) {
       setSaid(message(error))
     } finally {
@@ -430,6 +445,29 @@ export function CharmNetwork({
       setProgress(null)
     }
   }
+
+  /**
+   * The published image, checked against the version this row read: the bytes and their hash are
+   * what the link would send, so a package that moved between the two reads is refused here rather
+   * than by the charm after the whole image.
+   */
+  const sendPublished = () =>
+    send(async () => {
+      if (!published) throw new Error("The published firmware is not known yet.")
+      const image = await api.image()
+      const sha256Hex = await sha256Of(image)
+      if (image.length === published.size && sha256Hex === published.sha256)
+        return { image, sha256Hex }
+      // The tag may have moved between the row's read and this one: the version it names now is
+      // the one these bytes have to match before anything goes over the link.
+      const again = await api.published().catch(() => null)
+      if (again && again.size === image.length && again.sha256 === sha256Hex) {
+        setPublished(again)
+        setCheckSaid(null)
+        return { image, sha256Hex }
+      }
+      throw new Error(PUBLISHED_CHANGED)
+    })
 
   /**
    * A file from the phone: its bytes, and the SHA-256 computed here over them — that hash is the
@@ -443,8 +481,7 @@ export function CharmNetwork({
     }
     await send(async () => {
       const image = new Uint8Array(await picked.arrayBuffer())
-      const sha256Hex = hexOf(new Uint8Array(await crypto.subtle.digest("SHA-256", image)))
-      return { image, sha256Hex }
+      return { image, sha256Hex: await sha256Of(image) }
     })
   }
 
@@ -544,9 +581,7 @@ export function CharmNetwork({
                 id="charm-update-start"
                 type="button"
                 disabled={busy !== null}
-                onClick={() =>
-                  void send(async () => ({ image: await api.image(), sha256Hex: published.sha256 }))
-                }
+                onClick={() => void sendPublished()}
               >
                 {busy === "update" && progress
                   ? updateProgressWords(progress)
@@ -570,7 +605,11 @@ export function CharmNetwork({
               type="file"
               className="hidden"
               onChange={(event) => {
-                const picked = event.target.files?.[0]
+                const input = event.currentTarget
+                const picked = input.files?.[0]
+                // Cleared so the same file picked again fires `change`: a second try at a failed
+                // upload is exactly when a reader picks the file they just picked.
+                input.value = ""
                 if (picked) void sendFile(picked)
               }}
             />

@@ -15,12 +15,13 @@ import {
   CharmUpdateState,
   chunkSize,
   firmwareMessage,
+  imageChunks,
   parseFirmware,
   parseStatus,
   updateBeginMessage,
   updateEndMessage,
 } from "../src/lib/charm-protocol.ts"
-import { FirmwareRefused, uploadFirmware } from "../src/lib/charm-firmware.ts"
+import { FirmwareRefused, uploadFirmware, versionAfterReboot } from "../src/lib/charm-firmware.ts"
 
 /**
  * The network block's last three ops, as the firmware's `docs/PROTOCOL.md` numbers them. These
@@ -91,15 +92,18 @@ test("a Firmware answer reads the version, and a charm too old to know it says n
  * data writes carry it at their offsets, a status ask answers how much has arrived, and the end
  * checks the length and the hash it was told.
  */
-function fakeCharm({ version = "0.2.0", busy = false, failAt = null, strayOnce = false } = {}) {
+function fakeCharm({ version = "0.2.0", busy = false, failAt = null, strayOnce = false, refuseAt = null } = {}) {
   const ops = []
   const writes = []
+  const attempts = []
   const asked = []
   let session = null
   let received = []
   let gap = false
   let strayed = false
   let failure = null
+  let refused = false
+  let refusedOnce = false
   const answer = (code, op) => new Uint8Array([1, code, op, 0])
   // The asks whose answer carries extra put its length in front of it; a plain answer is the four.
   const carrying = (code, op, extra) => new Uint8Array([1, code, op, 0, extra.length, ...extra])
@@ -108,12 +112,19 @@ function fakeCharm({ version = "0.2.0", busy = false, failAt = null, strayOnce =
   return {
     ops,
     writes,
+    attempts,
     asked,
     get received() {
       return received
     },
     link: {
       mtu: 185,
+      // Whether the charm answered a data write with `Busy`: the same chunk has to go again.
+      refused() {
+        const was = refused
+        refused = false
+        return was
+      },
       // As `charm.ts`'s link answers: the bytes the charm sent, as a view.
       async ask(m) {
         return viewOf(await this.reply(m))
@@ -158,9 +169,18 @@ function fakeCharm({ version = "0.2.0", busy = false, failAt = null, strayOnce =
         return answer(CharmCode.BadMessage, op)
       },
       async data(chunk) {
+        attempts.push(chunk)
+        const offset = viewOf(chunk).getUint32(0, true)
+        // A buffer with no room refuses the write on the status characteristic, and takes the same
+        // chunk when it comes again: nothing is lost and the offset stays the next one.
+        if (refuseAt !== null && offset === refuseAt && !refusedOnce) {
+          refusedOnce = true
+          refused = true
+          return
+        }
         writes.push(chunk)
         // A write that is not the next one is a gap, which ends the attempt at the end.
-        if (!session || viewOf(chunk).getUint32(0, true) !== received.length) {
+        if (!session || offset !== received.length) {
           gap = true
           return
         }
@@ -204,6 +224,8 @@ test("progress rises, and only the charm's own count is a percentage", async () 
     [...sent].sort((a, b) => a - b),
   )
   assert.equal(sent.at(-1), bytes.length)
+  // One report per whole percent, plus the end's own: the row is not redrawn thousands of times.
+  assert.ok(seen.length <= 102, `one report per percent (${seen.length} for 200 KB)`)
   // Nothing is known as a percentage before the charm answers; after that it never falls.
   assert.equal(seen[0].percent, -1)
   const percents = seen.map((progress) => progress.percent).filter((percent) => percent >= 0)
@@ -268,4 +290,55 @@ test("a status that says failed stops the upload before its end", async () => {
     (error) => error instanceof FirmwareRefused && error.reason === CharmUpdateReason.WriteFailed,
   )
   assert.ok(!charm.ops.includes(UPDATE_WIRE.end), "a failed attempt is not ended")
+})
+
+test("a link at the smallest MTU still carries its offset and a byte of image", () => {
+  const size = chunkSize(23)
+  assert.ok(size <= 23 - 3, "the write fits the ATT payload")
+  assert.ok(size - 4 >= 1, "the four-byte offset leaves room for image bytes")
+})
+
+test("chunks are made as they are sent, not all at once", () => {
+  const chunks = imageChunks(image(1_000_000), 512)
+  // A megabyte held as thousands of chunks is a second copy of the image in memory.
+  assert.equal(typeof chunks.next, "function", "an iterator rather than an array of every chunk")
+  assert.ok(chunks.next().value.length > 0)
+})
+
+test("a chunk the charm refuses for room goes again, and the image completes", async () => {
+  const size = chunkSize(185)
+  const refusedAt = 2 * (size - 4)
+  // The third chunk meets a full buffer once: the charm says `Busy`, and takes it on the resend.
+  const charm = fakeCharm({ refuseAt: refusedAt })
+  const bytes = image(4000)
+  const result = await uploadFirmware(charm.link, bytes, sha256Of(bytes))
+
+  assert.equal(result.percent, 100)
+  assert.deepEqual([...charm.received], [...bytes], "every byte landed once, in order")
+  const offsets = charm.attempts.map((chunk) => viewOf(chunk).getUint32(0, true))
+  assert.deepEqual(
+    offsets.slice(2, 4),
+    [refusedAt, refusedAt],
+    "the refused chunk went again before the next offset",
+  )
+  assert.equal(charm.ops.filter((op) => op === UPDATE_WIRE.end).length, 1)
+})
+
+test("the version read answers whether the rebooted charm changed", async () => {
+  // A charm out of reach over its restart: the first two asks fail, the third is the new build.
+  let asked = 0
+  const changed = await versionAfterReboot(
+    async () => {
+      asked += 1
+      if (asked < 3) throw new Error("The charm went out of reach")
+      return "0.2.0"
+    },
+    "0.1.0",
+    { tries: 3, waitMs: 0 },
+  )
+  assert.deepEqual(changed, { changed: true, version: "0.2.0" })
+
+  // Every ask says the build it started on: the row has to be able to say it did not change.
+  const same = await versionAfterReboot(async () => "0.1.0", "0.1.0", { tries: 2, waitMs: 0 })
+  assert.deepEqual(same, { changed: false, version: "0.1.0" })
 })

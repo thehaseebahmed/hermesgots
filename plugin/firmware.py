@@ -17,6 +17,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 import re
 import urllib.error
 import urllib.parse
@@ -29,9 +30,10 @@ from . import github
 logger = logging.getLogger(__name__)
 
 REGISTRY = "https://ghcr.io"
-# The firmware repository whose package this is (``owner/name``), on GitHub and nowhere else.
-FIRMWARE_REPO = "thehaseebahmed/hermesgots-charm"
-IMAGE_PATH = f"{FIRMWARE_REPO}/firmware"
+# The package holding the firmware image (``owner/repo/firmware``): a fork or a second deployment
+# names its own rather than reading the one this repository publishes.
+DEFAULT_IMAGE = "thehaseebahmed/hermesgots-charm/firmware"
+IMAGE_ENV = "GOTS_CHARM_FIRMWARE_IMAGE"
 TAG = "latest"
 MANIFEST_MEDIA_TYPE = "application/vnd.oci.image.manifest.v1+json"
 
@@ -45,6 +47,7 @@ ANNOTATIONS = (
     ("size", SIZE_ANNOTATION, "size"),
 )
 DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
+VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
 
 # A manifest is a few hundred bytes; an image is a megabyte and a half, and a slow server may take
 # its time over the blob without the small reads ever waiting that long.
@@ -66,18 +69,24 @@ class FirmwareError(Exception):
         self.code = code
 
 
+def image_path() -> str:
+    """The registry path this host reads firmware from: its own, or the one this repo publishes."""
+    named = os.environ.get(IMAGE_ENV, "").strip() or DEFAULT_IMAGE
+    return named.removeprefix("ghcr.io/").strip("/")
+
+
 def token_url() -> str:
     """The token service's ask for a pull token over this one package."""
-    query = urllib.parse.urlencode({"scope": f"repository:{IMAGE_PATH}:pull", "service": "ghcr.io"})
+    query = urllib.parse.urlencode({"scope": f"repository:{image_path()}:pull", "service": "ghcr.io"})
     return f"{REGISTRY}/token?{query}"
 
 
 def manifest_url(tag: str = TAG) -> str:
-    return f"{REGISTRY}/v2/{IMAGE_PATH}/manifests/{tag}"
+    return f"{REGISTRY}/v2/{image_path()}/manifests/{tag}"
 
 
 def blob_url(digest: str) -> str:
-    return f"{REGISTRY}/v2/{IMAGE_PATH}/blobs/{digest}"
+    return f"{REGISTRY}/v2/{image_path()}/blobs/{digest}"
 
 
 def refusal(code: int) -> str:
@@ -117,6 +126,10 @@ def describe(manifest: Any) -> Dict[str, Any]:
         if not isinstance(value, str) or not value.strip():
             raise FirmwareError(f"The published charm firmware doesn't say its {name}.")
         said[key] = value.strip()
+    if not VERSION_RE.match(said["version"]):
+        raise FirmwareError(
+            "The published charm firmware's version isn't three numbers separated by dots."
+        )
     if not DIGEST_RE.match(said["sha256"]):
         raise FirmwareError("The published charm firmware's SHA-256 isn't a lowercase hex digest.")
     try:
@@ -138,17 +151,35 @@ def image_layer(manifest: Any) -> str:
     return digest
 
 
+class RegistryRedirect(urllib.request.HTTPRedirectHandler):
+    """Follows a redirect only within the registry: a pull token is ghcr.io's and goes nowhere else."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if urllib.parse.urlsplit(newurl).hostname != urllib.parse.urlsplit(REGISTRY).hostname:
+            return None
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_OPENER = urllib.request.build_opener(RegistryRedirect())
+
+
+def _open(request: urllib.request.Request, timeout: float):
+    """One GET through the registry's one door, so a redirect cannot carry the bearer elsewhere."""
+    return _OPENER.open(request, timeout=timeout)
+
+
 def _fetch(url: str, headers: Dict[str, str], timeout: float = READ_TIMEOUT_S) -> Tuple[bytes, Dict[str, str]]:
     """One GET against ghcr.io: its bytes and its headers, or the sentence its status is said in."""
     request = urllib.request.Request(
         url, headers={"User-Agent": "gots-hermes-plugin", **headers}, method="GET"
     )
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with _open(request, timeout) as response:
             return response.read(), dict(response.headers)
     except urllib.error.HTTPError as error:
         raise FirmwareError(refusal(error.code), status_for(error.code), error.code) from None
     except (urllib.error.URLError, TimeoutError, ValueError):
+        logger.warning("gots: couldn't reach GitHub Packages", exc_info=True)
         raise FirmwareError("Couldn't reach GitHub Packages from the server.") from None
 
 

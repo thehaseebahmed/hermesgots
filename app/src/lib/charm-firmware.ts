@@ -1,8 +1,6 @@
 /**
- * An image sent to the Gots Charm over the link the phone already holds: announce its length and
- * SHA-256, write it as `[offset u32][bytes]` chunks, then end. The charm checks the hash before it
- * makes the slot bootable, so the SHA-256 the phone computes is the whole trust anchor — a wrong or
- * truncated image is refused whatever served it.
+ * An image the phone sends over the link it already holds: the SHA-256 the phone computes is the
+ * whole trust anchor, so a wrong or truncated image is refused whatever served it.
  *
  * Pure over a transport, so a test drives a charm in memory with no radio.
  */
@@ -22,6 +20,10 @@ import {
 import type { CharmTransport } from "./charm-sync.ts"
 import { refusalWords, updateReasonWords } from "./charm-words.ts"
 
+/** How long the row waits between asks for the rebooted charm's version, and how many asks. */
+export const REBOOT_MS = 3_000
+export const REBOOT_TRIES = 4
+
 /**
  * A link an image goes over: a sync's transport, plus the answer as the bytes the charm sent. A
  * status ask can be answered by the notification a refused data write raises, and that answer has
@@ -29,6 +31,8 @@ import { refusalWords, updateReasonWords } from "./charm-words.ts"
  */
 export interface FirmwareLink extends CharmTransport {
   ask(message: Uint8Array): Promise<DataView>
+  /** Whether the charm refused the data write just made for buffer room, once per refusal. */
+  refused(): boolean
 }
 
 export interface FirmwareProgress {
@@ -79,25 +83,41 @@ export async function uploadFirmware(
   const progress: FirmwareProgress = { sent: 0, total: image.length, percent: -1 }
   const begin = parseStatus(await link.ask(updateBeginMessage(image.length, sha256)))
   if (begin.code !== CharmCode.Ok) throw new FirmwareRefused(begin.code)
-  onProgress?.({ ...progress })
+  // The row is redrawn for each whole percent, not for each chunk: a megabyte is thousands of
+  // writes, and nothing on screen changes between one percent and the next.
+  let shown = -1
+  const report = () => {
+    const whole = progress.total > 0 ? Math.round((progress.sent / progress.total) * 100) : 0
+    if (whole === shown) return
+    shown = whole
+    onProgress?.({ ...progress })
+  }
+  report()
 
   const size = chunkSize(link.mtu)
   let sinceAsk = 0
+  let last: Uint8Array | null = null
   for (const chunk of imageChunks(image, size)) {
+    // A data write carries no answer: a chunk the charm refused for buffer room is announced on
+    // the status characteristic instead. The chunk just written goes again before a new offset —
+    // whether the notice landed at once or answered the status ask since — because the next
+    // offset would be a gap, which the charm ends the whole image over.
+    while (last && link.refused()) await link.data(last)
+    last = chunk
     await link.data(chunk)
+    while (link.refused()) await link.data(chunk)
     progress.sent += chunk.length - 4
-    onProgress?.({ ...progress })
     sinceAsk += chunk.length - 4
+    report()
     if (sinceAsk < STATUS_BYTES) continue
     sinceAsk = 0
     const status = await updateStatusOf(link)
-    // A data write refused for buffer room notifies a code with no extra, and that notification
-    // can answer this ask: it is neither progress nor a reason to stop, so the image carries on.
+    // A stray notice is not progress and not a failure: see `updateStatusOf`.
     if (!status) continue
     if (status.state === CharmUpdateState.Failed)
       throw new FirmwareRefused(CharmCode.Ok, status.reason)
     progress.percent = status.percent
-    onProgress?.({ ...progress })
+    report()
   }
 
   const end = parseStatus(await link.ask(updateEndMessage()))
@@ -107,6 +127,27 @@ export async function uploadFirmware(
   const done = { ...progress, percent: 100 }
   onProgress?.(done)
   return done
+}
+
+/**
+ * The version the charm answers once it is back after an upload, or the one it never left: `read`
+ * is asked `tries` times, `waitMs` apart, and a change is what says the new build booted.
+ */
+export async function versionAfterReboot(
+  read: () => Promise<string | null>,
+  was: string | null | undefined,
+  { tries = REBOOT_TRIES, waitMs = REBOOT_MS } = {},
+): Promise<{ changed: boolean; version: string | null | undefined }> {
+  for (let attempt = 0; attempt < tries; attempt += 1) {
+    try {
+      const now = await read()
+      if (now !== was) return { changed: true, version: now }
+    } catch {
+      // The link is going down under it, which is the reboot itself.
+    }
+    await new Promise((done) => setTimeout(done, waitMs))
+  }
+  return { changed: false, version: was }
 }
 
 /**

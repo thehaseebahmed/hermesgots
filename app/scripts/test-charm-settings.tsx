@@ -5,12 +5,13 @@
  * answer reads as, and that a passphrase is never drawn back.
  */
 import assert from "node:assert/strict"
+import { createHash } from "node:crypto"
 import test from "node:test"
 import { act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { CharmNetwork, type CharmNetworkApi } from "@/components/settings/charm"
-import { CHARM_SLOT_BYTES, CharmLinkState } from "@/lib/charm-protocol"
+import { CHARM_SLOT_BYTES, CharmLinkState, CharmUpdateState } from "@/lib/charm-protocol"
 import { db } from "@/lib/db"
 import { SettingsPage } from "@/routes/settings"
 import { BatteryRow, WakingGroup } from "@/components/settings/charm"
@@ -179,6 +180,11 @@ async function pick(name: string, size: number) {
 
 const PUBLISHED = { version: "0.2.0", size: 4, sha256: "cd".repeat(32) }
 
+/** An image the row can publish, and the hash of its bytes as this phone computes it. */
+const IMAGE = new Uint8Array([9, 9, 9, 9])
+const IMAGE_SHA = createHash("sha256").update(IMAGE).digest("hex")
+const IMAGE_PUBLISHED = { version: "0.2.0", size: IMAGE.length, sha256: IMAGE_SHA }
+
 test("the firmware row offers the published one when the charm is older", async () => {
   await mount(
     <CharmNetwork api={radio({ published: async () => PUBLISHED })} />,
@@ -296,10 +302,10 @@ test("Update sends the published image and reads the version once the charm is b
   const sent: { bytes: Uint8Array; sha256: string }[] = []
   let reads = 0
   const api = radio({
-    published: async () => PUBLISHED,
+    published: async () => IMAGE_PUBLISHED,
     // The charm answers its old version until the upload lands, then the new one.
     version: async () => (++reads > 1 ? "0.2.0" : "0.1.0"),
-    image: async () => new Uint8Array([9, 9, 9, 9]),
+    image: async () => IMAGE,
     upload: async (image, sha256Hex, onProgress) => {
       sent.push({ bytes: image, sha256: sha256Hex })
       const done = { sent: image.length, total: image.length, percent: 100 }
@@ -312,9 +318,164 @@ test("Update sends the published image and reads the version once the charm is b
     await click(button("Update to 0.2.0"))
     await settle()
     assert.equal(sent.length, 1, "the published image went")
-    assert.deepEqual([...sent[0].bytes], [9, 9, 9, 9], "the bytes the host served")
-    assert.equal(sent[0].sha256, PUBLISHED.sha256, "with the hash the host named for them")
+    assert.deepEqual([...sent[0].bytes], [...IMAGE], "the bytes the host served")
+    assert.equal(
+      sent[0].sha256,
+      IMAGE_SHA,
+      "the hash the charm is told is the one computed over those bytes",
+    )
     assert.ok(text().includes("Charm 0.2.0 · up to date"), "and the charm's new version is read")
+  })
+})
+
+test("an image that is not the one the version names is refused before it goes", async () => {
+  const uploads: Uint8Array[] = []
+  const api = radio({
+    published: async () => IMAGE_PUBLISHED,
+    // A truncated body, an error page, or a tag that moved: not the bytes the version described.
+    image: async () => new Uint8Array([1, 2, 3, 4]),
+    upload: async (image) => {
+      uploads.push(image)
+      return { sent: image.length, total: image.length, percent: 100 }
+    },
+  })
+  await mount(<CharmNetwork api={api} />, async () => {
+    await settle()
+    await click(button("Update to 0.2.0"))
+    await settle()
+    assert.deepEqual(uploads, [], "no UpdateBegin reached the charm")
+    assert.ok(text().includes("isn't the one the version names"), "the row says why")
+  })
+})
+
+test("a version that moved between the reads is read again, and its image goes", async () => {
+  let reads = 0
+  const sent: { sha256: string }[] = []
+  const api = radio({
+    // The row read the old version on opening; a merge published a new one before the tap.
+    published: async () => (++reads === 1 ? PUBLISHED : IMAGE_PUBLISHED),
+    image: async () => IMAGE,
+    upload: async (_image, sha256Hex) => {
+      sent.push({ sha256: sha256Hex })
+      return { sent: IMAGE.length, total: IMAGE.length, percent: 100 }
+    },
+  })
+  await mount(<CharmNetwork api={api} />, async () => {
+    await settle()
+    await click(button("Update to 0.2.0"))
+    await settle()
+    assert.equal(sent.length, 1, "the image that arrived is sent")
+    assert.equal(sent[0].sha256, IMAGE_SHA, "with the hash computed over it")
+  })
+})
+
+test("a charm that cannot be reached is not a charm that didn't say", async () => {
+  const api = radio({
+    published: async () => PUBLISHED,
+    version: async () => {
+      throw new Error("The charm went out of reach")
+    },
+  })
+  await mount(<CharmNetwork api={api} />, async () => {
+    await settle()
+    assert.ok(
+      text().includes("0.2.0 published · couldn't reach the charm"),
+      "the link's failure is its own sentence",
+    )
+    assert.ok(!text().includes("didn't say"), "not blamed on the charm's firmware")
+    assert.ok(!find("#charm-update-start"), "and nothing is offered on a version nobody read")
+  })
+})
+
+test("starting an update stops the two-second status poll", async () => {
+  let polls = 0
+  let landed = false
+  let releaseUpload: (() => void) | undefined
+  const api = radio({
+    published: async () => IMAGE_PUBLISHED,
+    version: async () => (landed ? "0.2.0" : "0.1.0"),
+    image: async () => IMAGE,
+    // A download already running when the row opens starts the poll.
+    updateStatus: async () => {
+      polls += 1
+      return { state: CharmUpdateState.Downloading, percent: 10, reason: 0 }
+    },
+    upload: async () => {
+      await new Promise((done) => (releaseUpload = done))
+      landed = true
+      return { sent: IMAGE.length, total: IMAGE.length, percent: 100 }
+    },
+  })
+  await mount(<CharmNetwork api={api} />, async () => {
+    await settle()
+    const before = polls
+    assert.ok(before >= 1, "the row's own snapshot asked")
+    await click(button("Update to 0.2.0"))
+    // Longer than the poll's interval: a still-running poll would open a link and drop the upload.
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 2_300))
+    })
+    assert.equal(polls, before, "the poll did not ask while the upload held the link")
+    releaseUpload?.()
+    await settle()
+  })
+})
+
+test("a charm that does not come back on the new build is said, and the offer is read again", async () => {
+  let publishedReads = 0
+  const api = radio({
+    published: async () => {
+      publishedReads += 1
+      return IMAGE_PUBLISHED
+    },
+    // The charm answers the build it started on, however often it is asked.
+    version: async () => "0.1.0",
+    image: async () => IMAGE,
+    upload: async () => ({ sent: IMAGE.length, total: IMAGE.length, percent: 100 }),
+  })
+  await mount(<CharmNetwork api={api} />, async () => {
+    await settle()
+    await click(button("Update to 0.2.0"))
+    // The row's four asks, 3 s apart: the charm never answers on the new build.
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, 12_500))
+    })
+    await settle()
+    assert.ok(
+      text().includes("didn't come back on the new build"),
+      "the success sentence is revised rather than left standing",
+    )
+    assert.ok(publishedReads >= 2, "and what is published is read again")
+  })
+})
+
+test("the same file can be picked again after a failed upload", async () => {
+  let uploads = 0
+  const api = radio({
+    upload: async () => {
+      uploads += 1
+      throw new Error("The update failed: it was cancelled")
+    },
+  })
+  await mount(<CharmNetwork api={api} />, async () => {
+    await settle()
+    const input = find("#charm-update-file") as HTMLInputElement | null
+    assert.ok(input, "the file picker is on screen")
+    Object.defineProperty(input, "value", {
+      value: "charm.bin",
+      writable: true,
+      configurable: true,
+    })
+    const file = new File([new Uint8Array(8)], "charm.bin", {
+      type: "application/octet-stream",
+    })
+    Object.defineProperty(input, "files", { value: [file], configurable: true })
+    await act(async () => {
+      input.dispatchEvent(new Event("change", { bubbles: true }))
+    })
+    await settle()
+    assert.equal(input.value, "", "the field is cleared, so the same file fires change again")
+    assert.equal(uploads, 1)
   })
 })
 

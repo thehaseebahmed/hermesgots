@@ -2902,7 +2902,7 @@ export async function getCharmFirmware(
 ): Promise<CharmFirmware> {
   const response = await request(`${pluginRoot(config.baseUrl)}/charm/firmware`, {
     headers: headers(config),
-    signal,
+    signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
   })
   const body = await response.json()
   if (
