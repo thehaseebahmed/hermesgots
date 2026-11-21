@@ -32,6 +32,13 @@ export const CharmOp = {
   // The moments. These go over with no Begin either: they are not a sync at all.
   Alert: 0x20,
   Handoff: 0x22,
+  // The network. A charm is provisioned, not synced, so these carry no Begin either.
+  Wifi: 0x30,
+  Forget: 0x31,
+  Network: 0x32,
+  Tailnet: 0x33,
+  Update: 0x34,
+  UpdateStatus: 0x35,
 } as const
 
 type CharmOp = (typeof CharmOp)[keyof typeof CharmOp]
@@ -43,6 +50,35 @@ type CharmOp = (typeof CharmOp)[keyof typeof CharmOp]
 export const CharmReasonByte = {
   question: 1,
   approval: 2,
+} as const
+
+/**
+ * The network block's enumerations, by the number the wire uses. The firmware's `docs/PROTOCOL.md`
+ * fixes them, as it does the ops: a Wi-Fi or tunnel link is off, joining, online or failed; a Wi-Fi
+ * link that is not online says why; and a firmware download is idle, downloading, ready or failed,
+ * with a reason of its own.
+ */
+export const CharmLinkState = { Off: 0, Joining: 1, Online: 2, Failed: 3 } as const
+
+export const CharmWifiReason = {
+  None: 0,
+  NoCredentials: 1,
+  NotFound: 2,
+  BadCredentials: 3,
+  Unreachable: 4,
+  Lost: 5,
+} as const
+
+export const CharmUpdateState = { Idle: 0, Downloading: 1, Ready: 2, Failed: 3 } as const
+
+export const CharmUpdateReason = {
+  None: 0,
+  Offline: 1,
+  BadUrl: 2,
+  BadHash: 3,
+  TooBig: 4,
+  WriteFailed: 5,
+  Cancelled: 6,
 } as const
 
 /** What an alert's title and body may measure, as `kMaxTitleLen` and `kMaxBodyLen` do. */
@@ -58,6 +94,17 @@ export const CHARM_MAX_ACTIONS = 2
 export const CHARM_MAX_ACTION_ID_BYTES = 16
 export const CHARM_MAX_ACTION_LABEL_BYTES = 32
 
+/**
+ * What the network block's fields may measure, as the firmware's own bounds do: a network name, the
+ * passphrase that joins it (none for an open network), an image's address, a tailnet auth key, and
+ * the SHA-256 that names the image.
+ */
+export const CHARM_MAX_SSID_BYTES = 32
+export const CHARM_MAX_PASS_BYTES = 63
+export const CHARM_MAX_URL_BYTES = 180
+export const CHARM_MAX_KEY_BYTES = 96
+export const CHARM_SHA256_BYTES = 32
+
 export const CharmCode = {
   Ok: 0,
   BadVersion: 1,
@@ -69,6 +116,12 @@ export const CharmCode = {
   MissingImage: 8,
   StorageFailed: 9,
   BadMood: 10,
+  /** The charm joined a network but keeps it in RAM: its flash is not encrypted. */
+  SavedToRam: 11,
+  /** The charm is not on Wi-Fi, which a firmware download needs. */
+  Offline: 12,
+  /** The charm is already updating, or a bot sync is in flight. */
+  Busy: 13,
 } as const
 
 /** What the charm says a code means, in words a settings row can show. */
@@ -82,6 +135,10 @@ const CODE_WORDS: Record<number, string> = {
   [CharmCode.MissingImage]: "A picture never arrived",
   [CharmCode.StorageFailed]: "The charm's storage is full or failing",
   [CharmCode.BadMood]: "The charm runs older firmware, which has no pet mode",
+  [CharmCode.SavedToRam]:
+    "This charm's flash isn't encrypted, so it will forget this at the next boot",
+  [CharmCode.Offline]: "The charm isn't on Wi-Fi",
+  [CharmCode.Busy]: "The charm is busy; try again when it's done",
 }
 
 export const codeWords = (code: number) =>
@@ -249,6 +306,11 @@ class Writer {
   }
   str(b: Uint8Array) {
     this.u8(b.length)
+    for (const x of b) this.bytes.push(x)
+    return this
+  }
+  /** Bytes as they are, with no length in front: a SHA-256 is its own 32 bytes. */
+  raw(b: Uint8Array) {
     for (const x of b) this.bytes.push(x)
     return this
   }
@@ -446,6 +508,141 @@ export function parseStatus(view: DataView): CharmStatus {
     op: view.getUint8(2),
     needImage: view.getUint8(3) === 1,
   }
+}
+
+/**
+ * The network block: provisioning the charm's Wi-Fi, its tailnet key, and a firmware image it fetches
+ * itself. Every one is a control write answered by one status notification — four bytes, or the same
+ * four and then `[extraLen u8][extra]` for the two asks. The firmware's `docs/PROTOCOL.md` fixes
+ * every number here, as it does the rest of this file.
+ */
+
+const decoder = new TextDecoder()
+
+export const forgetMessage = () => control(CharmOp.Forget).done()
+export const networkMessage = () => control(CharmOp.Network).done()
+export const updateStatusMessage = () => control(CharmOp.UpdateStatus).done()
+
+/**
+ * The network to join. A passphrase of none is an open network, which the charm reads as such rather
+ * than as a blank password.
+ */
+export function wifiMessage(ssid: string, pass = ""): Uint8Array {
+  const name = encoder.encode(ssid)
+  if (name.length === 0) throw new Error("A Wi-Fi name is at least 1 byte")
+  if (name.length > CHARM_MAX_SSID_BYTES) throw new Error("A Wi-Fi name is at most 32 bytes")
+  const secret = encoder.encode(pass)
+  if (secret.length > CHARM_MAX_PASS_BYTES)
+    throw new Error("A Wi-Fi passphrase is at most 63 bytes")
+  return control(CharmOp.Wifi).str(name).str(secret).done()
+}
+
+/** A Tailscale auth key, which the charm uses once to join the tailnet. */
+export function tailnetMessage(key: string): Uint8Array {
+  const bytes = encoder.encode(key)
+  if (bytes.length === 0) throw new Error("A tailnet key is at least 1 byte")
+  if (bytes.length > CHARM_MAX_KEY_BYTES) throw new Error("A tailnet key is at most 96 bytes")
+  return control(CharmOp.Tailnet).str(bytes).done()
+}
+
+/**
+ * The image to fetch, and the SHA-256 that has to match it. The charm makes the request itself, so
+ * the address must be one it can fetch: https, and nothing else.
+ */
+export function updateMessage(url: string, sha256: Uint8Array): Uint8Array {
+  if (!url.startsWith("https://")) throw new Error("An update needs an https address")
+  const address = encoder.encode(url)
+  if (address.length > CHARM_MAX_URL_BYTES)
+    throw new Error("An update address is at most 180 bytes")
+  if (sha256.length !== CHARM_SHA256_BYTES)
+    throw new Error("An update carries the image's 32-byte SHA-256")
+  return control(CharmOp.Update).str(address).raw(sha256).done()
+}
+
+/** A hash as a person pastes it — hex, in either case, with spaces or colons — as its bytes. */
+export function hexBytes(hex: string): Uint8Array {
+  const clean = hex.replace(/[\s:]/g, "").toLowerCase()
+  if (!/^[0-9a-f]*$/.test(clean) || clean.length % 2 !== 0)
+    throw new Error("A SHA-256 is 64 hexadecimal characters")
+  const bytes = new Uint8Array(clean.length / 2)
+  for (let at = 0; at < bytes.length; at++)
+    bytes[at] = parseInt(clean.slice(at * 2, at * 2 + 2), 16)
+  return bytes
+}
+
+/** Bytes as the hash a person reads and pastes: lowercase hex. */
+export const hexOf = (bytes: Uint8Array) =>
+  [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("")
+
+/** What this phone keeps about the charm's Wi-Fi: the network, and whether the charm keeps it. */
+export interface CharmWifiRecord {
+  ssid: string
+  /** The charm wrote it to encrypted flash, so it survives a reboot. False when it kept it in RAM. */
+  saved: boolean
+}
+
+/**
+ * The record a Wi-Fi write leaves. It is the name and the charm's own word about keeping it — never
+ * the passphrase, which is the charm's from the write on.
+ */
+export const wifiRecord = (ssid: string, code: number): CharmWifiRecord => ({
+  ssid,
+  saved: code === CharmCode.Ok,
+})
+
+/** The charm's link, as it answers the `Network` ask. */
+export interface CharmNetworkReport {
+  wifi: { state: number; reason: number; ip: string; ssid: string }
+  tailnet: { state: number; ip: string }
+}
+
+/**
+ * The `Network` answer, read off `[extraLen][extra]`: the Wi-Fi link, its address and the network it
+ * joined, then the tunnel's. A short answer, one whose extra never arrived, or one that answers
+ * another op is no report at all — never half of one, since half a report would draw a state the
+ * charm never had.
+ */
+export function parseNetworkReport(view: DataView): CharmNetworkReport | null {
+  if (view.byteLength < 5) return null
+  if (view.getUint8(2) !== CharmOp.Network) return null
+  const end = 5 + view.getUint8(4)
+  if (view.byteLength < end) return null
+  let at = 5
+  const byte = () => {
+    if (at >= end) throw new Error("short")
+    return view.getUint8(at++)
+  }
+  const field = () => {
+    const length = byte()
+    if (at + length > end) throw new Error("short")
+    const text = decoder.decode(new Uint8Array(view.buffer, view.byteOffset + at, length))
+    at += length
+    return text
+  }
+  try {
+    return {
+      wifi: { state: byte(), reason: byte(), ip: field(), ssid: field() },
+      tailnet: { state: byte(), ip: field() },
+    }
+  } catch {
+    return null
+  }
+}
+
+/** Where a firmware download has got to, as it answers the `UpdateStatus` ask. */
+export interface CharmUpdateStatus {
+  state: number
+  percent: number
+  reason: number
+}
+
+/** The `UpdateStatus` answer: three bytes of extra, and null for anything shorter or for another op. */
+export function parseUpdateStatus(view: DataView): CharmUpdateStatus | null {
+  if (view.byteLength < 5) return null
+  if (view.getUint8(2) !== CharmOp.UpdateStatus) return null
+  const extra = view.getUint8(4)
+  if (extra < 3 || view.byteLength < 5 + extra) return null
+  return { state: view.getUint8(5), percent: view.getUint8(6), reason: view.getUint8(7) }
 }
 
 /** Checks the pet's pictures before any of them goes over the air. */
