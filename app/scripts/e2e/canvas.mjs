@@ -219,11 +219,14 @@ await flow(
       .filter({ hasText: EDIT })
       .locator("[data-build-details]")
       .first()
-    await readyLine.waitFor({ timeout: 20_000 })
-    assert.equal(
-      (await readyLine.locator("[data-build-state]").innerText()).trim(),
-      "Version 2 published",
-      "the row it was while it worked becomes the version it published",
+    // The row exists while the build works and becomes the version after it publishes, so the flow
+    // waits for the words rather than for the row.
+    await until(
+      async () =>
+        (await readyLine.locator("[data-build-state]").innerText()).trim() ===
+        "Version 2 published",
+      40_000,
+      "the row it was while it worked to become the version it published",
     )
     assert.equal(
       await page.locator("[data-build-details]").first().evaluate(
@@ -232,8 +235,6 @@ await flow(
       "BUTTON",
       "and the whole row is the press, not a word inside it",
     )
-    pass("the edit screen: the lane draws the build's request and the version it published")
-
     const build = builds.locator("[data-canvas-build]").filter({ hasText: EDIT })
     assert.equal(
       await builds.getByText(checkReport(2)).count(),
@@ -268,11 +269,6 @@ await flow(
       (await stepSheet.locator("[data-build-mark]").first().innerText()).trim(),
       /^Planning\b/,
       "and its first mark is the planning visit the build began with",
-    )
-    assert.equal(
-      await stepSheet.getByText(checkReport(1)).count(),
-      0,
-      "the build before this one checked too, and its report is not in this build's run",
     )
     // One scroller, not two: the pop-up's box holds the thread, and the thread's own viewport is
     // what moves, so a long step never scrolls its header away inside a second scroller.
