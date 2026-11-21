@@ -394,9 +394,10 @@ def note_run(path: Path, build_id: str, run_id: Optional[str]) -> None:
         )
     finally:
         conn.close()
-    if not build.get("wait") and _place(
-        path, build_id, BUILDING if build.get("plan") else PLANNING
-    ):
+    if build.get("wait"):
+        return
+    wanted = BUILDING if build.get("plan") else PLANNING
+    if _place(path, build_id, wanted) is not None and build.get("phase") != wanted:
         _note(path, build["canvas_id"])
 
 
@@ -715,12 +716,21 @@ def _shot_files(report: canvas_checks.CheckReport) -> List[Dict[str, Any]]:
     return found
 
 
-def _stamp(path: Path, build_id: str, number: int, document: str, flag: str) -> None:
-    """Records a check round on the build, and the flag it answered on its open checking visit.
+def _stamp(
+    path: Path,
+    build_id: str,
+    number: int,
+    document: str,
+    flag: str,
+    visit: Optional[int],
+) -> None:
+    """Records a check round on the build, and the flag it answered on that round's checking visit.
 
-    The round's flag is the version's (I5) and the checking step's (G6): the visit stamped is the
-    one still open, which is the checking visit this round opened. Both land in one write, so a
-    reader is never told what a check found without its marker saying so too.
+    The round's flag is the version's (I5) and the checking step's (G6). The visit is named by the
+    ordinal the round opened rather than looked for as "the one still open", because a turn can
+    start between that visit being placed and this write landing — the check's report is queued
+    while the check still runs — and the move closes it. Both land in one write, so a reader is
+    never told what a check found without its marker saying so too.
     """
     now = now_ms()
     with canvases._writing(path) as conn:
@@ -728,11 +738,11 @@ def _stamp(path: Path, build_id: str, number: int, document: str, flag: str) -> 
             "UPDATE canvas_builds SET rounds = ?, checked = ?, flag = ?, at = ? WHERE id = ?",
             (number, _digest(document), flag, now, build_id),
         )
-        conn.execute(
-            "UPDATE canvas_build_steps SET flag = ? WHERE build_id = ? AND phase = ?"
-            " AND ended_at IS NULL",
-            (flag, build_id, CHECKING),
-        )
+        if visit is not None:
+            conn.execute(
+                "UPDATE canvas_build_steps SET flag = ? WHERE build_id = ? AND ordinal = ?",
+                (flag, build_id, visit),
+            )
 
 
 def _report_turn(
@@ -779,18 +789,18 @@ def _checked(
     read's bound — stamps ``unchecked`` and publishes, because a build never stalls on its checks.
     """
     number = build["rounds"] + 1
-    _place(path, build["id"], CHECKING)
+    visit = _place(path, build["id"], CHECKING)
     try:
         snapshot = _snapshot(path, build["canvas_id"])
     except canvases.CanvasError:
         logger.debug("gots: %s's data has no snapshot a check can carry", build["canvas_id"])
-        _stamp(path, build["id"], number, document, canvas_checks.UNCHECKED)
+        _stamp(path, build["id"], number, document, canvas_checks.UNCHECKED, visit)
         _note(path, build["canvas_id"])
         publish(path, home, build["id"], _summary(session_id))
         return
     folder = attachments.folder(home, build["session_id"]) / f"check-{number}"
     report = canvas_checks.check(document, snapshot, _tests(path, build["canvas_id"]), folder)
-    _stamp(path, build["id"], number, document, report.flag)
+    _stamp(path, build["id"], number, document, report.flag, visit)
     _note(path, build["canvas_id"])
     if not report.ran:
         publish(path, home, build["id"], _summary(session_id))
@@ -920,7 +930,7 @@ def _close_step(conn: sqlite3.Connection, build_id: str, at: int) -> None:
     )
 
 
-def _open_step(conn: sqlite3.Connection, build_id: str, phase: str, at: int) -> None:
+def _open_step(conn: sqlite3.Connection, build_id: str, phase: str, at: int) -> int:
     ordinal = conn.execute(
         "SELECT COALESCE(MAX(ordinal), -1) + 1 FROM canvas_build_steps WHERE build_id = ?",
         (build_id,),
@@ -929,6 +939,7 @@ def _open_step(conn: sqlite3.Connection, build_id: str, phase: str, at: int) -> 
         "INSERT INTO canvas_build_steps (build_id, ordinal, phase, started_at) VALUES (?, ?, ?, ?)",
         (build_id, ordinal, phase, at),
     )
+    return ordinal
 
 
 def _phase(
@@ -948,27 +959,34 @@ def _phase(
         _close_step(conn, build_id, now)
 
 
-def _placed(conn: sqlite3.Connection, build_id: str, phase: str) -> bool:
+def _placed(conn: sqlite3.Connection, build_id: str, phase: str) -> Optional[int]:
     """Stamps where a working build is, the line the lane draws under it, and the step it entered.
 
     Entering the phase the open visit already holds opens nothing (I4): a run that starts while
     the build already says it is building is the same stretch of work, not a second one. Answers
-    whether it moved the build — the only thing a caller has to announce to every device.
+    the ordinal of the visit the build holds in that phase once it has landed — the one it opened,
+    or the open one it was already in — so a caller can name the visit it is about, as a check does
+    with the flag it stamps; None where there is no such build.
     """
     row = conn.execute("SELECT phase FROM canvas_builds WHERE id = ?", (build_id,)).fetchone()
+    if row is None:
+        return None
     now = now_ms()
     conn.execute(
         "UPDATE canvas_builds SET phase = ?, activity = ?, at = ? WHERE id = ?",
         (phase, ACTIVITY.get(phase), now, build_id),
     )
-    if row is None or row[0] == phase:
-        return False
+    if row[0] == phase:
+        found = conn.execute(
+            "SELECT ordinal FROM canvas_build_steps WHERE build_id = ? AND ended_at IS NULL",
+            (build_id,),
+        ).fetchone()
+        return None if found is None else found[0]
     _close_step(conn, build_id, now)
-    _open_step(conn, build_id, phase, now)
-    return True
+    return _open_step(conn, build_id, phase, now)
 
 
-def _place(path: Path, build_id: str, phase: str) -> bool:
+def _place(path: Path, build_id: str, phase: str) -> Optional[int]:
     with canvases._writing(path) as conn:
         return _placed(conn, build_id, phase)
 

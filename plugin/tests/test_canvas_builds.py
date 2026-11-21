@@ -968,6 +968,50 @@ class WhereABuildIsTest(unittest.TestCase):
         older = next(one for one in rows if one["id"] == "old")
         self.assertNotIn("steps", older)
 
+    def test_a_checks_flag_lands_on_the_visit_the_check_opened(self) -> None:
+        # A turn can start between the check placing its checking visit and stamping the round's
+        # flag: the check's report is queued while the check still runs, and the run that starts
+        # under it is what moves the build on, closing the visit the flag belongs to. The flag is
+        # that visit's (I5), so it is written on the visit the round opened rather than on whatever
+        # is open when the write lands — which here is nothing, and would say the two disagree.
+        planted = plant_runner(passing_answer)
+        self.addCleanup(planted.stop)
+        with planted:
+            build = self.host.start()
+            session = build["session_id"]
+            self.host.plan(
+                session,
+                changes="The heading says Split the bill.",
+                checks=[{"name": "the heading is split", "script": "return 1"}],
+                wait=False,
+            )
+            self.host.write(session, TWEAKED)
+            self.host.adapter.run("run_1", session, "completed", 3)
+
+            checking = canvas_checks.check
+
+            def raced(*args: Any, **kwargs: Any) -> Any:
+                # note_run is the dispatcher's own call at a turn's start, and the build has filed
+                # its plan, so the check's report turn moves it to building mid-check.
+                builds.note_run(self.host.path, build["id"], "run_2")
+                return checking(*args, **kwargs)
+
+            with patch.object(canvas_checks, "check", raced):
+                self.host.end(session, completed=True)
+
+        published = builds.listing(self.host.path, self.host.id)[0]
+        stepped = [one for one in published["steps"] if one["phase"] == "checking"]
+        self.assertEqual(len(stepped), 1, "the round opened one checking visit")
+        self.assertEqual(
+            stepped[0].get("flag"),
+            canvas_checks.PASSING,
+            "the round's flag is written on the checking visit it opened, closed or not",
+        )
+        self.assertEqual(published["flag"], canvas_checks.PASSING)
+        self.assertEqual(
+            stepped[0]["flag"], published["flag"], "the visit's flag is the version's (I5)"
+        )
+
 
 class ClosedAppTest(unittest.TestCase):
     """The plan's step 12 check: a waiting build pushes as a plan, and a published build pushes once.
