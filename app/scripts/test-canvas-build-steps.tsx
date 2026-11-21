@@ -51,7 +51,7 @@ const BUILDS = [
     activity: null,
     requests: ["and make it blue too"],
     summary: null,
-    flag: null,
+    flag: "failing",
     version: null,
     at: 3,
     created_at: 3,
@@ -132,6 +132,26 @@ const UNRECORDED_WAITING = {
   created_at: 6,
 }
 
+/** A build whose last visit that did work has closed: it is publishing, and draws no open marker. */
+const PUBLISHING = {
+  id: "b7",
+  session: "canvas-build-7",
+  phase: "publishing",
+  activity: "Publishing the version",
+  requests: ["and make it blue too"],
+  summary: null,
+  flag: "passing",
+  version: null,
+  at: 7,
+  created_at: 7,
+  steps: [
+    { phase: "planning", start: 0, end: 2_000 },
+    { phase: "building", start: 2_000, end: 90_000 },
+    { phase: "checking", start: 90_000, end: 91_000, flag: "passing" },
+    { phase: "publishing", start: 91_000 },
+  ],
+}
+
 /** The whole second the sheet's build ran on, as a session's rows are stamped by the host. */
 const RAN_AT = 1_760_000_000
 
@@ -149,8 +169,9 @@ const VISITED = {
   steps: [
     { phase: "planning", start: RAN_AT * 1_000, end: (RAN_AT + 10) * 1_000 },
     { phase: "building", start: (RAN_AT + 10) * 1_000, end: (RAN_AT + 20) * 1_000 },
-    { phase: "checking", start: (RAN_AT + 20) * 1_000, end: (RAN_AT + 30) * 1_000, flag: "passing" },
+    { phase: "checking", start: (RAN_AT + 20) * 1_000, end: (RAN_AT + 30) * 1_000, flag: "failing" },
     { phase: "building", start: (RAN_AT + 30) * 1_000, end: (RAN_AT + 40) * 1_000 },
+    { phase: "checking", start: (RAN_AT + 40) * 1_000, end: (RAN_AT + 50) * 1_000, flag: "passing" },
   ],
 }
 
@@ -160,7 +181,13 @@ const VISITED_ROWS = [
   { id: 3, role: "user", content: "and make it blue too", timestamp: RAN_AT + 12 },
   { id: 4, role: "assistant", content: "The heading is blue now.", timestamp: RAN_AT + 12 },
   { id: 5, role: "user", content: "check the tips", timestamp: RAN_AT + 22 },
-  { id: 6, role: "assistant", content: "The tips are checked.", timestamp: RAN_AT + 22 },
+  { id: 6, role: "assistant", content: "the tips look right", timestamp: RAN_AT + 22 },
+  // Stamped in the second the last checking visit began: a phase change is placed by the floored
+  // second, so this turn belongs to the visit that just began.
+  { id: 7, role: "user", content: "look at the tips once more", timestamp: RAN_AT + 40 },
+  // Stamped in the second that visit closed in, which the build's own last second holds: a sheet
+  // that ended at the visit's floor would leave this turn nowhere at all.
+  { id: 8, role: "assistant", content: "the tips are good now", timestamp: RAN_AT + 50 },
 ]
 
 const CANVAS = {
@@ -301,6 +328,20 @@ test(
       assert.ok(
         missing('[data-canvas-build="b2"] [data-build-step]'),
         "a build with no steps draws none",
+      )
+      // A build from before the record has no marker to read its flag on, so its reply's line keeps
+      // it — where there is a marker, the marker is what says it.
+      const olderLine = find('[data-canvas-build="b2"] [data-build-details]')?.parentElement
+      assert.ok(olderLine, "a build with no markers still draws its reply's line")
+      assert.deepEqual(
+        [...olderLine.children].map((one) => wordsOf(one)),
+        ["Checks failed", "Details"],
+        "the flag reads on the line only because no marker holds it",
+      )
+      assert.equal(
+        olderLine.querySelector("[data-build-flag]")?.getAttribute("data-build-flag"),
+        "failing",
+        "and it is the flag the record carries",
       )
       assert.ok(
         find('[data-canvas-build="b2"] [data-build-summary]'),
@@ -457,6 +498,45 @@ test(
 )
 
 test(
+  "a build publishing draws its line under the last step that did work",
+  laptop(async () => {
+    await drawLane([PUBLISHING, ...BUILDS], async () => {
+      const bot = (await db.profiles.get("bot-1"))!
+      await act(async () => {
+        await refreshCanvas("c1")
+        await noteChange(connectionKey(bot), "canvas")
+      })
+      await until(
+        () => Boolean(find('[data-canvas-build="b7"]')),
+        "the lane's publishing build to draw",
+      )
+      const markers = findAll('[data-canvas-build="b7"] [data-build-step]')
+      assert.deepEqual(
+        markers.map((one) => one.getAttribute("data-build-step")),
+        ["planning", "building", "checking"],
+        "the visits that did work are drawn, and publishing is not one of them",
+      )
+      assert.ok(
+        missing('[data-canvas-build="b7"] [data-working]'),
+        "no drawn step is open, so none of them pulses",
+      )
+      const activity = find('[data-canvas-build="b7"] [data-build-activity]')
+      assert.ok(activity, "the build still says what it is doing rather than ending in silence")
+      assert.equal(wordsOf(activity), "Publishing the version", "in the host's own words")
+      assert.equal(
+        markers[2].nextElementSibling,
+        activity,
+        "the line hangs under the last step that did work",
+      )
+      assert.ok(
+        missing('[data-canvas-build="b7"] [data-build-summary]'),
+        "and no reply is drawn before it has published one",
+      )
+    })
+  }),
+)
+
+test(
   "pressing a marker opens that visit's turns, and Details opens the whole build",
   laptop(async () => {
     await drawLane([VISITED], async () => {
@@ -474,8 +554,8 @@ test(
       const markers = findAll('[data-canvas-build="b4"] [data-build-step]')
       assert.deepEqual(
         markers.map((one) => one.getAttribute("data-build-step")),
-        ["planning", "building", "checking", "building"],
-        "the build's four visits, a marker each",
+        ["planning", "building", "checking", "building", "checking"],
+        "the build's five visits, a marker each",
       )
       await click(markers[1])
       await until(
@@ -500,6 +580,10 @@ test(
         !second.some((words) => words.includes("check the tips")),
         "and so is the turn of the visit after it",
       )
+      assert.ok(
+        !second.some((words) => words.includes("look at the tips once more")),
+        "and the one of the visit after that",
+      )
       assert.equal(
         wordsOf(find('[data-slot="sheet-title"]')),
         "Building",
@@ -514,7 +598,7 @@ test(
       await until(() => missing('[data-slot="sheet-content"]'), "the step's sheet to close")
       await click(find('[data-canvas-build="b4"] [data-build-details]'))
       await until(
-        () => sheetMessages().length === 6,
+        () => sheetMessages().length === 8,
         "the whole build's transcript to be drawn",
       )
       const whole = sheetMessages()
@@ -524,7 +608,9 @@ test(
         "and make it blue too",
         "The heading is blue now.",
         "check the tips",
-        "The tips are checked.",
+        "the tips look right",
+        "look at the tips once more",
+        "the tips are good now",
       ])
         assert.ok(
           whole.some((drawn) => drawn.includes(words)),
@@ -551,6 +637,29 @@ test(
       assert.ok(
         missing('[data-slot="sheet-content"] [aria-label="Messages"]'),
         "the thread is not drawn at all, so no empty state greets the reader",
+      )
+      // The last visit's window is tiled: it begins in the second its own turn was stamped in, and
+      // it holds the second the build closed in, which ends the visit after the next's floor.
+      await click(find('[data-slot="sheet-content"] [data-slot="sheet-close"]'))
+      await until(() => missing('[data-slot="sheet-content"]'), "the empty visit's sheet to close")
+      await click(markers[4])
+      await until(
+        () => sheetMessages().length > 0,
+        "the last visit's turns to be read and drawn",
+      )
+      const last = sheetMessages()
+      assert.equal(last.length, 2, "the visit's window holds the two turns stamped inside it")
+      assert.ok(
+        last[0].includes("look at the tips once more"),
+        "the turn stamped in the second the visit began",
+      )
+      assert.ok(
+        last[1].includes("the tips are good now"),
+        "and the one stamped in the second the build closed in",
+      )
+      assert.ok(
+        !last.some((words) => words.includes("check the tips")),
+        "and nothing of the checking visit before it",
       )
     }, VISITED_ROWS)
   }),

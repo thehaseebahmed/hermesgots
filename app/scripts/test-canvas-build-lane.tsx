@@ -337,8 +337,8 @@ test(
       )
       assert.deepEqual(
         [...line.children].map((one) => wordsOf(one)),
-        ["Version 3", "Details"],
-        "the line reads the version, then Details",
+        ["Checks passed", "Version 3", "Details"],
+        "the line reads the flag this build has no marker to carry, then the version and Details",
       )
       assert.ok(
         document.querySelector("[data-canvas-builds]"),

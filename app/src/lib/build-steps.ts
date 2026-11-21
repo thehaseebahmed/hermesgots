@@ -24,6 +24,11 @@ export function phaseWord(phase: string) {
   return PHASE_WORDS[phase] ?? "Working"
 }
 
+/** What a version's checks said, as a marker or a reply's line says it. */
+export function flagWords(flag: string) {
+  return FLAG_WORDS[flag]
+}
+
 /**
  * The visits a build's lane draws, in the order they happened: one marker per visit to a phase that
  * did work, never one per turn. Waiting and publishing are recorded but not drawn.
@@ -59,21 +64,51 @@ export function isOpen(step: CanvasBuildStep) {
   return step.endedAt === undefined
 }
 
+/** The whole seconds a drawn step's sheet reads, half-open. */
+export interface StepWindow {
+  /** The first second the step holds. */
+  start: number
+  /** The first second it does not; `Infinity` while the build is at work. */
+  end: number
+}
+
+/**
+ * The windows a build's drawn steps hold their turns in, in whole seconds and tiled (I2): a step
+ * ends where the next drawn step begins, so a turn stamped in the second a phase changed belongs to
+ * the step that just began and none falls between two. A visit can be shorter than the second it
+ * began in, and a step whose next one begins in that same second holds nothing of its own: what it
+ * could not hold reads in the step beside it rather than nowhere.
+ *
+ * The last drawn step is the one that holds the build's final second — a publishing visit after it
+ * is not drawn — so it ends a second past the second the build closed in. While the build is at
+ * work it has no end at all.
+ */
+export function windowsOf(steps: CanvasBuildStep[], build: { phase: string }): StepWindow[] {
+  const open = atWork(build)
+  return steps.map((step, at) => {
+    const start = Math.floor(step.startedAt / 1000)
+    const next = steps[at + 1]
+    if (next) return { start, end: Math.floor(next.startedAt / 1000) }
+    const end = step.endedAt
+    return { start, end: open || end === undefined ? Infinity : Math.floor(end / 1000) + 1 }
+  })
+}
+
 export function liveIndexOf(steps: CanvasBuildStep[]) {
   return steps.findLastIndex((step) => isOpen(step))
 }
 
 export function stepWords(step: CanvasBuildStep) {
   const words = [phaseWord(step.phase)]
-  const flag = step.flag ? FLAG_WORDS[step.flag] : undefined
+  const flag = step.flag ? flagWords(step.flag) : undefined
   if (flag) words.push(flag)
   if (step.endedAt !== undefined) words.push(formatDuration(step.endedAt - step.startedAt))
   return words.join(" · ")
 }
 
 /**
- * Whether a turn began inside a visit's window, both edges floored to the whole second: a row's
- * `timestamp` is whole seconds while a visit's clock is milliseconds, so a turn stamped in the same
+ * Whether a turn began inside a window in whole seconds — `windowsOf`' own space, which is what a
+ * row's `timestamp` and a visit's millisecond clock are reconciled in, so a turn stamped in the same
  * second as a phase change belongs to the visit that just began. A turn nothing dates can only be
  * placed in a visit that has no end yet, which is where the turn still being written runs.
  */
@@ -92,10 +127,9 @@ function beganIn(at: number | undefined, start: number, end: number) {
 export function turnsInStep<T extends { at?: number }>(
   turns: T[],
   origin: number,
-  step: { startedAt: number; endedAt?: number },
+  window: StepWindow,
 ): { turns: T[]; origin: number } {
-  const start = Math.floor(step.startedAt / 1000)
-  const end = step.endedAt === undefined ? Infinity : Math.floor(step.endedAt / 1000)
+  const { start, end } = window
   const kept: T[] = []
   let first = -1
   turns.forEach((turn, place) => {

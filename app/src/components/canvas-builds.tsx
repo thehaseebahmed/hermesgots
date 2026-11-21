@@ -25,11 +25,15 @@ import type { ThreadViewProps } from "@/chat-next/page"
 import {
   atWork,
   drawnSteps,
+  flagWords,
   isOpen,
   liveIndexOf,
+  markersOf,
   phaseWord,
   stepWords,
   turnsInStep,
+  windowsOf,
+  type StepWindow,
 } from "@/lib/build-steps"
 import type { CanvasBuildRow, CanvasBuildStep } from "@/lib/canvases"
 import {
@@ -53,12 +57,12 @@ const WORKING_WORDS = "The build is working."
 /** What the lane draws, kept in a context so the view is one stable component. */
 interface Lane {
   rows: CanvasBuildRow[]
-  open: (build: CanvasBuildRow, step?: CanvasBuildStep) => void
+  open: (build: CanvasBuildRow, step?: CanvasBuildStep, window?: StepWindow) => void
 }
 
 const LaneOf = createContext<Lane | null>(null)
 
-const WindowOf = createContext<CanvasBuildStep | undefined>(undefined)
+const WindowOf = createContext<StepWindow | undefined>(undefined)
 
 function StepRow({
   step,
@@ -88,11 +92,17 @@ function BuildSteps({
   onStep,
 }: {
   row: CanvasBuildRow
-  onStep: (step: CanvasBuildStep) => void
+  onStep: (step: CanvasBuildStep, window: StepWindow) => void
 }) {
   const steps = drawnSteps(row)
-  if (!steps.length) return null
+  const windows = windowsOf(steps, row)
   const live = liveIndexOf(steps)
+  // A build publishing has no drawn step open — the visit holding its turns is the checking one
+  // behind it — so its line hangs under the last marker, where the block would otherwise end in
+  // silence. A build waiting says nothing here: its words are the plan card in the composer's place.
+  const publishing = live < 0 && atWork(row) && row.phase === "publishing"
+  const noteAt = live >= 0 ? live : publishing ? steps.length - 1 : -1
+  if (!steps.length && !publishing) return null
   return (
     <div className={cn(REPLY_EDGE, "flex flex-col")}>
       {steps.map((step, at) => (
@@ -100,18 +110,24 @@ function BuildSteps({
           <StepRow
             step={step}
             live={at === live}
-            {...(isOpen(step) ? {} : { onPress: () => onStep(step) })}
+            {...(isOpen(step) ? {} : { onPress: () => onStep(step, windows[at]) })}
           />
-          {at === live ? (
+          {at === noteAt ? (
             <WorkNote data-build-activity>{row.activity ?? WORKING_WORDS}</WorkNote>
           ) : null}
         </Fragment>
       ))}
+      {steps.length === 0 ? (
+        <WorkNote data-build-activity>{row.activity ?? WORKING_WORDS}</WorkNote>
+      ) : null}
     </div>
   )
 }
 
 function BuildReply({ row, onDetails }: { row: CanvasBuildRow; onDetails: () => void }) {
+  // A build the record predates draws no marker, so its flag has none to read on and its reply's line
+  // keeps it. Where there is a marker, the marker is what says it.
+  const flag = row.flag && !markersOf(row).length ? flagWords(row.flag) : undefined
   return (
     <>
       {row.summary ? (
@@ -129,6 +145,7 @@ function BuildReply({ row, onDetails }: { row: CanvasBuildRow; onDetails: () => 
           "flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground",
         )}
       >
+        {flag ? <span data-build-flag={row.flag}>{flag}</span> : null}
         {row.version ? (
           <span data-build-version>
             Version {row.version}
@@ -155,7 +172,7 @@ function BuildBlock({
 }: {
   row: CanvasBuildRow
   onDetails: () => void
-  onStep: (step: CanvasBuildStep) => void
+  onStep: (step: CanvasBuildStep, window: StepWindow) => void
 }) {
   return (
     <div data-canvas-build={row.id} className="flex flex-col gap-3">
@@ -189,7 +206,7 @@ export function CanvasBuildsView({ waiting, composer }: ThreadViewProps) {
               key={row.id}
               row={row}
               onDetails={() => lane.open(row)}
-              onStep={(step) => lane.open(row, step)}
+              onStep={(step, window) => lane.open(row, step, window)}
             />
           ))}
         </div>
@@ -209,16 +226,17 @@ function NoComposer() {
 interface Sight {
   build: CanvasBuildRow
   step?: CanvasBuildStep
+  window?: StepWindow
 }
 
 function StepView(props: ThreadViewProps) {
-  const step = useContext(WindowOf)
+  const window = useContext(WindowOf)
   const { turns, origin } = props
   const narrowed = useMemo(
-    () => (step ? turnsInStep(turns, origin, step) : { turns, origin }),
-    [step, turns, origin],
+    () => (window ? turnsInStep(turns, origin, window) : { turns, origin }),
+    [window, turns, origin],
   )
-  if (step && !narrowed.turns.length && !props.firstReadOut)
+  if (window && !narrowed.turns.length && !props.firstReadOut)
     return (
       <p data-build-window-empty className={cn(COLUMN, "px-4 py-6 text-sm text-muted-foreground")}>
         No messages in this step of the build.
@@ -255,7 +273,8 @@ export function CanvasBuildsLane({
   const lane = useMemo<Lane>(
     () => ({
       rows,
-      open: (build, step) => setSight({ build, ...(step ? { step } : {}) }),
+      open: (build, step, window) =>
+        setSight({ build, ...(step ? { step } : {}), ...(window ? { window } : {}) }),
     }),
     [rows],
   )
@@ -273,7 +292,7 @@ export function CanvasBuildsLane({
           <div className="min-h-0 flex-1 overflow-hidden">
             {sight ? (
               <Suspense fallback={null}>
-                <WindowOf.Provider value={sight.step}>
+                <WindowOf.Provider value={sight.window}>
                   <AppChatNextThread
                     chatId={chatId}
                     server={bot.baseUrl}

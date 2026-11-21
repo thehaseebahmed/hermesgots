@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { drawnSteps, isOpen, liveIndexOf, markersOf, phaseWord, stepWords, turnsInStep } from "../src/lib/build-steps.ts"
+import { drawnSteps, isOpen, liveIndexOf, markersOf, phaseWord, stepWords, turnsInStep, windowsOf } from "../src/lib/build-steps.ts"
 
 /** One visit as the host answers it, mapped by `canvases.ts`'s `buildRowOf`. */
 const step = (phase, startedAt, endedAt, flag) => ({
@@ -122,11 +122,42 @@ test("only a visit the build has not left is drawn live", () => {
   assert.equal(liveIndexOf([]), -1, "a block with no marker draws none live")
 })
 
-const TURNS = [{ at: 1_000_000 }, { at: 2_000_000 }, { at: 3_000_000 }]
+const TURNS = [{ at: 1_000 }, { at: 2_000 }, { at: 3_000 }]
+
+/** Where each turn lands, as the phase words of the drawn steps that hold it. */
+const homesOf = (steps, build, turns) => {
+  const windows = windowsOf(steps, build)
+  return turns.map((turn) =>
+    steps
+      .filter((_, at) => turnsInStep([turn], 0, windows[at]).turns.length)
+      .map((one) => one.phase),
+  )
+}
+
+test("a build's drawn steps tile the seconds, each ending where the next begins", () => {
+  const steps = markersOf({
+    steps: [
+      step("planning", 0, 2_000),
+      step("waiting", 2_000, 90_000),
+      step("building", 90_000, 120_500),
+      step("checking", 120_500, 121_000, "failing"),
+      step("publishing", 121_000, 121_400),
+    ],
+  })
+  assert.deepEqual(
+    windowsOf(steps, { phase: "published" }),
+    [
+      { start: 0, end: 90 },
+      { start: 90, end: 120 },
+      { start: 120, end: 122 },
+    ],
+    "a step ends at the next drawn step's floored start, and the last one a second past the second it closed in",
+  )
+})
 
 test("a step's sheet keeps the turns that began inside its window", () => {
   assert.deepEqual(
-    turnsInStep(TURNS, 0, { startedAt: 2_000_000, endedAt: 3_000_000 }).turns,
+    turnsInStep(TURNS, 0, { start: 2, end: 3 }).turns,
     [TURNS[1]],
     "the window is half-open, so its start's turn is in it and its end's turn is not",
   )
@@ -135,39 +166,123 @@ test("a step's sheet keeps the turns that began inside its window", () => {
 test("a turn beginning in the second a phase changed belongs to the step that just began", () => {
   // A row's clock is whole seconds and a visit's is milliseconds, so both edges are floored: a turn
   // stamped inside the same second as an end belongs to the visit that opened at that instant.
+  const steps = markersOf({
+    steps: [step("planning", 1_000_000, 2_000_400), step("building", 2_000_400, 3_000_000)],
+  })
+  const windows = windowsOf(steps, { phase: "published" })
   const turn = { at: 2_000_400 }
+  assert.deepEqual(turnsInStep([turn], 0, windows[0]).turns, [], "not to the visit that just ended")
   assert.deepEqual(
-    turnsInStep([turn], 0, { startedAt: 1_000_000, endedAt: 2_000_400 }).turns,
-    [],
-    "not to the visit that just ended",
-  )
-  assert.deepEqual(
-    turnsInStep([turn], 0, { startedAt: 2_000_400, endedAt: 3_000_000 }).turns,
+    turnsInStep([turn], 0, windows[1]).turns,
     [turn],
     "but to the one that began with that second",
   )
 })
 
 test("a step's sheet moves the origin to the first turn it keeps", () => {
-  const kept = turnsInStep(TURNS, 7, { startedAt: 2_000_000, endedAt: 3_000_000 })
+  const kept = turnsInStep(TURNS, 7, { start: 2, end: 3 })
   assert.equal(
     kept.origin,
     8,
     "a kept turn keeps the place it had, which is what its message id is counted from",
   )
-  assert.equal(turnsInStep(TURNS, 7, { startedAt: 9_000_000, endedAt: 10_000_000 }).origin, 7)
+  assert.equal(turnsInStep(TURNS, 7, { start: 9, end: 10 }).origin, 7)
 })
 
 test("a window with no end keeps every turn from its start on, and a bounded one drops an undated turn", () => {
-  const turns = [{ at: 2_000_000 }, {}, { at: 4_000_000 }]
+  const turns = [{ at: 2_000 }, {}, { at: 4_000 }]
   assert.deepEqual(
-    turnsInStep(turns, 0, { startedAt: 2_000_000 }).turns,
+    turnsInStep(turns, 0, { start: 2, end: Infinity }).turns,
     turns,
     "a visit the build has not left has no end to bound it",
   )
   assert.deepEqual(
-    turnsInStep(turns, 0, { startedAt: 2_000_000, endedAt: 3_000_000 }).turns,
+    turnsInStep(turns, 0, { start: 2, end: 3 }).turns,
     [turns[0]],
     "a bounded visit leaves out a turn nothing can place",
+  )
+})
+
+test("a sub-second visit's second is a window, and its turn does not vanish", () => {
+  // A real build's check can run in under a second, and its visit then floors to a window one second
+  // wide at its end: the turn stamped in that second is the check's own, not nobody's.
+  const steps = markersOf({
+    steps: [
+      step("planning", 0, 2_000),
+      step("building", 2_000, 90_000),
+      step("checking", 90_000, 90_400, "passing"),
+      step("publishing", 90_400, 90_420),
+    ],
+  })
+  assert.deepEqual(
+    homesOf(steps, { phase: "published" }, [{ at: 90_000 }]),
+    [["checking"]],
+    "the 400ms check holds the turn stamped in the second it ran in",
+  )
+})
+
+test("the last drawn step keeps the second the build closed in, and stays open while it works", () => {
+  const closed = [step("planning", 0, 2_000), step("checking", 120_500, 121_000, "failing")]
+  const closing = { at: 121_000 }
+  assert.deepEqual(
+    windowsOf(markersOf({ steps: closed }), { phase: "published" })[1],
+    { start: 120, end: 122 },
+    "the last drawn step holds the second it began in and the one it closed in, since publishing after it is not drawn",
+  )
+  assert.deepEqual(
+    homesOf(markersOf({ steps: closed }), { phase: "published" }, [closing]),
+    [["checking"]],
+    "so the turn stamped as the build closed lands in it rather than nowhere",
+  )
+  const working = markersOf({ steps: [step("planning", 0, 2_000), step("checking", 120_500)] })
+  assert.equal(
+    windowsOf(working, { phase: "publishing" })[1].end,
+    Infinity,
+    "a build at work leaves its last drawn step open, so nothing stamped after it falls between two",
+  )
+})
+
+test("a build whose phases all fall in one second still lands every turn in one step", () => {
+  // A real plugin run's visits can all be inside one whole second, as the probe of "a build whose
+  // checks could not run" showed. Every one of them floors to the same second; the last drawn step
+  // is what holds it, so the turns are read rather than lost.
+  const steps = markersOf({
+    steps: [
+      step("planning", 1_795_269_103_975, 1_795_269_103_984),
+      step("building", 1_795_269_103_984, 1_795_269_103_988),
+      step("checking", 1_795_269_103_988, 1_795_269_103_990, "unchecked"),
+      step("publishing", 1_795_269_103_990, 1_795_269_103_991),
+    ],
+  })
+  const turns = [{ at: 1_795_269_103_000 }, { at: 1_795_269_103_000 }]
+  assert.deepEqual(
+    windowsOf(steps, { phase: "published" }).map((one) => [one.start, one.end]),
+    [
+      [1_795_269_103, 1_795_269_103],
+      [1_795_269_103, 1_795_269_103],
+      [1_795_269_103, 1_795_269_104],
+    ],
+    "the visits share one second, and only the last can hold it",
+  )
+  assert.deepEqual(
+    homesOf(steps, { phase: "published" }, turns),
+    [["checking"], ["checking"]],
+    "every dated turn lands in exactly one step",
+  )
+})
+
+test("a build publishing leaves no turn between its last drawn step and its reply", () => {
+  const steps = markersOf({
+    steps: [
+      step("planning", 0, 2_000),
+      step("building", 2_000, 90_000),
+      step("checking", 90_000, 91_000, "passing"),
+      step("publishing", 91_000),
+    ],
+  })
+  assert.deepEqual(
+    homesOf(steps, { phase: "publishing" }, [{ at: 91_000 }]),
+    [["checking"]],
+    "a turn stamped as the build publishes reads in the last step that did work",
   )
 })
