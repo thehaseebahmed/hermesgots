@@ -202,7 +202,6 @@ class ABuildKeepsNoStepsItNeverRecorded(unittest.TestCase):
             " NULL, 9, 5)",
             (json.dumps(["make it blue"]),),
         )
-        # A store of the build before this one: no steps table, and the version it stops at.
         old.execute("DROP TABLE IF EXISTS canvas_build_steps")
         old.execute("PRAGMA user_version = 81")
         old.close()
@@ -221,8 +220,6 @@ class ABuildKeepsNoStepsItNeverRecorded(unittest.TestCase):
             )
         finally:
             conn.close()
-        # The build the store already held still reads — as one written before the record, so it
-        # carries no steps at all rather than an empty list.
         listed = builds.listing(path, "c1")
         self.assertEqual([one["id"] for one in listed], ["b1"])
         self.assertNotIn("steps", listed[0])

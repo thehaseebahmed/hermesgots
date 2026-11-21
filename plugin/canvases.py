@@ -1319,9 +1319,6 @@ def _erase(conn: sqlite3.Connection, canvas_id: str) -> None:
     conn.execute("DELETE FROM canvas_versions WHERE canvas_id = ?", (canvas_id,))
     conn.execute("DELETE FROM canvas_docs WHERE canvas_id = ?", (canvas_id,))
     conn.execute("DELETE FROM canvas_grants WHERE canvas_id = ?", (canvas_id,))
-    # A build's visits are its own rows, and nothing else can reach them once the build is gone: a
-    # deleted canvas takes its builds and the visits they made, since the store's own read is the
-    # only door to either.
     conn.execute(
         "DELETE FROM canvas_build_steps WHERE build_id IN"
         " (SELECT id FROM canvas_builds WHERE canvas_id = ?)",

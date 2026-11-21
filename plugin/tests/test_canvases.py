@@ -2506,8 +2506,6 @@ class RouteTest(unittest.TestCase):
             {chat_id: {"at": ahead, "value": chats.one(self.path, chat_id)["value"]}},
         )
 
-        # A build this canvas had, and the visit it made: rows only this canvas could reach, so the
-        # delete is what has to take them.
         conn = connect(self.path)
         try:
             conn.execute(

@@ -214,7 +214,6 @@ export interface CanvasBuildRow {
   at: number
 }
 
-/** The visits a host's answer carries, or nothing where it sent none (I6). */
 function stepsOf(raw: unknown): CanvasBuildStep[] | undefined {
   if (!Array.isArray(raw)) return undefined
   const kept: CanvasBuildStep[] = []

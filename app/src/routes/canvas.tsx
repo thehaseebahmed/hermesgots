@@ -1078,10 +1078,6 @@ function CanvasChat({
 }) {
   const chatId = canvas?.chatId
   const chat = useLiveQuery(() => (chatId ? db.conversations.get(chatId) : undefined), [chatId])
-  // The lane draws builds, not the transcript (G9, G10): every build this canvas has had, newest
-  // first from the host and turned the right way up here — a build asked for earlier stands above
-  // the one asked for later, and the one working now is the last block, since the host lists it as it
-  // lists the rest. A canvas made before builds has none, and keeps its own chat's lane.
   const builds = Boolean(canvas?.builds)
   const records = useCanvasBuilds(canvas?.id ?? "", bot, builds)
   const buildsShown = useMemo(() => [...records].reverse(), [records])

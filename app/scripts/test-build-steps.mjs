@@ -1,10 +1,3 @@
-/**
- * The lane's steps as a pure rule (G2, G6): which of a build's visits draw a marker, whether one is
- * still open, and the words its marker says. A build's record holds every phase it visited, but the
- * lane draws only the visits that did work — Waiting's words are the composer's plan card, and a
- * Publishing visit holds no turns — so a build that planned, waited, built, checked, built again,
- * checked again and published draws five markers, in the order they happened.
- */
 import assert from "node:assert/strict"
 import test from "node:test"
 
@@ -18,7 +11,6 @@ const step = (phase, startedAt, endedAt, flag) => ({
   ...(flag === undefined ? {} : { flag }),
 })
 
-/** A build that fixed what a failed check found, and passed the next time. */
 const BUILD = {
   steps: [
     step("planning", 0, 2_000),
@@ -130,7 +122,6 @@ test("only a visit the build has not left is drawn live", () => {
   assert.equal(liveIndexOf([]), -1, "a block with no marker draws none live")
 })
 
-/** Three turns, one to a visit, in the milliseconds a row's whole seconds become. */
 const TURNS = [{ at: 1_000_000 }, { at: 2_000_000 }, { at: 3_000_000 }]
 
 test("a step's sheet keeps the turns that began inside its window", () => {

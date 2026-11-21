@@ -246,29 +246,14 @@ export function seedCanvas(store, name) {
   return canvas
 }
 
-/**
- * The canvases a mock host holds. `host` is what belongs to the server rather than to a canvas: the
- * sessions' transcripts (a build's visits are told from the turns inside them), the change stream a
- * build's move is noted on, and the host's own row counter.
- */
 export function createCanvasStore(host) {
   const { transcripts, note, nextRowId } = host
   const canvases = new Map()
   // The canvas a run's session edits, so a turn in a chat finds its canvas without walking them all.
   const bySession = new Map()
 
-  /**
-   * The rows this mock said itself. The host writes a turn of its own too — a check's report is
-   * queued as the build's next turn — and that turn is not the reader's, so it is not the message
-   * the next build was asked with.
-   */
   const said = new Set()
 
-  /**
-   * When the request that opened a build was said: the last thing the reader said in the canvas's
-   * chat, which is where this mock works a canvas's requests. A canvas made from a prompt has said
-   * nothing yet, so its build opens on the clock it was asked for.
-   */
   const askedAt = (canvas) => {
     const asked = (transcripts.get(canvas.session_id) ?? [])
       .filter((row) => row.role === "user" && !said.has(row.id))
@@ -276,10 +261,6 @@ export function createCanvasStore(host) {
     return typeof asked?.timestamp === "number" ? Math.round(asked.timestamp * 1000) : undefined
   }
 
-  /**
-   * Says `words` in a canvas's chat, as the host writes a turn of its own: a check's report is
-   * queued as the build's next turn, and this mock's build works in the canvas's own chat.
-   */
   const say = (canvas, words) => {
     const rows = transcripts.get(canvas.session_id) ?? []
     const id = nextRowId()
@@ -394,11 +375,6 @@ function checkOf(version) {
   return { flag: "passing", words: `Version ${version} drew its heading and its box.` }
 }
 
-/**
- * Moves a build to `phase` at `at`: the visit it was in closes and the next opens at the same clock,
- * as `builds.py`'s `_placed` does, so the visits tile (I2). Entering the phase the open visit
- * already holds opens nothing (I4).
- */
 function place(build, phase, at) {
   const open = build.steps.findLast((step) => step.end === undefined)
   if (open?.phase !== phase) {
@@ -410,20 +386,9 @@ function place(build, phase, at) {
   build.at = at
 }
 
-/**
- * Opens the build a request is worked in, as `builds.py` does when the queue hands a canvas chat's
- * item to a build: the first visit opens at the clock the request reached the host, and the lane
- * draws its phase and the line saying what it is doing until the version it writes publishes it.
- *
- * The build opens on `planning` and enters `building` at the clock it reached the host, which is the
- * two visits `open_build` and the first turn's `_placed` record. This mock plans and builds in one
- * step, so the visits are told apart by one clock and not by any work between them.
- */
 function openBuild(store, canvas, request) {
   if (!canvas.builds) return
   const at = Date.now()
-  // A request cannot have been said after the build it opened, and this mock's two clocks are the
-  // app's own and the transcript's: the earlier of the two is where planning began.
   const asked = Math.min(store.askedAt(canvas) ?? at, at)
   canvas.build = {
     id: `b_${randomUUID().slice(0, 8)}`,
@@ -439,13 +404,6 @@ function openBuild(store, canvas, request) {
   place(canvas.build, "building", at)
 }
 
-/**
- * Ends the build the version just written belongs to, as `builds.py` does after a check round: the
- * version leaves it building and enters checking at one clock, the check answers, and its report is
- * said in the build's chat while the phase is still checking. The publish that follows opens
- * `publishing` and closes it at the same clock, carrying the flag the check answered on the visit
- * that checked (I5, G6).
- */
 function publishBuild(store, canvas, version, edited) {
   const build = canvas.build
   if (!build) return
@@ -469,13 +427,10 @@ function publishBuild(store, canvas, version, edited) {
         : "The page is written.",
       flag: check.flag,
       version,
-      // Every visit the build made to a phase, in order, as `builds.py`'s `listing` answers them.
       steps: build.steps,
       at: done,
       created_at: build.created_at,
     })
-    // A request sent while the check ran opens a build of its own, and this publish must not take
-    // that one's place.
     if (canvas.build === build) canvas.build = null
     store.note("canvas", canvas.session_id)
   }, CHECK_MS)
@@ -499,9 +454,6 @@ function writeVersion(store, canvas, words) {
     tools: canvas.tools,
   })
   if (canvas.versions.length > KEEP) canvas.versions.shift()
-  // A canvas whose requests are builds publishes one per write, as `builds.py` does: the request it
-  // took, the summary it ended on, the check it ran and the version it wrote. The build the request
-  // opened is the row it publishes, so the lane's working build becomes its history.
   if (canvas.builds) publishBuild(store, canvas, canvas.version, edited)
 }
 

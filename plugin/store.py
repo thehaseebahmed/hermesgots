@@ -84,8 +84,6 @@ logger = logging.getLogger(__name__)
 # its phase, the line the lane draws under it, and the version it published.
 # 82 keeps every visit a build makes to a phase (the canvas lane's steps, `builds.py`): one new
 # table, one row a visit, so a build that checks, fixes and checks again keeps each stretch apart.
-# A build from before this has no rows, which is a build whose visits were never recorded rather
-# than one that made none.
 SCHEMA_VERSION = 82
 
 
@@ -1162,11 +1160,6 @@ def _migrate(conn: sqlite3.Connection) -> None:
                 "UPDATE canvas_builds SET phase = CASE WHEN wait = 1 THEN 'waiting' ELSE 'building' END"
                 " WHERE phase = 'open'"
             )
-        # v82: the visits a build makes to a phase (the canvas lane's steps, builds.py). One row a
-        # visit — when it began and ended, and the flag the check that ran in it answered — keyed by
-        # the build and its ordinal, so a build that checks, fixes and checks again keeps each
-        # stretch apart in the order it happened. The row with no `ended_at` is the build's current
-        # step; a build written before this has none, and nothing back-fills them.
         if version < 82:
             conn.execute(
                 """CREATE TABLE IF NOT EXISTS canvas_build_steps (

@@ -185,7 +185,6 @@ def builds_of(path: Path, canvas_id: str) -> List[Dict[str, Any]]:
 
 
 def _builds_in(conn: sqlite3.Connection, canvas_id: str) -> List[Dict[str, Any]]:
-    """The canvas's builds, newest first, over a connection its caller holds."""
     rows = conn.execute(
         "SELECT * FROM canvas_builds WHERE canvas_id = ? ORDER BY at DESC, rowid DESC",
         (canvas_id,),
@@ -200,11 +199,6 @@ def listing(path: Path, canvas_id: str) -> List[Dict[str, Any]]:
     the version it published; a working one carries its phase and the line saying what it is doing
     now. Each build also carries every visit it made to a phase, in order — except a build the
     record predates, which carries none at all (I6).
-
-    The builds and their visits are read in one snapshot, because they are one answer: a publish
-    that landed between the two reads would hand the lane a finished build whose last visit is
-    still open — a marker nothing can press — or a build with no visits at all, which reads as one
-    written before the record. The 404 is decided before it, from the canvas's own record.
     """
     record = canvases.record(path, canvas_id)
     if record is None:
@@ -220,7 +214,6 @@ def listing(path: Path, canvas_id: str) -> List[Dict[str, Any]]:
 
 
 def _lane_row(one: Dict[str, Any], steps: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
-    """One build as the lane draws it, carrying its visits only where the record holds them."""
     row = {
         "id": one["id"],
         "session": one["session_id"],
@@ -239,12 +232,6 @@ def _lane_row(one: Dict[str, Any], steps: Optional[List[Dict[str, Any]]]) -> Dic
 
 
 def _steps_in(conn: sqlite3.Connection, canvas_id: str) -> Dict[str, List[Dict[str, Any]]]:
-    """Every visit this canvas's builds made to a phase, by build, in one statement.
-
-    A visit is ``phase``, ``start``, ``end`` while it is closed and ``flag`` where a check stamped
-    one. A build with no rows is absent from the answer rather than answering an empty list: the
-    record never saw it, which is not the same as a build that visited nothing (I6).
-    """
     rows = conn.execute(
         """SELECT build_id, phase, started_at, ended_at, flag FROM canvas_build_steps
            WHERE build_id IN (SELECT id FROM canvas_builds WHERE canvas_id = ?)
@@ -339,11 +326,6 @@ def enter(path: Path, canvas_id: str, request: str) -> Optional[Dict[str, Any]]:
 
 
 def open_build(path: Path, canvas_id: str, request: str) -> Dict[str, Any]:
-    """Opens a build on a fresh session of its own, and answers it.
-
-    The build and its first visit are one write: a build a reader can see is a build whose lane has
-    a step, so no poll lands between them and draws a build the record says nothing happened to.
-    """
     build_id = uuid.uuid4().hex
     now = now_ms()
     with canvases._writing(path) as conn:
@@ -362,8 +344,6 @@ def open_build(path: Path, canvas_id: str, request: str) -> Dict[str, Any]:
                 now,
             ),
         )
-        # The build's first visit opens at the same clock the build is written with, so its lane
-        # has a step from the moment the build exists.
         _open_step(conn, build_id, PLANNING, now)
     _note(path, canvas_id)
     return of_canvas(path, canvas_id) or {}
@@ -446,8 +426,6 @@ def plan(path: Path, build_id: str, args: Dict[str, Any]) -> bool:
         raise canvases.CanvasError("There is no such build.", 404)
     canvases.keep(path, build["canvas_id"], canvases.TESTS, json.dumps(checks))
     phase = WAITING if wait else BUILDING
-    # The plan's own columns and the visit it opens land together, inside the canvas module's write
-    # lock: a phase must not land without its plan, nor a plan without its phase.
     with canvases._writing(path) as conn:
         conn.execute(
             "UPDATE canvas_builds SET plan = ?, wait = ? WHERE id = ?",
@@ -470,8 +448,6 @@ def approve(path: Path, canvas_id: str) -> Optional[Dict[str, Any]]:
         raise canvases.CanvasError("This canvas has no build open.", 409)
     if not build.get("wait"):
         raise canvases.CanvasError("This build's plan isn't waiting for approval.", 409)
-    # The wait and the visit it opens land together: a build must not say it is building without
-    # the wait cleared, nor the reverse.
     with canvases._writing(path) as conn:
         # The wait is over, so the marker a push left behind is cleared with it: a plan filed to
         # wait again after this approval is a new wait and new news (step 12).
@@ -942,7 +918,6 @@ def _close_step(conn: sqlite3.Connection, build_id: str, at: int) -> None:
 
 
 def _open_step(conn: sqlite3.Connection, build_id: str, phase: str, at: int) -> None:
-    """Appends the visit a build just entered, as its next ordinal."""
     ordinal = conn.execute(
         "SELECT COALESCE(MAX(ordinal), -1) + 1 FROM canvas_build_steps WHERE build_id = ?",
         (build_id,),
@@ -960,13 +935,6 @@ def _phase(
     summary: Optional[str],
     version: Optional[int] = None,
 ) -> None:
-    """Ends a build in ``phase``: its summary, the version it published, and no activity line.
-
-    A finished build has nothing going on, so the line a working build carries is cleared — its
-    summary is what the lane's row says instead. The visit the build was in closes at the same
-    clock, since a finished build has no open step (I3), and both land in one write: a build is
-    never ended with a visit still open for a reader to draw as the one it is in.
-    """
     now = now_ms()
     with canvases._writing(path) as conn:
         conn.execute(
@@ -979,10 +947,6 @@ def _phase(
 
 def _placed(conn: sqlite3.Connection, build_id: str, phase: str) -> None:
     """Stamps where a working build is, the line the lane draws under it, and the step it entered.
-
-    The one writer of a working build's ``phase``, ``activity`` and ``at``, and the one place a
-    visit opens or closes. It takes the connection its caller holds — inside the caller's write
-    transaction — so the phase, the visit that ended and the visit that began all land together.
 
     Entering the phase the open visit already holds opens nothing (I4): a run that starts while
     the build already says it is building is the same stretch of work, not a second one.
@@ -1000,7 +964,6 @@ def _placed(conn: sqlite3.Connection, build_id: str, phase: str) -> None:
 
 
 def _place(path: Path, build_id: str, phase: str) -> None:
-    """``_placed`` in a write transaction of its own, for a caller that holds none."""
     with canvases._writing(path) as conn:
         _placed(conn, build_id, phase)
 

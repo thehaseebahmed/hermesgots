@@ -1,9 +1,3 @@
-/**
- * A finished build's steps, drawn as the chat's own work rows (G2, G6): one marker per visit to a
- * phase that did work, in the order they happened, and the check flag on the marker that checked
- * rather than under the reply. A build the record predates carries no visits, so it draws none.
- * Pressing a marker opens that visit's own turns (G3), and Details still opens the whole build.
- */
 import assert from "node:assert/strict"
 import test from "node:test"
 import { act } from "react"
@@ -39,8 +33,6 @@ const PAGE = `<!doctype html>
   <body><h1>Tip</h1></body>
 </html>`
 
-/** Every visit the build made, as `builds.py`'s listing answers one: a check failed, the page was
- * written again, the next check passed, and the version was published. */
 const STEPS = [
   { phase: "planning", start: 0, end: 2_000 },
   { phase: "waiting", start: 2_000, end: 90_000 },
@@ -51,8 +43,6 @@ const STEPS = [
   { phase: "publishing", start: 131_500, end: 132_000 },
 ]
 
-/** The builds the host answers, newest first: one that recorded its visits, and one from before the
- * record, which carries no `steps` at all (I6). */
 const BUILDS = [
   {
     id: "b2",
@@ -81,8 +71,6 @@ const BUILDS = [
   },
 ]
 
-/** The build working now, as the listing answers it: the visits behind it, the last one still open,
- * and the line the host says it is doing. */
 const WORKING = {
   id: "b3",
   session: "canvas-build-3",
@@ -101,8 +89,6 @@ const WORKING = {
   ],
 }
 
-/** The build working now whose visits the record never wrote down: a plugin upgraded mid-build
- * answers a phase and an activity line, and no `steps` at all (I6). */
 const UNRECORDED = {
   id: "b3",
   session: "canvas-build-3",
@@ -116,8 +102,6 @@ const UNRECORDED = {
   created_at: 4,
 }
 
-/** The build waiting on its plan: the visit it took to plan, and the wait it is in now — a phase
- * the lane draws no marker for, since a wait's words are the plan card in the composer's place. */
 const WAITING = {
   id: "b5",
   session: "canvas-build-5",
@@ -135,8 +119,6 @@ const WAITING = {
   ],
 }
 
-/** The same wait as a plugin that predates the record answers it: a phase, the line saying what it
- * is doing, and no visits at all (I6). */
 const UNRECORDED_WAITING = {
   id: "b6",
   session: "canvas-build-6",
@@ -153,10 +135,6 @@ const UNRECORDED_WAITING = {
 /** The whole second the sheet's build ran on, as a session's rows are stamped by the host. */
 const RAN_AT = 1_760_000_000
 
-/**
- * A build whose three turns each landed in a different visit of it, and whose fourth visit the
- * transcript holds no turn in: one marker's sheet has a visit's own turn, and another has none.
- */
 const VISITED = {
   id: "b4",
   session: "canvas-build-4",
@@ -176,7 +154,6 @@ const VISITED = {
   ],
 }
 
-/** That build's session: one turn inside each of its first three visits, timed in whole seconds. */
 const VISITED_ROWS = [
   { id: 1, role: "user", content: "make the heading say Split the bill", timestamp: RAN_AT + 2 },
   { id: 2, role: "assistant", content: "The heading now says Split the bill.", timestamp: RAN_AT + 2 },
@@ -186,7 +163,6 @@ const VISITED_ROWS = [
   { id: 6, role: "assistant", content: "The tips are checked.", timestamp: RAN_AT + 22 },
 ]
 
-/** The canvas the lane is drawn in: its page, its chat and the builds feature on. */
 const CANVAS = {
   id: "c1",
   title: "A tip calculator",
@@ -245,11 +221,9 @@ async function seed() {
   })
 }
 
-/** The canvas's screen drawn over a builds read of `builds`, the lane given a change to settle on. */
 async function drawLane(
   builds: readonly unknown[],
   body: () => Promise<void>,
-  /** The turns the sheet's thread reads, as the host answers them. */
   rows: readonly unknown[] = [],
 ) {
   serve(builds, rows)
@@ -278,8 +252,6 @@ test(
         () => Boolean(find('[data-canvas-build="b1"]')),
         "the lane's finished build to draw",
       )
-      // One marker per visit that did work, in the order the visits happened: the waiting and
-      // publishing visits are in the record and draw nothing.
       const markers = findAll('[data-canvas-build="b1"] [data-build-step]')
       assert.deepEqual(
         markers.map((one) => one.getAttribute("data-build-step")),
@@ -297,11 +269,9 @@ test(
         ],
         "each marker says its phase, then the span it took, and the checks say what they found",
       )
-      // The row is the thread's own work row, not a shape of its own.
       const first = markers[0]
       assert.ok(first.querySelector('[data-slot="work-label"]'), "the marker is a work row")
       assert.ok(first.querySelector('[data-slot="work-mark"]'), "wearing the thread's chevron")
-      // The markers sit between the request the build took and the reply it answered with.
       const request = find('[data-canvas-build="b1"] [data-build-request]')
       const reply = find('[data-canvas-build="b1"] [data-build-summary]')
       assert.ok(request && reply, "the request and the reply are drawn")
@@ -314,7 +284,6 @@ test(
           Node.DOCUMENT_POSITION_FOLLOWING,
         "and the last one over the reply",
       )
-      // The flag reads on the marker that checked, and no longer under the reply.
       assert.equal(markers[2].getAttribute("data-build-flag"), "failing")
       assert.equal(markers[4].getAttribute("data-build-flag"), "passing")
       const line = find('[data-canvas-build="b1"] [data-build-version]')?.parentElement
@@ -329,7 +298,6 @@ test(
         null,
         "the flag has left the reply's line",
       )
-      // A build from before the record draws its request and its reply, and no markers.
       assert.ok(
         missing('[data-canvas-build="b2"] [data-build-step]'),
         "a build with no steps draws none",
@@ -359,8 +327,6 @@ test(
         () => Boolean(find('[data-canvas-build="b3"]')),
         "the lane's working build to draw",
       )
-      // The steps behind it, in the order it took them, and the one it is in: a step still open says
-      // its phase and no span, since it has none yet.
       const markers = findAll('[data-canvas-build="b3"] [data-build-step]')
       assert.deepEqual(
         markers.map((one) => one.getAttribute("data-build-step")),
@@ -372,13 +338,11 @@ test(
         ["Planning · 2.0s", "Building"],
         "the step it is in says no span",
       )
-      // Only the step it is in pulses; the ones behind it are done.
       assert.deepEqual(
         markers.map((one) => one.hasAttribute("data-working")),
         [false, true],
         "the last marker is the working one, and no other is",
       )
-      // Its phase's activity line hangs under that marker.
       const activity = find('[data-canvas-build="b3"] [data-build-activity]')
       assert.ok(activity, "the working build says what it is doing")
       assert.equal(wordsOf(activity), "Building the page", "in the host's own words")
@@ -387,15 +351,12 @@ test(
         activity,
         "the activity line hangs under the step it is in",
       )
-      // It draws its request as a bubble, as a finished build's is drawn.
       const request = find('[data-canvas-build="b3"] [data-build-request]')
       assert.ok(request, "the working build's request is drawn")
       assert.ok(
         request.closest('[data-slot="bubble"]'),
         "the request wears the chat's own user bubble",
       )
-      // A build still at work has no reply to draw, and no line under one: neither the failed
-      // sentence nor the stopped one stands where a reply would.
       assert.ok(
         missing('[data-canvas-build="b3"] [data-build-summary]'),
         "a build still at work draws no reply",
@@ -404,14 +365,11 @@ test(
         !(document.body.textContent ?? "").includes("The build was stopped."),
         "and is not said to have stopped",
       )
-      // The card the working build used to be is gone.
       assert.ok(missing("[data-canvas-build-open]"), "no open build is drawn beside the blocks")
       assert.ok(
         missing("[data-canvas-builds] .border-dashed"),
         "and no dashed card is drawn",
       )
-      // A step the build has left is a press; the one it is in is not, since its window is still
-      // being written and it has no end to bound it.
       assert.deepEqual(
         markers.map((one) => one.hasAttribute("disabled")),
         [false, true],
@@ -437,9 +395,6 @@ test(
         () => Boolean(find('[data-canvas-build="b5"]')),
         "the lane's waiting build to draw",
       )
-      // The wait is a phase the lane draws no marker for, so the visit behind it is a visit the
-      // build has left: nothing pulses, and no line hangs under a step it is not in. The wait reads
-      // on the plan's card in the composer's place, not here.
       const markers = findAll('[data-canvas-build="b5"] [data-build-step]')
       assert.deepEqual(
         markers.map((one) => one.getAttribute("data-build-step")),
@@ -454,8 +409,6 @@ test(
         missing('[data-canvas-build="b5"] [data-build-activity]'),
         "nor does a line say what a waiting build is doing",
       )
-      // A wait the record never wrote down is no invitation to invent its marker either: the phase
-      // is the one phase the lane must not draw, and it is not drawn.
       const unrecorded = find('[data-canvas-build="b6"]')
       assert.ok(unrecorded, "the build the record predates is still drawn")
       assert.ok(
@@ -487,8 +440,6 @@ test(
         () => Boolean(find('[data-canvas-build="b3"]')),
         "the lane's working build to draw",
       )
-      // A plugin upgraded mid-build answers no visits: the lane says the phase and its activity line
-      // rather than drawing an empty row.
       const markers = findAll('[data-canvas-build="b3"] [data-build-step]')
       assert.equal(markers.length, 1, "one marker stands for the phase it is in")
       assert.equal(markers[0].getAttribute("data-build-step"), "checking")
@@ -510,7 +461,6 @@ test(
   laptop(async () => {
     await drawLane([VISITED], async () => {
       const bot = (await db.profiles.get("bot-1"))!
-      /** The words the sheet's thread draws, one message at a time. */
       const sheetMessages = () =>
         findAll('[data-slot="sheet-content"] [data-slot="message"]').map(wordsOf)
       await act(async () => {
@@ -527,7 +477,6 @@ test(
         ["planning", "building", "checking", "building"],
         "the build's four visits, a marker each",
       )
-      // The second marker opens the second visit's turn, and neither of the other two.
       await click(markers[1])
       await until(
         () => sheetMessages().length > 0,
@@ -551,7 +500,6 @@ test(
         !second.some((words) => words.includes("check the tips")),
         "and so is the turn of the visit after it",
       )
-      // The sheet says which step it is, and whose build.
       assert.equal(
         wordsOf(find('[data-slot="sheet-title"]')),
         "Building",
@@ -562,7 +510,6 @@ test(
         "make the heading say Split the bill",
         "and describes the build by its first request",
       )
-      // Details still opens the whole build: all three turns, every row of the session.
       await click(find('[data-slot="sheet-content"] [data-slot="sheet-close"]'))
       await until(() => missing('[data-slot="sheet-content"]'), "the step's sheet to close")
       await click(find('[data-canvas-build="b4"] [data-build-details]'))
@@ -588,7 +535,6 @@ test(
         "Build",
         "and the whole build's sheet is titled by the build",
       )
-      // A visit the transcript holds no turn in says so, rather than greeting the reader.
       await click(find('[data-slot="sheet-content"] [data-slot="sheet-close"]'))
       await until(() => missing('[data-slot="sheet-content"]'), "the transcript's sheet to close")
       await click(markers[3])

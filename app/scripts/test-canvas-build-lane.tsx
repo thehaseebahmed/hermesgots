@@ -79,8 +79,6 @@ const BUILDS = [
   },
 ]
 
-/** The build working now, as the same read answers it: the step behind it, the one still open, and
- * the line the host says it is doing. */
 const WORKING = {
   id: "b3",
   session: "canvas-build-1",
@@ -250,9 +248,6 @@ test(
         !host.read.includes("gots-chat-1"),
         "the canvas's own session holds nothing while a build runs",
       )
-      // The build working now is a block of the lane, drawn as a chat: its request in the bubble a
-      // chat draws one in, the step behind it, the step it is in and the line saying what it is
-      // doing — not the dashed card the lane used to draw it as.
       const working = find('[data-canvas-build="b3"]')
       assert.ok(working, "the working build is drawn as a chat block")
       assert.ok(
@@ -312,8 +307,6 @@ test(
         () => Boolean(findText("button", "Details")),
         "the lane's builds to draw",
       )
-      // A finished build reads as a chat: the request is the reader's own message, in the bubble the
-      // thread draws one in and on the right; the summary is the bot's words, on the reply's edge.
       const request = find('[data-canvas-build="b1"] [data-build-request]')
       assert.ok(request, "the finished build's request is drawn")
       assert.ok(
@@ -336,8 +329,6 @@ test(
         "and says what the build answered",
       )
       assert.ok(!summary.closest('[data-slot="bubble"]'), "the bot's words wear no bubble")
-      // Under the reply, one muted line: the version it published and Details. The check flag reads on
-      // the marker that checked, and this build predates the record's visits, so it draws none.
       const line = find('[data-canvas-build="b1"] [data-build-version]')?.parentElement
       assert.ok(line, "the version's line is drawn")
       assert.ok(
@@ -357,7 +348,6 @@ test(
         !document.querySelector('[aria-label="Messages"]'),
         "no transcript is drawn in the lane",
       )
-      // A build with no reply of its own still says so where the reply would be, and keeps Details.
       const failed = find('[data-canvas-build="b2"] [data-build-summary]')
       assert.ok(failed, "a build with no summary still draws that place")
       assert.equal(wordsOf(failed), "The build failed.", "in the lane's own words")
@@ -367,8 +357,6 @@ test(
         missing('[data-canvas-build="b2"] [data-build-version]'),
         "a build that published no version names none",
       )
-      // The build working now is its phase and the line saying what it is doing, drawn as the lane's
-      // last block.
       const working = find('[data-canvas-build="b3"]')
       assert.ok(working, "the working build is drawn as a block of the lane")
       assert.equal(

@@ -552,8 +552,6 @@ const RESEARCH_WRITERS = process.env.MOCK_RESEARCH_WRITERS !== "off"
 // mock-canvas.mjs's pages at its first version, so a flow can visit a page whose asks it knows
 // without a bot writing it: `plain` asks for no library, `many` for chart, d3 and Day.js.
 const CANVAS = process.env.MOCK_CANVAS !== "0"
-// A canvas's builds are told from the turns they ran: the mock's own transcripts, its change stream
-// (a build's move is news to every device) and the host's row counter.
 const CANVASES = createCanvasStore({
   transcripts,
   note: noteEvent,

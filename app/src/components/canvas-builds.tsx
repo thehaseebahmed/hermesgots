@@ -1,16 +1,3 @@
-/**
- * A canvas's lane, drawn as builds rather than as a transcript (G9, G10, G5): each build reads as the
- * chat it was — its requests in the bubble a chat draws the reader's message in, a marker for each
- * step it took, its summary as the bot's words, and under them one line saying the version it
- * published, newest at the foot. The build working now is a block like any other, its last marker
- * the step it is in and that step's activity line hanging under it. The transcript is not drawn here
- * at all: one sheet holds it, opened on a build whole by `Details` and on a visit by that visit's
- * marker, where it reads only the turns that visit ran.
- *
- * The lane is still a chat's container (`ChatBody`): its composer queues a request on the plugin
- * exactly as before, and a waiting plan's card takes the composer's place. Only the thread is
- * replaced, which is why this is a `ThreadViewProps` view rather than a screen.
- */
 import {
   createContext,
   Fragment,
@@ -54,9 +41,6 @@ import {
 } from "@/lib/layout"
 import { cn } from "@/lib/utils"
 
-// The chat-next thread the app draws a chat with, loaded only when a build's sheet is opened: the
-// canvas route never reads a transcript until the reader asks for one. Both halves come from the one
-// module, so opening a build costs the one fetch.
 const AppChatNextThread = lazy(() =>
   import("@/chat-next/app-view").then((module) => ({ default: module.AppChatNextThread })),
 )
@@ -64,30 +48,18 @@ const AppThreadView = lazy(() =>
   import("@/chat-next/app-view").then((module) => ({ default: module.AppThreadView })),
 )
 
-/** What a working build says when its host named no activity line. */
 const WORKING_WORDS = "The build is working."
 
 /** What the lane draws, kept in a context so the view is one stable component. */
 interface Lane {
   rows: CanvasBuildRow[]
-  /** Opens the lane's one sheet: a build whole, or one visit of it where a marker was pressed. */
   open: (build: CanvasBuildRow, step?: CanvasBuildStep) => void
 }
 
 const LaneOf = createContext<Lane | null>(null)
 
-/**
- * The visit the sheet holds its thread to, kept in a context so the view that narrows it is one
- * stable component: absent for `Details`, which draws the build whole.
- */
 const WindowOf = createContext<CanvasBuildStep | undefined>(undefined)
 
-/**
- * One marker: a visit the build made to a phase that did work, drawn as the thread's own work row —
- * its phase's word, what a check found where it checked, and the span it took. The step a working
- * build is in pulses its words, as any working row of the thread does, and is no press: its window
- * is still being written. A visit the build has left opens that visit's own turns.
- */
 function StepRow({
   step,
   live = false,
@@ -95,7 +67,6 @@ function StepRow({
 }: {
   step: CanvasBuildStep
   live?: boolean
-  /** Opens this visit's own turns; absent while the build is still in the visit. */
   onPress?: () => void
 }) {
   return (
@@ -112,12 +83,6 @@ function StepRow({
   )
 }
 
-/**
- * A build's markers, in the order it took them, between its requests and its reply. The one step a
- * working build is in pulses, and its phase's activity line hangs under that marker until the build
- * leaves the step. A build at work in a phase it draws no marker for — waiting on its plan,
- * publishing — pulses none of them: every marker it draws is a step it has left.
- */
 function BuildSteps({
   row,
   onStep,
@@ -146,11 +111,6 @@ function BuildSteps({
   )
 }
 
-/**
- * A build that ended: its summary as the bot's words — or, where it ended without one, the line
- * saying how it ended — and under them the one muted line carrying the version it published and
- * `Details`, which opens the whole build's transcript.
- */
 function BuildReply({ row, onDetails }: { row: CanvasBuildRow; onDetails: () => void }) {
   return (
     <>
@@ -188,12 +148,6 @@ function BuildReply({ row, onDetails }: { row: CanvasBuildRow; onDetails: () => 
   )
 }
 
-/**
- * One build, drawn as the chat it was, or is: each request the reader's own message on the right, a
- * marker per step it took, and — once it has ended — the summary that ended it, with the version it
- * published and `Details` under it. A build still at work draws its requests and its steps, and waits
- * for the reply it has not given yet.
- */
 function BuildBlock({
   row,
   onDetails,
@@ -218,7 +172,6 @@ function BuildBlock({
   )
 }
 
-/** The lane's thread: every build the canvas has had, oldest at the top, with the composer under. */
 export function CanvasBuildsView({ waiting, composer }: ThreadViewProps) {
   const lane = useContext(LaneOf)
   if (!lane) return null
@@ -253,18 +206,11 @@ function NoComposer() {
   return null
 }
 
-/** What the lane's one sheet shows: a build whole, or one visit of that build. */
 interface Sight {
   build: CanvasBuildRow
   step?: CanvasBuildStep
 }
 
-/**
- * The sheet's thread, narrowed to the visit it was opened for (G3): the turns that began inside that
- * visit's window, with `origin` moved so each keeps the id it had. A visit the transcript holds no
- * turn in says so, rather than drawing a chat's empty state over a sheet the reader has nothing to
- * answer in.
- */
 function StepView(props: ThreadViewProps) {
   const step = useContext(WindowOf)
   const { turns, origin } = props

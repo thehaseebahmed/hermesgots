@@ -896,14 +896,10 @@ class WhereABuildIsTest(unittest.TestCase):
             self.host.adapter.run("run_1", session, "completed", 3)
             self.host.end(session, completed=True)
 
-            # The first check ran and its report is the build's next turn: the build writes again
-            # and its next end checks the page once more.
             self.host.tick(session)
             self.host.adapter.run("run_2", session, "completed", 4)
             self.host.write(session, DOCUMENT.replace("<h1>Tip</h1>", "<h1>Split it</h1>"))
 
-        # The second check cannot run on a host with no browser, so the build publishes what its
-        # last round said while the checking visit it opened is still the open one.
         with take_layer_away():
             self.host.adapter.run("run_3", session, "completed", 5)
             self.host.end(session, completed=True)
@@ -915,18 +911,14 @@ class WhereABuildIsTest(unittest.TestCase):
             [one["phase"] for one in steps],
             ["planning", "building", "checking", "building", "checking", "publishing"],
         )
-        # Windows tile: a visit ends where the next begins, and the build's end closes the last.
         for before, after in zip(steps, steps[1:]):
             self.assertEqual(before["end"], after["start"], "a step ends where the next begins")
         self.assertIn("end", steps[-1], "a finished build has no open step")
-        # Only a checking visit carries a flag, and the last one's is the version's.
         self.assertEqual([one["phase"] for one in steps if "flag" in one], ["checking", "checking"])
         self.assertEqual(steps[2]["flag"], canvas_checks.PASSING, "the round that passed said so")
         self.assertEqual(steps[-2]["flag"], published["flag"])
         self.assertEqual(steps[-2]["flag"], canvas_checks.UNCHECKED)
 
-        # A build the record predates has no rows, so it answers no steps at all — never an empty
-        # list, which would say it visited nothing (I6).
         conn = connect(self.host.path)
         try:
             conn.execute(

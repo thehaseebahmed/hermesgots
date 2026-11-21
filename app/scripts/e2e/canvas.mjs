@@ -3,9 +3,8 @@
 // while the bot builds, Preview appears with the first version and draws the page, its head's asks
 // for Chart.js and d3 answered so both libraries run inside the frame (the drawn page a refactor
 // has to leave as it was), a box ticked on the page is kept by the host, an edit sent from the chat
-// lands as a new version with the lane drawing a marker for each step that build took and one of
-// them opening the sheet on that step's own turn, Preview is where Undo is pressed, a page that
-// asks to leave is refused and drawn again, and the chat's Point row sends the reader to the page
+// lands as a new version, Preview is where Undo is pressed, a page that asks to leave is refused and
+// drawn again, and the chat's Point row sends the reader to the page
 // and takes the element they tap back as the field's chip — and a visit costs only what its page
 // asked: a page that asks for no library fetches none of one, and one that asks for three fetches
 // each of those chunks once.
@@ -197,10 +196,8 @@ await flow(
     )
     pass("the edit screen: the lane draws the build's request and the version it published")
 
-    // The build the flow just made, as the host's own clock saw it: a marker for each visit it made
-    // to a phase — it planned, it built, it checked, it published — and the check's flag on the
-    // visit that checked (G2, G6). Publishing draws no marker. A visit's span is the mock's clock,
-    // so a marker is read by the mark it carries and never by the duration beside it.
+    // A visit's span is the mock's clock, so a marker is read by the mark it carries and never by
+    // the duration beside it.
     const build = builds.locator("[data-canvas-build]").filter({ hasText: EDIT })
     const markers = build.locator("[data-build-step]")
     await until(
@@ -219,8 +216,6 @@ await flow(
       (await markers.nth(2).innerText()).includes("Checks passed"),
       "the visit that checked says what its check found",
     )
-    // The step's own turn is the host's, and the lane does not draw it: the lane is the build's
-    // requests, its markers and its reply, and its transcript is the sheet's (G3).
     assert.equal(
       await builds.getByText(checkReport(2)).count(),
       0,
@@ -230,7 +225,6 @@ await flow(
       "the edit screen: the lane draws a marker per step the build took, with the check's flag on the one that checked",
     )
 
-    // A marker is the visit it names: pressing it opens the sheet on that step's window alone.
     await markers.nth(2).click()
     const stepSheet = page.locator('[data-slot="sheet-content"]')
     await stepSheet.getByText(checkReport(2)).waitFor({ timeout: 20_000 })
