@@ -1,6 +1,7 @@
 import Dexie from "dexie"
 
 import type { SessionDb, SessionRow, SessionState } from "@/lib/db"
+import { equal } from "@/lib/equal"
 import { FLUSH_INTERVAL_MS } from "@/lib/freshness"
 import { rowText } from "@/lib/row-text"
 
@@ -10,8 +11,8 @@ import { initial, reduce, type ThreadEvent, type ThreadState } from "./state"
 /**
  * The one writer of a session's thread (ADR 0065). It holds the thread in memory, applies events in
  * the order they came, and writes to the device what the chat says: the rows, the archive, the
- * subagents and the streamed turn. What the page is doing — loading, running, waiting, failing — is
- * kept here only, and starts over each time the store is made.
+ * subagents, the streamed turn, and the form a call's card took. What the page is doing — loading,
+ * running, waiting, failing — is kept here only, and starts over each time the store is made.
  */
 export interface ThreadStore {
   get: () => ThreadState
@@ -27,9 +28,14 @@ export interface ThreadStore {
   apply: (event: ThreadEvent, keep?: () => boolean) => Promise<void>
 }
 
+/**
+ * What the page draws from, as one object that changes only when one of its fields does. It is the
+ * page's reactivity selector, not the set the device keeps: `clarifyForm` is restored from the record
+ * on open, and the rest start over with the store.
+ */
 export type Doing = Pick<
   ThreadState,
-  "status" | "running" | "waiting" | "between" | "questionSet" | "error"
+  "status" | "running" | "waiting" | "between" | "questionSet" | "clarifyForm" | "error"
 >
 
 const sameDoing = (a: Doing, b: ThreadState) =>
@@ -38,6 +44,7 @@ const sameDoing = (a: Doing, b: ThreadState) =>
   a.waiting === b.waiting &&
   a.between === b.between &&
   a.questionSet === b.questionSet &&
+  a.clarifyForm === b.clarifyForm &&
   a.error === b.error
 
 const doingOf = ({
@@ -46,6 +53,7 @@ const doingOf = ({
   waiting,
   between,
   questionSet,
+  clarifyForm,
   error,
 }: ThreadState): Doing => ({
   status,
@@ -53,6 +61,7 @@ const doingOf = ({
   waiting,
   between,
   questionSet,
+  clarifyForm,
   error,
 })
 
@@ -150,6 +159,12 @@ const recordOf = (session: string, state: ThreadState): SessionState => ({
   failures: state.failures,
   unsent: state.unsent,
   answers: state.answers,
+  // The form, without the prompt it last answered: the marker is the live page's guard, and a page
+  // opened again has no way to know whether the host took an answer that was in flight (`TakenForm`).
+  clarifyForm: state.clarifyForm && {
+    ...state.clarifyForm,
+    taken: { form: state.clarifyForm.taken.form },
+  },
 })
 
 const sameRecord = (a: SessionState | undefined, b: SessionState) =>
@@ -162,7 +177,8 @@ const sameRecord = (a: SessionState | undefined, b: SessionState) =>
   a.stats === b.stats &&
   a.failures === b.failures &&
   a.unsent === b.unsent &&
-  a.answers === b.answers
+  a.answers === b.answers &&
+  equal(a.clarifyForm, b.clarifyForm)
 
 function createStore(database: SessionDb, session: string, drop: () => void): ThreadStore {
   let state = initial
@@ -197,6 +213,17 @@ function createStore(database: SessionDb, session: string, drop: () => void): Th
       failures: record?.failures,
       unsent: record?.unsent,
       answers: record?.answers,
+      // A form read back is handed the marker the host's own answer confirmed, and never the send in
+      // flight it may have been carrying (`HeldForm.delivered`).
+      clarifyForm: record?.clarifyForm && {
+        ...record.clarifyForm,
+        taken: {
+          form: record.clarifyForm.taken.form,
+          ...(record.clarifyForm.delivered
+            ? { answeredPrompt: record.clarifyForm.delivered }
+            : {}),
+        },
+      },
     }
     written = {
       rows,

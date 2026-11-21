@@ -81,6 +81,15 @@ export interface Ask {
   multi_select: boolean
 }
 
+/**
+ * A call whose questions the host asks one prompt at a time: the prompt it waits on now, and the way
+ * to ask the next — the model loop between two of them, which the caller times.
+ */
+export interface Series {
+  /** Asks the call's next question, once the last one is answered. */
+  next(): void
+}
+
 type Prompt =
   | {
       kind: "approval"
@@ -102,6 +111,12 @@ type Prompt =
 export interface Run {
   /** The agent asks the user and waits: a `clarify.request`, and a pending control on the status. */
   ask(question: Ask): string
+  /**
+   * A call that put several questions, as Hermes makes one: the agent's row carries every question
+   * in its arguments, and the host holds one prompt per question — the next only when `next()` asks
+   * for it, since the model loop between two of them takes its own while.
+   */
+  askSeries(questions: Ask[]): Series
   /** A command needs the user's say: `tool.started`, `approval.request`, then the run waits. */
   requestApproval(command: string, description: string): string
   /**
@@ -373,37 +388,102 @@ export function fakeHost(
       }
     }
 
+    /** One answered question of a clarify call, as the call's result lists it. */
+    type Given = { question: string; choices: string[]; answer: string }
+
+    /**
+     * The host takes one question's answer: it is recorded, its `clarify.settled` sent, and — once the
+     * call's last question is answered — the call's result written and `tool.completed` pushed. Both
+     * the single-question `ask` and the one-prompt-at-a-time `askSeries` settle through here, so the
+     * call's shape is written once.
+     */
+    const settleOne = (
+      call: string,
+      prompt_id: string,
+      one: Ask,
+      answer: string,
+      last: boolean,
+      given: Given[],
+    ) => {
+      const choices = one.choices ?? []
+      answers.push({ run: id, prompt_id, generation: 1, answer })
+      given.push({ question: one.question, choices, answer })
+      turn.asks.push(`${one.question} → ${answer}`)
+      push("clarify.settled", { prompt_id, execution_generation: 1 })
+      if (!last) return
+      write(
+        "tool",
+        JSON.stringify({
+          responses: given.map((one) => ({
+            question: one.question,
+            choices_offered: one.choices,
+            user_response: one.answer,
+          })),
+          outcome: "submitted",
+        }),
+        { tool_call_id: call, tool_name: "clarify" },
+      )
+      push("tool.completed", { tool: "clarify", error: false, tool_call_id: call, preview: "" })
+    }
+
     const run: Run = {
-      ask({ question, choices = [], multi_select }) {
+      ask(one) {
         const call = callRow("clarify")
         push("tool.started", { tool: "clarify", preview: null, tool_call_id: call })
         const prompt_id = `cl${++nextPrompt}`
+        const given: Given[] = []
         hold(
-          { kind: "clarify", prompt_id, execution_generation: 1, question, choices, multi_select },
-          "answer",
-          (answer) => {
-            answers.push({ run: id, prompt_id, generation: 1, answer })
-            write(
-              "tool",
-              JSON.stringify({
-                responses: [{ question, choices_offered: choices, user_response: answer }],
-              }),
-              {
-                tool_call_id: call,
-                tool_name: "clarify",
-              },
-            )
-            turn.asks.push(`${question} → ${answer}`)
-            push("clarify.settled", { prompt_id, execution_generation: 1 })
-            push("tool.completed", {
-              tool: "clarify",
-              error: false,
-              tool_call_id: call,
-              preview: "",
-            })
+          {
+            kind: "clarify",
+            prompt_id,
+            execution_generation: 1,
+            question: one.question,
+            choices: one.choices ?? [],
+            multi_select: one.multi_select,
           },
+          "answer",
+          (answer) => settleOne(call, prompt_id, one, answer, true, given),
         )
         return prompt_id
+      },
+      askSeries(questions) {
+        const call = callRow(
+          "clarify",
+          JSON.stringify({
+            questions: questions.map((one) => ({
+              question: one.question,
+              ...(one.choices?.length ? { choices: one.choices } : {}),
+              ...(one.multi_select ? { multi_select: true } : {}),
+            })),
+          }),
+        )
+        push("tool.started", { tool: "clarify", preview: null, tool_call_id: call })
+        const given: Given[] = []
+        let nextAt = 1
+        const askNext = (index: number) => {
+          const one = questions[index]
+          const prompt_id = `cl${++nextPrompt}`
+          hold(
+            {
+              kind: "clarify",
+              prompt_id,
+              execution_generation: 1,
+              question: one.question,
+              choices: one.choices ?? [],
+              multi_select: one.multi_select,
+            },
+            "answer",
+            (answer) =>
+              settleOne(call, prompt_id, one, answer, index === questions.length - 1, given),
+          )
+        }
+        // The call's first question waits at once, as the host asks it before anything else.
+        askNext(0)
+        return {
+          next() {
+            if (nextAt < questions.length) askNext(nextAt++)
+          },
+        }
       },
       requestApproval(command, description) {
         const call = callRow("terminal")

@@ -16,6 +16,7 @@ import {
   findAll,
   findText,
   mount,
+  pagesRow,
   settle,
   text,
   type,
@@ -34,17 +35,6 @@ const message = (questions: ClarifyQuestion[]): Message => ({
 
 const answers: ClarifyAnswers[] = []
 const answered = () => answers.splice(0, answers.length)
-
-/** The row the pages scroll in, given the width and the scroll a browser lands a page at. */
-function pagesRow() {
-  const row = find("[data-question-pages]") as HTMLElement
-  Object.defineProperty(row, "clientWidth", { value: 320, configurable: true })
-  row.scrollTo = ((options: ScrollToOptions) => {
-    row.scrollLeft = Number(options.left ?? 0)
-    row.dispatchEvent(new Event("scroll"))
-  }) as typeof row.scrollTo
-  return row
-}
 
 const inert = (page: number) => find(`[data-question-page="${page}"]`)?.hasAttribute("inert")
 const arrow = (label: string) => find(`[aria-label="${label}"]`) as HTMLButtonElement | null
@@ -408,7 +398,7 @@ test("a card drawn again takes up the form it gave for the call, and answers the
     <QuestionCard
       message={message(threeAsked)}
       askedId="q1"
-      taken={{ form: filled, sent: "prompt-0" }}
+      taken={{ form: filled, answeredPrompt: "prompt-0" }}
       onAnswer={async (given) => {
         answers.push(given)
       }}
@@ -434,7 +424,7 @@ test("the card takes up a form that already answered the question the host asks 
     <QuestionCard
       message={message(threeAsked)}
       askedId="q1"
-      taken={{ form: filled, sent: "q1" }}
+      taken={{ form: filled, answeredPrompt: "q1" }}
       onAnswer={async (given) => {
         answers.push(given)
       }}
@@ -454,7 +444,7 @@ test("a lone question takes up no form, even where the host names it", async () 
     <QuestionCard
       message={message([{ id: "q0", question: "Which environment?", choices: ["staging"] }])}
       askedId="q0"
-      taken={{ form: filled, sent: "prompt-9" }}
+      taken={{ form: filled, answeredPrompt: "prompt-9" }}
       onAnswer={async (given) => {
         answers.push(given)
       }}
@@ -477,7 +467,7 @@ test("a form with no page for the question the host asks is let go, not left hol
     <QuestionCard
       message={message(threeAsked)}
       askedId="q2"
-      taken={{ form: { q0: filled.q0 }, sent: "prompt-0" }}
+      taken={{ form: { q0: filled.q0 }, answeredPrompt: "prompt-0" }}
       onAnswer={async (given) => {
         answers.push(given)
       }}

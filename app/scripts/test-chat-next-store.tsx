@@ -190,6 +190,67 @@ test("an answer given here is on the device, so a thread reopened mid-call still
   again.leave()
 })
 
+test("a form a call's card took is kept on the device, so a chat opened again owes no answers", async () => {
+  const database = deviceDatabase()
+  const first = opened(database, "s-form")
+  await first.store.apply({ type: "sent", user: "go" })
+  await first.store.apply({ type: "attach", run: "run_1" })
+  // The card is drawn on a prompt, so that is the state the form is taken in: its run is the form's.
+  await first.store.apply({
+    type: "waiting",
+    waiting: {
+      kind: "question",
+      run: "run_1",
+      promptId: "p1",
+      generation: 1,
+      question: "Tea?",
+      choices: ["yes", "no"],
+      multiSelect: false,
+    },
+  })
+  const taken = {
+    form: {
+      q0: { choices: ["yes"], other: "", usingOther: false },
+      q1: { choices: ["no"], other: "", usingOther: false },
+    },
+    answeredPrompt: "q0",
+  }
+  const held = { run: "run_1", key: "call:Tea?", taken }
+  await first.store.apply({ type: "clarify-form", key: "call:Tea?", taken })
+  assert.deepEqual(first.store.doing().clarifyForm, held, "the thread holds the form it was given")
+  // The phone steps out mid-call: the page goes while the run, and its call, are still going.
+  first.leave()
+  await sleep(FLUSH_INTERVAL_MS * 2)
+
+  const again = opened(database, "s-form")
+  await again.store.apply({ type: "attach", run: "run_1" })
+  assert.deepEqual(
+    again.store.doing().clarifyForm,
+    { run: "run_1", key: "call:Tea?", taken: { form: taken.form } },
+    "the form the reader gave ahead is read back from the device, under the run that asked it — and with no marker, since no answer was confirmed before the page went",
+  )
+  again.leave()
+
+  // A marker the host did confirm is handed back on the take, which is what lets a chat opened again
+  // skip the question it already answered rather than sending it twice.
+  await database.sessionStates.update("s-form", {
+    clarifyForm: {
+      run: "run_1",
+      key: "call:Tea?",
+      taken: { form: taken.form },
+      delivered: "q0",
+    },
+  })
+  const resumed = opened(database, "s-form")
+  await resumed.store.apply({ type: "attach", run: "run_1" })
+  assert.equal(
+    resumed.store.doing().clarifyForm?.taken.answeredPrompt,
+    "q0",
+    "the confirmed marker comes back on the form a reopened chat draws",
+  )
+  resumed.leave()
+})
+
 test("deleting a chat deletes what chat-next kept of its session", async () => {
   const session = "gots-delete-me"
   await db.conversations.put({

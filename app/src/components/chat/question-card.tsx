@@ -15,36 +15,19 @@ import { Card, CardContent, CardFooter, CardHeader, CardTitle } from "@/componen
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { answerClarify } from "@/lib/chat"
+import {
+  answerOf,
+  NOTHING_PICKED,
+  type Picked,
+  type PickedForm,
+  type TakenForm,
+} from "@/lib/clarify-form"
 import { prefersReducedMotion } from "@/lib/media"
 import type { ClarifyAnswers, ClarifyQuestion, Message } from "@/lib/db"
 import { useRefusal } from "@/lib/use-refusal"
 import { cn } from "@/lib/utils"
 
 const OTHER = "\u0000other"
-
-/** What the user has picked or typed for one question, before it's sent. */
-export interface Picked {
-  choices: string[]
-  other: string
-  usingOther: boolean
-}
-
-/** A form as the reader filled it in, by question id. */
-export type PickedForm = Record<string, Picked>
-
-/** Nothing picked yet: a question the card has not been answered on reads as this. */
-const NOTHING_PICKED: Picked = Object.freeze({ choices: [], other: "", usingOther: false })
-
-function answerOf(question: ClarifyQuestion, picked: Picked): string | string[] | null {
-  const typed = picked.other.trim()
-  if (!question.choices) return typed || null
-  if (question.multiSelect) {
-    const all = [...picked.choices, ...(picked.usingOther && typed ? [typed] : [])]
-    return all.length ? all : null
-  }
-  if (picked.usingOther) return typed || null
-  return picked.choices[0] ?? null
-}
 
 export function ChoiceRow({
   label,
@@ -184,19 +167,6 @@ const motion = () => (prefersReducedMotion() ? "auto" : "smooth")
 const HALF_SCREEN = "max-h-[50dvh]"
 
 /**
- * The form a card took for a call, and the prompt it last answered with it. The screen drawing the
- * card keeps it, so a card drawn again is handed it back: a host asks a call's questions one prompt
- * at a time and takes its own while to ask the next, and a card that left the composer in between
- * would otherwise take the reader's answers with it — one answer per visit, each needing its own tap.
- */
-export interface TakenForm {
-  /** The form as the reader filled it in, per question, so a card drawn again shows what they gave. */
-  form: PickedForm
-  /** The prompt the form last answered, so a question already sent is not sent again. */
-  sent: string
-}
-
-/**
  * The agent's questions, in place of the composer until answered; the answers then show as a card
  * in the thread (`ClarifyCard`). One question is a plain form. Two or more are pages of one card
  * (swipe, or the arrows beside its count), and any question may be skipped — so a question longer
@@ -245,7 +215,7 @@ export function QuestionCard({
   const owed = oneAtATime && paged ? taken : undefined
   const [committed, setCommitted] = useState<PickedForm | null>(owed?.form ?? null)
   /** The asked question the committed form last answered, so no question is answered twice. */
-  const sentFor = useRef<string>(owed?.sent)
+  const sentFor = useRef<string>(owed?.answeredPrompt)
   const pending = sending || held || committed !== null
   const [page, setPage] = useState(oneAtATime ? askedPage : 0)
   const card = useRef<HTMLDivElement>(null)
@@ -384,7 +354,7 @@ export function QuestionCard({
     const question = questions.find((one) => one.id === askedId)
     if (!question) return release()
     sentFor.current = askedId
-    onTaken?.({ form, sent: askedId })
+    onTaken?.({ form, answeredPrompt: askedId })
     if (await send({ [askedId]: answerOf(question, form[askedId] ?? NOTHING_PICKED) })) return
     release()
   }

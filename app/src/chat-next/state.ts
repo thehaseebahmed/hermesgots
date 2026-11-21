@@ -1,6 +1,7 @@
 import { sameSummaryRows, type SummaryRows } from "@/lib/compaction-seam"
 import { questionsAround } from "@/lib/clarify-questions"
 import { clarifyAnswered, questionAt, type ClarifyResponse } from "@/lib/clarify"
+import type { HeldForm, TakenForm } from "@/lib/clarify-form"
 import type { ClarifyQuestion, LiveTurn, MessageStats, Unsent } from "@/lib/db"
 import { equal } from "@/lib/equal"
 import type { CanvasPoint } from "@/lib/point-marker"
@@ -114,6 +115,15 @@ export interface ThreadState {
    * the call, so an answer stands wherever that call is drawn from.
    */
   answers?: Record<string, string>
+  /**
+   * The form a call's card took before the host asked its questions one at a time, with the run that
+   * asked it and the card's key for the call. Kept past the card and past the page — it is written to
+   * the device beside `answers` — so a chat left mid-call answers the rest of the call's questions
+   * from the form the reader filled in, rather than asking for them again one visit at a time. It
+   * goes with the run: dropped when the turn ends, when the host says the run is gone, or when
+   * another run is joined.
+   */
+  clarifyForm?: HeldForm
   /**
    * The prompt that has settled since this page opened, whether this screen answered it or another
    * one did: a status read still carrying it arrived too late to be drawn.
@@ -235,6 +245,12 @@ export type ThreadEvent =
   | { type: "summaries"; summaries?: SummaryRows }
   /** `at` is this device's clock as the event arrived, which a turn it sent is timed by. */
   | { type: "run"; event: RunEvent; at?: number }
+  /**
+   * The form a call's card took, with the card's key for the call, so a card drawn again — for the
+   * call's next prompt, or on a chat that was left and opened again — answers from it. Absent where
+   * the card hands the form back: a send the host refused, or a question it has no page for.
+   */
+  | { type: "clarify-form"; key: string; taken?: TakenForm }
   /**
    * What the session's last failed run ended with, as the plugin kept it for a device that never
    * watched it: the reason the transcript's notice does not carry (`failures.py`).
@@ -903,7 +919,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         waiting: done ? undefined : state.waiting,
         between: done ? undefined : state.between,
         ...(done
-          ? { questionSet: undefined }
+          ? { questionSet: undefined, clarifyForm: undefined }
           : { questionSet: questionsFor(state, state.waiting, rows) }),
         ...(done ? { settled: settledWith(state) } : {}),
       }
@@ -1004,6 +1020,8 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         pending: undefined,
         questionSet: waiting ? state.questionSet : undefined,
         answeredPrompts: waiting ? state.answeredPrompts : undefined,
+        // A form is owed to the run that asked it: another run's join drops what an older one took.
+        clarifyForm: state.clarifyForm?.run === event.run ? state.clarifyForm : undefined,
         live: last
           ? { turn: { ...last, parts: [], done: false }, replaces: true, replay: reach(last) }
           : undefined,
@@ -1033,6 +1051,25 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       if (readChangesNothing(state, waiting)) return state
       return { ...state, waiting, between: undefined, questionSet: questionsFor(state, waiting) }
     }
+    case "clarify-form": {
+      // A form is owed to the run whose prompt the card is drawn on, so one taken where no prompt is
+      // being asked is dropped: the card drawn again would have nothing to hand it back to.
+      const run = state.waiting?.run
+      if (!event.taken || !run) {
+        if (!state.clarifyForm) return state
+        return { ...state, clarifyForm: undefined }
+      }
+      const held: HeldForm = {
+        run,
+        key: event.key,
+        taken: event.taken,
+        // What the host is known to have taken stays with the call, across the sends of one call.
+        ...(state.clarifyForm?.run === run && state.clarifyForm.key === event.key
+          ? { delivered: state.clarifyForm.delivered }
+          : {}),
+      }
+      return equal(state.clarifyForm, held) ? state : { ...state, clarifyForm: held }
+    }
     case "agents":
       return sameAgents(state.agents, event.agents) ? state : { ...state, agents: event.agents }
     case "ended":
@@ -1042,18 +1079,23 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       return { ...state, running: false, between: undefined }
     case "between-lapsed":
       return state.between ? { ...state, between: undefined } : state
-    case "gone":
+    case "gone": {
       // Only the run this page was following can have settled that way: a wait raised since belongs
-      // to another run, and a `gone` still in flight from an earlier look is not about it.
-      if (state.waiting === undefined || state.waiting.run !== event.run) return state
+      // to another run, and a `gone` still in flight from an earlier look is not about it. The run's
+      // own form is the wait's too: a settle that lands while the answered card holds the place —
+      // `waiting` already gone — still takes the answers the reader gave ahead with it.
+      const waited = state.waiting?.run === event.run
+      if (!waited && state.clarifyForm?.run !== event.run) return state
       return {
         ...state,
-        waiting: undefined,
-        between: undefined,
-        questionSet: undefined,
-        answeredPrompts: undefined,
-        settled: settledWith(state),
+        waiting: waited ? undefined : state.waiting,
+        between: waited ? undefined : state.between,
+        questionSet: waited ? undefined : state.questionSet,
+        answeredPrompts: waited ? undefined : state.answeredPrompts,
+        clarifyForm: undefined,
+        ...(waited ? { settled: settledWith(state) } : {}),
       }
+    }
     case "answered": {
       // The card goes at once; the host's `*.settled` event confirms it. A question's call reads
       // the answer from here until the transcript's own result reaches it — and the answer is kept
@@ -1074,8 +1116,16 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         state.waiting && (!event.promptId || event.promptId === state.waiting.promptId)
           ? state.waiting
           : undefined
+      // The form the card took learns which question the host actually settled: that is the only
+      // marker worth keeping past the page, so a chat opened again skips it without ever skipping a
+      // send that never landed.
+      const form = state.clarifyForm
+      const set = state.questionSet ?? []
+      const at = form && answer ? questionAt(set, answer.question) : -1
+      const clarifyForm = form && at >= 0 ? { ...form, delivered: set[at].id } : state.clarifyForm
       // An answer that changed nothing on screen and nothing in the record is no state at all.
-      if (gone === undefined && live === held && answers === state.answers) return state
+      if (gone === undefined && live === held && answers === state.answers && clarifyForm === form)
+        return state
       return {
         ...state,
         ...(gone
@@ -1088,6 +1138,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
           : {}),
         ...(live ? { live } : {}),
         ...(answers ? { answers } : {}),
+        ...(clarifyForm ? { clarifyForm } : {}),
       }
     }
     case "run": {
@@ -1099,6 +1150,8 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
           ? questionsFor(state, waiting)
           : state.questionSet
       const answeredPrompts = ended ? undefined : state.answeredPrompts
+      // A form is owed to the run that asked its call, so the run's own ending takes it with the rest.
+      const clarifyForm = ended ? undefined : state.clarifyForm
       // A settle that took the question off leaves it holding the card's place while its call has
       // more to ask; any prompt raised, or the run's end, takes that place.
       const between =
@@ -1147,6 +1200,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         sameSettled(settled, state.settled) &&
         questionSet === state.questionSet &&
         answeredPrompts === state.answeredPrompts &&
+        clarifyForm === state.clarifyForm &&
         between === state.between &&
         failures === state.failures &&
         pending === state.pending
@@ -1159,6 +1213,7 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         live: moved,
         questionSet,
         answeredPrompts,
+        clarifyForm,
         between,
         failures,
         pending,

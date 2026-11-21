@@ -9,8 +9,9 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import { toast } from "sonner"
 
-import { fakeHost, type Ask } from "./chat-next-host.ts"
+import { fakeHost, type Ask, type Series } from "./chat-next-host.ts"
 import {
+  deviceDatabase,
   eventually,
   openDevice,
   sendFrom,
@@ -24,6 +25,8 @@ import {
 import { WAITING_ON_ANSWER } from "@/lib/format"
 import { AppPrompt } from "@/chat-next/app-view"
 import { storeFor } from "@/chat-next/store"
+import type { SessionDb } from "@/lib/db"
+import { pagesRow } from "./component-kit.tsx"
 
 const TEA: Ask = {
   question: "Which do you prefer?",
@@ -480,5 +483,69 @@ test.describe("a command that needs approval", () => {
     await withDevice(openDevice(host), async (after) => {
       await eventually(() => assert.deepEqual(after.waiting().approval, asked), "the command again")
     })
+  })
+})
+
+test.describe("a call's questions, and the chat left while it asks them", () => {
+  const CALL: Ask[] = [
+    {
+      question: "Which environment should this run against?",
+      choices: ["staging", "production"],
+      multi_select: false,
+    },
+    { question: "Which services are in scope?", choices: ["api", "web"], multi_select: false },
+  ]
+
+  /** The form the device keeps for a session, once the host's answer to it has been taken. */
+  const keptForm = async (database: SessionDb, session: string) => {
+    for (let tries = 0; tries < 20; tries++) {
+      const record = await database.sessionStates.get(session)
+      if (record?.clarifyForm?.delivered) return record.clarifyForm
+      await wait(25)
+    }
+    return undefined
+  }
+
+  test("the answers given ahead go in after the chat is left and opened again", async () => {
+    const host = setUp("q-call-kept")
+    const database = deviceDatabase()
+    let series: Series | undefined
+    await withDevice(openDevice(host, { database, Prompt: AppPrompt }), async (before) => {
+      const run = await sendFrom(before, host, "ask two")
+      series = run.askSeries(CALL)
+      await eventually(() => assert.ok(before.button("staging")), "the call's first question")
+      await before.press("staging")
+      await eventually(() => assert.ok(before.button("Next")), "the card's next page")
+      pagesRow()
+      await before.press("Next")
+      await eventually(() => assert.ok(before.button("Next") === null), "the card's last page")
+      await before.press("api")
+      await eventually(() => assert.ok(before.button("Send")), "the card's send")
+      await before.press("Send")
+      await eventually(() => assert.equal(host.answers.length, 1), "the host took the first answer")
+      // What the reader gave ahead is on the device — the form, and the marker the host's own answer
+      // confirmed, never the send that was in flight when the page went.
+      const kept = await keptForm(database, host.session)
+      assert.ok(kept, "the form is kept on the device")
+      assert.equal(kept.delivered, "q0", "with the question the host took")
+      assert.equal(kept.taken.answeredPrompt, undefined, "and no unconfirmed marker beside it")
+    })
+
+    // The host thinks about the call's next question with the chat closed: the phone stepped out.
+    series!.next()
+
+    await withDevice(openDevice(host, { database, Prompt: AppPrompt }), async (after) => {
+      await eventually(
+        () =>
+          assert.deepEqual(
+            host.answers.map((one) => one.answer),
+            ["staging", "api"],
+            "the answer given ahead goes in with no tap",
+          ),
+        "the call's second answer",
+      )
+      await eventually(() => assert.equal(after.button("Send"), null), "nothing is left to press")
+    })
+    host.latest.run!.finish("Staging, api.")
   })
 })
