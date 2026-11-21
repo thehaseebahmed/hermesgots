@@ -186,6 +186,48 @@ class ABuildKeepsItsPlanColumns(unittest.TestCase):
         )
 
 
+class ABuildKeepsNoStepsItNeverRecorded(unittest.TestCase):
+    """A v81 store gains the steps table, and the builds it holds read with no steps (I6)."""
+
+    def test_a_v81_store_upgrades_and_its_builds_read_with_no_steps(self) -> None:
+        path = db_path(temp_hermes_home(self))
+        old = connect(path)
+        old.execute(
+            "INSERT INTO canvases (id, title, session_id, chat_id, version, pinned, archived, at,"
+            " created_at) VALUES ('c1', 'Tip', 's1', 'chat-1', 1, 0, 0, 7, 5)"
+        )
+        old.execute(
+            "INSERT INTO canvas_builds (id, canvas_id, session_id, phase, requests, summary,"
+            " run_id, at, created_at) VALUES ('b1', 'c1', 'canvas-b1', 'published', ?, 'Done.',"
+            " NULL, 9, 5)",
+            (json.dumps(["make it blue"]),),
+        )
+        # A store of the build before this one: no steps table, and the version it stops at.
+        old.execute("DROP TABLE IF EXISTS canvas_build_steps")
+        old.execute("PRAGMA user_version = 81")
+        old.close()
+
+        conn = connect(path)
+        try:
+            self.assertEqual(conn.execute("PRAGMA user_version").fetchone()[0], SCHEMA_VERSION)
+            self.assertIn("canvas_build_steps", tables(path))
+            self.assertEqual(
+                tuple(
+                    conn.execute(
+                        "SELECT phase, requests, summary FROM canvas_builds WHERE id = 'b1'"
+                    ).fetchone()
+                ),
+                ("published", json.dumps(["make it blue"]), "Done."),
+            )
+        finally:
+            conn.close()
+        # The build the store already held still reads — as one written before the record, so it
+        # carries no steps at all rather than an empty list.
+        listed = builds.listing(path, "c1")
+        self.assertEqual([one["id"] for one in listed], ["b1"])
+        self.assertNotIn("steps", listed[0])
+
+
 class AFlagKeepsItsStateWhenItIsRenamed(unittest.TestCase):
     """The record's folded-away flag is the reader's "Archived"; a store written before that name
     keeps what it held."""

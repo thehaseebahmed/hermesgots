@@ -16,7 +16,7 @@ from unittest import mock
 from unittest.mock import patch
 
 from plugin import PREFIX, builds, canvas_checks, canvases, chats, outbox, progress, push
-from plugin.store import db_path, put_setting
+from plugin.store import connect, db_path, put_setting
 from plugin.tests._helpers import (
     FakeWeb,
     RouteAdapter,
@@ -879,6 +879,67 @@ class WhereABuildIsTest(unittest.TestCase):
         self.assertEqual(one["version"], 1)
         self.assertEqual(one["flag"], canvas_checks.UNCHECKED)
         self.assertIsNone(one["activity"], "a finished build has nothing going on")
+
+    def test_a_build_records_a_step_per_phase_it_visits(self) -> None:
+        planted = plant_runner(passing_answer)
+        self.addCleanup(planted.stop)
+        with planted:
+            build = self.host.start()
+            session = build["session_id"]
+            self.host.plan(
+                session,
+                changes="The heading says Split the bill.",
+                checks=[{"name": "the heading is split", "script": "return 1"}],
+                wait=False,
+            )
+            self.host.write(session, TWEAKED)
+            self.host.adapter.run("run_1", session, "completed", 3)
+            self.host.end(session, completed=True)
+
+            # The first check ran and its report is the build's next turn: the build writes again
+            # and its next end checks the page once more.
+            self.host.tick(session)
+            self.host.adapter.run("run_2", session, "completed", 4)
+            self.host.write(session, DOCUMENT.replace("<h1>Tip</h1>", "<h1>Split it</h1>"))
+
+        # The second check cannot run on a host with no browser, so the build publishes what its
+        # last round said while the checking visit it opened is still the open one.
+        with take_layer_away():
+            self.host.adapter.run("run_3", session, "completed", 5)
+            self.host.end(session, completed=True)
+
+        answer = self.host.ask(f"{PREFIX}/canvases/{{canvas_id}}/builds", "GET")["payload"]
+        published = next(one for one in answer["builds"] if one["id"] == build["id"])
+        steps = published.get("steps") or []
+        self.assertEqual(
+            [one["phase"] for one in steps],
+            ["planning", "building", "checking", "building", "checking", "publishing"],
+        )
+        # Windows tile: a visit ends where the next begins, and the build's end closes the last.
+        for before, after in zip(steps, steps[1:]):
+            self.assertEqual(before["end"], after["start"], "a step ends where the next begins")
+        self.assertIn("end", steps[-1], "a finished build has no open step")
+        # Only a checking visit carries a flag, and the last one's is the version's.
+        self.assertEqual([one["phase"] for one in steps if "flag" in one], ["checking", "checking"])
+        self.assertEqual(steps[2]["flag"], canvas_checks.PASSING, "the round that passed said so")
+        self.assertEqual(steps[-2]["flag"], published["flag"])
+        self.assertEqual(steps[-2]["flag"], canvas_checks.UNCHECKED)
+
+        # A build the record predates has no rows, so it answers no steps at all — never an empty
+        # list, which would say it visited nothing (I6).
+        conn = connect(self.host.path)
+        try:
+            conn.execute(
+                "INSERT INTO canvas_builds (id, canvas_id, session_id, phase, requests, summary,"
+                " run_id, at, created_at) VALUES ('old', ?, 'canvas-old', 'published', ?, NULL,"
+                " NULL, 1, 1)",
+                (self.host.id, json.dumps(["an older request"])),
+            )
+        finally:
+            conn.close()
+        rows = self.host.ask(f"{PREFIX}/canvases/{{canvas_id}}/builds", "GET")["payload"]["builds"]
+        older = next(one for one in rows if one["id"] == "old")
+        self.assertNotIn("steps", older)
 
 
 class ClosedAppTest(unittest.TestCase):
