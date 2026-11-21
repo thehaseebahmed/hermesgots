@@ -8,7 +8,7 @@ import {
   type CharmUpdateStatus,
   type CharmWifiRecord,
 } from "./charm-protocol.ts"
-
+import { CharmCode, codeWords, type CharmBatterySeen } from "./charm-protocol.ts"
 export interface CharmSeen {
   name: string
   syncedAt?: number
@@ -127,4 +127,36 @@ export function updateReasonWords(reason: number): string {
     default:
       return "the charm didn't say why"
   }
+}
+
+/** Under the double-tap switch: what two taps do, and what is left when they do nothing. */
+export function doubleTapSubtitle(on: boolean) {
+  return on ? "Two taps on the glass wake it" : "Only the buttons wake it"
+}
+
+/** The quiet row's value, in the charm's own words: the window the reader chose. */
+export const quietWords = (seconds: number) => `${seconds} seconds`
+
+/** The title of the row a reader reads before they change it. */
+export const QUIET_TITLE = "Stays lit for"
+
+/**
+ * The battery row: the level, the charger and how old the reading is. "Not read yet" is a reading
+ * nobody has asked for; "Unknown" is a charm that could not read its own charge, which is not 0%.
+ */
+export function batteryWords(battery: CharmBatterySeen | undefined, now = Date.now()) {
+  if (!battery) return "Not read yet"
+  if (battery.percent < 0) return "Unknown"
+  const charge = battery.charging ? " · Charging" : ""
+  return `${battery.percent}%${charge} · ${since(battery.at, now)}`
+}
+
+/**
+ * A refusal in the row's own words. BadMessage on a settings or battery op is a charm that never
+ * heard of it — its firmware is older than this app — and saying "the charm didn't understand the
+ * sync" of a switch would send the reader looking at the wrong thing.
+ */
+export function refusalWords(code: number) {
+  if (code === CharmCode.BadMessage) return "This charm's firmware is older than the app — update it"
+  return codeWords(code)
 }
