@@ -3,8 +3,9 @@
 // between, so what the reader filled in ahead must outlive it. One Send carries every answer.
 //
 // Three ways of coming back: the wait is up and the chat is left and opened again; the chat is left
-// before the host asks and opened onto a call already waiting; and the run is answered, carries on
-// and asks a second call, whose card is its own.
+// before the host asks and opened onto a call already waiting; and the form is filled in and sent,
+// then the chat is left while the host thinks about its next question. A fourth way ends the same
+// run: the call is answered, the run carries on, and a second call's card is its own.
 import {
   answerWith,
   assert,
@@ -167,6 +168,43 @@ await flow(
     pass("a call raised while the chat was left is answered whole once it is come back to")
   },
   { viewport: { width: 1024, height: 900 } },
+)
+
+await flow(
+  "question-reload-many-midway",
+  async ({ page, seed, send, shot }) => {
+    await openChatNext({ page, seed }, { id: "e2e-question-midway", title: "Left mid-call" })
+    const slot = slotOf(page)
+
+    await send("ask five")
+    await firstPage(page, SERIES.length)
+
+    // The whole form, filled in on the pages the card holds, sent once: the host takes the question
+    // it asked and thinks about the next.
+    await fill(page, SERIES)
+    // The card standing down is the answer having landed: the host is between two of its questions,
+    // which is the moment a reader steps out of the chat. The chat left and opened again finds the
+    // form on the device, so the rest of the call goes in with no tap on either visit.
+    await slot.locator("[data-slot=card]").waitFor({ state: "detached", timeout: 60_000 })
+    await shot("sent")
+    await leaveAndReturn(page)
+
+    const thread = threadOf(page)
+    await thread.getByText("Got 5 of 5 answers.", { exact: false }).waitFor({ timeout: 90_000 })
+    assert.equal(
+      await thread.getByText("No answer", { exact: true }).count(),
+      0,
+      "nothing was left owed",
+    )
+    assert.equal(
+      await slot.getByText("Questions", { exact: true }).count(),
+      0,
+      "and no question is left waiting on the reader",
+    )
+    await shot("back")
+    pass("a form sent before the chat was left answers the rest of the call with no tap")
+  },
+  { viewport: { width: 390, height: 844 }, dark: true },
 )
 
 await flow(

@@ -8,6 +8,7 @@ import { carriesPart } from "@/lib/attachment-caps"
 import type { Canvas, CanvasRecord } from "@/lib/canvases"
 import type { CanvasDoc } from "@/lib/canvas-bridge"
 import type { ChatFilter } from "@/lib/chat-list"
+import type { HeldForm } from "@/lib/clarify-form"
 import { connectionKey, hasServer } from "@/lib/connection"
 import { equal } from "@/lib/equal"
 import { mediaKeyPrefix } from "@/lib/media-key"
@@ -1070,6 +1071,16 @@ export interface SessionState {
    * answer while the transcript has no row for it yet.
    */
   answers?: Record<string, string>
+  /**
+   * The form a call's card took ahead of the host's one-question-at-a-time prompts, with the run that
+   * asked it and the card's own key for the call. Kept on the device so a chat left and opened again
+   * — a phone that stepped out mid-call — answers the rest of the call's questions from the form the
+   * reader already filled in, rather than asking for them again one visit at a time (ADR 0174). The
+   * marker it keeps is the one the host's own answer confirmed (`HeldForm.delivered`), never the send
+   * that was in flight when the page went: that one is not known to have landed, and honouring it
+   * would leave the asked question unanswerable from this device until the run ended.
+   */
+  clarifyForm?: HeldForm
 }
 
 /**

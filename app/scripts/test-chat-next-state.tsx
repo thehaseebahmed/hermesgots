@@ -1334,3 +1334,97 @@ test("a send's saved files land on the message it drew, and on no other", () => 
     "an empty list is not the drawn message's to empty",
   )
 })
+
+test("a form a call's card took is held with its run, and goes when the run does", () => {
+  const SET = [
+    { id: "q0", question: "Tea?", choices: ["yes", "no"], multiSelect: false },
+    { id: "q1", question: "Sugar?", choices: ["yes", "no"], multiSelect: false },
+  ]
+  const TAKEN = {
+    form: {
+      q0: { choices: ["staging"], other: "", usingOther: false },
+      q1: { choices: ["api"], other: "", usingOther: false },
+    },
+    answeredPrompt: "q0",
+  }
+  const held = reduce(RAISED, { type: "clarify-form", key: "call:Tea?", taken: TAKEN })
+  assert.deepEqual(
+    held.clarifyForm,
+    { run: "r", key: "call:Tea?", taken: TAKEN },
+    "the form is filed under the run that asked it and the card's key for the call",
+  )
+  assert.equal(
+    reduce(held, { type: "clarify-form", key: "call:Tea?", taken: { ...TAKEN } }).clarifyForm,
+    held.clarifyForm,
+    "the same form given again writes nothing",
+  )
+  assert.equal(
+    reduce(held, { type: "clarify-form", key: "call:Tea?" }).clarifyForm,
+    undefined,
+    "a card handing the form back takes it out of the thread",
+  )
+  assert.equal(
+    reduce(held, { type: "attach", run: "another" }).clarifyForm,
+    undefined,
+    "another run's join drops what an older one took",
+  )
+  assert.equal(
+    reduce(held, { type: "attach", run: "r" }).clarifyForm,
+    held.clarifyForm,
+    "the same run joined again keeps it, as the chat opened on another visit is",
+  )
+  assert.equal(
+    reduce(held, { type: "gone", run: "r" }).clarifyForm,
+    undefined,
+    "the host naming no run leaves nothing owed",
+  )
+  const ended = reduce(held, {
+    type: "transcript",
+    rows: [...PROMPT_ROWS, { id: 3, role: "assistant", content: "Done.", finish_reason: "stop" }],
+    final: true,
+  })
+  assert.equal(ended.clarifyForm, undefined, "and a turn that finished owes no further answer")
+  // The run's own ending takes the form with the rest of its call, before any read lands.
+  const runEnded = reduce(held, {
+    type: "run",
+    event: { event: "run.completed", run_id: "r" } as RunEvent,
+  })
+  assert.equal(runEnded.clarifyForm, undefined, "and the run's ending is enough on its own")
+  // The host taking an answer is what the form keeps as its marker: a page that died before that
+  // landed leaves nothing to skip, so the question it may have missed is asked again rather than
+  // left unanswerable.
+  const withSet = { ...held, questionSet: SET }
+  assert.equal(withSet.clarifyForm?.delivered, undefined, "a send in flight is no marker yet")
+  const settledForm = reduce(withSet, {
+    type: "answered",
+    promptId: "p1",
+    answer: { question: "Tea?", choicesOffered: ["yes", "no"], value: "yes" },
+  })
+  assert.equal(settledForm.clarifyForm?.delivered, "q0", "the host's answer stamps the question it took")
+  const nextPrompt = reduce(settledForm, {
+    type: "waiting",
+    waiting: { ...PROMPT, promptId: "p2", question: "Sugar?" },
+  })
+  assert.equal(
+    reduce(nextPrompt, { type: "clarify-form", key: "call:Tea?", taken: TAKEN }).clarifyForm
+      ?.delivered,
+    "q0",
+    "and the next send of the same call keeps what the host has already taken",
+  )
+  // A settle that lands while the answered card holds the place — no prompt on screen — is still the
+  // run's: the form it took goes, or a later run asking the same words would be answered by it.
+  assert.equal(
+    reduce({ ...held, waiting: undefined }, { type: "gone", run: "r" }).clarifyForm,
+    undefined,
+    "a host that stops holding the run clears a form the card already answered from",
+  )
+  assert.equal(
+    reduce(reduce(initial, { type: "sent", user: "go" }), {
+      type: "clarify-form",
+      key: "call:Tea?",
+      taken: TAKEN,
+    }).clarifyForm,
+    undefined,
+    "a form taken where no prompt is being asked is dropped rather than kept for another",
+  )
+})

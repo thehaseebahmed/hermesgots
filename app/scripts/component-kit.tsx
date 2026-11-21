@@ -606,6 +606,20 @@ export const wordsOf = (element: Element | null) =>
 export const find = (selector: string) => document.querySelector(selector)
 export const findAll = (selector: string) => [...document.querySelectorAll(selector)]
 /**
+ * The row a question card's pages scroll in, given the width and the scroll landing a browser gives
+ * it: jsdom lays nothing out, so a card whose pages are read from `scrollLeft / clientWidth` pages
+ * only when the test supplies both.
+ */
+export function pagesRow() {
+  const row = find("[data-question-pages]") as HTMLElement
+  Object.defineProperty(row, "clientWidth", { value: 320, configurable: true })
+  row.scrollTo = ((options: ScrollToOptions) => {
+    row.scrollLeft = Number(options.left ?? 0)
+    row.dispatchEvent(new Event("scroll"))
+  }) as typeof row.scrollTo
+  return row
+}
+/**
  * Whether nothing on the screen matches a selector, as a boolean: a failed assertion handed the
  * element builds its diff by inspecting it, and a mounted element carries React's fiber graph, so
  * that diff walks the whole tree.
