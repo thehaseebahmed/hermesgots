@@ -33,7 +33,12 @@ common case whole: the host still lists the question it took while it thinks abo
 in that gap is refused — which would hand the form back and lose the answers the reader gave ahead.
 
 **Keyed by the run and the call, and dropped with the run.** The key 0163 chose is unchanged — one
-string, the same the card is keyed by, so a form is never answered under another name. The run is what
+string, the same the card is keyed by, so a form is never answered under another name. Because that
+string is built from the call's questions, the set itself has to outlive a read that names no call: a
+chat big enough to be served its newest page, or a read landing while the host thinks between two
+prompts, would otherwise drop it, and the next prompt would be filed under another name — the answers
+given ahead handed to nothing, one per visit again even with the chat left open. The set is therefore
+kept until the run ends or another call's row names it. The run is what
 makes it safe to keep on a device for longer than a page: the record is filed under the run that asked
 the call, the card is handed it only when that run and its key are the ones being asked, and a form taken
 where no prompt is being asked is dropped rather than kept for a later call. The form goes when the
