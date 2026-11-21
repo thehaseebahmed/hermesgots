@@ -4,15 +4,9 @@ import { Markdown } from "@/components/chat/markdown"
 import { UserBubble } from "@/components/chat/user-bubble"
 import { WorkLabel, WorkMark, WorkRow } from "@/components/chat/work-row"
 import { Message as MessageRow, MessageContent } from "@/components/ui/message"
-import {
-  Popup,
-  PopupContent,
-  PopupDescription,
-  PopupHeader,
-  PopupTitle,
-} from "@/components/popup"
+import { Popup, PopupContent, PopupDescription, PopupHeader, PopupTitle } from "@/components/popup"
 import type { ThreadViewProps } from "@/chat-next/page"
-import { atWork, flagWords, phaseWord, rowWords, visitWords, visitsOf } from "@/lib/build-steps"
+import { atWork, flagWords, phaseWord, rowWords, visitWords } from "@/lib/build-steps"
 import type { ChatMark } from "@/lib/chat-flow"
 import type { CanvasBuildRow } from "@/lib/canvases"
 import { COLUMN, COMPOSER_SLOT, REPLY_EDGE, REPLY_TEXT, THREAD_GUTTER } from "@/lib/layout"
@@ -38,6 +32,9 @@ const LaneOf = createContext<Lane | null>(null)
 
 /** The visits a build's run is marked with, kept in a context so the view is one stable component. */
 const MarksOf = createContext<readonly ChatMark[]>([])
+
+/** The marks of no build at all: one array, so a sheet with no build keeps one context value. */
+const NO_MARKS: readonly ChatMark[] = []
 
 /**
  * The one row a build draws (G1): what it is doing while it works, and the version it published once
@@ -149,7 +146,7 @@ function SheetThread(props: ThreadViewProps) {
  * per step, now read inside the run it happened in.
  */
 function marksOf(build: CanvasBuildRow): ChatMark[] {
-  return visitsOf(build).map((visit) => ({
+  return (build.steps ?? []).map((visit) => ({
     at: visit.startedAt,
     words: visitWords(visit),
     ...(visit.flag ? { flag: visit.flag } : {}),
@@ -177,20 +174,17 @@ export function CanvasBuildsLane({
   children: ReactNode
 }) {
   const [sight, setSight] = useState<CanvasBuildRow | null>(null)
-  const lane = useMemo<Lane>(
-    () => ({ rows, open: (build) => setSight(build) }),
-    [rows],
-  )
+  // One array per build, not per render: the thread folds its flow on the marks' identity, so a fresh
+  // array on every poll would re-fold the whole run each time the canvas answered.
+  const marks = useMemo(() => (sight ? marksOf(sight) : NO_MARKS), [sight])
+  const lane = useMemo<Lane>(() => ({ rows, open: (build) => setSight(build) }), [rows])
   return (
     <LaneOf.Provider value={lane}>
       {children}
       {/* The build's run opens in the pop-up a subagent's row opens: a bottom sheet on a phone, the
           side drawer from 1024px. The sheet is given a height so the thread inside it is bounded, and
           the thread keeps its own scroller — the pop-up's box never scrolls a second time under it. */}
-      <Popup
-        open={sight !== null}
-        onOpenChange={(next) => (next ? undefined : setSight(null))}
-      >
+      <Popup open={sight !== null} onOpenChange={(next) => (next ? undefined : setSight(null))}>
         <PopupContent size="xl" fixedHeight="h-[85svh]" dataSlot="build-transcript">
           <PopupHeader className="gap-1 pb-3">
             <PopupTitle>{sight && atWork(sight) ? phaseWord(sight.phase) : "Build"}</PopupTitle>
@@ -201,7 +195,7 @@ export function CanvasBuildsLane({
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             {sight ? (
               <Suspense fallback={null}>
-                <MarksOf.Provider value={marksOf(sight)}>
+                <MarksOf.Provider value={marks}>
                   <AppChatNextThread
                     chatId={chatId}
                     server={bot.baseUrl}

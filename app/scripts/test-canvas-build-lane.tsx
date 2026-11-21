@@ -251,7 +251,7 @@ test(
       const working = find('[data-canvas-build="b3"]')
       assert.ok(working, "the working build is drawn as a chat block")
       assert.ok(
-        working.querySelector('[data-build-request]')?.closest('[data-slot="bubble"]'),
+        working.querySelector("[data-build-request]")?.closest('[data-slot="bubble"]'),
         "its request wears the chat's own user bubble",
       )
       const rowAtWork = working.querySelector("[data-build-details]")
@@ -265,10 +265,7 @@ test(
         missing('[data-canvas-build="b3"] [data-build-step]'),
         "one row, never a row per visit",
       )
-      assert.ok(
-        missing("[data-canvas-builds] .border-dashed"),
-        "no dashed card stands in the lane",
-      )
+      assert.ok(missing("[data-canvas-builds] .border-dashed"), "no dashed card stands in the lane")
       // A request is queued on the plugin, which hands it to the build or opens one: nothing is
       // posted to Hermes as a run of the canvas's own session.
       await sendInTheLane("and make it blue too")
@@ -302,10 +299,7 @@ test(
         await refreshCanvas("c1")
         await noteChange(connectionKey(bot), "canvas")
       })
-      await until(
-        () => Boolean(find("[data-build-details]")),
-        "the lane's builds to draw",
-      )
+      await until(() => Boolean(find("[data-build-details]")), "the lane's builds to draw")
       const request = find('[data-canvas-build="b1"] [data-build-request]')
       assert.ok(request, "the finished build's request is drawn")
       assert.ok(
@@ -348,10 +342,7 @@ test(
         line.querySelector('[data-slot="work-mark"]'),
         "wearing the chevron a work row draws",
       )
-      assert.ok(
-        document.querySelector("[data-canvas-builds]"),
-        "the lane draws its builds",
-      )
+      assert.ok(document.querySelector("[data-canvas-builds]"), "the lane draws its builds")
       assert.ok(
         !document.querySelector('[aria-label="Messages"]'),
         "no transcript is drawn in the lane",
@@ -467,10 +458,7 @@ test(
         document.body.textContent?.includes("The heading says Split the bill."),
         "the plan's own words are drawn",
       )
-      assert.ok(
-        composerField(),
-        "the composer stays under the card, so a message revises the plan",
-      )
+      assert.ok(composerField(), "the composer stays under the card, so a message revises the plan")
       // Approve posts to the host, and the card goes: the draft is open, so the lane draws the
       // composer alone again.
       await click(findText("button", "Approve"))
@@ -480,10 +468,7 @@ test(
         1,
         "Approve was posted to the host",
       )
-      assert.ok(
-        !document.body.textContent?.includes("Plan ready"),
-        "the plan card is taken away",
-      )
+      assert.ok(!document.body.textContent?.includes("Plan ready"), "the plan card is taken away")
       assert.ok(composerField(), "the composer is what the lane draws again")
     })
   }),
@@ -508,10 +493,7 @@ test(
         await refreshCanvas("c1")
         await noteChange(connectionKey(bot), "canvas")
       })
-      await until(
-        () => Boolean(findText("button", "Stop")),
-        "the waiting plan's Stop to be drawn",
-      )
+      await until(() => Boolean(findText("button", "Stop")), "the waiting plan's Stop to be drawn")
       await click(findText("button", "Stop"))
       await settle()
       assert.equal(
@@ -519,10 +501,7 @@ test(
         1,
         "Stop was posted to the host",
       )
-      assert.ok(
-        !document.body.textContent?.includes("Plan ready"),
-        "the plan card is taken away",
-      )
+      assert.ok(!document.body.textContent?.includes("Plan ready"), "the plan card is taken away")
       // A stopped build is no open build: the lane reads the canvas's own session again, as a
       // canvas with no build going does.
       await until(

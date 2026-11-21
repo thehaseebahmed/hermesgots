@@ -36,7 +36,7 @@ export interface MarkEntry extends ChatMark {
   kind: "mark"
 }
 
-/** An entry one chat's flow draws: a message, or a divider above one. */
+/** An entry one chat's flow draws: a message, the divider of a compaction above one, or a mark a screen named. */
 export type ChatFlowEntry = { kind: "message"; message: Message } | CompactionEntry | MarkEntry
 
 export const compactionEntry = (compaction: Compaction): CompactionEntry => ({
@@ -53,10 +53,11 @@ export const compactionEntry = (compaction: Compaction): CompactionEntry => ({
  * fold's.
  *
  * A mark is placed by time, not by id, because what a screen marks happened while the chat was being
- * written — `marks` are given in the order they happened, and are drawn in that order: a visit that began in the second a message was stamped stands above that message, and one
- * that began after the last message read so far stands at the foot of what is drawn. A message the
- * thread does not date (`createdAt` 0, a send this device is still holding) is later than every mark,
- * since a held message is the newest thing the flow has.
+ * written — `marks` are given in the order they happened and drawn in that order: a mark stamped at or
+ * before a message's clock stands above that message, and one that began after the last message read
+ * so far stands at the foot of what is drawn. A message the thread does not date (`createdAt` 0, a
+ * send this device is still holding) is later than every mark, since a held message is the newest
+ * thing the flow has.
  */
 export function chatFlow({
   thread,
@@ -68,16 +69,17 @@ export function chatFlow({
   marks?: readonly ChatMark[]
 }): ChatFlowEntry[] {
   const entries: ChatFlowEntry[] = []
-  const pending = [...(marks ?? [])]
+  const given = marks ?? []
+  let next = 0
   for (const message of thread ?? []) {
     const compaction = compacted?.before.get(message.id)
     if (compaction) entries.push(compactionEntry(compaction))
     const at = message.createdAt
-    while (pending.length && (at === 0 || pending[0].at <= at)) {
-      entries.push({ kind: "mark", ...pending.shift()! })
+    while (next < given.length && (at === 0 || given[next].at <= at)) {
+      entries.push({ kind: "mark", ...given[next++] })
     }
     entries.push({ kind: "message", message })
   }
-  for (const mark of pending) entries.push({ kind: "mark", ...mark })
+  for (const mark of given.slice(next)) entries.push({ kind: "mark", ...mark })
   return entries
 }

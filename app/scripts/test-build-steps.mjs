@@ -12,7 +12,6 @@ import {
   phaseWord,
   rowWords,
   visitWords,
-  visitsOf,
   WORKING_WORDS,
 } from "../src/lib/build-steps.ts"
 
@@ -62,37 +61,17 @@ test("a build's row says what it is doing while it works", () => {
 
 test("a build's row becomes the version it published, or the answer it gave", () => {
   assert.equal(
-    rowWords({ phase: "published", version: 3, summary: "The heading says Split the bill." }),
+    rowWords({ phase: "published", version: 3 }),
     "Version 3 published",
     "a build that published a version names it",
   )
   assert.equal(
-    rowWords({ phase: "published", summary: "The total is what everyone owes." }),
+    rowWords({ phase: "published" }),
     "Answered",
     "a build that published nothing answered rather than shipping",
   )
   assert.equal(rowWords({ phase: "failed" }), "Failed", "a build that failed says so")
   assert.equal(rowWords({ phase: "stopped" }), "Stopped", "and one that was stopped says that")
-})
-
-test("the visits a build made are read in order, with the clock each began at", () => {
-  const steps = [
-    { phase: "planning", startedAt: 1_000, endedAt: 3_000 },
-    { phase: "waiting", startedAt: 3_000, endedAt: 90_000 },
-    { phase: "checking", startedAt: 90_000, endedAt: 91_500, flag: "passing" },
-    { phase: "building", startedAt: 91_500 },
-  ]
-  assert.deepEqual(
-    visitsOf({ steps }),
-    [
-      { phase: "planning", startedAt: 1_000, endedAt: 3_000 },
-      { phase: "waiting", startedAt: 3_000, endedAt: 90_000 },
-      { phase: "checking", startedAt: 90_000, endedAt: 91_500, flag: "passing" },
-      { phase: "building", startedAt: 91_500 },
-    ],
-    "a visit a row, in the order the build made them",
-  )
-  assert.deepEqual(visitsOf({}), [], "a record that wrote no visit answers none rather than a lie")
 })
 
 test("a visit's marker says its phase, what a check found and how long it took", () => {
