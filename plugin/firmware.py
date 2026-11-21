@@ -41,6 +41,9 @@ MANIFEST_MEDIA_TYPE = "application/vnd.oci.image.manifest.v1+json"
 VERSION_ANNOTATION = "org.opencontainers.image.version"
 SHA256_ANNOTATION = "dev.gots.charm.sha256"
 SIZE_ANNOTATION = "dev.gots.charm.size"
+# The app partition's size, which a release from this one on names: a package from before it carries
+# no slot, and the app measures a picked file against its own.
+SLOT_ANNOTATION = "dev.gots.charm.slot"
 ANNOTATIONS = (
     ("version", VERSION_ANNOTATION, "version"),
     ("sha256", SHA256_ANNOTATION, "SHA-256"),
@@ -114,10 +117,25 @@ def status_for(code: int) -> int:
     return 502
 
 
+def byte_count(value: str, what: str) -> int:
+    """A positive byte count an annotation names, or the refusal saying it isn't one."""
+    try:
+        count = int(value)
+    except ValueError:
+        raise FirmwareError(f"The published charm firmware's {what} isn't a byte count.") from None
+    if count <= 0:
+        raise FirmwareError(f"The published charm firmware's {what} isn't a byte count.")
+    return count
+
+
 def describe(manifest: Any) -> Dict[str, Any]:
-    """The version, byte count and SHA-256 a tag's manifest carries, or the refusal saying which is
-    missing. They are annotations rather than fields, so a manifest that has none is answered in
-    words — never as a zero size or an empty version the app would compare against."""
+    """The version, byte count, SHA-256 and slot a tag's manifest carries, or the refusal saying
+    which is missing. They are annotations rather than fields, so a manifest that has none is
+    answered in words — never as a zero size or an empty version the app would compare against.
+
+    The slot is the one annotation a package may leave out: a release from before it names none, and
+    the app then measures a picked file against its own constant.
+    """
     found = manifest.get("annotations") if isinstance(manifest, dict) else None
     found = found if isinstance(found, dict) else {}
     said: Dict[str, str] = {}
@@ -132,13 +150,15 @@ def describe(manifest: Any) -> Dict[str, Any]:
         )
     if not DIGEST_RE.match(said["sha256"]):
         raise FirmwareError("The published charm firmware's SHA-256 isn't a lowercase hex digest.")
-    try:
-        size = int(said["size"])
-    except ValueError:
-        raise FirmwareError("The published charm firmware's size isn't a byte count.") from None
-    if size <= 0:
-        raise FirmwareError("The published charm firmware's size isn't a byte count.")
-    return {"version": said["version"], "size": size, "sha256": said["sha256"]}
+    described: Dict[str, Any] = {
+        "version": said["version"],
+        "size": byte_count(said["size"], "size"),
+        "sha256": said["sha256"],
+    }
+    slot = found.get(SLOT_ANNOTATION)
+    if isinstance(slot, str) and slot.strip():
+        described["slot"] = byte_count(slot.strip(), "slot")
+    return described
 
 
 def image_layer(manifest: Any) -> str:
@@ -169,13 +189,21 @@ def _open(request: urllib.request.Request, timeout: float):
 
 
 def _fetch(url: str, headers: Dict[str, str], timeout: float = READ_TIMEOUT_S) -> Tuple[bytes, Dict[str, str]]:
-    """One GET against ghcr.io: its bytes and its headers, or the sentence its status is said in."""
+    """One GET against ghcr.io: its bytes and its headers, or the sentence its status is said in.
+
+    The read is one of this host's outbound calls, so it takes a place in the counter every GitHub
+    request shares (`github.outbound`): a burst of settings reads queues a few at a time rather than
+    opening connections past the ceiling.
+    """
     request = urllib.request.Request(
         url, headers={"User-Agent": "gots-hermes-plugin", **headers}, method="GET"
     )
     try:
-        with _open(request, timeout) as response:
-            return response.read(), dict(response.headers)
+        with github.outbound(min(timeout, github.READ_TIMEOUT_S)):
+            with _open(request, timeout) as response:
+                return response.read(), dict(response.headers)
+    except github.GitHubBusy as busy:
+        raise FirmwareError(str(busy), busy.status) from None
     except urllib.error.HTTPError as error:
         raise FirmwareError(refusal(error.code), status_for(error.code), error.code) from None
     except (urllib.error.URLError, TimeoutError, ValueError):

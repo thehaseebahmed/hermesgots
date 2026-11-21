@@ -17,7 +17,7 @@ import urllib.request
 from unittest.mock import patch
 
 import plugin
-from plugin import firmware
+from plugin import firmware, github
 from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
 
 TOKEN = "ghp_the_hosts_token"
@@ -27,7 +27,7 @@ SHA = "9f2c41aa0b7d5e63" * 4
 
 
 def manifest(**annotations: str) -> dict:
-    """A tag's manifest as the release writes it: the three annotations on a single layer."""
+    """A tag's manifest as the release writes it: the annotations on a single layer."""
     said = {
         firmware.VERSION_ANNOTATION: "0.2.0",
         firmware.SHA256_ANNOTATION: SHA,
@@ -107,6 +107,24 @@ class AnnotationsTest(unittest.TestCase):
         self.assertEqual(answer["version"], "0.2.0")
         self.assertEqual(answer["size"], len(IMAGE), "the byte count, as a number")
         self.assertEqual(answer["sha256"], SHA)
+
+    def test_a_slot_the_package_names_is_the_app_partitions_size(self):
+        answer = firmware.describe(manifest(**{firmware.SLOT_ANNOTATION: "6553600"}))
+        self.assertEqual(answer["slot"], 6553600, "what a picked file is measured against")
+        self.assertEqual(answer["size"], len(IMAGE), "and the image's own count is its own")
+
+    def test_a_package_from_before_the_slot_is_answered_without_one(self):
+        self.assertNotIn(
+            "slot",
+            firmware.describe(manifest()),
+            "a release that names no slot leaves the app its own",
+        )
+
+    def test_a_slot_that_isnt_a_positive_byte_count_is_refused(self):
+        for said in ("0", "-4096", "half a megabyte"):
+            with self.assertRaises(firmware.FirmwareError) as raised:
+                firmware.describe(manifest(**{firmware.SLOT_ANNOTATION: said}))
+            self.assertIn("slot", str(raised.exception), said)
 
     def test_a_missing_annotation_is_said_rather_than_guessed(self):
         for key, said in (
@@ -267,6 +285,57 @@ class LatestTest(unittest.TestCase):
         self.assertEqual(answer["size"], len(IMAGE))
 
 
+class Counter:
+    """The host's outbound counter, watched rather than starved: what each call takes and gives."""
+
+    def __init__(self) -> None:
+        self.taken = 0
+        self.given = 0
+
+    def acquire(self, timeout=None) -> bool:
+        self.taken += 1
+        return True
+
+    def release(self) -> None:
+        self.given += 1
+
+
+class Full:
+    """The counter with every place taken: a caller is refused rather than parked on it."""
+
+    def acquire(self, timeout=None) -> bool:
+        return False
+
+    def release(self) -> None:
+        raise AssertionError("nothing was taken, so nothing is given back")
+
+
+class OutboundTest(unittest.TestCase):
+    """The registry read is one of this host's outbound calls: it takes the counter every GitHub
+    request shares, so a burst of settings reads cannot open more than the ceiling at once."""
+
+    def setUp(self) -> None:
+        self.home = temp_hermes_home(self)
+        self.addCleanup(patch.stopall)
+        patch.object(firmware.github, "token", lambda home: (TOKEN, "env")).start()
+
+    def test_a_read_takes_the_hosts_outbound_counter_and_gives_it_back(self):
+        counter = Counter()
+        with patch.object(github, "_outbound", counter):
+            with patch.object(firmware, "_open", serve()):
+                firmware.latest(self.home)
+        self.assertEqual(counter.taken, 2, "the token ask and the manifest each took a place")
+        self.assertEqual(counter.given, counter.taken, "and every place went back")
+
+    def test_a_read_with_every_place_taken_is_said_rather_than_queued(self):
+        with patch.object(github, "_outbound", Full()):
+            with patch.object(firmware, "_open", serve()):
+                with self.assertRaises(firmware.FirmwareError) as raised:
+                    firmware.latest(self.home)
+        self.assertEqual(raised.exception.status, 503, "a wait, not a broken package")
+        self.assertIn("busy", str(raised.exception))
+
+
 class RedirectTest(unittest.TestCase):
     def test_a_redirect_to_another_host_is_refused_rather_than_carrying_the_token(self):
         handler = firmware.RegistryRedirect()
@@ -312,6 +381,11 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(payload["sha256"], SHA)
         self.assertNotIn(TOKEN, json.dumps(payload), "the host's GitHub token stays on the host")
         self.assertNotIn(PULL_TOKEN, json.dumps(payload))
+
+    def test_the_route_carries_the_app_partition_the_package_names(self):
+        with patch.object(firmware, "_open", serve(manifest(**{firmware.SLOT_ANNOTATION: "6553600"}))):
+            payload = self.call("/charm/firmware")["payload"]
+        self.assertEqual(payload["slot"], 6553600, "what the app measures a picked file against")
 
     def test_the_image_route_sends_the_bytes_and_their_length(self):
         with patch.object(firmware, "_open", serve()):

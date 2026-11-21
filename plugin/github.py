@@ -9,6 +9,7 @@ to the gh CLI's login (``gh auth token``).
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import logging
 import os
@@ -160,6 +161,23 @@ def _page(path: str, auth: Optional[str]) -> Tuple[Any, str]:
     return _fetch(path, auth)
 
 
+@contextlib.contextmanager
+def outbound(timeout: float = READ_TIMEOUT_S):
+    """One outbound call's place in this host's ceiling, held until the call is over.
+
+    Every request to GitHub passes through this counter whatever module makes it: a screen asking
+    after a dozen sessions queues a few at a time rather than holding a worker per session, and a
+    read from another module (a charm's firmware from ghcr.io, say) shares those places instead of
+    opening a pool of its own past the ceiling.
+    """
+    if not _outbound.acquire(timeout=timeout):
+        raise GitHubBusy()
+    try:
+        yield
+    finally:
+        _outbound.release()
+
+
 def _fetch(
     path: str,
     auth: Optional[str],
@@ -184,24 +202,21 @@ def _fetch(
     )
     if timeout is None:
         timeout = READ_TIMEOUT_S if method == "GET" else WRITE_TIMEOUT_S
-    if not _outbound.acquire(timeout=min(timeout, READ_TIMEOUT_S)):
-        raise GitHubBusy()
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            raw = response.read()
-            link = response.headers.get("Link") or ""
-            # A DELETE answers 204 with no body.
-            return (json.loads(raw) if raw.strip() else None), link
-    except urllib.error.HTTPError as error:
-        if error.code == 401:
-            raise GitHubError("GitHub rejected the server's token.", 401) from None
-        raise GitHubError(
-            _error_message(error) or f"GitHub answered {error.code}.", 502, error.code
-        ) from None
-    except (urllib.error.URLError, TimeoutError, ValueError):
-        raise GitHubError("Couldn't reach GitHub from the server.") from None
-    finally:
-        _outbound.release()
+    with outbound(min(timeout, READ_TIMEOUT_S)):
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                raw = response.read()
+                link = response.headers.get("Link") or ""
+                # A DELETE answers 204 with no body.
+                return (json.loads(raw) if raw.strip() else None), link
+        except urllib.error.HTTPError as error:
+            if error.code == 401:
+                raise GitHubError("GitHub rejected the server's token.", 401) from None
+            raise GitHubError(
+                _error_message(error) or f"GitHub answered {error.code}.", 502, error.code
+            ) from None
+        except (urllib.error.URLError, TimeoutError, ValueError):
+            raise GitHubError("Couldn't reach GitHub from the server.") from None
 
 
 def _error_message(error: urllib.error.HTTPError) -> Optional[str]:
