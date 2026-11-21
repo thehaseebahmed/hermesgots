@@ -91,9 +91,6 @@ import { useNow } from "@/lib/threads"
  * `/canvas/:id` draws one page in a sandboxed frame (ADR 0114).
  */
 
-/** The phases a build never comes back from: the rows of the lane's history (`builds.py`). */
-const FINISHED = new Set(["published", "failed", "stopped"])
-
 /** How the tiles are laid out: a phone holds two, a tablet three, a desktop four. */
 const TILES = "grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-4"
 
@@ -1057,10 +1054,11 @@ const FLIP = { edit: "Edit", preview: "Preview" } as const
  * is nested in — so the chat that reads the numbers is the chat that draws them, and no screen has
  * to hand them up to a root it does not own.
  *
- * Where the canvas has a build going, the lane draws that build's session and queues its sends: a
- * build is a session of its own, seeded with the page, and the queue is what hands a request to it
- * or opens one (ADR 0170). The canvas's own session holds nothing while a build runs, so a lane that
- * drew it would draw an empty thread.
+ * Where the canvas has a build going, its composer queues sends on that build's own session — a
+ * build is a session of its own, seeded with the page, and the queue is what hands a request to it or
+ * opens one (ADR 0170) — while the lane draws every build the host lists, the one working now as its
+ * last block. The canvas's own session holds nothing while a build runs, so a lane that drew it would
+ * draw an empty thread.
  */
 function CanvasChat({
   canvas,
@@ -1082,13 +1080,11 @@ function CanvasChat({
   const chat = useLiveQuery(() => (chatId ? db.conversations.get(chatId) : undefined), [chatId])
   // The lane draws builds, not the transcript (G9, G10): every build this canvas has had, newest
   // first from the host and turned the right way up here — a build asked for earlier stands above
-  // the one asked for later. A canvas made before builds has none, and keeps its own chat's lane.
+  // the one asked for later, and the one working now is the last block, since the host lists it as it
+  // lists the rest. A canvas made before builds has none, and keeps its own chat's lane.
   const builds = Boolean(canvas?.builds)
   const records = useCanvasBuilds(canvas?.id ?? "", bot, builds)
-  const buildsShown = useMemo(
-    () => records.filter((row) => FINISHED.has(row.phase)).reverse(),
-    [records],
-  )
+  const buildsShown = useMemo(() => [...records].reverse(), [records])
   const [usageOpen, setUsageOpen] = useState(false)
   const view = useCallback(() => setUsageOpen(true), [])
   const { summaries, usage, providerUsage, limit } = useChatSurface(chat, bot, view)
@@ -1099,7 +1095,7 @@ function CanvasChat({
   const waiting = canvas.build?.wait ? canvas.build : undefined
   const body = (
     <PreviewerProvider>
-      <CanvasBuildsLane rows={buildsShown} open={canvas.build} bot={bot} chatId={canvas.chatId}>
+      <CanvasBuildsLane rows={buildsShown} bot={bot} chatId={canvas.chatId}>
         <ChatBody
           chat={chat}
           bot={bot}

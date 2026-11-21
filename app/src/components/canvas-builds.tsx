@@ -1,19 +1,29 @@
 /**
- * A canvas's lane, drawn as builds rather than as a transcript (G9, G10): each finished build reads
- * as the chat it was — its request in the bubble a chat draws the reader's message in, a marker for
- * each step it took, its summary as the bot's words, and under them one line saying the version it
- * published, newest at the foot; the build working now is its phase and the line saying what it is
- * doing. The transcript is not drawn here at all — `Details` opens one build's session read-only.
+ * A canvas's lane, drawn as builds rather than as a transcript (G9, G10, G5): each build reads as the
+ * chat it was — its requests in the bubble a chat draws the reader's message in, a marker for each
+ * step it took, its summary as the bot's words, and under them one line saying the version it
+ * published, newest at the foot. The build working now is a block like any other, its last marker
+ * the step it is in and that step's activity line hanging under it. The transcript is not drawn here
+ * at all — `Details` opens one build's session read-only.
  *
  * The lane is still a chat's container (`ChatBody`): its composer queues a request on the plugin
  * exactly as before, and a waiting plan's card takes the composer's place. Only the thread is
  * replaced, which is why this is a `ThreadViewProps` view rather than a screen.
  */
-import { createContext, lazy, Suspense, useContext, useMemo, useState, type ReactNode } from "react"
+import {
+  createContext,
+  Fragment,
+  lazy,
+  Suspense,
+  useContext,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react"
 
 import { Markdown } from "@/components/chat/markdown"
 import { UserBubble } from "@/components/chat/user-bubble"
-import { WorkLabel, WorkMark, WorkRow } from "@/components/chat/work-row"
+import { WorkLabel, WorkMark, WorkNote, WorkRow } from "@/components/chat/work-row"
 import { Button } from "@/components/ui/button"
 import { Message as MessageRow, MessageContent } from "@/components/ui/message"
 import {
@@ -25,7 +35,7 @@ import {
 } from "@/components/ui/sheet"
 import type { ThreadViewProps } from "@/chat-next/page"
 import { markersOf, PHASE_WORDS, stepWords } from "@/lib/build-steps"
-import type { CanvasBuild, CanvasBuildRow, CanvasBuildStep } from "@/lib/canvases"
+import type { CanvasBuildRow, CanvasBuildStep } from "@/lib/canvases"
 import {
   COLUMN,
   COMPOSER_SLOT,
@@ -41,52 +51,86 @@ const AppChatNextThread = lazy(() =>
   import("@/chat-next/app-view").then((module) => ({ default: module.AppChatNextThread })),
 )
 
+/** The phases a build ends in; every other phase is a build still at work. */
+const ENDED = new Set(["published", "failed", "stopped"])
+
+/** What a working build says when its host named no activity line. */
+const WORKING_WORDS = "The build is working."
+
 /** What the lane draws, kept in a context so the view is one stable component. */
 interface Lane {
   rows: CanvasBuildRow[]
-  open?: CanvasBuild
   onDetails: (build: CanvasBuildRow) => void
 }
 
 const LaneOf = createContext<Lane | null>(null)
 
+/** Whether a build is still at work, which is what makes its last marker the live one. */
+function atWork(row: CanvasBuildRow) {
+  return !ENDED.has(row.phase)
+}
+
+/**
+ * The steps a build's block draws: the visits it made, in the order it made them — or, for a build
+ * the record never wrote down (I6) that is still at work, the phase it is in, so a plugin upgraded
+ * mid-build says what it is doing rather than drawing an empty row.
+ */
+function stepsShown(row: CanvasBuildRow): CanvasBuildStep[] {
+  const steps = markersOf(row)
+  if (steps.length || !atWork(row)) return steps
+  return [{ phase: row.phase, startedAt: row.at }]
+}
+
 /**
  * One marker: a visit the build made to a phase that did work, drawn as the thread's own work row —
- * its phase's word, what a check found where it checked, and the span it took.
+ * its phase's word, what a check found where it checked, and the span it took. The step a working
+ * build is in pulses its words, as any working row of the thread does.
  */
-function StepRow({ step }: { step: CanvasBuildStep }) {
+function StepRow({ step, live = false }: { step: CanvasBuildStep; live?: boolean }) {
   return (
-    <WorkRow disabled data-build-step={step.phase} data-build-flag={step.flag} after={<WorkMark />}>
+    <WorkRow
+      disabled
+      working={live}
+      data-build-step={step.phase}
+      data-build-flag={step.flag}
+      after={<WorkMark />}
+    >
       <WorkLabel>{stepWords(step, PHASE_WORDS[step.phase] ?? "Working")}</WorkLabel>
     </WorkRow>
   )
 }
 
 /**
- * One finished build, drawn as the chat it was: each request the reader's own message on the right,
- * a marker per step it took, the summary that ended it as the bot's words, and under them the one
- * muted line — the version it published and `Details`, which opens the whole build's transcript. A
- * build that published no version names none, and one that ended without a reply says so in its
- * place.
+ * A build's markers, in the order it took them, between its requests and its reply. The one a
+ * working build is in pulses, and its phase's activity line hangs under that marker until the build
+ * leaves the step.
  */
-function BuildBlock({ row, onDetails }: { row: CanvasBuildRow; onDetails: () => void }) {
-  const steps = markersOf(row)
+function BuildSteps({ row }: { row: CanvasBuildRow }) {
+  const steps = stepsShown(row)
+  if (!steps.length) return null
+  const live = atWork(row) ? steps.length - 1 : -1
   return (
-    <div data-canvas-build={row.id} className="flex flex-col gap-3">
-      {row.requests.map((request, at) => (
-        <MessageRow key={at} align="end" className={COLUMN}>
-          <MessageContent className="items-end gap-1">
-            <UserBubble data-build-request>{request}</UserBubble>
-          </MessageContent>
-        </MessageRow>
+    <div className={cn(REPLY_EDGE, "flex flex-col")}>
+      {steps.map((step, at) => (
+        <Fragment key={at}>
+          <StepRow step={step} live={at === live} />
+          {at === live ? (
+            <WorkNote data-build-activity>{row.activity ?? WORKING_WORDS}</WorkNote>
+          ) : null}
+        </Fragment>
       ))}
-      {steps.length ? (
-        <div className={cn(REPLY_EDGE, "flex flex-col")}>
-          {steps.map((step, at) => (
-            <StepRow key={at} step={step} />
-          ))}
-        </div>
-      ) : null}
+    </div>
+  )
+}
+
+/**
+ * A build that ended: its summary as the bot's words — or, where it ended without one, the line
+ * saying how it ended — and under them the one muted line carrying the version it published and
+ * `Details`, which opens the whole build's transcript.
+ */
+function BuildReply({ row, onDetails }: { row: CanvasBuildRow; onDetails: () => void }) {
+  return (
+    <>
       {row.summary ? (
         <div data-build-summary className={REPLY_EDGE}>
           <Markdown className={REPLY_TEXT}>{row.summary}</Markdown>
@@ -117,35 +161,33 @@ function BuildBlock({ row, onDetails }: { row: CanvasBuildRow; onDetails: () => 
           Details
         </Button>
       </div>
-    </div>
+    </>
   )
 }
 
-/** The build working now: the phase it is in and the one line saying what it is doing. */
-function OpenBuild({ build }: { build: CanvasBuild }) {
-  const words = PHASE_WORDS[build.phase] ?? "Working"
+/**
+ * One build, drawn as the chat it was, or is: each request the reader's own message on the right, a
+ * marker per step it took, and — once it has ended — the summary that ended it, with the version it
+ * published and `Details` under it. A build still at work draws its requests and its steps, and waits
+ * for the reply it has not given yet.
+ */
+function BuildBlock({ row, onDetails }: { row: CanvasBuildRow; onDetails: () => void }) {
   return (
-    <div data-canvas-build-open className={cn(COLUMN, "rounded-lg border border-dashed p-3")}>
-      <p className="flex items-center gap-2 text-sm font-medium">
-        <span
-          aria-hidden
-          className="size-2 animate-pulse rounded-full bg-primary motion-reduce:animate-none"
-        />
-        {words}
-      </p>
-      <p data-build-activity className="mt-1 text-[15px] text-muted-foreground">
-        {build.activity ?? "The build is working."}
-      </p>
-      {build.requests.length ? (
-        <p data-build-request className="mt-1 text-sm">
-          {build.requests.join(" · ")}
-        </p>
-      ) : null}
+    <div data-canvas-build={row.id} className="flex flex-col gap-3">
+      {row.requests.map((request, at) => (
+        <MessageRow key={at} align="end" className={COLUMN}>
+          <MessageContent className="items-end gap-1">
+            <UserBubble data-build-request>{request}</UserBubble>
+          </MessageContent>
+        </MessageRow>
+      ))}
+      <BuildSteps row={row} />
+      {atWork(row) ? null : <BuildReply row={row} onDetails={onDetails} />}
     </div>
   )
 }
 
-/** The lane's thread: the builds it has had, then the one working, with the composer under them. */
+/** The lane's thread: every build the canvas has had, oldest at the top, with the composer under. */
 export function CanvasBuildsView({ waiting, composer }: ThreadViewProps) {
   const lane = useContext(LaneOf)
   if (!lane) return null
@@ -153,7 +195,7 @@ export function CanvasBuildsView({ waiting, composer }: ThreadViewProps) {
     <div className="flex min-h-0 flex-1 flex-col">
       <div data-canvas-builds className={cn("flex-1 overflow-y-auto", THREAD_GUTTER, "py-4")}>
         <div className="flex flex-col gap-3">
-          {lane.rows.length === 0 && !lane.open ? (
+          {lane.rows.length === 0 ? (
             <p className={cn(COLUMN, "text-sm text-muted-foreground")}>
               No builds yet. Ask for a change and it lands here when it is done.
             </p>
@@ -161,7 +203,6 @@ export function CanvasBuildsView({ waiting, composer }: ThreadViewProps) {
           {lane.rows.map((row) => (
             <BuildBlock key={row.id} row={row} onDetails={() => lane.onDetails(row)} />
           ))}
-          {lane.open ? <OpenBuild build={lane.open} /> : null}
         </div>
       </div>
       <div data-slot="composer-slot" data-toast-above className={COMPOSER_SLOT}>
@@ -181,17 +222,15 @@ function NoComposer() {
  *
  * `children` is the chat container (`ChatBody`) the lane still is: it owns the composer, the queue
  * and the waiting plan's card, and this hands it the view that draws the builds in the thread's
- * place. `rows` is every build the canvas has had, newest first, and `open` the one working now.
+ * place. `rows` is every build the canvas has had, oldest first, the one working now at the foot.
  */
 export function CanvasBuildsLane({
   rows,
-  open,
   bot,
   chatId,
   children,
 }: {
   rows: CanvasBuildRow[]
-  open?: CanvasBuild
   /** The bot the canvas's builds run on, whose host the transcript is read from. */
   bot: { baseUrl: string; apiKey?: string }
   /** The canvas's chat, which chat-next files the transcript's media against. */
@@ -199,10 +238,7 @@ export function CanvasBuildsLane({
   children: ReactNode
 }) {
   const [details, setDetails] = useState<CanvasBuildRow | null>(null)
-  const lane = useMemo<Lane>(
-    () => ({ rows, open, onDetails: setDetails }),
-    [rows, open],
-  )
+  const lane = useMemo<Lane>(() => ({ rows, onDetails: setDetails }), [rows])
   return (
     <LaneOf.Provider value={lane}>
       {children}

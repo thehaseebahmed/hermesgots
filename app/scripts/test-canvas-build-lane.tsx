@@ -19,6 +19,7 @@ import {
   click,
   composerField,
   find,
+  findAll,
   findText,
   json,
   laptop,
@@ -77,6 +78,25 @@ const BUILDS = [
     created_at: 1,
   },
 ]
+
+/** The build working now, as the same read answers it: the step behind it, the one still open, and
+ * the line the host says it is doing. */
+const WORKING = {
+  id: "b3",
+  session: "canvas-build-1",
+  phase: "building",
+  activity: "Building the page",
+  requests: ["make the heading say Split the bill"],
+  summary: null,
+  flag: null,
+  version: null,
+  at: 4,
+  created_at: 4,
+  steps: [
+    { phase: "planning", start: 0, end: 2_000 },
+    { phase: "building", start: 2_000 },
+  ],
+}
 
 /** What the host's one-canvas read answers, with the build a case wants it to carry. */
 const canvasAt = (build?: unknown) => ({
@@ -212,6 +232,7 @@ test(
       read: [],
       posted: [],
       acted: [],
+      builds: [WORKING],
     }
     serve(host)
     await seed()
@@ -228,6 +249,31 @@ test(
       assert.ok(
         !host.read.includes("gots-chat-1"),
         "the canvas's own session holds nothing while a build runs",
+      )
+      // The build working now is a block of the lane, drawn as a chat: its request in the bubble a
+      // chat draws one in, the step behind it, the step it is in and the line saying what it is
+      // doing — not the dashed card the lane used to draw it as.
+      const working = find('[data-canvas-build="b3"]')
+      assert.ok(working, "the working build is drawn as a chat block")
+      assert.ok(
+        working.querySelector('[data-build-request]')?.closest('[data-slot="bubble"]'),
+        "its request wears the chat's own user bubble",
+      )
+      assert.deepEqual(
+        findAll('[data-canvas-build="b3"] [data-build-step]').map((one) =>
+          one.getAttribute("data-build-step"),
+        ),
+        ["planning", "building"],
+        "and its steps are drawn, the last one still open",
+      )
+      assert.equal(
+        wordsOf(working.querySelector("[data-build-activity]")),
+        "Building the page",
+        "with the line saying what it is doing",
+      )
+      assert.ok(
+        missing("[data-canvas-builds] .border-dashed"),
+        "no dashed card stands in the lane",
       )
       // A request is queued on the plugin, which hands it to the build or opens one: nothing is
       // posted to Hermes as a run of the canvas's own session.
@@ -252,7 +298,7 @@ test(
       read: [],
       posted: [],
       acted: [],
-      builds: BUILDS,
+      builds: [WORKING, ...BUILDS],
     }
     serve(host)
     await seed()
@@ -321,10 +367,20 @@ test(
         missing('[data-canvas-build="b2"] [data-build-version]'),
         "a build that published no version names none",
       )
-      // The build working now is its phase and the line saying what it is doing.
-      const drawn = document.body.textContent ?? ""
-      assert.ok(drawn.includes("Building"), "the open build's phase is drawn")
-      assert.ok(drawn.includes("Building the page"), "and the line saying what it is doing")
+      // The build working now is its phase and the line saying what it is doing, drawn as the lane's
+      // last block.
+      const working = find('[data-canvas-build="b3"]')
+      assert.ok(working, "the working build is drawn as a block of the lane")
+      assert.equal(
+        wordsOf(working.querySelector('[data-build-step][data-working="true"]')),
+        "Building",
+        "the phase it is in is its working marker",
+      )
+      assert.equal(
+        wordsOf(working.querySelector("[data-build-activity]")),
+        "Building the page",
+        "and the line saying what it is doing hangs under it",
+      )
 
       // Details opens that build's transcript, read-only, over its own session.
       await click(find('[data-canvas-build="b1"] [data-build-details]'))

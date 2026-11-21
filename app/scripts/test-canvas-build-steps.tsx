@@ -15,6 +15,7 @@ import { CanvasView } from "@/routes/canvas"
 
 import {
   botProfile,
+  click,
   findAll,
   find,
   json,
@@ -22,6 +23,7 @@ import {
   missing,
   mount,
   seedSettings,
+  settle,
   until,
   wordsOf,
 } from "./component-kit.tsx"
@@ -78,6 +80,41 @@ const BUILDS = [
   },
 ]
 
+/** The build working now, as the listing answers it: the visits behind it, the last one still open,
+ * and the line the host says it is doing. */
+const WORKING = {
+  id: "b3",
+  session: "canvas-build-3",
+  phase: "building",
+  activity: "Building the page",
+  requests: ["and make it blue too"],
+  summary: null,
+  flag: null,
+  version: null,
+  at: 4,
+  created_at: 4,
+  steps: [
+    { phase: "planning", start: 0, end: 2_000 },
+    { phase: "waiting", start: 2_000, end: 90_000 },
+    { phase: "building", start: 90_000 },
+  ],
+}
+
+/** The build working now whose visits the record never wrote down: a plugin upgraded mid-build
+ * answers a phase and an activity line, and no `steps` at all (I6). */
+const UNRECORDED = {
+  id: "b3",
+  session: "canvas-build-3",
+  phase: "checking",
+  activity: "Checking the rendered page",
+  requests: ["make the heading say Split the bill"],
+  summary: null,
+  flag: null,
+  version: null,
+  at: 4,
+  created_at: 4,
+}
+
 /** The canvas the lane is drawn in: its page, its chat and the builds feature on. */
 const CANVAS = {
   id: "c1",
@@ -95,7 +132,7 @@ const CANVAS = {
   builds: true,
 }
 
-function serve() {
+function serve(builds: readonly unknown[] = BUILDS) {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
     if (url.pathname.endsWith("/info")) {
@@ -106,7 +143,7 @@ function serve() {
       return json({ object: "gots.canvases", canvases: [record] })
     }
     if (url.pathname.endsWith("/canvases/c1/builds")) {
-      return json({ object: "gots.canvas.builds", builds: BUILDS })
+      return json({ object: "gots.canvas.builds", builds })
     }
     if (url.pathname.endsWith("/canvases/c1")) {
       return json({ object: "gots.canvas", canvas: CANVAS })
@@ -135,6 +172,21 @@ async function seed() {
     changedAt: 2,
     canvasId: "c1",
   })
+}
+
+/** The canvas's screen drawn over a builds read of `builds`, the lane given a change to settle on. */
+async function drawLane(builds: readonly unknown[], body: () => Promise<void>) {
+  serve(builds)
+  await seed()
+  await mount(
+    <MemoryRouter initialEntries={["/canvas/c1"]}>
+      <Routes>
+        <Route path="/canvas" element={<div data-canvas-list />} />
+        <Route path="/canvas/:id" element={<CanvasView />} />
+      </Routes>
+    </MemoryRouter>,
+    body,
+  )
 }
 
 test(
@@ -225,5 +277,112 @@ test(
         )
       },
     )
+  }),
+)
+
+test(
+  "the working build draws the step it is in, and the ones behind it",
+  laptop(async () => {
+    await drawLane([WORKING, ...BUILDS], async () => {
+      const bot = (await db.profiles.get("bot-1"))!
+      await act(async () => {
+        await refreshCanvas("c1")
+        await noteChange(connectionKey(bot), "canvas")
+      })
+      await until(
+        () => Boolean(find('[data-canvas-build="b3"]')),
+        "the lane's working build to draw",
+      )
+      // The steps behind it, in the order it took them, and the one it is in: a step still open says
+      // its phase and no span, since it has none yet.
+      const markers = findAll('[data-canvas-build="b3"] [data-build-step]')
+      assert.deepEqual(
+        markers.map((one) => one.getAttribute("data-build-step")),
+        ["planning", "building"],
+        "the working build draws the steps behind it and the one it is in",
+      )
+      assert.deepEqual(
+        markers.map(wordsOf),
+        ["Planning · 2.0s", "Building"],
+        "the step it is in says no span",
+      )
+      // Only the step it is in pulses; the ones behind it are done.
+      assert.deepEqual(
+        markers.map((one) => one.hasAttribute("data-working")),
+        [false, true],
+        "the last marker is the working one, and no other is",
+      )
+      // Its phase's activity line hangs under that marker.
+      const activity = find('[data-canvas-build="b3"] [data-build-activity]')
+      assert.ok(activity, "the working build says what it is doing")
+      assert.equal(wordsOf(activity), "Building the page", "in the host's own words")
+      assert.equal(
+        markers[1].nextElementSibling,
+        activity,
+        "the activity line hangs under the step it is in",
+      )
+      // It draws its request as a bubble, as a finished build's is drawn.
+      const request = find('[data-canvas-build="b3"] [data-build-request]')
+      assert.ok(request, "the working build's request is drawn")
+      assert.ok(
+        request.closest('[data-slot="bubble"]'),
+        "the request wears the chat's own user bubble",
+      )
+      // A build still at work has no reply to draw, and no line under one: neither the failed
+      // sentence nor the stopped one stands where a reply would.
+      assert.ok(
+        missing('[data-canvas-build="b3"] [data-build-summary]'),
+        "a build still at work draws no reply",
+      )
+      assert.ok(
+        !(document.body.textContent ?? "").includes("The build was stopped."),
+        "and is not said to have stopped",
+      )
+      // The card the working build used to be is gone.
+      assert.ok(missing("[data-canvas-build-open]"), "no open build is drawn beside the blocks")
+      assert.ok(
+        missing("[data-canvas-builds] .border-dashed"),
+        "and no dashed card is drawn",
+      )
+      // A marker is not pressable yet, so a press opens nothing.
+      assert.ok(
+        markers.every((one) => one.hasAttribute("disabled")),
+        "a step is not a press yet",
+      )
+      await click(markers[1])
+      await settle()
+      assert.ok(missing('[data-slot="sheet-content"]'), "pressing a step opens nothing")
+    })
+  }),
+)
+
+test(
+  "a working build with no recorded steps draws the phase it is in",
+  laptop(async () => {
+    await drawLane([UNRECORDED, ...BUILDS], async () => {
+      const bot = (await db.profiles.get("bot-1"))!
+      await act(async () => {
+        await refreshCanvas("c1")
+        await noteChange(connectionKey(bot), "canvas")
+      })
+      await until(
+        () => Boolean(find('[data-canvas-build="b3"]')),
+        "the lane's working build to draw",
+      )
+      // A plugin upgraded mid-build answers no visits: the lane says the phase and its activity line
+      // rather than drawing an empty row.
+      const markers = findAll('[data-canvas-build="b3"] [data-build-step]')
+      assert.equal(markers.length, 1, "one marker stands for the phase it is in")
+      assert.equal(markers[0].getAttribute("data-build-step"), "checking")
+      assert.equal(wordsOf(markers[0]), "Checking")
+      assert.ok(markers[0].hasAttribute("data-working"), "and it is the working one")
+      const activity = find('[data-canvas-build="b3"] [data-build-activity]')
+      assert.equal(
+        wordsOf(activity),
+        "Checking the rendered page",
+        "the activity line says what it is doing",
+      )
+      assert.equal(markers[0].nextElementSibling, activity, "hanging under the marker")
+    })
   }),
 )
