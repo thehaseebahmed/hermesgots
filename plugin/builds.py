@@ -203,13 +203,10 @@ def listing(path: Path, canvas_id: str) -> List[Dict[str, Any]]:
     record = canvases.record(path, canvas_id)
     if record is None:
         raise canvases.CanvasError("There is no such canvas.", 404)
-    conn = _open(path)
-    try:
-        conn.execute("BEGIN")
+    # One snapshot for both statements: a build's steps are answered with the build they belong to.
+    with canvases._reading(path) as conn:
         builds = _builds_in(conn, canvas_id)
         steps = _steps_in(conn, canvas_id)
-    finally:
-        conn.close()
     return [_lane_row(one, steps.get(one["id"])) for one in builds]
 
 
@@ -382,6 +379,10 @@ def note_run(path: Path, build_id: str, run_id: Optional[str]) -> None:
     A run starting is the build working again: a build whose plan is filed says it is building,
     and one that has filed none is still planning. A plan that waits keeps saying so, since the
     reader's Approve is what opens the draft — a message sent while it waits only revises it.
+
+    The check's report starts a run while the build still says it is checking, so this is what
+    moves it back to building — and a device drawing the lane only hears that from the canvas
+    change, so a move worth hearing is announced.
     """
     build = _by_id(path, build_id)
     if build is None:
@@ -393,8 +394,10 @@ def note_run(path: Path, build_id: str, run_id: Optional[str]) -> None:
         )
     finally:
         conn.close()
-    if not build.get("wait"):
-        _place(path, build_id, BUILDING if build.get("plan") else PLANNING)
+    if not build.get("wait") and _place(
+        path, build_id, BUILDING if build.get("plan") else PLANNING
+    ):
+        _note(path, build["canvas_id"])
 
 
 def plan(path: Path, build_id: str, args: Dict[str, Any]) -> bool:
@@ -945,11 +948,12 @@ def _phase(
         _close_step(conn, build_id, now)
 
 
-def _placed(conn: sqlite3.Connection, build_id: str, phase: str) -> None:
+def _placed(conn: sqlite3.Connection, build_id: str, phase: str) -> bool:
     """Stamps where a working build is, the line the lane draws under it, and the step it entered.
 
     Entering the phase the open visit already holds opens nothing (I4): a run that starts while
-    the build already says it is building is the same stretch of work, not a second one.
+    the build already says it is building is the same stretch of work, not a second one. Answers
+    whether it moved the build — the only thing a caller has to announce to every device.
     """
     row = conn.execute("SELECT phase FROM canvas_builds WHERE id = ?", (build_id,)).fetchone()
     now = now_ms()
@@ -958,14 +962,15 @@ def _placed(conn: sqlite3.Connection, build_id: str, phase: str) -> None:
         (phase, ACTIVITY.get(phase), now, build_id),
     )
     if row is None or row[0] == phase:
-        return
+        return False
     _close_step(conn, build_id, now)
     _open_step(conn, build_id, phase, now)
+    return True
 
 
-def _place(path: Path, build_id: str, phase: str) -> None:
+def _place(path: Path, build_id: str, phase: str) -> bool:
     with canvases._writing(path) as conn:
-        _placed(conn, build_id, phase)
+        return _placed(conn, build_id, phase)
 
 
 def _note(path: Path, canvas_id: str) -> None:

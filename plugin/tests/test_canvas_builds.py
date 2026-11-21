@@ -15,7 +15,7 @@ from typing import Any, Dict, List, Optional
 from unittest import mock
 from unittest.mock import patch
 
-from plugin import PREFIX, builds, canvas_checks, canvases, chats, outbox, progress, push
+from plugin import PREFIX, builds, canvas_checks, canvases, chats, events, outbox, progress, push
 from plugin.store import connect, db_path, put_setting
 from plugin.tests._helpers import (
     FakeWeb,
@@ -848,6 +848,41 @@ class WhereABuildIsTest(unittest.TestCase):
         published = self.host.newest()
         self.assertEqual(published["phase"], builds.PUBLISHED)
         self.assertEqual(published["version"], 1)
+
+    def test_a_run_starting_where_the_build_moved_announces_the_canvas(self) -> None:
+        # The check's report turn starts with the build still checking, so the run's own start is
+        # what moves it to building. A device drawing the lane hears that from the canvas change;
+        # without it the lane pulses Checking until the next event or the safety poll.
+        planted = plant_runner(passing_answer)
+        self.addCleanup(planted.stop)
+        with planted:
+            build = self.host.start()
+            session = build["session_id"]
+            self.host.plan(
+                session,
+                changes="The heading says Split the bill.",
+                checks=[{"name": "the heading is split", "script": "return 1"}],
+                wait=False,
+            )
+            self.host.write(session, TWEAKED)
+            self.host.adapter.run("run_1", session, "completed", 3)
+            self.host.end(session, completed=True)
+            self.assertEqual(self.host.newest()["phase"], builds.CHECKING)
+
+            with patch.object(events, "note") as noted:
+                self.host.tick(session)  # the report turn starts: note_run places BUILDING
+
+        self.assertEqual(self.host.newest()["phase"], builds.BUILDING)
+        canvas_notes = [
+            call for call in noted.call_args_list if call.args and call.args[0] == "canvas"
+        ]
+        self.assertEqual(len(canvas_notes), 1, "the phase change is announced once")
+        self.assertEqual(
+            canvas_notes[0].args[1],
+            self.host.session,
+            "on the canvas chat every screen polls",
+        )
+        self.assertTrue(canvas_notes[0].args[3], "forced past the throttle, as a state change is")
 
     def test_the_list_carries_the_build_a_canvas_is_working_in(self) -> None:
         # A phone's edit screen draws the record and never the document, so the list read is the one
