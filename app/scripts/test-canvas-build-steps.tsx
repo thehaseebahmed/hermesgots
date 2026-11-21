@@ -7,9 +7,10 @@ import { PAGE as ROWS_PER_PAGE } from "@/chat-next/pages"
 import { refreshCanvas } from "@/lib/canvases"
 import { db } from "@/lib/db"
 import { connectionKey, noteChange } from "@/lib/live"
-import { CanvasView } from "@/routes/canvas"
+import { CanvasEdit, CanvasView } from "@/routes/canvas"
 
 import {
+  atWidth,
   botProfile,
   click,
   findAll,
@@ -20,6 +21,7 @@ import {
   mount,
   seedSettings,
   settle,
+  shutSheet,
   until,
   wordsOf,
 } from "./component-kit.tsx"
@@ -278,14 +280,16 @@ async function drawLane(
   body: () => Promise<void>,
   rows: readonly unknown[] = [],
   host: { unreadOlder?: boolean } = {},
+  entry = "/canvas/c1",
 ) {
   serve(builds, rows, host)
   await seed()
   await mount(
-    <MemoryRouter initialEntries={["/canvas/c1"]}>
+    <MemoryRouter initialEntries={[entry]}>
       <Routes>
         <Route path="/canvas" element={<div data-canvas-list />} />
         <Route path="/canvas/:id" element={<CanvasView />} />
+        <Route path="/canvas/:id/edit" element={<CanvasEdit />} />
       </Routes>
     </MemoryRouter>,
     body,
@@ -343,8 +347,8 @@ test(
       assert.ok(line, "the reply's line is still drawn")
       assert.deepEqual(
         [...line.children].map((one) => wordsOf(one)),
-        ["Version 3", "Details"],
-        "the line keeps the version it published and Details, and no flag",
+        ["Version 3", "ready"],
+        "the line keeps the version it published and ready, and no flag",
       )
       assert.equal(
         line.querySelector("[data-build-flag]"),
@@ -361,8 +365,8 @@ test(
       assert.ok(olderLine, "a build with no markers still draws its reply's line")
       assert.deepEqual(
         [...olderLine.children].map((one) => wordsOf(one)),
-        ["Checks failed", "Details"],
-        "the flag reads on the line only because no marker holds it",
+        ["Checks failed", "ready"],
+        "the flag reads on the line only because no marker holds it, then ready",
       )
       assert.equal(
         olderLine.querySelector("[data-build-flag]")?.getAttribute("data-build-flag"),
@@ -375,7 +379,7 @@ test(
       )
       assert.ok(
         find('[data-canvas-build="b2"] [data-build-details]'),
-        "and Details still opens the whole build",
+        "and ready still opens the whole build",
       )
     })
   }),
@@ -444,7 +448,7 @@ test(
       )
       await click(markers[1])
       await settle()
-      assert.ok(missing('[data-slot="sheet-content"]'), "pressing the step it is in opens nothing")
+      assert.ok(missing('[data-popup-form]'), "pressing the step it is in opens nothing")
     })
   }),
 )
@@ -529,7 +533,7 @@ test(
       await click(markers[0])
       await settle()
       assert.ok(
-        missing('[data-slot="sheet-content"]'),
+        missing('[data-popup-form]'),
         "and pressing it opens no sheet, since there are no turns it could hold",
       )
     })
@@ -576,12 +580,12 @@ test(
 )
 
 test(
-  "pressing a marker opens that visit's turns, and Details opens the whole build",
+  "pressing a marker opens that visit's turns, and ready opens the whole build",
   laptop(async () => {
     await drawLane([VISITED], async () => {
       const bot = (await db.profiles.get("bot-1"))!
       const sheetMessages = () =>
-        findAll('[data-slot="sheet-content"] [data-slot="message"]').map(wordsOf)
+        findAll('[data-popup-form] [data-slot="message"]').map(wordsOf)
       await act(async () => {
         await refreshCanvas("c1")
         await noteChange(connectionKey(bot), "canvas")
@@ -624,17 +628,25 @@ test(
         "and the one of the visit after that",
       )
       assert.equal(
-        wordsOf(find('[data-slot="sheet-title"]')),
-        "Building",
-        "the sheet is titled by the step's phase word",
+        find("[data-popup-form]")?.getAttribute("data-popup-form"),
+        "drawer",
+        "a laptop opens the step in the standard drawer a subagent's row opens",
       )
       assert.equal(
-        wordsOf(find('[data-slot="sheet-description"]')),
+        wordsOf(find('[data-popup-form] [data-slot="sheet-title"]')),
+        "Building",
+        "the pop-up is titled by the step's phase word",
+      )
+      assert.equal(
+        wordsOf(find('[data-popup-form] [data-slot="sheet-description"]')),
         "make the heading say Split the bill",
         "and describes the build by its first request",
       )
-      await click(find('[data-slot="sheet-content"] [data-slot="sheet-close"]'))
-      await until(() => missing('[data-slot="sheet-content"]'), "the step's sheet to close")
+      assert.ok(
+        find('[data-popup-form] [data-slot="build-transcript"] [data-slot="message-scroller"]'),
+        "the transcript the step narrows stands inside the pop-up's own box",
+      )
+      await shutSheet(() => find("[data-popup-form]"))
       await click(find('[data-canvas-build="b4"] [data-build-details]'))
       await until(
         () => sheetMessages().length === 8,
@@ -660,8 +672,7 @@ test(
         "Build",
         "and the whole build's sheet is titled by the build",
       )
-      await click(find('[data-slot="sheet-content"] [data-slot="sheet-close"]'))
-      await until(() => missing('[data-slot="sheet-content"]'), "the transcript's sheet to close")
+      await shutSheet(() => find("[data-popup-form]"))
       await click(markers[3])
       await until(
         () => Boolean(find("[data-build-window-empty]")),
@@ -676,14 +687,13 @@ test(
       // The thread is drawn over the step's turns rather than beside them, so its own marks stand
       // around the words; what it does not draw is the greeting a chat with nothing said wears.
       assert.equal(
-        wordsOf(find('[data-slot="sheet-content"] [aria-label="Messages"]')),
+        wordsOf(find('[data-popup-form] [aria-label="Messages"]')),
         "No messages in this step of the build.",
         "the thread reads as the step's own words, and not as a chat with nothing said",
       )
       // The last visit's window is tiled: it begins in the second its own turn was stamped in, and
       // it holds the second the build closed in, which ends the visit after the next's floor.
-      await click(find('[data-slot="sheet-content"] [data-slot="sheet-close"]'))
-      await until(() => missing('[data-slot="sheet-content"]'), "the empty visit's sheet to close")
+      await shutSheet(() => find("[data-popup-form]"))
       await click(markers[4])
       await until(
         () => sheetMessages().length > 0,
@@ -732,7 +742,7 @@ test(
           () => Boolean(find("[data-build-window-empty]")),
           "the step to say it holds nothing yet",
         )
-        const older = find('[data-slot="sheet-content"] [data-older]')
+        const older = find('[data-popup-form] [data-older]')
         assert.ok(older, "the sheet keeps the thread's own word that earlier messages are unread")
         assert.equal(
           older.getAttribute("data-older"),
@@ -740,12 +750,52 @@ test(
           "and says so in the state the thread's read is in",
         )
         assert.ok(
-          find('[data-slot="sheet-content"] [data-older-retry]'),
+          find('[data-popup-form] [data-older-retry]'),
           "offering the thread's own retry, so the step's turns can be read on from there",
         )
       },
       [...VISITED_ROWS, ...LATER_ROWS],
       { unreadOlder: true },
+    )
+  }),
+)
+
+test(
+  "a step's pop-up on a phone is the standard bottom sheet, with the thread as its one scroller",
+  atWidth(390, async () => {
+    await drawLane(
+      [VISITED],
+      async () => {
+        const bot = (await db.profiles.get("bot-1"))!
+        await act(async () => {
+          await refreshCanvas("c1")
+          await noteChange(connectionKey(bot), "canvas")
+        })
+        await until(
+          () => Boolean(find('[data-canvas-build="b4"] [data-build-step]')),
+          "the lane's build to draw",
+        )
+        await click(findAll('[data-canvas-build="b4"] [data-build-step]')[0])
+        await until(() => Boolean(find("[data-popup-form]")), "the step's pop-up to open")
+        assert.equal(
+          find("[data-popup-form]")?.getAttribute("data-popup-form"),
+          "sheet",
+          "a phone draws the step in the standard bottom sheet a subagent's row opens",
+        )
+        assert.ok(
+          find('[data-popup-form] [aria-label="Close"]'),
+          "the sheet is the pop-up's own, dragged by the handle it draws",
+        )
+        const box = find('[data-popup-form] [data-slot="build-transcript"]')
+        assert.ok(box, "the pop-up holds a box of its own for the thread")
+        assert.ok(
+          box.querySelector('[data-slot="message-scroller-viewport"]'),
+          "and the thread's viewport is the scroller inside it, not the pop-up's box",
+        )
+      },
+      VISITED_ROWS,
+      {},
+      "/canvas/c1/edit",
     )
   }),
 )

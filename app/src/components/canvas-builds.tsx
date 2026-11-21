@@ -15,12 +15,12 @@ import { WorkLabel, WorkMark, WorkNote, WorkRow } from "@/components/chat/work-r
 import { Button } from "@/components/ui/button"
 import { Message as MessageRow, MessageContent } from "@/components/ui/message"
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet"
+  Popup,
+  PopupContent,
+  PopupDescription,
+  PopupHeader,
+  PopupTitle,
+} from "@/components/popup"
 import type { ThreadViewProps } from "@/chat-next/page"
 import {
   atWork,
@@ -130,7 +130,7 @@ function BuildSteps({
   )
 }
 
-function BuildReply({ row, onDetails }: { row: CanvasBuildRow; onDetails: () => void }) {
+function BuildReply({ row, onReady }: { row: CanvasBuildRow; onReady: () => void }) {
   // A build the record predates draws no marker, so its flag has none to read on and its reply's line
   // keeps it. Where there is a marker, the marker is what says it.
   const flag = row.flag && !markersOf(row).length ? flagWords(row.flag) : undefined
@@ -157,14 +157,17 @@ function BuildReply({ row, onDetails }: { row: CanvasBuildRow; onDetails: () => 
             Version {row.version}
           </span>
         ) : null}
+        {/* The version says what it published; ready opens the whole build's transcript, one press
+            of the line under the reply. `data-build-details` is the attribute the flow presses. */}
         <Button
           variant="ghost"
           size="sm"
           data-build-details
           className="-ml-2 h-9 gap-1 px-2 font-normal"
-          onClick={onDetails}
+          onClick={onReady}
         >
-          Details
+          ready
+          <WorkMark />
         </Button>
       </div>
     </>
@@ -173,11 +176,11 @@ function BuildReply({ row, onDetails }: { row: CanvasBuildRow; onDetails: () => 
 
 function BuildBlock({
   row,
-  onDetails,
+  onReady,
   onStep,
 }: {
   row: CanvasBuildRow
-  onDetails: () => void
+  onReady: () => void
   onStep: (step: DrawnStep, window: StepWindow) => void
 }) {
   return (
@@ -190,7 +193,7 @@ function BuildBlock({
         </MessageRow>
       ))}
       <BuildSteps row={row} onStep={onStep} />
-      {atWork(row) ? null : <BuildReply row={row} onDetails={onDetails} />}
+      {atWork(row) ? null : <BuildReply row={row} onReady={onReady} />}
     </div>
   )
 }
@@ -211,7 +214,7 @@ export function CanvasBuildsView({ waiting, composer }: ThreadViewProps) {
             <BuildBlock
               key={row.id}
               row={row}
-              onDetails={() => lane.open(row)}
+              onReady={() => lane.open(row)}
               onStep={(step, window) => lane.open(row, step, window)}
             />
           ))}
@@ -269,7 +272,7 @@ function StepView(props: ThreadViewProps) {
 }
 
 /**
- * The canvas lane's builds, and the sheet one build's transcript opens in.
+ * The canvas lane's builds, and the pop-up one build's transcript opens in.
  *
  * `children` is the chat container (`ChatBody`) the lane still is: it owns the composer, the queue
  * and the waiting plan's card, and this hands it the view that draws the builds in the thread's
@@ -300,15 +303,19 @@ export function CanvasBuildsLane({
   return (
     <LaneOf.Provider value={lane}>
       {children}
-      <Sheet open={sight !== null} onOpenChange={(next) => (next ? undefined : setSight(null))}>
-        <SheetContent side="bottom" className="h-[85svh] gap-0 p-0">
-          <SheetHeader>
-            <SheetTitle>{sight?.step ? phaseWord(sight.step.phase) : "Build"}</SheetTitle>
-            <SheetDescription>
+      {/* The one build's transcript opens in the pop-up a subagent's row opens: a bottom sheet on a
+          phone, the side drawer from 1024px. The sheet is given a height so the thread inside it is
+          bounded, and the thread keeps its own scroller — the pop-up's box never scrolls a second
+          time under it. */}
+      <Popup open={sight !== null} onOpenChange={(next) => (next ? undefined : setSight(null))}>
+        <PopupContent size="xl" fixedHeight="h-[85svh]" dataSlot="build-transcript">
+          <PopupHeader className="gap-1 pb-3">
+            <PopupTitle>{sight?.step ? phaseWord(sight.step.phase) : "Build"}</PopupTitle>
+            <PopupDescription>
               {sight?.build.requests[0] ?? "What this build was asked for."}
-            </SheetDescription>
-          </SheetHeader>
-          <div className="min-h-0 flex-1 overflow-hidden">
+            </PopupDescription>
+          </PopupHeader>
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             {sight ? (
               <Suspense fallback={null}>
                 <WindowOf.Provider value={sight.window}>
@@ -324,8 +331,8 @@ export function CanvasBuildsLane({
               </Suspense>
             ) : null}
           </div>
-        </SheetContent>
-      </Sheet>
+        </PopupContent>
+      </Popup>
     </LaneOf.Provider>
   )
 }

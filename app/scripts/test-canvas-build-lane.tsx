@@ -284,7 +284,7 @@ test(
 )
 
 test(
-  "the lane draws builds and opens a build's transcript from Details",
+  "the lane draws builds and opens a build's transcript from ready",
   laptop(async () => {
     const host: Host = {
       canvas: canvasAt({ ...BUILD, phase: "building", activity: "Building the page" }),
@@ -304,7 +304,7 @@ test(
         await noteChange(connectionKey(bot), "canvas")
       })
       await until(
-        () => Boolean(findText("button", "Details")),
+        () => Boolean(findText("button", "ready")),
         "the lane's builds to draw",
       )
       const request = find('[data-canvas-build="b1"] [data-build-request]')
@@ -337,8 +337,12 @@ test(
       )
       assert.deepEqual(
         [...line.children].map((one) => wordsOf(one)),
-        ["Checks passed", "Version 3", "Details"],
-        "the line reads the flag this build has no marker to carry, then the version and Details",
+        ["Checks passed", "Version 3", "ready"],
+        "the line reads the flag this build has no marker to carry, then the version and ready",
+      )
+      assert.ok(
+        line.querySelector('[data-build-details] [data-slot="work-mark"]'),
+        "and ready wears the chevron a work row draws",
       )
       assert.ok(
         document.querySelector("[data-canvas-builds]"),
@@ -357,6 +361,11 @@ test(
         missing('[data-canvas-build="b2"] [data-build-version]'),
         "a build that published no version names none",
       )
+      assert.deepEqual(
+        [...failedLine.children].map((one) => wordsOf(one)),
+        ["ready"],
+        "a build with no version still offers ready on its line",
+      )
       const working = find('[data-canvas-build="b3"]')
       assert.ok(working, "the working build is drawn as a block of the lane")
       assert.equal(
@@ -370,17 +379,31 @@ test(
         "and the line saying what it is doing hangs under it",
       )
 
-      // Details opens that build's transcript, read-only, over its own session.
+      // ready opens that build's transcript, read-only, over its own session, in the pop-up a
+      // subagent's row opens.
       await click(find('[data-canvas-build="b1"] [data-build-details]'))
       await settle()
       await until(
-        () => host.read.includes("canvas-build-1"),
-        "the build's transcript to be read",
+        () => host.read.includes("canvas-build-1") && Boolean(find("[data-popup-form]")),
+        "the build's transcript to be read and its pop-up to open",
       )
-      assert.ok(
-        document.body.textContent?.includes("Build"),
-        "the transcript's sheet is open",
+      assert.equal(
+        find("[data-popup-form]")?.getAttribute("data-popup-form"),
+        "drawer",
+        "a laptop opens the standard drawer a subagent's row opens",
       )
+      assert.equal(
+        wordsOf(find('[data-popup-form] [data-slot="sheet-title"]')),
+        "Build",
+        "the whole build's pop-up is titled by the build",
+      )
+      assert.equal(
+        wordsOf(find('[data-popup-form] [data-slot="sheet-description"]')),
+        "make the heading say Split the bill",
+        "and describes the build by its first request",
+      )
+      const box = find('[data-popup-form] [data-slot="build-transcript"]')
+      assert.ok(box?.firstElementChild, "the build's thread is mounted in the pop-up's own box")
     })
   }),
 )

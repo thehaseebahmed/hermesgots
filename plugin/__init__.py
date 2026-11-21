@@ -3914,7 +3914,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         A build's row is its request, the summary it ended on, what its checks said and the
         version it published — which is the lane's whole row — and a working build says where it
         is and what it is doing now. The transcript is not here: it stays behind the build's own
-        session, which ``Details`` opens read-only.
+        session, which ``ready`` on the lane's line opens read-only.
         """
         denied = unauthorized(request)
         if denied is not None:

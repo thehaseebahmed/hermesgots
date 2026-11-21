@@ -218,7 +218,29 @@ await flow(
     assert.equal(
       await page.locator("[data-canvas-builds] [data-build-details]").count() > 0,
       true,
-      "each build offers Details",
+      "each build offers ready",
+    )
+    // The line under the reply keeps the version and offers ready: one press opens the whole build.
+    const readyLine = builds
+      .locator("[data-canvas-build]")
+      .filter({ hasText: EDIT })
+      .locator("[data-build-version]")
+      .first()
+    await readyLine.waitFor({ timeout: 20_000 })
+    assert.equal(
+      (await readyLine.innerText()).trim(),
+      "Version 2",
+      "the line keeps the version the build published",
+    )
+    assert.equal(
+      await builds
+        .locator("[data-canvas-build]")
+        .filter({ hasText: EDIT })
+        .locator("[data-build-details]")
+        .first()
+        .innerText(),
+      "ready",
+      "and the press under it reads ready",
     )
     pass("the edit screen: the lane draws the build's request and the version it published")
 
@@ -254,7 +276,10 @@ await flow(
     )
 
     await markers.nth(2).click()
-    const stepSheet = page.locator('[data-slot="sheet-content"]')
+    // The step opens in the pop-up a subagent's row opens: the standard bottom sheet on a phone,
+    // which rests at the foot of the screen and is dragged by its handle.
+    const stepSheet = page.locator('[data-popup-form="sheet"]')
+    await stepSheet.waitFor({ timeout: 20_000 })
     await stepSheet.getByText(checkReport(2)).waitFor({ timeout: 20_000 })
     assert.equal(
       (await stepSheet.locator('[data-slot="sheet-title"]').innerText()).trim(),
@@ -262,9 +287,58 @@ await flow(
       "the sheet is titled for the step whose marker was pressed",
     )
     assert.equal(
+      (await stepSheet.locator('[data-slot="sheet-description"]').innerText()).trim(),
+      EDIT,
+      "and describes the build by its first request",
+    )
+    assert.equal(
       await stepSheet.getByText(checkReport(1)).count(),
       0,
       "the build before this one checked too, and its report is not in this step's window",
+    )
+    // One scroller, not two: the pop-up's box holds the thread, and the thread's own viewport is
+    // what moves, so a long step never scrolls its header away inside a second scroller.
+    const stepBox = await page.evaluate(() => {
+      const popup = document.querySelector('[data-popup-form="sheet"]')
+      const box = popup?.querySelector('[data-slot="build-transcript"]')
+      const handle = popup?.querySelector('[aria-label="Close"]')
+      const viewport = popup?.querySelector('[data-slot="message-scroller-viewport"]')
+      if (!popup || !box || !handle) return null
+      const sheet = popup.getBoundingClientRect()
+      const grip = handle.getBoundingClientRect()
+      return {
+        top: Math.round(sheet.top),
+        bottom: Math.round(sheet.bottom),
+        grip: Math.round(grip.top),
+        box: box.scrollHeight - box.clientHeight,
+        thread: Boolean(viewport),
+        viewport: viewport ? Math.round(viewport.clientHeight) : 0,
+        screen: window.innerHeight,
+      }
+    })
+    console.log(
+      `step sheet 390 — sheet ${stepBox?.top}→${stepBox?.bottom} of ${stepBox?.screen}, ` +
+        `handle at ${stepBox?.grip}, pop-up box scrolled ${stepBox?.box}px, ` +
+        `thread viewport ${stepBox?.viewport}px`,
+    )
+    assert.ok(stepBox, "the step's pop-up draws its box, its handle and the thread's viewport")
+    assert.ok(
+      Math.abs(stepBox.bottom - stepBox.screen) <= 1,
+      `the sheet rests at the foot of the screen (bottom ${stepBox.bottom} of ${stepBox.screen})`,
+    )
+    assert.ok(stepBox.top > 0, `and rises from it (top ${stepBox.top})`)
+    assert.ok(
+      stepBox.grip - stepBox.top < 64,
+      `the handle stands at the sheet's head (handle ${stepBox.grip}, sheet top ${stepBox.top})`,
+    )
+    assert.equal(
+      stepBox.box,
+      0,
+      `the pop-up's own box never scrolls a second time (${stepBox.box}px past it)`,
+    )
+    assert.ok(
+      stepBox.thread && stepBox.viewport > 0,
+      `the thread's own viewport is the bounded scroller inside it (${stepBox.viewport}px)`,
     )
     await shot("step-sheet")
     pass("the edit screen: a checking marker opens a sheet holding that step's turn, and no other")
@@ -934,6 +1008,58 @@ await flow(
     )
     await shot("narrow-even-split")
     pass("a narrow screen: the two panes split the row evenly, and the composer fits its lane")
+
+    // 1024 is where a pop-up turns from a bottom sheet into the side drawer, and a step's transcript
+    // takes that same standard form: full height on the right, not a sheet over the lane.
+    const narrowBuild = page.locator("[data-canvas-build]").first()
+    await narrowBuild.locator("[data-build-version]").first().waitFor({ timeout: 40_000 })
+    await narrowBuild.locator("[data-build-step]").last().click()
+    const narrowStep = page.locator('[data-popup-form="drawer"]')
+    await narrowStep.waitFor({ timeout: 20_000 })
+    // The drawer slides in from the right; only at rest is its edge the screen's.
+    await settled(page)
+    await narrowStep
+      .locator('[data-slot="message-scroller-viewport"]')
+      .waitFor({ timeout: 20_000 })
+    const drawerBox = await page.evaluate(() => {
+      const popup = document.querySelector('[data-popup-form="drawer"]')
+      const box = popup?.querySelector('[data-slot="build-transcript"]')
+      const viewport = popup?.querySelector('[data-slot="message-scroller-viewport"]')
+      if (!popup || !box) return null
+      const drawn = popup.getBoundingClientRect()
+      return {
+        top: Math.round(drawn.top),
+        right: Math.round(drawn.right),
+        height: Math.round(drawn.height),
+        width: Math.round(drawn.width),
+        box: box.scrollHeight - box.clientHeight,
+        viewport: viewport ? Math.round(viewport.clientHeight) : 0,
+        screen: { width: window.innerWidth, height: window.innerHeight },
+      }
+    })
+    console.log(
+      `step drawer 1024 — ${drawerBox?.width}×${drawerBox?.height} at right ${drawerBox?.right} ` +
+        `of ${drawerBox?.screen?.width}, pop-up box scrolled ${drawerBox?.box}px, ` +
+        `thread viewport ${drawerBox?.viewport}px`,
+    )
+    assert.ok(drawerBox, "1024 opens the step in the standard drawer, with the thread's box in it")
+    assert.ok(
+      Math.abs(drawerBox.right - drawerBox.screen.width) <= 1 &&
+        Math.abs(drawerBox.height - drawerBox.screen.height) <= 1,
+      `the drawer is the screen's full height on its right (right ${drawerBox.right} of ` +
+        `${drawerBox.screen.width}, height ${drawerBox.height} of ${drawerBox.screen.height})`,
+    )
+    assert.equal(
+      drawerBox.box,
+      0,
+      `the pop-up's own box never scrolls a second time (${drawerBox.box}px past it)`,
+    )
+    assert.ok(
+      drawerBox.viewport > 0,
+      `the thread's own viewport is the bounded scroller inside it (${drawerBox.viewport}px)`,
+    )
+    await shot("step-sheet-1024")
+    pass("a narrow screen: a step's transcript opens in the standard drawer, the thread its one scroller")
   },
   { viewport: { width: 1024, height: 900 } },
 )
