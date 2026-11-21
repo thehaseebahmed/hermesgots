@@ -8,7 +8,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { isOpen, markersOf, stepWords, turnsInStep } from "../src/lib/build-steps.ts"
+import { drawnSteps, isOpen, liveIndexOf, markersOf, phaseWord, stepWords, turnsInStep } from "../src/lib/build-steps.ts"
 
 /** One visit as the host answers it, mapped by `canvases.ts`'s `buildRowOf`. */
 const step = (phase, startedAt, endedAt, flag) => ({
@@ -50,13 +50,18 @@ test("a step is open until it has an end", () => {
 })
 
 test("an open marker says its phase and nothing more", () => {
-  assert.equal(stepWords(step("building", 5_000), "Building"), "Building")
+  assert.equal(stepWords(step("building", 5_000)), "Building")
+})
+
+test("a phase this build's app does not know still says a word", () => {
+  assert.equal(phaseWord("auditing"), "Working", "an unknown phase is not drawn as an empty marker")
+  assert.equal(phaseWord("checking"), "Checking")
 })
 
 test("a closed marker says its phase and the span it took", () => {
-  assert.equal(stepWords(step("planning", 0, 2_000), "Planning"), "Planning · 2.0s")
+  assert.equal(stepWords(step("planning", 0, 2_000)), "Planning · 2.0s")
   assert.equal(
-    stepWords(step("building", 0, 95_000), "Building"),
+    stepWords(step("building", 0, 95_000)),
     "Building · 1m 35s",
     "a span over a minute reads in minutes and seconds",
   )
@@ -64,25 +69,65 @@ test("a closed marker says its phase and the span it took", () => {
 
 test("a checking marker says what the check found, then the span", () => {
   assert.equal(
-    stepWords(step("checking", 0, 500, "failing"), "Checking"),
+    stepWords(step("checking", 0, 500, "failing")),
     "Checking · Checks failed · 0.5s",
   )
   assert.equal(
-    stepWords(step("checking", 0, 1_500, "passing"), "Checking"),
+    stepWords(step("checking", 0, 1_500, "passing")),
     "Checking · Checks passed · 1.5s",
   )
   assert.equal(
-    stepWords(step("checking", 0, 1_500, "unchecked"), "Checking"),
+    stepWords(step("checking", 0, 1_500, "unchecked")),
     "Checking · Not checked · 1.5s",
   )
 })
 
 test("a checking marker that is still open says the flag and no span", () => {
   assert.equal(
-    stepWords(step("checking", 0, undefined, "failing"), "Checking"),
+    stepWords(step("checking", 0, undefined, "failing")),
     "Checking · Checks failed",
     "a check that has not ended has no span to say",
   )
+})
+
+test("a build at work in a phase it does not draw says that phase, and one that ended says nothing", () => {
+  const visit = (phase) => ({ phase, startedAt: 0 })
+  assert.deepEqual(
+    drawnSteps({ phase: "checking", at: 7 }).map((one) => one.phase),
+    ["checking"],
+    "a build the record never wrote down still says the phase it is in (I6)",
+  )
+  assert.deepEqual(
+    drawnSteps({ phase: "waiting", at: 7 }),
+    [],
+    "but a wait's words are the plan card in the composer's place, so it draws no marker",
+  )
+  assert.deepEqual(
+    drawnSteps({ phase: "failed", at: 7 }),
+    [],
+    "and a build that ended with no recorded visits draws none",
+  )
+  assert.deepEqual(
+    drawnSteps({ phase: "building", at: 7, steps: [visit("planning"), visit("building")] }).map(
+      (one) => one.phase,
+    ),
+    ["planning", "building"],
+    "a recorded build draws its own visits, in order, and nothing invented",
+  )
+})
+
+test("only a visit the build has not left is drawn live", () => {
+  assert.equal(
+    liveIndexOf([step("planning", 0, 2_000), step("building", 2_000)]),
+    1,
+    "the open visit is the live one",
+  )
+  assert.equal(
+    liveIndexOf([step("planning", 0, 2_000)]),
+    -1,
+    "a build waiting on its plan draws the visit behind it, and left that one",
+  )
+  assert.equal(liveIndexOf([]), -1, "a block with no marker draws none live")
 })
 
 /** Three turns, one to a visit, in the milliseconds a row's whole seconds become. */

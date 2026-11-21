@@ -35,7 +35,15 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import type { ThreadViewProps } from "@/chat-next/page"
-import { isOpen, markersOf, PHASE_WORDS, stepWords, turnsInStep } from "@/lib/build-steps"
+import {
+  atWork,
+  drawnSteps,
+  isOpen,
+  liveIndexOf,
+  phaseWord,
+  stepWords,
+  turnsInStep,
+} from "@/lib/build-steps"
 import type { CanvasBuildRow, CanvasBuildStep } from "@/lib/canvases"
 import {
   COLUMN,
@@ -56,9 +64,6 @@ const AppThreadView = lazy(() =>
   import("@/chat-next/app-view").then((module) => ({ default: module.AppThreadView })),
 )
 
-/** The phases a build ends in; every other phase is a build still at work. */
-const ENDED = new Set(["published", "failed", "stopped"])
-
 /** What a working build says when its host named no activity line. */
 const WORKING_WORDS = "The build is working."
 
@@ -76,25 +81,6 @@ const LaneOf = createContext<Lane | null>(null)
  * stable component: absent for `Details`, which draws the build whole.
  */
 const WindowOf = createContext<CanvasBuildStep | undefined>(undefined)
-
-/** The phase a marker says, and a plain word for a phase this build's app does not know. */
-const phaseWordOf = (step: CanvasBuildStep) => PHASE_WORDS[step.phase] ?? "Working"
-
-/** Whether a build is still at work, which is what makes its last marker the live one. */
-function atWork(row: CanvasBuildRow) {
-  return !ENDED.has(row.phase)
-}
-
-/**
- * The steps a build's block draws: the visits it made, in the order it made them — or, for a build
- * the record never wrote down (I6) that is still at work, the phase it is in, so a plugin upgraded
- * mid-build says what it is doing rather than drawing an empty row.
- */
-function stepsShown(row: CanvasBuildRow): CanvasBuildStep[] {
-  const steps = markersOf(row)
-  if (steps.length || !atWork(row)) return steps
-  return [{ phase: row.phase, startedAt: row.at }]
-}
 
 /**
  * One marker: a visit the build made to a phase that did work, drawn as the thread's own work row —
@@ -121,15 +107,16 @@ function StepRow({
       onClick={onPress}
       after={<WorkMark />}
     >
-      <WorkLabel>{stepWords(step, phaseWordOf(step))}</WorkLabel>
+      <WorkLabel>{stepWords(step)}</WorkLabel>
     </WorkRow>
   )
 }
 
 /**
- * A build's markers, in the order it took them, between its requests and its reply. The one a
+ * A build's markers, in the order it took them, between its requests and its reply. The one step a
  * working build is in pulses, and its phase's activity line hangs under that marker until the build
- * leaves the step.
+ * leaves the step. A build at work in a phase it draws no marker for — waiting on its plan,
+ * publishing — pulses none of them: every marker it draws is a step it has left.
  */
 function BuildSteps({
   row,
@@ -138,9 +125,9 @@ function BuildSteps({
   row: CanvasBuildRow
   onStep: (step: CanvasBuildStep) => void
 }) {
-  const steps = stepsShown(row)
+  const steps = drawnSteps(row)
   if (!steps.length) return null
-  const live = atWork(row) ? steps.length - 1 : -1
+  const live = liveIndexOf(steps)
   return (
     <div className={cn(REPLY_EDGE, "flex flex-col")}>
       {steps.map((step, at) => (
@@ -332,7 +319,7 @@ export function CanvasBuildsLane({
       <Sheet open={sight !== null} onOpenChange={(next) => (next ? undefined : setSight(null))}>
         <SheetContent side="bottom" className="h-[85svh] gap-0 p-0">
           <SheetHeader>
-            <SheetTitle>{sight?.step ? phaseWordOf(sight.step) : "Build"}</SheetTitle>
+            <SheetTitle>{sight?.step ? phaseWord(sight.step.phase) : "Build"}</SheetTitle>
             <SheetDescription>
               {sight?.build.requests[0] ?? "What this build was asked for."}
             </SheetDescription>

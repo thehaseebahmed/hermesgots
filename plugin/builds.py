@@ -179,12 +179,17 @@ def builds_of(path: Path, canvas_id: str) -> List[Dict[str, Any]]:
         return []
     conn = _open(path)
     try:
-        rows = conn.execute(
-            "SELECT * FROM canvas_builds WHERE canvas_id = ? ORDER BY at DESC, rowid DESC",
-            (canvas_id,),
-        ).fetchall()
+        return _builds_in(conn, canvas_id)
     finally:
         conn.close()
+
+
+def _builds_in(conn: sqlite3.Connection, canvas_id: str) -> List[Dict[str, Any]]:
+    """The canvas's builds, newest first, over a connection its caller holds."""
+    rows = conn.execute(
+        "SELECT * FROM canvas_builds WHERE canvas_id = ? ORDER BY at DESC, rowid DESC",
+        (canvas_id,),
+    ).fetchall()
     return [_build(row) for row in rows]
 
 
@@ -193,16 +198,25 @@ def listing(path: Path, canvas_id: str) -> List[Dict[str, Any]]:
 
     A finished build carries the request it took, the summary it ended on, what its checks said and
     the version it published; a working one carries its phase and the line saying what it is doing
-    now. The lane shows the second as the build in progress and the first as its history, so both
-    ride one read rather than the app guessing which is which. Each build also carries every visit
-    it made to a phase, in order — except a build the record predates, which carries none at all
-    (I6).
+    now. Each build also carries every visit it made to a phase, in order — except a build the
+    record predates, which carries none at all (I6).
+
+    The builds and their visits are read in one snapshot, because they are one answer: a publish
+    that landed between the two reads would hand the lane a finished build whose last visit is
+    still open — a marker nothing can press — or a build with no visits at all, which reads as one
+    written before the record. The 404 is decided before it, from the canvas's own record.
     """
     record = canvases.record(path, canvas_id)
     if record is None:
         raise canvases.CanvasError("There is no such canvas.", 404)
-    steps = _steps_of(path, canvas_id)
-    return [_lane_row(one, steps.get(one["id"])) for one in builds_of(path, canvas_id)]
+    conn = _open(path)
+    try:
+        conn.execute("BEGIN")
+        builds = _builds_in(conn, canvas_id)
+        steps = _steps_in(conn, canvas_id)
+    finally:
+        conn.close()
+    return [_lane_row(one, steps.get(one["id"])) for one in builds]
 
 
 def _lane_row(one: Dict[str, Any], steps: Optional[List[Dict[str, Any]]]) -> Dict[str, Any]:
@@ -224,25 +238,19 @@ def _lane_row(one: Dict[str, Any], steps: Optional[List[Dict[str, Any]]]) -> Dic
     return row
 
 
-def _steps_of(path: Path, canvas_id: str) -> Dict[str, List[Dict[str, Any]]]:
+def _steps_in(conn: sqlite3.Connection, canvas_id: str) -> Dict[str, List[Dict[str, Any]]]:
     """Every visit this canvas's builds made to a phase, by build, in one statement.
 
     A visit is ``phase``, ``start``, ``end`` while it is closed and ``flag`` where a check stamped
     one. A build with no rows is absent from the answer rather than answering an empty list: the
     record never saw it, which is not the same as a build that visited nothing (I6).
     """
-    if not canvas_id or not path.exists():
-        return {}
-    conn = _open(path)
-    try:
-        rows = conn.execute(
-            """SELECT build_id, phase, started_at, ended_at, flag FROM canvas_build_steps
-               WHERE build_id IN (SELECT id FROM canvas_builds WHERE canvas_id = ?)
-               ORDER BY build_id, ordinal""",
-            (canvas_id,),
-        ).fetchall()
-    finally:
-        conn.close()
+    rows = conn.execute(
+        """SELECT build_id, phase, started_at, ended_at, flag FROM canvas_build_steps
+           WHERE build_id IN (SELECT id FROM canvas_builds WHERE canvas_id = ?)
+           ORDER BY build_id, ordinal""",
+        (canvas_id,),
+    ).fetchall()
     found: Dict[str, List[Dict[str, Any]]] = {}
     for row in rows:
         step: Dict[str, Any] = {"phase": row["phase"], "start": row["started_at"]}
@@ -331,11 +339,14 @@ def enter(path: Path, canvas_id: str, request: str) -> Optional[Dict[str, Any]]:
 
 
 def open_build(path: Path, canvas_id: str, request: str) -> Dict[str, Any]:
-    """Opens a build on a fresh session of its own, and answers it."""
+    """Opens a build on a fresh session of its own, and answers it.
+
+    The build and its first visit are one write: a build a reader can see is a build whose lane has
+    a step, so no poll lands between them and draws a build the record says nothing happened to.
+    """
     build_id = uuid.uuid4().hex
     now = now_ms()
-    conn = _open(path)
-    try:
+    with canvases._writing(path) as conn:
         conn.execute(
             """INSERT INTO canvas_builds (id, canvas_id, session_id, phase, activity, requests, summary,
                                           run_id, at, created_at)
@@ -353,13 +364,7 @@ def open_build(path: Path, canvas_id: str, request: str) -> Dict[str, Any]:
         )
         # The build's first visit opens at the same clock the build is written with, so its lane
         # has a step from the moment the build exists.
-        conn.execute(
-            """INSERT INTO canvas_build_steps (build_id, ordinal, phase, started_at)
-               VALUES (?, 0, ?, ?)""",
-            (build_id, PLANNING, now),
-        )
-    finally:
-        conn.close()
+        _open_step(conn, build_id, PLANNING, now)
     _note(path, canvas_id)
     return of_canvas(path, canvas_id) or {}
 
@@ -735,11 +740,11 @@ def _stamp(path: Path, build_id: str, number: int, document: str, flag: str) -> 
     """Records a check round on the build, and the flag it answered on its open checking visit.
 
     The round's flag is the version's (I5) and the checking step's (G6): the visit stamped is the
-    one still open, which is the checking visit this round opened.
+    one still open, which is the checking visit this round opened. Both land in one write, so a
+    reader is never told what a check found without its marker saying so too.
     """
     now = now_ms()
-    conn = _open(path)
-    try:
+    with canvases._writing(path) as conn:
         conn.execute(
             "UPDATE canvas_builds SET rounds = ?, checked = ?, flag = ?, at = ? WHERE id = ?",
             (number, _digest(document), flag, now, build_id),
@@ -749,8 +754,6 @@ def _stamp(path: Path, build_id: str, number: int, document: str, flag: str) -> 
             " AND ended_at IS NULL",
             (flag, build_id, CHECKING),
         )
-    finally:
-        conn.close()
 
 
 def _report_turn(
@@ -926,6 +929,30 @@ def _by_id(path: Path, build_id: str) -> Optional[Dict[str, Any]]:
     return _build(row) if row else None
 
 
+def _close_step(conn: sqlite3.Connection, build_id: str, at: int) -> None:
+    """Closes the visit a build is in, at ``at`` — the one statement that ends a visit.
+
+    Every window the lane slices is tiled by it (I2): the visit a build leaves ends at the clock the
+    next one begins, and a finished build's last visit ends at the clock it ended.
+    """
+    conn.execute(
+        "UPDATE canvas_build_steps SET ended_at = ? WHERE build_id = ? AND ended_at IS NULL",
+        (at, build_id),
+    )
+
+
+def _open_step(conn: sqlite3.Connection, build_id: str, phase: str, at: int) -> None:
+    """Appends the visit a build just entered, as its next ordinal."""
+    ordinal = conn.execute(
+        "SELECT COALESCE(MAX(ordinal), -1) + 1 FROM canvas_build_steps WHERE build_id = ?",
+        (build_id,),
+    ).fetchone()[0]
+    conn.execute(
+        "INSERT INTO canvas_build_steps (build_id, ordinal, phase, started_at) VALUES (?, ?, ?, ?)",
+        (build_id, ordinal, phase, at),
+    )
+
+
 def _phase(
     path: Path,
     build_id: str,
@@ -937,22 +964,17 @@ def _phase(
 
     A finished build has nothing going on, so the line a working build carries is cleared — its
     summary is what the lane's row says instead. The visit the build was in closes at the same
-    clock, since a finished build has no open step (I3).
+    clock, since a finished build has no open step (I3), and both land in one write: a build is
+    never ended with a visit still open for a reader to draw as the one it is in.
     """
     now = now_ms()
-    conn = _open(path)
-    try:
+    with canvases._writing(path) as conn:
         conn.execute(
             "UPDATE canvas_builds SET phase = ?, summary = ?, version = COALESCE(?, version), "
             "activity = NULL, at = ? WHERE id = ?",
             (phase, summary, version, now, build_id),
         )
-        conn.execute(
-            "UPDATE canvas_build_steps SET ended_at = ? WHERE build_id = ? AND ended_at IS NULL",
-            (now, build_id),
-        )
-    finally:
-        conn.close()
+        _close_step(conn, build_id, now)
 
 
 def _placed(conn: sqlite3.Connection, build_id: str, phase: str) -> None:
@@ -973,18 +995,8 @@ def _placed(conn: sqlite3.Connection, build_id: str, phase: str) -> None:
     )
     if row is None or row[0] == phase:
         return
-    conn.execute(
-        "UPDATE canvas_build_steps SET ended_at = ? WHERE build_id = ? AND ended_at IS NULL",
-        (now, build_id),
-    )
-    ordinal = conn.execute(
-        "SELECT COALESCE(MAX(ordinal), -1) + 1 FROM canvas_build_steps WHERE build_id = ?",
-        (build_id,),
-    ).fetchone()[0]
-    conn.execute(
-        "INSERT INTO canvas_build_steps (build_id, ordinal, phase, started_at) VALUES (?, ?, ?, ?)",
-        (build_id, ordinal, phase, now),
-    )
+    _close_step(conn, build_id, now)
+    _open_step(conn, build_id, phase, now)
 
 
 def _place(path: Path, build_id: str, phase: str) -> None:

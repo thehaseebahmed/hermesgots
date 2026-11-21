@@ -116,6 +116,40 @@ const UNRECORDED = {
   created_at: 4,
 }
 
+/** The build waiting on its plan: the visit it took to plan, and the wait it is in now — a phase
+ * the lane draws no marker for, since a wait's words are the plan card in the composer's place. */
+const WAITING = {
+  id: "b5",
+  session: "canvas-build-5",
+  phase: "waiting",
+  activity: "Waiting for your approval",
+  requests: ["make the heading say Split the bill"],
+  summary: null,
+  flag: null,
+  version: null,
+  at: 5,
+  created_at: 5,
+  steps: [
+    { phase: "planning", start: 0, end: 2_000 },
+    { phase: "waiting", start: 2_000 },
+  ],
+}
+
+/** The same wait as a plugin that predates the record answers it: a phase, the line saying what it
+ * is doing, and no visits at all (I6). */
+const UNRECORDED_WAITING = {
+  id: "b6",
+  session: "canvas-build-6",
+  phase: "waiting",
+  activity: "Waiting for your approval",
+  requests: ["and make it blue too"],
+  summary: null,
+  flag: null,
+  version: null,
+  at: 6,
+  created_at: 6,
+}
+
 /** The whole second the sheet's build ran on, as a session's rows are stamped by the host. */
 const RAN_AT = 1_760_000_000
 
@@ -212,8 +246,13 @@ async function seed() {
 }
 
 /** The canvas's screen drawn over a builds read of `builds`, the lane given a change to settle on. */
-async function drawLane(builds: readonly unknown[], body: () => Promise<void>) {
-  serve(builds)
+async function drawLane(
+  builds: readonly unknown[],
+  body: () => Promise<void>,
+  /** The turns the sheet's thread reads, as the host answers them. */
+  rows: readonly unknown[] = [],
+) {
+  serve(builds, rows)
   await seed()
   await mount(
     <MemoryRouter initialEntries={["/canvas/c1"]}>
@@ -229,91 +268,81 @@ async function drawLane(builds: readonly unknown[], body: () => Promise<void>) {
 test(
   "a finished build reads as a request, its markers and a reply",
   laptop(async () => {
-    serve()
-    await seed()
-    const bot = (await db.profiles.get("bot-1"))!
-    await mount(
-      <MemoryRouter initialEntries={["/canvas/c1"]}>
-        <Routes>
-          <Route path="/canvas" element={<div data-canvas-list />} />
-          <Route path="/canvas/:id" element={<CanvasView />} />
-        </Routes>
-      </MemoryRouter>,
-      async () => {
-        await act(async () => {
-          await refreshCanvas("c1")
-          await noteChange(connectionKey(bot), "canvas")
-        })
-        await until(
-          () => Boolean(find('[data-canvas-build="b1"]')),
-          "the lane's finished build to draw",
-        )
-        // One marker per visit that did work, in the order the visits happened: the waiting and
-        // publishing visits are in the record and draw nothing.
-        const markers = findAll('[data-canvas-build="b1"] [data-build-step]')
-        assert.deepEqual(
-          markers.map((one) => one.getAttribute("data-build-step")),
-          ["planning", "building", "checking", "building", "checking"],
-          "a build that checked, fixed and checked again draws five markers, in order",
-        )
-        assert.deepEqual(
-          markers.map(wordsOf),
-          [
-            "Planning · 2.0s",
-            "Building · 30.5s",
-            "Checking · Checks failed · 0.5s",
-            "Building · 9.0s",
-            "Checking · Checks passed · 1.5s",
-          ],
-          "each marker says its phase, then the span it took, and the checks say what they found",
-        )
-        // The row is the thread's own work row, not a shape of its own.
-        const first = markers[0]
-        assert.ok(first.querySelector('[data-slot="work-label"]'), "the marker is a work row")
-        assert.ok(first.querySelector('[data-slot="work-mark"]'), "wearing the thread's chevron")
-        // The markers sit between the request the build took and the reply it answered with.
-        const request = find('[data-canvas-build="b1"] [data-build-request]')
-        const reply = find('[data-canvas-build="b1"] [data-build-summary]')
-        assert.ok(request && reply, "the request and the reply are drawn")
-        assert.ok(
-          request.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING,
-          "the first marker stands under the request",
-        )
-        assert.ok(
-          markers[markers.length - 1].compareDocumentPosition(reply) &
-            Node.DOCUMENT_POSITION_FOLLOWING,
-          "and the last one over the reply",
-        )
-        // The flag reads on the marker that checked, and no longer under the reply.
-        assert.equal(markers[2].getAttribute("data-build-flag"), "failing")
-        assert.equal(markers[4].getAttribute("data-build-flag"), "passing")
-        const line = find('[data-canvas-build="b1"] [data-build-version]')?.parentElement
-        assert.ok(line, "the reply's line is still drawn")
-        assert.deepEqual(
-          [...line.children].map((one) => wordsOf(one)),
-          ["Version 3", "Details"],
-          "the line keeps the version it published and Details, and no flag",
-        )
-        assert.equal(
-          line.querySelector("[data-build-flag]"),
-          null,
-          "the flag has left the reply's line",
-        )
-        // A build from before the record draws its request and its reply, and no markers.
-        assert.ok(
-          missing('[data-canvas-build="b2"] [data-build-step]'),
-          "a build with no steps draws none",
-        )
-        assert.ok(
-          find('[data-canvas-build="b2"] [data-build-summary]'),
-          "its reply is drawn as any build's is",
-        )
-        assert.ok(
-          find('[data-canvas-build="b2"] [data-build-details]'),
-          "and Details still opens the whole build",
-        )
-      },
-    )
+    await drawLane(BUILDS, async () => {
+      const bot = (await db.profiles.get("bot-1"))!
+      await act(async () => {
+        await refreshCanvas("c1")
+        await noteChange(connectionKey(bot), "canvas")
+      })
+      await until(
+        () => Boolean(find('[data-canvas-build="b1"]')),
+        "the lane's finished build to draw",
+      )
+      // One marker per visit that did work, in the order the visits happened: the waiting and
+      // publishing visits are in the record and draw nothing.
+      const markers = findAll('[data-canvas-build="b1"] [data-build-step]')
+      assert.deepEqual(
+        markers.map((one) => one.getAttribute("data-build-step")),
+        ["planning", "building", "checking", "building", "checking"],
+        "a build that checked, fixed and checked again draws five markers, in order",
+      )
+      assert.deepEqual(
+        markers.map(wordsOf),
+        [
+          "Planning · 2.0s",
+          "Building · 30.5s",
+          "Checking · Checks failed · 0.5s",
+          "Building · 9.0s",
+          "Checking · Checks passed · 1.5s",
+        ],
+        "each marker says its phase, then the span it took, and the checks say what they found",
+      )
+      // The row is the thread's own work row, not a shape of its own.
+      const first = markers[0]
+      assert.ok(first.querySelector('[data-slot="work-label"]'), "the marker is a work row")
+      assert.ok(first.querySelector('[data-slot="work-mark"]'), "wearing the thread's chevron")
+      // The markers sit between the request the build took and the reply it answered with.
+      const request = find('[data-canvas-build="b1"] [data-build-request]')
+      const reply = find('[data-canvas-build="b1"] [data-build-summary]')
+      assert.ok(request && reply, "the request and the reply are drawn")
+      assert.ok(
+        request.compareDocumentPosition(first) & Node.DOCUMENT_POSITION_FOLLOWING,
+        "the first marker stands under the request",
+      )
+      assert.ok(
+        markers[markers.length - 1].compareDocumentPosition(reply) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+        "and the last one over the reply",
+      )
+      // The flag reads on the marker that checked, and no longer under the reply.
+      assert.equal(markers[2].getAttribute("data-build-flag"), "failing")
+      assert.equal(markers[4].getAttribute("data-build-flag"), "passing")
+      const line = find('[data-canvas-build="b1"] [data-build-version]')?.parentElement
+      assert.ok(line, "the reply's line is still drawn")
+      assert.deepEqual(
+        [...line.children].map((one) => wordsOf(one)),
+        ["Version 3", "Details"],
+        "the line keeps the version it published and Details, and no flag",
+      )
+      assert.equal(
+        line.querySelector("[data-build-flag]"),
+        null,
+        "the flag has left the reply's line",
+      )
+      // A build from before the record draws its request and its reply, and no markers.
+      assert.ok(
+        missing('[data-canvas-build="b2"] [data-build-step]'),
+        "a build with no steps draws none",
+      )
+      assert.ok(
+        find('[data-canvas-build="b2"] [data-build-summary]'),
+        "its reply is drawn as any build's is",
+      )
+      assert.ok(
+        find('[data-canvas-build="b2"] [data-build-details]'),
+        "and Details still opens the whole build",
+      )
+    })
   }),
 )
 
@@ -396,6 +425,56 @@ test(
 )
 
 test(
+  "a waiting build pulses nothing and says nothing it is doing",
+  laptop(async () => {
+    await drawLane([UNRECORDED_WAITING, WAITING, ...BUILDS], async () => {
+      const bot = (await db.profiles.get("bot-1"))!
+      await act(async () => {
+        await refreshCanvas("c1")
+        await noteChange(connectionKey(bot), "canvas")
+      })
+      await until(
+        () => Boolean(find('[data-canvas-build="b5"]')),
+        "the lane's waiting build to draw",
+      )
+      // The wait is a phase the lane draws no marker for, so the visit behind it is a visit the
+      // build has left: nothing pulses, and no line hangs under a step it is not in. The wait reads
+      // on the plan's card in the composer's place, not here.
+      const markers = findAll('[data-canvas-build="b5"] [data-build-step]')
+      assert.deepEqual(
+        markers.map((one) => one.getAttribute("data-build-step")),
+        ["planning"],
+        "only the visit that did work draws a marker",
+      )
+      assert.ok(
+        missing('[data-canvas-build="b5"] [data-working]'),
+        "and the visit behind the wait does not pulse as the live one",
+      )
+      assert.ok(
+        missing('[data-canvas-build="b5"] [data-build-activity]'),
+        "nor does a line say what a waiting build is doing",
+      )
+      // A wait the record never wrote down is no invitation to invent its marker either: the phase
+      // is the one phase the lane must not draw, and it is not drawn.
+      const unrecorded = find('[data-canvas-build="b6"]')
+      assert.ok(unrecorded, "the build the record predates is still drawn")
+      assert.ok(
+        missing('[data-canvas-build="b6"] [data-build-step]'),
+        "a waiting build with no recorded visits draws no marker",
+      )
+      assert.ok(
+        missing('[data-canvas-build="b6"] [data-build-activity]'),
+        "and no line under one",
+      )
+      assert.ok(
+        unrecorded.querySelector("[data-build-request]"),
+        "its request is drawn as any build's is",
+      )
+    })
+  }),
+)
+
+test(
   "a working build with no recorded steps draws the phase it is in",
   laptop(async () => {
     await drawLane([UNRECORDED, ...BUILDS], async () => {
@@ -429,114 +508,104 @@ test(
 test(
   "pressing a marker opens that visit's turns, and Details opens the whole build",
   laptop(async () => {
-    serve([VISITED], VISITED_ROWS)
-    await seed()
-    const bot = (await db.profiles.get("bot-1"))!
-    /** The words the sheet's thread draws, one message at a time. */
-    const sheetMessages = () =>
-      findAll('[data-slot="sheet-content"] [data-slot="message"]').map(wordsOf)
-    await mount(
-      <MemoryRouter initialEntries={["/canvas/c1"]}>
-        <Routes>
-          <Route path="/canvas" element={<div data-canvas-list />} />
-          <Route path="/canvas/:id" element={<CanvasView />} />
-        </Routes>
-      </MemoryRouter>,
-      async () => {
-        await act(async () => {
-          await refreshCanvas("c1")
-          await noteChange(connectionKey(bot), "canvas")
-        })
-        await until(
-          () => Boolean(find('[data-canvas-build="b4"]')),
-          "the lane's build to draw",
-        )
-        const markers = findAll('[data-canvas-build="b4"] [data-build-step]')
-        assert.deepEqual(
-          markers.map((one) => one.getAttribute("data-build-step")),
-          ["planning", "building", "checking", "building"],
-          "the build's four visits, a marker each",
-        )
-        // The second marker opens the second visit's turn, and neither of the other two.
-        await click(markers[1])
-        await until(
-          () => sheetMessages().length > 0,
-          "the second visit's turn to be read and drawn",
-        )
-        const second = sheetMessages()
-        assert.equal(second.length, 2, "one turn, drawn as a request and its reply")
+    await drawLane([VISITED], async () => {
+      const bot = (await db.profiles.get("bot-1"))!
+      /** The words the sheet's thread draws, one message at a time. */
+      const sheetMessages = () =>
+        findAll('[data-slot="sheet-content"] [data-slot="message"]').map(wordsOf)
+      await act(async () => {
+        await refreshCanvas("c1")
+        await noteChange(connectionKey(bot), "canvas")
+      })
+      await until(
+        () => Boolean(find('[data-canvas-build="b4"]')),
+        "the lane's build to draw",
+      )
+      const markers = findAll('[data-canvas-build="b4"] [data-build-step]')
+      assert.deepEqual(
+        markers.map((one) => one.getAttribute("data-build-step")),
+        ["planning", "building", "checking", "building"],
+        "the build's four visits, a marker each",
+      )
+      // The second marker opens the second visit's turn, and neither of the other two.
+      await click(markers[1])
+      await until(
+        () => sheetMessages().length > 0,
+        "the second visit's turn to be read and drawn",
+      )
+      const second = sheetMessages()
+      assert.equal(second.length, 2, "one turn, drawn as a request and its reply")
+      assert.ok(
+        second.some((words) => words.includes("and make it blue too")),
+        "the visit's own request is drawn",
+      )
+      assert.ok(
+        second.some((words) => words.includes("The heading is blue now.")),
+        "and the answer it was given",
+      )
+      assert.ok(
+        !second.some((words) => words.includes("The heading now says Split the bill.")),
+        "the turn of the visit before is left out",
+      )
+      assert.ok(
+        !second.some((words) => words.includes("check the tips")),
+        "and so is the turn of the visit after it",
+      )
+      // The sheet says which step it is, and whose build.
+      assert.equal(
+        wordsOf(find('[data-slot="sheet-title"]')),
+        "Building",
+        "the sheet is titled by the step's phase word",
+      )
+      assert.equal(
+        wordsOf(find('[data-slot="sheet-description"]')),
+        "make the heading say Split the bill",
+        "and describes the build by its first request",
+      )
+      // Details still opens the whole build: all three turns, every row of the session.
+      await click(find('[data-slot="sheet-content"] [data-slot="sheet-close"]'))
+      await until(() => missing('[data-slot="sheet-content"]'), "the step's sheet to close")
+      await click(find('[data-canvas-build="b4"] [data-build-details]'))
+      await until(
+        () => sheetMessages().length === 6,
+        "the whole build's transcript to be drawn",
+      )
+      const whole = sheetMessages()
+      for (const words of [
+        "make the heading say Split the bill",
+        "The heading now says Split the bill.",
+        "and make it blue too",
+        "The heading is blue now.",
+        "check the tips",
+        "The tips are checked.",
+      ])
         assert.ok(
-          second.some((words) => words.includes("and make it blue too")),
-          "the visit's own request is drawn",
+          whole.some((drawn) => drawn.includes(words)),
+          `the whole build draws "${words}"`,
         )
-        assert.ok(
-          second.some((words) => words.includes("The heading is blue now.")),
-          "and the answer it was given",
-        )
-        assert.ok(
-          !second.some((words) => words.includes("The heading now says Split the bill.")),
-          "the turn of the visit before is left out",
-        )
-        assert.ok(
-          !second.some((words) => words.includes("check the tips")),
-          "and so is the turn of the visit after it",
-        )
-        // The sheet says which step it is, and whose build.
-        assert.equal(
-          wordsOf(find('[data-slot="sheet-title"]')),
-          "Building",
-          "the sheet is titled by the step's phase word",
-        )
-        assert.equal(
-          wordsOf(find('[data-slot="sheet-description"]')),
-          "make the heading say Split the bill",
-          "and describes the build by its first request",
-        )
-        // Details still opens the whole build: all three turns, every row of the session.
-        await click(find('[data-slot="sheet-content"] [data-slot="sheet-close"]'))
-        await until(() => missing('[data-slot="sheet-content"]'), "the step's sheet to close")
-        await click(find('[data-canvas-build="b4"] [data-build-details]'))
-        await until(
-          () => sheetMessages().length === 6,
-          "the whole build's transcript to be drawn",
-        )
-        const whole = sheetMessages()
-        for (const words of [
-          "make the heading say Split the bill",
-          "The heading now says Split the bill.",
-          "and make it blue too",
-          "The heading is blue now.",
-          "check the tips",
-          "The tips are checked.",
-        ])
-          assert.ok(
-            whole.some((drawn) => drawn.includes(words)),
-            `the whole build draws "${words}"`,
-          )
-        assert.equal(
-          wordsOf(find('[data-slot="sheet-title"]')),
-          "Build",
-          "and the whole build's sheet is titled by the build",
-        )
-        // A visit the transcript holds no turn in says so, rather than greeting the reader.
-        await click(find('[data-slot="sheet-content"] [data-slot="sheet-close"]'))
-        await until(() => missing('[data-slot="sheet-content"]'), "the transcript's sheet to close")
-        await click(markers[3])
-        await until(
-          () => Boolean(find("[data-build-window-empty]")),
-          "the empty visit to say it holds nothing",
-        )
-        assert.equal(
-          wordsOf(find("[data-build-window-empty]")),
-          "No messages in this step of the build.",
-          "the sheet says the step holds no messages",
-        )
-        assert.equal(sheetMessages().length, 0, "and draws no message of another visit")
-        assert.ok(
-          missing('[data-slot="sheet-content"] [aria-label="Messages"]'),
-          "the thread is not drawn at all, so no empty state greets the reader",
-        )
-      },
-    )
+      assert.equal(
+        wordsOf(find('[data-slot="sheet-title"]')),
+        "Build",
+        "and the whole build's sheet is titled by the build",
+      )
+      // A visit the transcript holds no turn in says so, rather than greeting the reader.
+      await click(find('[data-slot="sheet-content"] [data-slot="sheet-close"]'))
+      await until(() => missing('[data-slot="sheet-content"]'), "the transcript's sheet to close")
+      await click(markers[3])
+      await until(
+        () => Boolean(find("[data-build-window-empty]")),
+        "the empty visit to say it holds nothing",
+      )
+      assert.equal(
+        wordsOf(find("[data-build-window-empty]")),
+        "No messages in this step of the build.",
+        "the sheet says the step holds no messages",
+      )
+      assert.equal(sheetMessages().length, 0, "and draws no message of another visit")
+      assert.ok(
+        missing('[data-slot="sheet-content"] [aria-label="Messages"]'),
+        "the thread is not drawn at all, so no empty state greets the reader",
+      )
+    }, VISITED_ROWS)
   }),
 )

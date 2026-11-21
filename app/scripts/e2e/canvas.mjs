@@ -198,25 +198,25 @@ await flow(
     pass("the edit screen: the lane draws the build's request and the version it published")
 
     // The build the flow just made, as the host's own clock saw it: a marker for each visit it made
-    // to a phase — it built, it checked, it published — and the check's flag on the visit that
-    // checked (G2, G6). A visit's span is the mock's clock, so a marker is read by the phase it
-    // names and never by the duration beside it.
+    // to a phase — it planned, it built, it checked, it published — and the check's flag on the
+    // visit that checked (G2, G6). Publishing draws no marker. A visit's span is the mock's clock,
+    // so a marker is read by the mark it carries and never by the duration beside it.
     const build = builds.locator("[data-canvas-build]").filter({ hasText: EDIT })
     const markers = build.locator("[data-build-step]")
     await until(
-      async () => (await markers.count()) === 2,
+      async () => (await markers.count()) === 3,
       20_000,
-      "the lane to draw a marker for each of the build's two steps",
+      "the lane to draw a marker for each of the build's three drawn steps",
     )
     assert.deepEqual(
       await markers.evaluateAll((nodes) =>
-        nodes.map((node) => node.textContent.split(" · ")[0].trim()),
+        nodes.map((node) => node.getAttribute("data-build-step")),
       ),
-      ["Building", "Checking"],
+      ["planning", "building", "checking"],
       "the markers are the visits the build made, in the order it made them",
     )
     assert.ok(
-      (await markers.nth(1).innerText()).includes("Checks passed"),
+      (await markers.nth(2).innerText()).includes("Checks passed"),
       "the visit that checked says what its check found",
     )
     // The step's own turn is the host's, and the lane does not draw it: the lane is the build's
@@ -231,7 +231,7 @@ await flow(
     )
 
     // A marker is the visit it names: pressing it opens the sheet on that step's window alone.
-    await markers.nth(1).click()
+    await markers.nth(2).click()
     const stepSheet = page.locator('[data-slot="sheet-content"]')
     await stepSheet.getByText(checkReport(2)).waitFor({ timeout: 20_000 })
     assert.equal(

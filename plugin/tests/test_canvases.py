@@ -2506,6 +2506,24 @@ class RouteTest(unittest.TestCase):
             {chat_id: {"at": ahead, "value": chats.one(self.path, chat_id)["value"]}},
         )
 
+        # A build this canvas had, and the visit it made: rows only this canvas could reach, so the
+        # delete is what has to take them.
+        conn = connect(self.path)
+        try:
+            conn.execute(
+                "INSERT INTO canvas_builds (id, canvas_id, session_id, phase, requests, summary,"
+                " run_id, at, created_at) VALUES ('b1', ?, 'canvas-b1', 'published', ?, NULL,"
+                " NULL, 9, 5)",
+                (canvas_id, json.dumps(["make it blue"])),
+            )
+            conn.execute(
+                "INSERT INTO canvas_build_steps (build_id, ordinal, phase, started_at)"
+                " VALUES ('b1', 0, 'planning', 5)"
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
         gone = self.call("/canvases/{canvas_id}", "DELETE", canvas_id=canvas_id)
         self.assertEqual(gone["status"], 200)
         self.assertEqual(
@@ -2530,8 +2548,12 @@ class RouteTest(unittest.TestCase):
                     ("canvas_versions", "canvas_id"),
                     ("canvas_docs", "canvas_id"),
                     ("canvas_grants", "canvas_id"),
+                    ("canvas_builds", "canvas_id"),
                 )
             }
+            visits = conn.execute(
+                "SELECT COUNT(*) FROM canvas_build_steps WHERE build_id = 'b1'"
+            ).fetchone()[0]
         finally:
             conn.close()
         self.assertEqual(left, {
@@ -2539,7 +2561,9 @@ class RouteTest(unittest.TestCase):
             "canvas_versions": 0,
             "canvas_docs": 0,
             "canvas_grants": 0,
+            "canvas_builds": 0,
         })
+        self.assertEqual(visits, 0, "a build's visits go with the build")
 
     def test_a_delete_whose_session_cant_be_ended_still_answers_deleted(self) -> None:
         canvas_id = self.make()

@@ -258,13 +258,20 @@ export function createCanvasStore(host) {
   const bySession = new Map()
 
   /**
+   * The rows this mock said itself. The host writes a turn of its own too — a check's report is
+   * queued as the build's next turn — and that turn is not the reader's, so it is not the message
+   * the next build was asked with.
+   */
+  const said = new Set()
+
+  /**
    * When the request that opened a build was said: the last thing the reader said in the canvas's
    * chat, which is where this mock works a canvas's requests. A canvas made from a prompt has said
    * nothing yet, so its build opens on the clock it was asked for.
    */
   const askedAt = (canvas) => {
     const asked = (transcripts.get(canvas.session_id) ?? [])
-      .filter((row) => row.role === "user")
+      .filter((row) => row.role === "user" && !said.has(row.id))
       .at(-1)
     return typeof asked?.timestamp === "number" ? Math.round(asked.timestamp * 1000) : undefined
   }
@@ -275,8 +282,10 @@ export function createCanvasStore(host) {
    */
   const say = (canvas, words) => {
     const rows = transcripts.get(canvas.session_id) ?? []
+    const id = nextRowId()
+    said.add(id)
     rows.push({
-      id: nextRowId(),
+      id,
       session_id: canvas.session_id,
       timestamp: Date.now() / 1000,
       role: "user",
@@ -357,9 +366,17 @@ function picture(canvas) {
 }
 
 /**
- * The line a build's phase says while it is in it, as `builds.py`'s ACTIVITY does.
+ * The line a build's phase says while it is in it, as `builds.py`'s ACTIVITY says it: the five
+ * phases the host records, worded as the host words them. A lane drawn against this mock says what
+ * a real host's lane says, so a copy that drifts is a copy a reader is shown.
  */
-const ACTIVITY = { building: "Building the page", checking: "Checking the page" }
+const ACTIVITY = {
+  planning: "Planning the change",
+  waiting: "Waiting for your approval",
+  building: "Building the page",
+  checking: "Checking the rendered page",
+  publishing: "Publishing the version",
+}
 
 /**
  * How long the mock's check takes. A visit's window is half-open in whole seconds (the app floors
@@ -397,24 +414,29 @@ function place(build, phase, at) {
  * Opens the build a request is worked in, as `builds.py` does when the queue hands a canvas chat's
  * item to a build: the first visit opens at the clock the request reached the host, and the lane
  * draws its phase and the line saying what it is doing until the version it writes publishes it.
- * The mock works in one turn, so a build here goes straight to `building`, and the version
- * `writeVersion` writes is what checks and publishes it.
+ *
+ * The build opens on `planning` and enters `building` at the clock it reached the host, which is the
+ * two visits `open_build` and the first turn's `_placed` record. This mock plans and builds in one
+ * step, so the visits are told apart by one clock and not by any work between them.
  */
 function openBuild(store, canvas, request) {
   if (!canvas.builds) return
   const at = Date.now()
-  const asked = store.askedAt(canvas) ?? at
+  // A request cannot have been said after the build it opened, and this mock's two clocks are the
+  // app's own and the transcript's: the earlier of the two is where planning began.
+  const asked = Math.min(store.askedAt(canvas) ?? at, at)
   canvas.build = {
     id: `b_${randomUUID().slice(0, 8)}`,
     // This mock holds no session of a build's own: a canvas's work runs in its chat.
     session: canvas.session_id,
-    phase: "building",
-    activity: ACTIVITY.building,
+    phase: "planning",
+    activity: ACTIVITY.planning,
     requests: [typeof request === "string" && request ? request : canvas.prompt],
-    steps: [{ phase: "building", start: asked }],
+    steps: [{ phase: "planning", start: asked }],
     at,
     created_at: asked,
   }
+  place(canvas.build, "building", at)
 }
 
 /**
