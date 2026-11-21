@@ -2,6 +2,7 @@
  * A finished build's steps, drawn as the chat's own work rows (G2, G6): one marker per visit to a
  * phase that did work, in the order they happened, and the check flag on the marker that checked
  * rather than under the reply. A build the record predates carries no visits, so it draws none.
+ * Pressing a marker opens that visit's own turns (G3), and Details still opens the whole build.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -115,6 +116,42 @@ const UNRECORDED = {
   created_at: 4,
 }
 
+/** The whole second the sheet's build ran on, as a session's rows are stamped by the host. */
+const RAN_AT = 1_760_000_000
+
+/**
+ * A build whose three turns each landed in a different visit of it, and whose fourth visit the
+ * transcript holds no turn in: one marker's sheet has a visit's own turn, and another has none.
+ */
+const VISITED = {
+  id: "b4",
+  session: "canvas-build-4",
+  phase: "published",
+  activity: null,
+  requests: ["make the heading say Split the bill"],
+  summary: "The heading says Split the bill, in blue.",
+  flag: "passing",
+  version: 4,
+  at: 6,
+  created_at: 6,
+  steps: [
+    { phase: "planning", start: RAN_AT * 1_000, end: (RAN_AT + 10) * 1_000 },
+    { phase: "building", start: (RAN_AT + 10) * 1_000, end: (RAN_AT + 20) * 1_000 },
+    { phase: "checking", start: (RAN_AT + 20) * 1_000, end: (RAN_AT + 30) * 1_000, flag: "passing" },
+    { phase: "building", start: (RAN_AT + 30) * 1_000, end: (RAN_AT + 40) * 1_000 },
+  ],
+}
+
+/** That build's session: one turn inside each of its first three visits, timed in whole seconds. */
+const VISITED_ROWS = [
+  { id: 1, role: "user", content: "make the heading say Split the bill", timestamp: RAN_AT + 2 },
+  { id: 2, role: "assistant", content: "The heading now says Split the bill.", timestamp: RAN_AT + 2 },
+  { id: 3, role: "user", content: "and make it blue too", timestamp: RAN_AT + 12 },
+  { id: 4, role: "assistant", content: "The heading is blue now.", timestamp: RAN_AT + 12 },
+  { id: 5, role: "user", content: "check the tips", timestamp: RAN_AT + 22 },
+  { id: 6, role: "assistant", content: "The tips are checked.", timestamp: RAN_AT + 22 },
+]
+
 /** The canvas the lane is drawn in: its page, its chat and the builds feature on. */
 const CANVAS = {
   id: "c1",
@@ -132,7 +169,7 @@ const CANVAS = {
   builds: true,
 }
 
-function serve(builds: readonly unknown[] = BUILDS) {
+function serve(builds: readonly unknown[] = BUILDS, rows: readonly unknown[] = []) {
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input))
     if (url.pathname.endsWith("/info")) {
@@ -149,7 +186,7 @@ function serve(builds: readonly unknown[] = BUILDS) {
       return json({ object: "gots.canvas", canvas: CANVAS })
     }
     if (/\/api\/sessions\/[^/]+\/messages$/.test(url.pathname)) {
-      return json({ data: [], total: 0 })
+      return json({ data: rows, total: rows.length })
     }
     return json({}, 404)
   }) as typeof fetch
@@ -344,14 +381,16 @@ test(
         missing("[data-canvas-builds] .border-dashed"),
         "and no dashed card is drawn",
       )
-      // A marker is not pressable yet, so a press opens nothing.
-      assert.ok(
-        markers.every((one) => one.hasAttribute("disabled")),
-        "a step is not a press yet",
+      // A step the build has left is a press; the one it is in is not, since its window is still
+      // being written and it has no end to bound it.
+      assert.deepEqual(
+        markers.map((one) => one.hasAttribute("disabled")),
+        [false, true],
+        "the steps behind it are pressable, and the one it is in is not",
       )
       await click(markers[1])
       await settle()
-      assert.ok(missing('[data-slot="sheet-content"]'), "pressing a step opens nothing")
+      assert.ok(missing('[data-slot="sheet-content"]'), "pressing the step it is in opens nothing")
     })
   }),
 )
@@ -384,5 +423,120 @@ test(
       )
       assert.equal(markers[0].nextElementSibling, activity, "hanging under the marker")
     })
+  }),
+)
+
+test(
+  "pressing a marker opens that visit's turns, and Details opens the whole build",
+  laptop(async () => {
+    serve([VISITED], VISITED_ROWS)
+    await seed()
+    const bot = (await db.profiles.get("bot-1"))!
+    /** The words the sheet's thread draws, one message at a time. */
+    const sheetMessages = () =>
+      findAll('[data-slot="sheet-content"] [data-slot="message"]').map(wordsOf)
+    await mount(
+      <MemoryRouter initialEntries={["/canvas/c1"]}>
+        <Routes>
+          <Route path="/canvas" element={<div data-canvas-list />} />
+          <Route path="/canvas/:id" element={<CanvasView />} />
+        </Routes>
+      </MemoryRouter>,
+      async () => {
+        await act(async () => {
+          await refreshCanvas("c1")
+          await noteChange(connectionKey(bot), "canvas")
+        })
+        await until(
+          () => Boolean(find('[data-canvas-build="b4"]')),
+          "the lane's build to draw",
+        )
+        const markers = findAll('[data-canvas-build="b4"] [data-build-step]')
+        assert.deepEqual(
+          markers.map((one) => one.getAttribute("data-build-step")),
+          ["planning", "building", "checking", "building"],
+          "the build's four visits, a marker each",
+        )
+        // The second marker opens the second visit's turn, and neither of the other two.
+        await click(markers[1])
+        await until(
+          () => sheetMessages().length > 0,
+          "the second visit's turn to be read and drawn",
+        )
+        const second = sheetMessages()
+        assert.equal(second.length, 2, "one turn, drawn as a request and its reply")
+        assert.ok(
+          second.some((words) => words.includes("and make it blue too")),
+          "the visit's own request is drawn",
+        )
+        assert.ok(
+          second.some((words) => words.includes("The heading is blue now.")),
+          "and the answer it was given",
+        )
+        assert.ok(
+          !second.some((words) => words.includes("The heading now says Split the bill.")),
+          "the turn of the visit before is left out",
+        )
+        assert.ok(
+          !second.some((words) => words.includes("check the tips")),
+          "and so is the turn of the visit after it",
+        )
+        // The sheet says which step it is, and whose build.
+        assert.equal(
+          wordsOf(find('[data-slot="sheet-title"]')),
+          "Building",
+          "the sheet is titled by the step's phase word",
+        )
+        assert.equal(
+          wordsOf(find('[data-slot="sheet-description"]')),
+          "make the heading say Split the bill",
+          "and describes the build by its first request",
+        )
+        // Details still opens the whole build: all three turns, every row of the session.
+        await click(find('[data-slot="sheet-content"] [data-slot="sheet-close"]'))
+        await until(() => missing('[data-slot="sheet-content"]'), "the step's sheet to close")
+        await click(find('[data-canvas-build="b4"] [data-build-details]'))
+        await until(
+          () => sheetMessages().length === 6,
+          "the whole build's transcript to be drawn",
+        )
+        const whole = sheetMessages()
+        for (const words of [
+          "make the heading say Split the bill",
+          "The heading now says Split the bill.",
+          "and make it blue too",
+          "The heading is blue now.",
+          "check the tips",
+          "The tips are checked.",
+        ])
+          assert.ok(
+            whole.some((drawn) => drawn.includes(words)),
+            `the whole build draws "${words}"`,
+          )
+        assert.equal(
+          wordsOf(find('[data-slot="sheet-title"]')),
+          "Build",
+          "and the whole build's sheet is titled by the build",
+        )
+        // A visit the transcript holds no turn in says so, rather than greeting the reader.
+        await click(find('[data-slot="sheet-content"] [data-slot="sheet-close"]'))
+        await until(() => missing('[data-slot="sheet-content"]'), "the transcript's sheet to close")
+        await click(markers[3])
+        await until(
+          () => Boolean(find("[data-build-window-empty]")),
+          "the empty visit to say it holds nothing",
+        )
+        assert.equal(
+          wordsOf(find("[data-build-window-empty]")),
+          "No messages in this step of the build.",
+          "the sheet says the step holds no messages",
+        )
+        assert.equal(sheetMessages().length, 0, "and draws no message of another visit")
+        assert.ok(
+          missing('[data-slot="sheet-content"] [aria-label="Messages"]'),
+          "the thread is not drawn at all, so no empty state greets the reader",
+        )
+      },
+    )
   }),
 )

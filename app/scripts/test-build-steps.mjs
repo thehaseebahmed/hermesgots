@@ -8,7 +8,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { isOpen, markersOf, stepWords } from "../src/lib/build-steps.ts"
+import { isOpen, markersOf, stepWords, turnsInStep } from "../src/lib/build-steps.ts"
 
 /** One visit as the host answers it, mapped by `canvases.ts`'s `buildRowOf`. */
 const step = (phase, startedAt, endedAt, flag) => ({
@@ -82,5 +82,56 @@ test("a checking marker that is still open says the flag and no span", () => {
     stepWords(step("checking", 0, undefined, "failing"), "Checking"),
     "Checking · Checks failed",
     "a check that has not ended has no span to say",
+  )
+})
+
+/** Three turns, one to a visit, in the milliseconds a row's whole seconds become. */
+const TURNS = [{ at: 1_000_000 }, { at: 2_000_000 }, { at: 3_000_000 }]
+
+test("a step's sheet keeps the turns that began inside its window", () => {
+  assert.deepEqual(
+    turnsInStep(TURNS, 0, { startedAt: 2_000_000, endedAt: 3_000_000 }).turns,
+    [TURNS[1]],
+    "the window is half-open, so its start's turn is in it and its end's turn is not",
+  )
+})
+
+test("a turn beginning in the second a phase changed belongs to the step that just began", () => {
+  // A row's clock is whole seconds and a visit's is milliseconds, so both edges are floored: a turn
+  // stamped inside the same second as an end belongs to the visit that opened at that instant.
+  const turn = { at: 2_000_400 }
+  assert.deepEqual(
+    turnsInStep([turn], 0, { startedAt: 1_000_000, endedAt: 2_000_400 }).turns,
+    [],
+    "not to the visit that just ended",
+  )
+  assert.deepEqual(
+    turnsInStep([turn], 0, { startedAt: 2_000_400, endedAt: 3_000_000 }).turns,
+    [turn],
+    "but to the one that began with that second",
+  )
+})
+
+test("a step's sheet moves the origin to the first turn it keeps", () => {
+  const kept = turnsInStep(TURNS, 7, { startedAt: 2_000_000, endedAt: 3_000_000 })
+  assert.equal(
+    kept.origin,
+    8,
+    "a kept turn keeps the place it had, which is what its message id is counted from",
+  )
+  assert.equal(turnsInStep(TURNS, 7, { startedAt: 9_000_000, endedAt: 10_000_000 }).origin, 7)
+})
+
+test("a window with no end keeps every turn from its start on, and a bounded one drops an undated turn", () => {
+  const turns = [{ at: 2_000_000 }, {}, { at: 4_000_000 }]
+  assert.deepEqual(
+    turnsInStep(turns, 0, { startedAt: 2_000_000 }).turns,
+    turns,
+    "a visit the build has not left has no end to bound it",
+  )
+  assert.deepEqual(
+    turnsInStep(turns, 0, { startedAt: 2_000_000, endedAt: 3_000_000 }).turns,
+    [turns[0]],
+    "a bounded visit leaves out a turn nothing can place",
   )
 })

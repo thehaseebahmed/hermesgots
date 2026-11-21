@@ -4,7 +4,8 @@
  * step it took, its summary as the bot's words, and under them one line saying the version it
  * published, newest at the foot. The build working now is a block like any other, its last marker
  * the step it is in and that step's activity line hanging under it. The transcript is not drawn here
- * at all — `Details` opens one build's session read-only.
+ * at all: one sheet holds it, opened on a build whole by `Details` and on a visit by that visit's
+ * marker, where it reads only the turns that visit ran.
  *
  * The lane is still a chat's container (`ChatBody`): its composer queues a request on the plugin
  * exactly as before, and a waiting plan's card takes the composer's place. Only the thread is
@@ -34,7 +35,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import type { ThreadViewProps } from "@/chat-next/page"
-import { markersOf, PHASE_WORDS, stepWords } from "@/lib/build-steps"
+import { isOpen, markersOf, PHASE_WORDS, stepWords, turnsInStep } from "@/lib/build-steps"
 import type { CanvasBuildRow, CanvasBuildStep } from "@/lib/canvases"
 import {
   COLUMN,
@@ -45,10 +46,14 @@ import {
 } from "@/lib/layout"
 import { cn } from "@/lib/utils"
 
-// The chat-next thread the app draws a chat with, loaded only when a build's Details is opened: the
-// canvas route never reads a transcript until the reader asks for one.
+// The chat-next thread the app draws a chat with, loaded only when a build's sheet is opened: the
+// canvas route never reads a transcript until the reader asks for one. Both halves come from the one
+// module, so opening a build costs the one fetch.
 const AppChatNextThread = lazy(() =>
   import("@/chat-next/app-view").then((module) => ({ default: module.AppChatNextThread })),
+)
+const AppThreadView = lazy(() =>
+  import("@/chat-next/app-view").then((module) => ({ default: module.AppThreadView })),
 )
 
 /** The phases a build ends in; every other phase is a build still at work. */
@@ -60,10 +65,20 @@ const WORKING_WORDS = "The build is working."
 /** What the lane draws, kept in a context so the view is one stable component. */
 interface Lane {
   rows: CanvasBuildRow[]
-  onDetails: (build: CanvasBuildRow) => void
+  /** Opens the lane's one sheet: a build whole, or one visit of it where a marker was pressed. */
+  open: (build: CanvasBuildRow, step?: CanvasBuildStep) => void
 }
 
 const LaneOf = createContext<Lane | null>(null)
+
+/**
+ * The visit the sheet holds its thread to, kept in a context so the view that narrows it is one
+ * stable component: absent for `Details`, which draws the build whole.
+ */
+const WindowOf = createContext<CanvasBuildStep | undefined>(undefined)
+
+/** The phase a marker says, and a plain word for a phase this build's app does not know. */
+const phaseWordOf = (step: CanvasBuildStep) => PHASE_WORDS[step.phase] ?? "Working"
 
 /** Whether a build is still at work, which is what makes its last marker the live one. */
 function atWork(row: CanvasBuildRow) {
@@ -84,18 +99,29 @@ function stepsShown(row: CanvasBuildRow): CanvasBuildStep[] {
 /**
  * One marker: a visit the build made to a phase that did work, drawn as the thread's own work row —
  * its phase's word, what a check found where it checked, and the span it took. The step a working
- * build is in pulses its words, as any working row of the thread does.
+ * build is in pulses its words, as any working row of the thread does, and is no press: its window
+ * is still being written. A visit the build has left opens that visit's own turns.
  */
-function StepRow({ step, live = false }: { step: CanvasBuildStep; live?: boolean }) {
+function StepRow({
+  step,
+  live = false,
+  onPress,
+}: {
+  step: CanvasBuildStep
+  live?: boolean
+  /** Opens this visit's own turns; absent while the build is still in the visit. */
+  onPress?: () => void
+}) {
   return (
     <WorkRow
-      disabled
+      disabled={!onPress}
       working={live}
       data-build-step={step.phase}
       data-build-flag={step.flag}
+      onClick={onPress}
       after={<WorkMark />}
     >
-      <WorkLabel>{stepWords(step, PHASE_WORDS[step.phase] ?? "Working")}</WorkLabel>
+      <WorkLabel>{stepWords(step, phaseWordOf(step))}</WorkLabel>
     </WorkRow>
   )
 }
@@ -105,7 +131,13 @@ function StepRow({ step, live = false }: { step: CanvasBuildStep; live?: boolean
  * working build is in pulses, and its phase's activity line hangs under that marker until the build
  * leaves the step.
  */
-function BuildSteps({ row }: { row: CanvasBuildRow }) {
+function BuildSteps({
+  row,
+  onStep,
+}: {
+  row: CanvasBuildRow
+  onStep: (step: CanvasBuildStep) => void
+}) {
   const steps = stepsShown(row)
   if (!steps.length) return null
   const live = atWork(row) ? steps.length - 1 : -1
@@ -113,7 +145,11 @@ function BuildSteps({ row }: { row: CanvasBuildRow }) {
     <div className={cn(REPLY_EDGE, "flex flex-col")}>
       {steps.map((step, at) => (
         <Fragment key={at}>
-          <StepRow step={step} live={at === live} />
+          <StepRow
+            step={step}
+            live={at === live}
+            {...(isOpen(step) ? {} : { onPress: () => onStep(step) })}
+          />
           {at === live ? (
             <WorkNote data-build-activity>{row.activity ?? WORKING_WORDS}</WorkNote>
           ) : null}
@@ -171,7 +207,15 @@ function BuildReply({ row, onDetails }: { row: CanvasBuildRow; onDetails: () => 
  * published and `Details` under it. A build still at work draws its requests and its steps, and waits
  * for the reply it has not given yet.
  */
-function BuildBlock({ row, onDetails }: { row: CanvasBuildRow; onDetails: () => void }) {
+function BuildBlock({
+  row,
+  onDetails,
+  onStep,
+}: {
+  row: CanvasBuildRow
+  onDetails: () => void
+  onStep: (step: CanvasBuildStep) => void
+}) {
   return (
     <div data-canvas-build={row.id} className="flex flex-col gap-3">
       {row.requests.map((request, at) => (
@@ -181,7 +225,7 @@ function BuildBlock({ row, onDetails }: { row: CanvasBuildRow; onDetails: () => 
           </MessageContent>
         </MessageRow>
       ))}
-      <BuildSteps row={row} />
+      <BuildSteps row={row} onStep={onStep} />
       {atWork(row) ? null : <BuildReply row={row} onDetails={onDetails} />}
     </div>
   )
@@ -201,7 +245,12 @@ export function CanvasBuildsView({ waiting, composer }: ThreadViewProps) {
             </p>
           ) : null}
           {lane.rows.map((row) => (
-            <BuildBlock key={row.id} row={row} onDetails={() => lane.onDetails(row)} />
+            <BuildBlock
+              key={row.id}
+              row={row}
+              onDetails={() => lane.open(row)}
+              onStep={(step) => lane.open(row, step)}
+            />
           ))}
         </div>
       </div>
@@ -215,6 +264,38 @@ export function CanvasBuildsView({ waiting, composer }: ThreadViewProps) {
 /** Nothing in a build's transcript is the reader's to answer: it is read, not continued. */
 function NoComposer() {
   return null
+}
+
+/** What the lane's one sheet shows: a build whole, or one visit of that build. */
+interface Sight {
+  build: CanvasBuildRow
+  step?: CanvasBuildStep
+}
+
+/**
+ * The sheet's thread, narrowed to the visit it was opened for (G3): the turns that began inside that
+ * visit's window, with `origin` moved so each keeps the id it had. A visit the transcript holds no
+ * turn in says so, rather than drawing a chat's empty state over a sheet the reader has nothing to
+ * answer in.
+ */
+function StepView(props: ThreadViewProps) {
+  const step = useContext(WindowOf)
+  const { turns, origin } = props
+  const narrowed = useMemo(
+    () => (step ? turnsInStep(turns, origin, step) : { turns, origin }),
+    [step, turns, origin],
+  )
+  if (step && !narrowed.turns.length && !props.firstReadOut)
+    return (
+      <p data-build-window-empty className={cn(COLUMN, "px-4 py-6 text-sm text-muted-foreground")}>
+        No messages in this step of the build.
+      </p>
+    )
+  return (
+    <Suspense fallback={null}>
+      <AppThreadView {...props} turns={narrowed.turns} origin={narrowed.origin} />
+    </Suspense>
+  )
 }
 
 /**
@@ -237,29 +318,38 @@ export function CanvasBuildsLane({
   chatId: string
   children: ReactNode
 }) {
-  const [details, setDetails] = useState<CanvasBuildRow | null>(null)
-  const lane = useMemo<Lane>(() => ({ rows, onDetails: setDetails }), [rows])
+  const [sight, setSight] = useState<Sight | null>(null)
+  const lane = useMemo<Lane>(
+    () => ({
+      rows,
+      open: (build, step) => setSight({ build, ...(step ? { step } : {}) }),
+    }),
+    [rows],
+  )
   return (
     <LaneOf.Provider value={lane}>
       {children}
-      <Sheet open={details !== null} onOpenChange={(next) => (next ? undefined : setDetails(null))}>
+      <Sheet open={sight !== null} onOpenChange={(next) => (next ? undefined : setSight(null))}>
         <SheetContent side="bottom" className="h-[85svh] gap-0 p-0">
           <SheetHeader>
-            <SheetTitle>Build</SheetTitle>
+            <SheetTitle>{sight?.step ? phaseWordOf(sight.step) : "Build"}</SheetTitle>
             <SheetDescription>
-              {details?.requests[0] ?? "What this build was asked for."}
+              {sight?.build.requests[0] ?? "What this build was asked for."}
             </SheetDescription>
           </SheetHeader>
           <div className="min-h-0 flex-1 overflow-hidden">
-            {details ? (
+            {sight ? (
               <Suspense fallback={null}>
-                <AppChatNextThread
-                  chatId={chatId}
-                  server={bot.baseUrl}
-                  apiKey={bot.apiKey ?? null}
-                  session={details.session}
-                  Composer={NoComposer}
-                />
+                <WindowOf.Provider value={sight.step}>
+                  <AppChatNextThread
+                    chatId={chatId}
+                    server={bot.baseUrl}
+                    apiKey={bot.apiKey ?? null}
+                    session={sight.build.session}
+                    View={StepView}
+                    Composer={NoComposer}
+                  />
+                </WindowOf.Provider>
               </Suspense>
             ) : null}
           </div>

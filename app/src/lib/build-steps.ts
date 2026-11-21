@@ -56,3 +56,38 @@ export function stepWords(step: CanvasBuildStep, phaseWord: string) {
     words.push(formatDuration(step.endedAt - step.startedAt))
   return words.join(" · ")
 }
+
+/**
+ * Whether a turn began inside a visit's window, both edges floored to the whole second: a row's
+ * `timestamp` is whole seconds while a visit's clock is milliseconds, so a turn stamped in the same
+ * second as a phase change belongs to the visit that just began. A turn nothing dates can only be
+ * placed in a visit that has no end yet, which is where the turn still being written runs.
+ */
+function beganIn(at: number | undefined, start: number, end: number) {
+  if (at === undefined) return end === Infinity
+  const second = Math.floor(at / 1000)
+  return second >= start && second < end
+}
+
+/**
+ * The turns of a thread that one visit's sheet shows (G3): the ones that began inside the visit's
+ * half-open window — and `origin` moved to the first kept turn's place, since a message's id is that
+ * origin plus the turn's place (`chat-next/messages.ts`). A narrowed thread that left `origin` alone
+ * would hand its turns the ids of the ones it dropped.
+ */
+export function turnsInStep<T extends { at?: number }>(
+  turns: T[],
+  origin: number,
+  step: { startedAt: number; endedAt?: number },
+): { turns: T[]; origin: number } {
+  const start = Math.floor(step.startedAt / 1000)
+  const end = step.endedAt === undefined ? Infinity : Math.floor(step.endedAt / 1000)
+  const kept: T[] = []
+  let first = -1
+  turns.forEach((turn, place) => {
+    if (!beganIn(turn.at, start, end)) return
+    if (first < 0) first = place
+    kept.push(turn)
+  })
+  return { turns: kept, origin: first < 0 ? origin : origin + first }
+}
