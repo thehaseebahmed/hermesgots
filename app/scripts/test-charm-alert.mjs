@@ -707,3 +707,28 @@ test("the charm's answer is applied in one place", () => {
   assert.match(notifier, /answers\.py/, "the plugin's signed link, named where it would be posted")
   assert.match(notifier, /answers\.mint/, "and the mint that makes it")
 })
+
+/**
+ * A passphrase and a tailnet key are the charm's from the write on. What stays on this phone is the
+ * network's name and whether the charm will still have it after a reboot, and whether a key was
+ * ever handed over — never the secret itself, in the record, in localStorage or at the console. The
+ * secret arrives in the same function as the write that must not keep it, so this holds the seam: the
+ * frame's bytes, and one record built from the name and the code alone.
+ */
+test("a saved passphrase never reaches the paired-charm record", () => {
+  const body = functionText("src/lib/charm.ts", "setCharmWifi")
+  assert.match(body, /wifiMessage\(ssid, pass\)/, "the passphrase goes into the write")
+  const records = [...body.matchAll(/write\(\{([^}]*)\}\)/g)].map((match) => `{${match[1]}}`)
+  assert.deepEqual(records, ["{ ...paired, wifi: wifiRecord(ssid, status.code) }"])
+  assert.doesNotMatch(records[0], /pass/, "the record is the name and the charm's own word")
+  assert.doesNotMatch(body, /console\./, "and the passphrase is never logged")
+})
+
+/** The same for the tailnet key: the record says one was set, and nothing more. */
+test("a tailnet key never reaches the paired-charm record", () => {
+  const body = functionText("src/lib/charm.ts", "setCharmTailnetKey")
+  assert.match(body, /tailnetMessage\(key\)/, "the key goes into the write")
+  const records = [...body.matchAll(/write\(\{([^}]*)\}\)/g)].map((match) => `{${match[1]}}`)
+  assert.deepEqual(records, ["{ ...paired, tailnet: true }"])
+  assert.doesNotMatch(body, /console\./, "and the key is never logged")
+})

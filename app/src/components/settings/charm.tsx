@@ -3,14 +3,27 @@
  * lives there as a pet. The charm keeps them, with their pictures, after the phone has gone.
  * Android only, since only the app has the radio.
  */
-import { useRef, useState } from "react"
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import {
   BellRingIcon,
   BluetoothIcon,
+  CloudDownloadIcon,
+  EyeIcon,
+  EyeOffIcon,
+  NetworkIcon,
   PawPrintIcon,
   RefreshCwIcon,
   UnlinkIcon,
+  WifiIcon,
+  WifiOffIcon,
 } from "lucide-react"
 
 import { Banner } from "@/components/banner"
@@ -24,29 +37,430 @@ import {
   RowText,
   SwitchRow,
   ValueRow,
+  fieldInnerClass,
+  fieldInputClass,
+  fieldLabelClass,
+  headerRowClass,
   rowClass,
 } from "@/components/settings-chrome"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import {
+  InputGroup,
+  InputGroupAddon,
+  InputGroupButton,
+  InputGroupInput,
+} from "@/components/ui/input-group"
 import { botsByLabel, labelOf } from "@/lib/bot-name"
 import {
   charmAvailable,
   charmBots,
+  charmNetwork,
   charmPoses,
+  charmUpdateStatus,
   forgetCharm,
+  forgetCharmWifi,
   pairCharm,
   sendTestAlert,
   setCharmPet,
+  setCharmTailnetKey,
+  setCharmWifi,
   syncToCharm,
+  updateCharm,
   usePairedCharm,
 } from "@/lib/charm"
-import { petSettingsFrom, type CharmPetChoice } from "@/lib/charm-protocol"
+import {
+  CharmCode,
+  CharmUpdateState,
+  codeWords,
+  hexBytes,
+  hexOf,
+  petSettingsFrom,
+  type CharmNetworkReport,
+  type CharmPetChoice,
+  type CharmUpdateStatus,
+  type CharmWifiRecord,
+} from "@/lib/charm-protocol"
 import type { SyncProgress } from "@/lib/charm-sync"
 import { listProfiles } from "@/lib/db"
-import { charmSynced, petSubtitle } from "@/lib/charm-words"
+import { charmSynced, petSubtitle, tailnetWords, updateWords, wifiWords } from "@/lib/charm-words"
 import { tell } from "@/lib/tell"
 import { useBotLabels } from "@/lib/use-bot-labels"
 
 const message = (error: unknown) =>
   error instanceof Error && error.message ? error.message : "Something went wrong"
+
+/** How often a running firmware download is asked where it has got to. */
+const UPDATE_POLL_MS = 2_000
+
+/**
+ * The Network section's radio, as the page reaches it: every call is one control ask over the
+ * charm's own link. It is an interface so a test can draw the section's answers without a radio.
+ */
+export interface CharmNetworkApi {
+  status(): Promise<CharmNetworkReport>
+  saveWifi(ssid: string, pass: string): Promise<number>
+  forget(): Promise<number>
+  saveTailnet(key: string): Promise<number>
+  update(url: string, sha256Hex: string): Promise<number>
+  updateStatus(): Promise<CharmUpdateStatus>
+}
+
+/** The one implementation: the phone's own functions. */
+const RADIO: CharmNetworkApi = {
+  status: charmNetwork,
+  saveWifi: setCharmWifi,
+  forget: forgetCharmWifi,
+  saveTailnet: setCharmTailnetKey,
+  update: updateCharm,
+  updateStatus: charmUpdateStatus,
+}
+
+/** One form's body in a group: the card's own fill, under the row that heads it. */
+const formRowClass = "flex flex-col gap-4 bg-card px-5 py-4"
+
+/** A labelled field of the network forms: the label above, the filled pill below. */
+function Field({
+  id,
+  label,
+  hint,
+  ...input
+}: { id: string; label: string; hint?: ReactNode } & Omit<
+  ComponentProps<typeof Input>,
+  "id" | "className"
+>) {
+  return (
+    <div className="flex flex-col gap-2">
+      <label htmlFor={id} className={fieldLabelClass}>
+        {label}
+      </label>
+      <Input id={id} className={fieldInputClass} autoComplete="off" spellCheck={false} {...input} />
+      {hint && <p className="px-1 text-xs break-all text-muted-foreground">{hint}</p>}
+    </div>
+  )
+}
+
+/**
+ * A field whose value is a secret: masked, with the show toggle a key field wears, so a passphrase
+ * can be read back while it is being typed and never again after the write.
+ */
+function SecretField({
+  id,
+  label,
+  value,
+  onChange,
+  placeholder,
+  disabled,
+}: {
+  id: string
+  label: string
+  value: string
+  onChange: (value: string) => void
+  placeholder?: string
+  disabled?: boolean
+}) {
+  const [shown, setShown] = useState(false)
+  return (
+    <div className="flex flex-col gap-2">
+      <label htmlFor={id} className={fieldLabelClass}>
+        {label}
+      </label>
+      <InputGroup className="h-12 rounded-full bg-muted">
+        <InputGroupInput
+          id={id}
+          className={fieldInnerClass}
+          autoComplete="off"
+          autoCapitalize="off"
+          autoCorrect="off"
+          spellCheck={false}
+          type={shown ? "text" : "password"}
+          placeholder={placeholder}
+          value={value}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+        />
+        <InputGroupAddon align="inline-end">
+          <InputGroupButton
+            size="icon-sm"
+            className="mr-1 size-10 rounded-full"
+            aria-label={shown ? `Hide ${label}` : `Show ${label}`}
+            onClick={() => setShown((open) => !open)}
+          >
+            {shown ? <EyeOffIcon /> : <EyeIcon />}
+          </InputGroupButton>
+        </InputGroupAddon>
+      </InputGroup>
+    </div>
+  )
+}
+
+/**
+ * Settings → Charm's network: the Wi-Fi the charm joins, the tailnet key it joins with, and a
+ * firmware image it fetches itself. Every row draws the charm's own answer rather than what was
+ * sent, and a passphrase or a key clears the moment the write has gone: neither is ever drawn
+ * again, and neither is kept on this phone.
+ */
+export function CharmNetwork({
+  api = RADIO,
+  record,
+  tailnet,
+}: {
+  /** The radio, or a stand-in under test. */
+  api?: CharmNetworkApi
+  /** The network this phone last told the charm to join, while the charm itself is not answering. */
+  record?: CharmWifiRecord
+  /** Whether a tailnet key was handed over before, while the charm itself is not answering. */
+  tailnet?: boolean
+}) {
+  const [report, setReport] = useState<CharmNetworkReport | null>(null)
+  const [update, setUpdate] = useState<CharmUpdateStatus | null>(null)
+  const [ssid, setSsid] = useState("")
+  const [pass, setPass] = useState("")
+  const [key, setKey] = useState("")
+  const [url, setUrl] = useState("")
+  const [sha, setSha] = useState("")
+  const [busy, setBusy] = useState<"wifi" | "forget" | "tailnet" | "update" | null>(null)
+  const [said, setSaid] = useState<string | null>(null)
+  const [watching, setWatching] = useState(false)
+
+  /** What the charm says about its links and its firmware, read in one go: both or neither. */
+  const snapshot = useCallback(async () => {
+    const [report, update] = await Promise.all([
+      api.status().catch(() => null),
+      api.updateStatus().catch(() => null),
+    ])
+    return { report, update }
+  }, [api])
+
+  // The section's first line is the charm's own: read once on opening, and again after each write.
+  useEffect(() => {
+    void snapshot().then(({ report, update }) => {
+      if (report) setReport(report)
+      if (update) setUpdate(update)
+    })
+  }, [snapshot])
+
+  // A download that is running is asked where it has got to until it stops running.
+  useEffect(() => {
+    if (!watching) return
+    let live = true
+    const timer = setInterval(() => {
+      void api
+        .updateStatus()
+        .then((next) => {
+          if (!live) return
+          setUpdate(next)
+          if (next.state !== CharmUpdateState.Downloading) setWatching(false)
+        })
+        .catch(() => {
+          if (live) setWatching(false)
+        })
+    }, UPDATE_POLL_MS)
+    return () => {
+      live = false
+      clearInterval(timer)
+    }
+  }, [watching, api])
+
+  /** One write, its answer said in words: null while it is refused or never lands. */
+  const write = async (what: typeof busy, run: () => Promise<number>): Promise<number | null> => {
+    setBusy(what)
+    setSaid(null)
+    try {
+      const code = await run()
+      // SavedToRam is a yes the charm will forget: the words say that rather than a plain "Saved".
+      setSaid(code === CharmCode.Ok ? null : codeWords(code))
+      if (code === CharmCode.Ok || code === CharmCode.SavedToRam) {
+        const { report: next, update: progress } = await snapshot()
+        if (next) setReport(next)
+        if (progress) setUpdate(progress)
+      }
+      return code
+    } catch (error) {
+      setSaid(message(error))
+      return null
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const saveWifi = async () => {
+    const code = await write("wifi", () => api.saveWifi(ssid.trim(), pass))
+    // The charm has the passphrase now, or refused it: either way this field never draws it again.
+    if (code !== null) setPass("")
+  }
+
+  const forgetNetwork = async () => {
+    const code = await write("forget", () => api.forget())
+    if (code === CharmCode.Ok) setSsid("")
+  }
+
+  const saveKey = async () => {
+    const code = await write("tailnet", () => api.saveTailnet(key.trim()))
+    // The key is the charm's from here on, and is never drawn again.
+    if (code !== null) setKey("")
+  }
+
+  const startUpdate = async () => {
+    const code = await write("update", () => api.update(url.trim(), sha))
+    if (code !== CharmCode.Ok) return
+    setUpdate({ state: CharmUpdateState.Downloading, percent: 0, reason: 0 })
+    setWatching(true)
+  }
+
+  // The hash as it will go over the wire, so a paste in capitals or with spaces is shown as it reads.
+  const hash = (() => {
+    try {
+      return hexOf(hexBytes(sha))
+    } catch {
+      return ""
+    }
+  })()
+
+  return (
+    <>
+      {said && <Caption>{said}</Caption>}
+      <Group>
+        <div className={headerRowClass}>
+          <WifiIcon className="size-5 shrink-0 text-muted-foreground" />
+          <RowText title="Wi-Fi" subtitle={wifiWords(report?.wifi, record)} />
+        </div>
+        <form
+          className={formRowClass}
+          onSubmit={(event) => {
+            event.preventDefault()
+            void saveWifi()
+          }}
+        >
+          <Field
+            id="charm-wifi-ssid"
+            label="Network name"
+            placeholder="Home"
+            autoCapitalize="none"
+            value={ssid}
+            disabled={busy !== null}
+            onChange={(event) => setSsid(event.target.value)}
+          />
+          <SecretField
+            id="charm-wifi-pass"
+            label="Passphrase"
+            placeholder="Nothing, for an open network"
+            value={pass}
+            disabled={busy !== null}
+            onChange={setPass}
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              id="charm-wifi-save"
+              type="submit"
+              disabled={busy !== null || ssid.trim() === ""}
+            >
+              {busy === "wifi" ? "Saving…" : "Save"}
+            </Button>
+            <Button
+              id="charm-wifi-forget"
+              type="button"
+              variant="ghost"
+              disabled={busy !== null}
+              onClick={() => void forgetNetwork()}
+            >
+              <WifiOffIcon />
+              Forget
+            </Button>
+          </div>
+        </form>
+      </Group>
+      <Group>
+        <div className={headerRowClass}>
+          <NetworkIcon className="size-5 shrink-0 text-muted-foreground" />
+          <RowText title="Tailnet" subtitle={tailnetWords(report?.tailnet, tailnet)} />
+        </div>
+        <form
+          className={formRowClass}
+          onSubmit={(event) => {
+            event.preventDefault()
+            void saveKey()
+          }}
+        >
+          <SecretField
+            id="charm-tailnet-key"
+            label="Auth key"
+            placeholder="tskey-auth-…"
+            value={key}
+            disabled={busy !== null}
+            onChange={setKey}
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              id="charm-tailnet-save"
+              type="submit"
+              disabled={busy !== null || key.trim() === ""}
+            >
+              {busy === "tailnet" ? "Saving…" : "Save"}
+            </Button>
+          </div>
+        </form>
+      </Group>
+      <Group>
+        <div className={headerRowClass}>
+          <CloudDownloadIcon className="size-5 shrink-0 text-muted-foreground" />
+          <RowText title="Firmware" subtitle={updateWords(update)} />
+        </div>
+        <form
+          className={formRowClass}
+          onSubmit={(event) => {
+            event.preventDefault()
+            void startUpdate()
+          }}
+        >
+          <Field
+            id="charm-update-url"
+            label="Image address"
+            type="url"
+            inputMode="url"
+            placeholder="https://…"
+            autoCapitalize="none"
+            autoCorrect="off"
+            value={url}
+            disabled={busy !== null}
+            onChange={(event) => setUrl(event.target.value)}
+          />
+          <Field
+            id="charm-update-sha"
+            label="SHA-256"
+            placeholder="64 hexadecimal characters"
+            autoCapitalize="none"
+            autoCorrect="off"
+            value={sha}
+            disabled={busy !== null}
+            onChange={(event) => setSha(event.target.value)}
+            hint={
+              sha.trim() === ""
+                ? undefined
+                : hash
+                  ? `${hash.length / 2} of 32 bytes · ${hash}`
+                  : "A SHA-256 is 64 hexadecimal characters"
+            }
+          />
+          <div className="flex items-center gap-2">
+            <Button
+              id="charm-update-start"
+              type="submit"
+              disabled={busy !== null || url.trim() === "" || !hash}
+            >
+              {busy === "update" ? "Asking…" : "Update"}
+            </Button>
+          </div>
+        </form>
+      </Group>
+      <Caption>
+        The charm fetches the image itself, over https, and checks it against the SHA-256 before it
+        writes it. A passphrase stays on the charm: unless its flash is encrypted it keeps it only
+        until the next boot, and says so.
+      </Caption>
+    </>
+  )
+}
 
 export function CharmSettings() {
   const charm = usePairedCharm()
@@ -195,7 +609,6 @@ export function CharmSettings() {
             </button>
           </Group>
           <Group>
-
             <SwitchRow
               id="charm-pet-mode"
               icon={PawPrintIcon}
@@ -232,6 +645,7 @@ export function CharmSettings() {
               />
             </button>
           </Group>
+          <CharmNetwork record={charm.wifi} tailnet={charm.tailnet} />
           <Group>
             <ActionRow
               icon={UnlinkIcon}

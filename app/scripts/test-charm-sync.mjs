@@ -8,23 +8,43 @@ import test from "node:test"
 
 import {
   CHARM_MAX_IMAGE_BYTES,
+  CHARM_MAX_KEY_BYTES,
+  CHARM_MAX_PASS_BYTES,
+  CHARM_MAX_SSID_BYTES,
+  CHARM_MAX_URL_BYTES,
+  CHARM_SHA256_BYTES,
   CharmCode,
+  CharmLinkState,
+  CharmOp,
+  CharmUpdateState,
   beginMessage,
   botMessage,
   charmMood,
   checkBots,
   chunkSize,
+  codeWords,
   crc32,
+  forgetMessage,
+  hexBytes,
+  hexOf,
   imageChunks,
+  networkMessage,
+  parseNetworkReport,
   parseStatus,
+  parseUpdateStatus,
   petSettingsFrom,
   petSettingsMessage,
   poseImageEndMessage,
   poseImageMessage,
   poseMessage,
   rgb565,
+  tailnetMessage,
   timeMessage,
+  updateMessage,
+  updateStatusMessage,
   utf8Clip,
+  wifiMessage,
+  wifiRecord,
 } from "../src/lib/charm-protocol.ts"
 import { CharmRefused, syncCharm } from "../src/lib/charm-sync.ts"
 
@@ -504,4 +524,239 @@ test("the paired charm's own row says only when it last synced", async () => {
     charmSynced({ name: "Gots Charm", syncedAt: now - 5 * 60_000 }, now),
     "Synced 5 min ago",
   )
+})
+
+/**
+ * The network block, as the firmware's `docs/PROTOCOL.md` writes it: one control write per ask, the
+ * four-byte answers, and the two asks whose answer carries `[extraLen][extra]`. These literals are
+ * the document's, not the app's.
+ */
+const NETWORK_WIRE = {
+  version: 1,
+  wifi: 0x30,
+  forget: 0x31,
+  network: 0x32,
+  tailnet: 0x33,
+  update: 0x34,
+  updateStatus: 0x35,
+  ssidBytes: 32,
+  passBytes: 63,
+  urlBytes: 180,
+  keyBytes: 96,
+  sha256Bytes: 32,
+}
+
+const spell = (text) => [...new TextEncoder().encode(text)]
+const viewOf = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+
+test("the network ops are the ones PROTOCOL.md numbers, and the bounds are its own", () => {
+  assert.equal(CharmOp.Wifi, NETWORK_WIRE.wifi)
+  assert.equal(CharmOp.Forget, NETWORK_WIRE.forget)
+  assert.equal(CharmOp.Network, NETWORK_WIRE.network)
+  assert.equal(CharmOp.Tailnet, NETWORK_WIRE.tailnet)
+  assert.equal(CharmOp.Update, NETWORK_WIRE.update)
+  assert.equal(CharmOp.UpdateStatus, NETWORK_WIRE.updateStatus)
+  assert.equal(CHARM_MAX_SSID_BYTES, NETWORK_WIRE.ssidBytes)
+  assert.equal(CHARM_MAX_PASS_BYTES, NETWORK_WIRE.passBytes)
+  assert.equal(CHARM_MAX_URL_BYTES, NETWORK_WIRE.urlBytes)
+  assert.equal(CHARM_MAX_KEY_BYTES, NETWORK_WIRE.keyBytes)
+  assert.equal(CHARM_SHA256_BYTES, NETWORK_WIRE.sha256Bytes)
+  // The three that carry nothing: the version, the op, and the charm's answer to come.
+  assert.deepEqual([...forgetMessage()], [NETWORK_WIRE.version, NETWORK_WIRE.forget])
+  assert.deepEqual([...networkMessage()], [NETWORK_WIRE.version, NETWORK_WIRE.network])
+  assert.deepEqual([...updateStatusMessage()], [NETWORK_WIRE.version, NETWORK_WIRE.updateStatus])
+})
+
+test("a Wi-Fi write carries the name and the passphrase as UTF-8", () => {
+  const ssid = "Café ☕"
+  const name = spell(ssid)
+  assert.deepEqual(
+    [...wifiMessage(ssid, "hunter2")],
+    [1, NETWORK_WIRE.wifi, name.length, ...name, 7, ...spell("hunter2")],
+  )
+  // An open network is a passphrase of no bytes, not a field left out: the charm reads the zero.
+  assert.deepEqual([...wifiMessage("Home", "")], [1, NETWORK_WIRE.wifi, 4, ...spell("Home"), 0])
+})
+
+test("a key and an address go over with their own lengths", () => {
+  const key = "tskey-auth-abc"
+  assert.deepEqual([...tailnetMessage(key)], [1, NETWORK_WIRE.tailnet, key.length, ...spell(key)])
+  const url = "https://fw.example/gots.bin"
+  const sha = Uint8Array.from({ length: 32 }, (_, at) => (at * 7) & 0xff)
+  // The hash is its own 32 bytes, with no length in front of them.
+  assert.deepEqual(
+    [...updateMessage(url, sha)],
+    [1, NETWORK_WIRE.update, url.length, ...spell(url), ...sha],
+  )
+})
+
+test("a name, a passphrase, a key, an address and a hash are refused before any write", () => {
+  assert.throws(() => wifiMessage("x".repeat(33), ""), /at most 32 bytes/)
+  assert.throws(() => wifiMessage("", ""), /at least 1 byte/)
+  assert.throws(() => wifiMessage("Home", "p".repeat(CHARM_MAX_PASS_BYTES + 1)), /at most 63 bytes/)
+  assert.throws(() => tailnetMessage("k".repeat(CHARM_MAX_KEY_BYTES + 1)), /at most 96 bytes/)
+  assert.throws(() => tailnetMessage(""), /at least 1 byte/)
+  // The charm makes the request itself, so it can only be one it can fetch: https, never http.
+  assert.throws(() => updateMessage("http://e.test/fw.bin", new Uint8Array(32)), /https address/)
+  assert.throws(() => updateMessage("ftp://e.test/fw.bin", new Uint8Array(32)), /https address/)
+  assert.throws(() => updateMessage("https://e.test/fw.bin", new Uint8Array(31)), /32-byte SHA-256/)
+  assert.throws(
+    () => updateMessage(`https://e.test/${"a".repeat(CHARM_MAX_URL_BYTES)}`, new Uint8Array(32)),
+    /at most 180 bytes/,
+  )
+})
+
+test("a hash reads back from hex in either case, and refuses what is not hex", () => {
+  const sha = Uint8Array.from({ length: 32 }, (_, at) => at * 3)
+  assert.equal(hexOf(sha).length, 64)
+  assert.deepEqual([...hexBytes(hexOf(sha))], [...sha])
+  // A paste in capitals, with spaces or colons, is still the hash it was.
+  assert.deepEqual([...hexBytes("A0 b1:C2")], [0xa0, 0xb1, 0xc2])
+  assert.throws(() => hexBytes("not hex"), /64 hexadecimal characters/)
+  assert.throws(() => hexBytes("abc"), /64 hexadecimal characters/, "an odd count is half a byte")
+})
+
+/** A `Network` answer as the charm sends one: the head, the extra's length, then the extra. */
+function networkAnswer({ state, reason, ip, ssid, tunnel, tunnelIp }) {
+  const extra = [
+    state,
+    reason,
+    ip.length,
+    ...spell(ip),
+    ssid.length,
+    ...spell(ssid),
+    tunnel,
+    tunnelIp.length,
+    ...spell(tunnelIp),
+  ]
+  return new Uint8Array([1, 0, NETWORK_WIRE.network, 0, extra.length, ...extra])
+}
+
+test("a Network answer reads the Wi-Fi link and the tunnel", () => {
+  const answer = networkAnswer({
+    state: CharmLinkState.Online,
+    reason: 0,
+    ip: "192.168.1.20",
+    ssid: "Home",
+    tunnel: CharmLinkState.Online,
+    tunnelIp: "100.64.0.7",
+  })
+  assert.deepEqual(parseNetworkReport(viewOf(answer)), {
+    wifi: { state: 2, reason: 0, ip: "192.168.1.20", ssid: "Home" },
+    tailnet: { state: 2, ip: "100.64.0.7" },
+  })
+  // A charm with neither link says so with the same shape: zero lengths, not missing fields.
+  assert.deepEqual(
+    parseNetworkReport(
+      viewOf(networkAnswer({ state: 0, reason: 0, ip: "", ssid: "", tunnel: 0, tunnelIp: "" })),
+    ),
+    { wifi: { state: 0, reason: 0, ip: "", ssid: "" }, tailnet: { state: 0, ip: "" } },
+  )
+})
+
+test("a truncated or wrong-op answer is no report at all", () => {
+  const full = networkAnswer({
+    state: 3,
+    reason: 3,
+    ip: "",
+    ssid: "Home",
+    tunnel: 1,
+    tunnelIp: "",
+  })
+  // Every cut, however early, is short of the report the charm promised.
+  for (let at = 0; at < full.length; at++)
+    assert.equal(parseNetworkReport(viewOf(full.subarray(0, at))), null, `cut at ${at}`)
+  // An answer that says it carries more than it does is no answer either.
+  const lying = new Uint8Array(full)
+  lying[4] = full.length
+  assert.equal(parseNetworkReport(viewOf(lying)), null)
+  // And another op's answer is never read as this one.
+  assert.equal(parseNetworkReport(viewOf(updateAnswer({ state: 1, percent: 1, reason: 0 }))), null)
+})
+
+/** An `UpdateStatus` answer: the head, the extra's three bytes, and nothing else. */
+const updateAnswer = ({ state, percent, reason }) =>
+  new Uint8Array([1, 0, NETWORK_WIRE.updateStatus, 0, 3, state, percent, reason])
+
+test("an UpdateStatus answer reads the state, the percent and the reason", () => {
+  assert.deepEqual(parseUpdateStatus(viewOf(updateAnswer({ state: 1, percent: 42, reason: 0 }))), {
+    state: 1,
+    percent: 42,
+    reason: 0,
+  })
+  assert.deepEqual(parseUpdateStatus(viewOf(updateAnswer({ state: 3, percent: 0, reason: 3 }))), {
+    state: 3,
+    percent: 0,
+    reason: 3,
+  })
+  const full = updateAnswer({ state: 2, percent: 100, reason: 0 })
+  for (let at = 0; at < full.length; at++)
+    assert.equal(parseUpdateStatus(viewOf(full.subarray(0, at))), null, `cut at ${at}`)
+  // An extra that is shorter than the three bytes the answer is made of is no answer.
+  assert.equal(
+    parseUpdateStatus(viewOf(new Uint8Array([1, 0, NETWORK_WIRE.updateStatus, 0, 2, 1, 2]))),
+    null,
+  )
+  assert.equal(
+    parseUpdateStatus(
+      viewOf(networkAnswer({ state: 2, reason: 0, ip: "", ssid: "", tunnel: 0, tunnelIp: "" })),
+    ),
+    null,
+  )
+})
+
+test("the network lines are the charm's own state in words", async () => {
+  const { tailnetWords, updateWords, wifiReasonWords, wifiWords } =
+    await import("../src/lib/charm-words.ts")
+  assert.equal(wifiWords(undefined), "Not set")
+  assert.equal(wifiWords({ state: CharmLinkState.Off, reason: 0, ip: "", ssid: "" }), "Not set")
+  assert.equal(wifiWords({ state: 1, reason: 0, ip: "", ssid: "Home" }), "Joining…")
+  assert.equal(
+    wifiWords({ state: 2, reason: 0, ip: "10.0.0.2", ssid: "Home" }),
+    "Connected to Home",
+  )
+  assert.equal(wifiWords({ state: 2, reason: 0, ip: "10.0.0.2", ssid: "" }), "Connected")
+  assert.equal(wifiWords({ state: 3, reason: 3, ip: "", ssid: "Home" }), "Wrong passphrase")
+  assert.equal(wifiWords({ state: 3, reason: 2, ip: "", ssid: "Home" }), "Not in range")
+  assert.equal(wifiReasonWords(4), "No address from the network")
+  assert.equal(wifiReasonWords(5), "Dropped off the network")
+  // Before the charm answers, the line is what this phone last told it.
+  assert.equal(wifiWords(undefined, { ssid: "Home", saved: true }), "Saved Home")
+  assert.equal(
+    wifiWords(undefined, { ssid: "Home", saved: false }),
+    "Home, kept for this boot only",
+  )
+
+  assert.equal(tailnetWords(undefined), "Not set")
+  assert.equal(tailnetWords({ state: 2, ip: "" }), "On your tailnet")
+  assert.equal(tailnetWords({ state: 2, ip: "100.64.0.7" }), "On your tailnet at 100.64.0.7")
+  assert.equal(tailnetWords({ state: 3, ip: "" }), "Couldn't reach the tailnet")
+  assert.equal(tailnetWords(undefined, true), "Key saved; not joined")
+
+  assert.equal(updateWords(null), "No update running")
+  assert.equal(
+    updateWords({ state: CharmUpdateState.Downloading, percent: 42, reason: 0 }),
+    "Downloading… 42%",
+  )
+  assert.equal(updateWords({ state: 2, percent: 100, reason: 0 }), "Ready: the charm is restarting")
+  assert.equal(
+    updateWords({ state: 3, percent: 0, reason: 3 }),
+    "Update failed: the image didn't match its SHA-256",
+  )
+})
+
+test("the new codes say what they mean", () => {
+  assert.equal(
+    codeWords(CharmCode.SavedToRam),
+    "This charm's flash isn't encrypted, so it will forget this at the next boot",
+  )
+  assert.match(codeWords(CharmCode.Offline), /isn't on Wi-Fi/)
+  assert.match(codeWords(CharmCode.Busy), /busy/)
+})
+
+test("the record a Wi-Fi write leaves is the name and whether the charm keeps it", () => {
+  assert.deepEqual(wifiRecord("Home", CharmCode.Ok), { ssid: "Home", saved: true })
+  // Kept in RAM is a yes the charm forgets, so the record says it is not saved.
+  assert.deepEqual(wifiRecord("Home", CharmCode.SavedToRam), { ssid: "Home", saved: false })
+  assert.deepEqual(Object.keys(wifiRecord("Home", CharmCode.Ok)).sort(), ["saved", "ssid"])
 })

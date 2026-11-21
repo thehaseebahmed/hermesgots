@@ -457,6 +457,16 @@ Bots register themselves instead of being typed in (design: https://claude.ai/co
 - **1024px is the app's one breakpoint** for panes, pop-ups and these screens; Material's 840dp expansion point is a later, app-wide change (ADR 0055), never a per-screen one.
 - **A destructive action stays where its spec puts it** — the bot's page *Delete bot* button at its foot, for one — and a page earns an overflow menu only where it needs more than one action.
 
+## Charm
+
+Settings → Charm is the phone half of the Gots Charm: pair one over BLE, send it your bots and their pictures, and choose whether one of them lives there as a pet. Its **Network** section provisions the charm for the network it needs to reach:
+
+- **Wi-Fi** takes a network name and a passphrase (leave the passphrase empty for an open network) and **Forget** drops it. The charm keeps the passphrase only when its flash is encrypted; otherwise it answers "kept for this boot only" and forgets the network at the next reboot.
+- **Tailnet** sends a Tailscale auth key once, so the charm can join your tailnet.
+- **Firmware** takes an https address and the image's SHA-256. The charm downloads the image itself and checks the hash before it writes it; the phone only says what to fetch.
+
+The wire is the firmware repo's `docs/PROTOCOL.md`, which is authoritative: `app/src/lib/charm-protocol.ts` builds and reads every frame, `app/src/lib/charm.ts` is the BLE link, and the page is `app/src/components/settings/charm.tsx`. A passphrase and a key pass through the page on their way to the charm and are never kept on the phone — no store, no log, and the paired-charm record holds only the network's name and whether the charm will keep it.
+
 ## Conventions
 
 - **The UI renders from Dexie live queries.** Streaming writes into IndexedDB (throttled), and components never hold stream state.
