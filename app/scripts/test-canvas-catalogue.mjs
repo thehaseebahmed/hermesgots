@@ -62,8 +62,8 @@ test("the guide keeps the length it shipped with", () => {
   // legitimate edit updates this pin on purpose, the way a version's tests hold their literal.
   assert.equal(
     rendered.length,
-    3_916,
-    "the canvas's guide is 3,916 characters and stays that way",
+    3_958,
+    "the canvas's guide is 3,958 characters and stays that way",
   )
 })
 
@@ -99,5 +99,17 @@ test("the catalogue, the sources it writes and the guide it renders are one list
     carried,
     Object.fromEntries(CATALOGUE.map((one) => [one.name, { global: one.global, bytes: one.bytes }])),
     "and each one carries its global and its measured size",
+  )
+})
+
+test("the guide tells a question about the page from a change to it", () => {
+  // The guide is the only place a build is told what a request is, and its method opens with
+  // `canvas_plan` unconditionally: a build asked "what does the total do?" files a plan that waits,
+  // so the reader's answer is a Plan card they have to Approve to get an answer. A question is
+  // answered in words, with nothing planned and nothing written.
+  assert.match(
+    rendered,
+    /A\s+question about the page is answered, not built/,
+    "the guide says a question is answered rather than built",
   )
 })
