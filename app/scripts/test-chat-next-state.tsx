@@ -62,6 +62,34 @@ const PROMPT_ROWS: Row[] = [
   },
 ]
 
+/** The row the agent wrote when it made a call of two questions, as the thread reads it. */
+const CALL_ROWS: Row[] = [
+  { id: 1, role: "user", content: "go" },
+  {
+    id: 2,
+    role: "assistant",
+    content: "",
+    finish_reason: "tool_calls",
+    tool_calls: [
+      {
+        id: "c1",
+        function: {
+          name: "clarify",
+          arguments: JSON.stringify({
+            questions: [
+              { question: "Tea?", choices: ["yes", "no"] },
+              { question: "Sugar?", choices: ["yes", "no"] },
+            ],
+          }),
+        },
+      },
+    ],
+  },
+]
+
+/** The key the two-question call above is filed under: the card's own, from the call's questions. */
+const CALL_KEY = "call:Tea?\u0000Sugar?"
+
 /** A turn that finished: what a thread holds above the turn a later question is asked in. */
 const FINISHED: Row[] = [
   { id: 1, role: "user", content: "go" },
@@ -1430,30 +1458,6 @@ test("a form a call's card took is held with its run, and goes when the run does
 })
 
 test("a call's question set survives a read that lands between two of its prompts", () => {
-  // The row the agent wrote when it made the call, in the transcript.
-  const CALL_ROWS: Row[] = [
-    { id: 1, role: "user", content: "go" },
-    {
-      id: 2,
-      role: "assistant",
-      content: "",
-      finish_reason: "tool_calls",
-      tool_calls: [
-        {
-          id: "c1",
-          function: {
-            name: "clarify",
-            arguments: JSON.stringify({
-              questions: [
-                { question: "Tea?", choices: ["yes", "no"] },
-                { question: "Sugar?", choices: ["yes", "no"] },
-              ],
-            }),
-          },
-        },
-      ],
-    },
-  ]
   let state = reduce(initial, { type: "attach", run: "r" })
   state = reduce(state, { type: "transcript", rows: CALL_ROWS, final: true })
   state = reduce(state, { type: "waiting", waiting: { ...PROMPT, question: "Tea?" } })
@@ -1493,4 +1497,35 @@ test("a call's question set survives a read that lands between two of its prompt
     ["Tea?", "Sugar?"],
     "so the next prompt of the call is still the same call, and the form is handed to it",
   )
+})
+
+test("a run joined again between two prompts keeps the call's set, and the form filed under it", () => {
+  let state = reduce(initial, { type: "attach", run: "r" })
+  state = reduce(state, { type: "transcript", rows: CALL_ROWS, final: true })
+  state = reduce(state, { type: "waiting", waiting: { ...PROMPT, question: "Tea?" } })
+  state = reduce(state, {
+    type: "clarify-form",
+    key: CALL_KEY,
+    taken: { form: { q0: { choices: ["yes"], other: "", usingOther: false } }, answeredPrompt: "q0" },
+  })
+  state = reduce(state, {
+    type: "answered",
+    promptId: "p1",
+    answer: { question: "Tea?", choicesOffered: ["yes", "no"], value: "yes" },
+  })
+  // The stream drops and the page joins the run it was already on: the replay omits the call's
+  // prompt, and nothing has been read of the next question yet.
+  const again = reduce(state, { type: "attach", run: "r" })
+  assert.deepEqual(
+    again.questionSet?.map((one) => one.id),
+    ["q0", "q1"],
+    "the set the form is filed under outlives a re-join of its own run",
+  )
+  assert.equal(again.clarifyForm?.key, CALL_KEY, "and the form taken is still this run's")
+  assert.deepEqual(again.answeredPrompts, ["p1"], "and what this run already settled is not asked again")
+
+  // Another run's join is not this one: what this run held goes with it.
+  const other = reduce(state, { type: "attach", run: "r2" })
+  assert.equal(other.questionSet, undefined, "another run does not inherit the call's set")
+  assert.equal(other.clarifyForm, undefined, "nor the form taken under it")
 })

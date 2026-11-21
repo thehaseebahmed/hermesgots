@@ -1018,6 +1018,11 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
       // a join of the same run keeps it.
       const last = turnsOf(foldedOf(state.rows, state), state.live, state.waiting).at(-1)
       const waiting = state.waiting?.run === event.run ? state.waiting : undefined
+      // A join of the run this page was already on keeps the rest of what that run carries too: its
+      // replay omits a prompt raised while the page was away, and the call's set is the key a taken
+      // form is filed under — dropping either would take the answers the reader gave ahead with it,
+      // which is what a stream that reconnects between two prompts looked like (ADR 0174).
+      const sameRun = state.run === event.run
       return {
         ...state,
         run: event.run,
@@ -1025,8 +1030,12 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         waiting,
         // Nothing was heard of this run's ending yet: the last turn's failure is not its own.
         pending: undefined,
-        questionSet: waiting ? state.questionSet : undefined,
-        answeredPrompts: waiting ? state.answeredPrompts : undefined,
+        questionSet: sameRun ? state.questionSet : waiting ? state.questionSet : undefined,
+        answeredPrompts: sameRun
+          ? state.answeredPrompts
+          : waiting
+            ? state.answeredPrompts
+            : undefined,
         // A form is owed to the run that asked it: another run's join drops what an older one took.
         clarifyForm: state.clarifyForm?.run === event.run ? state.clarifyForm : undefined,
         live: last
