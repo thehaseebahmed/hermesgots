@@ -1,4 +1,14 @@
 /** What the charm's settings say about it: plain words, kept apart so they are tested alone. */
+import {
+  CharmLinkState,
+  CharmUpdateReason,
+  CharmUpdateState,
+  CharmWifiReason,
+  type CharmNetworkReport,
+  type CharmUpdateStatus,
+  type CharmWifiRecord,
+} from "./charm-protocol.ts"
+
 export interface CharmSeen {
   name: string
   syncedAt?: number
@@ -37,4 +47,84 @@ export function petSubtitle(
 ) {
   if (!choice?.enabled) return "Your bots only, as they are now"
   return petName ? "Lives on the charm" : "Choose the bot that lives there"
+}
+
+/**
+ * The Network section's Wi-Fi line: what the charm says its link is doing, and — before it has
+ * answered, or while it is out of reach — what this phone last told it.
+ */
+export function wifiWords(
+  wifi: CharmNetworkReport["wifi"] | undefined,
+  record?: CharmWifiRecord,
+): string {
+  if (!wifi) return recordWords(record)
+  if (wifi.state === CharmLinkState.Off) return recordWords(record)
+  if (wifi.state === CharmLinkState.Joining) return "Joining…"
+  if (wifi.state === CharmLinkState.Online)
+    return wifi.ssid ? `Connected to ${wifi.ssid}` : "Connected"
+  return wifiReasonWords(wifi.reason)
+}
+
+/** Why the charm is not on Wi-Fi, in the words a failure means to a reader. */
+export function wifiReasonWords(reason: number): string {
+  switch (reason) {
+    case CharmWifiReason.NoCredentials:
+      return "No network saved"
+    case CharmWifiReason.NotFound:
+      return "Not in range"
+    case CharmWifiReason.BadCredentials:
+      return "Wrong passphrase"
+    case CharmWifiReason.Unreachable:
+      return "No address from the network"
+    case CharmWifiReason.Lost:
+      return "Dropped off the network"
+    default:
+      return "Couldn't join the network"
+  }
+}
+
+/** What the phone remembers of a network the charm took, when the charm itself has not answered. */
+function recordWords(record?: CharmWifiRecord) {
+  if (!record) return "Not set"
+  return record.saved ? `Saved ${record.ssid}` : `${record.ssid}, kept for this boot only`
+}
+
+/** The tailnet line: whether the charm is on it, and its own name for it. */
+export function tailnetWords(
+  tailnet: CharmNetworkReport["tailnet"] | undefined,
+  saved?: boolean,
+): string {
+  if (tailnet?.state === CharmLinkState.Joining) return "Joining…"
+  if (tailnet?.state === CharmLinkState.Online)
+    return tailnet.ip ? `On your tailnet at ${tailnet.ip}` : "On your tailnet"
+  if (tailnet?.state === CharmLinkState.Failed) return "Couldn't reach the tailnet"
+  return saved ? "Key saved; not joined" : "Not set"
+}
+
+/** Where the charm's firmware download has got to, in one line. */
+export function updateWords(update: CharmUpdateStatus | null | undefined): string {
+  if (!update || update.state === CharmUpdateState.Idle) return "No update running"
+  if (update.state === CharmUpdateState.Downloading) return `Downloading… ${update.percent}%`
+  if (update.state === CharmUpdateState.Ready) return "Ready: the charm is restarting"
+  return `Update failed: ${updateReasonWords(update.reason)}`
+}
+
+/** Why a download failed, as the charm's code means it. */
+export function updateReasonWords(reason: number): string {
+  switch (reason) {
+    case CharmUpdateReason.Offline:
+      return "the charm isn't on Wi-Fi"
+    case CharmUpdateReason.BadUrl:
+      return "that address isn't https"
+    case CharmUpdateReason.BadHash:
+      return "the image didn't match its SHA-256"
+    case CharmUpdateReason.TooBig:
+      return "the image is too big"
+    case CharmUpdateReason.WriteFailed:
+      return "the charm couldn't write it"
+    case CharmUpdateReason.Cancelled:
+      return "it was cancelled"
+    default:
+      return "the charm didn't say why"
+  }
 }

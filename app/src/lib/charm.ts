@@ -1,7 +1,8 @@
 /**
  * The Gots Charm on this phone: which one is paired, whether one of its bots lives there as a pet,
- * and a sync of every bot to it over BLE (Android app only). The charm holds names and pictures,
- * never a key or a host address, so nothing here sends either.
+ * a sync of every bot to it over BLE, and the network it joins, its tailnet key and its firmware
+ * (Android app only). The charm holds names and pictures; a passphrase, a key and an image address
+ * pass through this phone on their way to it and are never kept here.
  */
 import { BleClient, type BleDevice } from "@capacitor-community/bluetooth-le"
 import { Capacitor, registerPlugin } from "@capacitor/core"
@@ -21,15 +22,30 @@ import {
   CHARM_DATA,
   CHARM_SERVICE,
   CHARM_STATUS,
+  CharmCode,
+  forgetMessage,
+  hexBytes,
+  networkMessage,
+  parseNetworkReport,
   parseStatus,
+  parseUpdateStatus,
   rgb565,
+  tailnetMessage,
+  updateMessage,
+  updateStatusMessage,
+  wifiMessage,
+  wifiRecord,
   type CharmAlertAction,
   type CharmBot,
+  type CharmNetworkReport,
   type CharmPetChoice,
   type CharmPose,
   type CharmStatus,
+  type CharmUpdateStatus,
+  type CharmWifiRecord,
 } from "./charm-protocol.ts"
 import {
+  CharmRefused,
   syncCharm,
   type CharmTransport,
   type SyncProgress,
@@ -44,6 +60,13 @@ export interface PairedCharm {
   syncedBots?: number
   /** Pet mode: which bot lives on the charm, and whether it does at all. Off until set. */
   pet?: CharmPetChoice
+  /**
+   * The Wi-Fi it was told to join: the name, and whether the charm will still have it after a
+   * reboot. The passphrase is never part of it — the charm holds it, or held it in RAM.
+   */
+  wifi?: CharmWifiRecord
+  /** Whether the charm has a tailnet key. The key itself is the charm's, and is never kept here. */
+  tailnet?: boolean
 }
 
 const KEY = "gots.charm"
@@ -259,50 +282,57 @@ export async function charmBots(
 }
 
 /** The BLE side of a sync: control writes answered by status notifications, in order. */
-async function openTransport(
-  deviceId: string,
-): Promise<CharmTransport & { close(): Promise<void> }> {
-  let pending: { resolve: (s: CharmStatus) => void; reject: (e: Error) => void } | null = null
+interface CharmLink extends CharmTransport {
+  /** Writes one control message and answers the notification with the bytes the charm sent. */
+  ask(message: Uint8Array): Promise<DataView>
+  close(): Promise<void>
+}
+
+async function openTransport(deviceId: string): Promise<CharmLink> {
+  let pending: { resolve: (answer: DataView) => void; reject: (e: Error) => void } | null = null
   let dropped = false
   await BleClient.connect(deviceId, () => {
     dropped = true
     pending?.reject(new Error("The charm went out of reach"))
     pending = null
   })
+  const view = (bytes: Uint8Array) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   try {
     // Already bonded resolves at once; a charm that lost its bond asks for the passkey again.
     await BleClient.createBond(deviceId, { timeout: 60_000 })
-    await BleClient.startNotifications(deviceId, CHARM_SERVICE, CHARM_STATUS, (value) => {
+    await BleClient.startNotifications(deviceId, CHARM_SERVICE, CHARM_STATUS, (answer) => {
       const waiting = pending
       pending = null
-      waiting?.resolve(parseStatus(value))
+      waiting?.resolve(answer)
     })
   } catch (error) {
     await BleClient.disconnect(deviceId).catch(() => {})
     throw error
   }
   const mtu = await BleClient.getMtu(deviceId).catch(() => 23)
-  const view = (bytes: Uint8Array) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const ask = (message: Uint8Array) => {
+    if (dropped) return Promise.reject(new Error("The charm went out of reach"))
+    return new Promise<DataView>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        pending = null
+        reject(new Error("The charm stopped answering"))
+      }, ANSWER_MS)
+      pending = {
+        resolve: (answer) => (clearTimeout(timer), resolve(answer)),
+        reject: (e) => (clearTimeout(timer), reject(e)),
+      }
+      BleClient.write(deviceId, CHARM_SERVICE, CHARM_CONTROL, view(message)).catch((error) => {
+        pending = null
+        clearTimeout(timer)
+        reject(error instanceof Error ? error : new Error(String(error)))
+      })
+    })
+  }
   return {
     mtu,
-    control(message) {
-      if (dropped) return Promise.reject(new Error("The charm went out of reach"))
-      return new Promise<CharmStatus>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          pending = null
-          reject(new Error("The charm stopped answering"))
-        }, ANSWER_MS)
-        pending = {
-          resolve: (s) => (clearTimeout(timer), resolve(s)),
-          reject: (e) => (clearTimeout(timer), reject(e)),
-        }
-        BleClient.write(deviceId, CHARM_SERVICE, CHARM_CONTROL, view(message)).catch((error) => {
-          pending = null
-          clearTimeout(timer)
-          reject(error instanceof Error ? error : new Error(String(error)))
-        })
-      })
-    },
+    // A sync's answers are a status and nothing more; a network ask's answer carries its own extra.
+    control: async (message) => parseStatus(await ask(message)),
+    ask,
     data(chunk) {
       return BleClient.writeWithoutResponse(deviceId, CHARM_SERVICE, CHARM_DATA, view(chunk))
     },
@@ -336,6 +366,81 @@ export async function syncToCharm(
   } finally {
     await link.close()
   }
+}
+
+/**
+ * One control ask on a link of its own: pair-connect, write the one op, read its answer, close. The
+ * network ops are each a single write, so each gets its own link rather than holding one open the
+ * way a sync does.
+ */
+async function askCharm(message: Uint8Array): Promise<{ status: CharmStatus; bytes: DataView }> {
+  const charm = paired
+  if (!charm) throw new Error("No charm paired")
+  await ready()
+  const link = await openTransport(charm.deviceId)
+  try {
+    const bytes = await link.ask(message)
+    return { status: parseStatus(bytes), bytes }
+  } finally {
+    await link.close()
+  }
+}
+
+/** The one answer a network write takes as a yes: written to flash, or kept for this boot only. */
+const kept = (code: number) => code === CharmCode.Ok || code === CharmCode.SavedToRam
+
+/**
+ * Tells the charm which network to join, and keeps only the name and the charm's word about keeping
+ * it. The passphrase is in the write and nowhere else: no store, no log, no record.
+ */
+export async function setCharmWifi(ssid: string, pass: string): Promise<number> {
+  const { status } = await askCharm(wifiMessage(ssid, pass))
+  if (paired && kept(status.code)) write({ ...paired, wifi: wifiRecord(ssid, status.code) })
+  return status.code
+}
+
+/** Makes the charm forget its network. It drops off Wi-Fi, and the record forgets the name. */
+export async function forgetCharmWifi(): Promise<number> {
+  const { status } = await askCharm(forgetMessage())
+  if (paired && status.code === CharmCode.Ok) write({ ...paired, wifi: undefined })
+  return status.code
+}
+
+/** What the charm's Wi-Fi and its tunnel are doing right now. */
+export async function charmNetwork(): Promise<CharmNetworkReport> {
+  const { status, bytes } = await askCharm(networkMessage())
+  if (status.code !== CharmCode.Ok) throw new CharmRefused(status.code)
+  const report = parseNetworkReport(bytes)
+  if (!report) throw new Error("The charm's network answer was too short")
+  return report
+}
+
+/**
+ * Hands the charm a tailnet auth key, which it uses once to join the tailnet. The key is not kept:
+ * only whether the charm said it had one.
+ */
+export async function setCharmTailnetKey(key: string): Promise<number> {
+  const { status } = await askCharm(tailnetMessage(key))
+  if (paired && kept(status.code)) write({ ...paired, tailnet: true })
+  return status.code
+}
+
+/**
+ * Asks the charm to fetch a firmware image from an https address and check it against the SHA-256
+ * pasted here. The charm downloads it itself; this phone only says what to fetch.
+ */
+export async function updateCharm(url: string, sha256Hex: string): Promise<number> {
+  const { status } = await askCharm(updateMessage(url, hexBytes(sha256Hex)))
+  return status.code
+}
+
+/** Where the charm's firmware download has got to. */
+export async function charmUpdateStatus(): Promise<CharmUpdateStatus> {
+  const { status, bytes } = await askCharm(updateStatusMessage())
+  if (status.code !== CharmCode.Ok) throw new CharmRefused(status.code)
+  const update = parseUpdateStatus(bytes)
+  if (!update) throw new Error("The charm's update answer was too short")
+  return update
 }
 
 /** What a test alert is keyed by: no session's, so it clears only when the reader dismisses it. */
