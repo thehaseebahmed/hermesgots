@@ -399,9 +399,10 @@ def plan(path: Path, build_id: str, args: Dict[str, Any]) -> bool:
     conn = _open(path)
     try:
         conn.execute(
-            "UPDATE canvas_builds SET plan = ?, wait = ?, phase = ?, activity = ?, at = ? WHERE id = ?",
-            (changes, 1 if wait else 0, phase, ACTIVITY[phase], now_ms(), build_id),
+            "UPDATE canvas_builds SET plan = ?, wait = ? WHERE id = ?",
+            (changes, 1 if wait else 0, build_id),
         )
+        _placed(conn, build_id, phase)
     finally:
         conn.close()
     _note(path, build["canvas_id"])
@@ -425,10 +426,9 @@ def approve(path: Path, canvas_id: str) -> Optional[Dict[str, Any]]:
         # The wait is over, so the marker a push left behind is cleared with it: a plan filed to
         # wait again after this approval is a new wait and new news (step 12).
         conn.execute(
-            "UPDATE canvas_builds SET wait = 0, waiting = 0, phase = ?, activity = ?, at = ? "
-            "WHERE id = ?",
-            (BUILDING, ACTIVITY[BUILDING], now_ms(), build["id"]),
+            "UPDATE canvas_builds SET wait = 0, waiting = 0 WHERE id = ?", (build["id"],)
         )
+        _placed(conn, build["id"], BUILDING)
     finally:
         conn.close()
     _note(path, canvas_id)
@@ -896,14 +896,24 @@ def _phase(
         conn.close()
 
 
+def _placed(conn: sqlite3.Connection, build_id: str, phase: str) -> None:
+    """Stamps where a working build is and the one line the lane draws under it.
+
+    The one writer of a working build's ``phase``, ``activity`` and ``at``. It takes the connection
+    its caller holds, so a caller that writes other columns of the same build writes the phase
+    through here, in that connection, rather than in a statement of its own.
+    """
+    conn.execute(
+        "UPDATE canvas_builds SET phase = ?, activity = ?, at = ? WHERE id = ?",
+        (phase, ACTIVITY.get(phase), now_ms(), build_id),
+    )
+
+
 def _place(path: Path, build_id: str, phase: str) -> None:
-    """Stamps where a working build is and the one line the lane draws under it."""
+    """``_placed`` on a connection of its own, for a caller that holds none."""
     conn = _open(path)
     try:
-        conn.execute(
-            "UPDATE canvas_builds SET phase = ?, activity = ?, at = ? WHERE id = ?",
-            (phase, ACTIVITY.get(phase), now_ms(), build_id),
-        )
+        _placed(conn, build_id, phase)
     finally:
         conn.close()
 
