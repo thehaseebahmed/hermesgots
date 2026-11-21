@@ -920,7 +920,14 @@ export function reduce(state: ThreadState, event: ThreadEvent): ThreadState {
         between: done ? undefined : state.between,
         ...(done
           ? { questionSet: undefined, clarifyForm: undefined }
-          : { questionSet: questionsFor(state, state.waiting, rows) }),
+          : {
+              // The call's questions are what a taken form is filed under, so a read that names no
+              // call — the newest page of a big chat, or one landing while the host is between two
+              // prompts — keeps the set it held: dropping it would file the next prompt under
+              // another name and the answers given ahead would not be handed to it. A read that
+              // names another call replaces it.
+              questionSet: questionsFor(state, state.waiting, rows) ?? state.questionSet,
+            }),
         ...(done ? { settled: settledWith(state) } : {}),
       }
     }

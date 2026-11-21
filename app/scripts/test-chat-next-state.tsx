@@ -1428,3 +1428,69 @@ test("a form a call's card took is held with its run, and goes when the run does
     "a form taken where no prompt is being asked is dropped rather than kept for another",
   )
 })
+
+test("a call's question set survives a read that lands between two of its prompts", () => {
+  // The row the agent wrote when it made the call, in the transcript.
+  const CALL_ROWS: Row[] = [
+    { id: 1, role: "user", content: "go" },
+    {
+      id: 2,
+      role: "assistant",
+      content: "",
+      finish_reason: "tool_calls",
+      tool_calls: [
+        {
+          id: "c1",
+          function: {
+            name: "clarify",
+            arguments: JSON.stringify({
+              questions: [
+                { question: "Tea?", choices: ["yes", "no"] },
+                { question: "Sugar?", choices: ["yes", "no"] },
+              ],
+            }),
+          },
+        },
+      ],
+    },
+  ]
+  let state = reduce(initial, { type: "attach", run: "r" })
+  state = reduce(state, { type: "transcript", rows: CALL_ROWS, final: true })
+  state = reduce(state, { type: "waiting", waiting: { ...PROMPT, question: "Tea?" } })
+  assert.deepEqual(
+    state.questionSet?.map((one) => one.id),
+    ["q0", "q1"],
+    "the call's questions are read off its row",
+  )
+  const took = reduce(state, {
+    type: "clarify-form",
+    key: "call:Tea?\u0000Sugar?",
+    taken: { form: { q0: { choices: ["yes"], other: "", usingOther: false } }, answeredPrompt: "q0" },
+  })
+  const settled = reduce(took, {
+    type: "answered",
+    promptId: "p1",
+    answer: { question: "Tea?", choicesOffered: ["yes", "no"], value: "yes" },
+  })
+  // The host thinks about the call's next question, and a read lands meanwhile: the turn is not over,
+  // and the newest page a big chat is served need not carry the row the call was made in.
+  const read = reduce(settled, {
+    type: "transcript",
+    rows: [{ id: 3, role: "assistant", content: "", tool_calls: [] }],
+    final: true,
+  })
+  assert.deepEqual(
+    read.questionSet?.map((one) => one.id),
+    ["q0", "q1"],
+    "the set the form is filed under outlives a read that does not name it",
+  )
+  const next = reduce(read, {
+    type: "waiting",
+    waiting: { ...PROMPT, promptId: "p2", question: "Sugar?" },
+  })
+  assert.deepEqual(
+    next.questionSet?.map((one) => one.question),
+    ["Tea?", "Sugar?"],
+    "so the next prompt of the call is still the same call, and the form is handed to it",
+  )
+})
