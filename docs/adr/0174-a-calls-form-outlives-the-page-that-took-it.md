@@ -46,7 +46,10 @@ turn ends (a done read or the run's own ending), when the host says the run is g
 the answered card still holds the place and no prompt is on screen — when another run is joined, or when
 the card hands it back: a refused send, or a question the form has no page for. It deliberately does
 *not* go when the page's event stream ends: a phone asleep drops the stream while the run carries on,
-and that is precisely the gap the form is kept for. That is the rule 0163 had to state in a page effect,
+and that is precisely the gap the form is kept for. The join that follows such a drop is the same
+event one step later — a replay of the run from its start, which can leave out the prompt raised
+while the page was away — so a re-join of the run already on is not an ending either: the set and
+what the run settled stay, and only another run's join clears them. That is the rule 0163 had to state in a page effect,
 now stated in the reducer where the run's own endings are.
 
 **What this leaves open.** The identity still has the hole 0163 recorded: two calls in one run that ask
