@@ -1,8 +1,9 @@
 /**
- * A canvas's lane, drawn as builds rather than as a transcript (G9, G10): each finished build is the
- * request it took, the summary it ended on, what its checks said and the version it published,
- * newest at the foot; the build working now is its phase and the line saying what it is doing. The
- * transcript is not drawn here at all — `Details` opens one build's session read-only.
+ * A canvas's lane, drawn as builds rather than as a transcript (G9, G10): each finished build reads
+ * as the chat it was — its request in the bubble a chat draws the reader's message in, its summary
+ * as the bot's words, and under them one line saying what the checks found and the version it
+ * published, newest at the foot; the build working now is its phase and the line saying what it is
+ * doing. The transcript is not drawn here at all — `Details` opens one build's session read-only.
  *
  * The lane is still a chat's container (`ChatBody`): its composer queues a request on the plugin
  * exactly as before, and a waiting plan's card takes the composer's place. Only the thread is
@@ -10,7 +11,10 @@
  */
 import { createContext, lazy, Suspense, useContext, useMemo, useState, type ReactNode } from "react"
 
+import { Markdown } from "@/components/chat/markdown"
+import { UserBubble } from "@/components/chat/user-bubble"
 import { Button } from "@/components/ui/button"
+import { Message as MessageRow, MessageContent } from "@/components/ui/message"
 import {
   Sheet,
   SheetContent,
@@ -20,7 +24,13 @@ import {
 } from "@/components/ui/sheet"
 import type { ThreadViewProps } from "@/chat-next/page"
 import type { CanvasBuild, CanvasBuildRow } from "@/lib/canvases"
-import { COLUMN, COMPOSER_SLOT, THREAD_GUTTER } from "@/lib/layout"
+import {
+  COLUMN,
+  COMPOSER_SLOT,
+  REPLY_EDGE,
+  REPLY_TEXT,
+  THREAD_GUTTER,
+} from "@/lib/layout"
 import { cn } from "@/lib/utils"
 
 // The chat-next thread the app draws a chat with, loaded only when a build's Details is opened: the
@@ -55,30 +65,37 @@ const FLAG_WORDS: Record<string, string> = {
 }
 
 /**
- * One finished build's row: the request, the summary that ended it, its check flag and version.
- * A build that published a version is the only one whose version it names.
+ * One finished build, drawn as the chat it was: each request the reader's own message on the right,
+ * the summary that ended it as the bot's words, and under them the one muted line — what the checks
+ * said, the version it published and `Details`, which opens the whole build's transcript. A build
+ * that published no version names none, and one that ended without a reply says so in its place.
  */
-function BuildRow({ row, onDetails }: { row: CanvasBuildRow; onDetails: () => void }) {
+function BuildBlock({ row, onDetails }: { row: CanvasBuildRow; onDetails: () => void }) {
   const flag = row.flag ? FLAG_WORDS[row.flag] : undefined
   return (
-    <article data-canvas-build={row.id} className={cn(COLUMN, "rounded-lg border p-3 text-sm")}>
-      <div className="flex flex-col gap-1">
-        {row.requests.map((request, at) => (
-          <p key={at} data-build-request className="font-medium">
-            {request}
-          </p>
-        ))}
-        {row.summary ? (
-          <p data-build-summary className="text-[15px] whitespace-pre-wrap">
-            {row.summary}
-          </p>
-        ) : (
-          <p className="text-muted-foreground">
-            {row.phase === "failed" ? "The build failed." : "The build was stopped."}
-          </p>
+    <div data-canvas-build={row.id} className="flex flex-col gap-3">
+      {row.requests.map((request, at) => (
+        <MessageRow key={at} align="end" className={COLUMN}>
+          <MessageContent className="items-end gap-1">
+            <UserBubble data-build-request>{request}</UserBubble>
+          </MessageContent>
+        </MessageRow>
+      ))}
+      {row.summary ? (
+        <div data-build-summary className={REPLY_EDGE}>
+          <Markdown className={REPLY_TEXT}>{row.summary}</Markdown>
+        </div>
+      ) : (
+        <p data-build-summary className={cn(REPLY_EDGE, REPLY_TEXT, "text-muted-foreground")}>
+          {row.phase === "failed" ? "The build failed." : "The build was stopped."}
+        </p>
+      )}
+      <div
+        className={cn(
+          REPLY_EDGE,
+          "flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground",
         )}
-      </div>
-      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[13px] text-muted-foreground">
+      >
         {flag ? <span data-build-flag={row.flag}>{flag}</span> : null}
         {row.version ? (
           <span data-build-version>
@@ -95,7 +112,7 @@ function BuildRow({ row, onDetails }: { row: CanvasBuildRow; onDetails: () => vo
           Details
         </Button>
       </div>
-    </article>
+    </div>
   )
 }
 
@@ -137,7 +154,7 @@ export function CanvasBuildsView({ waiting, composer }: ThreadViewProps) {
             </p>
           ) : null}
           {lane.rows.map((row) => (
-            <BuildRow key={row.id} row={row} onDetails={() => lane.onDetails(row)} />
+            <BuildBlock key={row.id} row={row} onDetails={() => lane.onDetails(row)} />
           ))}
           {lane.open ? <OpenBuild build={lane.open} /> : null}
         </div>

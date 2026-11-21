@@ -22,12 +22,14 @@ import {
   findText,
   json,
   laptop,
+  missing,
   mount,
   seedSettings,
   settle,
   type,
   transcriptRows,
   until,
+  wordsOf,
 } from "./component-kit.tsx"
 
 const PAGE = `<!doctype html>
@@ -53,8 +55,8 @@ const BUILDS = [
   {
     id: "b2",
     session: "canvas-build-2",
-    phase: "building",
-    activity: "Building the page",
+    phase: "failed",
+    activity: null,
     requests: ["and make it blue too"],
     summary: null,
     flag: null,
@@ -264,20 +266,42 @@ test(
         () => Boolean(findText("button", "Details")),
         "the lane's builds to draw",
       )
-      const drawn = document.body.textContent ?? ""
-      // A finished build is its request, its summary, its check flag and its version, newest at
-      // the foot: the transcript is not drawn at all.
+      // A finished build reads as a chat: the request is the reader's own message, in the bubble the
+      // thread draws one in and on the right; the summary is the bot's words, on the reply's edge.
+      const request = find('[data-canvas-build="b1"] [data-build-request]')
+      assert.ok(request, "the finished build's request is drawn")
       assert.ok(
-        drawn.includes("make the heading say Split the bill"),
-        "the finished build's request is drawn",
+        request.closest('[data-slot="bubble"]'),
+        "the request wears the chat's own user bubble",
+      )
+      assert.equal(
+        request.closest('[data-slot="message"]')?.getAttribute("data-align"),
+        "end",
+        "the request sits on the right, where a chat draws what was said to the bot",
+      )
+      const summary = find('[data-canvas-build="b1"] [data-build-summary]')
+      assert.ok(summary, "its summary is drawn")
+      assert.ok(
+        summary.querySelector('[data-slot="markdown"]'),
+        "the summary is drawn as the bot's words",
       )
       assert.ok(
-        drawn.includes("The heading now says Split the bill."),
-        "its summary is drawn",
+        wordsOf(summary).includes("The heading now says Split the bill."),
+        "and says what the build answered",
       )
-      assert.ok(drawn.includes("Checks passed"), "its check flag is drawn")
-      assert.ok(drawn.includes("Version 3"), "the version it published is drawn")
-      // The lane draws builds in the thread's place: a chat's own message scroller is not there.
+      assert.ok(!summary.closest('[data-slot="bubble"]'), "the bot's words wear no bubble")
+      // Under the reply, one muted line: the flag the checks left, the version it published, Details.
+      const line = find('[data-canvas-build="b1"] [data-build-version]')?.parentElement
+      assert.ok(line, "the version's line is drawn")
+      assert.ok(
+        summary.nextElementSibling === line,
+        "the line stands directly under the reply it belongs to",
+      )
+      assert.deepEqual(
+        [...line.children].map((one) => wordsOf(one)),
+        ["Checks passed", "Version 3", "Details"],
+        "the line reads the flag, then the version, then Details",
+      )
       assert.ok(
         document.querySelector("[data-canvas-builds]"),
         "the lane draws its builds",
@@ -286,7 +310,18 @@ test(
         !document.querySelector('[aria-label="Messages"]'),
         "no transcript is drawn in the lane",
       )
+      // A build with no reply of its own still says so where the reply would be, and keeps Details.
+      const failed = find('[data-canvas-build="b2"] [data-build-summary]')
+      assert.ok(failed, "a build with no summary still draws that place")
+      assert.equal(wordsOf(failed), "The build failed.", "in the lane's own words")
+      const failedLine = find('[data-canvas-build="b2"] [data-build-details]')?.parentElement
+      assert.ok(failedLine, "and still draws its line")
+      assert.ok(
+        missing('[data-canvas-build="b2"] [data-build-version]'),
+        "a build that published no version names none",
+      )
       // The build working now is its phase and the line saying what it is doing.
+      const drawn = document.body.textContent ?? ""
       assert.ok(drawn.includes("Building"), "the open build's phase is drawn")
       assert.ok(drawn.includes("Building the page"), "and the line saying what it is doing")
 
