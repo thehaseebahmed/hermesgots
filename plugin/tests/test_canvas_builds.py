@@ -15,8 +15,8 @@ from typing import Any, Dict, List, Optional
 from unittest import mock
 from unittest.mock import patch
 
-from plugin import PREFIX, builds, canvas_checks, canvases, chats, outbox, progress, push
-from plugin.store import db_path, put_setting
+from plugin import PREFIX, builds, canvas_checks, canvases, chats, events, outbox, progress, push
+from plugin.store import connect, db_path, put_setting
 from plugin.tests._helpers import (
     FakeWeb,
     RouteAdapter,
@@ -849,6 +849,41 @@ class WhereABuildIsTest(unittest.TestCase):
         self.assertEqual(published["phase"], builds.PUBLISHED)
         self.assertEqual(published["version"], 1)
 
+    def test_a_run_starting_where_the_build_moved_announces_the_canvas(self) -> None:
+        # The check's report turn starts with the build still checking, so the run's own start is
+        # what moves it to building. A device drawing the lane hears that from the canvas change;
+        # without it the lane pulses Checking until the next event or the safety poll.
+        planted = plant_runner(passing_answer)
+        self.addCleanup(planted.stop)
+        with planted:
+            build = self.host.start()
+            session = build["session_id"]
+            self.host.plan(
+                session,
+                changes="The heading says Split the bill.",
+                checks=[{"name": "the heading is split", "script": "return 1"}],
+                wait=False,
+            )
+            self.host.write(session, TWEAKED)
+            self.host.adapter.run("run_1", session, "completed", 3)
+            self.host.end(session, completed=True)
+            self.assertEqual(self.host.newest()["phase"], builds.CHECKING)
+
+            with patch.object(events, "note") as noted:
+                self.host.tick(session)  # the report turn starts: note_run places BUILDING
+
+        self.assertEqual(self.host.newest()["phase"], builds.BUILDING)
+        canvas_notes = [
+            call for call in noted.call_args_list if call.args and call.args[0] == "canvas"
+        ]
+        self.assertEqual(len(canvas_notes), 1, "the phase change is announced once")
+        self.assertEqual(
+            canvas_notes[0].args[1],
+            self.host.session,
+            "on the canvas chat every screen polls",
+        )
+        self.assertTrue(canvas_notes[0].args[3], "forced past the throttle, as a state change is")
+
     def test_the_list_carries_the_build_a_canvas_is_working_in(self) -> None:
         # A phone's edit screen draws the record and never the document, so the list read is the one
         # that has to carry where the build is — otherwise its lane has nothing to say while it works.
@@ -879,6 +914,103 @@ class WhereABuildIsTest(unittest.TestCase):
         self.assertEqual(one["version"], 1)
         self.assertEqual(one["flag"], canvas_checks.UNCHECKED)
         self.assertIsNone(one["activity"], "a finished build has nothing going on")
+
+    def test_a_build_records_a_step_per_phase_it_visits(self) -> None:
+        planted = plant_runner(passing_answer)
+        self.addCleanup(planted.stop)
+        with planted:
+            build = self.host.start()
+            session = build["session_id"]
+            self.host.plan(
+                session,
+                changes="The heading says Split the bill.",
+                checks=[{"name": "the heading is split", "script": "return 1"}],
+                wait=False,
+            )
+            self.host.write(session, TWEAKED)
+            self.host.adapter.run("run_1", session, "completed", 3)
+            self.host.end(session, completed=True)
+
+            self.host.tick(session)
+            self.host.adapter.run("run_2", session, "completed", 4)
+            self.host.write(session, DOCUMENT.replace("<h1>Tip</h1>", "<h1>Split it</h1>"))
+
+        with take_layer_away():
+            self.host.adapter.run("run_3", session, "completed", 5)
+            self.host.end(session, completed=True)
+
+        answer = self.host.ask(f"{PREFIX}/canvases/{{canvas_id}}/builds", "GET")["payload"]
+        published = next(one for one in answer["builds"] if one["id"] == build["id"])
+        steps = published.get("steps") or []
+        self.assertEqual(
+            [one["phase"] for one in steps],
+            ["planning", "building", "checking", "building", "checking", "publishing"],
+        )
+        for before, after in zip(steps, steps[1:]):
+            self.assertEqual(before["end"], after["start"], "a step ends where the next begins")
+        self.assertIn("end", steps[-1], "a finished build has no open step")
+        self.assertEqual([one["phase"] for one in steps if "flag" in one], ["checking", "checking"])
+        self.assertEqual(steps[2]["flag"], canvas_checks.PASSING, "the round that passed said so")
+        self.assertEqual(steps[-2]["flag"], published["flag"])
+        self.assertEqual(steps[-2]["flag"], canvas_checks.UNCHECKED)
+
+        conn = connect(self.host.path)
+        try:
+            conn.execute(
+                "INSERT INTO canvas_builds (id, canvas_id, session_id, phase, requests, summary,"
+                " run_id, at, created_at) VALUES ('old', ?, 'canvas-old', 'published', ?, NULL,"
+                " NULL, 1, 1)",
+                (self.host.id, json.dumps(["an older request"])),
+            )
+        finally:
+            conn.close()
+        rows = self.host.ask(f"{PREFIX}/canvases/{{canvas_id}}/builds", "GET")["payload"]["builds"]
+        older = next(one for one in rows if one["id"] == "old")
+        self.assertNotIn("steps", older)
+
+    def test_a_checks_flag_lands_on_the_visit_the_check_opened(self) -> None:
+        # A turn can start between the check placing its checking visit and stamping the round's
+        # flag: the check's report is queued while the check still runs, and the run that starts
+        # under it is what moves the build on, closing the visit the flag belongs to. The flag is
+        # that visit's (I5), so it is written on the visit the round opened rather than on whatever
+        # is open when the write lands — which here is nothing, and would say the two disagree.
+        planted = plant_runner(passing_answer)
+        self.addCleanup(planted.stop)
+        with planted:
+            build = self.host.start()
+            session = build["session_id"]
+            self.host.plan(
+                session,
+                changes="The heading says Split the bill.",
+                checks=[{"name": "the heading is split", "script": "return 1"}],
+                wait=False,
+            )
+            self.host.write(session, TWEAKED)
+            self.host.adapter.run("run_1", session, "completed", 3)
+
+            checking = canvas_checks.check
+
+            def raced(*args: Any, **kwargs: Any) -> Any:
+                # note_run is the dispatcher's own call at a turn's start, and the build has filed
+                # its plan, so the check's report turn moves it to building mid-check.
+                builds.note_run(self.host.path, build["id"], "run_2")
+                return checking(*args, **kwargs)
+
+            with patch.object(canvas_checks, "check", raced):
+                self.host.end(session, completed=True)
+
+        published = builds.listing(self.host.path, self.host.id)[0]
+        stepped = [one for one in published["steps"] if one["phase"] == "checking"]
+        self.assertEqual(len(stepped), 1, "the round opened one checking visit")
+        self.assertEqual(
+            stepped[0].get("flag"),
+            canvas_checks.PASSING,
+            "the round's flag is written on the checking visit it opened, closed or not",
+        )
+        self.assertEqual(published["flag"], canvas_checks.PASSING)
+        self.assertEqual(
+            stepped[0]["flag"], published["flag"], "the visit's flag is the version's (I5)"
+        )
 
 
 class ClosedAppTest(unittest.TestCase):

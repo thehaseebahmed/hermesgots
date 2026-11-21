@@ -82,7 +82,9 @@ logger = logging.getLogger(__name__)
 # message is the same wait.
 # 81 keeps where a build is and what it is doing (the canvas builds plan's step 13, `builds.py`):
 # its phase, the line the lane draws under it, and the version it published.
-SCHEMA_VERSION = 81
+# 82 keeps every visit a build makes to a phase (the canvas lane's steps, `builds.py`): one new
+# table, one row a visit, so a build that checks, fixes and checks again keeps each stretch apart.
+SCHEMA_VERSION = 82
 
 
 def data_dir(hermes_home: Path) -> Path:
@@ -1157,6 +1159,18 @@ def _migrate(conn: sqlite3.Connection) -> None:
             conn.execute(
                 "UPDATE canvas_builds SET phase = CASE WHEN wait = 1 THEN 'waiting' ELSE 'building' END"
                 " WHERE phase = 'open'"
+            )
+        if version < 82:
+            conn.execute(
+                """CREATE TABLE IF NOT EXISTS canvas_build_steps (
+                       build_id TEXT NOT NULL,
+                       ordinal INTEGER NOT NULL,
+                       phase TEXT NOT NULL,
+                       started_at INTEGER NOT NULL,
+                       ended_at INTEGER,
+                       flag TEXT,
+                       PRIMARY KEY (build_id, ordinal)
+                   )"""
             )
         # v61: the data a canvas keeps, one row per document of one collection. `value` is the
         # document as JSON and `at` is the host's clock when it was written, since the page owns the

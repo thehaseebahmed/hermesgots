@@ -821,6 +821,30 @@ def _answer(
 
 
 @contextmanager
+def _reading(path: Path) -> Iterator[sqlite3.Connection]:
+    """A connection inside one read: every statement in the block asks the same snapshot, and the
+    connection is closed however the block ends.
+
+    A read of more than one statement asked apart could see a write land between them — a build
+    listed with the steps it had already lost — so a read that spans more than one takes the
+    snapshot the way a write takes the lock. Rows are read by column name here, as the writes'
+    callers read them, and by position still, for the readers that do.
+    """
+    conn = connect(path)
+    conn.row_factory = sqlite3.Row
+    try:
+        conn.execute("BEGIN")
+        yield conn
+        conn.execute("COMMIT")
+    except BaseException:
+        if conn.in_transaction:
+            conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.close()
+
+
+@contextmanager
 def _writing(path: Path) -> Iterator[sqlite3.Connection]:
     """A connection inside the store's write lock: committed on a clean exit, rolled back and closed
     however the block ends.
@@ -1319,6 +1343,12 @@ def _erase(conn: sqlite3.Connection, canvas_id: str) -> None:
     conn.execute("DELETE FROM canvas_versions WHERE canvas_id = ?", (canvas_id,))
     conn.execute("DELETE FROM canvas_docs WHERE canvas_id = ?", (canvas_id,))
     conn.execute("DELETE FROM canvas_grants WHERE canvas_id = ?", (canvas_id,))
+    conn.execute(
+        "DELETE FROM canvas_build_steps WHERE build_id IN"
+        " (SELECT id FROM canvas_builds WHERE canvas_id = ?)",
+        (canvas_id,),
+    )
+    conn.execute("DELETE FROM canvas_builds WHERE canvas_id = ?", (canvas_id,))
 
 
 def delete(

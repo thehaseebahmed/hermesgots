@@ -3,10 +3,11 @@
 // while the bot builds, Preview appears with the first version and draws the page, its head's asks
 // for Chart.js and d3 answered so both libraries run inside the frame (the drawn page a refactor
 // has to leave as it was), a box ticked on the page is kept by the host, an edit sent from the chat
-// lands as a new version, Preview is where Undo is pressed, a page that asks to leave is refused
-// and drawn again, and the chat's Point row sends the reader to the page and takes the element
-// they tap back as the field's chip — and a visit costs only what its page asked: a page that asks
-// for no library fetches none of one, and one that asks for three fetches each of those chunks once.
+// lands as a new version, Preview is where Undo is pressed, a page that asks to leave is refused and
+// drawn again, and the chat's Point row sends the reader to the page
+// and takes the element they tap back as the field's chip — and a visit costs only what its page
+// asked: a page that asks for no library fetches none of one, and one that asks for three fetches
+// each of those chunks once.
 // The mark's own box at the head of the options' Name block opens the mark picker (issue #1065) as
 // a sheet on the phone and a menu anchored to it on a wide screen, lucide's icons listed eight to a
 // row and narrowed by the field, an icon then an emoji picked as the mark its row draws, and the one
@@ -32,6 +33,10 @@ import { app, assert, flow, mockJson, pass, SEND_CHORD, settled } from "./lib.mj
 
 const PROMPT = "A checklist for the deck"
 const EDIT = "Make it say the deck is done."
+
+// The mock's check report (`mock-canvas.mjs`'s `checkOf`): the one turn a published version's
+// checking visit holds, named for the version it read.
+const checkReport = (version) => `Version ${version} drew its heading and its box.`
 
 const FRAME = "iframe[data-canvas-frame]"
 
@@ -70,8 +75,9 @@ await flow(
     )
     await shot("edit-no-build")
     pass("the edit screen: a canvas made from a prompt lands on its chat, with no page and no Preview")
-    // The lane while the build works: its phase and the line saying what it is doing, over the
-    // composer. The mock publishes 2.5s after the start, so this is the one window it is drawn in.
+    // The lane while the build works: the block it is in — its request, the visits behind it and the
+    // line saying what it is doing — over the composer. The mock holds its check a beat, so this is
+    // the window it is drawn in.
     await shot("building")
 
     // The first version lands through the live record, so Preview is drawn without a reload, and
@@ -178,6 +184,31 @@ await flow(
     assert.equal(await page.locator(FRAME).count(), 0, "the edit screen draws no page")
     await field.fill(EDIT)
     await field.press(SEND_CHORD)
+    // The lane draws the build it is in while it works: the host's listing carries the working build,
+    // so its request, the visits it has made and the line under the one it is in are drawn before it
+    // publishes. The mock holds its check a beat, which is this window.
+    const working = page.locator("[data-canvas-build]").filter({ hasText: EDIT })
+    await working.locator("[data-build-activity]").waitFor({ timeout: 30_000 })
+    assert.deepEqual(
+      await working
+        .locator("[data-build-step]")
+        .evaluateAll((nodes) =>
+          nodes.map((node) => [
+            node.getAttribute("data-build-step"),
+            node.hasAttribute("data-working"),
+          ]),
+        ),
+      [
+        ["planning", false],
+        ["building", false],
+        ["checking", true],
+      ],
+      "the build draws the visits it made, and the one it is in is the live one",
+    )
+    await shot("edit-building")
+    pass(
+      "the edit screen: the working build draws its request, its steps, and the step it is in live",
+    )
     await page.getByText("v2", { exact: true }).waitFor({ timeout: 40_000 })
     // The lane is builds, not the transcript (G9, G10): the request it took is the row's line, and
     // the version it wrote is the row's version, drawn on the edit screen itself.
@@ -187,9 +218,129 @@ await flow(
     assert.equal(
       await page.locator("[data-canvas-builds] [data-build-details]").count() > 0,
       true,
-      "each build offers Details",
+      "each build offers ready",
+    )
+    // The line under the reply keeps the version and offers ready: one press opens the whole build.
+    const readyLine = builds
+      .locator("[data-canvas-build]")
+      .filter({ hasText: EDIT })
+      .locator("[data-build-version]")
+      .first()
+    await readyLine.waitFor({ timeout: 20_000 })
+    assert.equal(
+      (await readyLine.innerText()).trim(),
+      "Version 2 ready",
+      "the line is one row reading the version the build published and ready",
+    )
+    assert.equal(
+      await page.locator("[data-build-details]").first().evaluate(
+        (one) => one.tagName,
+      ),
+      "BUTTON",
+      "and the whole row is the press, not a word inside it",
     )
     pass("the edit screen: the lane draws the build's request and the version it published")
+
+    // A visit's span is the mock's clock, so a marker is read by the mark it carries and never by
+    // the duration beside it.
+    const build = builds.locator("[data-canvas-build]").filter({ hasText: EDIT })
+    const markers = build.locator("[data-build-step]")
+    // The build publishes a beat after it checks, and only then is the step it checked in pressable.
+    await build.locator("[data-build-version]").waitFor({ timeout: 30_000 })
+    await until(
+      async () => (await markers.count()) === 3,
+      20_000,
+      "the lane to draw a marker for each of the build's three drawn steps",
+    )
+    assert.deepEqual(
+      await markers.evaluateAll((nodes) =>
+        nodes.map((node) => node.getAttribute("data-build-step")),
+      ),
+      ["planning", "building", "checking"],
+      "the markers are the visits the build made, in the order it made them",
+    )
+    assert.ok(
+      (await markers.nth(2).innerText()).includes("Checks passed"),
+      "the visit that checked says what its check found",
+    )
+    assert.equal(
+      await builds.getByText(checkReport(2)).count(),
+      0,
+      "the build's checking turn is not drawn in the lane",
+    )
+    pass(
+      "the edit screen: the lane draws a marker per step the build took, with the check's flag on the one that checked",
+    )
+
+    await markers.nth(2).click()
+    // The step opens in the pop-up a subagent's row opens: the standard bottom sheet on a phone,
+    // which rests at the foot of the screen and is dragged by its handle.
+    const stepSheet = page.locator('[data-popup-form="sheet"]')
+    await stepSheet.waitFor({ timeout: 20_000 })
+    await stepSheet.getByText(checkReport(2)).waitFor({ timeout: 20_000 })
+    assert.equal(
+      (await stepSheet.locator('[data-slot="sheet-title"]').innerText()).trim(),
+      "Checking",
+      "the sheet is titled for the step whose marker was pressed",
+    )
+    assert.equal(
+      (await stepSheet.locator('[data-slot="sheet-description"]').innerText()).trim(),
+      EDIT,
+      "and describes the build by its first request",
+    )
+    assert.equal(
+      await stepSheet.getByText(checkReport(1)).count(),
+      0,
+      "the build before this one checked too, and its report is not in this step's window",
+    )
+    // One scroller, not two: the pop-up's box holds the thread, and the thread's own viewport is
+    // what moves, so a long step never scrolls its header away inside a second scroller.
+    const stepBox = await page.evaluate(() => {
+      const popup = document.querySelector('[data-popup-form="sheet"]')
+      const box = popup?.querySelector('[data-slot="build-transcript"]')
+      const handle = popup?.querySelector('[aria-label="Close"]')
+      const viewport = popup?.querySelector('[data-slot="message-scroller-viewport"]')
+      if (!popup || !box || !handle) return null
+      const sheet = popup.getBoundingClientRect()
+      const grip = handle.getBoundingClientRect()
+      return {
+        top: Math.round(sheet.top),
+        bottom: Math.round(sheet.bottom),
+        grip: Math.round(grip.top),
+        box: box.scrollHeight - box.clientHeight,
+        thread: Boolean(viewport),
+        viewport: viewport ? Math.round(viewport.clientHeight) : 0,
+        screen: window.innerHeight,
+      }
+    })
+    console.log(
+      `step sheet 390 — sheet ${stepBox?.top}→${stepBox?.bottom} of ${stepBox?.screen}, ` +
+        `handle at ${stepBox?.grip}, pop-up box scrolled ${stepBox?.box}px, ` +
+        `thread viewport ${stepBox?.viewport}px`,
+    )
+    assert.ok(stepBox, "the step's pop-up draws its box, its handle and the thread's viewport")
+    assert.ok(
+      Math.abs(stepBox.bottom - stepBox.screen) <= 1,
+      `the sheet rests at the foot of the screen (bottom ${stepBox.bottom} of ${stepBox.screen})`,
+    )
+    assert.ok(stepBox.top > 0, `and rises from it (top ${stepBox.top})`)
+    assert.ok(
+      stepBox.grip - stepBox.top < 64,
+      `the handle stands at the sheet's head (handle ${stepBox.grip}, sheet top ${stepBox.top})`,
+    )
+    assert.equal(
+      stepBox.box,
+      0,
+      `the pop-up's own box never scrolls a second time (${stepBox.box}px past it)`,
+    )
+    assert.ok(
+      stepBox.thread && stepBox.viewport > 0,
+      `the thread's own viewport is the bounded scroller inside it (${stepBox.viewport}px)`,
+    )
+    await shot("step-sheet")
+    pass("the edit screen: a checking marker opens a sheet holding that step's turn, and no other")
+    await page.keyboard.press("Escape")
+    await stepSheet.waitFor({ state: "detached", timeout: 10_000 })
     await shot("edited")
     pass("the edit screen: an edit sent from its chat lands as version 2")
 
@@ -854,6 +1005,58 @@ await flow(
     )
     await shot("narrow-even-split")
     pass("a narrow screen: the two panes split the row evenly, and the composer fits its lane")
+
+    // 1024 is where a pop-up turns from a bottom sheet into the side drawer, and a step's transcript
+    // takes that same standard form: full height on the right, not a sheet over the lane.
+    const narrowBuild = page.locator("[data-canvas-build]").first()
+    await narrowBuild.locator("[data-build-version]").first().waitFor({ timeout: 40_000 })
+    await narrowBuild.locator("[data-build-step]").last().click()
+    const narrowStep = page.locator('[data-popup-form="drawer"]')
+    await narrowStep.waitFor({ timeout: 20_000 })
+    // The drawer slides in from the right; only at rest is its edge the screen's.
+    await settled(page)
+    await narrowStep
+      .locator('[data-slot="message-scroller-viewport"]')
+      .waitFor({ timeout: 20_000 })
+    const drawerBox = await page.evaluate(() => {
+      const popup = document.querySelector('[data-popup-form="drawer"]')
+      const box = popup?.querySelector('[data-slot="build-transcript"]')
+      const viewport = popup?.querySelector('[data-slot="message-scroller-viewport"]')
+      if (!popup || !box) return null
+      const drawn = popup.getBoundingClientRect()
+      return {
+        top: Math.round(drawn.top),
+        right: Math.round(drawn.right),
+        height: Math.round(drawn.height),
+        width: Math.round(drawn.width),
+        box: box.scrollHeight - box.clientHeight,
+        viewport: viewport ? Math.round(viewport.clientHeight) : 0,
+        screen: { width: window.innerWidth, height: window.innerHeight },
+      }
+    })
+    console.log(
+      `step drawer 1024 — ${drawerBox?.width}×${drawerBox?.height} at right ${drawerBox?.right} ` +
+        `of ${drawerBox?.screen?.width}, pop-up box scrolled ${drawerBox?.box}px, ` +
+        `thread viewport ${drawerBox?.viewport}px`,
+    )
+    assert.ok(drawerBox, "1024 opens the step in the standard drawer, with the thread's box in it")
+    assert.ok(
+      Math.abs(drawerBox.right - drawerBox.screen.width) <= 1 &&
+        Math.abs(drawerBox.height - drawerBox.screen.height) <= 1,
+      `the drawer is the screen's full height on its right (right ${drawerBox.right} of ` +
+        `${drawerBox.screen.width}, height ${drawerBox.height} of ${drawerBox.screen.height})`,
+    )
+    assert.equal(
+      drawerBox.box,
+      0,
+      `the pop-up's own box never scrolls a second time (${drawerBox.box}px past it)`,
+    )
+    assert.ok(
+      drawerBox.viewport > 0,
+      `the thread's own viewport is the bounded scroller inside it (${drawerBox.viewport}px)`,
+    )
+    await shot("step-sheet-1024")
+    pass("a narrow screen: a step's transcript opens in the standard drawer, the thread its one scroller")
   },
   { viewport: { width: 1024, height: 900 } },
 )

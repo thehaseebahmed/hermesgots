@@ -2501,7 +2501,7 @@ export async function getCanvas(
  * build's request, summary, check flag and version, and a working one's phase and activity line.
  *
  * The lane draws these instead of the transcript, so the read is the canvas's own history rather
- * than a session's rows — a build's transcript stays behind `Details`, one session at a time.
+ * than a session's rows — a build's transcript stays behind `ready`, one session at a time.
  */
 export async function getCanvasBuilds(config: HermesConfig, id: string, signal?: AbortSignal) {
   const response = await request(`${canvasRoot(config, id)}/builds`, {

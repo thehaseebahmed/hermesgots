@@ -552,7 +552,11 @@ const RESEARCH_WRITERS = process.env.MOCK_RESEARCH_WRITERS !== "off"
 // mock-canvas.mjs's pages at its first version, so a flow can visit a page whose asks it knows
 // without a bot writing it: `plain` asks for no library, `many` for chart, d3 and Day.js.
 const CANVAS = process.env.MOCK_CANVAS !== "0"
-const CANVASES = createCanvasStore()
+const CANVASES = createCanvasStore({
+  transcripts,
+  note: noteEvent,
+  nextRowId: () => ++lastRowId,
+})
 // Rooms (mock-rooms.mjs): MOCK_ROOMS=0 is a plugin whose host has no room driver, so its routes 404,
 // `rooms` is missing from the features, and no device lists a room.
 const ROOMS = process.env.MOCK_ROOMS !== "0"

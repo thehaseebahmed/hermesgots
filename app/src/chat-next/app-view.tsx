@@ -89,6 +89,7 @@ export function AppThreadView({
   agents,
   failure,
   firstReadOut,
+  noTurns,
   older,
   origin,
   earlier,
@@ -205,6 +206,10 @@ export function AppThreadView({
   // read is not empty, since the greeting would say there is nothing here.
   const empty =
     !flow.length && !held.length && !queue?.items.length && !earlier && !streaming && !firstReadOut
+  // The words a view says where it has no turn to draw, standing in the place the messages would:
+  // the thread's own marks — a failure, a page above it still to be read, the archive — stay around
+  // them rather than being replaced by the greeting a chat with nothing said wears.
+  const saysNothing = noTurns !== undefined && !flow.length
   const unstarted = Boolean(blank) && !messages.length && !streaming && !queue?.items.length
   // The one loader a thread has, over a thread held nowhere (ADR 0084). `flow` is what the thread
   // draws — messages and compaction dividers — so a thread the device holds any of is never loading.
@@ -236,7 +241,7 @@ export function AppThreadView({
             session={{ repos: blank.repos }}
             id={chatId}
           />
-        ) : empty ? (
+        ) : empty && !saysNothing ? (
           <EmptyChatState
             botId={profile?.botId}
             configured={Boolean(profile?.baseUrl.trim())}
@@ -278,6 +283,7 @@ export function AppThreadView({
                       </Button>
                     </div>
                   )}
+                  {saysNothing ? noTurns : null}
                   <AgentsContext.Provider value={source}>
                     {drawn.map((entry) => {
                       if (entry.kind === "compaction")

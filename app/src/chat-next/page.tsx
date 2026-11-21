@@ -429,6 +429,12 @@ export interface ThreadViewProps {
    */
   firstReadOut: boolean
   /**
+   * What this view draws where a thread with no turns draws its empty state: a build's step sheet
+   * says it holds no messages in place of the greeting a chat with nothing said wears. Absent, the
+   * thread draws its own empty state, as every thread that names none has always drawn it.
+   */
+  noTurns?: ReactNode
+  /**
    * Older pages of the transcript are being read (`reading`) or the last read failed (`failed`, and
    * `retry` reads on from there); absent once the chat is whole, so nothing is drawn for it then.
    */

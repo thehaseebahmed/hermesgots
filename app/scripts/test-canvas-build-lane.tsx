@@ -19,15 +19,18 @@ import {
   click,
   composerField,
   find,
+  findAll,
   findText,
   json,
   laptop,
+  missing,
   mount,
   seedSettings,
   settle,
   type,
   transcriptRows,
   until,
+  wordsOf,
 } from "./component-kit.tsx"
 
 const PAGE = `<!doctype html>
@@ -53,8 +56,8 @@ const BUILDS = [
   {
     id: "b2",
     session: "canvas-build-2",
-    phase: "building",
-    activity: "Building the page",
+    phase: "failed",
+    activity: null,
     requests: ["and make it blue too"],
     summary: null,
     flag: null,
@@ -75,6 +78,23 @@ const BUILDS = [
     created_at: 1,
   },
 ]
+
+const WORKING = {
+  id: "b3",
+  session: "canvas-build-1",
+  phase: "building",
+  activity: "Building the page",
+  requests: ["make the heading say Split the bill"],
+  summary: null,
+  flag: null,
+  version: null,
+  at: 4,
+  created_at: 4,
+  steps: [
+    { phase: "planning", start: 0, end: 2_000 },
+    { phase: "building", start: 2_000 },
+  ],
+}
 
 /** What the host's one-canvas read answers, with the build a case wants it to carry. */
 const canvasAt = (build?: unknown) => ({
@@ -210,6 +230,7 @@ test(
       read: [],
       posted: [],
       acted: [],
+      builds: [WORKING],
     }
     serve(host)
     await seed()
@@ -227,6 +248,28 @@ test(
         !host.read.includes("gots-chat-1"),
         "the canvas's own session holds nothing while a build runs",
       )
+      const working = find('[data-canvas-build="b3"]')
+      assert.ok(working, "the working build is drawn as a chat block")
+      assert.ok(
+        working.querySelector('[data-build-request]')?.closest('[data-slot="bubble"]'),
+        "its request wears the chat's own user bubble",
+      )
+      assert.deepEqual(
+        findAll('[data-canvas-build="b3"] [data-build-step]').map((one) =>
+          one.getAttribute("data-build-step"),
+        ),
+        ["planning", "building"],
+        "and its steps are drawn, the last one still open",
+      )
+      assert.equal(
+        wordsOf(working.querySelector("[data-build-activity]")),
+        "Building the page",
+        "with the line saying what it is doing",
+      )
+      assert.ok(
+        missing("[data-canvas-builds] .border-dashed"),
+        "no dashed card stands in the lane",
+      )
       // A request is queued on the plugin, which hands it to the build or opens one: nothing is
       // posted to Hermes as a run of the canvas's own session.
       await sendInTheLane("and make it blue too")
@@ -241,7 +284,7 @@ test(
 )
 
 test(
-  "the lane draws builds and opens a build's transcript from Details",
+  "the lane draws builds and opens a build's transcript from ready",
   laptop(async () => {
     const host: Host = {
       canvas: canvasAt({ ...BUILD, phase: "building", activity: "Building the page" }),
@@ -250,7 +293,7 @@ test(
       read: [],
       posted: [],
       acted: [],
-      builds: BUILDS,
+      builds: [WORKING, ...BUILDS],
     }
     serve(host)
     await seed()
@@ -261,23 +304,46 @@ test(
         await noteChange(connectionKey(bot), "canvas")
       })
       await until(
-        () => Boolean(findText("button", "Details")),
+        () => Boolean(find("[data-build-details]")),
         "the lane's builds to draw",
       )
-      const drawn = document.body.textContent ?? ""
-      // A finished build is its request, its summary, its check flag and its version, newest at
-      // the foot: the transcript is not drawn at all.
+      const request = find('[data-canvas-build="b1"] [data-build-request]')
+      assert.ok(request, "the finished build's request is drawn")
       assert.ok(
-        drawn.includes("make the heading say Split the bill"),
-        "the finished build's request is drawn",
+        request.closest('[data-slot="bubble"]'),
+        "the request wears the chat's own user bubble",
+      )
+      assert.equal(
+        request.closest('[data-slot="message"]')?.getAttribute("data-align"),
+        "end",
+        "the request sits on the right, where a chat draws what was said to the bot",
+      )
+      const summary = find('[data-canvas-build="b1"] [data-build-summary]')
+      assert.ok(summary, "its summary is drawn")
+      assert.ok(
+        summary.querySelector('[data-slot="markdown"]'),
+        "the summary is drawn as the bot's words",
       )
       assert.ok(
-        drawn.includes("The heading now says Split the bill."),
-        "its summary is drawn",
+        wordsOf(summary).includes("The heading now says Split the bill."),
+        "and says what the build answered",
       )
-      assert.ok(drawn.includes("Checks passed"), "its check flag is drawn")
-      assert.ok(drawn.includes("Version 3"), "the version it published is drawn")
-      // The lane draws builds in the thread's place: a chat's own message scroller is not there.
+      assert.ok(!summary.closest('[data-slot="bubble"]'), "the bot's words wear no bubble")
+      const line = find('[data-canvas-build="b1"] [data-build-version]')?.parentElement
+      assert.ok(line, "the version's line is drawn")
+      assert.ok(
+        summary.nextElementSibling === line,
+        "the line stands directly under the reply it belongs to",
+      )
+      assert.deepEqual(
+        [...line.children].map((one) => wordsOf(one)),
+        ["Checks passed", "Version 3 ready", ""],
+        "the line is one row: the flag this build has no marker to carry, then the version and ready",
+      )
+      assert.ok(
+        line.querySelector('[data-slot="work-mark"]'),
+        "and ready wears the chevron a work row draws",
+      )
       assert.ok(
         document.querySelector("[data-canvas-builds]"),
         "the lane draws its builds",
@@ -286,21 +352,58 @@ test(
         !document.querySelector('[aria-label="Messages"]'),
         "no transcript is drawn in the lane",
       )
-      // The build working now is its phase and the line saying what it is doing.
-      assert.ok(drawn.includes("Building"), "the open build's phase is drawn")
-      assert.ok(drawn.includes("Building the page"), "and the line saying what it is doing")
+      const failed = find('[data-canvas-build="b2"] [data-build-summary]')
+      assert.ok(failed, "a build with no summary still draws that place")
+      assert.equal(wordsOf(failed), "The build failed.", "in the lane's own words")
+      const failedLine = find('[data-canvas-build="b2"] [data-build-details]')
+      assert.ok(failedLine, "and still draws its line")
+      assert.ok(
+        missing('[data-canvas-build="b2"] [data-build-version]'),
+        "a build that published no version names none",
+      )
+      assert.deepEqual(
+        [...failedLine.children].map((one) => wordsOf(one)),
+        ["ready", ""],
+        "a build with no version still offers ready on its line",
+      )
+      const working = find('[data-canvas-build="b3"]')
+      assert.ok(working, "the working build is drawn as a block of the lane")
+      assert.equal(
+        wordsOf(working.querySelector('[data-build-step][data-working="true"]')),
+        "Building",
+        "the phase it is in is its working marker",
+      )
+      assert.equal(
+        wordsOf(working.querySelector("[data-build-activity]")),
+        "Building the page",
+        "and the line saying what it is doing hangs under it",
+      )
 
-      // Details opens that build's transcript, read-only, over its own session.
+      // ready opens that build's transcript, read-only, over its own session, in the pop-up a
+      // subagent's row opens.
       await click(find('[data-canvas-build="b1"] [data-build-details]'))
       await settle()
       await until(
-        () => host.read.includes("canvas-build-1"),
-        "the build's transcript to be read",
+        () => host.read.includes("canvas-build-1") && Boolean(find("[data-popup-form]")),
+        "the build's transcript to be read and its pop-up to open",
       )
-      assert.ok(
-        document.body.textContent?.includes("Build"),
-        "the transcript's sheet is open",
+      assert.equal(
+        find("[data-popup-form]")?.getAttribute("data-popup-form"),
+        "drawer",
+        "a laptop opens the standard drawer a subagent's row opens",
       )
+      assert.equal(
+        wordsOf(find('[data-popup-form] [data-slot="sheet-title"]')),
+        "Build",
+        "the whole build's pop-up is titled by the build",
+      )
+      assert.equal(
+        wordsOf(find('[data-popup-form] [data-slot="sheet-description"]')),
+        "make the heading say Split the bill",
+        "and describes the build by its first request",
+      )
+      const box = find('[data-popup-form] [data-slot="build-transcript"]')
+      assert.ok(box?.firstElementChild, "the build's thread is mounted in the pop-up's own box")
     })
   }),
 )

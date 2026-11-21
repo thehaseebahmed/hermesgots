@@ -246,10 +246,34 @@ export function seedCanvas(store, name) {
   return canvas
 }
 
-export function createCanvasStore() {
+export function createCanvasStore(host) {
+  const { transcripts, note, nextRowId } = host
   const canvases = new Map()
   // The canvas a run's session edits, so a turn in a chat finds its canvas without walking them all.
   const bySession = new Map()
+
+  const said = new Set()
+
+  const askedAt = (canvas) => {
+    const asked = (transcripts.get(canvas.session_id) ?? [])
+      .filter((row) => row.role === "user" && !said.has(row.id))
+      .at(-1)
+    return typeof asked?.timestamp === "number" ? Math.round(asked.timestamp * 1000) : undefined
+  }
+
+  const say = (canvas, words) => {
+    const rows = transcripts.get(canvas.session_id) ?? []
+    const id = nextRowId()
+    said.add(id)
+    rows.push({
+      id,
+      session_id: canvas.session_id,
+      timestamp: Date.now() / 1000,
+      role: "user",
+      content: words,
+    })
+    transcripts.set(canvas.session_id, rows)
+  }
 
   /**
    * The greatest version stored under the record's pointer, as the plugin's `_greatest_below` reads:
@@ -310,7 +334,7 @@ export function createCanvasStore() {
   // answers, so a client that renamed or pinned a canvas keeps the page it already draws.
   const record = (c) => ({ ...summary(c), can_undo: below(c) !== null })
 
-  return { canvases, bySession, summary, record, full, below }
+  return { canvases, bySession, summary, record, full, below, askedAt, say, note }
 }
 
 /**
@@ -323,21 +347,115 @@ function picture(canvas) {
 }
 
 /**
- * Opens the build a request is worked in, as `builds.py` does when the queue hands a canvas chat's
- * item to a build: the lane draws its phase and the line saying what it is doing until the version it
- * writes publishes it. The mock works in one turn, so a build here goes straight to `building`, and
- * the version `writeVersion` writes is what ends it `published`.
+ * The line a build's phase says while it is in it, as `builds.py`'s ACTIVITY says it: the five
+ * phases the host records, worded as the host words them. A lane drawn against this mock says what
+ * a real host's lane says, so a copy that drifts is a copy a reader is shown.
  */
-function openBuild(canvas, request) {
+const ACTIVITY = {
+  planning: "Planning the change",
+  waiting: "Waiting for your approval",
+  building: "Building the page",
+  checking: "Checking the rendered page",
+  publishing: "Publishing the version",
+}
+
+/**
+ * How long the mock's check takes. A visit's window is half-open in whole seconds (the app floors
+ * both edges), so a check that ended in the second it began would hold no turn at all: the publish
+ * that follows is held a beat, and the report it wrote is in the visit's window. The beat is also
+ * the window a flow reads the lane in while the build works, so it is long enough for a browser to
+ * be in it.
+ */
+const CHECK_MS = 3000
+
+/**
+ * What the mock's check answered: this host has no browser, so the one thing it can read is the page
+ * it just wrote, and the page it writes always holds its heading and its box. The report names the
+ * version it read, so one build's step is told from another's in a lane's sheet.
+ */
+function checkOf(version) {
+  return { flag: "passing", words: `Version ${version} drew its heading and its box.` }
+}
+
+function place(build, phase, at) {
+  const open = build.steps.findLast((step) => step.end === undefined)
+  if (open?.phase !== phase) {
+    if (open) open.end = at
+    build.steps.push({ phase, start: at })
+  }
+  build.phase = phase
+  build.activity = ACTIVITY[phase] ?? null
+  build.at = at
+}
+
+function openBuild(store, canvas, request) {
   if (!canvas.builds) return
+  const at = Date.now()
+  const asked = Math.min(store.askedAt(canvas) ?? at, at)
   canvas.build = {
     id: `b_${randomUUID().slice(0, 8)}`,
-    session: `canvas-${randomUUID().slice(0, 8)}`,
-    phase: "building",
-    activity: "Building the page",
+    // This mock holds no session of a build's own: a canvas's work runs in its chat.
+    session: canvas.session_id,
+    phase: "planning",
+    activity: ACTIVITY.planning,
     requests: [typeof request === "string" && request ? request : canvas.prompt],
-    at: Date.now(),
+    steps: [{ phase: "planning", start: asked }],
+    at,
+    created_at: asked,
   }
+  place(canvas.build, "building", at)
+}
+
+/**
+ * The build working now, as the lane's listing answers it: the same row a published build is, with
+ * the visits it has made so far and nothing it has not published yet.
+ */
+function workingRow(build) {
+  return {
+    id: build.id,
+    session: build.session,
+    phase: build.phase,
+    activity: build.activity ?? null,
+    requests: build.requests,
+    summary: null,
+    flag: null,
+    version: null,
+    steps: build.steps,
+    at: build.at,
+    created_at: build.created_at,
+  }
+}
+
+function publishBuild(store, canvas, version, edited) {
+  const build = canvas.build
+  if (!build) return
+  const at = Date.now()
+  place(build, "checking", at)
+  const check = checkOf(version)
+  build.steps.at(-1).flag = check.flag
+  store.say(canvas, check.words)
+  setTimeout(() => {
+    const done = Date.now()
+    place(build, "publishing", done)
+    build.steps.at(-1).end = done
+    canvas.buildRows.unshift({
+      id: build.id,
+      session: build.session,
+      phase: "published",
+      activity: null,
+      requests: build.requests,
+      summary: edited
+        ? `The page now says ${edited.replace(/[.!?]+$/, "")}.`
+        : "The page is written.",
+      flag: check.flag,
+      version,
+      steps: build.steps,
+      at: done,
+      created_at: build.created_at,
+    })
+    if (canvas.build === build) canvas.build = null
+    store.note("canvas", canvas.session_id)
+  }, CHECK_MS)
 }
 
 /**
@@ -346,7 +464,7 @@ function openBuild(canvas, request) {
  * number, then the page is built from what the version was asked to say. The canvas's data — the
  * box, the count — sits outside the versions, so a new one opens with what the reader left.
  */
-function writeVersion(canvas, words) {
+function writeVersion(store, canvas, words) {
   canvas.version += 1
   canvas.at = Date.now()
   canvas.versions = canvas.versions.filter((one) => one.version < canvas.version)
@@ -358,28 +476,7 @@ function writeVersion(canvas, words) {
     tools: canvas.tools,
   })
   if (canvas.versions.length > KEEP) canvas.versions.shift()
-  // A canvas whose requests are builds publishes one per write, as `builds.py` does: the request it
-  // took, the summary it ended on, the check flag a host with no browser gives it, and the version it
-  // wrote. The build the request opened is the row it publishes, so the lane's working build becomes
-  // its history. The mock runs no checks of its own, so every build here is `unchecked`.
-  if (canvas.builds) {
-    const open = canvas.build
-    canvas.buildRows.unshift({
-      id: open?.id ?? `b_${randomUUID().slice(0, 8)}`,
-      session: open?.session ?? `canvas-${randomUUID().slice(0, 8)}`,
-      phase: "published",
-      activity: null,
-      requests: open?.requests ?? [edited || canvas.prompt],
-      summary: edited
-        ? `The page now says ${edited.replace(/[.!?]+$/, "")}.`
-        : "The page is written.",
-      flag: "unchecked",
-      version: canvas.version,
-      at: canvas.at,
-      created_at: open?.at ?? canvas.at,
-    })
-    canvas.build = null
-  }
+  if (canvas.builds) publishBuild(store, canvas, canvas.version, edited)
 }
 
 /**
@@ -389,8 +486,8 @@ function writeVersion(canvas, words) {
 export function editCanvasSession(store, sessionId, words) {
   const canvas = store.bySession.get(sessionId)
   if (!canvas) return null
-  openBuild(canvas, words)
-  writeVersion(canvas, words)
+  openBuild(store, canvas, words)
+  writeVersion(store, canvas, words)
   return canvas
 }
 
@@ -623,7 +720,7 @@ export async function handleCanvas(
       // The app says this canvas's requests are builds when it knows the feature (ADR 0170), and the
       // mock answers it: its lane then draws builds, and each version it writes is one of them.
       canvas.builds = body?.builds === true
-      openBuild(canvas, prompt)
+      openBuild(store, canvas, prompt)
       const { chat_id: chatId } = canvas
       canvases.set(canvas.id, canvas)
       bySession.set(canvas.session_id, canvas)
@@ -639,7 +736,7 @@ export async function handleCanvas(
       // The gap is what lets a wide screen draw version 0 — the Canvas icon over "Canvas is building…"
       // — before the page lands, with room for a phone to reach its chat's edit screen in the meantime.
       setTimeout(() => {
-        writeVersion(canvas)
+        writeVersion(store, canvas)
         noteEvent("canvas", canvas.session_id)
       }, 2500)
       json(res, 202, { object: "gots.canvas", canvas: full(canvas) })
@@ -699,8 +796,15 @@ export async function handleCanvas(
       return true
     }
     // A canvas from before builds answers an empty list rather than a refusal: its lane falls back to
-    // its own chat, which is what the app draws for a record with no `builds` flag anyway.
-    json(res, 200, { object: "gots.canvas.builds", builds: canvas.buildRows ?? [] })
+    // its own chat, which is what the app draws for a record with no `builds` flag anyway. The build
+    // working now is a row of the list too, as `builds.py`'s `builds_of` answers every build the
+    // canvas has: the lane draws the block it is in while it works, and a list of finished ones alone
+    // would leave that block undrawn until the build ended. Publishing moves the same row into the
+    // published list, so no build is drawn twice.
+    json(res, 200, {
+      object: "gots.canvas.builds",
+      builds: [...(canvas.build ? [workingRow(canvas.build)] : []), ...(canvas.buildRows ?? [])],
+    })
     return true
   }
 
