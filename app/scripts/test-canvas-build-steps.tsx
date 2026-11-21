@@ -687,3 +687,49 @@ test(
     )
   }),
 )
+
+test(
+  "a build's sheet follows the build to the version it publishes",
+  laptop(async () => {
+    await drawLane([WORKING], async () => {
+      await laneDrew("b3")
+      await click(find('[data-canvas-build="b3"] [data-build-details]'))
+      await until(() => Boolean(find("[data-popup-form]")), "the run's pop-up to open")
+      assert.equal(
+        wordsOf(find('[data-popup-form] [data-slot="sheet-title"]')),
+        "Building",
+        "a run opened while the build works is titled by what it is doing",
+      )
+      // The host publishes the build while its run is open: the row the lane holds its id by moves,
+      // and the sheet is about that row rather than about the one it was pressed as.
+      serve(
+        [
+          {
+            ...WORKING,
+            phase: "published",
+            activity: null,
+            summary: "The heading is blue.",
+            flag: "passing",
+            version: 4,
+            steps: [...WORKING.steps, { phase: "publishing", start: 1_760_000_400_000 }],
+          },
+        ],
+        [],
+      )
+      await act(async () => {
+        await refreshCanvas("c1")
+        await noteChange(connectionKey((await db.profiles.get("bot-1"))!), "canvas")
+      })
+      await until(
+        () => wordsOf(find('[data-popup-form] [data-slot="sheet-title"]')) === "Build",
+        "the sheet to follow the build to the version it published",
+      )
+      assert.ok(
+        findAll("[data-popup-form] [data-build-mark]").some((one) =>
+          wordsOf(one).startsWith("Publishing"),
+        ),
+        "and the visit the build ended in is marked in the run as it happens",
+      )
+    })
+  }),
+)

@@ -609,6 +609,15 @@ class PlanWaitingTest(unittest.TestCase):
         seeded = builds.seed(self.host.path, self.host.id)
         self.assertIn("canvas_plan", seeded, "a build is told to plan before it writes")
 
+    def test_the_seed_tells_a_question_from_a_change(self) -> None:
+        """The guide says a question is answered rather than built, and the seed is what a build is
+        told before its first turn: told only to plan, a build asked what the page does files a plan
+        the reader has to Approve to get an answer they never asked to approve (G2)."""
+        seeded = builds.seed(self.host.path, self.host.id)
+        self.assertIn("answered in words", seeded, "a question is answered, not planned")
+        self.assertIn("file no plan and write nothing", seeded, "and nothing is planned for it")
+        self.assertIn("A request to change it is a build", seeded, "while a change is still a build")
+
 
 def passing_answer(request: Dict[str, Any]) -> Dict[str, Any]:
     """What the harness page answers for a draft that passes every test."""

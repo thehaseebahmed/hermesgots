@@ -516,7 +516,7 @@ test(
     /** The header's one control, shaped, named and then pressed where `part` names. */
     const press = async (where: string, part: "the title" | "the subtitle" | "the block") => {
       await until(
-        () => Boolean(find('[data-canvas-options-open]')),
+        () => Boolean(find("[data-canvas-options-open]")),
         "the canvas's title in the shared header",
       )
       const heading = find('[data-slot="header-title"]')
@@ -535,7 +535,10 @@ test(
 
       const line = find('[data-slot="header-line"]')
       const block = heading!.parentElement
-      assert.ok(block && block.contains(line), "the line is drawn in the block the press answers on")
+      assert.ok(
+        block && block.contains(line),
+        "the line is drawn in the block the press answers on",
+      )
       // The head is one block: the thumb's 44px box is the block the press answers on, and the title's
       // own box is its words' height — a 44px box drawn round them is what held the line away.
       assert.ok(
@@ -768,7 +771,11 @@ test("a phone's canvas opens on Preview and Edit is an address with a way back",
 
       await click(find('[data-canvas-flip="preview"]'))
       await until(() => Boolean(find("iframe[data-canvas-frame]")), "the page the corner draws")
-      assert.equal(nav(), `REPLACE:/canvas/${CANVAS.id}`, "Preview puts the page where the chat was")
+      assert.equal(
+        nav(),
+        `REPLACE:/canvas/${CANVAS.id}`,
+        "Preview puts the page where the chat was",
+      )
       assert.match(drawn(), /var at=450/, "the page comes back where the reader left it")
     })
   }
@@ -807,7 +814,10 @@ test(
       const head = find("header")
       const field = composerField()
       assert.ok(head && lane!.contains(head), "the canvas's head is drawn in the lane")
-      assert.ok(field && lane!.contains(field), "and the chat's field under it, in that same column")
+      assert.ok(
+        field && lane!.contains(field),
+        "and the chat's field under it, in that same column",
+      )
       assert.equal(lane!.nextElementSibling, page, "the lane is the page's previous sibling")
       assert.ok(
         !lane!.contains(find("iframe[data-canvas-frame]")),
@@ -1614,10 +1624,7 @@ test(
         assert.ok(find('[data-canvas-flip="preview"]'), "the corner is still the way to the page")
         const back = labelled("button", "All canvases")
         assert.ok(back, "and the head leads back to the list the chat was opened from")
-        assert.ok(
-          missing('[aria-label="Open conversations"]'),
-          "with no drawer drawn beside it",
-        )
+        assert.ok(missing('[aria-label="Open conversations"]'), "with no drawer drawn beside it")
         assert.equal(pressBack(), "screen", "the chat takes the press")
         assert.deepEqual(history.backs, [1], "and steps back to the list behind it")
         await click(back)
@@ -1731,7 +1738,11 @@ test(
     await drawCanvas(["/canvas/c5/edit"], async () => {
       await until(() => /This canvas is gone/.test(text()), "the gone sentence")
       assert.ok(missing('[data-canvas-flip="preview"]'), "with nothing to flip to")
-      assert.equal(find('[data-slot="header-title"]')?.tagName, "H1", "the title is still the heading")
+      assert.equal(
+        find('[data-slot="header-title"]')?.tagName,
+        "H1",
+        "the title is still the heading",
+      )
       assert.ok(
         missing("[data-canvas-options-open]"),
         "and no control for a canvas that isn't there",
@@ -2107,6 +2118,25 @@ test(
         !text().includes("This canvas is gone"),
         "a canvas the bot holds is never called gone",
       )
+    })
+  }),
+)
+
+test(
+  "a canvas nobody could be asked about is read, not said to be away",
+  atWidth(390, async () => {
+    // A phone opens a canvas from a notification with nothing answering: no list, no chat that names
+    // a bot, and no copy. Nothing has been asked about this canvas, so nothing may say its bot isn't
+    // answering — the one true thing the screen knows is that it is reading.
+    serveCanvases({ version: 3, undos: 0, failAll: true })
+    await seedCanvasChat()
+    await drawCanvas(["/canvas/c11"], async () => {
+      await until(() => /Reading the canvas/.test(text()), "the reading sentence")
+      assert.ok(
+        !/isn't answering/.test(text()),
+        "and never that its bot is away, since nothing was asked of it",
+      )
+      assert.ok(!/This canvas is gone/.test(text()), "nor that the canvas is gone")
     })
   }),
 )

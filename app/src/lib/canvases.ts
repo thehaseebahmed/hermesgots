@@ -52,7 +52,14 @@ import {
 import { sweepCanvas } from "@/lib/canvas-sweep"
 import { hostTargets, serverConfig } from "@/lib/connection"
 import { hasPluginFeature } from "@/lib/hermes"
-import { db, getSettings, listEnabledProfiles, type Attachment, type ModelChoice, type Profile } from "@/lib/db"
+import {
+  db,
+  getSettings,
+  listEnabledProfiles,
+  type Attachment,
+  type ModelChoice,
+  type Profile,
+} from "@/lib/db"
 import { equal } from "@/lib/equal"
 import { LIST_MS, SAFETY_MS } from "@/lib/freshness"
 import {
@@ -361,7 +368,10 @@ export const CANVAS_UNREACHABLE = "This canvas can't reach its bot right now."
  * sentence said in passing is gone before the reader looking at the press finds it
  * (`confirm-destructive.tsx`'s reason).
  */
-function refuse(message: string, { cause, quiet }: { cause?: unknown; quiet?: boolean } = {}): never {
+function refuse(
+  message: string,
+  { cause, quiet }: { cause?: unknown; quiet?: boolean } = {},
+): never {
   if (!quiet) tell.error(message)
   throw new Error(message, { cause })
 }
@@ -377,7 +387,12 @@ function grantsOf(raw: unknown): CanvasGrant[] | undefined {
   for (const row of raw) {
     if (!row || typeof row !== "object") continue
     const { tool, allowed, at } = row as Record<string, unknown>
-    if (typeof tool === "string" && tool && typeof allowed === "boolean" && typeof at === "number") {
+    if (
+      typeof tool === "string" &&
+      tool &&
+      typeof allowed === "boolean" &&
+      typeof at === "number"
+    ) {
       kept.push({ tool, allowed, at })
     }
   }
@@ -405,7 +420,9 @@ function toCanvas(raw: Record<string, unknown>, profileId: string): Canvas {
     ...(typeof raw.docs_at === "number" ? { docsAt: raw.docs_at } : {}),
     ...(grants ? { grants } : {}),
     ...(typeof raw.html === "string" ? { html: raw.html } : {}),
-    ...(Array.isArray(raw.tools) ? { tools: raw.tools.filter((t): t is string => typeof t === "string") } : {}),
+    ...(Array.isArray(raw.tools)
+      ? { tools: raw.tools.filter((t): t is string => typeof t === "string") }
+      : {}),
     ...(raw.builds ? { builds: true } : {}),
     ...(build ? { build } : {}),
   }
@@ -560,9 +577,7 @@ async function readAll(): Promise<Sweep> {
         keepList(profile, lists[profile.id])
         // A canvas whose documents moved since this device swept it is swept again. The rows are the
         // device's own, so this is the one thing a listing does about them.
-        void sweepMoved(profile, lists[profile.id]).catch(
-          quietly("Reading a canvas's documents"),
-        )
+        void sweepMoved(profile, lists[profile.id]).catch(quietly("Reading a canvas's documents"))
       } catch (failure) {
         // A bot that couldn't answer keeps the list it last gave rather than looking empty, and says
         // so: an empty list is a bot with no canvases, which is a different thing to tell a reader.
@@ -588,7 +603,10 @@ async function readAll(): Promise<Sweep> {
  * Fired and not awaited: a listing is a read of names, and a sweep of one canvas is a whole canvas.
  */
 async function sweepMoved(profile: Profile, rows: CanvasRecord[]) {
-  const marks = await sweepMarks(profile, rows.map((row) => row.id))
+  const marks = await sweepMarks(
+    profile,
+    rows.map((row) => row.id),
+  )
   for (const row of rows) {
     const mark = marks.get(row.id)
     if (!mark || (mark.docsAt ?? 0) === (row.docsAt ?? 0)) continue
@@ -647,8 +665,10 @@ async function botHolding(id: string): Promise<string | null> {
   const complete = await refreshCanvases()
   const found = profileOf(id)
   if (found) return found
+  // Only a sweep every bot answered can say no bot holds it. One that didn't is no evidence about a
+  // canvas nobody has read: saying its bot isn't answering would put a list's failure in a page's
+  // mouth, and the screen reads "Reading the canvas…" until a read of the canvas itself settles it.
   if (complete) store.set({ ...store.get(), missing: { ...store.get().missing, [id]: true } })
-  else markAway(id)
   return null
 }
 
@@ -979,7 +999,11 @@ export function useCanvases() {
   // fresh; the poll is the fallback for a host whose stream isn't up.
   const live = useAllLive(profiles)
   const changes = useAnyChange("canvas")
-  usePoll(() => void refreshCanvases(), live ? SAFETY_MS : LIST_MS, [changes, profiles?.length, live])
+  usePoll(() => void refreshCanvases(), live ? SAFETY_MS : LIST_MS, [
+    changes,
+    profiles?.length,
+    live,
+  ])
   return held
 }
 
@@ -1037,11 +1061,11 @@ export function useCanvas(id: string) {
   }, [profile, id])
   const live = useLive(profile)
   const changes = useChanges("canvas", profile)
-  usePoll(
-    () => void refreshCanvas(id).catch(() => undefined),
-    live ? SAFETY_MS : LIST_MS,
-    [id, changes, live],
-  )
+  usePoll(() => void refreshCanvas(id).catch(() => undefined), live ? SAFETY_MS : LIST_MS, [
+    id,
+    changes,
+    live,
+  ])
   return {
     canvas,
     /** The bot holding it, read here so neither screen reads the same profile a second time. */
@@ -1061,7 +1085,9 @@ export function useCanvas(id: string) {
  */
 export function useCanvasRecord(id: string) {
   const state = store.use()
-  const listed = Object.values(state.lists).flat().find((row) => row.id === id)
+  const listed = Object.values(state.lists)
+    .flat()
+    .find((row) => row.id === id)
   // A record this device kept answers before a sweep has landed: it is the row a list answers, kept
   // without the page it was kept with.
   const kept = useLiveQuery(async () => {
@@ -1079,11 +1105,11 @@ export function useCanvasRecord(id: string) {
   )
   const live = useLive(profile)
   const changes = useChanges("canvas", profile)
-  usePoll(
-    () => void readRecord(id).catch(() => undefined),
-    live ? SAFETY_MS : LIST_MS,
-    [id, changes, live],
-  )
+  usePoll(() => void readRecord(id).catch(() => undefined), live ? SAFETY_MS : LIST_MS, [
+    id,
+    changes,
+    live,
+  ])
   return {
     canvas,
     /** The bot holding it, read here so neither screen reads the same profile a second time. */
@@ -1110,9 +1136,7 @@ export function useCanvasBuilds(id: string, bot: Profile | undefined, enabled: b
     (signal) => {
       if (!enabled || !bot) return
       void getCanvasBuilds(serverConfig(bot), id, signal)
-        .then((raw) =>
-          setRows(raw.flatMap((one) => buildRowOf(one) ?? [])),
-        )
+        .then((raw) => setRows(raw.flatMap((one) => buildRowOf(one) ?? [])))
         .catch(quietly("Reading a canvas's builds"))
     },
     live ? SAFETY_MS : LIST_MS,
@@ -1323,4 +1347,3 @@ export async function startCanvas(
   put(profile, canvas)
   return canvas
 }
-

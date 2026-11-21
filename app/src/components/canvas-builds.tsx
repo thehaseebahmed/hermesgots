@@ -166,18 +166,21 @@ export function CanvasBuildsLane({
   chatId: string
   children: ReactNode
 }) {
-  const [sight, setSight] = useState<CanvasBuildRow | null>(null)
+  const [openId, setOpenId] = useState<string | null>(null)
+  // The build the sheet is about, read from the rows rather than kept beside them: a build publishes
+  // while its run is open, and a row held from the press would keep saying it is still building.
+  const sight = openId ? (rows.find((row) => row.id === openId) ?? null) : null
   // One array per build, not per render: the thread folds its flow on the marks' identity, so a fresh
   // array on every poll would re-fold the whole run each time the canvas answered.
   const marks = useMemo(() => (sight ? marksOf(sight) : NO_MARKS), [sight])
-  const lane = useMemo<Lane>(() => ({ rows, open: (build) => setSight(build) }), [rows])
+  const lane = useMemo<Lane>(() => ({ rows, open: (build) => setOpenId(build.id) }), [rows])
   return (
     <LaneOf.Provider value={lane}>
       {children}
       {/* The build's run opens in the pop-up a subagent's row opens: a bottom sheet on a phone, the
           side drawer from 1024px. The sheet is given a height so the thread inside it is bounded, and
           the thread keeps its own scroller — the pop-up's box never scrolls a second time under it. */}
-      <Popup open={sight !== null} onOpenChange={(next) => (next ? undefined : setSight(null))}>
+      <Popup open={sight !== null} onOpenChange={(next) => (next ? undefined : setOpenId(null))}>
         <PopupContent size="xl" fixedHeight="h-[85svh]" dataSlot="build-transcript">
           <PopupHeader className="gap-1 pb-3">
             <PopupTitle>{sight && atWork(sight) ? phaseWord(sight.phase) : "Build"}</PopupTitle>

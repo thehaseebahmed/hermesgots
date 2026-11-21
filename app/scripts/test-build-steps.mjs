@@ -6,14 +6,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import {
-  atWork,
-  flagWords,
-  phaseWord,
-  rowWords,
-  visitWords,
-  WORKING_WORDS,
-} from "../src/lib/build-steps.ts"
+import { atWork, flagWords, phaseWord, rowWords, visitWords } from "../src/lib/build-steps.ts"
 
 test("a phase's word is the lane's own, and a phase nobody named is Working", () => {
   assert.equal(phaseWord("planning"), "Planning")
@@ -54,8 +47,13 @@ test("a build's row says what it is doing while it works", () => {
   )
   assert.equal(
     rowWords({ phase: "planning" }),
-    WORKING_WORDS,
-    "a record that names no activity still says the build is working",
+    "Planning",
+    "a record that names no activity says the phase the build is in",
+  )
+  assert.equal(
+    rowWords({ phase: "waiting" }),
+    "Waiting",
+    "and a build waiting on the reader never says the host is busy",
   )
 })
 

@@ -18,8 +18,6 @@ const FLAG_WORDS: Record<string, string> = {
 
 const ENDED = new Set(["published", "failed", "stopped"])
 
-export const WORKING_WORDS = "The build is working."
-
 export function phaseWord(phase: string) {
   return PHASE_WORDS[phase] ?? "Working"
 }
@@ -47,7 +45,7 @@ export function visitWords(visit: CanvasBuildStep) {
  * that failed or was stopped says so rather than claiming a version.
  */
 export function rowWords(build: { phase: string; activity?: string; version?: number }) {
-  if (atWork(build)) return build.activity ?? WORKING_WORDS
+  if (atWork(build)) return build.activity ?? phaseWord(build.phase)
   if (build.phase === "failed") return "Failed"
   if (build.phase === "stopped") return "Stopped"
   return build.version ? `Version ${build.version} published` : "Answered"
