@@ -13,6 +13,7 @@
  * holds the one rule for where a bot's routes live, and nothing here keeps a second copy of it.
  */
 import { byName } from "./compare.ts"
+import { schemeOf } from "./host-url.ts"
 
 /** The three fields a label is read from: `Profile` carries them and so does a list's row. */
 export interface NamedBot {
@@ -28,11 +29,12 @@ const ANONYMOUS = "Bot"
  * A bot's address with any scheme and path taken off, for the strings `new URL` reads as no host: a
  * hand-typed `hermes.domain.com:8642` parses with a scheme of its own and an empty host.
  */
-const withoutPath = (baseUrl: string) =>
-  baseUrl
-    .trim()
-    .replace(/^[a-z][a-z0-9+.-]*:\/\//i, "")
-    .replace(/\/+$/, "")
+const withoutPath = (baseUrl: string) => {
+  const trimmed = baseUrl.trim()
+  const scheme = schemeOf(trimmed)
+  // A scheme is its name and the three characters that follow it: `http://`.
+  return (scheme ? trimmed.slice(scheme.length + 3) : trimmed).replace(/\/+$/, "")
+}
 
 /** A host as a bot's address names it: its name and, where one is given, its port. */
 function hostOf(baseUrl: string) {

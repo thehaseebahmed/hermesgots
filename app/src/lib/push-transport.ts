@@ -9,8 +9,10 @@
  * What differs between them is who holds a category's switch. Firebase's are Android channels, which
  * only the phone's own settings switch (`system`). Web Push and ntfy have no channel per category —
  * ntfy's app has one per *priority* — so the app's own list is the switch and the sender enforces it
- * (`app`). Import-free, so `scripts/test-push-transport.mjs` runs it as a pure rule.
+ * (`app`). Its one import is `host-url.ts`'s scheme rule, which is itself import-free, so
+ * `scripts/test-push-transport.mjs` still runs it as a pure rule.
  */
+import { schemeOf } from "./host-url.ts"
 
 export type PushTransportId = "webpush" | "firebase" | "ntfy"
 
@@ -102,7 +104,7 @@ export function ntfyServer(value: string): string | undefined {
   const typed = value.trim()
   let url: URL
   try {
-    url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(typed) ? typed : `https://${typed}`)
+    url = new URL(schemeOf(typed) ? typed : `https://${typed}`)
   } catch {
     return undefined
   }

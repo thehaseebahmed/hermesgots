@@ -37,6 +37,7 @@ from . import (
     canvas_vault,
     chats,
     clarify,
+    charm_audio,
     cleanup,
     clones,
     closes,
@@ -84,6 +85,8 @@ from . import (
     push,
     ship,
     stream,
+    talk,
+    talk_tokens,
     tasks,
     todos,
     usage,
@@ -241,12 +244,43 @@ def _routine_summaries() -> List[Dict[str, Any]]:
 
 def _error(web: Any, message: str, status: int, code: str | None = None):
     # The API server's own error shape, so clients read every error the same way. `code` is there
-    # only where the refusal has one a client can act on — a canvas's four consent verdicts — so a
-    # screen never has to read the words to know what to do next.
+    # wherever the refusal has a word a client acts on rather than a sentence it reads — a canvas's
+    # four consent verdicts, and every way the talk contract refuses a charm's turn — so a screen or
+    # a charm's band never has to parse the words to know what to do next.
     error: Dict[str, Any] = {"message": message}
     if code is not None:
         error["code"] = code
     return web.json_response({"error": error}, status=status)
+
+
+def _not_linked(web: Any):
+    """A host no bot is linked to: no token was ever minted here to judge one against."""
+    return _error(
+        web,
+        "This bot isn't linked to a Gots account, so it has no id to talk as.",
+        409,
+        "not_linked",
+    )
+
+
+def _talk_bot(web: Any, request: Any, linked: Any) -> Tuple[Optional[str], Optional[Any]]:
+    """The bot a talk request names, or the refusal to answer it with: one rule for both routes.
+
+    No ``?bot=`` names this host's linked bot; an id that is not one is the caller's mistake, in
+    words; a host with no bot is refused as unlinked; and another bot's id is no bot this host
+    serves. The hand-over and the charm's turn reading ``?bot=`` by one rule is what keeps a
+    malformed id from being refused as a bad token by one door and as an id by the other —
+    ``talk_tokens.valid_bot`` owns the predicate, this owns the order. The turn route asks this
+    only once its token has been verified, so a stranger never reaches it.
+    """
+    asked = request.query.get("bot") or ""
+    if asked and not talk_tokens.valid_bot(asked):
+        return None, _error(web, "Not a bot id", 400)
+    if not isinstance(linked, str) or not linked:
+        return None, _not_linked(web)
+    if asked and asked != linked:
+        return None, _error(web, "No such bot.", 404, "unknown_bot")
+    return asked or linked, None
 
 
 def _request_profile():
@@ -667,6 +701,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # the phone's Firmware row can take its answer as the host's own record: an
                     # older plugin has no route, and the row draws no published version at all.
                     "charm_firmware",
+                    # A per-charm talk token and the address the charm's turns go to (`GET talk`),
+                    # minted when the reader sets the Voice row up (talk_tokens.py, the PTT plan).
+                    # Advertised so the row is drawn only where a host can hand both over.
+                    "talk",
                     # How long a Research or Meetings model call may take, per bot (model_timeout.py).
                     "model_timeout",
                     # A project's ready tasks, read from its repositories' GitHub issues; see tasks.py.
@@ -1989,6 +2027,104 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             headers={"Content-Type": found["type"], "Content-Length": str(len(found["data"]))},
         )
 
+    async def get_talk(request: "web.Request") -> "web.Response":
+        """The app's one hand-over: where the charm calls, which bot it is, and a token, once.
+
+        The address is the one this request was dialled at, to the plugin's own prefix — the same
+        reader a notice's button uses (`push.base_url`), and the one address this host knows it is
+        reached at; the charm appends `/talk/v1/turn` to it. A request that can't say where it landed
+        falls back to the address the app last subscribed from, and a bot nothing has ever reached is
+        refused in words rather than handed an address guessed here.
+
+        This is the only answer the token is ever in the clear in (`talk_tokens`): the app writes it to
+        the charm's flash, and no route or log repeats it.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        home, path = profile_home(), store_path()
+        state = await asyncio.to_thread(link.load_state, home)
+        bot, refused = _talk_bot(web, request, state.get("botId"))
+        if refused is not None:
+            return refused
+        host = push.base_url(request, "/talk") or push.base(path)
+        if not host:
+            return _error(web, "This bot has not been reached by an app at any address yet.", 409)
+        try:
+            token = await asyncio.to_thread(talk_tokens.mint, path, bot)
+        except talk_tokens.TalkTokenError as error:
+            return _error(web, str(error), 400)
+        return web.json_response({"object": "gots.talk", "host": host, "bot": bot, "token": token})
+
+    async def talk_turn(request: "web.Request") -> "web.Response":
+        """The charm's one call: its utterance heard, the bot's answer spoken, and both as Opus.
+
+        A charm holds no API key: it proves itself with the per-charm token the app wrote to it
+        (`talk_tokens.verify`), presented as a Bearer, and says which version of this contract it
+        speaks in `talk.VERSION_HEADER`. What it hears and says is `talk.turn`'s and `talk.speak`'s;
+        this route carries the audio and nothing else — its own name for the stream is
+        `charm_audio.CONTENT_TYPE`, so a caller never has to guess what a body is.
+
+        The front door is checked in one order, and each way through it has its own word: no token
+        at all, a host no bot is linked to, a bearer that isn't this bot's, a bot this host doesn't
+        serve, and a contract this host doesn't speak. The token is judged before ``?bot=`` is read
+        at all, so a stranger presenting a bearer learns nothing about this host's bots — a bogus
+        bearer with a malformed or foreign ``?bot=`` is a ``bad_token`` and nothing else, and only a
+        caller holding this bot's token is told its ``?bot=`` is wrong. That one is read by the
+        hand-over's own rule (`_talk_bot`), so an id that isn't one is a 400 here too, and a charm is
+        told which versions are spoken where its own is not one.
+        """
+        header = request.headers.get("Authorization") or ""
+        token = header[len("Bearer ") :] if header.startswith("Bearer ") else ""
+        path = store_path()
+        linked = (await asyncio.to_thread(link.load_state, profile_home())).get("botId")
+        if not token:
+            return _error(web, "A turn needs this charm's token, as a Bearer.", 401, "no_token")
+        if not isinstance(linked, str) or not linked:
+            # No bot means no token was ever minted: there is nothing to judge one against, and
+            # saying so describes the host rather than any bot of its.
+            return _not_linked(web)
+        # The token proves the caller is this host's charm, so it is judged against this host's own
+        # bot: a `?bot=` naming another one is a mistake to answer after the token, not before it.
+        if not await asyncio.to_thread(talk_tokens.verify, path, linked, token):
+            return _error(web, "This token isn't this bot's.", 401, "bad_token")
+        bot, refused = _talk_bot(web, request, linked)
+        if refused is not None:
+            return refused
+        if (request.headers.get(talk.VERSION_HEADER) or "").strip() != talk.VERSION:
+            return _error(
+                web,
+                f"This host speaks only {talk.VERSION_HEADER}: {talk.VERSION}.",
+                400,
+                "bad_version",
+            )
+        try:
+            try:
+                data = await request.read()
+            except web.HTTPRequestEntityTooLarge:
+                # The server's own cap, in this contract's words: the class carries the status and
+                # the word, so this route repeats neither.
+                raise charm_audio.TooLong(charm_audio.TOO_LONG) from None
+            if not data:
+                raise talk.HeardNothing("Nothing was said.")
+            said = await talk.turn(path, bot, data, adapter=adapter)
+            # Off the loop, as the turn's own work is: a voice and a codec are not something to
+            # hold a request handler on while they run.
+            spoken = await asyncio.to_thread(talk.speak, said)
+        except dictation.DictationError as error:
+            # Our own sentence with the host's reason on the end: a provider's words are not a
+            # sentence a band can draw, and the reason is the only thing that says what failed.
+            return _error(web, f"This host couldn't hear the turn: {error}", error.status, "unheard")
+        except (talk.TalkError, charm_audio.CharmAudioError) as error:
+            # Each reason carries its own status and word, beside itself (talk, charm_audio), so a
+            # route never decides how a failure reads — and a reload of either module can't leave a
+            # table here pointing at a reason nobody raises any more.
+            return _error(web, str(error), error.status, error.code)
+        return web.Response(
+            body=spoken,
+            headers={"Content-Type": charm_audio.CONTENT_TYPE, "Content-Length": str(len(spoken))},
+        )
+
     async def create_project(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -2985,6 +3121,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)
     app.router.add_get(f"{PREFIX}/charm/firmware", charm_firmware)
     app.router.add_get(f"{PREFIX}/charm/firmware/image", charm_firmware_image)
+    # The app's hand-over of the host's address and a per-charm token, and the charm's own turn,
+    # which takes that token rather than the bot's key (`talk_tokens`, the PTT plan's step 1). The
+    # path's version is `talk.VERSION`, the same number the charm is answered its version in: one
+    # fact spelled once, so a bump cannot move one and leave the other behind.
+    app.router.add_get(f"{PREFIX}/talk", get_talk)
+    app.router.add_post(f"{PREFIX}/talk/v{talk.VERSION}/turn", talk_turn)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/context", session_context)
     app.router.add_get(f"{PREFIX}/usage", account_usage)

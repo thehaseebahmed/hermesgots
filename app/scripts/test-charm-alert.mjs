@@ -732,3 +732,17 @@ test("a tailnet key never reaches the paired-charm record", () => {
   assert.deepEqual(records, ["{ ...paired, tailnet: true }"])
   assert.doesNotMatch(body, /console\./, "and the key is never logged")
 })
+
+/**
+ * The Voice row's write keeps no part of the token either, and records only that the hand-over
+ * happened: the token lives on the charm, and the record is what lets the row say a second set-up
+ * would revoke the one the charm is using.
+ */
+test("a talk token never reaches the paired-charm record", () => {
+  const body = functionText("src/lib/charm.ts", "setCharmTalk")
+  assert.match(body, /talkMessage\(address, token\)/, "the address and the token go into the write")
+  const records = [...body.matchAll(/write\(\{([^}]*)\}\)/g)].map((match) => `{${match[1]}}`)
+  assert.deepEqual(records, ["{ ...paired, talk: true }"], "the hand-over, and nothing of it")
+  assert.doesNotMatch(records[0], /token/, "no part of the token is kept")
+  assert.doesNotMatch(body, /console\./, "and it is never logged")
+})

@@ -9,7 +9,12 @@ import {
   type CharmUpdateStatus,
   type CharmWifiRecord,
 } from "./charm-protocol.ts"
-import { CharmCode, codeWords, type CharmBatterySeen } from "./charm-protocol.ts"
+import {
+  CHARM_MAX_URL_BYTES,
+  CharmCode,
+  codeWords,
+  type CharmBatterySeen,
+} from "./charm-protocol.ts"
 import { compareVersions } from "./version-compare.ts"
 export interface CharmSeen {
   name: string
@@ -316,10 +321,64 @@ export const BATTERY_ASK = "Tap to ask the charm"
 /**
  * A refusal in the row's own words. BadMessage on a settings or battery op is a charm that never
  * heard of it — its firmware is older than this app — and saying "the charm didn't understand the
- * sync" of a switch would send the reader looking at the wrong thing.
+ * sync" of a switch would send the reader looking at the wrong thing. `tail` is the row's own next
+ * step once the firmware is updated, for the row that has one to add.
  */
-export function refusalWords(code: number) {
+export function refusalWords(code: number, tail = "") {
   if (code === CharmCode.BadMessage)
-    return "This charm's firmware is older than the app — update it"
+    return `This charm's firmware is older than the app — update it${tail}`
   return codeWords(code)
 }
+
+/**
+ * Voice: the row a charm's own voice is set up from. Its words live here with every other sentence a
+ * charm's settings read; `talk.ts` holds the rules that read an address and build the frame.
+ */
+
+/** The row's line under its title: what holding B does, which is the whole point of the setting. */
+export const VOICE_ASK = "Hold B on your charm and talk to this bot"
+
+/**
+ * Under the address field: why the address the host answered is not the address the charm gets, in
+ * the reader's own terms. Said once, before they have had to guess at it.
+ */
+export const VOICE_HINT =
+  "Your phone reaches this bot at its own address; your charm needs one it can reach on your tailnet, and calls /talk/v1/turn on it."
+
+/**
+ * Under the field for a charm already set up: what the second tap spends. Asking the host again mints
+ * a new token and revokes the one the charm holds, so the row says so before the reader taps it.
+ */
+export const VOICE_AGAIN =
+  "Setting up again mints a new token and revokes the one your charm holds, so send it again after."
+
+/**
+ * Under the row: a charm keeps the token in its flash, and a flash that isn't sealed gives it away to
+ * anyone holding the charm. The token's own caveat, said once for the row rather than as a second
+ * sentence of code 11's — that one is the charm's, and names no token.
+ */
+export const VOICE_KEPT =
+  "A charm whose flash isn't sealed lets anyone holding it read the token off the chip."
+
+/** Nothing was typed: the charm would have nowhere to send a turn. */
+export const TALK_NEEDS_ADDRESS = "Your charm needs the address it can reach."
+
+/** The charm's own call is plain http — the tailnet is the encrypted boundary, not its client. */
+export const TALK_NEEDS_HTTP =
+  "The charm speaks plain http on your tailnet — give it your host's tailnet address, not the https one your phone uses."
+
+/** The firmware's own bound on the address it keeps, built from the constant the frame enforces. */
+export const TALK_TOO_LONG = `That address is longer than the charm holds (${CHARM_MAX_URL_BYTES} bytes at most).`
+
+export const TALK_SENT = "Sent to your charm."
+
+/**
+ * After an answer that did not keep it: the token is this phone's still, and the same one can go
+ * again. Said only where the charm's answer is not a keep (``charmKept``), since an answer that
+ * kept it spends the token and there is nothing left to send.
+ */
+export const TALK_STILL_HELD =
+  "The token is still on this phone: send it again once the charm can keep it."
+
+/** The Voice row's own end to a refusal: the firmware first, then this row set up again. */
+export const VOICE_TAIL = ", then set voice up again"

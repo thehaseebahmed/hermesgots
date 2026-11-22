@@ -4,6 +4,7 @@ import { heardOf } from "@/lib/dictation-log"
 import { namedLevel, type CleanupLevel } from "@/lib/speech"
 import { readHeardBy, type HeardBy, type SpeechPatch } from "@/lib/speech"
 import { pluginRoot, serverRoot } from "@/lib/host-url"
+import { talkOffer, talkRoute, type TalkOffer } from "@/lib/talk"
 import { READ_TIMEOUT_MS, RUN_STREAM_IDLE_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import type {
   ApprovalChoice,
@@ -2935,6 +2936,20 @@ export async function getCharmFirmwareImage(config: HermesConfig): Promise<Uint8
     signal: AbortSignal.timeout(FIRMWARE_IMAGE_TIMEOUT_MS),
   })
   return new Uint8Array(await response.arrayBuffer())
+}
+
+/**
+ * The voice hand-over's one ask: where the charm's turns are posted, and the token it proves itself
+ * with (`plugin/talk_tokens.py`). This is the only answer in which this app ever sees a token, and it
+ * goes straight into the write that hands it over — minting again is what revokes the last one, so a
+ * caller asks only when the reader has said to set the charm up.
+ */
+export async function getTalkToken(config: HermesConfig, signal?: AbortSignal): Promise<TalkOffer> {
+  const response = await request(talkRoute(config.baseUrl), {
+    headers: headers(config),
+    signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
+  })
+  return talkOffer(await response.json())
 }
 
 /** What the plugin's media route answers a mint: where the file can be read, and what it is. */

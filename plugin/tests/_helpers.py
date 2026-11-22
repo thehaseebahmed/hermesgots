@@ -186,13 +186,17 @@ class FakeWeb:
         """The request body passed the server's own cap, which a route answers in its own words."""
 
     class Request:
-        """A request as far as a route reads one: its query, and whatever a test hangs on it.
+        """A request as far as a route reads one: its query, its body, and whatever a test hangs on it.
 
-        A real request always carries its query, so a harness's bare request does too — empty unless
-        the case set it, which is a caller who asked for nothing.
+        A real request always carries its query and its body, so a harness's bare request does too —
+        empty unless the case set it, which is a caller who asked for nothing.
         """
 
         query: Dict[str, str] = {}
+        body: bytes = b""
+
+        async def read(self) -> bytes:
+            return self.body
 
     @staticmethod
     def json_response(payload: Any, status: int = 200) -> Dict[str, Any]:

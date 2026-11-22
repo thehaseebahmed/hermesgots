@@ -186,6 +186,25 @@ def put_setting(path: Path, key: str, value: Optional[Any]) -> None:
         conn.close()
 
 
+def put_setting_if_absent(path: Path, key: str, value: Any) -> bool:
+    """Keeps ``value`` under ``key`` only when nothing is kept there yet; True when it was written.
+
+    Unlike ``put_setting`` an existing row is left as it is rather than replaced, and the two
+    writers of one key each get a truthful answer to whether theirs landed: two turns that both
+    read an absent row and both open something leave exactly the first, which is what keeps one
+    chat per bot under a race.
+    """
+    conn = connect(path)
+    try:
+        cursor = conn.execute(
+            "INSERT OR IGNORE INTO host_settings (key, value) VALUES (?, ?)",
+            (key, json.dumps(value)),
+        )
+        return cursor.rowcount == 1
+    finally:
+        conn.close()
+
+
 def open_rows(path: Path) -> sqlite3.Connection:
     """A store's connection, with rows a reader can name a column on."""
     conn = connect(path)
