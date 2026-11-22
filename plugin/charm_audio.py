@@ -221,7 +221,6 @@ def pcm(source: Union[bytes, bytearray, str, Path]) -> bytes:
 
 
 def _framed(packet: Any) -> bytes:
-    """One packet as the wire carries it: its length, then it."""
     payload = bytes(packet)
     if len(payload) > MAX_PACKET:
         raise Oversized(f"A packet is at most {MAX_PACKET} bytes, and one is {len(payload)}.")
@@ -229,7 +228,6 @@ def _framed(packet: Any) -> bytes:
 
 
 def _packets(stream: bytes) -> List[bytes]:
-    """Every packet in a stream, in order, refusing what the wire cannot have meant."""
     packets: List[bytes] = []
     at = 0
     while at < len(stream):

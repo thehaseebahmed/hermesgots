@@ -370,7 +370,6 @@ export const TALK_NEEDS_HTTP =
 /** The firmware's own bound on the address it keeps, built from the constant the frame enforces. */
 export const TALK_TOO_LONG = `That address is longer than the charm holds (${CHARM_MAX_URL_BYTES} bytes at most).`
 
-/** The charm kept both: the row's word that the hand-over is done. */
 export const TALK_SENT = "Sent to your charm."
 
 /** The Voice row's own end to a refusal: the firmware first, then this row set up again. */

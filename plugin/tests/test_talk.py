@@ -409,7 +409,6 @@ class Reply(unittest.TestCase):
         return talk.last_reply(self.home, "gots-chat-1", since)
 
     def add(self, row: tuple) -> None:
-        """One more message row, as the run writes them."""
         conn = sqlite3.connect(self.home / "state.db")
         try:
             conn.execute(

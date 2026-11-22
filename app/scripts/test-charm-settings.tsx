@@ -917,7 +917,6 @@ test("a write that never landed keeps the token, so one drop costs no second min
 })
 
 test("a charm already set up is offered Set up again, and told what that spends", async () => {
-  // What the phone's own record says of the charm: it was handed an address and a token already.
   await mount(
     <CharmVoice talk api={voice()} profile={connection("talk-set-up")} />,
     async () => {
@@ -933,7 +932,6 @@ test("a charm already set up is offered Set up again, and told what that spends"
       )
     },
   )
-  // A charm never set up is offered the plain word, and nothing is said of a token it never had.
   await mount(<CharmVoice api={voice()} profile={connection("talk-never")} />, async () => {
     await until(async () => Boolean(find("#charm-talk-setup")), "the row's controls")
     assert.equal(
@@ -983,7 +981,6 @@ test("Set up fills the address in, and Send writes what the reader left", async 
   })
   await mount(<CharmVoice api={api} profile={connection("talk-writes")} />, async () => {
     await until(async () => Boolean(find("#charm-talk-setup")), "the row's controls")
-    // Nothing has been minted: there is nothing to send, and the button says so by being off.
     assert.equal(
       (find("#charm-talk-send") as HTMLButtonElement | null)?.disabled,
       true,
@@ -996,7 +993,6 @@ test("Set up fills the address in, and Send writes what the reader left", async 
     await settle()
     assert.deepEqual(wrote, [[TAILNET, TOKEN]], "the address and the minted token, as one write")
     assert.ok(text().includes("Sent to your charm."), "and the row says it went")
-    // The token is the charm's from here on: not on the page, and not in this device's store.
     assert.ok(!text().includes(TOKEN), "nothing draws it")
     assert.ok(
       !JSON.stringify({ ...localStorage }).includes(TOKEN),

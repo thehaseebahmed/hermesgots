@@ -56,7 +56,6 @@ def _key(bot: str) -> str:
 
 
 def digest(token: str) -> str:
-    """What the store keeps of a token: its SHA-256, in hex."""
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 

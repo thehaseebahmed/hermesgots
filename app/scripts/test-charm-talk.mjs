@@ -89,7 +89,6 @@ test("the row says what the charm answered, in the charm's own words", () => {
 })
 
 test("a charm that refuses the op is named, and told apart from the sync's refusal", () => {
-  // One sentence for a firmware older than the app: the shared refusal, with this row's own tail.
   assert.equal(
     talkWords(CharmCode.BadMessage),
     refusalWords(CharmCode.BadMessage, ", then set voice up again"),
