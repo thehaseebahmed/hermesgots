@@ -84,6 +84,7 @@ from . import (
     push,
     ship,
     stream,
+    talk_tokens,
     tasks,
     todos,
     usage,
@@ -667,6 +668,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # the phone's Firmware row can take its answer as the host's own record: an
                     # older plugin has no route, and the row draws no published version at all.
                     "charm_firmware",
+                    # A per-charm talk token and the address the charm's turns go to (`GET talk`),
+                    # minted when the reader sets the Voice row up (talk_tokens.py, the PTT plan).
+                    # Advertised so the row is drawn only where a host can hand both over.
+                    "talk",
                     # How long a Research or Meetings model call may take, per bot (model_timeout.py).
                     "model_timeout",
                     # A project's ready tasks, read from its repositories' GitHub issues; see tasks.py.
@@ -1989,6 +1994,60 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             headers={"Content-Type": found["type"], "Content-Length": str(len(found["data"]))},
         )
 
+    async def get_talk(request: "web.Request") -> "web.Response":
+        """The app's one hand-over: where the charm calls, which bot it is, and a token, once.
+
+        The address is the one this request was dialled at, to the plugin's own prefix — the same
+        reader a notice's button uses (`push.base_url`), and the one address this host knows it is
+        reached at; the charm appends `/talk/v1/turn` to it. A request that can't say where it landed
+        falls back to the address the app last subscribed from, and a bot nothing has ever reached is
+        refused in words rather than handed an address guessed here.
+
+        This is the only answer the token is ever in the clear in (`talk_tokens`): the app writes it to
+        the charm's flash, and no route or log repeats it.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        home, path = profile_home(), store_path()
+        state = await asyncio.to_thread(link.load_state, home)
+        bot = state.get("botId")
+        asked = request.query.get("bot") or ""
+        # A bot named by the app is this host's bot or nothing: one profile serves one bot, and a
+        # token minted for an id nothing turns as would be a secret for no one.
+        if asked and not talk_tokens.BOT.match(asked):
+            return _error(web, "Not a bot id", 400)
+        if asked and asked != bot:
+            return _error(web, "No such bot.", 404)
+        if not isinstance(bot, str) or not bot:
+            return _error(web, "This bot isn't linked to a Gots account, so it has no id to talk as.", 409)
+        host = push.base_url(request, "/talk") or push.base(path)
+        if not host:
+            return _error(web, "This bot has not been reached by an app at any address yet.", 409)
+        try:
+            token = await asyncio.to_thread(talk_tokens.mint, path, bot)
+        except talk_tokens.TalkTokenError as error:
+            return _error(web, str(error), 400)
+        return web.json_response({"object": "gots.talk", "host": host, "bot": bot, "token": token})
+
+    async def talk_turn(request: "web.Request") -> "web.Response":
+        """The charm's turn, whose front door is this bot's talk token and not the API server's key.
+
+        A charm holds no API key: it proves itself with the per-charm token the app wrote to it
+        (`talk_tokens.verify`), presented as a Bearer. What it hears, answers and speaks is the next
+        step's; until that lands, a turn carrying this bot's own token is answered as not built yet
+        rather than as a refusal of the charm, which is the difference between "update the host" and
+        "your token is wrong" on the band.
+        """
+        header = request.headers.get("Authorization") or ""
+        token = header[len("Bearer ") :] if header.startswith("Bearer ") else ""
+        path = store_path()
+        state = await asyncio.to_thread(link.load_state, profile_home())
+        bot = request.query.get("bot") or state.get("botId")
+        if not await asyncio.to_thread(talk_tokens.verify, path, bot, token):
+            return _error(web, "Unknown talk token", 401)
+        return _error(web, "This host doesn't take turns yet.", 501)
+
     async def create_project(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
         if denied is not None:
@@ -2985,6 +3044,10 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)
     app.router.add_get(f"{PREFIX}/charm/firmware", charm_firmware)
     app.router.add_get(f"{PREFIX}/charm/firmware/image", charm_firmware_image)
+    # The app's hand-over of the host's address and a per-charm token, and the charm's own turn,
+    # which takes that token rather than the bot's key (`talk_tokens`, the PTT plan's step 1).
+    app.router.add_get(f"{PREFIX}/talk", get_talk)
+    app.router.add_post(f"{PREFIX}/talk/v1/turn", talk_turn)
     app.router.add_post(f"{PREFIX}/sessions/{{session_id}}/label", label_session)
     app.router.add_get(f"{PREFIX}/sessions/{{session_id}}/context", session_context)
     app.router.add_get(f"{PREFIX}/usage", account_usage)
