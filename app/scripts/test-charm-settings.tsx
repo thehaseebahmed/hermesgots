@@ -27,6 +27,7 @@ import {
   findText,
   json,
   labelled,
+  missing,
   mount,
   seedSettings,
   settle,
@@ -630,9 +631,8 @@ test("the page draws a mark for each link that is down and the level", async () 
       assert.ok(text().includes("Desk charm"), "the charm is named")
       assert.ok(labelled('[role="img"]', "Wi-Fi is down"), "a mark for the Wi-Fi link")
       assert.ok(labelled('[role="img"]', "Tailnet is down"), "a mark for the tailnet")
-      assert.equal(
-        labelled('[role="img"]', "Bluetooth is down"),
-        null,
+      assert.ok(
+        missing('[role="img"][aria-label="Bluetooth is down"]'),
         "and none for the link the report itself arrived on",
       )
       assert.match(text(), /82%/, "the level is drawn beside them")
@@ -743,9 +743,8 @@ test("the page's one read fills the status row and the section below it", async 
       labelled('[role="img"]', "Tailnet is down"),
       "the row marks what the same report said",
     )
-    assert.equal(
-      labelled('[role="img"]', "Wi-Fi is down"),
-      null,
+    assert.ok(
+      missing('[role="img"][aria-label="Wi-Fi is down"]'),
       "and nothing for a link that is up",
     )
   })
