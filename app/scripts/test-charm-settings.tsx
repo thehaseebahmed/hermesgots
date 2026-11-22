@@ -17,8 +17,13 @@ import {
   type CharmVoiceApi,
 } from "@/components/settings/charm"
 import { useCharmReport } from "@/lib/charm"
-import { CHARM_SLOT_BYTES, CharmCode, CharmLinkState, CharmUpdateState } from "@/lib/charm-protocol"
-import { TALK_READABLE } from "@/lib/talk"
+import {
+  CHARM_SLOT_BYTES,
+  CharmCode,
+  CharmLinkState,
+  CharmUpdateState,
+  codeWords,
+} from "@/lib/charm-protocol"
 import { db } from "@/lib/db"
 import type { CharmFirmware } from "@/lib/hermes"
 import { SettingsPage } from "@/routes/settings"
@@ -884,6 +889,62 @@ test("the voice row is offered only where the host advertises talk", async () =>
   })
 })
 
+test("a write that never landed keeps the token, so one drop costs no second mint", async () => {
+  // The link, not the address: the charm is out of reach before the write can be answered.
+  const api = voice({
+    offer: async () => ({ host: TAILNET, bot: "4f1c2a90", token: TOKEN }),
+    send: async () => {
+      throw new Error("The charm went out of reach")
+    },
+  })
+  await mount(<CharmVoice api={api} profile={connection("talk-drop")} />, async () => {
+    await until(async () => Boolean(find("#charm-talk-setup")), "the row's controls")
+    await click(find("#charm-talk-setup"))
+    await settle()
+    await click(find("#charm-talk-send"))
+    await settle()
+    assert.ok(text().includes("The charm went out of reach"), "the row says why nothing landed")
+    assert.equal(
+      (find("#charm-talk-send") as HTMLButtonElement | null)?.disabled,
+      false,
+      "the token is still this phone's to hand over: setting up again would revoke the charm's",
+    )
+    // And a second Send is the same token, not a fresh ask of the host.
+    await click(find("#charm-talk-send"))
+    await settle()
+    assert.ok(text().includes("The charm went out of reach"), "the same write, tried again")
+  })
+})
+
+test("a charm already set up is offered Set up again, and told what that spends", async () => {
+  // What the phone's own record says of the charm: it was handed an address and a token already.
+  await mount(
+    <CharmVoice talk api={voice()} profile={connection("talk-set-up")} />,
+    async () => {
+      await until(async () => Boolean(find("#charm-talk-setup")), "the row's controls")
+      assert.equal(
+        (find("#charm-talk-setup") as HTMLElement | null)?.textContent?.trim(),
+        "Set up again",
+        "the charm holds a token, so the row says what the tap does to it",
+      )
+      assert.ok(
+        text().includes("mints a new token and revokes the one your charm holds"),
+        "and that setting up again spends it",
+      )
+    },
+  )
+  // A charm never set up is offered the plain word, and nothing is said of a token it never had.
+  await mount(<CharmVoice api={voice()} profile={connection("talk-never")} />, async () => {
+    await until(async () => Boolean(find("#charm-talk-setup")), "the row's controls")
+    assert.equal(
+      (find("#charm-talk-setup") as HTMLElement | null)?.textContent?.trim(),
+      "Set up",
+      "the first set-up is the plain one",
+    )
+    assert.ok(!text().includes("revokes"), "there is nothing of the charm's to spend yet")
+  })
+})
+
 test("the voice row asks the host for the address and the token, with the app's key", async () => {
   const host = serveTalk("talk-handover", ["talk"], {
     object: "gots.talk",
@@ -981,19 +1042,25 @@ test("an address the charm could not call is refused in words, and nothing is wr
   })
 })
 
-test("a plaintext charm's keep is said in its own words", async () => {
+test("a plaintext charm's keep is said in the charm's own words, and the token in the hint", async () => {
   // 11 on the wire: the charm kept the address and the token, and warns that the chip gives them away.
   const api = voice({ send: async () => CharmCode.KeptReadable })
   await mount(<CharmVoice api={api} profile={connection("talk-readable")} />, async () => {
     await until(async () => Boolean(find("#charm-talk-setup")), "the row's controls")
     await click(find("#charm-talk-setup"))
     await settle()
-    // The row prefill is the host's https answer here, so send what the charm can call.
+    // The row prefill is the host's answer here, so send what the charm can call.
     await type(find("#charm-talk-address"), TAILNET)
     await click(find("#charm-talk-send"))
     await settle()
-    assert.ok(text().includes(TALK_READABLE), "the readable secret is said, not glossed")
-    assert.ok(text().includes("read the token off the chip"))
+    assert.ok(
+      text().includes(codeWords(CharmCode.KeptReadable)),
+      "code 11 is the charm's own sentence, not a second one for this row",
+    )
+    assert.ok(text().includes("read it off the chip"), "and it is not glossed")
+    // What is *the token's* about it is the row's hint, said once for the row rather than once more
+    // for one code: a charm whose flash isn't sealed lets anyone holding it read the token off it.
+    assert.ok(text().includes("read the token off the chip"), "the hint names the token")
   })
 })
 

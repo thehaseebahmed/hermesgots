@@ -16,9 +16,13 @@ import {
   linksDown,
   readFailed,
   readValue,
+  refusalWords,
+  TALK_TOO_LONG,
+  VOICE_ASK,
+  VOICE_HINT,
 } from "../src/lib/charm-words.ts"
 import { compareVersions } from "../src/lib/version-compare.ts"
-import { CharmLinkState } from "../src/lib/charm-protocol.ts"
+import { CHARM_MAX_URL_BYTES, CharmCode, CharmLinkState } from "../src/lib/charm-protocol.ts"
 import { report } from "./fixtures/charm-report.ts"
 
 test("only a link that is down is marked, and a fact nobody has read is not one", () => {
@@ -132,4 +136,23 @@ test("a link that never opened is not a charm that had nothing to say", () => {
     "This charm can't say which version it runs — the first update is by cable",
     "and a firmware too old to say is said in the row's own words",
   )
+})
+
+test("the charm's reader-facing sentences live together, and one refusal serves every row", () => {
+  // Voice's words are the settings page's like every other row's, not the rules module's: the row's
+  // line, its hint, and the count in its sentence are all read from here.
+  assert.equal(VOICE_ASK, "Hold B on your charm and talk to this bot")
+  assert.match(VOICE_HINT, /tailnet/, "the address the charm needs is the row's hint")
+  assert.match(TALK_TOO_LONG, new RegExp(`\\(${CHARM_MAX_URL_BYTES} bytes at most\\)`), "no count typed twice")
+
+  // A firmware older than the app is one sentence, and a row adds only its own next step to it.
+  const plain = refusalWords(CharmCode.BadMessage)
+  assert.equal(plain, "This charm's firmware is older than the app — update it")
+  assert.equal(
+    refusalWords(CharmCode.BadMessage, ", then set voice up again"),
+    `${plain}, then set voice up again`,
+    "the tail is the row's, the sentence is the page's",
+  )
+  // A code that is not that one is the charm's own words, tail or no tail.
+  assert.equal(refusalWords(CharmCode.StorageFailed, ", then set voice up again"), "The charm's storage is full or failing")
 })

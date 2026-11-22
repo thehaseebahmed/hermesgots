@@ -3,6 +3,7 @@
  * charm notifies, as bytes. Pure, so it is tested without a radio. The firmware repo's
  * `docs/PROTOCOL.md` is the spec and `include/protocol.h` the charm's copy; keep all three in step.
  */
+import { schemeOf } from "./host-url.ts"
 
 export const CHARM_VERSION = 1
 
@@ -121,7 +122,7 @@ export const CHARM_MAX_KEY_BYTES = 96
 export const CHARM_SHA256_BYTES = 32
 /**
  * The token a charm presents on every turn, as the firmware's own bound has it: the host mints 64
- * hex characters today, and the link carries 128 bytes so a longer one still fits.
+ * hex characters today, and this is the room a longer one still fits in.
  */
 export const CHARM_MAX_TOKEN_BYTES = 128
 
@@ -192,7 +193,9 @@ export const CharmCode = {
   Busy: 13,
 } as const
 
-/** What the charm says a code means, in words a settings row can show. */
+/** What the charm says a code means, in words a settings row can show. No code's words name an op:
+ * the table draws a sync's refusal, a provisioning write's and the Voice row's alike, so a reader is
+ * never told the charm "refused the sync" of a switch. */
 const CODE_WORDS: Record<number, string> = {
   [CharmCode.BadVersion]: "The charm runs a different sync version; update its firmware",
   [CharmCode.BadMessage]: "The charm didn't understand the sync",
@@ -210,7 +213,7 @@ const CODE_WORDS: Record<number, string> = {
 }
 
 export const codeWords = (code: number) =>
-  CODE_WORDS[code] ?? `The charm refused the sync (${code})`
+  CODE_WORDS[code] ?? `The charm refused it (${code})`
 
 /**
  * A mood by the number the charm knows it by, in the app's own names. The number is the wire
@@ -301,7 +304,9 @@ export interface CharmStatus {
   needImage: boolean
 }
 
-const encoder = new TextEncoder()
+/** The one UTF-8 encoder every frame is written with, shared with the callers that measure what a
+ * frame will hold (`talk.ts` bounds the address before a link is opened). */
+export const encoder = new TextEncoder()
 
 /** UTF-8 bytes cut to `max` without splitting a character. */
 export function utf8Clip(text: string, max: number): Uint8Array {
@@ -646,21 +651,41 @@ export function tailnetMessage(key: string): Uint8Array {
 }
 
 /**
+ * A URL as an address op carries it: the bytes of it, refused here for a scheme the charm cannot use
+ * or a length past what it holds, and never encoded twice by two ops that disagree. The two want
+ * opposite schemes — the charm fetches an image over https, and calls its host in the plain http its
+ * tailnet client speaks — so the scheme is the caller's, the bound is this module's, and `needs` is
+ * an op's own wording for the refusal where it has been said one way already.
+ */
+function addressBytes(
+  url: string,
+  scheme: "http" | "https",
+  what: string,
+  needs = `${what} must be ${scheme}://`,
+) {
+  const bytes = encoder.encode(url)
+  if (bytes.length === 0) throw new Error(`${what} is at least 1 byte`)
+  if (schemeOf(url) !== scheme) throw new Error(needs)
+  if (bytes.length > CHARM_MAX_URL_BYTES)
+    throw new Error(`${what} is at most ${CHARM_MAX_URL_BYTES} bytes`)
+  return bytes
+}
+
+/**
  * The address the charm's turns are posted to and the token it presents with them, as
  * `[urlLen u8][url][tokenLen u8][token]`. The charm appends `/talk/v1/turn` to the address, keeps
  * both, and never answers either back — `Forget` sweeps them with its other secrets.
  *
- * The bounds are the firmware's own: an address of 1..180 bytes and a token of 1..128. Whether the
- * address is one the charm can call at all is the caller's rule (`talk.ts`), since only it knows
- * what the reader was told.
+ * The bounds are the firmware's own: `CHARM_MAX_URL_BYTES` for the address and
+ * `CHARM_MAX_TOKEN_BYTES` for the token. Which addresses the charm can actually call is `talk.ts`'s
+ * rule, since only it knows what the reader was told; here one is only refused.
  */
 export function talkFrame(address: string, token: string): Uint8Array {
-  const url = encoder.encode(address)
-  if (url.length === 0) throw new Error("A talk address is at least 1 byte")
-  if (url.length > CHARM_MAX_URL_BYTES) throw new Error("A talk address is at most 180 bytes")
+  const url = addressBytes(address, "http", "A talk address")
   const secret = encoder.encode(token)
   if (secret.length === 0) throw new Error("A talk token is at least 1 byte")
-  if (secret.length > CHARM_MAX_TOKEN_BYTES) throw new Error("A talk token is at most 128 bytes")
+  if (secret.length > CHARM_MAX_TOKEN_BYTES)
+    throw new Error(`A talk token is at most ${CHARM_MAX_TOKEN_BYTES} bytes`)
   return control(CharmOp.Talk).str(url).str(secret).done()
 }
 
@@ -669,10 +694,7 @@ export function talkFrame(address: string, token: string): Uint8Array {
  * the address must be one it can fetch: https, and nothing else.
  */
 export function updateMessage(url: string, sha256: Uint8Array): Uint8Array {
-  if (!url.startsWith("https://")) throw new Error("An update needs an https address")
-  const address = encoder.encode(url)
-  if (address.length > CHARM_MAX_URL_BYTES)
-    throw new Error("An update address is at most 180 bytes")
+  const address = addressBytes(url, "https", "An update address", "An update needs an https address")
   if (sha256.length !== CHARM_SHA256_BYTES)
     throw new Error("An update carries the image's 32-byte SHA-256")
   return control(CharmOp.Update).str(address).raw(sha256).done()

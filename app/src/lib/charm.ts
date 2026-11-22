@@ -82,6 +82,12 @@ export interface PairedCharm {
   wifi?: CharmWifiRecord
   /** Whether the charm has a tailnet key. The key itself is the charm's, and is never kept here. */
   tailnet?: boolean
+  /**
+   * Whether the charm was handed the address its turns go to and the token it proves itself with.
+   * Neither is kept here — only that the hand-over happened, so the row knows a second set-up would
+   * revoke the token the charm is using.
+   */
+  talk?: boolean
   /** The glass's own settings, as the reader last chose them here. */
   wake?: CharmWake
   /**
@@ -481,10 +487,12 @@ export async function setCharmTailnetKey(key: string): Promise<number> {
  * Hands the charm the address its turns go to and the token it proves itself with. Neither is kept
  * here — not in this phone's store and not beside the paired charm — because the charm is the only
  * place they were ever for: the row holds the token from the host's answer until this write lands,
- * and no longer. An address the charm could not call is refused before a link is opened.
+ * and no longer. Only the hand-over is recorded, since a second set-up revokes the token this one
+ * left the charm holding. An address the charm could not call is refused before a link is opened.
  */
 export async function setCharmTalk(address: string, token: string): Promise<number> {
   const { status } = await askCharm(talkMessage(address, token))
+  if (paired && charmKept(status.code)) write({ ...paired, talk: true })
   return status.code
 }
 

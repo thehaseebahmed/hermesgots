@@ -4,6 +4,16 @@
  */
 
 /**
+ * The scheme a typed address wears, lowercased — `http` in `http://100.64.0.2:8642` — or undefined
+ * for one that names none, since a host and a port (`bot.example:8642`) are a scheme of their own to
+ * a URL parser. One rule for every reader of a typed address: whether it is the plain http a charm
+ * calls its host on, whether an image's is https, and the two rows that read a pasted host at all.
+ */
+export function schemeOf(url: string) {
+  return /^([a-z][a-z0-9+.-]*):\/\//i.exec(url.trim())?.[1]?.toLowerCase()
+}
+
+/**
  * Root of the server (strips a trailing `/v1`), for non-OpenAI routes like `/health`. A query or a
  * fragment is no part of the path a route is built on, so it goes first: an address pasted with one
  * is still the server it names.

@@ -123,6 +123,10 @@ import {
   tailnetWords,
   updateWords,
   updateProgressWords,
+  VOICE_AGAIN,
+  VOICE_ASK,
+  VOICE_HINT,
+  VOICE_KEPT,
   wifiWords,
   type CharmLink,
   type CharmRead,
@@ -130,14 +134,7 @@ import {
   type CharmSeen,
 } from "@/lib/charm-words"
 import { quietly } from "@/lib/report"
-import {
-  TALK_FEATURE,
-  VOICE_ASK,
-  VOICE_HINT,
-  talkProblem,
-  talkWords,
-  type TalkOffer,
-} from "@/lib/talk"
+import { TALK_FEATURE, talkProblem, talkWords, type TalkOffer } from "@/lib/talk"
 import { tell } from "@/lib/tell"
 import { useBotLabels } from "@/lib/use-bot-labels"
 
@@ -684,21 +681,26 @@ const VOICE: CharmVoiceApi = {
  * the charm over its own link. The row is offered only where the host advertises the route — a host
  * older than it has no token to mint — and it is the reader's two taps rather than one, because
  * asking the host mints a new token and revokes the one the charm already holds: a page that fetched
- * on opening would break a charm that was set up yesterday.
+ * on opening would break a charm that was set up yesterday. A charm this phone's record says was set
+ * up already says so on the button, and the hint says what that tap spends.
  *
  * The address the host answers with is the one this phone dialled, so the field is prefilled and
  * editable: the charm calls over the tailnet in plain http, and the reader is the one who knows the
- * address it reaches the host at. The token is held here from the host's answer until the write
- * lands, and then not at all — it lives on the charm, and nowhere on this phone.
+ * address it reaches the host at. The token is held here from the host's answer until the charm
+ * answers the write, and then not at all — it lives on the charm, and nowhere on this phone. A write
+ * that never landed keeps it, since nothing was spent and a second mint would revoke the charm's.
  */
 export function CharmVoice({
   api = VOICE,
   profile,
+  talk,
 }: {
   /** The host and the radio, or a stand-in under test. */
   api?: CharmVoiceApi
   /** The bot whose host mints the token: the row exists only where that host advertises it. */
   profile?: PluginServer
+  /** What this phone's record says of the charm: it was handed an address and a token already. */
+  talk?: boolean
 }) {
   const offered = usePluginFeatureOn(profile, TALK_FEATURE)
   /** The address the charm will be given: what the host answered, until the reader says otherwise. */
@@ -711,14 +713,16 @@ export function CharmVoice({
 
   if (!offered) return null
 
-  /** The host's one ask: what the address is, and the token this charm will keep. */
-  const setup = async () => {
-    setBusy("setup")
+  /**
+   * The row's one state machine, for both of its taps: busy with the step it is on, the last line
+   * cleared, and then whatever the work said — the charm's answer, or why there is none — in its
+   * place.
+   */
+  const run = async (step: "setup" | "send", work: () => Promise<string | null>) => {
+    setBusy(step)
     setSaid(null)
     try {
-      const offer = await api.offer(profile)
-      setAddress(offer.host)
-      setToken(offer.token)
+      setSaid(await work())
     } catch (error) {
       setSaid(message(error))
     } finally {
@@ -726,27 +730,32 @@ export function CharmVoice({
     }
   }
 
+  /** The host's one ask: what the address is, and the token this charm will keep. */
+  const setup = () =>
+    run("setup", async () => {
+      const offer = await api.offer(profile)
+      setAddress(offer.host)
+      setToken(offer.token)
+      return null
+    })
+
   /**
-   * The write. An address the charm could not call is refused here, before the link is opened, and
-   * the token stays where it is so the reader can fix the address and send again; once the write
-   * has gone, the token is this phone's no longer, whatever the charm said about it.
+   * The write. An address the charm could not call is refused here, before any link is opened, and
+   * the token stays where it is so the reader can fix the address and send again. Only the charm's
+   * own answer spends the token: a write that threw may never have reached it, and minting another
+   * would revoke the one it is holding.
    */
-  const send = async () => {
+  const send = () => {
     const problem = talkProblem(address)
     if (problem) {
       setSaid(problem)
       return
     }
-    setBusy("send")
-    setSaid(null)
-    try {
-      setSaid(talkWords(await api.send(address, token)))
-    } catch (error) {
-      setSaid(message(error))
-    } finally {
+    return run("send", async () => {
+      const words = talkWords(await api.send(address, token))
       setToken("")
-      setBusy(null)
-    }
+      return words
+    })
   }
 
   return (
@@ -765,7 +774,7 @@ export function CharmVoice({
             value={address}
             disabled={busy !== null}
             onChange={(event) => setAddress(event.target.value)}
-            hint={VOICE_HINT}
+            hint={talk ? `${VOICE_HINT} ${VOICE_AGAIN}` : VOICE_HINT}
           />
           <div className="flex flex-wrap items-center gap-2">
             <Button
@@ -775,7 +784,7 @@ export function CharmVoice({
               disabled={busy !== null}
               onClick={() => void setup()}
             >
-              {busy === "setup" ? "Asking…" : "Set up"}
+              {busy === "setup" ? "Asking…" : talk ? "Set up again" : "Set up"}
             </Button>
             <Button
               id="charm-talk-send"
@@ -791,7 +800,8 @@ export function CharmVoice({
       </Group>
       <Caption>
         Set up asks your bot&rsquo;s host for this charm&rsquo;s own token; Send hands the address
-        and the token to the charm, which keeps them. This phone keeps no copy of the token.
+        and the token to the charm, which keeps them. This phone keeps no copy of the token.{" "}
+        {VOICE_KEPT}
       </Caption>
     </>
   )
@@ -1085,7 +1095,7 @@ export function CharmSettings() {
             read={status}
             refresh={refreshStatus}
           />
-          <CharmVoice profile={profile} />
+          <CharmVoice profile={profile} talk={charm.talk} />
           <Group>
             <ActionRow
               icon={UnlinkIcon}
