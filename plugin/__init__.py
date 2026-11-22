@@ -253,25 +253,31 @@ def _error(web: Any, message: str, status: int, code: str | None = None):
     return web.json_response({"error": error}, status=status)
 
 
+def _not_linked(web: Any):
+    """A host no bot is linked to: no token was ever minted here to judge one against."""
+    return _error(
+        web,
+        "This bot isn't linked to a Gots account, so it has no id to talk as.",
+        409,
+        "not_linked",
+    )
+
+
 def _talk_bot(web: Any, request: Any, linked: Any) -> Tuple[Optional[str], Optional[Any]]:
     """The bot a talk request names, or the refusal to answer it with: one rule for both routes.
 
     No ``?bot=`` names this host's linked bot; an id that is not one is the caller's mistake, in
-    words and before any token is judged; a host with no bot is refused as unlinked; and another
-    bot's id is no bot this host serves. The hand-over and the charm's turn reading ``?bot=`` by one
-    rule is what keeps a malformed id from being refused as a bad token by one door and as an id by
-    the other — ``talk_tokens.valid_bot`` owns the predicate, this owns the order.
+    words; a host with no bot is refused as unlinked; and another bot's id is no bot this host
+    serves. The hand-over and the charm's turn reading ``?bot=`` by one rule is what keeps a
+    malformed id from being refused as a bad token by one door and as an id by the other —
+    ``talk_tokens.valid_bot`` owns the predicate, this owns the order. The turn route asks this
+    only once its token has been verified, so a stranger never reaches it.
     """
     asked = request.query.get("bot") or ""
     if asked and not talk_tokens.valid_bot(asked):
         return None, _error(web, "Not a bot id", 400)
     if not isinstance(linked, str) or not linked:
-        return None, _error(
-            web,
-            "This bot isn't linked to a Gots account, so it has no id to talk as.",
-            409,
-            "not_linked",
-        )
+        return None, _not_linked(web)
     if asked and asked != linked:
         return None, _error(web, "No such bot.", 404, "unknown_bot")
     return asked or linked, None
@@ -2061,21 +2067,30 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
 
         The front door is checked in one order, and each way through it has its own word: no token
         at all, a host no bot is linked to, a bearer that isn't this bot's, a bot this host doesn't
-        serve, and a contract this host doesn't speak. A stranger learns nothing before presenting
-        a token, and a charm is told which versions are spoken where its own is not one. `?bot=` is
-        read by the hand-over's own rule (`_talk_bot`), so an id that isn't one is a 400 here too.
+        serve, and a contract this host doesn't speak. The token is judged before ``?bot=`` is read
+        at all, so a stranger presenting a bearer learns nothing about this host's bots — a bogus
+        bearer with a malformed or foreign ``?bot=`` is a ``bad_token`` and nothing else, and only a
+        caller holding this bot's token is told its ``?bot=`` is wrong. That one is read by the
+        hand-over's own rule (`_talk_bot`), so an id that isn't one is a 400 here too, and a charm is
+        told which versions are spoken where its own is not one.
         """
         header = request.headers.get("Authorization") or ""
         token = header[len("Bearer ") :] if header.startswith("Bearer ") else ""
         path = store_path()
-        state = await asyncio.to_thread(link.load_state, profile_home())
+        linked = (await asyncio.to_thread(link.load_state, profile_home())).get("botId")
         if not token:
             return _error(web, "A turn needs this charm's token, as a Bearer.", 401, "no_token")
-        bot, refused = _talk_bot(web, request, state.get("botId"))
+        if not isinstance(linked, str) or not linked:
+            # No bot means no token was ever minted: there is nothing to judge one against, and
+            # saying so describes the host rather than any bot of its.
+            return _not_linked(web)
+        # The token proves the caller is this host's charm, so it is judged against this host's own
+        # bot: a `?bot=` naming another one is a mistake to answer after the token, not before it.
+        if not await asyncio.to_thread(talk_tokens.verify, path, linked, token):
+            return _error(web, "This token isn't this bot's.", 401, "bad_token")
+        bot, refused = _talk_bot(web, request, linked)
         if refused is not None:
             return refused
-        if not await asyncio.to_thread(talk_tokens.verify, path, bot, token):
-            return _error(web, "This token isn't this bot's.", 401, "bad_token")
         if (request.headers.get(talk.VERSION_HEADER) or "").strip() != talk.VERSION:
             return _error(
                 web,

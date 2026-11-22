@@ -387,6 +387,11 @@ class Speaking(Routes):
             ("no_voice", 503, lambda: self.under(saying(fails()))),
             ("no_voice_chat", 503, no_voice_chat),
             ("unanswered", 504, lambda: self.under(mock.patch.object(talk, "last_reply", Reader()))),
+            (
+                "turn_failed",
+                500,
+                lambda: self.under(mock.patch.object(talk, "last_reply", Reader(""))),
+            ),
             ("unheard", 502, unheard),
             ("answer_too_long", 502, lambda: self.under(saying(long_says()))),
         ]
@@ -549,6 +554,21 @@ class Speaking(Routes):
             [],
             "and the empty Voice chat is gone from the app's list",
         )
+
+    def test_a_stranger_learns_nothing_before_its_token_is_judged(self) -> None:
+        """A bogus bearer is refused as a bad token whatever its `?bot=` says.
+
+        The route used to judge `?bot=` before the token, so a stranger could learn that an id is
+        malformed or that this host doesn't serve it without holding this bot's token at all.
+        """
+        bogus = {"Authorization": "Bearer " + "0" * 64}
+        for query in ({"bot": "not a bot"}, {"bot": OTHER}):
+            with self.subTest(query=query):
+                refused, word, sentence = self.refusal(self.answers(headers=bogus, query=query))
+                self.assertEqual(
+                    (refused, word), (401, "bad_token"), "the token is judged first"
+                )
+                self.assertNotIn("bot id", sentence.lower(), "and says nothing about the id asked")
 
     def test_a_bot_id_that_is_not_one_is_refused_the_same_way_on_both_routes(self) -> None:
         """The turn route reads ``?bot=`` by the hand-over's rule: a malformed id is a 400."""

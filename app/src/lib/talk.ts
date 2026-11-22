@@ -14,11 +14,12 @@
  *
  * Pure, so the row's rules are tested with no radio and no host (`scripts/test-charm-talk.mjs`).
  */
-import { CHARM_MAX_URL_BYTES, CharmCode, encoder, talkFrame } from "./charm-protocol.ts"
+import { CHARM_MAX_URL_BYTES, CharmCode, charmKept, encoder, talkFrame } from "./charm-protocol.ts"
 import {
   TALK_NEEDS_ADDRESS,
   TALK_NEEDS_HTTP,
   TALK_SENT,
+  TALK_STILL_HELD,
   TALK_TOO_LONG,
   VOICE_TAIL,
   refusalWords,
@@ -90,10 +91,13 @@ export function talkMessage(address: string, token: string): Uint8Array {
 
 /**
  * What the charm's answer to the write means, in the words the row shows. Its own `Ok` has the row's
- * word; everything else is the charm's code, drawn by the settings page's one rule for a code — the
- * firmware step for an op the charm is too old to know, with this row's next step on the end of it.
+ * word; an answer that kept the secret has the charm's code and nothing more, since the token is
+ * spent; everything else is the charm's code, drawn by the settings page's one rule for a code — the
+ * firmware step for an op the charm is too old to know, with this row's next step on the end of it —
+ * followed by the one fact that answer leaves: the token is still this phone's to send again.
  */
 export function talkWords(code: number): string {
   if (code === CharmCode.Ok) return TALK_SENT
-  return refusalWords(code, VOICE_TAIL)
+  const words = refusalWords(code, VOICE_TAIL)
+  return charmKept(code) ? words : `${words} ${TALK_STILL_HELD}`
 }

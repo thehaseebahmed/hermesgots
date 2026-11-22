@@ -88,10 +88,27 @@ test("the row says what the charm answered, in the charm's own words", () => {
   assert.doesNotMatch(codeWords(4242), /sync/, "and an unknown code is the charm's own, not a sync's")
 })
 
+test("an answer that did not keep it says the token is still this phone's to send", () => {
+  // Busy and StorageFailed both leave the secret where it was: the row has the only copy the
+  // reader can still hand over, so it says so rather than drawing a refusal that sounds final.
+  for (const code of [CharmCode.Busy, CharmCode.StorageFailed]) {
+    assert.match(
+      talkWords(code),
+      /still on this phone/,
+      "a charm that never kept it leaves the token with the phone",
+    )
+    assert.match(talkWords(code), /send it again/, "and Send is the way it goes")
+  }
+  // A keep spends the token, so there is nothing left to say about it.
+  assert.doesNotMatch(talkWords(CharmCode.Ok), /still on this phone/)
+  assert.doesNotMatch(talkWords(CharmCode.KeptReadable), /still on this phone/)
+})
+
 test("a charm that refuses the op is named, and told apart from the sync's refusal", () => {
-  assert.equal(
-    talkWords(CharmCode.BadMessage),
-    refusalWords(CharmCode.BadMessage, ", then set voice up again"),
+  assert.ok(
+    talkWords(CharmCode.BadMessage).startsWith(
+      refusalWords(CharmCode.BadMessage, ", then set voice up again"),
+    ),
     "the row does not keep a second sentence for the same fact",
   )
   assert.match(talkWords(CharmCode.BadMessage), /older than the app/, "the firmware is what to update")

@@ -372,5 +372,13 @@ export const TALK_TOO_LONG = `That address is longer than the charm holds (${CHA
 
 export const TALK_SENT = "Sent to your charm."
 
+/**
+ * After an answer that did not keep it: the token is this phone's still, and the same one can go
+ * again. Said only where the charm's answer is not a keep (``charmKept``), since an answer that
+ * kept it spends the token and there is nothing left to send.
+ */
+export const TALK_STILL_HELD =
+  "The token is still on this phone: send it again once the charm can keep it."
+
 /** The Voice row's own end to a refusal: the firmware first, then this row set up again. */
 export const VOICE_TAIL = ", then set voice up again"

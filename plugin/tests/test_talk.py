@@ -110,6 +110,40 @@ def planted(home: Path, rows: List[tuple]) -> None:
         conn.close()
 
 
+def lineage(home: Path, rows: List[tuple]) -> None:
+    """Hermes's own session rows: ``(id, parent, end_reason, model_config, source, started_at)``.
+
+    A chat compacted after it was opened is a parent ended in compression and the child Hermes
+    carries it on in, which is the only ancestry these cases need.
+    """
+    conn = sqlite3.connect(home / "state.db")
+    try:
+        conn.execute(
+            "CREATE TABLE sessions (id TEXT PRIMARY KEY, parent_session_id TEXT, end_reason TEXT,"
+            " model_config TEXT, source TEXT, started_at REAL)"
+        )
+        conn.executemany(
+            "INSERT INTO sessions (id, parent_session_id, end_reason, model_config, source,"
+            " started_at) VALUES (?, ?, ?, ?, ?, ?)",
+            rows,
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def write(home: Path, row: tuple) -> None:
+    """One transcript row written while a turn is out, as Hermes writes it: ``(id, session, role, …)``."""
+    conn = sqlite3.connect(home / "state.db")
+    try:
+        conn.execute(
+            "INSERT INTO messages (id, session_id, role, content) VALUES (?, ?, ?, ?)", row
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 class Turn(unittest.TestCase):
     def setUp(self) -> None:
         self.home = temp_hermes_home(self)
@@ -349,6 +383,77 @@ class Turn(unittest.TestCase):
         self.assertEqual(self.poster.starts, [], "an utterance nobody can answer in is not posted")
         self.assertEqual(self.tt.audio, [], "and it isn't heard before the host finds it has no chat")
 
+    def test_an_answer_written_to_a_compression_child_is_heard(self) -> None:
+        """A compaction part-way through the turn moves the chat on: the answer is read where
+        Hermes wrote it, in the child, rather than waited out in the session the chat opened as."""
+        store.put_setting(
+            self.path, f"{talk.VOICE}:{BOT}", {"chat": "chat-1", "session": "gots-chat-1"}
+        )
+        lineage(
+            self.home,
+            [
+                ("gots-chat-1", None, "compression", "{}", "api_server", 1.0),
+                ("gots-chat-2", "gots-chat-1", None, "{}", "api_server", 2.0),
+            ],
+        )
+        planted(
+            self.home,
+            [
+                (1, "gots-chat-1", "user", "Before the compaction."),
+                (2, "gots-chat-1", "assistant", "The one before."),
+                (3, "gots-chat-2", "user", "After it."),
+            ],
+        )
+        seen: List[int] = []
+
+        def reading(home: Path, session_id: str, since: int) -> Optional[str]:
+            seen.append(since)
+            if len(seen) == 1:
+                # The answer lands after the floor was taken, in the child the compaction made.
+                write(self.home, (since + 1, "gots-chat-2", "assistant", ANSWER))
+                return None
+            return talk.last_reply(home, session_id, since)
+
+        self.assertEqual(self.turn(reader=reading), ANSWER)
+        self.assertEqual(
+            seen[0],
+            4,
+            "the floor is the live child's next row, not the compacted parent's",
+        )
+
+    def test_a_run_that_ends_with_no_words_is_the_turn_failing_not_the_voice(self) -> None:
+        """A finished turn with an empty answer is `turn_failed`: the host has a voice, and the
+        band must not be told it hasn't."""
+        store.put_setting(
+            self.path, f"{talk.VOICE}:{BOT}", {"chat": "chat-1", "session": "gots-chat-1"}
+        )
+        planted(self.home, [(1, "gots-chat-1", "user", "Say nothing.")])
+        seen: List[int] = []
+
+        def reading(home: Path, session_id: str, since: int) -> Optional[str]:
+            seen.append(since)
+            if len(seen) == 1:
+                write(self.home, (since, "gots-chat-1", "assistant", ""))
+                return None
+            return talk.last_reply(home, session_id, since)
+
+        with self.assertRaises(talk.TalkError) as refused:
+            self.turn(reader=reading)
+        self.assertEqual(refused.exception.code, "turn_failed", "the turn failed, not the voice")
+        self.assertIs(type(refused.exception), talk.TalkError, "the contract's own refusal")
+        self.assertEqual(
+            self.tt.audio[0]["source"], "dictation", "the utterance itself was still heard"
+        )
+
+    def test_a_stamp_after_the_row_was_taken_back_leaves_no_row(self) -> None:
+        """Another turn can take the row back between this one's read of it and its stamp: a bare
+        `{at}` would read as absent to the next turn and as taken to a write, wedging the bot."""
+        talk._stamp(self.path, BOT, 1_800_000_000_000)
+        self.assertIsNone(
+            store.get_setting(self.path, f"{talk.VOICE}:{BOT}"),
+            "a stamp never stands where the chat it belongs to was taken back",
+        )
+
     def test_a_turn_with_no_known_floor_in_its_transcript_is_unanswered(self) -> None:
         class Away:
             """The store as a read that raises: the session's place in it can't be known."""
@@ -439,6 +544,56 @@ class Reply(unittest.TestCase):
         self.assertIsNone(
             self.reply(since=0),
             "0 is no floor rather than 'any row': a turn that doesn't know where it starts is unanswered",
+        )
+
+    def test_the_answer_is_read_from_the_child_the_chat_moved_to(self) -> None:
+        """Compression moves the chat on, and the answer is written in the child: the read follows."""
+        lineage(
+            self.home,
+            [
+                ("gots-chat-1", None, "compression", "{}", "api_server", 1.0),
+                ("gots-chat-2", "gots-chat-1", None, "{}", "api_server", 2.0),
+            ],
+        )
+        planted(
+            self.home,
+            [
+                (1, "gots-chat-1", "assistant", "The one before."),
+                (2, "gots-chat-2", "assistant", "In the child, after the compaction."),
+            ],
+        )
+        self.assertEqual(
+            talk.last_reply(self.home, "gots-chat-1", 2),
+            "In the child, after the compaction.",
+            "the read is of the chat's live end, not the id it was opened with",
+        )
+
+    def test_a_branch_off_the_chat_is_not_the_chat(self) -> None:
+        """A branch shares the parent link without continuing the conversation: never followed."""
+        lineage(
+            self.home,
+            [
+                ("gots-chat-1", None, "compression", "{}", "api_server", 1.0),
+                (
+                    "gots-chat-2",
+                    "gots-chat-1",
+                    None,
+                    '{"_branched_from": "gots-chat-1"}',
+                    "api_server",
+                    2.0,
+                ),
+            ],
+        )
+        planted(
+            self.home,
+            [
+                (1, "gots-chat-1", "assistant", "The one before."),
+                (2, "gots-chat-2", "assistant", "Another conversation."),
+            ],
+        )
+        self.assertIsNone(
+            talk.last_reply(self.home, "gots-chat-1", 2),
+            "only a compression continuation is the chat's own",
         )
 
 

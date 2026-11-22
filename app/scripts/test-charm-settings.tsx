@@ -916,6 +916,43 @@ test("a write that never landed keeps the token, so one drop costs no second min
   })
 })
 
+test("an answer that did not keep it leaves the token here, and the row says so", async () => {
+  const cases = [
+    ["busy", CharmCode.Busy],
+    ["full", CharmCode.StorageFailed],
+  ] as const
+  for (const [why, code] of cases) {
+    const wrote: string[] = []
+    const api = voice({
+      send: async (_address, token) => {
+        wrote.push(token)
+        return code
+      },
+    })
+    await mount(<CharmVoice api={api} profile={connection(`talk-keep-${why}`)} />, async () => {
+      await until(async () => Boolean(find("#charm-talk-setup")), "the row's controls")
+      await click(find("#charm-talk-setup"))
+      await settle()
+      await click(find("#charm-talk-send"))
+      await settle()
+      assert.ok(text().includes(codeWords(code)), "the charm's answer is what the row draws")
+      assert.ok(
+        text().includes("still on this phone"),
+        "and that the token is still here to send: the charm never kept it",
+      )
+      assert.equal(
+        (find("#charm-talk-send") as HTMLButtonElement | null)?.disabled,
+        false,
+        "Send is not spent, since nothing was kept",
+      )
+      // The same token goes again rather than a new one minted over the token the charm never kept.
+      await click(find("#charm-talk-send"))
+      await settle()
+      assert.deepEqual(wrote, [TOKEN, TOKEN], "the retry is the same token")
+    })
+  }
+})
+
 test("a charm already set up is offered Set up again, and told what that spends", async () => {
   await mount(
     <CharmVoice talk api={voice()} profile={connection("talk-set-up")} />,

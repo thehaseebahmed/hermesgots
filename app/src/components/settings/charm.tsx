@@ -687,8 +687,9 @@ const VOICE: CharmVoiceApi = {
  * The address the host answers with is the one this phone dialled, so the field is prefilled and
  * editable: the charm calls over the tailnet in plain http, and the reader is the one who knows the
  * address it reaches the host at. The token is held here from the host's answer until the charm
- * answers the write, and then not at all — it lives on the charm, and nowhere on this phone. A write
- * that never landed keeps it, since nothing was spent and a second mint would revoke the charm's.
+ * answers that it kept it (`Ok` or `KeptReadable`), and then not at all — it lives on the charm, and
+ * nowhere on this phone. A write that never landed, and an answer that did not keep it, keep it:
+ * nothing was spent, and a second mint would revoke the token the charm can still be given.
  */
 export function CharmVoice({
   api = VOICE,
@@ -741,9 +742,10 @@ export function CharmVoice({
 
   /**
    * The write. An address the charm could not call is refused here, before any link is opened, and
-   * the token stays where it is so the reader can fix the address and send again. Only the charm's
-   * own answer spends the token: a write that threw may never have reached it, and minting another
-   * would revoke the one it is holding.
+   * the token stays where it is so the reader can fix the address and send again. Only an answer
+   * that says the charm kept the secret spends the token: a write that threw may never have reached
+   * it, and a charm that was busy or full never wrote it, so minting another would revoke the one
+   * the charm can still be given.
    */
   const send = () => {
     const problem = talkProblem(address)
@@ -752,9 +754,11 @@ export function CharmVoice({
       return
     }
     return run("send", async () => {
-      const words = talkWords(await api.send(address, token))
-      setToken("")
-      return words
+      const code = await api.send(address, token)
+      // Only an answer that says the charm kept it spends the token: one that is busy or full never
+      // wrote it, and minting another would revoke the one the charm is about to be given.
+      if (charmKept(code)) setToken("")
+      return talkWords(code)
     })
   }
 

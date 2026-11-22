@@ -279,9 +279,18 @@ def _voice_row(path: Path, bot: str) -> Optional[Dict[str, Any]]:
 
 
 def _stamp(path: Path, bot: str, at: int) -> None:
-    """When this bot's last turn really went out: its own write, beside the chat and not over it."""
+    """When this bot's last turn really went out: its own write, beside the chat and not over it.
+
+    A row taken back between the turn's read of it and this write — another turn lost the race for
+    the chat and the loser's ``_abandon`` removed it — is left gone. Writing the stamp alone would
+    leave a row with no chat and no session, which ``_voice_row`` reads as absent while
+    ``put_setting_if_absent`` reads as taken, so the next turn would open a chat it must abandon and
+    the bot would never answer again.
+    """
     held = get_setting(path, _key(bot))
     row = dict(held) if isinstance(held, dict) else {}
+    if not isinstance(row.get("chat"), str) or not row["chat"]:
+        return
     row["at"] = at
     put_setting(path, _key(bot), row)
 
@@ -327,12 +336,20 @@ async def _answered(
     read: Callable[..., Optional[str]],
     clock: Clock,
 ) -> str:
-    """The run's reply, waited for until the deadline, or ``Unanswered`` when it never came."""
+    """The run's reply, waited for until the deadline, or ``Unanswered`` when it never came.
+
+    An answer that is present but holds no words is a finished turn with nothing to say, which is no
+    reason to keep waiting and no reason to blame the host's voice: it is the contract's own
+    ``turn_failed``, raised here so a reader who sees it knows the turn failed rather than the host
+    being mute.
+    """
     deadline = clock.now() + ANSWER_SECONDS
     delay = POLL_FIRST
     while True:
         answer = await asyncio.to_thread(read, home, session, since)
         if answer is not None:
+            if not answer.strip():
+                raise TalkError("The bot's answer has no words to speak.")
             return answer
         left = deadline - clock.now()
         if left <= 0:
@@ -352,10 +369,15 @@ def last_reply(home: Path, session_id: str, since: int) -> Optional[str]:
     assistant message, with the run's own end the way Hermes reads one: a trailing user or tool row,
     or an assistant row still holding tool calls, is a turn that hasn't finished. Read-only, so a
     poll of a running turn can never lock the gateway out of its own store.
+
+    The transcript is read at the session's live end (``sessions.live_session``): a compaction
+    part-way through the turn moves the chat on, and Hermes writes the answer into the child, where
+    a read of the id the chat was opened with would never find it.
     """
     floor = int(since) if isinstance(since, int) and not isinstance(since, bool) else 0
     if floor < 1:
         return None
+    live = sessions.live_session(home, session_id)
     conn = sessions._open_state(home)
     if conn is None:
         return None
@@ -364,10 +386,10 @@ def last_reply(home: Path, session_id: str, since: int) -> Optional[str]:
             row = conn.execute(
                 """SELECT role, content, tool_calls FROM messages
                    WHERE session_id = ? AND id >= ? ORDER BY id DESC LIMIT 1""",
-                (session_id, floor),
+                (live, floor),
             ).fetchone()
     except sqlite3.Error:
-        logger.debug("gots: couldn't read %s's last message", session_id, exc_info=True)
+        logger.debug("gots: couldn't read %s's last message", live, exc_info=True)
         return None
     if row is None or str(row["role"] or "").strip().lower() != "assistant":
         return None
@@ -380,10 +402,14 @@ def _newest(home: Path, session_id: str) -> int:
     """The id a session's next message row will have: where a turn posted now begins.
 
     One past the session's newest row, or 1 for a session with none — ids are positive, so the floor
-    is always a real one. A store that is there but can't be read raises ``Unanswered`` rather than
-    answering 0: 0 is not a floor, and a turn that guessed it would read a row from before itself.
-    A profile that has no ``state.db`` yet has no messages at all, which is a floor of 1.
+    is always a real one. The row is counted at the chat's live end (``sessions.live_session``), since
+    a chat compacted since it was opened holds its newest rows in a child; a floor taken on the old
+    session would read an answer of the child's from before this turn. A store that is there but
+    can't be read raises ``Unanswered`` rather than answering 0: 0 is not a floor, and a turn that
+    guessed it would read a row from before itself. A profile that has no ``state.db`` yet has no
+    messages at all, which is a floor of 1.
     """
+    live = sessions.live_session(home, session_id)
     conn = sessions._open_state(home)
     if conn is None:
         if (home / "state.db").exists():
@@ -394,10 +420,10 @@ def _newest(home: Path, session_id: str) -> int:
     try:
         with closing(conn):
             row = conn.execute(
-                "SELECT MAX(id) FROM messages WHERE session_id = ?", (session_id,)
+                "SELECT MAX(id) FROM messages WHERE session_id = ?", (live,)
             ).fetchone()
     except sqlite3.Error as error:
-        logger.debug("gots: couldn't read %s's place in its transcript", session_id, exc_info=True)
+        logger.debug("gots: couldn't read %s's place in its transcript", live, exc_info=True)
         raise Unanswered(
             "This turn's transcript couldn't be read, so its answer can't be told apart."
         ) from error

@@ -843,6 +843,51 @@ def chat_session(
     return current
 
 
+def live_session(home: Path, session_id: str) -> str:
+    """The session a chat's conversation has moved on to: its last compression continuation.
+
+    ``chat_session`` reads these links the other way — from the session Hermes keyed a run on back
+    to the one the chat began as — while this answers the id Hermes writes a run's rows to. Gots
+    knows only the id a chat was opened with, and a compaction moves the conversation on, so a read
+    or a floor taken on that id would miss every row after it.
+
+    A hop is taken only where the session ended in compression and the child continues it rather
+    than forking off it (``_forks``), the same step ``chat_session`` takes: a branch, a delegation
+    or a tool session is another conversation and is not followed. A store that can't answer leaves
+    the id as it was, which is no worse than the read before this walk existed.
+    """
+    current = session_id
+    walked = [session_id]
+    conn = _open_state(home)
+    if conn is None:
+        return session_id
+    try:
+        with closing(conn):
+            for _ in range(COMPRESSION_DEPTH):
+                ended = conn.execute(
+                    "SELECT end_reason FROM sessions WHERE id = ?", (current,)
+                ).fetchone()
+                if ended is None or ended["end_reason"] != "compression":
+                    break
+                child = None
+                for row in conn.execute(
+                    "SELECT id, model_config, source FROM sessions"
+                    " WHERE parent_session_id = ? ORDER BY started_at DESC",
+                    (current,),
+                ):
+                    if row["id"] not in walked and not _forks(row):
+                        child = row["id"]
+                        break
+                if child is None:
+                    break
+                current = child
+                walked.append(current)
+    except sqlite3.Error:
+        logger.debug("gots: couldn't walk a chat's compression continuations", exc_info=True)
+        return session_id
+    return current
+
+
 def _forks(row: Any) -> bool:
     """Whether this child forks off its parent instead of continuing it: a session a tool made, or
     one carrying a branch, delegation or reset marker at all — Hermes's ``_CHAIN_STEP_SQL`` refuses
