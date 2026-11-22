@@ -261,6 +261,12 @@ class Refusals(unittest.TestCase):
             # The cap is "at most": a minute exactly is still an utterance.
             self.assertEqual(len(wire(charm_audio.encode(bytes(minute)))), charm_audio.MAX_FRAMES)
 
+    def test_pcm_that_ends_inside_a_sample_is_refused_as_audio(self) -> None:
+        av, _ = stub_av()
+        with mock.patch.dict(sys.modules, {"av": av}):
+            with self.assertRaises(charm_audio.OddPcm):
+                charm_audio.encode(b"\x00")
+
     def test_a_host_with_no_codec_imports_and_says_so(self) -> None:
         with mock.patch.dict(sys.modules, {"av": None}):
             try:
@@ -310,6 +316,33 @@ class Pcm(unittest.TestCase):
         with mock.patch.dict(sys.modules, {"av": None}):
             with self.assertRaises(charm_audio.NoCodec):
                 charm_audio.pcm(wav_of(tone(charm_audio.FRAME_SAMPLES)))
+
+    def test_a_file_that_fails_mid_read_is_closed_and_logged(self) -> None:
+        av, made = stub_av()
+
+        def opening(source: Any) -> Any:
+            container = Container(source)
+
+            def giving_up(audio: Optional[int] = None):
+                yield Frame.holding(b"\x00\x00")
+                raise ValueError("the codec gave up")
+
+            container.decode = giving_up
+            made.opened.append(container)
+            return container
+
+        av.open = opening
+        with mock.patch.dict(sys.modules, {"av": av}):
+            with mock.patch.object(charm_audio.logger, "debug") as debug:
+                with self.assertRaises(charm_audio.Undecodable):
+                    charm_audio.pcm(wav_of(tone(charm_audio.FRAME_SAMPLES)))
+        self.assertTrue(
+            made.opened[-1].closed, "the file the read opened is closed however that read ended"
+        )
+        self.assertTrue(
+            debug.called and debug.call_args.kwargs.get("exc_info"),
+            "and the failure is logged with its traceback, rather than passing for the codec's own",
+        )
 
 
 class RealCodec(unittest.TestCase):

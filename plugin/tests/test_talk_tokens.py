@@ -68,6 +68,19 @@ class Tokens(unittest.TestCase):
             with self.subTest(value=value):
                 self.assertFalse(talk_tokens.verify(self.path, BOT, value))
 
+    def test_a_tokens_shape_is_the_length_it_is_minted_at(self) -> None:
+        width = talk_tokens.TOKEN_BYTES * 2
+        self.assertRegex("0" * width, talk_tokens.TOKEN)
+        for value in ("0" * (width - 1), "0" * (width + 1)):
+            with self.subTest(value=value):
+                self.assertIsNone(talk_tokens.TOKEN.match(value))
+
+    def test_a_bot_id_is_judged_by_one_predicate(self) -> None:
+        self.assertTrue(talk_tokens.valid_bot(BOT))
+        for value in ("", "a bot", "a" * 65, None, 7):
+            with self.subTest(value=value):
+                self.assertFalse(talk_tokens.valid_bot(value))
+
 
 if __name__ == "__main__":
     unittest.main()

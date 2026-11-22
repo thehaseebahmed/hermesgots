@@ -31,7 +31,7 @@ from typing import Any, Dict, List
 from unittest import mock
 
 import plugin
-from plugin import charm_audio, link, store, talk, talk_tokens
+from plugin import charm_audio, chats, link, store, talk, talk_tokens
 from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
 from plugin.tests.test_charm_audio import stub_av, tone, wav_of, wire as packets_of
 from plugin.tests.test_dictation import hermes
@@ -92,6 +92,21 @@ def refuses(why: str = "no voice provider is configured") -> Any:
 
     def text_to_speech_tool(text: str, output_path: str, **extra: Any) -> str:
         return json.dumps({"success": False, "error": why})
+
+    return text_to_speech_tool
+
+
+def long_says(seconds: int = charm_audio.MAX_SECONDS + 1) -> Any:
+    """A voice whose answer runs past the minute a turn can carry: 16 kHz mono silence, and a file.
+
+    It writes where it was asked to, which is also the case a turn must not take the same path back
+    from twice: the provider honoured ``output_path``.
+    """
+
+    def text_to_speech_tool(text: str, output_path: str, **extra: Any) -> str:
+        samples = charm_audio.SAMPLE_RATE * charm_audio.SAMPLE_BYTES * seconds
+        Path(output_path).write_bytes(wav_of(bytes(samples)))
+        return json.dumps({"success": True, "file_path": output_path})
 
     return text_to_speech_tool
 
@@ -373,6 +388,7 @@ class Speaking(Routes):
             ("no_voice_chat", 503, no_voice_chat),
             ("unanswered", 504, lambda: self.under(mock.patch.object(talk, "last_reply", Reader()))),
             ("unheard", 502, unheard),
+            ("answer_too_long", 502, lambda: self.under(saying(long_says()))),
         ]
         words = []
         for code, status, answer in cases:
@@ -434,35 +450,117 @@ class Speaking(Routes):
                 wrote.exists(), "the file the voice wrote is the turn's to delete, whichever it named"
             )
 
-    def test_no_tts_is_named_rather_than_crashing(self) -> None:
-        """A host with nothing to speak with answers a word, after the turn has landed in its chat.
+    def test_a_host_with_no_voice_is_refused_before_the_turn_is_heard(self) -> None:
+        """A host with nothing to speak with answers a word, and spends nothing finding out.
 
-        The turn is worth having even where the reply can't be spoken: the reader's words are in the
-        chat, so the answer is there to read on the phone. What the charm gets is the refusal, in
-        the same shape as every other one, rather than a crashed request.
+        A take and a run are a model each, so both are asked for only after the host has said it has
+        a voice at all: one that can never speak this answer refuses the turn before it pays for
+        either, and the chat a turn would have opened is not left behind.
         """
-        cases = {
-            "a host with no text-to-speech at all": unvoiced,
-            "a voice that raises": lambda: saying(fails()),
-            "a voice that answers a failure": lambda: saying(refuses()),
-        }
+        started, heard = len(self.poster.starts), len(self.tt.audio)
+        with unvoiced():
+            refused, word, sentence = self.refusal(self.answers())
+        self.assertEqual((refused, word), (503, "no_voice"))
+        self.assertIn("voice", sentence, "the sentence says what the host is missing")
+        self.assertEqual(len(self.poster.starts), started, "the run is not paid for")
+        self.assertEqual(len(self.tt.audio), heard, "nor the hearing")
+        self.assertIsNone(
+            store.get_setting(self.store, f"{talk.VOICE}:{BOT}"), "and no chat is left opened"
+        )
+
+    def test_a_voice_that_fails_after_the_turn_landed_is_still_named(self) -> None:
+        """A provider that is away is only known by asking it: the turn is worth having anyway.
+
+        The reader's words are in the chat, so the answer is there to read on the phone. What the
+        charm gets is the refusal, in the same shape as every other one.
+        """
+        cases = {"a voice that raises": fails, "a voice that answers a failure": refuses}
         for why, voice in cases.items():
             with self.subTest(why=why):
                 started = len(self.poster.starts)
-                with voice():
-                    refused, word, sentence = self.refusal(self.answers())
+                refused, word, sentence = self.refusal(self.under(saying(voice())))
                 self.assertEqual((refused, word), (503, "no_voice"), why)
                 self.assertIn("voice", sentence, "the sentence says what the host is missing")
                 self.assertEqual(
                     len(self.poster.starts),
                     started + 1,
-                    "the turn was heard and posted before the host found it had no voice",
+                    "the turn was heard and posted before the voice failed",
                 )
                 self.assertEqual(
                     store.get_setting(self.store, f"{talk.VOICE}:{BOT}")["session"],
                     self.poster.starts[-1]["body"]["session_id"],
                     "and it is in the bot's one voice chat, where the reader can read it",
                 )
+
+    def test_an_answer_past_the_minute_is_named_and_the_turn_still_counted(self) -> None:
+        """An answer too long to speak is the answer's failure, not the charm's: a 502.
+
+        The turn itself was heard, run and written into the voice chat before the voice made a file
+        past the minute, so it is stamped as the turn it was; what the charm is told is a word for
+        exactly this, rather than the 413 the audio wire refuses a charm's own long take with.
+        """
+        started = len(self.poster.starts)
+        refused, word, sentence = self.refusal(self.under(saying(long_says())))
+        self.assertEqual((refused, word), (502, "answer_too_long"))
+        self.assertIn("answer", sentence)
+        self.assertEqual(
+            len(self.poster.starts), started + 1, "the turn landed in the chat before it was spoken"
+        )
+        self.assertEqual(
+            store.get_setting(self.store, f"{talk.VOICE}:{BOT}")["at"],
+            1_800_000_000_000,
+            "and is stamped as the last turn the bot took",
+        )
+
+    def test_a_voice_that_honours_the_path_it_was_given_deletes_it_once(self) -> None:
+        """The file a voice wrote is taken back once, though both names are the same path."""
+
+        def honouring(text: str, output_path: str, **extra: Any) -> str:
+            Path(output_path).write_bytes(wav_of(tone(charm_audio.SAMPLE_RATE // 2)))
+            return json.dumps({"success": True, "file_path": output_path})
+
+        deleted: List[Path] = []
+        unlink = Path.unlink
+
+        def counting(self: Path, *args: Any, **kwargs: Any) -> Any:
+            deleted.append(self)
+            return unlink(self, *args, **kwargs)
+
+        with mock.patch.object(Path, "unlink", counting):
+            answer = self.under(saying(honouring))
+        self.assertEqual(self.status(answer), 200, answer)
+        self.assertEqual(
+            len(deleted), 1, f"the one file the answer was left in is taken back once, not {deleted}"
+        )
+        self.assertFalse(deleted[0].exists())
+
+    def test_a_first_turn_that_never_lands_takes_its_chat_back(self) -> None:
+        """A chat opened for a turn nothing was posted in is tombstoned, not left in the list."""
+        refused, word, _ = self.refusal(
+            self.under(mock.patch.object(talk.outbox, "post", Poster(run_id="")))
+        )
+        self.assertEqual((refused, word), (504, "unanswered"))
+        self.assertIsNone(
+            store.get_setting(self.store, f"{talk.VOICE}:{BOT}"),
+            "the bot holds no chat a turn was never posted in",
+        )
+        self.assertEqual(
+            [chat for chat, entry in chats.read(self.store).items() if not entry.get("deleted")],
+            [],
+            "and the empty Voice chat is gone from the app's list",
+        )
+
+    def test_a_bot_id_that_is_not_one_is_refused_the_same_way_on_both_routes(self) -> None:
+        """The turn route reads ``?bot=`` by the hand-over's rule: a malformed id is a 400."""
+        refused, _, sentence = self.refusal(self.answers(query={"bot": "not a bot"}))
+        self.assertEqual((refused, sentence), (400, "Not a bot id"))
+
+    def test_the_turn_is_served_at_the_version_this_host_speaks(self) -> None:
+        """The path's ``v1`` is ``talk.VERSION``: a bump cannot move one without the other."""
+        served = [
+            path for method, path, _ in self.app.router.added if method == "POST" and path.endswith("/turn")
+        ]
+        self.assertEqual(served, [f"{plugin.PREFIX}/talk/v{talk.VERSION}/turn"])
 
 
 if __name__ == "__main__":

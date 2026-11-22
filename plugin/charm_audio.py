@@ -28,10 +28,13 @@ fallback is Ogg on both sides, and ``test_charm_audio`` is where that would show
 from __future__ import annotations
 
 import io
+import logging
 import struct
 from fractions import Fraction
 from pathlib import Path
 from typing import Any, List, Union
+
+logger = logging.getLogger(__name__)
 
 CODEC = "libopus"
 SAMPLE_RATE = 16000
@@ -102,6 +105,17 @@ class Undecodable(CharmAudioError):
     code = "undecodable"
 
 
+class OddPcm(CharmAudioError):
+    """PCM that ends inside a sample: not the 16 kHz mono s16 this wire carries.
+
+    A programmer's mistake rather than a caller's — nothing here decodes to an odd length — but a
+    refusal like the rest, rather than a bare ``ValueError`` a route carrying it would miss.
+    """
+
+    status = 422
+    code = "odd_pcm"
+
+
 def _av() -> Any:
     try:
         import av
@@ -119,7 +133,7 @@ def encode(pcm: bytes) -> bytes:
     cap counts and what the charm's buffer is sized from.
     """
     if len(pcm) % SAMPLE_BYTES:
-        raise ValueError("16 kHz mono s16 PCM is two bytes a sample.")
+        raise OddPcm("16 kHz mono s16 PCM is two bytes a sample.")
     if len(pcm) // SAMPLE_BYTES > SAMPLE_RATE * MAX_SECONDS:
         raise TooLong(TOO_LONG)
     av = _av()
@@ -165,6 +179,10 @@ def decode(stream: bytes) -> bytes:
         for piece in _resampled(resampler, None):
             pcm += _samples(piece)
     except Exception as error:
+        # The codec's refusal and a defect of ours both land here, and only the first is a sentence
+        # for the charm: logged with its traceback so our own mistake is visible in the log rather
+        # than passing, for ever, as audio nothing could read.
+        logger.debug("gots: a charm's stream couldn't be decoded", exc_info=True)
         raise Undecodable(f"This audio couldn't be decoded: {error}") from error
     return bytes(pcm)
 
@@ -179,9 +197,12 @@ def pcm(source: Union[bytes, bytearray, str, Path]) -> bytes:
     """
     av = _av()
     opened = io.BytesIO(bytes(source)) if isinstance(source, (bytes, bytearray)) else str(source)
-    container: Any = None
     try:
         container = av.open(opened)
+    except Exception as error:
+        logger.debug("gots: %r couldn't be opened as audio", opened, exc_info=True)
+        raise Undecodable(f"This audio couldn't be read: {error}") from error
+    try:
         resampler = av.AudioResampler(format="s16", layout="mono", rate=SAMPLE_RATE)
         heard = bytearray()
         for frame in container.decode(audio=0):
@@ -190,11 +211,12 @@ def pcm(source: Union[bytes, bytearray, str, Path]) -> bytes:
         for piece in _resampled(resampler, None):
             heard += _samples(piece)
     except Exception as error:
+        # As ``decode``: the codec's failure is the charm's sentence, ours is logged first so a
+        # defect here can't hide behind a refusal that blames the file.
+        logger.debug("gots: %r couldn't be read as audio", opened, exc_info=True)
         raise Undecodable(f"This audio couldn't be read: {error}") from error
     finally:
-        closing = getattr(container, "close", None)
-        if callable(closing):
-            closing()
+        container.close()
     return bytes(heard)
 
 

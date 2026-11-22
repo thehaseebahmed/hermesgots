@@ -25,18 +25,29 @@ from .store import get_setting, now_ms, put_setting
 # The key one bot's token is kept under, and the prefix of it. Written once, read by the route that
 # answers the app and the one a charm turns on.
 SETTING = "talk_token"
-# A bot id: the 16 hex the registry spells (`link.bot_id`), or a profile's own name, which is the
-# shape every id in this plugin already has (`device_keys.DEVICE`). Longer than either can be, so a
-# name that grew still fits and nothing else does.
+# A bot id: the 16 hex the registry spells (`link.bot_id`), or a profile's own name. Bounded here
+# rather than by a caller because it is part of a store key, and this is deliberately narrower than
+# the app's own phone id (`device_keys.DEVICE`, `{1,128}` over a different id): a bot id has never
+# carried a space, and 64 characters is longer than either shape can be.
 BOT = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 # 32 bytes, hex: what the app writes into the charm's own bounds, and what a turn presents. Lower
-# case only, so one token has one spelling to compare against.
-TOKEN = re.compile(r"^[0-9a-f]{64}$")
+# case only, so one token has one spelling to compare against — and its width follows `TOKEN_BYTES`
+# rather than being written out again, so a longer token cannot be minted and judged unshaped.
 TOKEN_BYTES = 32
+TOKEN = re.compile(rf"^[0-9a-f]{{{TOKEN_BYTES * 2}}}$")
 
 
 class TalkTokenError(Exception):
     """A bot id no token is minted for, in words the route can answer with."""
+
+
+def valid_bot(bot: Any) -> bool:
+    """Whether ``bot`` is an id this plugin mints a token for — the shape, in one place.
+
+    The routes that read a ``?bot=`` and the two calls below judge an id by this rule and no other:
+    a route that kept its own copy could refuse a malformed id as a bad token instead of as an id.
+    """
+    return isinstance(bot, str) and BOT.match(bot) is not None
 
 
 def _key(bot: str) -> str:
@@ -51,7 +62,7 @@ def digest(token: str) -> str:
 
 def mint(path: Path, bot: Any) -> str:
     """A new token for ``bot``, kept as its hash, answered once. A bot already holding one loses it."""
-    if not isinstance(bot, str) or not BOT.match(bot):
+    if not valid_bot(bot):
         raise TalkTokenError("Not a bot id")
     token = secrets.token_hex(TOKEN_BYTES)
     put_setting(path, _key(bot), {"sha256": digest(token), "at": now_ms()})
@@ -64,7 +75,7 @@ def verify(path: Path, bot: Any, token: Any) -> bool:
     False for anything short of that — an id or a token of the wrong shape, a bot nothing was minted
     for, a token spent by a later mint — so a caller has one answer to refuse on.
     """
-    if not isinstance(bot, str) or not BOT.match(bot):
+    if not valid_bot(bot):
         return False
     if not isinstance(token, str) or not TOKEN.match(token):
         return False
