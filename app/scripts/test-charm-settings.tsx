@@ -7,21 +7,17 @@
 import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
 import test from "node:test"
-import { act } from "react"
+import { type ComponentProps, act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { CharmNetwork, type CharmNetworkApi } from "@/components/settings/charm"
-import {
-  CHARM_SLOT_BYTES,
-  CharmLinkState,
-  CharmUpdateState,
-  type CharmNetworkReport,
-} from "@/lib/charm-protocol"
-import type { CharmRead } from "@/lib/charm-words"
+import { useCharmReport } from "@/lib/charm"
+import { CHARM_SLOT_BYTES, CharmLinkState, CharmUpdateState } from "@/lib/charm-protocol"
 import { db } from "@/lib/db"
 import type { CharmFirmware } from "@/lib/hermes"
 import { SettingsPage } from "@/routes/settings"
 import { BatteryRow, CharmStatusRow, WakingGroup } from "@/components/settings/charm"
+import { report } from "./fixtures/charm-report.ts"
 import {
   Path,
   click,
@@ -121,6 +117,21 @@ function radio(overrides: Partial<CharmNetworkApi> = {}): CharmNetworkApi {
   }
 }
 
+/**
+ * The Network section as the page draws it: the page's own read is made once, above the section, and
+ * handed down — the one ask the status row and the two link lines both read.
+ */
+function Network({
+  api,
+  ...rest
+}: { api?: CharmNetworkApi } & Omit<
+  ComponentProps<typeof CharmNetwork>,
+  "api" | "read" | "refresh"
+>) {
+  const { read, refresh } = useCharmReport(api)
+  return <CharmNetwork api={api} read={read} refresh={refresh} {...rest} />
+}
+
 /** The form's own submit: a DOM without a browser does not submit on the button's click. */
 async function submit(field: Element | null) {
   const form = field?.closest("form")
@@ -140,7 +151,7 @@ test("the network section says Not set before the charm answers", async () => {
       throw new Error("No charm paired")
     },
   })
-  await mount(<CharmNetwork api={api} />, async () => {
+  await mount(<Network api={api} />, async () => {
     await settle()
     assert.ok(text().includes("Not set"), "the Wi-Fi line, with nothing to say yet")
     assert.ok(!text().includes("Connected"), "and nothing it could not know")
@@ -148,7 +159,7 @@ test("the network section says Not set before the charm answers", async () => {
 })
 
 test("a parsed answer says the charm is connected", async () => {
-  await mount(<CharmNetwork api={radio()} />, async () => {
+  await mount(<Network api={radio()} />, async () => {
     await settle()
     assert.ok(text().includes("Connected to Home"), "the Wi-Fi line, from the charm's own answer")
   })
@@ -162,7 +173,7 @@ test("a passphrase is sent once and never drawn as a label", async () => {
       return 0
     },
   })
-  await mount(<CharmNetwork api={api} />, async () => {
+  await mount(<Network api={api} />, async () => {
     await type(find("#charm-wifi-ssid"), "Home")
     await type(find("#charm-wifi-pass"), "correct horse battery")
     assert.ok(!text().includes("correct horse battery"), "the field holds it; no label draws it")
@@ -180,7 +191,7 @@ test("a passphrase is sent once and never drawn as a label", async () => {
 test("a charm that kept the secret readable says so, in its own words", async () => {
   // 11 on the wire: the charm kept the network and warns that the chip gives it away.
   const api = radio({ saveWifi: async () => 11 })
-  await mount(<CharmNetwork api={api} />, async () => {
+  await mount(<Network api={api} />, async () => {
     await type(find("#charm-wifi-ssid"), "Home")
     await type(find("#charm-wifi-pass"), "correct horse battery")
     await submit(find("#charm-wifi-pass"))
@@ -245,7 +256,7 @@ function serveFirmware(
 
 test("the firmware row offers the published one when the charm is older", async () => {
   const host = serveFirmware("firmware-offered", PUBLISHED)
-  await mount(<CharmNetwork api={radio()} profile={host.profile} />, async () => {
+  await mount(<Network api={radio()} profile={host.profile} />, async () => {
     await until(async () => text().includes("Charm 0.1.0 · 0.2.0 available"), "the host's answer")
     assert.ok(button("Update to 0.2.0"), "the newer one is offered")
     assert.ok(button("Choose a file…"), "and a file is always taken")
@@ -254,7 +265,7 @@ test("the firmware row offers the published one when the charm is older", async 
 
 test("the firmware row says the charm is up to date when the versions match", async () => {
   const host = serveFirmware("firmware-current", { ...PUBLISHED, version: "0.1.0" })
-  await mount(<CharmNetwork api={radio()} profile={host.profile} />, async () => {
+  await mount(<Network api={radio()} profile={host.profile} />, async () => {
     await until(async () => text().includes("Charm 0.1.0 · up to date"), "the host's answer")
     assert.ok(!button("Update to"), "nothing to offer")
     assert.ok(button("Choose a file…"), "but a file is still taken")
@@ -264,7 +275,7 @@ test("the firmware row says the charm is up to date when the versions match", as
 test("a charm ahead of the package is said, and never offered a downgrade", async () => {
   const api = radio({ version: async () => "0.3.0" })
   const host = serveFirmware("firmware-behind", PUBLISHED)
-  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
+  await mount(<Network api={api} profile={host.profile} />, async () => {
     await until(async () => text().includes("Charm 0.3.0 · newer than 0.2.0"), "the two versions")
     assert.ok(!find("#charm-update-start"), "and offers no update")
   })
@@ -273,7 +284,7 @@ test("a charm ahead of the package is said, and never offered a downgrade", asyn
 test("a charm too old to say its version is not compared with the package", async () => {
   const api = radio({ version: async () => null })
   const host = serveFirmware("firmware-too-old", PUBLISHED)
-  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
+  await mount(<Network api={api} profile={host.profile} />, async () => {
     await until(async () => text().includes("can't say which version it runs"), "the row's line")
     assert.ok(text().includes("cable"), "and how the first one gets there")
     assert.ok(!find("#charm-update-start"), "nothing is offered over the air")
@@ -284,7 +295,7 @@ test("a charm too old to say its version is not compared with the package", asyn
 test("a host that can't answer says it couldn't check, in its own words", async () => {
   const said = "GitHub refused this server's token for the charm firmware."
   const host = serveFirmware("firmware-refused", said)
-  await mount(<CharmNetwork api={radio()} profile={host.profile} />, async () => {
+  await mount(<Network api={radio()} profile={host.profile} />, async () => {
     await until(async () => text().includes(said), "the host's sentence")
     assert.ok(text().includes("couldn't check for a newer one"), "the row says the check failed")
     assert.ok(button("Choose a file…"), "and the picker is not held hostage to it")
@@ -300,7 +311,7 @@ test("a picked file larger than a slot is refused before anything is written", a
     },
   })
   const host = serveFirmware("firmware-no-slot", PUBLISHED)
-  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
+  await mount(<Network api={api} profile={host.profile} />, async () => {
     await settle()
     await pick("too-big.bin", CHARM_SLOT_BYTES + 1)
     assert.ok(text().includes("larger than a slot"), "the row refuses it in words")
@@ -319,7 +330,7 @@ test("a file over the slot the host publishes is refused, under it goes", async 
     },
   })
   const host = serveFirmware("firmware-slot", { ...PUBLISHED, version: "0.1.0", slot: 8 })
-  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
+  await mount(<Network api={api} profile={host.profile} />, async () => {
     await until(async () => text().includes("0.1.0 · up to date"), "the host's answer")
     await pick("over-slot.bin", 9)
     assert.ok(text().includes("larger than a slot"), "a byte over the published slot is refused")
@@ -338,7 +349,7 @@ test("a picked file is sent with the hash the phone computes over it", async () 
     },
   })
   const host = serveFirmware("firmware-hashed", PUBLISHED)
-  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
+  await mount(<Network api={api} profile={host.profile} />, async () => {
     await settle()
     await pick("charm.bin", 8)
     assert.equal(sent.length, 1, "one image went")
@@ -359,7 +370,7 @@ test("a failed upload is drawn with the reason the charm gave", async () => {
     },
   })
   const host = serveFirmware("firmware-failed", PUBLISHED)
-  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
+  await mount(<Network api={api} profile={host.profile} />, async () => {
     await settle()
     await pick("charm.bin", 8)
     assert.ok(text().includes("The update failed: it was cancelled"))
@@ -372,7 +383,7 @@ test("an image the charm refuses for its build is drawn in the charm's own reaso
   const api = radio({
     updateStatus: async () => ({ state: CharmUpdateState.Failed, percent: 0, reason: 7 }),
   })
-  await mount(<CharmNetwork api={api} />, async () => {
+  await mount(<Network api={api} />, async () => {
     await until(
       async () =>
         text().includes("Update failed: that image was built for a different kind of charm"),
@@ -396,7 +407,7 @@ test("Update sends the published image and reads the version once the charm is b
     },
   })
   const host = serveFirmware("firmware-sent", IMAGE_PUBLISHED, IMAGE)
-  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
+  await mount(<Network api={api} profile={host.profile} />, async () => {
     await until(async () => Boolean(button("Update to 0.2.0")), "the offer")
     await click(button("Update to 0.2.0"))
     await settle()
@@ -421,7 +432,7 @@ test("an image that is not the one the version names is refused before it goes",
   })
   // A truncated body, an error page, or a tag that moved: not the bytes the version described.
   const host = serveFirmware("firmware-mismatch", IMAGE_PUBLISHED, new Uint8Array([1, 2, 3, 4]))
-  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
+  await mount(<Network api={api} profile={host.profile} />, async () => {
     await until(async () => Boolean(button("Update to 0.2.0")), "the offer")
     await click(button("Update to 0.2.0"))
     await settle()
@@ -444,7 +455,7 @@ test("a version that moved between the reads is read again, and its image goes",
     (reads) => (reads === 1 ? PUBLISHED : IMAGE_PUBLISHED),
     IMAGE,
   )
-  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
+  await mount(<Network api={api} profile={host.profile} />, async () => {
     await until(async () => Boolean(button("Update to 0.2.0")), "the offer")
     await click(button("Update to 0.2.0"))
     await settle()
@@ -460,7 +471,7 @@ test("a charm that cannot be reached is not a charm that didn't say", async () =
     },
   })
   const host = serveFirmware("firmware-unreachable", PUBLISHED)
-  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
+  await mount(<Network api={api} profile={host.profile} />, async () => {
     await until(
       async () => text().includes("0.2.0 published · couldn't reach the charm"),
       "the link's own sentence",
@@ -488,7 +499,7 @@ test("starting an update stops the two-second status poll", async () => {
     },
   })
   const host = serveFirmware("firmware-poll", IMAGE_PUBLISHED, IMAGE)
-  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
+  await mount(<Network api={api} profile={host.profile} />, async () => {
     await until(async () => Boolean(button("Update to 0.2.0")), "the offer")
     const before = polls
     assert.ok(before >= 1, "the row's own snapshot asked")
@@ -510,7 +521,7 @@ test("a charm that does not come back on the new build is said, and the offer is
     upload: async () => ({ sent: IMAGE.length, total: IMAGE.length, percent: 100 }),
   })
   const host = serveFirmware("firmware-not-back", IMAGE_PUBLISHED, IMAGE)
-  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
+  await mount(<Network api={api} profile={host.profile} />, async () => {
     await until(async () => Boolean(button("Update to 0.2.0")), "the offer")
     await click(button("Update to 0.2.0"))
     // The row's four asks, 3 s apart: the charm never answers on the new build.
@@ -535,7 +546,7 @@ test("the same file can be picked again after a failed upload", async () => {
     },
   })
   const host = serveFirmware("firmware-again", PUBLISHED)
-  await mount(<CharmNetwork api={api} profile={host.profile} />, async () => {
+  await mount(<Network api={api} profile={host.profile} />, async () => {
     await settle()
     const input = find("#charm-update-file") as HTMLInputElement | null
     assert.ok(input, "the file picker is on screen")
@@ -558,7 +569,7 @@ test("the same file can be picked again after a failed upload", async () => {
 })
 
 test("the firmware group says the published image is the everyday build, once", async () => {
-  await mount(<CharmNetwork api={radio()} />, async () => {
+  await mount(<Network api={radio()} />, async () => {
     await settle()
     const warnings = (text().match(/everyday build/g) ?? []).length
     assert.equal(warnings, 1, "said once, not beside every control")
@@ -602,12 +613,6 @@ test("the waking group offers the switch, the three windows and what off leaves"
       assert.ok(text().includes("30 seconds"))
     },
   )
-})
-
-/** The report the charm answers with, in the states its own wire names for each link. */
-const report = (wifi: number, tailnet: number) => ({
-  wifi: { state: wifi, reason: 0, ip: "", ssid: "" },
-  tailnet: { state: tailnet, ip: "" },
 })
 
 /** The marks a status row draws: one for each link that is down, wearing that link's own words. */
@@ -694,53 +699,126 @@ test("a link that is up draws no mark", async () => {
   )
 })
 
-test("the network section tells the row above what its own read found", async () => {
-  const reads: CharmRead<CharmNetworkReport>[] = []
-  await mount(<CharmNetwork api={radio()} onReport={(read) => reads.push(read)} />, async () => {
-    await until(async () => reads.some((read) => read.state === "read"), "the charm's answer")
-    const found = reads.find((read) => read.state === "read")
+test("a read that failed says in the console why, not only that it did", async () => {
+  // Refused, disconnected and timed out all read as one "out of reach" on the page, so the reason
+  // the ask gave is the one place it survives.
+  const noted: unknown[][] = []
+  const debug = console.debug
+  console.debug = (...args: unknown[]) => noted.push(args)
+  try {
+    const api = radio({
+      status: async () => {
+        throw new Error("GATT 133: the link dropped")
+      },
+    })
+    await mount(<Network api={api} />, async () => {
+      await until(async () => noted.length > 0, "the failure noted")
+    })
+  } finally {
+    console.debug = debug
+  }
+  assert.ok(
+    noted.some((args) => args.some((arg) => String(arg).includes("GATT 133"))),
+    "the reason the ask failed, not just the fact that it did",
+  )
+})
+
+test("the page's one read fills the status row and the section below it", async () => {
+  // One ask, drawn twice: the status row marks the link the report says is down, and the section's
+  // Wi-Fi line is the answer that same ask carried — a page cannot disagree with itself about what
+  // the charm said.
+  const api = radio()
+  function Page() {
+    const { read, refresh } = useCharmReport(api)
+    return (
+      <>
+        <CharmStatusRow charm={{ name: "Desk charm" }} status={read} />
+        <CharmNetwork read={read} refresh={refresh} />
+      </>
+    )
+  }
+  await mount(<Page />, async () => {
+    await until(async () => text().includes("Connected to Home"), "the charm's answer")
     assert.ok(
-      found?.state === "read" && found.value.wifi.ssid === "Home",
-      "the report the charm answered, handed up as the row above draws it",
+      labelled('[role="img"]', "Tailnet is down"),
+      "the row marks what the same report said",
+    )
+    assert.equal(
+      labelled('[role="img"]', "Wi-Fi is down"),
+      null,
+      "and nothing for a link that is up",
     )
   })
 })
 
-test("a read that failed is told as a failure, not as a charm that said nothing", async () => {
-  const reads: CharmRead<CharmNetworkReport>[] = []
+test("a read that failed marks the phone's link and leaves the charm's lines unread", async () => {
+  // The ask never opened: that is the Bluetooth mark, and the two lines it would have filled fall
+  // back to what this phone last told the charm — not to a link drawn as connected.
   const api = radio({
     status: async () => {
       throw new Error("The charm went out of reach")
     },
   })
-  await mount(<CharmNetwork api={api} onReport={(read) => reads.push(read)} />, async () => {
-    await until(async () => reads.some((read) => read.state === "failed"), "the failed read")
-    assert.ok(
-      !reads.some((read) => read.state === "read"),
-      "a read that never landed is not drawn as an answer",
+  function Page() {
+    const { read, refresh } = useCharmReport(api)
+    return (
+      <>
+        <CharmStatusRow charm={{ name: "Desk charm" }} status={read} />
+        <CharmNetwork api={api} read={read} refresh={refresh} />
+      </>
     )
+  }
+  await mount(<Page />, async () => {
+    await until(async () => marks().length > 0, "the failed read")
+    assert.equal(marks().length, 1)
+    assert.ok(labelled('[role="img"]', "Bluetooth is down"), "the ask that did not open")
+    assert.ok(text().includes("Not set"), "and the Wi-Fi line is what the phone last knew")
+    assert.ok(!text().includes("Connected"), "never an answer the charm did not give")
   })
 })
 
-test("the battery row says the level, the charger and how old the reading is", async () => {
+test("the level is drawn once, and the battery row asks for it", async () => {
+  // A reader who scrolls the paired group sees the level in one place: the status row's line. The
+  // battery row is the control that asks the charm again, so it says what a tap does instead.
+  const now = Date.now()
+  await mount(
+    <>
+      <CharmStatusRow
+        charm={{ name: "Desk charm" }}
+        status={{ state: "read", value: report(CharmLinkState.Online, CharmLinkState.Online) }}
+        battery={{ percent: 82, charging: true, at: now }}
+      />
+      <BatteryRow busy={false} onRefresh={() => {}} />
+    </>,
+    async () => {
+      await settle()
+      assert.equal((text().match(/82%/g) ?? []).length, 1, "the level is drawn once on the page")
+      assert.ok(text().includes("Tap to ask the charm"), "and the row that asks says so")
+    },
+  )
+})
+
+test("the battery row asks when tapped, and draws a failed ask in the charm's words", async () => {
   let asked = 0
+  await mount(<BatteryRow busy={false} onRefresh={() => asked++} />, async () => {
+    await settle()
+    assert.ok(text().includes("Tap to ask the charm"), "the row says what a tap does")
+    assert.ok(!text().includes("%"), "and the level is the status row's to draw")
+    await click(rowButton("Battery"))
+    assert.equal(asked, 1) // tapping the row asks the charm again
+  })
+
+  // A failed ask is this row's own line: the battery is the one thing it is about.
   await mount(
     <BatteryRow
-      reading={{ percent: 82, charging: true, at: Date.now() }}
+      note="This charm's firmware is older than the app — update it"
       busy={false}
-      onRefresh={() => asked++}
+      onRefresh={() => {}}
     />,
     async () => {
       await settle()
-      assert.match(text(), /82% · Charging · just now/)
-      await click(rowButton("Battery"))
-      assert.equal(asked, 1) // tapping the row asks the charm again
+      assert.ok(text().includes("firmware is older than the app"), "why the ask failed")
+      assert.ok(!text().includes("Tap to ask the charm"), "said over what a tap would do")
     },
   )
-
-  // A reading nobody has asked for is not a battery at zero.
-  await mount(<BatteryRow busy={false} onRefresh={() => {}} />, async () => {
-    await settle()
-    assert.ok(text().includes("Not read yet"))
-  })
 })

@@ -540,16 +540,6 @@ test("the pet row says which bot lives on the charm", async () => {
   assert.equal(petSubtitle({ enabled: true, botId: "nova" }, "Nova"), "Lives on the charm")
 })
 
-test("the paired charm's own row says only when it last synced", async () => {
-  const { charmSynced } = await import("../src/lib/charm-words.ts")
-  const now = Date.UTC(2026, 10, 20, 12)
-  assert.equal(charmSynced({ name: "Gots Charm" }, now), "Never synced")
-  assert.equal(
-    charmSynced({ name: "Gots Charm", syncedAt: now - 5 * 60_000 }, now),
-    "Synced 5 min ago",
-  )
-})
-
 /**
  * The network block, as the firmware's `docs/PROTOCOL.md` writes it: one control write per ask, the
  * four-byte answers, and the two asks whose answer carries `[extraLen][extra]`. These literals are

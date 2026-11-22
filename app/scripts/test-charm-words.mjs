@@ -5,22 +5,21 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
+import { BluetoothIcon, WaypointsIcon, WifiIcon } from "lucide-react"
+
 import {
   firmwareOffers,
   firmwareWords,
+  LINKS,
   LINK_DOWN_WORDS,
+  LINK_MARKS,
   linksDown,
   readFailed,
   readValue,
 } from "../src/lib/charm-words.ts"
 import { compareVersions } from "../src/lib/version-compare.ts"
 import { CharmLinkState } from "../src/lib/charm-protocol.ts"
-
-/** The charm's own answer about its two links, in the states its wire names for each. */
-const report = (wifi, tailnet) => ({
-  wifi: { state: wifi, reason: 0, ip: "", ssid: "" },
-  tailnet: { state: tailnet, ip: "" },
-})
+import { report } from "./fixtures/charm-report.ts"
 
 test("only a link that is down is marked, and a fact nobody has read is not one", () => {
   // Nothing has answered: the page knows nothing of the three, so it marks none of them. A mark here
@@ -50,6 +49,19 @@ test("only a link that is down is marked, and a fact nobody has read is not one"
     ["Bluetooth is down", "Wi-Fi is down", "Tailnet is down"],
     "each mark carries its own words as its name",
   )
+})
+
+test("one list names the links, and each keeps its words and its mark", () => {
+  assert.deepEqual([...LINKS], ["bluetooth", "wifi", "tailnet"], "the band's order, written once")
+  // Every link the list names has its words and its mark, and nothing else does: a fourth link
+  // could not be added to the list and forgotten in the words or the marks.
+  assert.deepEqual(Object.keys(LINK_DOWN_WORDS).sort(), [...LINKS].sort(), "words for each link")
+  assert.deepEqual(Object.keys(LINK_MARKS).sort(), [...LINKS].sort(), "and one mark for each")
+  // The tailnet wears the waypoints the charm draws by hand, in its header and in the status row
+  // both; Wi-Fi's is one glyph too, never an "on" icon above an "off" twin.
+  assert.equal(LINK_MARKS.tailnet, WaypointsIcon, "the tailnet's own mark")
+  assert.equal(LINK_MARKS.wifi, WifiIcon, "the Wi-Fi mark a header and a row share")
+  assert.equal(LINK_MARKS.bluetooth, BluetoothIcon)
 })
 
 test("a read that failed keeps what an earlier one found", () => {

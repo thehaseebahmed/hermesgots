@@ -1,4 +1,5 @@
-/** What the charm's settings say about it: plain words, kept apart so they are tested alone. */
+/** What the charm's settings say about it — its words and the marks its links wear — kept apart so they are tested alone. */
+import { BluetoothIcon, WifiIcon, WaypointsIcon, type LucideIcon } from "lucide-react"
 import {
   CharmLinkState,
   CharmUpdateReason,
@@ -22,11 +23,6 @@ export function charmSubtitle(charm: CharmSeen | null, now = Date.now()) {
   if (!charm) return "Not paired"
   if (!charm.syncedAt) return `${charm.name} · Never synced`
   return `${charm.name} · Synced ${since(charm.syncedAt, now)}`
-}
-
-/** Under the paired charm's own name: just when it last took the bots. */
-export function charmSynced(charm: CharmSeen, now = Date.now()) {
-  return charm.syncedAt ? `Synced ${since(charm.syncedAt, now)}` : "Never synced"
 }
 
 function since(at: number, now: number) {
@@ -108,10 +104,9 @@ export function tailnetWords(
 
 /**
  * One fact the page has read from the charm: an ask that is still out, an ask that finished without an
- * answer, and what an answer said. A failed read and one that never arrived were the same `null`
- * before this, so nothing could tell "not yet" from "gone" — and a row that could not tell them apart
- * could not draw a link that was down either. `last` is what an earlier read found, which is still
- * true of the charm while the phone can't reach it: away is not amnesia.
+ * answer, and what an answer said. `last` is what an earlier read found — still true of the charm
+ * while the phone cannot reach it, so a level or a link it named once is not lost the moment a later
+ * ask goes unanswered: away is not amnesia.
  */
 export type CharmRead<T> =
   { state: "reading" } | { state: "failed"; last?: T } | { state: "read"; value: T }
@@ -128,8 +123,15 @@ export function readFailed<T>(read: CharmRead<T>): CharmRead<T> {
   return last === undefined ? { state: "failed" } : { state: "failed", last }
 }
 
-/** The three links the band marks, in the order it marks them. */
-export type CharmLink = "bluetooth" | "wifi" | "tailnet"
+/**
+ * The three links the band marks, in the order it marks them. The type, the words and the marks all
+ * read off this one list, so a link cannot be added in one place and missed in another — and the rule
+ * that lists the links that are down takes its order from here rather than writing it again.
+ */
+export const LINKS = ["bluetooth", "wifi", "tailnet"] as const
+
+/** One of the links the band marks. */
+export type CharmLink = (typeof LINKS)[number]
 
 /**
  * What each mark says to a reader who cannot see it, kept here beside the charm's other words rather
@@ -142,6 +144,17 @@ export const LINK_DOWN_WORDS: Record<CharmLink, string> = {
 }
 
 /**
+ * The mark each link wears: Lucide's own shapes, the ones the charm traces by hand. One mark per
+ * link rather than one per state, so a section's header wears the same glyph as the status row's
+ * mark for that link; only a link that is down is drawn at all, and its words say which.
+ */
+export const LINK_MARKS: Record<CharmLink, LucideIcon> = {
+  bluetooth: BluetoothIcon,
+  wifi: WifiIcon,
+  tailnet: WaypointsIcon,
+}
+
+/**
  * Which links are down, from the page's own read of the charm and the last report it sent. The
  * Bluetooth mark is the phone's own ask not opening — the one fact here the phone learns by asking
  * rather than by being told; the other two are the charm's, and a link it named as anything but
@@ -149,12 +162,13 @@ export const LINK_DOWN_WORDS: Record<CharmLink, string> = {
  * from it would be a guess, and "not read yet" draws nothing on the glass too.
  */
 export function linksDown(read: CharmRead<CharmNetworkReport>): CharmLink[] {
-  const down: CharmLink[] = read.state === "failed" ? ["bluetooth"] : []
   const report = readValue(read)
-  if (!report) return down
-  if (report.wifi.state !== CharmLinkState.Online) down.push("wifi")
-  if (report.tailnet.state !== CharmLinkState.Online) down.push("tailnet")
-  return down
+  return LINKS.filter((link) => {
+    // The phone's own ask not opening is the one link here it learns by asking.
+    if (link === "bluetooth") return read.state === "failed"
+    if (!report) return false
+    return (link === "wifi" ? report.wifi : report.tailnet).state !== CharmLinkState.Online
+  })
 }
 
 /** Where the charm's firmware download has got to, in one line. */
@@ -292,6 +306,12 @@ export function batteryWords(battery: CharmBatterySeen | undefined, now = Date.n
   const charge = battery.charging ? " · Charging" : ""
   return `${battery.percent}%${charge} · ${since(battery.at, now)}`
 }
+
+/**
+ * Under the battery row's title. The level itself is the status row's line, so this row says what a
+ * tap does, and a failure is the only thing it says over that.
+ */
+export const BATTERY_ASK = "Tap to ask the charm"
 
 /**
  * A refusal in the row's own words. BadMessage on a settings or battery op is a charm that never
