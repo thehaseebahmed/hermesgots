@@ -58,6 +58,7 @@ import {
   type CharmWifiRecord,
 } from "./charm-protocol.ts"
 import { type CharmWake, wakeMessage } from "./charm-protocol.ts"
+import { talkMessage } from "./talk.ts"
 import {
   CharmRefused,
   syncCharm,
@@ -473,6 +474,17 @@ export async function charmNetwork(): Promise<CharmNetworkReport> {
 export async function setCharmTailnetKey(key: string): Promise<number> {
   const { status } = await askCharm(tailnetMessage(key))
   if (paired && charmKept(status.code)) write({ ...paired, tailnet: true })
+  return status.code
+}
+
+/**
+ * Hands the charm the address its turns go to and the token it proves itself with. Neither is kept
+ * here — not in this phone's store and not beside the paired charm — because the charm is the only
+ * place they were ever for: the row holds the token from the host's answer until this write lands,
+ * and no longer. An address the charm could not call is refused before a link is opened.
+ */
+export async function setCharmTalk(address: string, token: string): Promise<number> {
+  const { status } = await askCharm(talkMessage(address, token))
   return status.code
 }
 

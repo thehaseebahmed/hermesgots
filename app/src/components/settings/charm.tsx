@@ -20,6 +20,7 @@ import {
   EyeOffIcon,
   FileUpIcon,
   HandIcon,
+  MicIcon,
   PawPrintIcon,
   RefreshCwIcon,
   UnlinkIcon,
@@ -68,6 +69,7 @@ import {
   sendTestAlert,
   setCharmPet,
   setCharmTailnetKey,
+  setCharmTalk,
   setCharmWifi,
   setCharmWake,
   syncToCharm,
@@ -94,9 +96,10 @@ import {
 } from "@/lib/charm-protocol"
 import { type FirmwareProgress, versionAfterReboot } from "@/lib/charm-firmware"
 import type { SyncProgress } from "@/lib/charm-sync"
+import { serverConfig } from "@/lib/connection"
 import { getActiveProfile, listProfiles } from "@/lib/db"
-import type { PluginServer } from "@/lib/features"
-import { getCharmFirmwareImage } from "@/lib/hermes"
+import { usePluginFeatureOn, type PluginServer } from "@/lib/features"
+import { getCharmFirmwareImage, getTalkToken } from "@/lib/hermes"
 import { useHostRecord } from "@/lib/host-record"
 import {
   BATTERY_ASK,
@@ -127,6 +130,14 @@ import {
   type CharmSeen,
 } from "@/lib/charm-words"
 import { quietly } from "@/lib/report"
+import {
+  TALK_FEATURE,
+  VOICE_ASK,
+  VOICE_HINT,
+  talkProblem,
+  talkWords,
+  type TalkOffer,
+} from "@/lib/talk"
 import { tell } from "@/lib/tell"
 import { useBotLabels } from "@/lib/use-bot-labels"
 
@@ -652,6 +663,141 @@ export function CharmNetwork({
 }
 
 /**
+ * The Voice row's own reach into the world: one ask of the bot's host, and one control write to the
+ * charm. An interface, so the row's states can be drawn without a host or a radio to stand them up.
+ */
+export interface CharmVoiceApi {
+  /** The host's answer: the address the charm's turns go to, and the token it minted for it. */
+  offer(server: PluginServer): Promise<TalkOffer>
+  /** The Talk write, and the charm's own word about keeping what it carried. */
+  send(address: string, token: string): Promise<number>
+}
+
+/** The one implementation: the host's route and the phone's radio. */
+const VOICE: CharmVoiceApi = {
+  offer: (server) => getTalkToken(serverConfig(server)),
+  send: setCharmTalk,
+}
+
+/**
+ * Voice: the address the charm's turns are posted to and the token it proves itself with, handed to
+ * the charm over its own link. The row is offered only where the host advertises the route — a host
+ * older than it has no token to mint — and it is the reader's two taps rather than one, because
+ * asking the host mints a new token and revokes the one the charm already holds: a page that fetched
+ * on opening would break a charm that was set up yesterday.
+ *
+ * The address the host answers with is the one this phone dialled, so the field is prefilled and
+ * editable: the charm calls over the tailnet in plain http, and the reader is the one who knows the
+ * address it reaches the host at. The token is held here from the host's answer until the write
+ * lands, and then not at all — it lives on the charm, and nowhere on this phone.
+ */
+export function CharmVoice({
+  api = VOICE,
+  profile,
+}: {
+  /** The host and the radio, or a stand-in under test. */
+  api?: CharmVoiceApi
+  /** The bot whose host mints the token: the row exists only where that host advertises it. */
+  profile?: PluginServer
+}) {
+  const offered = usePluginFeatureOn(profile, TALK_FEATURE)
+  /** The address the charm will be given: what the host answered, until the reader says otherwise. */
+  const [address, setAddress] = useState("")
+  /** The token the host minted, held only until the write that hands it over has an answer. */
+  const [token, setToken] = useState("")
+  const [busy, setBusy] = useState<"setup" | "send" | null>(null)
+  /** The charm's answer, or the reason nothing reached it: the row's one line. */
+  const [said, setSaid] = useState<string | null>(null)
+
+  if (!offered) return null
+
+  /** The host's one ask: what the address is, and the token this charm will keep. */
+  const setup = async () => {
+    setBusy("setup")
+    setSaid(null)
+    try {
+      const offer = await api.offer(profile)
+      setAddress(offer.host)
+      setToken(offer.token)
+    } catch (error) {
+      setSaid(message(error))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  /**
+   * The write. An address the charm could not call is refused here, before the link is opened, and
+   * the token stays where it is so the reader can fix the address and send again; once the write
+   * has gone, the token is this phone's no longer, whatever the charm said about it.
+   */
+  const send = async () => {
+    const problem = talkProblem(address)
+    if (problem) {
+      setSaid(problem)
+      return
+    }
+    setBusy("send")
+    setSaid(null)
+    try {
+      setSaid(talkWords(await api.send(address, token)))
+    } catch (error) {
+      setSaid(message(error))
+    } finally {
+      setToken("")
+      setBusy(null)
+    }
+  }
+
+  return (
+    <>
+      <Group>
+        <div className={headerRowClass}>
+          <MicIcon className="size-5 shrink-0 text-muted-foreground" />
+          <RowText title="Voice" subtitle={VOICE_ASK} />
+        </div>
+        <div className={formRowClass}>
+          <Field
+            id="charm-talk-address"
+            label="Host address"
+            placeholder="http://100.64.0.2:8642/api/plugins/gots"
+            autoCapitalize="none"
+            value={address}
+            disabled={busy !== null}
+            onChange={(event) => setAddress(event.target.value)}
+            hint={VOICE_HINT}
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              id="charm-talk-setup"
+              type="button"
+              variant="ghost"
+              disabled={busy !== null}
+              onClick={() => void setup()}
+            >
+              {busy === "setup" ? "Asking…" : "Set up"}
+            </Button>
+            <Button
+              id="charm-talk-send"
+              type="button"
+              disabled={busy !== null || token === ""}
+              onClick={() => void send()}
+            >
+              {busy === "send" ? "Sending…" : "Send"}
+            </Button>
+          </div>
+          {said && <p className="px-1 text-xs text-muted-foreground">{said}</p>}
+        </div>
+      </Group>
+      <Caption>
+        Set up asks your bot&rsquo;s host for this charm&rsquo;s own token; Send hands the address
+        and the token to the charm, which keeps them. This phone keeps no copy of the token.
+      </Caption>
+    </>
+  )
+}
+
+/**
  * The paired section's first row: its name with a mark for each link that is down, and its level as
  * the line beneath — the row's subtitle, as every row in this page's groups keeps its value. Its own
  * component so a test can draw it with props and no radio, as the battery row and the waking group
@@ -939,6 +1085,7 @@ export function CharmSettings() {
             read={status}
             refresh={refreshStatus}
           />
+          <CharmVoice profile={profile} />
           <Group>
             <ActionRow
               icon={UnlinkIcon}
@@ -948,7 +1095,9 @@ export function CharmSettings() {
           </Group>
           <Caption>
             Keep the charm close while it syncs. Afterwards it shows your bots on its own, with the
-            phone away. It holds names and pictures only, never keys or server addresses.
+            phone away. It holds names and pictures, and — once voice is set up — the address it
+            calls and its own token. Nothing else leaves the phone, and the token is kept nowhere
+            else.
           </Caption>
           <PickSurface open={picking} onOpenChange={setPicking} title="The pet">
             <PickList

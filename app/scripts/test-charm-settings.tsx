@@ -10,9 +10,15 @@ import test from "node:test"
 import { type ComponentProps, act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
-import { CharmNetwork, type CharmNetworkApi } from "@/components/settings/charm"
+import {
+  CharmNetwork,
+  CharmVoice,
+  type CharmNetworkApi,
+  type CharmVoiceApi,
+} from "@/components/settings/charm"
 import { useCharmReport } from "@/lib/charm"
-import { CHARM_SLOT_BYTES, CharmLinkState, CharmUpdateState } from "@/lib/charm-protocol"
+import { CHARM_SLOT_BYTES, CharmCode, CharmLinkState, CharmUpdateState } from "@/lib/charm-protocol"
+import { TALK_READABLE } from "@/lib/talk"
 import { db } from "@/lib/db"
 import type { CharmFirmware } from "@/lib/hermes"
 import { SettingsPage } from "@/routes/settings"
@@ -820,4 +826,188 @@ test("the battery row asks when tapped, and draws a failed ask in the charm's wo
       assert.ok(!text().includes("Tap to ask the charm"), "said over what a tap would do")
     },
   )
+})
+
+/** The token the host mints: 32 bytes, hex, as `talk_tokens.mint` answers one. */
+const TOKEN = "9c".repeat(32)
+/** The address a charm can call: the host on the tailnet, in the plain http its client speaks. */
+const TAILNET = "http://100.64.0.2:8642/api/plugins/gots"
+/** The address the host answers with: where this phone dialled it. */
+const APP_HOST = "https://bot.example/api/plugins/gots"
+
+/** The Voice row's two reaches, over a stand-in: one ask of the host, one write to the charm. */
+function voice(overrides: Partial<CharmVoiceApi> = {}): CharmVoiceApi {
+  return {
+    offer: async () => ({ host: TAILNET, bot: "4f1c2a90", token: TOKEN }),
+    send: async () => CharmCode.Ok,
+    ...overrides,
+  }
+}
+
+/**
+ * A bot's host as the Voice row asks it: its feature list, and its one hand-over answer. Every ask
+ * is recorded with the key it carried, since the hand-over is the app's key and no other.
+ */
+function serveTalk(name: string, features: string[], answer: unknown) {
+  const profile = connection(name)
+  const asked: { path: string; authorization: string | null }[] = []
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input instanceof Request ? input.url : input))
+    asked.push({
+      path: url.pathname + url.search,
+      authorization: new Headers(init?.headers).get("Authorization"),
+    })
+    if (url.pathname.endsWith("/plugins/gots/info"))
+      return json({ name: "gots", version: "1.0.0", features })
+    if (url.pathname.endsWith("/plugins/gots/talk")) return json(answer)
+    return json({ error: { message: "no route" } }, 404)
+  }) as unknown as typeof fetch
+  return { profile, asked: () => asked }
+}
+
+test("the voice row is offered only where the host advertises talk", async () => {
+  // A host older than the route has nothing to mint, so the row is not drawn at all.
+  const older = serveTalk("talk-absent", ["charm_firmware"], {})
+  await mount(<CharmVoice profile={older.profile} api={voice()} />, async () => {
+    await settle()
+    assert.ok(!text().includes("Voice"), "no row for a host with no token to mint")
+    assert.ok(!find("#charm-talk-address"), "and no address field either")
+  })
+
+  const newer = serveTalk("talk-offered", ["charm_firmware", "talk"], {})
+  await mount(<CharmVoice profile={newer.profile} api={voice()} />, async () => {
+    await until(
+      async () => text().includes("Voice"),
+      "the row, once the host says it has the route",
+    )
+    assert.ok(text().includes("Hold B on your charm"), "and what the setting is for")
+  })
+})
+
+test("the voice row asks the host for the address and the token, with the app's key", async () => {
+  const host = serveTalk("talk-handover", ["talk"], {
+    object: "gots.talk",
+    host: APP_HOST,
+    bot: "4f1c2a90",
+    token: TOKEN,
+  })
+  // The row's own reaches, not a stand-in's: this is the ask the app really makes.
+  await mount(<CharmVoice profile={host.profile} />, async () => {
+    await until(async () => Boolean(find("#charm-talk-setup")), "the row's controls")
+    await click(find("#charm-talk-setup"))
+    await settle()
+    assert.equal(
+      (find("#charm-talk-address") as HTMLInputElement | null)?.value,
+      APP_HOST,
+      "the address the host answered is filled in, and editable",
+    )
+    const asked = host.asked().find((one) => one.path.endsWith("/plugins/gots/talk"))
+    assert.ok(asked, "the hand-over route was asked")
+    assert.equal(
+      asked.authorization,
+      `Bearer ${host.profile.apiKey}`,
+      "with the app's key, as every plugin route is",
+    )
+    assert.ok(!text().includes(TOKEN), "the token is held for the write, not drawn on the page")
+  })
+})
+
+test("Set up fills the address in, and Send writes what the reader left", async () => {
+  const wrote: [string, string][] = []
+  const api = voice({
+    send: async (address, token) => {
+      wrote.push([address, token])
+      return CharmCode.Ok
+    },
+  })
+  await mount(<CharmVoice api={api} profile={connection("talk-writes")} />, async () => {
+    await until(async () => Boolean(find("#charm-talk-setup")), "the row's controls")
+    // Nothing has been minted: there is nothing to send, and the button says so by being off.
+    assert.equal(
+      (find("#charm-talk-send") as HTMLButtonElement | null)?.disabled,
+      true,
+      "Send waits on the host's answer",
+    )
+    await click(find("#charm-talk-setup"))
+    await settle()
+    assert.equal((find("#charm-talk-address") as HTMLInputElement | null)?.value, TAILNET)
+    await click(find("#charm-talk-send"))
+    await settle()
+    assert.deepEqual(wrote, [[TAILNET, TOKEN]], "the address and the minted token, as one write")
+    assert.ok(text().includes("Sent to your charm."), "and the row says it went")
+    // The token is the charm's from here on: not on the page, and not in this device's store.
+    assert.ok(!text().includes(TOKEN), "nothing draws it")
+    assert.ok(
+      !JSON.stringify({ ...localStorage }).includes(TOKEN),
+      "and nothing keeps it on the phone after the write",
+    )
+    assert.equal(
+      (find("#charm-talk-send") as HTMLButtonElement | null)?.disabled,
+      true,
+      "a second Send would write nothing: a new token is the host's to mint",
+    )
+  })
+})
+
+test("an address the charm could not call is refused in words, and nothing is written", async () => {
+  const wrote: string[] = []
+  const api = voice({
+    offer: async () => ({ host: APP_HOST, bot: "4f1c2a90", token: TOKEN }),
+    send: async (address) => {
+      wrote.push(address)
+      return CharmCode.Ok
+    },
+  })
+  await mount(<CharmVoice api={api} profile={connection("talk-https")} />, async () => {
+    await until(async () => Boolean(find("#charm-talk-setup")), "the row's controls")
+    await click(find("#charm-talk-setup"))
+    await settle()
+    // The host answers the address this phone dialled: https, which the charm does not speak.
+    await click(find("#charm-talk-send"))
+    await settle()
+    assert.deepEqual(wrote, [], "nothing went over the link")
+    assert.ok(text().includes("plain http"), "the row says what the charm speaks instead")
+    assert.ok(text().includes("tailnet address"), "and where to find the one it can call")
+    assert.equal(
+      (find("#charm-talk-send") as HTMLButtonElement | null)?.disabled,
+      false,
+      "the token is still held: the reader can fix the address and send again",
+    )
+    // Edited to the address the charm reaches the host at, the same write goes.
+    await type(find("#charm-talk-address"), TAILNET)
+    await click(find("#charm-talk-send"))
+    await settle()
+    assert.deepEqual(wrote, [TAILNET], "the address the reader left is the one written")
+  })
+})
+
+test("a plaintext charm's keep is said in its own words", async () => {
+  // 11 on the wire: the charm kept the address and the token, and warns that the chip gives them away.
+  const api = voice({ send: async () => CharmCode.KeptReadable })
+  await mount(<CharmVoice api={api} profile={connection("talk-readable")} />, async () => {
+    await until(async () => Boolean(find("#charm-talk-setup")), "the row's controls")
+    await click(find("#charm-talk-setup"))
+    await settle()
+    // The row prefill is the host's https answer here, so send what the charm can call.
+    await type(find("#charm-talk-address"), TAILNET)
+    await click(find("#charm-talk-send"))
+    await settle()
+    assert.ok(text().includes(TALK_READABLE), "the readable secret is said, not glossed")
+    assert.ok(text().includes("read the token off the chip"))
+  })
+})
+
+test("a charm that does not speak the op is named, and not blamed on the sync", async () => {
+  // An app may land before the firmware that speaks Talk: the row sends the reader to the update.
+  const api = voice({ send: async () => CharmCode.BadMessage })
+  await mount(<CharmVoice api={api} profile={connection("talk-old-firmware")} />, async () => {
+    await until(async () => Boolean(find("#charm-talk-setup")), "the row's controls")
+    await click(find("#charm-talk-setup"))
+    await settle()
+    await type(find("#charm-talk-address"), TAILNET)
+    await click(find("#charm-talk-send"))
+    await settle()
+    assert.ok(text().includes("older than the app"), "the charm's firmware is what needs updating")
+    assert.ok(!text().includes("didn't understand the sync"), "not the sync's refusal")
+  })
 })

@@ -48,6 +48,9 @@ export const CharmOp = {
   Firmware: 0x36,
   UpdateBegin: 0x37,
   UpdateEnd: 0x38,
+  // Voice: the address the charm's turns are posted to and the token it proves itself with, handed
+  // over by the app. One write, and the charm keeps both.
+  Talk: 0x40,
 } as const
 
 type CharmOp = (typeof CharmOp)[keyof typeof CharmOp]
@@ -116,6 +119,11 @@ export const CHARM_MAX_PASS_BYTES = 63
 export const CHARM_MAX_URL_BYTES = 180
 export const CHARM_MAX_KEY_BYTES = 96
 export const CHARM_SHA256_BYTES = 32
+/**
+ * The token a charm presents on every turn, as the firmware's own bound has it: the host mints 64
+ * hex characters today, and the link carries 128 bytes so a longer one still fits.
+ */
+export const CHARM_MAX_TOKEN_BYTES = 128
 
 /**
  * One firmware slot, as the partition table sizes it: an image larger than this cannot be received
@@ -635,6 +643,25 @@ export function tailnetMessage(key: string): Uint8Array {
   if (bytes.length === 0) throw new Error("A tailnet key is at least 1 byte")
   if (bytes.length > CHARM_MAX_KEY_BYTES) throw new Error("A tailnet key is at most 96 bytes")
   return control(CharmOp.Tailnet).str(bytes).done()
+}
+
+/**
+ * The address the charm's turns are posted to and the token it presents with them, as
+ * `[urlLen u8][url][tokenLen u8][token]`. The charm appends `/talk/v1/turn` to the address, keeps
+ * both, and never answers either back — `Forget` sweeps them with its other secrets.
+ *
+ * The bounds are the firmware's own: an address of 1..180 bytes and a token of 1..128. Whether the
+ * address is one the charm can call at all is the caller's rule (`talk.ts`), since only it knows
+ * what the reader was told.
+ */
+export function talkFrame(address: string, token: string): Uint8Array {
+  const url = encoder.encode(address)
+  if (url.length === 0) throw new Error("A talk address is at least 1 byte")
+  if (url.length > CHARM_MAX_URL_BYTES) throw new Error("A talk address is at most 180 bytes")
+  const secret = encoder.encode(token)
+  if (secret.length === 0) throw new Error("A talk token is at least 1 byte")
+  if (secret.length > CHARM_MAX_TOKEN_BYTES) throw new Error("A talk token is at most 128 bytes")
+  return control(CharmOp.Talk).str(url).str(secret).done()
 }
 
 /**
