@@ -15,17 +15,14 @@ import { useLiveQuery } from "dexie-react-hooks"
 import {
   BatteryMediumIcon,
   BellRingIcon,
-  BluetoothIcon,
   CloudDownloadIcon,
   EyeIcon,
   EyeOffIcon,
   FileUpIcon,
-  NetworkIcon,
   HandIcon,
   PawPrintIcon,
   RefreshCwIcon,
   UnlinkIcon,
-  WifiIcon,
   WifiOffIcon,
 } from "lucide-react"
 
@@ -75,6 +72,7 @@ import {
   setCharmWake,
   syncToCharm,
   uploadCharmFirmware,
+  useCharmReport,
   usePairedCharm,
 } from "@/lib/charm"
 import {
@@ -101,8 +99,8 @@ import type { PluginServer } from "@/lib/features"
 import { getCharmFirmwareImage } from "@/lib/hermes"
 import { useHostRecord } from "@/lib/host-record"
 import {
+  BATTERY_ASK,
   batteryWords,
-  charmSynced,
   doubleTapSubtitle,
   FILE_TOO_BIG,
   FIRMWARE_CAPTION,
@@ -110,15 +108,23 @@ import {
   FIRMWARE_SENT,
   firmwareOffers,
   firmwareWords,
+  LINK_DOWN_WORDS,
+  LINK_MARKS,
+  linksDown,
   petSubtitle,
   PUBLISHED_CHANGED,
   QUIET_TITLE,
   quietWords,
+  readFailed,
+  readValue,
   tailnetWords,
   updateWords,
   updateProgressWords,
   wifiWords,
+  type CharmLink,
+  type CharmRead,
   type CharmRunning,
+  type CharmSeen,
 } from "@/lib/charm-words"
 import { quietly } from "@/lib/report"
 import { tell } from "@/lib/tell"
@@ -129,9 +135,7 @@ const message = (error: unknown) =>
 
 /** The SHA-256 of bytes this phone holds, as the lowercase hex the link takes. */
 const sha256Of = async (image: Uint8Array) =>
-  hexOf(
-    new Uint8Array(await crypto.subtle.digest("SHA-256", image as unknown as BufferSource)),
-  )
+  hexOf(new Uint8Array(await crypto.subtle.digest("SHA-256", image as unknown as BufferSource)))
 
 /** How often a running firmware download is asked where it has got to. */
 const UPDATE_POLL_MS = 2_000
@@ -248,6 +252,15 @@ function SecretField({
 }
 
 /**
+ * A link's own mark at a row's size: the pair row and both link headers wear the one map the status
+ * row wears, so a link cannot be a globe here and the charm's waypoints two rows down.
+ */
+function LinkIcon({ link }: { link: CharmLink }) {
+  const Mark = LINK_MARKS[link]
+  return <Mark className="size-5 shrink-0 text-muted-foreground" />
+}
+
+/**
  * Settings → Charm's network: the Wi-Fi the charm joins, the tailnet key it joins with, and the
  * firmware it runs — the version it says it has beside the one the package publishes, an update when
  * that one is newer, and a file the reader picks. Every row draws the charm's own answer rather than
@@ -259,6 +272,8 @@ export function CharmNetwork({
   profile,
   record,
   tailnet,
+  read,
+  refresh,
 }: {
   /** The radio, or a stand-in under test. */
   api?: CharmNetworkApi
@@ -268,9 +283,15 @@ export function CharmNetwork({
   record?: CharmWifiRecord
   /** Whether a tailnet key was handed over before, while the charm itself is not answering. */
   tailnet?: boolean
+  /**
+   * The page's own read of the charm's links, made above this section: the same one the status row
+   * draws, so the two rows cannot disagree about what the charm said.
+   */
+  read: CharmRead<CharmNetworkReport>
+  /** Asks the charm's links again after a write: the section never makes that ask itself. */
+  refresh: () => Promise<void>
 }) {
-  const [report, setReport] = useState<CharmNetworkReport | null>(null)
-  const [update, setUpdate] = useState<CharmUpdateStatus | null>(null)
+  const [update, setUpdate] = useState<CharmRead<CharmUpdateStatus>>({ state: "reading" })
   const [ssid, setSsid] = useState("")
   const [pass, setPass] = useState("")
   const [key, setKey] = useState("")
@@ -296,14 +317,30 @@ export function CharmNetwork({
   const versions = { running, published: published?.version, answered: firmware.settled }
   const offers = firmwareOffers(versions)
 
-  /** What the charm says about its links and its firmware, read in one go: both or neither. */
-  const snapshot = useCallback(async () => {
-    const [report, update] = await Promise.all([
-      api.status().catch(() => null),
-      api.updateStatus().catch(() => null),
-    ])
-    return { report, update }
-  }, [api])
+  /** What the charm last answered about its two links, and where its download had got to. */
+  const links = readValue(read)
+  const downloading = readValue(update)
+
+  /**
+   * Where the charm's download has got to, asked when the section opens and again after each write. A
+   * failed ask keeps what an earlier one found — the charm is out of reach, not empty — and says why,
+   * since refused, disconnected and timed out are three facts rather than one silence.
+   */
+  const readUpdate = useCallback(
+    () =>
+      api.updateStatus().then(
+        (value) => {
+          setUpdate({ state: "read", value })
+          return value
+        },
+        (reason: unknown) => {
+          quietly("reading the charm's download")(reason)
+          setUpdate(readFailed)
+          return undefined
+        },
+      ),
+    [api],
+  )
 
   /**
    * The charm's own version when the row opens: a version it can't say stays unsaid rather than
@@ -318,17 +355,13 @@ export function CharmNetwork({
     )
   }, [api])
 
-  // The section's first line is the charm's own: read once on opening, and again after each write.
+  // The download's own line: read once on opening, and again after each write.
   useEffect(() => {
-    void snapshot().then(({ report, update }) => {
-      if (report) setReport(report)
-      if (update) {
-        setUpdate(update)
-        // A download already running when the row opens is followed to its end, as one it started was.
-        if (update.state === CharmUpdateState.Downloading) setWatching(true)
-      }
+    void readUpdate().then((found) => {
+      // A download already running when the row opens is followed to its end, as one it started was.
+      if (found?.state === CharmUpdateState.Downloading) setWatching(true)
     })
-  }, [snapshot])
+  }, [readUpdate])
 
   // A download that is running is asked where it has got to until it stops running.
   useEffect(() => {
@@ -339,11 +372,14 @@ export function CharmNetwork({
         .updateStatus()
         .then((next) => {
           if (!live) return
-          setUpdate(next)
+          setUpdate({ state: "read", value: next })
           if (next.state !== CharmUpdateState.Downloading) setWatching(false)
         })
         .catch(() => {
-          if (live) setWatching(false)
+          if (!live) return
+          // The charm stopped answering: the poll ends, and what it last said is still what it said.
+          setUpdate((before) => readFailed(before))
+          setWatching(false)
         })
     }, UPDATE_POLL_MS)
     return () => {
@@ -361,11 +397,8 @@ export function CharmNetwork({
       // A refusal gets the code's words. A plaintext charm's 11 is a yes whose words are the warning
       // that anyone holding the charm can read the secret off the chip, so it says them too.
       setSaid(code === CharmCode.Ok ? null : codeWords(code))
-      if (charmKept(code)) {
-        const { report: next, update: progress } = await snapshot()
-        if (next) setReport(next)
-        if (progress) setUpdate(progress)
-      }
+      // A write the charm kept is read back: its links and its download, from the same asks as before.
+      if (charmKept(code)) await Promise.all([refresh(), readUpdate()])
       return code
     } catch (error) {
       setSaid(message(error))
@@ -401,8 +434,7 @@ export function CharmNetwork({
   const readBack = async () => {
     const was = running.state === "says" ? running.version : null
     const { changed, version } = await versionAfterReboot(() => api.version(), was)
-    if (changed)
-      setRunning(version === null ? { state: "too-old" } : { state: "says", version })
+    if (changed) setRunning(version === null ? { state: "too-old" } : { state: "says", version })
     return changed
   }
 
@@ -478,8 +510,8 @@ export function CharmNetwork({
       {said && <Caption>{said}</Caption>}
       <Group>
         <div className={headerRowClass}>
-          <WifiIcon className="size-5 shrink-0 text-muted-foreground" />
-          <RowText title="Wi-Fi" subtitle={wifiWords(report?.wifi, record)} />
+          <LinkIcon link="wifi" />
+          <RowText title="Wi-Fi" subtitle={wifiWords(links?.wifi, record)} />
         </div>
         <form
           className={formRowClass}
@@ -528,8 +560,8 @@ export function CharmNetwork({
       </Group>
       <Group>
         <div className={headerRowClass}>
-          <NetworkIcon className="size-5 shrink-0 text-muted-foreground" />
-          <RowText title="Tailnet" subtitle={tailnetWords(report?.tailnet, tailnet)} />
+          <LinkIcon link="tailnet" />
+          <RowText title="Tailnet" subtitle={tailnetWords(links?.tailnet, tailnet)} />
         </div>
         <form
           className={formRowClass}
@@ -606,7 +638,9 @@ export function CharmNetwork({
       </Group>
       {checkSaid && <Caption>{checkSaid}</Caption>}
       <Caption>{FIRMWARE_CAPTION}</Caption>
-      {update && update.state !== CharmUpdateState.Idle && <Caption>{updateWords(update)}</Caption>}
+      {downloading && downloading.state !== CharmUpdateState.Idle && (
+        <Caption>{updateWords(downloading)}</Caption>
+      )}
       <Caption>
         The image goes over the charm's own link, and the charm checks it against the SHA-256 it was
         given before it keeps it. A passphrase stays on the charm across a reboot: a charm whose
@@ -617,6 +651,50 @@ export function CharmNetwork({
   )
 }
 
+/**
+ * The paired section's first row: its name with a mark for each link that is down, and its level as
+ * the line beneath — the row's subtitle, as every row in this page's groups keeps its value. Its own
+ * component so a test can draw it with props and no radio, as the battery row and the waking group
+ * already are. The level is drawn always, unlike the glass's, because a settings page has no band to
+ * pull — and a mark is drawn only for a link the page has read and found down, since a mark for a
+ * fact nobody has read would be a guess.
+ */
+export function CharmStatusRow({
+  charm,
+  status,
+  battery,
+}: {
+  charm: CharmSeen
+  /** The page's own read of the charm's link, and the last report it answered with. */
+  status: CharmRead<CharmNetworkReport>
+  /** What the charm last said its charge was. */
+  battery?: CharmBatterySeen
+}) {
+  return (
+    <div className={rowClass}>
+      <RowText
+        title={
+          <span className="flex min-w-0 items-center gap-2">
+            <span className="truncate">{charm.name}</span>
+            {linksDown(status).map((link) => {
+              const Mark = LINK_MARKS[link]
+              return (
+                <Mark
+                  key={link}
+                  role="img"
+                  aria-label={LINK_DOWN_WORDS[link]}
+                  className="size-4 shrink-0 text-muted-foreground"
+                />
+              )
+            })}
+          </span>
+        }
+        subtitle={batteryWords(battery)}
+      />
+    </div>
+  )
+}
+
 export function CharmSettings() {
   const charm = usePairedCharm()
   const profiles = useLiveQuery(listProfiles, [])
@@ -624,6 +702,8 @@ export function CharmSettings() {
   const profile = useLiveQuery(getActiveProfile, [])
   const labels = useBotLabels()
   const [busy, setBusy] = useState<"pair" | "sync" | "test" | "wake" | "battery" | null>(null)
+  /** The page's own read of the charm's links: the status row and the Network section both draw it. */
+  const { read: status, refresh: refreshStatus } = useCharmReport()
   const [progress, setProgress] = useState<SyncProgress | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const [batteryNote, setBatteryNote] = useState<string | undefined>(undefined)
@@ -789,16 +869,8 @@ export function CharmSettings() {
       {charm ? (
         <>
           <Group>
-            <div className={rowClass}>
-              <BluetoothIcon className="size-5 shrink-0 text-muted-foreground" />
-              <RowText title={charm.name} subtitle={charmSynced(charm)} />
-            </div>
-            <BatteryRow
-              reading={charm.battery}
-              note={batteryNote}
-              busy={busy !== null}
-              onRefresh={refreshBattery}
-            />
+            <CharmStatusRow charm={charm} status={status} battery={charm.battery} />
+            <BatteryRow note={batteryNote} busy={busy !== null} onRefresh={refreshBattery} />
             <button
               type="button"
               className={rowClass}
@@ -860,7 +932,13 @@ export function CharmSettings() {
               />
             </button>
           </Group>
-          <CharmNetwork profile={profile} record={charm.wifi} tailnet={charm.tailnet} />
+          <CharmNetwork
+            profile={profile}
+            record={charm.wifi}
+            tailnet={charm.tailnet}
+            read={status}
+            refresh={refreshStatus}
+          />
           <Group>
             <ActionRow
               icon={UnlinkIcon}
@@ -900,7 +978,7 @@ export function CharmSettings() {
         <>
           <Group>
             <button type="button" className={rowClass} onClick={pair} disabled={busy !== null}>
-              <BluetoothIcon className="size-5 shrink-0 text-muted-foreground" />
+              <LinkIcon link="bluetooth" />
               <RowText
                 title={busy === "pair" ? "Pairing…" : "Pair a charm"}
                 subtitle="Turn the charm on and keep it close"
@@ -971,16 +1049,15 @@ export function WakingGroup({
 }
 
 /**
- * What the charm last said its charge was. Tapping it asks again, because the reading is the charm's
- * and this row only remembers it.
+ * The control that asks the charm for its charge. What the charm answered is the status row's line,
+ * so this row says what a tap does — and, when an ask failed, why it did.
  */
 export function BatteryRow({
-  reading,
   note,
   busy,
   onRefresh,
 }: {
-  reading?: CharmBatterySeen
+  /** Why the last ask failed, in words: the row's line while it stands. */
   note?: string
   busy: boolean
   onRefresh: () => void
@@ -988,7 +1065,7 @@ export function BatteryRow({
   return (
     <button type="button" className={rowClass} onClick={onRefresh} disabled={busy}>
       <BatteryMediumIcon className="size-5 shrink-0 text-muted-foreground" />
-      <RowText title="Battery" subtitle={note ?? batteryWords(reading)} />
+      <RowText title="Battery" subtitle={note ?? BATTERY_ASK} />
     </button>
   )
 }

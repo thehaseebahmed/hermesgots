@@ -6,7 +6,7 @@
  */
 import { BleClient, type BleDevice } from "@capacitor-community/bluetooth-le"
 import { Capacitor, registerPlugin } from "@capacitor/core"
-import { useSyncExternalStore } from "react"
+import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
 
 import { BOT_MOODS, DEFAULT_MOOD, botImage, type BotMood } from "@/components/bots"
 import { findBot } from "@/components/bot"
@@ -23,7 +23,7 @@ import { registryId } from "@/lib/registry"
 import { charmBotId, charmButtons } from "./charm-alert.ts"
 import { type FirmwareProgress, uploadFirmware } from "./charm-firmware.ts"
 import { oneAtATime } from "./charm-queue.ts"
-import { refusalWords } from "./charm-words.ts"
+import { readFailed, refusalWords, type CharmRead } from "./charm-words.ts"
 import {
   CHARM_CONTROL,
   CHARM_DATA,
@@ -155,6 +155,39 @@ export function usePairedCharm(): PairedCharm | null {
     },
     () => paired,
   )
+}
+
+/** The one ask this page makes about the charm's own links. */
+export interface CharmReportApi {
+  status(): Promise<CharmNetworkReport>
+}
+
+/** The radio the page reads the charm's links with, when nothing stands in for it. */
+const REPORT_RADIO: CharmReportApi = { status: charmNetwork }
+
+/**
+ * The page's own read of the charm's links: one ask, drawn by the paired section's status row and by
+ * the Network section's two lines, so the page cannot tell two stories about what the charm said.
+ * `refresh` asks again — after a write, or after a sync — and a failed ask keeps what an earlier one
+ * found, with its reason said in the console rather than everything reading as one silence. The radio
+ * is the page's one constant, since the ask it opens with is keyed on it.
+ */
+export function useCharmReport(api: CharmReportApi = REPORT_RADIO) {
+  const [read, setRead] = useState<CharmRead<CharmNetworkReport>>({ state: "reading" })
+  const refresh = useCallback(
+    () =>
+      api.status().then(
+        (value) => setRead({ state: "read", value }),
+        (reason: unknown) => {
+          quietly("reading the charm's links")(reason)
+          setRead(readFailed)
+        },
+      ),
+    [api],
+  )
+  // One ask when the section opens: what the phone learns by asking, it asks once.
+  useEffect(() => void refresh(), [refresh])
+  return { read, refresh }
 }
 
 /** Only the Android app has a radio to reach the charm with. */
