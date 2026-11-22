@@ -13,12 +13,16 @@ mistake.
 from __future__ import annotations
 
 import importlib.util
+import io
 import math
 import struct
 import sys
+import tempfile
 import types
 import unittest
+import wave
 import zlib
+from pathlib import Path
 from typing import Any, List, Optional, Tuple
 from unittest import mock
 
@@ -86,14 +90,37 @@ class Resampler:
         return [] if frame is None else [frame]
 
 
+class Container:
+    """An audio file as ``pcm`` opens one: a WAV read for its frames, and nothing else.
+
+    The stand-in is narrower than PyAV on purpose — it reads the one format a test can write
+    honestly — while the case that needs the real codec is skipped where ``av`` is absent.
+    """
+
+    def __init__(self, source: Any) -> None:
+        data = source.read() if hasattr(source, "read") else Path(source).read_bytes()
+        with wave.open(io.BytesIO(data)) as file:
+            self.frames = file.readframes(file.getnframes())
+        self.asked: Optional[int] = None
+        self.closed = False
+
+    def decode(self, audio: Optional[int] = None):
+        self.asked = audio
+        yield Frame.holding(self.frames)
+
+    def close(self) -> None:
+        self.closed = True
+
+
 def stub_av() -> Tuple[types.ModuleType, types.SimpleNamespace]:
     """``av`` as far as this module uses it, and what the module asked each part for.
 
     A packet is one 20 ms frame, zlib-compressed: a handful of bytes for a frame, the shape an Opus
     packet has, and lossless, so a round trip proves the framing rather than the codec. ``made``
-    holds the encoder and the resampler, because their settings are part of the wire's contract.
+    holds the encoder and the resampler, because their settings are part of the wire's contract,
+    and every container ``pcm`` opened.
     """
-    made = types.SimpleNamespace(encoders=[], resamplers=[])
+    made = types.SimpleNamespace(encoders=[], resamplers=[], opened=[])
 
     class Encoder:
         def __init__(self) -> None:
@@ -123,6 +150,13 @@ def stub_av() -> Tuple[types.ModuleType, types.SimpleNamespace]:
     av.AudioFrame = Frame
     av.AudioResampler = resampler
     av.Packet = Packet
+
+    def opening(source: Any) -> Container:
+        container = Container(source)
+        made.opened.append(container)
+        return container
+
+    av.open = opening
     return av, made
 
 
@@ -136,6 +170,17 @@ def tone(samples: int = 16000, frequency: float = 440.0) -> bytes:
         )
         for index in range(samples)
     )
+
+
+def wav_of(pcm: bytes, *, rate: int = charm_audio.SAMPLE_RATE, channels: int = 1) -> bytes:
+    """``pcm`` as a WAV file at some other rate and layout: what a voice provider hands back."""
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as file:
+        file.setnchannels(channels)
+        file.setsampwidth(charm_audio.SAMPLE_BYTES)
+        file.setframerate(rate)
+        file.writeframes(pcm)
+    return buffer.getvalue()
 
 
 def wire(stream: bytes) -> List[bytes]:
@@ -228,7 +273,56 @@ class Refusals(unittest.TestCase):
         self.assertIn("av", str(refused.exception))
 
 
+class Pcm(unittest.TestCase):
+    """A file of whatever shape a voice provider made, read as the one the wire carries (``pcm``)."""
+
+    def test_pcm_reads_a_file_at_any_rate_and_layout_as_the_wires_own(self) -> None:
+        av, made = stub_av()
+        spoken = tone(charm_audio.SAMPLE_RATE // 4)
+        stereo = b"".join(spoken[at : at + 2] * 2 for at in range(0, len(spoken), 2))
+        clip = wav_of(stereo, rate=48000, channels=2)
+        with mock.patch.dict(sys.modules, {"av": av}):
+            heard = charm_audio.pcm(clip)
+            with tempfile.TemporaryDirectory() as folder:
+                at = Path(folder) / "voice.wav"
+                at.write_bytes(clip)
+                from_path = charm_audio.pcm(at)
+                closed = made.opened[-1].closed
+        self.assertEqual(heard, stereo, "every sample the file held came back out of it")
+        self.assertEqual(from_path, heard, "a path and the same file's bytes are one call")
+        self.assertEqual(
+            made.resamplers[-1].asked,
+            ("s16", "mono", charm_audio.SAMPLE_RATE),
+            "the one rate and layout the wire carries, whatever the file was",
+        )
+        self.assertEqual(made.opened[0].asked, 0, "the file's first audio stream, and no video")
+        self.assertTrue(closed, "the file was closed however the read ended")
+
+    def test_a_file_nothing_can_open_is_refused(self) -> None:
+        av, _ = stub_av()
+        with mock.patch.dict(sys.modules, {"av": av}):
+            with self.assertRaises(charm_audio.Undecodable):
+                charm_audio.pcm(b"not an audio file")
+            with self.assertRaises(charm_audio.Undecodable):
+                charm_audio.pcm(Path(tempfile.gettempdir()) / "nothing-here.ogg")
+
+    def test_pcm_wants_the_codec_too(self) -> None:
+        with mock.patch.dict(sys.modules, {"av": None}):
+            with self.assertRaises(charm_audio.NoCodec):
+                charm_audio.pcm(wav_of(tone(charm_audio.FRAME_SAMPLES)))
+
+
 class RealCodec(unittest.TestCase):
+    @unittest.skipUnless(HAVE_AV, "av isn't installed on this host")
+    def test_a_real_av_reads_a_wav_at_another_rate(self) -> None:
+        clip = wav_of(tone(), rate=48000, channels=2)
+        pcm = charm_audio.pcm(clip)
+        self.assertEqual(len(pcm), charm_audio.SAMPLE_RATE * charm_audio.SAMPLE_BYTES)
+        samples = struct.unpack(f"<{len(pcm) // 2}h", pcm)
+        crosses = sum(1 for a, b in zip(samples, samples[1:]) if (a < 0) != (b < 0))
+        self.assertAlmostEqual(crosses, 880, delta=40, msg="the tone came back a 16 kHz tone")
+        self.assertGreater(max(samples) - min(samples), 8000, "and at the volume it was sent")
+
     @unittest.skipUnless(HAVE_AV, "av isn't installed on this host")
     def test_a_real_av_encodes_16k_mono(self) -> None:
         pcm = tone()

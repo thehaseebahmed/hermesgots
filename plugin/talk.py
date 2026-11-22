@@ -1,10 +1,12 @@
-"""A charm's turn: the utterance heard, and the bot's answer, in that bot's one voice chat.
+"""A charm's turn: the utterance heard, the bot's answer, in that bot's one voice chat, and spoken.
 
 A turn is one request the charm makes and one answer it hears, so everything a spoken sentence needs
 happens here rather than in the route that carries it: the Opus stream is decoded (``charm_audio``),
 the PCM is heard by the host's own speech-to-text — the path a dictated take takes — and those words
 go into a chat of the bot's own as an ordinary ``/v1/runs`` turn, whose reply is read back off the
-session's last assistant message.
+session's last assistant message. That reply is then spoken by the host's own voice
+(``tools.tts_tool``, the text-to-speech every other surface of a Hermes uses) and encoded as the
+stream the charm plays, so one module owns both halves of a spoken turn.
 
 That chat is opened once per bot and titled ``Voice``, and it is a chat like any other: it is in the
 list, the app draws what was said and what came back, and every later turn posts into it, so a
@@ -15,18 +17,25 @@ up the next morning should not carry on yesterday's subject — and a turn under
 The host's seams are injected rather than reached for: the poster that starts the run, the hearer, the
 reader that answers a session's last message, and the clock. That is what lets the suite prove a turn
 with no server, no model and no codec, and what keeps the waiting honest — one seam moves the clock,
-so nothing sleeps.
+so nothing sleeps. The voice is imported lazily, inside ``speak``, so a host without one loads the
+plugin and refuses a turn by name instead of failing to import.
 
-Three failures are this module's own, and each is its own error so a route can name it: an utterance
-with no words in it (``HeardNothing``), a run that never ended (``Unanswered``) and a bot with nowhere
-to answer (``NoVoiceChat``). Audio the wire won't carry is ``charm_audio``'s refusal and a decode the
-host couldn't do is ``dictation``'s, both handed on as they are.
+Four failures are this module's own, and each is its own error so a route can name it: an utterance
+with no words in it (``HeardNothing``), a run that never ended (``Unanswered``), a bot with nowhere
+to answer (``NoVoiceChat``) and a host with nothing to speak with (``NoVoice``). Audio the wire won't
+carry is ``charm_audio``'s refusal and a decode the host couldn't do is ``dictation``'s, both handed
+on as they are.
+
+``VERSION`` is the contract's own number, stated by a charm on every request in ``VERSION_HEADER``,
+because a charm in the reader's hand is updated only by the app or a cable: a host that reads the
+version on the request it refuses can say which ones it speaks.
 """
 
 from __future__ import annotations
 
 import asyncio
 import io
+import json
 import logging
 import os
 import sqlite3
@@ -41,6 +50,13 @@ from . import charm_audio, dictation, link, new_chats, outbox, sessions
 from .store import get_setting, home_of, put_setting
 
 logger = logging.getLogger(__name__)
+
+# The wire's version, and the header a charm states it in: one fact in two places, because the charm
+# sends it and the route reads it.
+VERSION = "1"
+VERSION_HEADER = "X-Gots-Talk"
+# What a host with no voice says, and the one sentence a route hands the charm for it.
+NO_VOICE = "This host has no voice to answer with."
 
 # Where one bot's voice chat is kept, and the clock its last turn was posted at: a row of the bot's
 # own, as its talk token is, so one bot's chat is never written into another's.
@@ -59,19 +75,43 @@ CHANGE_OF_TOPIC = (
 
 
 class TalkError(Exception):
-    """A turn that couldn't be carried out, in a sentence a route can hand the charm."""
+    """A turn that couldn't be carried out, in a sentence a route can hand the charm.
+
+    ``status`` and ``code`` are how a route answers it: the HTTP status, and the word the charm's
+    band switches on rather than reading the sentence. They are here beside the reason so a failure
+    has one word wherever it is answered — the route's own front-door refusals are the route's.
+    """
+
+    status = 500
+    code = "turn_failed"
 
 
 class HeardNothing(TalkError):
     """The utterance held no words, so there is nothing to answer."""
 
+    status = 422
+    code = "nothing_heard"
+
 
 class Unanswered(TalkError):
     """The run didn't end on the deadline, or never started, so there are no words to speak back."""
 
+    status = 504
+    code = "unanswered"
+
 
 class NoVoiceChat(TalkError):
     """This bot's voice chat couldn't be opened, so a turn has nowhere to land."""
+
+    status = 503
+    code = "no_voice_chat"
+
+
+class NoVoice(TalkError):
+    """This host has no voice to speak the answer with: nothing to send back."""
+
+    status = 503
+    code = "no_voice"
 
 
 class Clock:
@@ -291,3 +331,79 @@ def _wav(pcm: bytes) -> bytes:
         file.setframerate(charm_audio.SAMPLE_RATE)
         file.writeframes(pcm)
     return buffer.getvalue()
+
+
+def speak(text: str) -> bytes:
+    """``text`` spoken by the host's own voice, as the stream a charm decodes and plays.
+
+    Hermes's text-to-speech is asked for a file and answers where it really wrote one
+    (``file_path``), in whatever format its provider makes — an MP3 for one provider, a WAV for the
+    next — so the file is decoded rather than assumed (``charm_audio.pcm``) and both leave here as
+    the wire's 16 kHz mono Opus. Nothing of that file survives the call: the path asked for and the
+    one named are both the turn's to delete.
+
+    A host with no voice, one whose voice fails, and one whose voice answers nothing in particular
+    are one refusal (``NoVoice``), because the reader's remedy is the same for all three and the
+    band has one word for it.
+    """
+    said = text.strip()
+    if not said:
+        raise NoVoice(NO_VOICE)
+    fd, name = tempfile.mkstemp(prefix="gots-voice-", suffix=".ogg")
+    os.close(fd)
+    asked = Path(name)
+    wrote: Optional[Path] = None
+    try:
+        wrote = _said(_voiced(said, name))
+        return charm_audio.encode(charm_audio.pcm(wrote))
+    except (charm_audio.Undecodable, charm_audio.NoCodec) as error:
+        raise NoVoice(f"{NO_VOICE} {error}") from error
+    finally:
+        _unlink(asked, wrote)
+
+
+def _voiced(text: str, output_path: str) -> Any:
+    """Hermes's own text-to-speech, asked for a file: the tool every other surface speaks with.
+
+    Imported here rather than at the top, as every Hermes module is in this plugin: a host without
+    the tool must still load, and a turn on it is refused in our words rather than an ImportError's.
+    """
+    try:
+        from tools import tts_tool
+    except Exception as missing:
+        raise NoVoice(NO_VOICE) from missing
+    try:
+        return tts_tool.text_to_speech_tool(text=text, output_path=output_path)
+    except Exception as error:
+        raise NoVoice(f"{NO_VOICE} {error}") from error
+
+
+def _said(answer: Any) -> Path:
+    """The file a voice wrote, out of the envelope it answers: Hermes's ``tool_result`` JSON text.
+
+    A dict is read the same way, so the seam outlives a caller that parsed the text first, and what
+    the tool said when it failed is kept in the refusal, since it is the only words that say why.
+    """
+    if isinstance(answer, (str, bytes, bytearray)):
+        try:
+            answer = json.loads(answer)
+        except ValueError as error:
+            raise NoVoice(f"{NO_VOICE} Its answer wasn't a result: {error}") from error
+    if not isinstance(answer, dict) or not answer.get("success"):
+        why = answer.get("error") if isinstance(answer, dict) else None
+        raise NoVoice(f"{NO_VOICE} {why}" if why else NO_VOICE)
+    wrote = answer.get("file_path")
+    if not isinstance(wrote, str) or not wrote:
+        raise NoVoice(f"{NO_VOICE} It answered no file.")
+    return Path(wrote)
+
+
+def _unlink(*paths: Optional[Path]) -> None:
+    """Let go of the files a spoken answer was left in: the one asked for and the one Hermes named."""
+    for path in paths:
+        if path is None:
+            continue
+        try:
+            path.unlink()
+        except OSError:
+            logger.debug("gots: couldn't delete a voice file", exc_info=True)

@@ -10,7 +10,14 @@ the host's speech model hear what the charm captured, and lets the charm play wh
 A stream is at most a minute of it, the cap the plan made, and a packet at most the 1275 bytes one
 Opus frame can be (RFC 6716 §3.2.5), so neither direction can be handed something that makes it
 allocate or decode for ever. What is inside a packet is the codec's to judge: a payload it cannot
-decode raises ``av``'s own error, which a route names like any other failure.
+decode raises ``Undecodable``, which a route names like any other failure.
+
+A reply does not arrive in that shape, though: the host's voice answers a file in whatever format
+its provider gave — an MP3, an Ogg, a WAV at 24 kHz stereo — so ``pcm`` reads one of those as the
+16 kHz mono samples ``encode`` frames. Reading a file and reading a charm's stream are one path,
+because a reply and an utterance must land on the wire in the same format.
+
+``CONTENT_TYPE`` is that wire's name, which the turn route answers its stream under.
 
 ``av`` is imported inside the functions, never at the top: a host without it must still load the
 plugin, and the refusal is then a sentence of ours rather than an ImportError in the routes. PyAV
@@ -20,9 +27,11 @@ fallback is Ogg on both sides, and ``test_charm_audio`` is where that would show
 
 from __future__ import annotations
 
+import io
 import struct
 from fractions import Fraction
-from typing import Any, List
+from pathlib import Path
+from typing import Any, List, Union
 
 CODEC = "libopus"
 SAMPLE_RATE = 16000
@@ -35,28 +44,62 @@ FRAME_MS = 1000 * FRAME_SAMPLES // SAMPLE_RATE
 MAX_FRAMES = MAX_SECONDS * 1000 // FRAME_MS
 # One Opus frame is at most this many bytes, whatever its duration (RFC 6716 §3.2.5).
 MAX_PACKET = 1275
+# What a turn's answer is: the framed stream, under a type of its own, so a caller never has to
+# guess whether a body is audio and which audio it is.
+CONTENT_TYPE = "audio/x-gots-opus"
+# What a body past the cap says, whichever direction carried it — a request the server itself
+# refused is too much for the same reason, so one sentence is answered for all of it.
+TOO_LONG = f"A turn's audio is at most {MAX_SECONDS} seconds."
 
 HEAD = struct.Struct("<H")
 
 
 class CharmAudioError(Exception):
-    """Audio this wire won't carry, in a sentence a route can answer the charm with."""
+    """Audio this wire won't carry, in a sentence a route can answer the charm with.
+
+    ``status`` and ``code`` are how a route answers it: the HTTP status, and the word the charm's
+    band switches on rather than reading the sentence. A caller's own mistake is its 4xx; a host
+    that can't do the work is not. Both live beside the reason so a reason cannot be worded one way
+    here and another in a route that carries it.
+    """
+
+    status = 500
+    code = "audio_failed"
 
 
 class NoCodec(CharmAudioError):
     """``av`` isn't on this host, so nothing here can encode or decode a packet."""
 
+    status = 503
+    code = "no_codec"
+
 
 class Truncated(CharmAudioError):
     """A stream that ends inside a packet's length, or inside the packet it named."""
+
+    status = 400
+    code = "truncated"
 
 
 class Oversized(CharmAudioError):
     """A length past what one Opus frame can be: not audio, whatever follows it."""
 
+    status = 400
+    code = "oversized"
+
 
 class TooLong(CharmAudioError):
     """A stream past the minute a turn may carry, in either direction."""
+
+    status = 413
+    code = "too_long"
+
+
+class Undecodable(CharmAudioError):
+    """Audio the codec can't read: a payload that isn't Opus, or a file nothing here can open."""
+
+    status = 422
+    code = "undecodable"
 
 
 def _av() -> Any:
@@ -78,7 +121,7 @@ def encode(pcm: bytes) -> bytes:
     if len(pcm) % SAMPLE_BYTES:
         raise ValueError("16 kHz mono s16 PCM is two bytes a sample.")
     if len(pcm) // SAMPLE_BYTES > SAMPLE_RATE * MAX_SECONDS:
-        raise TooLong(f"An utterance is at most {MAX_SECONDS} seconds.")
+        raise TooLong(TOO_LONG)
     av = _av()
     encoder = av.CodecContext.create(CODEC, "w")
     encoder.sample_rate = SAMPLE_RATE
@@ -106,20 +149,53 @@ def decode(stream: bytes) -> bytes:
 
     Every packet is counted before the first is decoded, so a body past the cap costs a walk of its
     lengths rather than a minute of work. The resampler is asked for its own tail at the end, since
-    it holds a little of the last frame back until it is.
+    it holds a little of the last frame back until it is. A payload the codec can't read is
+    ``Undecodable`` rather than ``av``'s own error, so a route names it like the rest of the wire's.
     """
     packets = _packets(stream)
     av = _av()
-    decoder = av.CodecContext.create(CODEC, "r")
-    resampler = av.AudioResampler(format="s16", layout="mono", rate=SAMPLE_RATE)
-    pcm = bytearray()
-    for payload in packets:
-        for frame in decoder.decode(av.Packet(payload)):
-            for piece in _resampled(resampler, frame):
-                pcm += _samples(piece)
-    for piece in _resampled(resampler, None):
-        pcm += _samples(piece)
+    try:
+        decoder = av.CodecContext.create(CODEC, "r")
+        resampler = av.AudioResampler(format="s16", layout="mono", rate=SAMPLE_RATE)
+        pcm = bytearray()
+        for payload in packets:
+            for frame in decoder.decode(av.Packet(payload)):
+                for piece in _resampled(resampler, frame):
+                    pcm += _samples(piece)
+        for piece in _resampled(resampler, None):
+            pcm += _samples(piece)
+    except Exception as error:
+        raise Undecodable(f"This audio couldn't be decoded: {error}") from error
     return bytes(pcm)
+
+
+def pcm(source: Union[bytes, bytearray, str, Path]) -> bytes:
+    """A file of any audio the host can open, as 16 kHz mono s16 PCM — ``source``'s bytes or path.
+
+    The host's voice answers a file in whatever its provider gave, so nothing here assumes one:
+    the container is opened, its first audio stream decoded, and every frame resampled to the rate
+    and layout the wire carries. One path with ``encode``'s, since a reply and an utterance that
+    disagreed about the format would be a charm that hears one and plays the other at pitch.
+    """
+    av = _av()
+    opened = io.BytesIO(bytes(source)) if isinstance(source, (bytes, bytearray)) else str(source)
+    container: Any = None
+    try:
+        container = av.open(opened)
+        resampler = av.AudioResampler(format="s16", layout="mono", rate=SAMPLE_RATE)
+        heard = bytearray()
+        for frame in container.decode(audio=0):
+            for piece in _resampled(resampler, frame):
+                heard += _samples(piece)
+        for piece in _resampled(resampler, None):
+            heard += _samples(piece)
+    except Exception as error:
+        raise Undecodable(f"This audio couldn't be read: {error}") from error
+    finally:
+        closing = getattr(container, "close", None)
+        if callable(closing):
+            closing()
+    return bytes(heard)
 
 
 def _framed(packet: Any) -> bytes:
@@ -146,7 +222,7 @@ def _packets(stream: bytes) -> List[bytes]:
         packets.append(stream[at : at + size])
         at += size
         if len(packets) > MAX_FRAMES:
-            raise TooLong(f"An utterance is at most {MAX_SECONDS} seconds.")
+            raise TooLong(TOO_LONG)
     return packets
 
 

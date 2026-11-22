@@ -37,6 +37,7 @@ from . import (
     canvas_vault,
     chats,
     clarify,
+    charm_audio,
     cleanup,
     clones,
     closes,
@@ -84,6 +85,7 @@ from . import (
     push,
     ship,
     stream,
+    talk,
     talk_tokens,
     tasks,
     todos,
@@ -2031,22 +2033,70 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return web.json_response({"object": "gots.talk", "host": host, "bot": bot, "token": token})
 
     async def talk_turn(request: "web.Request") -> "web.Response":
-        """The charm's turn, whose front door is this bot's talk token and not the API server's key.
+        """The charm's one call: its utterance heard, the bot's answer spoken, and both as Opus.
 
         A charm holds no API key: it proves itself with the per-charm token the app wrote to it
-        (`talk_tokens.verify`), presented as a Bearer. What it hears, answers and speaks is the next
-        step's; until that lands, a turn carrying this bot's own token is answered as not built yet
-        rather than as a refusal of the charm, which is the difference between "update the host" and
-        "your token is wrong" on the band.
+        (`talk_tokens.verify`), presented as a Bearer, and says which version of this contract it
+        speaks in `talk.VERSION_HEADER`. What it hears and says is `talk.turn`'s and `talk.speak`'s;
+        this route carries the audio and nothing else — its own name for the stream is
+        `charm_audio.CONTENT_TYPE`, so a caller never has to guess what a body is.
+
+        The front door is checked in one order, and each way through it has its own word: no token
+        at all, a host no bot is linked to, a bearer that isn't this bot's, a bot this host doesn't
+        serve, and a contract this host doesn't speak. A stranger learns nothing before presenting
+        a token, and a charm is told which versions are spoken where its own is not one.
         """
         header = request.headers.get("Authorization") or ""
         token = header[len("Bearer ") :] if header.startswith("Bearer ") else ""
         path = store_path()
         state = await asyncio.to_thread(link.load_state, profile_home())
-        bot = request.query.get("bot") or state.get("botId")
+        linked_bot = state.get("botId")
+        asked = request.query.get("bot") or ""
+        bot = asked or linked_bot
+        if not token:
+            return _error(web, "A turn needs this charm's token, as a Bearer.", 401, "no_token")
+        if not isinstance(linked_bot, str) or not linked_bot:
+            return _error(
+                web,
+                "This bot isn't linked to a Gots account, so it takes no turns.",
+                409,
+                "not_linked",
+            )
         if not await asyncio.to_thread(talk_tokens.verify, path, bot, token):
-            return _error(web, "Unknown talk token", 401)
-        return _error(web, "This host doesn't take turns yet.", 501)
+            if asked and asked != linked_bot:
+                return _error(web, "No such bot.", 404, "unknown_bot")
+            return _error(web, "This token isn't this bot's.", 401, "bad_token")
+        if (request.headers.get(talk.VERSION_HEADER) or "").strip() != talk.VERSION:
+            return _error(
+                web,
+                f"This host speaks only {talk.VERSION_HEADER}: {talk.VERSION}.",
+                400,
+                "bad_version",
+            )
+        try:
+            data = await request.read()
+        except web.HTTPRequestEntityTooLarge:
+            return _error(web, charm_audio.TOO_LONG, 413, "too_long")
+        if not data:
+            return _error(web, "Nothing was said.", 422, "nothing_heard")
+        try:
+            said = await talk.turn(path, bot, data, adapter=adapter)
+            # Off the loop, as the turn's own work is: a voice and a codec are not something to
+            # hold a request handler on while they run.
+            spoken = await asyncio.to_thread(talk.speak, said)
+        except dictation.DictationError as error:
+            # Our own sentence with the host's reason on the end: a provider's words are not a
+            # sentence a band can draw, and the reason is the only thing that says what failed.
+            return _error(web, f"This host couldn't hear the turn: {error}", error.status, "unheard")
+        except (talk.TalkError, charm_audio.CharmAudioError) as error:
+            # Each reason carries its own status and word, beside itself (talk, charm_audio), so a
+            # route never decides how a failure reads — and a reload of either module can't leave a
+            # table here pointing at a reason nobody raises any more.
+            return _error(web, str(error), error.status, error.code)
+        return web.Response(
+            body=spoken,
+            headers={"Content-Type": charm_audio.CONTENT_TYPE, "Content-Length": str(len(spoken))},
+        )
 
     async def create_project(request: "web.Request") -> "web.Response":
         denied = unauthorized(request)
