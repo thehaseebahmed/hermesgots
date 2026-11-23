@@ -54,6 +54,14 @@ export const CharmOp = {
   Talk: 0x40,
   // What the charm holds: the address, never the token.
   TalkState: 0x41,
+  // The microphone's own account of the last press: which door refused, and the heap at that moment.
+  // The band says "No mic" for every door there is, which is one word where there are ten.
+  Diagnose: 0x42,
+  // Whether the charm keeps a copy of its own log. Off until this arms it; a minute with the phone
+  // off the link lets it go on the charm's own account.
+  Log: 0x43,
+  // A page of the log's rows, already wrapped at the panel's column.
+  LogTail: 0x44,
 } as const
 
 type CharmOp = (typeof CharmOp)[keyof typeof CharmOp]
@@ -214,8 +222,7 @@ const CODE_WORDS: Record<number, string> = {
   [CharmCode.Busy]: "The charm is busy; try again when it's done",
 }
 
-export const codeWords = (code: number) =>
-  CODE_WORDS[code] ?? `The charm refused it (${code})`
+export const codeWords = (code: number) => CODE_WORDS[code] ?? `The charm refused it (${code})`
 
 /**
  * A mood by the number the charm knows it by, in the app's own names. The number is the wire
@@ -701,6 +708,79 @@ export function talkFrame(address: string, token: string): Uint8Array {
  * which the page draws as a firmware without the answer rather than as an empty one.
  */
 export const talkStateMessage = () => control(CharmOp.TalkState).done()
+export const diagnoseMessage = () => control(CharmOp.Diagnose).done()
+export const logMessage = (on: boolean) =>
+  control(CharmOp.Log)
+    .u8(on ? 1 : 0)
+    .done()
+export const logTailMessage = (from: number) => control(CharmOp.LogTail).u16(from).done()
+
+/**
+ * The door a press's microphone refused at, and the memory the charm had at that moment. `asked` is
+ * whether any press has opened a microphone at all: `exit` 0 is both "the last open succeeded" and
+ * "nothing has opened yet", and a page that took the two as one would show three zeros as a reading.
+ */
+export interface CharmDiagnose {
+  asked: boolean
+  /** `CharmMicExit`: 0 nothing, 1 busy, 2 island, 3 codec memory, 4 encoder, 5 decoder, 6 frames,
+   * 7 queue, 8 play buffer, 9 microphone, 10 capture task. */
+  exit: number
+  freeInternal: number
+  largestInternal: number
+  freePsram: number
+}
+
+export function parseDiagnose(view: DataView): CharmDiagnose | null {
+  if (view.byteLength < 5) return null
+  if (view.getUint8(2) !== CharmOp.Diagnose) return null
+  const extra = view.getUint8(4)
+  if (extra < 14 || view.byteLength < 5 + 14) return null
+  return {
+    asked: view.getUint8(5) === 1,
+    exit: view.getUint8(6),
+    freeInternal: view.getUint32(7, true),
+    largestInternal: view.getUint32(11, true),
+    freePsram: view.getUint32(15, true),
+  }
+}
+
+/** One row of the charm's log, as the ring wrapped it: never longer than the panel's column. */
+export interface CharmLogRow {
+  text: string
+  /** The row carries a line on from the row above it — a wrapped line's remainder. */
+  carried: boolean
+}
+
+export interface CharmLogPage {
+  /** Every row the charm keeps, so a reader knows when it has the lot. */
+  total: number
+  /** The index of the first row here; a page asked past the end answers none. */
+  from: number
+  rows: CharmLogRow[]
+}
+
+export function parseLogPage(view: DataView): CharmLogPage | null {
+  if (view.byteLength < 10) return null
+  if (view.getUint8(2) !== CharmOp.LogTail) return null
+  const extra = view.getUint8(4)
+  if (extra < 5 || view.byteLength < 5 + extra) return null
+  const total = view.getUint16(5, false)
+  const from = view.getUint16(7, false)
+  const count = view.getUint8(9)
+  const rows: CharmLogRow[] = []
+  let at = 10
+  for (let i = 0; i < count; i++) {
+    if (at + 2 > 5 + extra) return null
+    const flags = view.getUint8(at)
+    const len = view.getUint8(at + 1)
+    at += 2
+    if (at + len > 5 + extra) return null
+    const bytes = new Uint8Array(view.buffer, view.byteOffset + at, len)
+    rows.push({ text: decoder.decode(bytes), carried: (flags & 1) !== 0 })
+    at += len
+  }
+  return { total, from, rows }
+}
 
 export function parseTalkState(view: DataView): { address: string | null } | null {
   if (view.byteLength < 6) return null
@@ -719,7 +799,12 @@ export function parseTalkState(view: DataView): { address: string | null } | nul
  * the address must be one it can fetch: https, and nothing else.
  */
 export function updateMessage(url: string, sha256: Uint8Array): Uint8Array {
-  const address = addressBytes(url, "https", "An update address", "An update needs an https address")
+  const address = addressBytes(
+    url,
+    "https",
+    "An update address",
+    "An update needs an https address",
+  )
   if (sha256.length !== CHARM_SHA256_BYTES)
     throw new Error("An update carries the image's 32-byte SHA-256")
   return control(CharmOp.Update).str(address).raw(sha256).done()

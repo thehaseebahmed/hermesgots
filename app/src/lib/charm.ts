@@ -32,12 +32,17 @@ import {
   CharmCode,
   batteryMessage,
   charmKept,
+  diagnoseMessage,
   firmwareMessage,
   forgetMessage,
   hexBytes,
+  logMessage,
+  logTailMessage,
   networkMessage,
   parseBattery,
+  parseDiagnose,
   parseFirmware,
+  parseLogPage,
   parseNetworkReport,
   parseStatus,
   parseTalkState,
@@ -50,6 +55,8 @@ import {
   wifiRecord,
   type CharmAlertAction,
   type CharmBattery,
+  type CharmDiagnose,
+  type CharmLogRow,
   type CharmBatterySeen,
   type CharmBot,
   type CharmNetworkReport,
@@ -382,7 +389,11 @@ async function openTransport(deviceId: string): Promise<CharmLink> {
     await BleClient.startNotifications(deviceId, CHARM_SERVICE, CHARM_STATUS, (answer) => {
       // A `Busy` for op 0 is the charm refusing the data write just made, whether or not an ask is
       // waiting: the upload resends that chunk rather than moving to an offset it would refuse.
-      if (answer.byteLength >= 3 && answer.getUint8(1) === CharmCode.Busy && answer.getUint8(2) === 0)
+      if (
+        answer.byteLength >= 3 &&
+        answer.getUint8(1) === CharmCode.Busy &&
+        answer.getUint8(2) === 0
+      )
         refused = true
       const waiting = pending
       pending = null
@@ -482,6 +493,48 @@ export async function forgetCharmWifi(): Promise<number> {
 }
 
 /** What the charm's Wi-Fi and its tunnel are doing right now. */
+/** The last press's microphone exit, as the charm recorded it at the moment of the refusal. */
+export async function charmDiagnose(): Promise<CharmDiagnose> {
+  const { status, bytes } = await askCharm(diagnoseMessage())
+  if (status.code !== CharmCode.Ok) throw new CharmRefused(status.code)
+  const report = parseDiagnose(bytes)
+  if (!report) throw new Error("The charm's microphone answer was too short")
+  return report
+}
+
+/**
+ * Arms or releases the charm's copy of its log, answering whether the charm is keeping one now. The
+ * ask is the only thing that arms it: a window opens at this write and closes by itself a minute after
+ * this phone leaves the link, so a page that closes does not have to be trusted to close it.
+ */
+export async function setCharmLog(on: boolean): Promise<boolean> {
+  const { status, bytes } = await askCharm(logMessage(on))
+  if (status.code !== CharmCode.Ok) throw new CharmRefused(status.code)
+  return bytes.byteLength > 5 ? bytes.getUint8(5) === 1 : on
+}
+
+/**
+ * The charm's log, oldest row first, as the ring wrapped it. A page carries six rows, so this asks
+ * until the charm says the rows are exhausted — a log the charm is still writing runs to its size, not
+ * to a page count.
+ */
+export async function charmLog(): Promise<CharmLogRow[]> {
+  const rows: CharmLogRow[] = []
+  let from = 0
+  // A ring is two kilobytes of twenty-six-column rows: well under this bound, and a charm that keeps
+  // answering past it is not a charm this page can show.
+  for (let page = 0; page < 64; page++) {
+    const { status, bytes } = await askCharm(logTailMessage(from))
+    if (status.code !== CharmCode.Ok) throw new CharmRefused(status.code)
+    const answered = parseLogPage(bytes)
+    if (!answered) throw new Error("The charm's log answer was too short")
+    rows.push(...answered.rows)
+    from = answered.from + answered.rows.length
+    if (answered.rows.length === 0 || from >= answered.total) break
+  }
+  return rows
+}
+
 export async function charmNetwork(): Promise<CharmNetworkReport> {
   const { status, bytes } = await askCharm(networkMessage())
   if (status.code !== CharmCode.Ok) throw new CharmRefused(status.code)
@@ -584,8 +637,7 @@ export async function uploadCharmFirmware(
  * package yet, a token without `read:packages` — is that host's answer too, in its own words.
  */
 export type PublishedFirmware =
-  | { state: "published"; firmware: CharmFirmware }
-  | { state: "refused"; said: string }
+  { state: "published"; firmware: CharmFirmware } | { state: "refused"; said: string }
 
 /**
  * The published firmware as one of the host's own records: read when the row opens, kept for its
