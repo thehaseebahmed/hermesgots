@@ -83,11 +83,17 @@ export interface PairedCharm {
   /** Whether the charm has a tailnet key. The key itself is the charm's, and is never kept here. */
   tailnet?: boolean
   /**
-   * Whether the charm was handed the address its turns go to and the token it proves itself with.
-   * Neither is kept here — only that the hand-over happened, so the row knows a second set-up would
-   * revoke the token the charm is using.
+   * The address the charm was handed last, or `true` for a record written before this phone kept the
+   * address: the hand-over happened, the address it wrote is unknown. The token is never here — only
+   * the address, so a sync knows whether the charm already holds one and nothing is minted twice.
    */
-  talk?: boolean
+  talk?: boolean | string
+  /**
+   * Which scheme the charm's turns are handed over with: https over the charm's own Wi-Fi, where a
+   * certificate is checked against the firmware's roots, or plain http over the tailnet. Absent is
+   * https — the route that needs no tailnet and no typed address.
+   */
+  voice?: CharmScheme
   /** The glass's own settings, as the reader last chose them here. */
   wake?: CharmWake
   /**
@@ -107,6 +113,9 @@ const CHARM_PLUGIN = "Charm"
  * ones that need an action from the reader. A finished run asks for nothing, so it draws no alert.
  */
 export type CharmReason = "question" | "approval"
+
+/** The two schemes a charm's turn can be handed over with: TLS over its own Wi-Fi, or the tailnet. */
+export type CharmScheme = "http" | "https"
 
 interface CharmBridge {
   save(options: { deviceId: string }): Promise<void>
@@ -460,7 +469,9 @@ export async function setCharmWifi(ssid: string, pass: string): Promise<number> 
 /** Makes the charm forget its network. It drops off Wi-Fi, and the record forgets the name. */
 export async function forgetCharmWifi(): Promise<number> {
   const { status } = await askCharm(forgetMessage())
-  if (paired && status.code === CharmCode.Ok) write({ ...paired, wifi: undefined })
+  // The charm's own `Forget` sweeps the talk secret with the Wi-Fi keys and the tailnet's, so this
+  // phone's record of the address goes with the network it was handed over on.
+  if (paired && status.code === CharmCode.Ok) write({ ...paired, wifi: undefined, talk: undefined })
   return status.code
 }
 
@@ -492,8 +503,21 @@ export async function setCharmTailnetKey(key: string): Promise<number> {
  */
 export async function setCharmTalk(address: string, token: string): Promise<number> {
   const { status } = await askCharm(talkMessage(address, token))
-  if (paired && charmKept(status.code)) write({ ...paired, talk: true })
+  if (paired && charmKept(status.code)) write({ ...paired, talk: address })
   return status.code
+}
+
+/** The scheme the next sync hands over: the reader's pick, https unless they moved it. */
+export function charmVoice(record: PairedCharm | null | undefined): CharmScheme {
+  return record?.voice === "http" ? "http" : "https"
+}
+
+/**
+ * The switch beside Sync. It is this phone's decision and nothing else: no radio is opened and the
+ * charm is told nothing until a sync, which is what hands the address the scheme picks over.
+ */
+export function setCharmVoice(scheme: CharmScheme): void {
+  if (paired) write({ ...paired, voice: scheme })
 }
 
 /** Where the charm's firmware download has got to. */

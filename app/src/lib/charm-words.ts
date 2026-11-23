@@ -335,22 +335,18 @@ export function refusalWords(code: number, tail = "") {
  * charm's settings read; `talk.ts` holds the rules that read an address and build the frame.
  */
 
-/** The row's line under its title: what holding B does, which is the whole point of the setting. */
-export const VOICE_ASK = "Hold B on your charm and talk to this bot"
-
 /**
- * Under the address field: why the address the host answered is not the address the charm gets, in
- * the reader's own terms. Said once, before they have had to guess at it.
+ * The switch beside Sync: the reader's pick of the route the charm's turns take, and what each
+ * position needs of them. The words say the need rather than the mechanism, because the two differ
+ * in what they ask of a tailnet and a clock, not in what the reader hears.
  */
-export const VOICE_HINT =
-  "Your phone reaches this bot at its own address; your charm needs one it can reach on your tailnet, and calls /talk/v1/turn on it."
+export const VOICE_SCHEME = "Hold B on your charm and talk to this bot"
 
-/**
- * Under the field for a charm already set up: what the second tap spends. Asking the host again mints
- * a new token and revokes the one the charm holds, so the row says so before the reader taps it.
- */
-export const VOICE_AGAIN =
-  "Setting up again mints a new token and revokes the one your charm holds, so send it again after."
+export const VOICE_HTTPS =
+  "Your charm calls your host at the address your phone uses, with the certificate checked against the charm's own roots. It needs the charm's clock, which a sync sets."
+
+export const VOICE_HTTP =
+  "Your charm calls your host on your tailnet in plain http. It needs your host to know its tailnet address, and the charm to be on the tailnet."
 
 /**
  * Under the row: a charm keeps the token in its flash, and a flash that isn't sealed gives it away to

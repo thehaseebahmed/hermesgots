@@ -17,7 +17,6 @@
 import { CHARM_MAX_URL_BYTES, CharmCode, charmKept, encoder, talkFrame } from "./charm-protocol.ts"
 import {
   TALK_NEEDS_ADDRESS,
-  TALK_NEEDS_HTTP,
   TALK_SENT,
   TALK_STILL_HELD,
   TALK_TOO_LONG,
@@ -33,6 +32,8 @@ export const TALK_FEATURE = "talk"
 export interface TalkOffer {
   /** Where the charm's turns go, which the charm appends `/talk/v1/turn` to. */
   host: string
+  /** The host's own tailnet address, plain http, when it can name one: the `http` scheme's address. */
+  tailnet?: string
   /** The bot the token was minted for, as the id the charm knows it by. */
   bot: string
   /** The one copy of the token this axis of the world ever sees in the clear. */
@@ -48,16 +49,22 @@ export const talkRoute = (baseUrl: string) => `${pluginRoot(baseUrl)}/talk`
  * that cannot prove itself.
  */
 export function talkOffer(body: unknown): TalkOffer {
-  const held = body as { host?: unknown; bot?: unknown; token?: unknown } | null
+  const held = body as { host?: unknown; tailnet?: unknown; bot?: unknown; token?: unknown } | null
   if (
     typeof held?.host !== "string" ||
     held.host.trim() === "" ||
+    (held.tailnet !== undefined && (typeof held.tailnet !== "string" || held.tailnet.trim() === "")) ||
     typeof held.bot !== "string" ||
     typeof held.token !== "string" ||
     held.token === ""
   )
     throw new Error("The host's answer about your charm's voice was unreadable.")
-  return { host: held.host, bot: held.bot, token: held.token }
+  return {
+    host: held.host,
+    bot: held.bot,
+    token: held.token,
+    ...(held.tailnet === undefined ? {} : { tailnet: held.tailnet as string }),
+  }
 }
 
 /** The address as the frame carries it: trimmed, and without a slash the charm would double. */
@@ -65,16 +72,14 @@ export const talkAddress = (address: string) => address.trim().replace(/\/+$/, "
 
 /**
  * Why this address is not one the charm can be given, in the reader's words, or null for one it can.
- * The host answers the address the app dialled — https, on a public name — and the charm reaches the
- * host on the tailnet in plain http, so an https answer is a starting point rather than an address.
- * The scheme is read by the one rule `host-url.ts` holds, and the bound is the frame's own.
+ * Both schemes are the charm's now — https over its own Wi-Fi with a certificate, plain http over the
+ * tailnet — so the scheme is read to refuse what is neither, and the bound is the frame's own.
  */
 export function talkProblem(address: string): string | null {
   const trimmed = address.trim()
   if (trimmed === "") return TALK_NEEDS_ADDRESS
   const scheme = schemeOf(trimmed)
-  if (scheme === "https") return TALK_NEEDS_HTTP
-  if (scheme !== "http") return TALK_NEEDS_ADDRESS
+  if (scheme !== "http" && scheme !== "https") return TALK_NEEDS_ADDRESS
   if (encoder.encode(talkAddress(trimmed)).length > CHARM_MAX_URL_BYTES) return TALK_TOO_LONG
   return null
 }

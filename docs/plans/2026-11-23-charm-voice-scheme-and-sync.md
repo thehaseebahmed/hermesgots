@@ -181,7 +181,7 @@ sequenceDiagram
    Charm, voice rules, the page's words, the record. Check: `cd app && pnpm test` —
    `test-charm-settings.tsx` "the charm section offers one switch for the scheme and no voice row"
    (red today: the Voice row is drawn and `#charm-talk-setup` exists) and its hint, with
-   `test-charm-talk.mjs` accepting http and https and refusing both non-schemes.
+   `test-charm-talk.mjs` accepting http and https and refusing both non-schemes. Done.
 
 7. **Sync hands the voice over.** After pet, and only when the record holds no address or holds one
    whose scheme is not the switch's, the session asks the host once, mints at that point, picks the

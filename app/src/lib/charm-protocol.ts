@@ -652,20 +652,23 @@ export function tailnetMessage(key: string): Uint8Array {
 
 /**
  * A URL as an address op carries it: the bytes of it, refused here for a scheme the charm cannot use
- * or a length past what it holds, and never encoded twice by two ops that disagree. The two want
- * opposite schemes — the charm fetches an image over https, and calls its host in the plain http its
- * tailnet client speaks — so the scheme is the caller's, the bound is this module's, and `needs` is
- * an op's own wording for the refusal where it has been said one way already.
+ * or a length past what it holds, and never encoded twice by two ops that disagree. The ops want
+ * different schemes — the charm fetches an image over https only, and a turn's address is either,
+ * because it has a door for each — so the schemes are the caller's, the bound is this module's, and
+ * `needs` is an op's own wording for the refusal where it has been said one way already.
  */
 function addressBytes(
   url: string,
-  scheme: "http" | "https",
+  scheme: "http" | "https" | readonly ("http" | "https")[],
   what: string,
-  needs = `${what} must be ${scheme}://`,
+  needs = `${what} must be ${(Array.isArray(scheme) ? scheme : [scheme])
+    .map((one) => `${one}://`)
+    .join(" or ")}`,
 ) {
   const bytes = encoder.encode(url)
   if (bytes.length === 0) throw new Error(`${what} is at least 1 byte`)
-  if (schemeOf(url) !== scheme) throw new Error(needs)
+  const allowed = Array.isArray(scheme) ? scheme : [scheme]
+  if (!allowed.includes(schemeOf(url) as "http" | "https")) throw new Error(needs)
   if (bytes.length > CHARM_MAX_URL_BYTES)
     throw new Error(`${what} is at most ${CHARM_MAX_URL_BYTES} bytes`)
   return bytes
@@ -681,7 +684,7 @@ function addressBytes(
  * rule, since only it knows what the reader was told; here one is only refused.
  */
 export function talkFrame(address: string, token: string): Uint8Array {
-  const url = addressBytes(address, "http", "A talk address")
+  const url = addressBytes(address, ["http", "https"], "A talk address")
   const secret = encoder.encode(token)
   if (secret.length === 0) throw new Error("A talk token is at least 1 byte")
   if (secret.length > CHARM_MAX_TOKEN_BYTES)

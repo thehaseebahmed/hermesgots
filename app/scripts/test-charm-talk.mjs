@@ -124,11 +124,12 @@ test("a charm that refuses the op is named, and told apart from the sync's refus
 })
 
 test("the charm is given an address it can reach, and a frame within its bounds", () => {
-  // The host answers with the address the phone dialled — https, public, and not the charm's.
-  assert.ok(talkProblem(HOST), "the https address the app uses is not one the charm can call")
-  assert.match(talkProblem(HOST) ?? "", /plain http/)
-  assert.equal(talkProblem("   "), "Your charm needs the address it can reach.")
-  assert.equal(talkProblem("bot.example/api"), "Your charm needs the address it can reach.")
+  // Both schemes are the charm's now: the host's own https address, and the tailnet's plain http.
+  assert.equal(talkProblem(HOST), null, "the address the app uses is one the charm can call")
+  assert.equal(talkProblem("https://h.example:8443/api/plugins/gots"), null)
+  assert.match(talkProblem("   ") ?? "", /needs the address/)
+  assert.match(talkProblem("bot.example/api") ?? "", /needs the address/)
+  assert.match(talkProblem("ftp://h/api") ?? "", /needs the address/, "a scheme it cannot speak")
   const long = `http://100.64.0.2/${"a".repeat(CHARM_MAX_URL_BYTES)}`
   assert.match(talkProblem(long) ?? "", /longer than the charm/)
   // The sentence the row shows is built from the bound the frame enforces, so moving the bound
@@ -162,13 +163,15 @@ test("the charm is given an address it can reach, and a frame within its bounds"
 })
 
 test("each address op takes the scheme the charm speaks for it", () => {
-  // The charm fetches an image itself, so that address is https; and it calls its host from the
-  // tailnet's plain http client, so a talk address is http. One rule reads both, and refuses the
-  // scheme the op cannot use rather than encoding a URL the charm would fail to open.
+  // The charm fetches an image itself, so that address is https; and a turn's is either, because the
+  // firmware has a door for each. One rule reads them, and refuses the scheme the op cannot use
+  // rather than encoding a URL the charm would fail to open.
+  assert.doesNotThrow(() => talkFrame("https://bot.example/api", TOKEN), "a turn may be https")
+  assert.doesNotThrow(() => talkFrame("http://100.64.0.2:8642/api/plugins/gots", TOKEN))
   assert.throws(
-    () => talkFrame("https://bot.example/api", TOKEN),
-    /must be http:\/\//,
-    "an https address is not one the charm's client can call",
+    () => talkFrame("ftp://bot.example/api", TOKEN),
+    /must be http:\/\/ or https:\/\//,
+    "and nothing else",
   )
   assert.throws(
     () => updateMessage("http://h/image.bin", new Uint8Array(32)),
