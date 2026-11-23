@@ -52,8 +52,7 @@ export const CharmOp = {
   // Voice: the address the charm's turns are posted to and the token it proves itself with, handed
   // over by the app. One write, and the charm keeps both.
   Talk: 0x40,
-  // What the charm holds, so a page draws what is on it rather than what this phone wrote: the
-  // address, never the token. A charm older than the op answers BadMessage.
+  // What the charm holds: the address, never the token.
   TalkState: 0x41,
 } as const
 
@@ -680,7 +679,8 @@ function addressBytes(
 /**
  * The address the charm's turns are posted to and the token it presents with them, as
  * `[urlLen u8][url][tokenLen u8][token]`. The charm appends `/talk/v1/turn` to the address, keeps
- * both, and never answers either back — `Forget` sweeps them with its other secrets.
+ * both, and answers the address back only (`talkStateMessage`) — the token is never answered —
+ * `Forget` sweeps them with its other secrets.
  *
  * The bounds are the firmware's own: `CHARM_MAX_URL_BYTES` for the address and
  * `CHARM_MAX_TOKEN_BYTES` for the token. Which addresses the charm can actually call is `talk.ts`'s

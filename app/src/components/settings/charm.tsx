@@ -670,8 +670,8 @@ export function CharmNetwork({
 /**
  * The scheme the charm reaches its host by: https over the charm's own Wi-Fi with a certificate
  * checked against the roots the firmware ships, or plain http over the tailnet. The reader's choice
- * and nothing else: this touches no radio, it is kept on the paired charm, and the next sync is what
- * hands the address it picks to the charm.
+ * and nothing else: this touches no radio, it is kept on this phone's record of the charm, and the
+ * next sync is what hands the address it picks to the charm.
  */
 export function CharmVoiceScheme({
   scheme,
@@ -839,21 +839,19 @@ export function CharmSettings() {
       .catch((error) => setBatteryNote(message(error)))
   }, [deviceId])
 
-  // The charm's own answer about its voice, read when the page opens and again after a sync: what it
-  // holds, or that this firmware cannot say. The record is what this phone wrote; this is what landed.
-  const readVoice = async () => {
+  // The charm's own answer about its voice, read when the page opens and again after a sync.
+  const readVoice = useCallback(async () => {
     try {
       setHeld(await readCharmTalk())
       setHeldFailed(false)
     } catch {
       setHeldFailed(true)
     }
-  }
+  }, [])
   useEffect(() => {
     if (!deviceId) return
     void readVoice()
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one read per charm, as the battery's
-  }, [deviceId])
+  }, [deviceId, readVoice])
 
   if (!charmAvailable())
     return (

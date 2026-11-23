@@ -734,11 +734,6 @@ test("a tailnet key never reaches the paired-charm record", () => {
 })
 
 /**
- * The voice hand-over keeps the address and never the token: the write happens inside a sync, and the
- * record is only what says which address the charm holds — the token lives on the charm and nowhere
- * else, so the sync that carried it keeps nothing of it either.
- */
-/**
  * A hand-over the charm refused is not a hand-over: the record is what says nothing is owed, so a
  * refusal written there would leave a charm the page believes is set up and never offer it again.
  */
@@ -748,6 +743,11 @@ test("a refused hand-over moves no record, so the next sync offers it again", ()
   assert.match(body, /talkBot/, "and the bot the token was minted for rides beside it")
 })
 
+/**
+ * The voice hand-over keeps the address and never the token: the write happens inside a sync, and the
+ * record is only what says which address the charm holds — the token lives on the charm and nowhere
+ * else, so the sync that carried it keeps nothing of it either.
+ */
 test("a voice hand-over keeps the address and never the token", () => {
   const body = functionText("src/lib/charm.ts", "recordCharmTalk")
   const records = [...body.matchAll(/write\(\{([^}]*)\}\)/g)].map((match) => `{${match[1]}}`)
