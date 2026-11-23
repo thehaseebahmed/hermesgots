@@ -90,6 +90,11 @@ export interface PairedCharm {
    */
   talk?: boolean | string
   /**
+   * The bot the token now on the charm was minted for. A token is one bot's (`talk_tokens.mint`), so a
+   * phone that switches bot owes the charm a new one even though the address is unchanged.
+   */
+  talkBot?: string
+  /**
    * Which scheme the charm's turns are handed over with: https over the charm's own Wi-Fi, where a
    * certificate is checked against the firmware's roots, or plain http over the tailnet. Absent is
    * https — the route that needs no tailnet and no typed address.
@@ -499,9 +504,18 @@ export async function setCharmTailnetKey(key: string): Promise<number> {
  * Keeps the address a sync's hand-over wrote, once the charm has answered that it kept it. The write
  * itself is the sync's own voice step; this is the phone's memory of it. The token is nowhere here —
  * it lives on the charm and nowhere else.
+ *
+ * The answer is handed in rather than assumed: a refusal is a sync that has to offer the address
+ * again, so recording it there would leave a charm the record says is set up and the reader is told
+ * the next sync will try again.
  */
-export function recordCharmTalk(address: string): void {
-  if (paired) write({ ...paired, talk: address })
+export function recordCharmTalk(
+  voice: "sent" | "refused" | undefined,
+  address: string,
+  bot: string,
+): void {
+  if (voice !== "sent" || !paired) return
+  write({ ...paired, talk: address, talkBot: bot })
 }
 
 /** The scheme the next sync hands over: the reader's pick, https unless they moved it. */

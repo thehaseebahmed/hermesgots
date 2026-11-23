@@ -409,6 +409,7 @@ test("a sync that owes voice writes it last, and a refusal there leaves the sync
   const refusing = fakeCharm({ refuseTalk: true })
   const second = await syncCharm(refusing.link, [nova], undefined, { talk })
   assert.equal(second.voice, "refused")
+  assert.equal(second.voiceCode, CharmCode.BadMessage, "the charm's own word, for the page to draw")
   assert.equal(second.done, 1, "the bots are on the charm")
   assert.equal(refusing.shown.length, 1)
 })

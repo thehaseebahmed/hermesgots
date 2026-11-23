@@ -103,7 +103,7 @@ import type { SyncProgress } from "@/lib/charm-sync"
 import { serverConfig } from "@/lib/connection"
 import { getActiveProfile, listProfiles } from "@/lib/db"
 import type { PluginServer } from "@/lib/features"
-import { getCharmFirmwareImage, getTalkToken } from "@/lib/hermes"
+import { getCharmFirmwareImage, getTalkAddress, getTalkToken } from "@/lib/hermes"
 import { useHostRecord } from "@/lib/host-record"
 import {
   BATTERY_ASK,
@@ -135,8 +135,6 @@ import {
   VOICE_HELD_TITLE,
   VOICE_HELD_UNKNOWN,
   VOICE_NO_TAILNET,
-  VOICE_NOT_KEPT,
-  VOICE_SENT,
   wifiWords,
   type CharmLink,
   type CharmRead,
@@ -144,7 +142,7 @@ import {
   type CharmSeen,
 } from "@/lib/charm-words"
 import { quietly } from "@/lib/report"
-import { voiceAddress, voiceOwed } from "@/lib/talk"
+import { talkWords, voiceAddress, voiceOwed } from "@/lib/talk"
 import { tell } from "@/lib/tell"
 import { useBotLabels } from "@/lib/use-bot-labels"
 
@@ -904,26 +902,36 @@ export function CharmSettings() {
       const petBot = sources.find((p) => p.id === settings.petBotId)
       const poses = settings.enabled && petBot ? await charmPoses(petBot.botId) : []
       // The voice hand-over, when the record says the charm does not hold the address this scheme
-      // names. Asking the host is what mints the token, so a sync that owes nothing asks nothing.
-      let talk: { address: string; token: string } | undefined
+      // names. The address is asked for first, with no token: a mint revokes the one the charm holds,
+      // so nothing is spent until there is an address this sync can actually write.
+      let talk: { address: string; token: string; bot: string } | undefined
       let voiceNote: string | undefined
-      if (profile && voiceOwed(charm?.talk, scheme)) {
+      if (profile && voiceOwed(charm, scheme, profile.id)) {
         try {
-          const offer = await getTalkToken(serverConfig(profile))
-          const address = voiceAddress(offer, scheme)
-          if (!address) voiceNote = VOICE_NO_TAILNET
-          else talk = { address, token: offer.token }
+          const addresses = await getTalkAddress(serverConfig(profile))
+          const address = voiceAddress(addresses, scheme)
+          if (!address) {
+            voiceNote = VOICE_NO_TAILNET
+          } else {
+            const offer = await getTalkToken(serverConfig(profile))
+            talk = { address, token: offer.token, bot: offer.bot }
+          }
         } catch (error) {
           voiceNote = message(error)
         }
       }
-      const done = await syncToCharm(bots, setProgress, { pet: { settings, poses }, talk })
-      if (talk) recordCharmTalk(talk.address)
+      const done = await syncToCharm(bots, setProgress, {
+        pet: { settings, poses },
+        talk: talk ? { address: talk.address, token: talk.token } : undefined,
+      })
+      // Only a kept write is recorded: the record is what says nothing is owed, so a refusal written
+      // there would leave a charm the page believes is set up and never offer it again.
+      if (talk) recordCharmTalk(done.voice, talk.address, talk.bot)
       tell.success(done.total === 1 ? "1 bot on your charm" : `${done.total} bots on your charm`)
       if (done.petRefused && settings.enabled)
         tell.info("Your bots synced. This charm's firmware has no pet mode yet.")
-      if (talk && done.voice !== "sent") voiceNote = VOICE_NOT_KEPT
-      if (talk && done.voice === "sent") tell.success(VOICE_SENT)
+      if (talk && done.voice !== "sent")
+        voiceNote = talkWords(done.voiceCode ?? CharmCode.BadMessage)
       if (voiceNote) tell.info(voiceNote)
       // The charm is awake on the other end, and its own answer is the row's truth.
       if (talk) await readVoice().catch(quietly("reading what the charm holds"))

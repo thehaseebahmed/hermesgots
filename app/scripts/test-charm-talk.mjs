@@ -110,13 +110,13 @@ test("an answer that did not keep it says the token is still this phone's to sen
 test("a charm that refuses the op is named, and told apart from the sync's refusal", () => {
   assert.ok(
     talkWords(CharmCode.BadMessage).startsWith(
-      refusalWords(CharmCode.BadMessage, ", then set voice up again"),
+      refusalWords(CharmCode.BadMessage, ", then sync again"),
     ),
     "the row does not keep a second sentence for the same fact",
   )
   assert.match(talkWords(CharmCode.BadMessage), /older than the app/, "the firmware is what to update")
   assert.match(talkWords(CharmCode.BadMessage), /update it/)
-  assert.match(talkWords(CharmCode.BadMessage), /set voice up again/, "and the row is set up after")
+  assert.match(talkWords(CharmCode.BadMessage), /sync again/, "and a sync is what offers it again")
   assert.doesNotMatch(
     talkWords(CharmCode.BadMessage),
     /didn't understand the sync/,
@@ -182,11 +182,24 @@ test("the charm's answer about what it holds is the address, and never the token
 })
 
 test("a sync owes voice when the charm holds nothing, or the other scheme's address", () => {
-  assert.equal(voiceOwed(undefined, "https"), true, "no record of a hand-over")
-  assert.equal(voiceOwed(true, "https"), true, "a bare record from before addresses were kept")
-  assert.equal(voiceOwed("https://h.example/api", "https"), false, "this scheme's address is held")
-  assert.equal(voiceOwed("http://100.64.0.2:8642/api", "https"), true, "the other scheme's is not")
-  assert.equal(voiceOwed("http://100.64.0.2:8642/api", "http"), false)
+  assert.equal(voiceOwed(undefined, "https", BOT), true, "no record of a hand-over")
+  assert.equal(voiceOwed({ talk: true }, "https", BOT), true, "a bare record from before addresses")
+  assert.equal(
+    voiceOwed({ talk: "https://h.example/api", talkBot: BOT }, "https", BOT),
+    false,
+    "this scheme's address, for this bot, is held",
+  )
+  assert.equal(
+    voiceOwed({ talk: "http://100.64.0.2:8642/api", talkBot: BOT }, "https", BOT),
+    true,
+    "the other scheme's address is not",
+  )
+  // A token is one bot's, so another bot is another hand-over even at the same address.
+  assert.equal(
+    voiceOwed({ talk: "https://h.example/api", talkBot: "another" }, "https", BOT),
+    true,
+    "the token on the charm is another bot's",
+  )
 })
 
 test("the scheme picks the address the host answered with", () => {

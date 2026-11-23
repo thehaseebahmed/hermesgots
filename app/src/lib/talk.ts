@@ -51,19 +51,28 @@ export const talkRoute = (baseUrl: string) => `${pluginRoot(baseUrl)}/talk`
  */
 export function talkOffer(body: unknown): TalkOffer {
   const held = body as { host?: unknown; tailnet?: unknown; bot?: unknown; token?: unknown } | null
+  if (typeof held?.token !== "string" || held.token === "")
+    throw new Error("The host's answer about your charm's voice was unreadable.")
+  return { ...talkAddresses(body), token: held.token }
+}
+
+/**
+ * The two addresses in a host's answer, and the bot they were minted for, with no token: the shape
+ * `?mint=0` answers, so an app can tell whether it has an address before it spends a token.
+ */
+export function talkAddresses(body: unknown): Omit<TalkOffer, "token"> {
+  const held = body as { host?: unknown; tailnet?: unknown; bot?: unknown } | null
   if (
     typeof held?.host !== "string" ||
     held.host.trim() === "" ||
-    (held.tailnet !== undefined && (typeof held.tailnet !== "string" || held.tailnet.trim() === "")) ||
     typeof held.bot !== "string" ||
-    typeof held.token !== "string" ||
-    held.token === ""
+    (held.tailnet !== undefined &&
+      (typeof held.tailnet !== "string" || held.tailnet.trim() === ""))
   )
     throw new Error("The host's answer about your charm's voice was unreadable.")
   return {
     host: held.host,
     bot: held.bot,
-    token: held.token,
     ...(held.tailnet === undefined ? {} : { tailnet: held.tailnet as string }),
   }
 }
@@ -113,9 +122,20 @@ export function talkWords(code: number): string {
  * from before this phone kept the address, or the address it holds is the other scheme's. A sync that
  * owes nothing asks the host for nothing, so no token is minted and none is revoked.
  */
-export function voiceOwed(held: boolean | string | undefined, scheme: CharmScheme): boolean {
+export function voiceOwed(
+  record: { talk?: boolean | string; talkBot?: string } | null | undefined,
+  scheme: CharmScheme,
+  bot: string | undefined,
+): boolean {
+  const held = record?.talk
+  // No address, or a record from before addresses were kept: the charm holds nothing this phone can
+  // vouch for.
   if (typeof held !== "string") return true
-  return schemeOf(held) !== scheme
+  // The other scheme's address is not one this sync would write.
+  if (schemeOf(held) !== scheme) return true
+  // A token is minted per bot, so a phone that changed bot owes the charm another one even though the
+  // address it holds is the same.
+  return Boolean(bot) && record?.talkBot !== bot
 }
 
 /**
@@ -123,6 +143,9 @@ export function voiceOwed(held: boolean | string | undefined, scheme: CharmSchem
  * address for plain http — and null when it did not name a tailnet one, which is a sync that says so
  * rather than one that hands the charm an address it cannot dial.
  */
-export function voiceAddress(offer: TalkOffer, scheme: CharmScheme): string | null {
+export function voiceAddress(
+  offer: { host: string; tailnet?: string },
+  scheme: CharmScheme,
+): string | null {
   return scheme === "https" ? offer.host : (offer.tailnet ?? null)
 }

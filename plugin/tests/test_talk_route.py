@@ -205,7 +205,7 @@ class TalkRoute(Routes):
         """The charm's address is this host's own: plain http, on the tailnet, on the port it holds."""
         linked(self.home)
         with mock.patch.object(talk_hosts, "tailnet_ip", return_value="100.64.0.9"):
-            answer = self.call(sockname=("127.0.0.1", 8642))
+            answer = self.call(sockname=("100.64.0.9", 8642))
         self.assertEqual(answer["status"], 200, answer)
         payload = answer["payload"]
         self.assertEqual(
@@ -223,7 +223,7 @@ class TalkRoute(Routes):
         """No 100.64 address is no answer: the key is absent rather than guessed at."""
         linked(self.home)
         with mock.patch.object(talk_hosts, "tailnet_ip", return_value=None):
-            answer = self.call(sockname=("127.0.0.1", 8642))
+            answer = self.call(sockname=("100.64.0.9", 8642))
         self.assertEqual(answer["status"], 200, answer)
         self.assertNotIn("tailnet", answer["payload"])
         self.assertIn("host", answer["payload"], "the app still gets the address it dialled")
@@ -234,6 +234,28 @@ class TalkRoute(Routes):
         with mock.patch.object(talk_hosts, "tailnet_ip", return_value="100.64.0.9"):
             answer = self.call()
         self.assertNotIn("tailnet", answer["payload"])
+
+    def test_a_server_only_on_its_loopback_names_no_tailnet_address(self) -> None:
+        """An address only this machine can dial is not one a charm on the tailnet can call."""
+        linked(self.home)
+        with mock.patch.object(talk_hosts, "tailnet_ip", return_value="100.64.0.9"):
+            answer = self.call(sockname=("127.0.0.1", 8642))
+        self.assertEqual(answer["status"], 200, answer)
+        self.assertNotIn("tailnet", answer["payload"])
+
+    def test_a_mint_of_none_spends_no_token(self) -> None:
+        """`?mint=0` says where the host is and leaves the charm's token alone."""
+        linked(self.home)
+        first = self.call()["payload"]["token"]
+        with mock.patch.object(talk_hosts, "tailnet_ip", return_value="100.64.0.9"):
+            answer = self.call(query={"mint": "0"}, sockname=("100.64.0.9", 8642))
+        self.assertEqual(answer["status"], 200, answer)
+        self.assertNotIn("token", answer["payload"], "an address is not a token")
+        self.assertEqual(answer["payload"]["tailnet"], "http://100.64.0.9:8642/api/plugins/gots")
+        self.assertTrue(
+            talk_tokens.verify(self.store, BOT, first),
+            "the token the charm holds is still the one this host honours",
+        )
 
     def test_the_token_is_kept_as_its_hash_and_answered_once(self) -> None:
         linked(self.home)

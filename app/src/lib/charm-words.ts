@@ -336,12 +336,8 @@ export function refusalWords(code: number, tail = "") {
  */
 
 /**
- * The switch beside Sync: the reader's pick of the route the charm's turns take, and what each
- * position needs of them. The words say the need rather than the mechanism, because the two differ
- * in what they ask of a tailnet and a clock, not in what the reader hears.
+ * The switch beside Sync: what each of its positions needs of the reader's host and charm.
  */
-export const VOICE_SCHEME = "Hold B on your charm and talk to this bot"
-
 export const VOICE_HTTPS =
   "Your charm calls your host at the address your phone uses, with the certificate checked against the charm's own roots. It needs the charm's clock, which a sync sets."
 
@@ -366,27 +362,13 @@ export const VOICE_KEPT =
 /** Nothing was typed: the charm would have nowhere to send a turn. */
 export const TALK_NEEDS_ADDRESS = "Your charm needs the address it can reach."
 
-/** The charm's own call is plain http — the tailnet is the encrypted boundary, not its client. */
-export const TALK_NEEDS_HTTP =
-  "The charm speaks plain http on your tailnet — give it your host's tailnet address, not the https one your phone uses."
-
 /** The firmware's own bound on the address it keeps, built from the constant the frame enforces. */
 export const TALK_TOO_LONG = `That address is longer than the charm holds (${CHARM_MAX_URL_BYTES} bytes at most).`
 
 export const TALK_SENT = "Sent to your charm."
 
-/** The page's line once a sync's hand-over landed: what the reader can do now that it did. */
-export const VOICE_SENT = "Voice is set up: hold B on your charm and talk to this bot."
-
-/**
- * A sync that owed the charm its voice and could not make the hand-over, in the three ways it fails.
- * Each says what still works — the bots and the pet synced — because the next sync is what repairs it.
- */
 export const VOICE_NO_TAILNET =
   "Your bots synced. This host didn't say its tailnet address, so voice stayed as it was — use https, or let your host join a tailnet."
-
-export const VOICE_NOT_KEPT =
-  "Your bots synced. Your charm didn't take the voice address, so the next sync will offer it again."
 
 /**
  * After an answer that did not keep it: the token is this phone's still, and the same one can go
@@ -396,5 +378,5 @@ export const VOICE_NOT_KEPT =
 export const TALK_STILL_HELD =
   "The token is still on this phone: send it again once the charm can keep it."
 
-/** The Voice row's own end to a refusal: the firmware first, then this row set up again. */
-export const VOICE_TAIL = ", then set voice up again"
+/** The Voice row's own end to a refusal: the firmware first, then the sync that offers it again. */
+export const VOICE_TAIL = ", then sync again"

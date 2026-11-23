@@ -4,7 +4,7 @@ import { heardOf } from "@/lib/dictation-log"
 import { namedLevel, type CleanupLevel } from "@/lib/speech"
 import { readHeardBy, type HeardBy, type SpeechPatch } from "@/lib/speech"
 import { pluginRoot, serverRoot } from "@/lib/host-url"
-import { talkOffer, talkRoute, type TalkOffer } from "@/lib/talk"
+import { talkAddresses, talkOffer, talkRoute, type TalkOffer } from "@/lib/talk"
 import { READ_TIMEOUT_MS, RUN_STREAM_IDLE_MS, WRITE_TIMEOUT_MS } from "@/lib/freshness"
 import type {
   ApprovalChoice,
@@ -2950,6 +2950,24 @@ export async function getTalkToken(config: HermesConfig, signal?: AbortSignal): 
     signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
   })
   return talkOffer(await response.json())
+}
+
+/**
+ * The same answer without a token: where this host can be called, so a sync can decide whether it has
+ * an address to hand over *before* it spends the token the charm is holding. A mint revokes the last
+ * one, so asking for an address the app then never writes would cost a working charm its voice.
+ */
+export async function getTalkAddress(
+  config: HermesConfig,
+  signal?: AbortSignal,
+): Promise<Omit<TalkOffer, "token">> {
+  const url = `${talkRoute(config.baseUrl)}?mint=0`
+  const response = await request(url, {
+    headers: headers(config),
+    signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
+  })
+  const body = (await response.json()) as { host?: unknown; tailnet?: unknown; bot?: unknown }
+  return talkAddresses(body)
 }
 
 /** What the plugin's media route answers a mint: where the file can be read, and what it is. */

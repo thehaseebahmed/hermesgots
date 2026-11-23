@@ -22,8 +22,17 @@ from typing import Any, Optional
 TAILNET = ipaddress.ip_network("100.64.0.0/10")
 
 # The route this module's answer rides on: the charm's address is the prefix it answers at, which is
-# the request's own path with this cut off.
+# the request's own path with this cut off. It is the same tail `push.base_url` cuts for the same
+# route, so the two are one string's worth of knowledge and must move together.
 TAIL = "/talk"
+
+
+def _on_loopback(address: Any) -> bool:
+    """Whether a socket bound to ``address`` is one only this machine can dial."""
+    try:
+        return ipaddress.ip_address(str(address)).is_loopback
+    except ValueError:
+        return False  # a host name, or nothing the kernel wrote as an address
 
 
 def _on_tailnet(address: Any) -> bool:
@@ -83,7 +92,9 @@ def local_port(request: Any) -> Optional[int]:
     """The port this API server is listening on, read off the request's own socket.
 
     Not the ``Host`` header's: behind a proxy that is the proxy's, and a tailnet caller can reach the
-    port the server holds and no other. A request this host cannot answer that for names no address.
+    port the server holds and no other. A request this host cannot answer that for names no address —
+    and neither does one the server took on its loopback, because a peer on the tailnet cannot dial an
+    address that only this machine can.
     """
     transport = getattr(request, "transport", None)
     extra = getattr(transport, "get_extra_info", None)
@@ -95,7 +106,9 @@ def local_port(request: Any) -> Optional[int]:
         return None
     if not sockname or not isinstance(sockname, (tuple, list)) or len(sockname) < 2:
         return None
-    port = sockname[1]
+    bound, port = sockname[0], sockname[1]
+    if _on_loopback(bound):
+        return None
     return port if isinstance(port, int) and 0 < port < 65536 else None
 
 

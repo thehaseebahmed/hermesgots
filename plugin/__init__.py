@@ -2051,16 +2051,22 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         host = push.base_url(request, "/talk") or push.base(path)
         if not host:
             return _error(web, "This bot has not been reached by an app at any address yet.", 409)
-        try:
-            token = await asyncio.to_thread(talk_tokens.mint, path, bot)
-        except talk_tokens.TalkTokenError as error:
-            return _error(web, str(error), 400)
-        answer = {"object": "gots.talk", "host": host, "bot": bot, "token": token}
+        answer = {"object": "gots.talk", "host": host, "bot": bot}
         # The host's own tailnet address, for a charm that has no phone in the room. A host that
         # cannot name it omits the key rather than answering one the charm would fail to dial.
         tailnet = await asyncio.to_thread(talk_hosts.charm_address, request)
         if tailnet:
             answer["tailnet"] = tailnet
+        # `?mint=0` answers where this host can be called without minting: a mint revokes the token a
+        # charm is holding, so the app asks for the address first and spends a token only once it has
+        # one to write.
+        if str(request.query.get("mint", "1")) == "0":
+            return web.json_response(answer)
+        try:
+            token = await asyncio.to_thread(talk_tokens.mint, path, bot)
+        except talk_tokens.TalkTokenError as error:
+            return _error(web, str(error), 400)
+        answer["token"] = token
         return web.json_response(answer)
 
     async def talk_turn(request: "web.Request") -> "web.Response":

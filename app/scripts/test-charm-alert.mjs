@@ -738,10 +738,24 @@ test("a tailnet key never reaches the paired-charm record", () => {
  * record is only what says which address the charm holds — the token lives on the charm and nowhere
  * else, so the sync that carried it keeps nothing of it either.
  */
+/**
+ * A hand-over the charm refused is not a hand-over: the record is what says nothing is owed, so a
+ * refusal written there would leave a charm the page believes is set up and never offer it again.
+ */
+test("a refused hand-over moves no record, so the next sync offers it again", () => {
+  const body = functionText("src/lib/charm.ts", "recordCharmTalk")
+  assert.match(body, /voice !== "sent"/, "only a kept write is recorded")
+  assert.match(body, /talkBot/, "and the bot the token was minted for rides beside it")
+})
+
 test("a voice hand-over keeps the address and never the token", () => {
   const body = functionText("src/lib/charm.ts", "recordCharmTalk")
   const records = [...body.matchAll(/write\(\{([^}]*)\}\)/g)].map((match) => `{${match[1]}}`)
-  assert.deepEqual(records, ["{ ...paired, talk: address }"], "the address, and nothing of it")
+  assert.deepEqual(
+    records,
+    ["{ ...paired, talk: address, talkBot: bot }"],
+    "the address and the bot it was minted for, and nothing of the token",
+  )
   assert.doesNotMatch(records[0], /token/, "no part of the token is kept")
   assert.doesNotMatch(body, /console\./, "and it is never logged")
   assert.doesNotMatch(

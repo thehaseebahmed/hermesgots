@@ -167,11 +167,13 @@ sequenceDiagram
 3. **The turn's https goes over the charm's own Wi-Fi, verified.** A second implementation of
    `tunnel::Dial` (`openLine` → a line over esp-tls with `esp_crt_bundle_attach`, SNI the address's
    host, the address's port) so `open`, the in-flight count and the `Line::read`/`write`/`close` the
-   exchange uses are the same code. Two constraints this step owns: the handshake needs more stack
+   exchange uses are the same code. Three constraints this step owns: the handshake needs more stack
    than `kWireStack`'s 16 KiB, measured for `opus_encode`, so the wire task's stack is raised to what
-   mbedTLS needs and measured the same way; and `Line::read(waitMs)` waits for the first byte, which
-   esp-tls does not, so the line sets the socket's receive timeout per read and maps a timeout to 0.
-   `exchange()` asks the dial the address's scheme names, and nothing else in it moves. Goals: G1.
+   mbedTLS needs and its high-water mark is logged per turn so a board measures it; the socket is left
+   non-blocking after the handshake, so `Line::read(waitMs)`'s `select` is the only wait there is and
+   one read cannot hold the task for the dial's timeout; and a write that answers `WANT_*` while a
+   slow host drains is waited on, bounded, rather than taken for a dead line. `exchange()` asks the
+   dial the address's scheme names, and nothing else in it moves. Goals: G1.
    After: 1, 2. Layers: the https line, `talk_board::Board`, `src/main.cpp`. Check:
    `PATH=/opt/data/tmp-home/.platformio/penv/bin:$PATH pio run` builds the image, and
    `CXX="python3 -m ziglang c++" bash scripts/test-host.sh` stays green. Done.
@@ -202,16 +204,19 @@ sequenceDiagram
    (red today: the Voice row is drawn and `#charm-talk-setup` exists) and its hint, with
    `test-charm-talk.mjs` accepting http and https and refusing both non-schemes. Done.
 
-7. **Sync hands the voice over.** After pet, and only when the record holds no address or holds one
-   whose scheme is not the switch's, the session asks the host once, mints at that point, picks the
-   address the scheme names, and writes it last. A host that names no tailnet address while the switch
-   says http, a failed host ask and a charm's refusal are each reported in the page's line and never
-   fail the bots sync; only a kept write is recorded, so the next sync offers it again. Goals: G2.
-   After: 2, 3, 5, 6. Layers: Sync, the record, Settings → Charm, the page's words. Check:
+7. **Sync hands the voice over.** After pet, and only when the record holds no address, holds a bare
+   record, holds one whose scheme is not the switch's, or holds a token minted for another bot, the
+   session asks the host for its addresses **without a token** (`GET talk?mint=0`), picks the address
+   the scheme names, and only then mints and writes — so a host that names no tailnet address costs
+   the charm no token. A host that names none, a failed host ask and a charm's refusal are each
+   reported in the page's line, with the charm's own code for a refusal, and never fail the bots sync;
+   only a kept write is recorded, so the next sync offers it again. Goals: G2. After: 2, 3, 5, 6.
+   Layers: Sync, the record, Settings → Charm, the page's words, the host's hand-over route. Check:
    `cd app && pnpm test` — `test-charm-sync.mjs` "a sync that owes voice writes it last, and a refusal
    there leaves the sync a success" and "a sync with no voice to hand over writes no talk op", with
    `test-charm-talk.mjs`'s "a sync owes voice when the charm holds nothing, or the other scheme's
-   address" and "the scheme picks the address the host answered with" red first, then green. Done.
+   address" and "the scheme picks the address the host answered with" red first, then green, and
+   `python3 -m unittest plugin.tests.test_talk_route`'s "a mint of none spends no token". Done.
 
 8. **The charm says what it holds, and the page draws that.** `TalkState` (`0x41`) answers the address
    the charm kept — `[urlLen u8][url]`, zero for none, the token never in it — and an older charm
@@ -272,8 +277,13 @@ sequenceDiagram
 - **The handshake's stack is bigger than the wire task's.** `kWireStack` is 16 KiB, measured against
   `opus_encode`; mbedTLS needs more, and a stack a byte short is a reboot at the first https press, so
   this step measures rather than guesses.
-- **esp-tls does not honour `Line::read`'s wait.** The TLS line must set the socket's receive timeout
-  (or select) per read, or a turn on a stalled host waits past its deadline.
+- **esp-tls does not honour `Line::read`'s wait.** The line leaves the socket non-blocking after the
+  handshake so a read with nothing answers `WANT_READ` at once and the seam's own `select` is the wait;
+  a blocking socket would let one read hold the wire task for the dial's timeout and a trickling peer
+  hold it past the turn's deadline.
+- **The wire's stack is asserted until a board says otherwise.** 32 KiB is opus's measured 10.5 KiB
+  plus room for mbedTLS's handshake, and the line `transmit` logs per turn carries the task's
+  high-water mark so the first https press on a board turns the guess into a number.
 - **The TLS line is board code.** `pio run` proves it builds, not that a handshake verifies against a
   real certificate; the bundle is the updater's, so the roots are right, but the first board run is
   the real test.
