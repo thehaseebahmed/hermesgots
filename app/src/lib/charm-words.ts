@@ -370,13 +370,5 @@ export const TALK_SENT = "Sent to your charm."
 export const VOICE_NO_TAILNET =
   "Your bots synced. This host didn't say its tailnet address, so voice stayed as it was — use https, or let your host join a tailnet."
 
-/**
- * After an answer that did not keep it: the token is this phone's still, and the same one can go
- * again. Said only where the charm's answer is not a keep (``charmKept``), since an answer that
- * kept it spends the token and there is nothing left to send.
- */
-export const TALK_STILL_HELD =
-  "The token is still on this phone: send it again once the charm can keep it."
-
 /** The Voice row's own end to a refusal: the firmware first, then the sync that offers it again. */
 export const VOICE_TAIL = ", then sync again"

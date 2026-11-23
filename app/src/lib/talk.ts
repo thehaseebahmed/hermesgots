@@ -14,12 +14,11 @@
  *
  * Pure, so the row's rules are tested with no radio and no host (`scripts/test-charm-talk.mjs`).
  */
-import { CHARM_MAX_URL_BYTES, CharmCode, charmKept, encoder, talkFrame } from "./charm-protocol.ts"
+import { CHARM_MAX_URL_BYTES, CharmCode, encoder, talkFrame } from "./charm-protocol.ts"
 import type { CharmScheme } from "./charm.ts"
 import {
   TALK_NEEDS_ADDRESS,
   TALK_SENT,
-  TALK_STILL_HELD,
   TALK_TOO_LONG,
   VOICE_TAIL,
   refusalWords,
@@ -110,29 +109,31 @@ export function talkMessage(address: string, token: string): Uint8Array {
  */
 export function talkWords(code: number): string {
   if (code === CharmCode.Ok) return TALK_SENT
-  const words = refusalWords(code, VOICE_TAIL)
-  return charmKept(code) ? words : `${words} ${TALK_STILL_HELD}`
+  // The charm's own sentence, and the sync that offers it again: the token is not this phone's to
+  // send, and there is no row left to send it from.
+  return refusalWords(code, VOICE_TAIL)
 }
 
 /**
- * Whether the next sync owes the charm a hand-over: it holds no address, its record is a bare `true`
- * from before this phone kept the address, or the address it holds is the other scheme's. A sync that
- * owes nothing asks the host for nothing, so no token is minted and none is revoked.
+ * Whether this sync owes the charm a hand-over: the address it holds is not the one the scheme names
+ * now, the token on it was minted for another bot, or the charm itself says it holds nothing while
+ * this phone's record says otherwise. The address and the bot are the host's answer, so the two ids
+ * compared are both the host's — a profile id and a bot id are different namespaces and never meet.
  */
 export function voiceOwed(
   record: { talk?: boolean | string; talkBot?: string } | null | undefined,
-  scheme: CharmScheme,
-  bot: string | undefined,
+  address: string,
+  bot: string,
+  held?: string | null,
 ): boolean {
-  const held = record?.talk
+  const kept = record?.talk
   // No address, or a record from before addresses were kept: the charm holds nothing this phone can
   // vouch for.
-  if (typeof held !== "string") return true
-  // The other scheme's address is not one this sync would write.
-  if (schemeOf(held) !== scheme) return true
-  // A token is minted per bot, so a phone that changed bot owes the charm another one even though the
-  // address it holds is the same.
-  return Boolean(bot) && record?.talkBot !== bot
+  if (typeof kept !== "string") return true
+  if (kept !== address || record?.talkBot !== bot) return true
+  // The charm's own answer, when the page has read one: a charm that says it holds nothing is owed a
+  // hand-over however sure the record is — a swept secret or a reflash leaves exactly that.
+  return held !== undefined && held !== kept
 }
 
 /**

@@ -44,10 +44,10 @@ export interface CharmTransport {
 export interface SyncOptions {
   /** Pet mode as the sheet has it, with the pet's pictures ready to send. */
   pet?: { settings: CharmPetSettings; poses: CharmPose[] }
-  /** The voice hand-over this sync owes the charm: the address the reader's scheme picked, and a token
-   * the host minted for it. Sent last, after the bots and the pet, because a mint has already revoked
-   * whatever token the charm was holding, so the frame's own write is the shortest window there is. */
-  talk?: { address: string; token: string }
+  /** The voice hand-over this sync owes the charm: the address, and the mint that issues its token.
+   * The mint is called at the frame's own write — after the bots, the pictures and the pet — because a
+   * mint revokes the token the charm is holding, so that window is one write long rather than a sync's. */
+  talk?: { address: string; mint: () => Promise<string> }
   /** The phone's clock, in epoch milliseconds; tests pin it. */
   now?: number
 }
@@ -125,24 +125,20 @@ export async function syncCharm(
       if (!(error instanceof CharmRefused)) throw error
       progress.petRefused = true
     }
-    // The voice hand-over is last and never fails the sync: a charm that refuses it has the bots and
-    // the pet, and the next sync offers the address again.
+    // The voice hand-over is last and never fails the sync: a charm that refuses it, a host that will
+    // not mint and a link that goes at the last write all leave the bots and the pet landed, and the
+    // next sync offers the voice again.
     if (options.talk) {
-      // A frame this app cannot build — an address past the charm's bounds — is the same outcome as a
-      // refusal, and never the bots' failure: they are committed by now.
-      let frame: Uint8Array | undefined
       try {
-        frame = talkMessage(options.talk.address, options.talk.token)
-      } catch {
-        progress.voice = "refused"
-      }
-      if (frame) {
-        const answer = await link.control(frame)
+        const token = await options.talk.mint()
+        const answer = await link.control(talkMessage(options.talk.address, token))
         const kept = charmKept(answer.code)
         progress.voice = kept ? "sent" : "refused"
         // The charm's own code, so the page can say which refusal it was: an older firmware's "update
         // it" is not a busy charm's "try again".
         if (!kept) progress.voiceCode = answer.code
+      } catch {
+        progress.voice = "refused"
       }
     }
     return progress

@@ -899,20 +899,25 @@ export function CharmSettings() {
       // Pictures are the character's, so the pet's are drawn from its profile's botId.
       const petBot = sources.find((p) => p.id === settings.petBotId)
       const poses = settings.enabled && petBot ? await charmPoses(petBot.botId) : []
-      // The voice hand-over, when the record says the charm does not hold the address this scheme
-      // names. The address is asked for first, with no token: a mint revokes the one the charm holds,
-      // so nothing is spent until there is an address this sync can actually write.
-      let talk: { address: string; token: string; bot: string } | undefined
+      // The voice hand-over, when the host's own answer says this charm holds another address, another
+      // bot's token, or nothing at all. Asked without a token, because a mint revokes the one the charm
+      // holds; the mint itself runs at the frame's write, deep in the sync.
+      let talk: { address: string; bot: string; mint: () => Promise<string> } | undefined
       let voiceNote: string | undefined
-      if (profile && voiceOwed(charm, scheme, profile.id)) {
+      if (profile) {
         try {
           const addresses = await getTalkAddress(serverConfig(profile))
           const address = voiceAddress(addresses, scheme)
-          if (!address) {
+          if (address && voiceOwed(charm, address, addresses.bot, held)) {
+            talk = {
+              address,
+              bot: addresses.bot,
+              mint: async () => (await getTalkToken(serverConfig(profile))).token,
+            }
+          } else if (!address && typeof charm?.talk === "string") {
+            // Voice was set up and this scheme cannot be given an address: say so rather than let the
+            // charm keep calling an address the reader has just stopped using.
             voiceNote = VOICE_NO_TAILNET
-          } else {
-            const offer = await getTalkToken(serverConfig(profile))
-            talk = { address, token: offer.token, bot: offer.bot }
           }
         } catch (error) {
           voiceNote = message(error)
@@ -920,7 +925,7 @@ export function CharmSettings() {
       }
       const done = await syncToCharm(bots, setProgress, {
         pet: { settings, poses },
-        talk: talk ? { address: talk.address, token: talk.token } : undefined,
+        talk: talk ? { address: talk.address, mint: talk.mint } : undefined,
       })
       // Only a kept write is recorded: the record is what says nothing is owed, so a refusal written
       // there would leave a charm the page believes is set up and never offer it again.

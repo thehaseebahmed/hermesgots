@@ -89,20 +89,17 @@ test("the row says what the charm answered, in the charm's own words", () => {
   assert.doesNotMatch(codeWords(4242), /sync/, "and an unknown code is the charm's own, not a sync's")
 })
 
-test("an answer that did not keep it says the token is still this phone's to send", () => {
-  // Busy and StorageFailed both leave the secret where it was: the row has the only copy the
-  // reader can still hand over, so it says so rather than drawing a refusal that sounds final.
+test("a refusal names the charm and the sync, not a button that is gone", () => {
+  // There is no Send to press any more: the token came from a mint and was never this phone's to
+  // hold, so the repair a refusal can name is the next sync.
   for (const code of [CharmCode.Busy, CharmCode.StorageFailed]) {
-    assert.match(
-      talkWords(code),
-      /still on this phone/,
-      "a charm that never kept it leaves the token with the phone",
-    )
-    assert.match(talkWords(code), /send it again/, "and Send is the way it goes")
+    assert.doesNotMatch(talkWords(code), /still on this phone/, "the token was never the phone's")
+    assert.doesNotMatch(talkWords(code), /send it again/, "nor is there a send to press")
   }
-  // A keep spends the token, so there is nothing left to say about it.
-  assert.doesNotMatch(talkWords(CharmCode.Ok), /still on this phone/)
-  assert.doesNotMatch(talkWords(CharmCode.KeptReadable), /still on this phone/)
+  // The one code whose repair is the reader's own — an older firmware — hands them the next step.
+  assert.match(talkWords(CharmCode.BadMessage), /then sync again/)
+  // A keep needs no repair at all.
+  assert.equal(talkWords(CharmCode.Ok), TALK_SENT)
 })
 
 test("a charm that refuses the op is named, and told apart from the sync's refusal", () => {
@@ -179,24 +176,35 @@ test("the charm's answer about what it holds is the address, and never the token
   assert.equal(parseTalkState(other), null)
 })
 
-test("a sync owes voice when the charm holds nothing, or the other scheme's address", () => {
-  assert.equal(voiceOwed(undefined, "https", BOT), true, "no record of a hand-over")
-  assert.equal(voiceOwed({ talk: true }, "https", BOT), true, "a bare record from before addresses")
+test("a sync owes voice when the address or the bot differs, or the charm says it holds nothing", () => {
+  const address = "https://h.example/api/plugins/gots"
+  assert.equal(voiceOwed(undefined, address, BOT), true, "no record of a hand-over")
+  assert.equal(voiceOwed({ talk: true }, address, BOT), true, "a bare record from before addresses")
   assert.equal(
-    voiceOwed({ talk: "https://h.example/api", talkBot: BOT }, "https", BOT),
+    voiceOwed({ talk: address, talkBot: BOT }, address, BOT),
     false,
-    "this scheme's address, for this bot, is held",
+    "this address, for this bot, is held",
   )
   assert.equal(
-    voiceOwed({ talk: "http://100.64.0.2:8642/api", talkBot: BOT }, "https", BOT),
+    voiceOwed({ talk: "http://100.64.0.2:8642/api", talkBot: BOT }, address, BOT),
     true,
-    "the other scheme's address is not",
+    "another address is not",
   )
-  // A token is one bot's, so another bot is another hand-over even at the same address.
+  // A token is one bot's, and both ids here are the host's own: a profile id never meets a bot id.
   assert.equal(
-    voiceOwed({ talk: "https://h.example/api", talkBot: "another" }, "https", BOT),
+    voiceOwed({ talk: address, talkBot: "another" }, address, BOT),
     true,
     "the token on the charm is another bot's",
+  )
+  assert.equal(
+    voiceOwed({ talk: address, talkBot: BOT }, address, BOT, null),
+    true,
+    "the charm itself says it holds nothing",
+  )
+  assert.equal(
+    voiceOwed({ talk: address, talkBot: BOT }, address, BOT, address),
+    false,
+    "and the charm agreeing with the record owes nothing",
   )
 })
 

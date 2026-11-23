@@ -397,7 +397,10 @@ test("a bot's two pictures go over, and one the charm holds does not", async () 
 test("a sync that owes voice writes it last, and a refusal there leaves the sync a success", async () => {
   const charm = fakeCharm()
   const nova = { id: "nova", name: "Nova", accent: 1, image: picture(1), waiting: picture(5) }
-  const talk = { address: "https://bot.example/api/plugins/gots", token: "tk_5d0d9a7c4b1e" }
+  const talk = {
+    address: "https://bot.example/api/plugins/gots",
+    mint: async () => "tk_5d0d9a7c4b1e",
+  }
 
   const done = await syncCharm(charm.link, [nova], undefined, { talk })
   assert.equal(done.voice, "sent", "the charm kept it")
