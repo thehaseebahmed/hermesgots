@@ -58,7 +58,6 @@ import {
   type CharmWifiRecord,
 } from "./charm-protocol.ts"
 import { type CharmWake, wakeMessage } from "./charm-protocol.ts"
-import { talkMessage } from "./talk.ts"
 import {
   CharmRefused,
   syncCharm,
@@ -495,16 +494,12 @@ export async function setCharmTailnetKey(key: string): Promise<number> {
 }
 
 /**
- * Hands the charm the address its turns go to and the token it proves itself with. Neither is kept
- * here — not in this phone's store and not beside the paired charm — because the charm is the only
- * place they were ever for: the row holds the token from the host's answer until this write lands,
- * and no longer. Only the hand-over is recorded, since a second set-up revokes the token this one
- * left the charm holding. An address the charm could not call is refused before a link is opened.
+ * Keeps the address a sync's hand-over wrote, once the charm has answered that it kept it. The write
+ * itself is the sync's own voice step; this is the phone's memory of it. The token is nowhere here —
+ * it lives on the charm and nowhere else.
  */
-export async function setCharmTalk(address: string, token: string): Promise<number> {
-  const { status } = await askCharm(talkMessage(address, token))
-  if (paired && charmKept(status.code)) write({ ...paired, talk: address })
-  return status.code
+export function recordCharmTalk(address: string): void {
+  if (paired) write({ ...paired, talk: address })
 }
 
 /** The scheme the next sync hands over: the reader's pick, https unless they moved it. */

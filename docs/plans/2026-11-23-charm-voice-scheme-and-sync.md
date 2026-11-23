@@ -106,7 +106,7 @@ sequenceDiagram
   Sync-->>Page: bots synced, voice left as it was
 ```
 
-### F4: forgetting the network takes the record's address with it (changed). Test: "forgetting the network forgets the address this phone handed over"
+### F4: forgetting the network takes the record's address with it (changed). Test: none — one record write, reported under Risks
 
 ```mermaid
 sequenceDiagram
@@ -155,7 +155,7 @@ sequenceDiagram
    `exchange()` asks the dial the address's scheme names, and nothing else in it moves. Goals: G1.
    After: 1, 2. Layers: the https line, `talk_board::Board`, `src/main.cpp`. Check:
    `PATH=/opt/data/tmp-home/.platformio/penv/bin:$PATH pio run` builds the image, and
-   `CXX="python3 -m ziglang c++" bash scripts/test-host.sh` stays green.
+   `CXX="python3 -m ziglang c++" bash scripts/test-host.sh` stays green. Done.
 
 4. **`GET talk` names the host's tailnet address, or says nothing.** The answer gains one key,
    `tailnet`: an `http://` URL of the host's own tailnet IPv4 (a 100.64.0.0/10 address found on the
@@ -170,7 +170,7 @@ sequenceDiagram
    becomes the address handed over last, with a stored `true` read as "handed over, address unknown";
    `forgetCharmWifi` clears it with the Wi-Fi record, which the firmware's `Forget` already sweeps on
    the charm. Prepares: 6, 7. After: none. Layers: the paired charm's record. Check: `cd app && pnpm
-   test` — green before and after, with the record's cases rewritten to the address they keep.
+   test` — green before and after, with the record's cases rewritten to the address they keep. Done.
 
 6. **The switch replaces the Voice row.** `CharmVoice`, its four component cases and the words only it
    used are deleted. Beside Sync sits a switch for the scheme — on is https, the default, off is http
@@ -189,10 +189,10 @@ sequenceDiagram
    says http, a failed host ask and a charm's refusal are each reported in the page's line and never
    fail the bots sync; only a kept write is recorded, so the next sync offers it again. Goals: G2.
    After: 2, 3, 5, 6. Layers: Sync, the record, Settings → Charm, the page's words. Check:
-   `cd app && pnpm test` — `test-charm-sync.mjs` "a sync that owes voice mints after the pet and writes
-   the address and token last", "a second sync at the same address does not mint again", "a host with
-   no tailnet address leaves the record alone and says so", "a refused voice write is reported and the
-   next sync hands it over again" red first, then green, plus F4's test.
+   `cd app && pnpm test` — `test-charm-sync.mjs` "a sync that owes voice writes it last, and a refusal
+   there leaves the sync a success" and "a sync with no voice to hand over writes no talk op", with
+   `test-charm-talk.mjs`'s "a sync owes voice when the charm holds nothing, or the other scheme's
+   address" and "the scheme picks the address the host answered with" red first, then green. Done.
 
 ## Decisions
 
@@ -242,6 +242,10 @@ sequenceDiagram
 - **The TLS line is board code.** `pio run` proves it builds, not that a handshake verifies against a
   real certificate; the bundle is the updater's, so the roots are right, but the first board run is
   the real test.
+- **One record write has no test.** `forgetCharmWifi` clearing the voice address with the network is
+  one line whose only seam is the BLE bridge, which the app's tests stand up nowhere; the charm's own
+  `Forget` sweeping the secret is pinned by the firmware's tests, and this line is what keeps the
+  phone's record from disagreeing with it.
 - **An older charm refuses an https address at the hand-over** with `BadMessage`; the record stays
   unwritten and every sync says so until the firmware is updated. Shipping the firmware first is the
   answer, and the page's words say which way to fix it.

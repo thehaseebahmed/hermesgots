@@ -67,6 +67,7 @@ import {
   PUBLISHED_FIRMWARE,
   charmVoice,
   readCharmBattery,
+  recordCharmTalk,
   sendTestAlert,
   setCharmPet,
   setCharmTailnetKey,
@@ -98,9 +99,10 @@ import {
 } from "@/lib/charm-protocol"
 import { type FirmwareProgress, versionAfterReboot } from "@/lib/charm-firmware"
 import type { SyncProgress } from "@/lib/charm-sync"
+import { serverConfig } from "@/lib/connection"
 import { getActiveProfile, listProfiles } from "@/lib/db"
 import type { PluginServer } from "@/lib/features"
-import { getCharmFirmwareImage } from "@/lib/hermes"
+import { getCharmFirmwareImage, getTalkToken } from "@/lib/hermes"
 import { useHostRecord } from "@/lib/host-record"
 import {
   BATTERY_ASK,
@@ -126,6 +128,9 @@ import {
   updateProgressWords,
   VOICE_HTTP,
   VOICE_HTTPS,
+  VOICE_NO_TAILNET,
+  VOICE_NOT_KEPT,
+  VOICE_SENT,
   wifiWords,
   type CharmLink,
   type CharmRead,
@@ -133,6 +138,7 @@ import {
   type CharmSeen,
 } from "@/lib/charm-words"
 import { quietly } from "@/lib/report"
+import { voiceAddress, voiceOwed } from "@/lib/talk"
 import { tell } from "@/lib/tell"
 import { useBotLabels } from "@/lib/use-bot-labels"
 
@@ -842,10 +848,28 @@ export function CharmSettings() {
       // Pictures are the character's, so the pet's are drawn from its profile's botId.
       const petBot = sources.find((p) => p.id === settings.petBotId)
       const poses = settings.enabled && petBot ? await charmPoses(petBot.botId) : []
-      const done = await syncToCharm(bots, setProgress, { pet: { settings, poses } })
+      // The voice hand-over, when the record says the charm does not hold the address this scheme
+      // names. Asking the host is what mints the token, so a sync that owes nothing asks nothing.
+      let talk: { address: string; token: string } | undefined
+      let voiceNote: string | undefined
+      if (profile && voiceOwed(charm?.talk, scheme)) {
+        try {
+          const offer = await getTalkToken(serverConfig(profile))
+          const address = voiceAddress(offer, scheme)
+          if (!address) voiceNote = VOICE_NO_TAILNET
+          else talk = { address, token: offer.token }
+        } catch (error) {
+          voiceNote = message(error)
+        }
+      }
+      const done = await syncToCharm(bots, setProgress, { pet: { settings, poses }, talk })
+      if (talk) recordCharmTalk(talk.address)
       tell.success(done.total === 1 ? "1 bot on your charm" : `${done.total} bots on your charm`)
       if (done.petRefused && settings.enabled)
         tell.info("Your bots synced. This charm's firmware has no pet mode yet.")
+      if (talk && done.voice !== "sent") voiceNote = VOICE_NOT_KEPT
+      if (talk && done.voice === "sent") tell.success(VOICE_SENT)
+      if (voiceNote) tell.info(voiceNote)
       // A sync just spent a connection and the charm is awake on the other end: the battery is
       // cheap to ask now, and the row is one sync fresher for it.
       await readCharmBattery().catch(quietly("reading the charm's battery"))

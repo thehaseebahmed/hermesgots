@@ -14,6 +14,7 @@ import {
   botMessage,
   checkBots,
   checkPoses,
+  charmKept,
   chunkSize,
   codeWords,
   commitMessage,
@@ -30,6 +31,7 @@ import {
   type CharmPose,
   type CharmStatus,
 } from "./charm-protocol.ts"
+import { talkMessage } from "./talk.ts"
 
 export interface CharmTransport {
   /** Writes a control message and resolves with the charm's answer to it. */
@@ -42,6 +44,12 @@ export interface CharmTransport {
 export interface SyncOptions {
   /** Pet mode as the sheet has it, with the pet's pictures ready to send. */
   pet?: { settings: CharmPetSettings; poses: CharmPose[] }
+  /**
+   * The voice hand-over this sync owes the charm: the address the reader's scheme picked, and a token
+   * the host minted for it. Sent last, after the bots and the pet, because a mint has already revoked
+   * whatever token the charm was holding, so the frame's own write is the shortest window there is.
+   */
+  talk?: { address: string; token: string }
   /** The phone's clock, in epoch milliseconds; tests pin it. */
   now?: number
 }
@@ -53,6 +61,8 @@ export interface SyncProgress {
   sent: number
   /** The charm would not take pet mode: firmware without it, or a clock it did not believe. */
   petRefused?: boolean
+  /** Whether the voice hand-over landed: the page's line, and what its record keeps. */
+  voice?: "sent" | "refused"
 }
 
 export class CharmRefused extends Error {
@@ -114,6 +124,12 @@ export async function syncCharm(
       // into a failed one, and a dead link still fails.
       if (!(error instanceof CharmRefused)) throw error
       progress.petRefused = true
+    }
+    // The voice hand-over is last and never fails the sync: a charm that refuses it has the bots and
+    // the pet, and the next sync offers the address again.
+    if (options.talk) {
+      const answer = await link.control(talkMessage(options.talk.address, options.talk.token))
+      progress.voice = charmKept(answer.code) ? "sent" : "refused"
     }
     return progress
   } catch (error) {

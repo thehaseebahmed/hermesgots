@@ -15,6 +15,7 @@
  * Pure, so the row's rules are tested with no radio and no host (`scripts/test-charm-talk.mjs`).
  */
 import { CHARM_MAX_URL_BYTES, CharmCode, charmKept, encoder, talkFrame } from "./charm-protocol.ts"
+import type { CharmScheme } from "./charm.ts"
 import {
   TALK_NEEDS_ADDRESS,
   TALK_SENT,
@@ -105,4 +106,23 @@ export function talkWords(code: number): string {
   if (code === CharmCode.Ok) return TALK_SENT
   const words = refusalWords(code, VOICE_TAIL)
   return charmKept(code) ? words : `${words} ${TALK_STILL_HELD}`
+}
+
+/**
+ * Whether the next sync owes the charm a hand-over: it holds no address, its record is a bare `true`
+ * from before this phone kept the address, or the address it holds is the other scheme's. A sync that
+ * owes nothing asks the host for nothing, so no token is minted and none is revoked.
+ */
+export function voiceOwed(held: boolean | string | undefined, scheme: CharmScheme): boolean {
+  if (typeof held !== "string") return true
+  return schemeOf(held) !== scheme
+}
+
+/**
+ * The address a host's answer names for `scheme`: its own public address for https, its tailnet
+ * address for plain http — and null when it did not name a tailnet one, which is a sync that says so
+ * rather than one that hands the charm an address it cannot dial.
+ */
+export function voiceAddress(offer: TalkOffer, scheme: CharmScheme): string | null {
+  return scheme === "https" ? offer.host : (offer.tailnet ?? null)
 }

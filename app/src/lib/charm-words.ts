@@ -368,6 +368,19 @@ export const TALK_TOO_LONG = `That address is longer than the charm holds (${CHA
 
 export const TALK_SENT = "Sent to your charm."
 
+/** The page's line once a sync's hand-over landed: what the reader can do now that it did. */
+export const VOICE_SENT = "Voice is set up: hold B on your charm and talk to this bot."
+
+/**
+ * A sync that owed the charm its voice and could not make the hand-over, in the three ways it fails.
+ * Each says what still works — the bots and the pet synced — because the next sync is what repairs it.
+ */
+export const VOICE_NO_TAILNET =
+  "Your bots synced. This host didn't say its tailnet address, so voice stayed as it was — use https, or let your host join a tailnet."
+
+export const VOICE_NOT_KEPT =
+  "Your bots synced. Your charm didn't take the voice address, so the next sync will offer it again."
+
 /**
  * After an answer that did not keep it: the token is this phone's still, and the same one can go
  * again. Said only where the charm's answer is not a keep (``charmKept``), since an answer that

@@ -21,6 +21,8 @@ import {
   talkMessage,
   talkOffer,
   talkProblem,
+  voiceAddress,
+  voiceOwed,
   talkRoute,
   talkWords,
 } from "../src/lib/talk.ts"
@@ -159,6 +161,30 @@ test("the charm is given an address it can reach, and a frame within its bounds"
   assert.doesNotThrow(
     () => talkFrame("http://h", "a".repeat(CHARM_MAX_TOKEN_BYTES)),
     `${CHARM_MAX_TOKEN_BYTES} bytes is a token still`,
+  )
+})
+
+test("a sync owes voice when the charm holds nothing, or the other scheme's address", () => {
+  assert.equal(voiceOwed(undefined, "https"), true, "no record of a hand-over")
+  assert.equal(voiceOwed(true, "https"), true, "a bare record from before addresses were kept")
+  assert.equal(voiceOwed("https://h.example/api", "https"), false, "this scheme's address is held")
+  assert.equal(voiceOwed("http://100.64.0.2:8642/api", "https"), true, "the other scheme's is not")
+  assert.equal(voiceOwed("http://100.64.0.2:8642/api", "http"), false)
+})
+
+test("the scheme picks the address the host answered with", () => {
+  const both = {
+    host: "https://bot.example/api/plugins/gots",
+    tailnet: "http://100.64.0.2:8642/api/plugins/gots",
+    bot: "4f1c2a90",
+    token: TOKEN,
+  }
+  assert.equal(voiceAddress(both, "https"), both.host, "https is the address the phone dials")
+  assert.equal(voiceAddress(both, "http"), both.tailnet, "http is the host's own tailnet address")
+  assert.equal(
+    voiceAddress({ host: both.host, bot: both.bot, token: both.token }, "http"),
+    null,
+    "a host that named no tailnet address names none, rather than borrowing the https one",
   )
 })
 
