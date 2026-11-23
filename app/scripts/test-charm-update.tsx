@@ -12,10 +12,15 @@ import test from "node:test"
 import { type ComponentProps, type ReactElement, act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
-import { CharmUpdateScreen } from "@/components/charm-update"
+import { CharmUpdateScreen, type CharmUpdateApi } from "@/components/charm-update"
 import { CharmNetwork, type CharmNetworkApi } from "@/components/settings/charm"
-import { useCharmReport } from "@/lib/charm"
-import { CHARM_SLOT_BYTES, CharmLinkState, CharmUpdateState } from "@/lib/charm-protocol"
+import { useCharmReport, type PairedCharm } from "@/lib/charm"
+import {
+  CHARM_SLOT_BYTES,
+  CharmLinkState,
+  CharmUpdateReason,
+  CharmUpdateState,
+} from "@/lib/charm-protocol"
 import { db } from "@/lib/db"
 import type { CharmFirmware } from "@/lib/hermes"
 import {
@@ -52,6 +57,15 @@ function radio(overrides: Partial<ComponentProps<typeof CharmUpdateScreen>["api"
   let reads = 0
   return {
     version: async () => (++reads > 1 ? "0.2.0" : "0.1.0"),
+    // A report with both links down, so no door is open: the walk the tests around here pin is the
+    // transfer's, and the fetch walks name the report of their own.
+    network: async () => ({
+      wifi: { state: CharmLinkState.Off, reason: 0, ip: "", ssid: "" },
+      tailnet: { state: CharmLinkState.Off, ip: "" },
+    }),
+    updateStatus: async () => ({ state: CharmUpdateState.Idle, percent: 0, reason: 0 }),
+    // The Update op the fetch walk hands the charm: unused unless a test stands one up.
+    update: async () => {},
     upload: async (
       image: Uint8Array,
       _sha256Hex: string,
@@ -98,6 +112,26 @@ const IMAGE = new Uint8Array([9, 9, 9, 9])
 const IMAGE_SHA = createHash("sha256").update(IMAGE).digest("hex")
 const IMAGE_PUBLISHED = { version: "0.2.0", size: IMAGE.length, sha256: IMAGE_SHA }
 
+/** The token the test host mints, as the real one's: bytes that ride the URL and nothing else. */
+const FETCH_TOKEN = "1f".repeat(32)
+
+/**
+ * A paired charm holding a voice hand-over: the address the last sync wrote it, on the scheme the
+ * reader had picked — the two facts the door is picked from.
+ */
+const charmedOver = (talk: string, voice: "http" | "https"): PairedCharm => ({
+  deviceId: "dev-1",
+  name: "Charm",
+  talk,
+  voice,
+})
+
+/** The charm's report when it is online on the Wi-Fi it joined, its tunnel down. */
+const ONLINE_WIFI = {
+  wifi: { state: CharmLinkState.Online, reason: 0, ip: "192.168.1.20", ssid: "Home" },
+  tailnet: { state: CharmLinkState.Off, ip: "" },
+}
+
 /**
  * A bot's host, as the app's own reader asks it for a charm's firmware: the plugin's feature list,
  * the tag's answer, and the image's bytes. `published` is that answer — a package, or the sentence
@@ -113,11 +147,19 @@ function serveFirmware(
 ) {
   const profile = connection(name)
   let reads = 0
+  let mints = 0
+  let imageReads = 0
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const url = new URL(String(input instanceof Request ? input.url : input))
     if (url.pathname.endsWith("/plugins/gots/info"))
       return json({ name: "gots", version: "1.0.0", features: ["charm_firmware"] })
+    if (url.pathname.endsWith("/charm/firmware/fetch")) {
+      // The fetch token's mint, the one ask the walk makes only when a door is open.
+      mints += 1
+      return json({ object: "gots.charm_firmware_fetch", token: FETCH_TOKEN })
+    }
     if (url.pathname.endsWith("/charm/firmware/image")) {
+      imageReads += 1
       if (!stream)
         return new Response(image, { headers: { "Content-Length": String(image.length) } })
       const held = stream
@@ -140,7 +182,7 @@ function serveFirmware(
     }
     return json({ error: { message: "no route" } }, 404)
   }) as unknown as typeof fetch
-  return { profile, reads: () => reads }
+  return { profile, reads: () => reads, mints: () => mints, imageReads: () => imageReads }
 }
 
 test("the steps appear in the order they walk, each bar moving, and the image that went is the host's", async () => {
@@ -188,6 +230,147 @@ test("the steps appear in the order they walk, each bar moving, and the image th
       assert.equal(sent.length, 1, "one image went")
       assert.deepEqual([...sent[0].bytes], [...image], "the bytes the host served")
       assert.equal(sent[0].sha256, sha256, "the hash the charm is told is the one over those bytes")
+    },
+  )
+})
+
+test("a charm online on Wi-Fi fetches the image itself, its own percent on the Downloading bar", async () => {
+  const handed: { url: string; sha256Hex: string }[] = []
+  let asks = 0
+  const api = radio({
+    network: async () => ONLINE_WIFI,
+    // The charm's own walk: 40%, then 71%, then the slot ready and the reboot a moment away.
+    updateStatus: async () => {
+      asks += 1
+      if (asks === 1) return { state: CharmUpdateState.Downloading, percent: 40, reason: 0 }
+      if (asks === 2) return { state: CharmUpdateState.Downloading, percent: 71, reason: 0 }
+      return { state: CharmUpdateState.Ready, percent: 100, reason: 0 }
+    },
+    update: async (url: string, sha256Hex: string) => {
+      handed.push({ url, sha256Hex })
+    },
+    upload: async () => {
+      throw new Error("the BLE transfer ran")
+    },
+  })
+  const host = serveFirmware("update-fetch", IMAGE_PUBLISHED, IMAGE)
+  const charm = charmedOver("https://update-fetch.test/api/plugins/gots", "https")
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
+    async () => {
+      await until(async () => bars().includes(40), "the charm's own first percent on the bar")
+      assert.ok(
+        text().includes("The charm is fetching it itself over Wi-Fi"),
+        "the door it picked, in the reader's words",
+      )
+      await until(async () => bars().includes(71), "the charm's percent moving on its own")
+      await until(async () => text().includes("The charm runs 0.2.0"), "the end of the walk")
+
+      assert.equal(handed.length, 1, "one Update op went")
+      assert.equal(
+        handed[0].url,
+        `https://update-fetch.test/api/plugins/gots/charm/firmware/image/fetch?token=${FETCH_TOKEN}`,
+        "the host the voice hand-over kept, the image route's tokened variant, the token",
+      )
+      assert.equal(handed[0].sha256Hex, IMAGE_PUBLISHED.sha256, "the published SHA-256, as the record's hex")
+      assert.equal(host.mints(), 1, "the token was minted, and only once")
+      assert.equal(host.imageReads(), 0, "no image came to the phone: the charm fetches it itself")
+      assert.ok(!text().includes("Transferring"), "the link never carried the image")
+    },
+  )
+})
+
+test("a charm online on its tailnet fetches over the http door it was handed", async () => {
+  const handed: { url: string }[] = []
+  const api = radio({
+    network: async () => ({
+      wifi: { state: CharmLinkState.Off, reason: 0, ip: "", ssid: "" },
+      tailnet: { state: CharmLinkState.Online, ip: "100.64.0.9" },
+    }),
+    updateStatus: async () => ({ state: CharmUpdateState.Ready, percent: 100, reason: 0 }),
+    update: async (url: string) => {
+      handed.push({ url })
+    },
+    upload: async () => {
+      throw new Error("the BLE transfer ran")
+    },
+  })
+  const host = serveFirmware("update-tailnet", IMAGE_PUBLISHED, IMAGE)
+  const charm = charmedOver("http://100.64.0.9:8642/api/plugins/gots", "http")
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
+    async () => {
+      await until(async () => text().includes("The charm runs 0.2.0"), "the end of the walk")
+      assert.equal(handed.length, 1, "one Update op went")
+      assert.equal(
+        handed[0].url,
+        `http://100.64.0.9:8642/api/plugins/gots/charm/firmware/image/fetch?token=${FETCH_TOKEN}`,
+        "plain http, over the charm's tailnet",
+      )
+      assert.ok(
+        text().includes("The charm is fetching it itself over your tailnet"),
+        "the door it picked says the tailnet",
+      )
+    },
+  )
+})
+
+test("a door that is shut runs the transfer this phone drives, and mints nothing", async () => {
+  const handed: unknown[] = []
+  const uploads: Uint8Array[] = []
+  const api = radio({
+    update: async () => {
+      handed.push(1)
+    },
+    upload: async (image: Uint8Array) => {
+      uploads.push(image)
+      return { sent: image.length, total: image.length, percent: 100 }
+    },
+  })
+  const host = serveFirmware("update-shut", IMAGE_PUBLISHED, IMAGE)
+  const charm = charmedOver("https://update-shut.test/api/plugins/gots", "https")
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
+    async () => {
+      await until(async () => text().includes("The charm runs 0.2.0"), "the end of the walk")
+      assert.deepEqual(handed, [], "no Update op went: no door is open")
+      assert.equal(host.mints(), 0, "no token was minted for a door that is shut")
+      assert.equal(uploads.length, 1, "the image went over the link this phone drives")
+      assert.equal(host.imageReads(), 1, "and it came to the phone first")
+      assert.ok(text().includes("Downloading"), "the phone's own download is the bar")
+    },
+  )
+})
+
+test("a fetch the charm fails is drawn in its own reason words, with Try again and the cable", async () => {
+  let handed = 0
+  const api = radio({
+    network: async () => ONLINE_WIFI,
+    updateStatus: async () => ({
+      state: CharmUpdateState.Failed,
+      percent: 0,
+      reason: CharmUpdateReason.Cancelled,
+    }),
+    update: async () => {
+      handed += 1
+    },
+    upload: async () => {
+      throw new Error("the BLE transfer ran")
+    },
+  })
+  const host = serveFirmware("update-fetch-failed", IMAGE_PUBLISHED, IMAGE)
+  const charm = charmedOver("https://update-fetch-failed.test/api/plugins/gots", "https")
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
+    async () => {
+      await until(
+        async () => text().includes("The update failed: it was cancelled"),
+        "the charm's reason in words",
+      )
+      assert.ok(text().includes("flash it by cable"), "the sure path is said beside it")
+      await click(find("#charm-update-retry"))
+      await until(async () => handed === 2, "the retry walks the fetch again")
+      assert.equal(host.mints(), 2, "a fresh token for the fresh walk")
     },
   )
 })
@@ -430,7 +613,7 @@ function Routed({
   api,
   profile,
 }: {
-  api: CharmNetworkApi
+  api: CharmNetworkApi & CharmUpdateApi
   profile: ComponentProps<typeof CharmNetwork>["profile"]
 }) {
   return (
@@ -450,11 +633,13 @@ test("tapping Update leaves the section, and the status poll stops while the upl
   let polls = 0
   let landed = false
   let releaseUpload: (() => void) | undefined
-  const api: CharmNetworkApi = {
-    status: async () => ({
-      wifi: { state: CharmLinkState.Online, reason: 0, ip: "192.168.1.20", ssid: "Home" },
-      tailnet: { state: CharmLinkState.Off, ip: "" },
-    }),
+  const links = {
+    wifi: { state: CharmLinkState.Online, reason: 0, ip: "192.168.1.20", ssid: "Home" },
+    tailnet: { state: CharmLinkState.Off, ip: "" },
+  }
+  const api: CharmNetworkApi & CharmUpdateApi = {
+    status: async () => links,
+    network: async () => links,
     saveWifi: async () => 0,
     forget: async () => 0,
     saveTailnet: async () => 0,
@@ -464,6 +649,7 @@ test("tapping Update leaves the section, and the status poll stops while the upl
       return { state: CharmUpdateState.Downloading, percent: 10, reason: 0 }
     },
     version: async () => (landed ? "0.2.0" : "0.1.0"),
+    update: async () => {},
     upload: async () => {
       await new Promise<void>((done) => (releaseUpload = done))
       landed = true
@@ -489,8 +675,12 @@ test("tapping Update leaves the section, and the status poll stops while the upl
 })
 
 test("the row's picker opens the same screen ready for a file", async () => {
-  const api: CharmNetworkApi = {
+  const api: CharmNetworkApi & CharmUpdateApi = {
     status: async () => ({
+      wifi: { state: CharmLinkState.Online, reason: 0, ip: "192.168.1.20", ssid: "Home" },
+      tailnet: { state: CharmLinkState.Off, ip: "" },
+    }),
+    network: async () => ({
       wifi: { state: CharmLinkState.Online, reason: 0, ip: "192.168.1.20", ssid: "Home" },
       tailnet: { state: CharmLinkState.Off, ip: "" },
     }),
@@ -499,6 +689,7 @@ test("the row's picker opens the same screen ready for a file", async () => {
     saveTailnet: async () => 0,
     updateStatus: async () => ({ state: CharmUpdateState.Idle, percent: 0, reason: 0 }),
     version: async () => "0.1.0",
+    update: async () => {},
     upload: async (image: Uint8Array) => ({
       sent: image.length,
       total: image.length,

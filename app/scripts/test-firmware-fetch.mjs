@@ -19,7 +19,8 @@ import test from "node:test"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { firmwareFetchToken, firmwareFetchUrl } from "../src/lib/firmware-fetch.ts"
+import { CharmLinkState } from "../src/lib/charm-protocol.ts"
+import { firmwareDoor, firmwareFetchToken, firmwareFetchUrl } from "../src/lib/firmware-fetch.ts"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const appDir = resolve(here, "..")
@@ -64,6 +65,67 @@ test("the token the host answers is read once, or the answer is refused as unrea
   for (const body of [{}, { token: "" }, { token: 7 }, null]) {
     assert.throws(() => firmwareFetchToken(body), /unreadable/)
   }
+})
+
+/** The charm's two links as its report answers them: the one online, and the one down. */
+const ONLINE_WIFI = { state: CharmLinkState.Online, reason: 0, ip: "192.168.1.20", ssid: "Home" }
+const ONLINE_TUNNEL = { state: CharmLinkState.Online, ip: "100.64.0.9" }
+const WIFI_DOWN = { state: CharmLinkState.Off, reason: 0, ip: "", ssid: "" }
+const TUNNEL_DOWN = { state: CharmLinkState.Off, ip: "" }
+
+test("a charm online on Wi-Fi with an https host, or on its tailnet with an http one, fetches", () => {
+  assert.equal(
+    firmwareDoor(
+      { wifi: ONLINE_WIFI, tailnet: TUNNEL_DOWN },
+      "https",
+      "https://bot.example/api/plugins/gots",
+    ),
+    "fetch",
+    "the Wi-Fi door: the host's own address, over the network the charm joined",
+  )
+  assert.equal(
+    firmwareDoor(
+      { wifi: WIFI_DOWN, tailnet: ONLINE_TUNNEL },
+      "http",
+      "http://100.64.0.9:8642/api/plugins/gots",
+    ),
+    "fetch",
+    "the tailnet door: the host's tailnet address, over the tunnel the charm holds",
+  )
+})
+
+test("a door that is shut answers the transfer this phone drives", () => {
+  assert.equal(
+    firmwareDoor({ wifi: WIFI_DOWN, tailnet: TUNNEL_DOWN }, "https", "https://bot.example/gots"),
+    "transfer",
+    "neither link online, whatever the address",
+  )
+  assert.equal(
+    firmwareDoor({ wifi: ONLINE_WIFI, tailnet: TUNNEL_DOWN }, "http", "http://100.64.0.9:8642/gots"),
+    "transfer",
+    "the http door needs the tunnel: without it the charm would refuse the address",
+  )
+  assert.equal(
+    firmwareDoor({ wifi: WIFI_DOWN, tailnet: ONLINE_TUNNEL }, "https", "https://bot.example/gots"),
+    "transfer",
+    "the https door needs the charm on a network that reaches the host",
+  )
+  // No address kept, no door: a hand-over this phone never saw the address of is not one to send
+  // the charm walking down blind.
+  assert.equal(
+    firmwareDoor({ wifi: ONLINE_WIFI, tailnet: TUNNEL_DOWN }, "https", undefined),
+    "transfer",
+  )
+  // A scheme switched since the last sync is a preference the charm has not been handed: the
+  // address it holds is the other door's, and this phone does not send what it would refuse.
+  assert.equal(
+    firmwareDoor(
+      { wifi: ONLINE_WIFI, tailnet: ONLINE_TUNNEL },
+      "http",
+      "https://bot.example/api/plugins/gots",
+    ),
+    "transfer",
+  )
 })
 
 /** A port the mock can listen on, borrowed for the moment the spawn needs it. */

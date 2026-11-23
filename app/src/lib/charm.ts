@@ -55,6 +55,7 @@ import {
   rgb565,
   tailnetMessage,
   talkStateMessage,
+  updateMessage,
   updateStatusMessage,
   wifiMessage,
   wifiRecord,
@@ -611,6 +612,19 @@ export async function charmUpdateStatus(): Promise<CharmUpdateStatus> {
   const update = parseUpdateStatus(bytes)
   if (!update) throw new Error("The charm's update answer was too short")
   return update
+}
+
+/**
+ * Hands the charm the image to fetch itself: the host's tokened route, and the SHA-256 the bytes it
+ * fetches must hash to — the charm checks the hash before it writes the slot, so the hash is the
+ * trust anchor and the token is only the door. The door has been picked before this is called
+ * (`firmwareDoor`): the address is https over the charm's own Wi-Fi, or http while its tunnel is
+ * up, which are the only two the charm takes.
+ */
+export async function startCharmFirmwareFetch(url: string, sha256Hex: string): Promise<void> {
+  // The hash is read here, so one that is not a hash is refused before a connection is opened.
+  const { status } = await askCharm(updateMessage(url, hexBytes(sha256Hex)))
+  if (status.code !== CharmCode.Ok) throw new CharmRefused(status.code)
 }
 
 /**

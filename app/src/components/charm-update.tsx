@@ -7,24 +7,45 @@ import { Caption, Group, RowText } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
 import {
   charmFirmwareVersion,
+  charmNetwork,
+  charmUpdateStatus,
+  charmVoice,
   hostForActiveBot,
   PUBLISHED_FIRMWARE,
+  startCharmFirmwareFetch,
   uploadCharmFirmware,
+  usePairedCharm,
+  type CharmScheme,
+  type PairedCharm,
 } from "@/lib/charm"
-import { versionAfterReboot, type FirmwareProgress } from "@/lib/charm-firmware"
-import { hexOf, CHARM_SLOT_BYTES } from "@/lib/charm-protocol"
+import { FirmwareRefused, versionAfterReboot, type FirmwareProgress } from "@/lib/charm-firmware"
+import {
+  CHARM_SLOT_BYTES,
+  CharmCode,
+  CharmUpdateState,
+  hexOf,
+  type CharmNetworkReport,
+  type CharmUpdateStatus,
+} from "@/lib/charm-protocol"
 import {
   downloadWords,
+  fetchWords,
   FILE_TOO_BIG,
   firmwareDoneWords,
   FIRMWARE_CABLE,
   FIRMWARE_NOT_BACK,
   FIRMWARE_NOT_PUBLISHED,
+  FIRMWARE_NOT_STARTED,
   FIRMWARE_SENT,
   PUBLISHED_CHANGED,
 } from "@/lib/charm-words"
+import { firmwareDoor, firmwareFetchUrl } from "@/lib/firmware-fetch"
 import { getActiveProfile } from "@/lib/db"
-import { getCharmFirmwareImage, type CharmFirmware } from "@/lib/hermes"
+import {
+  getCharmFirmwareFetchToken,
+  getCharmFirmwareImage,
+  type CharmFirmware,
+} from "@/lib/hermes"
 import { useHostRecord } from "@/lib/host-record"
 import type { PluginServer } from "@/lib/features"
 
@@ -37,12 +58,20 @@ const sha256Of = async (image: Uint8Array) =>
 
 /**
  * What the update screen needs of the charm, as the phone's radio answers it. A page mounted in a
- * test is handed a stand-in, as the network section's is; the screen asks nothing on a timer of its
- * own — the upload reports where it has got to, and the reboot window is a fixed number of asks.
+ * test is handed a stand-in, as the network section's is. The screen asks nothing on a timer of its
+ * own while it drives a send — the upload reports where it has got to, and the reboot window is a
+ * fixed number of asks — except the one walk it cannot drive: a charm fetching the image itself is
+ * followed on the poll below, at the pace the settings row watches a download at.
  */
 export interface CharmUpdateApi {
   /** Which build the charm runs; null for a firmware too old to have the ask. */
   version(): Promise<string | null>
+  /** The charm's report of its two links — the ask the settings page already makes. */
+  network(): Promise<CharmNetworkReport>
+  /** Where the charm's own fetch has got to, as the `UpdateStatus` ask answers it. */
+  updateStatus(): Promise<CharmUpdateStatus>
+  /** Hands the charm the image to fetch itself: the URL and the SHA-256 it must hash to. */
+  update(url: string, sha256Hex: string): Promise<void>
   /** One image over the charm's link, drawing where the phone has got to. */
   upload(
     image: Uint8Array,
@@ -52,7 +81,54 @@ export interface CharmUpdateApi {
 }
 
 /** The one implementation: the phone's own functions. */
-const LIVE: CharmUpdateApi = { version: charmFirmwareVersion, upload: uploadCharmFirmware }
+const LIVE: CharmUpdateApi = {
+  version: charmFirmwareVersion,
+  network: charmNetwork,
+  updateStatus: charmUpdateStatus,
+  update: startCharmFirmwareFetch,
+  upload: uploadCharmFirmware,
+}
+
+/**
+ * One image's way onto the charm: the bytes this phone sends over the link, or the door the charm
+ * walks itself — the URL this phone hands it, and the hash the bytes it fetches must carry.
+ */
+type FirmwareHand =
+  | { kind: "transfer"; image: Uint8Array; sha256Hex: string }
+  | { kind: "fetch"; url: string; sha256Hex: string; scheme: CharmScheme }
+
+/** How often the charm's own percent is asked while it fetches: the settings row's watching pace. */
+const FETCH_POLL_MS = 2_000
+
+/**
+ * How many asks in a row may say nothing is running before the walk calls the fetch one that never
+ * started. An `Idle` answer right after the write is the fetch arming itself; a few together are a
+ * charm that took the address and started nothing, which is a failure to say rather than a wait
+ * without an end.
+ */
+const FETCH_IDLE_TRIES = 3
+
+/**
+ * The charm's own percent, followed to the end of its fetch. `Ready` is the slot written and the
+ * reboot a moment away; `Failed` is the charm's own reason, in the same words an upload's refusal
+ * wears — so the failure path is the same either way.
+ */
+async function watchCharmFetch(
+  ask: () => Promise<CharmUpdateStatus>,
+  onProgress?: (update: CharmUpdateStatus) => void,
+): Promise<void> {
+  let idles = 0
+  for (;;) {
+    const update = await ask()
+    if (update.state === CharmUpdateState.Failed)
+      throw new FirmwareRefused(CharmCode.Ok, update.reason)
+    if (update.state === CharmUpdateState.Ready) return
+    if (update.state === CharmUpdateState.Downloading) idles = 0
+    else if ((idles += 1) >= FETCH_IDLE_TRIES) throw new Error(FIRMWARE_NOT_STARTED)
+    onProgress?.(update)
+    await new Promise((done) => setTimeout(done, FETCH_POLL_MS))
+  }
+}
 
 /** One step of the walk, as the screen holds it: its line, and its bar while it moves. */
 interface StepView {
@@ -70,25 +146,34 @@ const STEP_TITLES: Record<StepView["name"], string> = {
 
 /**
  * Settings → Charm's update screen: the steps a firmware update walks, in the reader's words —
- * Downloading while the phone fetches the image, Transferring with the bar the upload reports,
- * Restarting over the reboot window, and the end: the version the charm came back on, or the
- * failure with its reason and what to do — try again, and, when the charm keeps cancelling, flash
- * it by cable, which always works. The Firmware row's Update button opens it straight into the
- * published image; its picker opens it ready for a file, which walks the same steps minus the
- * download. The reader can step back at any point — the transfer is driven by its own promise,
- * not by the screen, so leaving changes nothing about what the charm takes.
+ * Downloading, whether the phone fetches the image or the charm fetches it itself through a door it
+ * holds, Transferring with the bar the upload reports, Restarting over the reboot window, and the
+ * end: the version the charm came back on, or the failure with its reason and what to do — try
+ * again, and, when the charm keeps cancelling, flash it by cable, which always works. The Firmware
+ * row's Update button opens it straight into the published image; its picker opens it ready for a
+ * file, which walks the same steps minus the download — and always over the link, since a file the
+ * phone holds has no door to walk. The reader can step back at any point — the send is driven by
+ * its own promise, not by the screen, so leaving changes nothing about what the charm takes.
  */
 export function CharmUpdateScreen({
   api = LIVE,
   profile: given,
+  charm: givenCharm,
 }: {
   /** The charm, or a stand-in under test. */
   api?: CharmUpdateApi
   /** The bot whose host publishes the firmware; the active bot when none is handed in. */
   profile?: PluginServer
+  /**
+   * The paired charm — its voice scheme and the address the hand-over kept are the two facts a door
+   * is picked from. The phone's own record when none is handed in, as a test hands one of its own.
+   */
+  charm?: PairedCharm | null
 }) {
   const active = useLiveQuery(getActiveProfile, [])
   const profile = given ?? active
+  const paired = usePairedCharm()
+  const charm = givenCharm ?? paired
   const [params] = useSearchParams()
   const pickMode = params.get("file") === "1"
 
@@ -106,9 +191,9 @@ export function CharmUpdateScreen({
   const [busy, setBusy] = useState(false)
   /** `busy` is a render behind, so a double tap in one tick would both reach the radio. */
   const sending = useRef(false)
-  /** The last load that ran, in the words it ran under: what a failure's Try again re-runs. */
+  /** The last hand the charm was given, in the words it went under: what a failure's Try again re-runs. */
   const again = useRef<{
-    load: () => Promise<{ image: Uint8Array; sha256Hex: string }>
+    hand: () => Promise<FirmwareHand>
     title: string
   } | null>(null)
   const started = useRef(false)
@@ -125,16 +210,13 @@ export function CharmUpdateScreen({
     })
 
   /**
-   * One image through the whole walk, however the phone came by it. `load` is where the bytes and
-   * the hash come from — the host's package, streamed, or a file the reader picked — and it can
-   * draw a Downloading step of its own on the way in.
+   * One image through the whole walk, however it goes on. `hand` is where the image and its hash
+   * come from — the host's package streamed to this phone, a file the reader picked, or a door the
+   * charm walks itself — and it can draw a Downloading step of its own on the way in.
    */
-  const send = async (
-    load: () => Promise<{ image: Uint8Array; sha256Hex: string }>,
-    heading: string,
-  ) => {
+  const send = async (hand: () => Promise<FirmwareHand>, heading: string) => {
     if (sending.current) return
-    again.current = { load, title: heading }
+    again.current = { hand, title: heading }
     sending.current = true
     setBusy(true)
     setEnd(null)
@@ -145,14 +227,26 @@ export function CharmUpdateScreen({
       // The build the charm runs now, read before anything goes: the answer the reboot's read is
       // compared against, so a charm that could not say before is one whose any answer is the change.
       const was = await api.version().catch(() => null)
-      const { image, sha256Hex } = await load()
-      show("transfer", { percent: 0 })
-      await api.upload(image, sha256Hex, (progress) => {
-        const percent =
-          progress.total > 0 ? Math.round((progress.sent / progress.total) * 100) : 0
-        show("transfer", { percent })
-      })
-      show("transfer", { percent: 100 })
+      const next = await hand()
+      if (next.kind === "fetch") {
+        // The charm fetches the image itself: this phone's whole part is the one ask that hands it
+        // the address, and the charm's own percent then feeds the bar — the poll the settings row
+        // runs, at the row's own pace — until the charm says its slot is ready.
+        show("download", { subtitle: fetchWords(next.scheme), percent: 0 })
+        await api.update(next.url, next.sha256Hex)
+        await watchCharmFetch(
+          () => api.updateStatus(),
+          (update) => show("download", { percent: update.percent }),
+        )
+      } else {
+        show("transfer", { percent: 0 })
+        await api.upload(next.image, next.sha256Hex, (progress) => {
+          const percent =
+            progress.total > 0 ? Math.round((progress.sent / progress.total) * 100) : 0
+          show("transfer", { percent })
+        })
+        show("transfer", { percent: 100 })
+      }
       // The end is a yes only once the slot is bootable: the charm reboots a moment later, and the
       // window is the phone's own asks for the version the new build answers with.
       show("restart", { subtitle: FIRMWARE_SENT })
@@ -174,13 +268,32 @@ export function CharmUpdateScreen({
   }
 
   /**
-   * The published image, checked against the version this screen read: the bytes and their hash are
-   * what the link would send, so a package that moved between the two reads is refused here rather
+   * The published image, however the charm takes it. The door is asked first — the charm's own
+   * report of its links, against the address the voice hand-over kept — and only a door that is
+   * open mints a token and hands the charm the address, so the screen never offers a walk the charm
+   * cannot make; a report that could not be read is no door either, since an unread fact is not a
+   * fact. No door open is the transfer: the image streamed to this phone, checked against the
+   * version this screen read, so a package that moved between the two reads is refused here rather
    * than by the charm after the whole image — unless the re-read names these bytes, when they are
    * exactly the image to send.
    */
   const runPublished = (record: CharmFirmware) =>
     send(async () => {
+      const scheme = charmVoice(charm)
+      const address = typeof charm?.talk === "string" ? charm.talk : undefined
+      const report = await api.network().catch(() => null)
+      if (report && firmwareDoor(report, scheme, address) === "fetch" && address) {
+        // The one answer in which this phone ever sees the token: it rides the URL it builds, and
+        // the image's bytes stay pinned by the SHA-256 of the record — the charm checks it before
+        // it writes the slot, so a tag that moved is refused by the hash, not trusted by the URL.
+        const token = await getCharmFirmwareFetchToken(hostForActiveBot(profile))
+        return {
+          kind: "fetch",
+          url: firmwareFetchUrl(address, token),
+          sha256Hex: record.sha256,
+          scheme,
+        }
+      }
       const image = await getCharmFirmwareImage(hostForActiveBot(profile), (progress) =>
         show("download", {
           subtitle: downloadWords(progress),
@@ -194,11 +307,11 @@ export function CharmUpdateScreen({
       })
       const sha256Hex = await sha256Of(image)
       if (image.length === record.size && sha256Hex === record.sha256)
-        return { image, sha256Hex }
+        return { kind: "transfer", image, sha256Hex }
       const fresh = await firmware.reload()
       const again = fresh?.state === "published" ? fresh.firmware : undefined
       if (again && again.size === image.length && again.sha256 === sha256Hex)
-        return { image, sha256Hex }
+        return { kind: "transfer", image, sha256Hex }
       throw new Error(PUBLISHED_CHANGED)
     }, `Updating to ${record.version}`)
 
@@ -206,7 +319,8 @@ export function CharmUpdateScreen({
    * A file from the phone: its bytes, and the SHA-256 computed here over them — that hash is the
    * whole trust anchor, so what the charm checks is what this phone read. A file too big for a slot
    * is refused before a byte goes over the link: the slot the host publishes where it names one,
-   * this phone's own constant otherwise.
+   * this phone's own constant otherwise. A file has no door to walk, whatever the charm's links: it
+   * is this phone's bytes, so this phone sends them.
    */
   const sendFile = (chosen: File) => {
     if (chosen.size > (published?.slot ?? CHARM_SLOT_BYTES)) {
@@ -215,7 +329,7 @@ export function CharmUpdateScreen({
     }
     void send(async () => {
       const image = new Uint8Array(await chosen.arrayBuffer())
-      return { image, sha256Hex: await sha256Of(image) }
+      return { kind: "transfer", image, sha256Hex: await sha256Of(image) }
     }, `Sending ${chosen.name}`)
   }
 
@@ -228,11 +342,11 @@ export function CharmUpdateScreen({
     if (published) void runPublished(published)
   }, [pickMode, firmware.settled, published])
 
-  /** What a failure's way forward re-runs: the same image, fetched or read again. */
+  /** What a failure's way forward re-runs: the same hand — the bytes read again, or the door asked again. */
   const retry = () => {
     const last = again.current
     if (sending.current || !last) return
-    void send(last.load, last.title)
+    void send(last.hand, last.title)
   }
 
   return (

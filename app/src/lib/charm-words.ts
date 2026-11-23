@@ -288,6 +288,20 @@ export function firmwareDoneWords(version: string): string {
   return `The charm runs ${version}.`
 }
 
+/**
+ * The Downloading step's line when the charm fetches the image itself: which door it walks, said
+ * so the reader knows why this phone is only watching. https is the host's own address over the
+ * charm's Wi-Fi; http is its tailnet address, called by the same name the voice rows call it.
+ */
+export function fetchWords(scheme: "http" | "https"): string {
+  return scheme === "http"
+    ? "The charm is fetching it itself over your tailnet"
+    : "The charm is fetching it itself over Wi-Fi"
+}
+
+/** The fetch walk's line for a charm that took the address and started nothing. */
+export const FIRMWARE_NOT_STARTED = "The charm didn't start the fetch it was handed."
+
 /** The update screen's line when the host's read names no image to send. */
 export const FIRMWARE_NOT_PUBLISHED =
   "This host isn't offering a firmware image. A file can still be sent."

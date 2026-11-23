@@ -804,15 +804,13 @@ export function parseTalkState(view: DataView): { address: string | null } | nul
 
 /**
  * The image to fetch, and the SHA-256 that has to match it. The charm makes the request itself, so
- * the address must be one it can fetch: https, and nothing else.
+ * the address must be one it can fetch: https over the Wi-Fi it joins — a certificate checked
+ * against its own roots — or plain http over its tailnet, which the charm takes only while its
+ * tunnel is up. The rule is the firmware's own (`Updater::update`); the phone's door-picking
+ * (`firmwareDoor`) is what hands an http address only to a charm whose tunnel is up.
  */
 export function updateMessage(url: string, sha256: Uint8Array): Uint8Array {
-  const address = addressBytes(
-    url,
-    "https",
-    "An update address",
-    "An update needs an https address",
-  )
+  const address = addressBytes(url, ["https", "http"], "An update address")
   if (sha256.length !== CHARM_SHA256_BYTES)
     throw new Error("An update carries the image's 32-byte SHA-256")
   return control(CharmOp.Update).str(address).raw(sha256).done()

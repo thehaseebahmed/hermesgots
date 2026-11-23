@@ -13,7 +13,12 @@
  * `getCharmFirmwareFetchToken`'s own business in hermes.ts, as the streamed read is
  * `getCharmFirmwareImage`'s.
  */
-import { CHARM_MAX_URL_BYTES, encoder } from "./charm-protocol.ts"
+import {
+  CHARM_MAX_URL_BYTES,
+  CharmLinkState,
+  encoder,
+  type CharmNetworkReport,
+} from "./charm-protocol.ts"
 import { schemeOf } from "./host-url.ts"
 
 /** The image route's tokened variant under the plugin prefix, as the phone already knows it. */
@@ -47,4 +52,28 @@ export function firmwareFetchUrl(base: string, token: string): string {
   if (encoder.encode(url).length > CHARM_MAX_URL_BYTES)
     throw new Error(`An update address is at most ${CHARM_MAX_URL_BYTES} bytes`)
   return url
+}
+
+/** Which way the image goes onto the charm: its own fetch, or the transfer this phone drives. */
+export type FirmwareDoor = "fetch" | "transfer"
+
+/**
+ * The door the update walks, from the charm's own report of its links and the voice hand-over this
+ * phone keeps. The door is the address the hand-over wrote the charm: https is the host's own
+ * address, which the charm fetches over the Wi-Fi it joins; http is its tailnet address, which the
+ * charm takes only while its tunnel is up — so the scheme the reader keeps and the one the address
+ * carries must name the same door, since a scheme switched since the last sync is a preference the
+ * charm has not been handed, not a door it holds. No address kept, no door.
+ *
+ * Pure, like the rest of this module: the ask the report comes from is `charmNetwork`'s, the one
+ * the settings page already makes.
+ */
+export function firmwareDoor(
+  report: CharmNetworkReport,
+  scheme: "http" | "https",
+  address: string | undefined,
+): FirmwareDoor {
+  if (!address || schemeOf(address) !== scheme) return "transfer"
+  const link = scheme === "https" ? report.wifi.state : report.tailnet.state
+  return link === CharmLinkState.Online ? "fetch" : "transfer"
 }
