@@ -16,6 +16,7 @@ import {
   type CharmBatterySeen,
 } from "./charm-protocol.ts"
 import { compareVersions } from "./version-compare.ts"
+import { formatBytes } from "./attachment-caps.ts"
 export interface CharmSeen {
   name: string
   syncedAt?: number
@@ -265,6 +266,31 @@ export const FIRMWARE_SENT = "Sent. The charm is restarting on it."
 
 /** The row's word when the charm never answered on the build it was sent. */
 export const FIRMWARE_NOT_BACK = "The charm didn't come back on the new build."
+
+/**
+ * Under every failure the update screen draws: the sure path. The over-the-air hop is the one this
+ * app made sound, but a charm that keeps cancelling — the builds already in the field, whose
+ * refusals name no position — can always be flashed by cable, and a reader who has met the same
+ * failure twice should not meet it a third time.
+ */
+export const FIRMWARE_CABLE =
+  "If the charm keeps cancelling, flash it by cable instead — that always works."
+
+/** The Downloading step's line: the bytes that have landed, of the whole the length named. */
+export function downloadWords(progress: { received: number; total: number }): string {
+  if (progress.total <= 0) return formatBytes(progress.received)
+  const percent = Math.round((progress.received / progress.total) * 100)
+  return `${percent}% of ${formatBytes(progress.total)}`
+}
+
+/** The update screen's end: the build the charm came back on, as its own answer read it. */
+export function firmwareDoneWords(version: string): string {
+  return `The charm runs ${version}.`
+}
+
+/** The update screen's line when the host's read names no image to send. */
+export const FIRMWARE_NOT_PUBLISHED =
+  "This host isn't offering a firmware image. A file can still be sent."
 
 /** Why a download failed, as the charm's code means it. */
 export function updateReasonWords(reason: number): string {

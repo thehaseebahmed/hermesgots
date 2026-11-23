@@ -12,6 +12,7 @@ import {
   type ReactNode,
 } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
+import { useNavigate } from "react-router"
 import {
   BatteryMediumIcon,
   BellRingIcon,
@@ -62,7 +63,6 @@ import {
   charmUpdateStatus,
   forgetCharm,
   forgetCharmWifi,
-  hostForActiveBot,
   pairCharm,
   PUBLISHED_FIRMWARE,
   charmVoice,
@@ -73,23 +73,20 @@ import {
   setCharmPet,
   setCharmTailnetKey,
   setCharmVoice,
-  setCharmWifi,
   setCharmWake,
+  setCharmWifi,
   syncToCharm,
-  uploadCharmFirmware,
   useCharmReport,
   usePairedCharm,
   type CharmScheme,
 } from "@/lib/charm"
 import {
   CHARM_QUIET_PRESETS,
-  CHARM_SLOT_BYTES,
   CharmCode,
   CharmUpdateState,
   charmKept,
   charmWakeOf,
   codeWords,
-  hexOf,
   petSettingsFrom,
   type CharmBatterySeen,
   type CharmNetworkReport,
@@ -98,35 +95,29 @@ import {
   type CharmWake,
   type CharmWifiRecord,
 } from "@/lib/charm-protocol"
-import { type FirmwareProgress, versionAfterReboot } from "@/lib/charm-firmware"
 import type { SyncProgress } from "@/lib/charm-sync"
 import { serverConfig } from "@/lib/connection"
 import { getActiveProfile, listProfiles } from "@/lib/db"
 import type { PluginServer } from "@/lib/features"
-import { getCharmFirmwareImage, getTalkAddress, getTalkToken } from "@/lib/hermes"
+import { getTalkAddress, getTalkToken } from "@/lib/hermes"
 import { useHostRecord } from "@/lib/host-record"
 import {
   BATTERY_ASK,
   batteryWords,
   doubleTapSubtitle,
-  FILE_TOO_BIG,
   FIRMWARE_CAPTION,
-  FIRMWARE_NOT_BACK,
-  FIRMWARE_SENT,
   firmwareOffers,
   firmwareWords,
   LINK_DOWN_WORDS,
   LINK_MARKS,
   linksDown,
   petSubtitle,
-  PUBLISHED_CHANGED,
   QUIET_TITLE,
   quietWords,
   readFailed,
   readValue,
   tailnetWords,
   updateWords,
-  updateProgressWords,
   VOICE_HTTP,
   VOICE_HTTPS,
   VOICE_HELD_ASKING,
@@ -149,10 +140,6 @@ import { useBotLabels } from "@/lib/use-bot-labels"
 const message = (error: unknown) =>
   error instanceof Error && error.message ? error.message : "Something went wrong"
 
-/** The SHA-256 of bytes this phone holds, as the lowercase hex the link takes. */
-const sha256Of = async (image: Uint8Array) =>
-  hexOf(new Uint8Array(await crypto.subtle.digest("SHA-256", image as unknown as BufferSource)))
-
 /** How often a running firmware download is asked where it has got to. */
 const UPDATE_POLL_MS = 2_000
 
@@ -160,7 +147,8 @@ const UPDATE_POLL_MS = 2_000
  * The Network section's radio, as the page reaches it: every call is one control ask over the
  * charm's own link. It is an interface so a test can draw the section's answers without a radio.
  * What the host says about the published firmware is not the charm's answer, and is not here: it is
- * that host's own record, read by the row below.
+ * that host's own record, read by the row below. The upload is not here either — it is the update
+ * screen's, which is where the whole send now runs.
  */
 export interface CharmNetworkApi {
   status(): Promise<CharmNetworkReport>
@@ -170,12 +158,6 @@ export interface CharmNetworkApi {
   updateStatus(): Promise<CharmUpdateStatus>
   /** Which build the charm runs; null for a firmware too old to have the ask. */
   version(): Promise<string | null>
-  /** One image over the charm's link, drawing where the phone has got to. */
-  upload(
-    image: Uint8Array,
-    sha256Hex: string,
-    onProgress?: (progress: FirmwareProgress) => void,
-  ): Promise<FirmwareProgress>
 }
 
 /** The one implementation: the phone's own functions. */
@@ -186,7 +168,6 @@ const RADIO: CharmNetworkApi = {
   saveTailnet: setCharmTailnetKey,
   updateStatus: charmUpdateStatus,
   version: charmFirmwareVersion,
-  upload: uploadCharmFirmware,
 }
 
 /** One form's body in a group: the card's own fill, under the row that heads it. */
@@ -278,10 +259,10 @@ function LinkIcon({ link }: { link: CharmLink }) {
 
 /**
  * Settings → Charm's network: the Wi-Fi the charm joins, the tailnet key it joins with, and the
- * firmware it runs — the version it says it has beside the one the package publishes, an update when
- * that one is newer, and a file the reader picks. Every row draws the charm's own answer rather than
- * what was sent, and a passphrase or a key clears the moment the write has gone: neither is ever
- * drawn again, and neither is kept on this phone.
+ * firmware it runs — the version it says it has beside the one the package publishes, and the two
+ * doors onto the update's own screen: an update when the published one is newer, a file otherwise.
+ * Every row draws the charm's own answer rather than what was sent, and a passphrase or a key clears
+ * the moment the write has gone: neither is ever drawn again, and neither is kept on this phone.
  */
 export function CharmNetwork({
   api = RADIO,
@@ -323,11 +304,9 @@ export function CharmNetwork({
   const published = seen?.state === "published" ? seen.firmware : undefined
   /** The host's own sentence where its read was refused, which is not a charmed-nothing-said. */
   const checkSaid = seen?.state === "refused" ? seen.said : null
-  const [progress, setProgress] = useState<FirmwareProgress | null>(null)
-  const [busy, setBusy] = useState<"wifi" | "forget" | "tailnet" | "update" | null>(null)
+  const [busy, setBusy] = useState<"wifi" | "forget" | "tailnet" | null>(null)
   const [said, setSaid] = useState<string | null>(null)
   const [watching, setWatching] = useState(false)
-  const file = useRef<HTMLInputElement | null>(null)
 
   /** The two versions the row compares: the charm's own, and the package's as its host reads it. */
   const versions = { running, published: published?.version, answered: firmware.settled }
@@ -442,84 +421,11 @@ export function CharmNetwork({
   }
 
   /**
-   * The version again once the charm is back: a change is what says the new build booted, and a
-   * charm that never answered on it is the row's to say rather than a success left standing. The
-   * build compared against is the one the row read: null where it read none, so any answer is the
-   * change — a charm that could not say its build before is not a charm that came back on one.
+   * The Firmware row's two doors onto the update's own screen, which is where the send runs now:
+   * the steps, the bars, the version read back and the failure's words all live there, and leaving
+   * this section is what stops the status poll below — the upload holds the charm's link alone.
    */
-  const readBack = async () => {
-    const was = running.state === "says" ? running.version : null
-    const { changed, version } = await versionAfterReboot(() => api.version(), was)
-    if (changed) setRunning(version === null ? { state: "too-old" } : { state: "says", version })
-    return changed
-  }
-
-  /**
-   * One image over the link, however the phone came by it, and the versions read again once the
-   * charm is back. `load` is where the bytes and the hash come from: the host's package, or a file
-   * the reader picked.
-   */
-  const send = async (load: () => Promise<{ image: Uint8Array; sha256Hex: string }>) => {
-    // The status poll holds a link of its own every two seconds; an upload needs the charm to itself.
-    setWatching(false)
-    setBusy("update")
-    setSaid(null)
-    setProgress(null)
-    try {
-      const { image, sha256Hex } = await load()
-      setProgress({ sent: 0, total: image.length })
-      await api.upload(image, sha256Hex, setProgress)
-      setSaid(FIRMWARE_SENT)
-      if (await readBack()) return
-      // The charm never answered on the new build: the offer is read again too, since a merge may
-      // have published another version while this one was being tried.
-      setSaid(FIRMWARE_NOT_BACK)
-      await firmware.reload()
-    } catch (error) {
-      setSaid(message(error))
-    } finally {
-      setBusy(null)
-      setProgress(null)
-    }
-  }
-
-  /**
-   * The published image, checked against the version this row read: the bytes and their hash are
-   * what the link would send, so a package that moved between the two reads is refused here rather
-   * than by the charm after the whole image.
-   */
-  const sendPublished = () =>
-    send(async () => {
-      if (!published) throw new Error("The published firmware is not known yet.")
-      const image = await getCharmFirmwareImage(hostForActiveBot(profile))
-      const sha256Hex = await sha256Of(image)
-      if (image.length === published.size && sha256Hex === published.sha256)
-        return { image, sha256Hex }
-      // The tag may have moved between the row's read and this one: the version it names now is
-      // the one these bytes have to match before anything goes over the link.
-      const again = await firmware.reload()
-      const fresh = again?.state === "published" ? again.firmware : undefined
-      if (fresh && fresh.size === image.length && fresh.sha256 === sha256Hex)
-        return { image, sha256Hex }
-      throw new Error(PUBLISHED_CHANGED)
-    })
-
-  /**
-   * A file from the phone: its bytes, and the SHA-256 computed here over them — that hash is the
-   * whole trust anchor, so what the charm checks is what this phone read. A file too big for a slot
-   * is refused before a byte goes over the link: the slot the host publishes where it names one, this
-   * phone's own constant otherwise.
-   */
-  const sendFile = async (picked: File) => {
-    if (picked.size > (published?.slot ?? CHARM_SLOT_BYTES)) {
-      setSaid(FILE_TOO_BIG)
-      return
-    }
-    await send(async () => {
-      const image = new Uint8Array(await picked.arrayBuffer())
-      return { image, sha256Hex: await sha256Of(image) }
-    })
-  }
+  const navigate = useNavigate()
 
   return (
     <>
@@ -617,11 +523,9 @@ export function CharmNetwork({
                 id="charm-update-start"
                 type="button"
                 disabled={busy !== null}
-                onClick={() => void sendPublished()}
+                onClick={() => navigate("/settings/charm-firmware")}
               >
-                {busy === "update" && progress
-                  ? updateProgressWords(progress)
-                  : `Update to ${published.version}`}
+                Update to {published.version}
               </Button>
             )}
             <Button
@@ -629,26 +533,11 @@ export function CharmNetwork({
               type="button"
               variant="ghost"
               disabled={busy !== null}
-              onClick={() => file.current?.click()}
+              onClick={() => navigate("/settings/charm-firmware?file=1")}
             >
               <FileUpIcon />
               Choose a file…
             </Button>
-            {/* A web file input is the whole Android picker: the WebView opens the system's own. */}
-            <input
-              ref={file}
-              id="charm-update-file"
-              type="file"
-              className="hidden"
-              onChange={(event) => {
-                const input = event.currentTarget
-                const picked = input.files?.[0]
-                // Cleared so the same file picked again fires `change`: a second try at a failed
-                // upload is exactly when a reader picks the file they just picked.
-                input.value = ""
-                if (picked) void sendFile(picked)
-              }}
-            />
           </div>
         </div>
       </Group>
