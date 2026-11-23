@@ -204,13 +204,15 @@ sequenceDiagram
    (red today: the Voice row is drawn and `#charm-talk-setup` exists) and its hint, with
    `test-charm-talk.mjs` accepting http and https and refusing both non-schemes. Done.
 
-7. **Sync hands the voice over.** After pet, and only when the record holds no address, holds a bare
-   record, holds one whose scheme is not the switch's, or holds a token minted for another bot, the
-   session asks the host for its addresses **without a token** (`GET talk?mint=0`), picks the address
-   the scheme names, and only then mints and writes — so a host that names no tailnet address costs
-   the charm no token. A host that names none, a failed host ask and a charm's refusal are each
-   reported in the page's line, with the charm's own code for a refusal, and never fail the bots sync;
-   only a kept write is recorded, so the next sync offers it again. Goals: G2. After: 2, 3, 5, 6.
+7. **Sync hands the voice over.** The page asks the host for its addresses **without a token**
+   (`GET talk?mint=0`) and decides with the host's own answer: a hand-over is owed when the address it
+   holds is not the one the scheme names now, the token on it was minted for another bot (both ids are
+   the host's; a profile id never meets a bot id), or the charm's own read-back says it holds nothing.
+   The mint runs at the frame's own write, after the bots, the pictures and the pet, so the token the
+   charm holds is revoked for one write rather than for a sync. A host that names no tailnet address, a
+   failed ask, a host that will not mint and a charm's refusal are each reported in the page's line —
+   with the charm's own code — and never fail the bots sync; only a kept write is recorded. Goals: G2.
+   After: 2, 3, 5, 6.
    Layers: Sync, the record, Settings → Charm, the page's words, the host's hand-over route. Check:
    `cd app && pnpm test` — `test-charm-sync.mjs` "a sync that owes voice writes it last, and a refusal
    there leaves the sync a success" and "a sync with no voice to hand over writes no talk op", with
