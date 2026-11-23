@@ -31,7 +31,7 @@ from typing import Any, Dict, List
 from unittest import mock
 
 import plugin
-from plugin import charm_audio, chats, link, store, talk, talk_tokens
+from plugin import charm_audio, chats, link, store, talk, talk_hosts, talk_tokens
 from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
 from plugin.tests.test_charm_audio import stub_av, tone, wav_of, wire as packets_of
 from plugin.tests.test_dictation import hermes
@@ -149,7 +149,13 @@ class Routes(unittest.TestCase):
         self.store = store.db_path(self.home)
 
     def call(
-        self, path: str = "/talk", method: str = "GET", query=None, headers=None, body: bytes = b""
+        self,
+        path: str = "/talk",
+        method: str = "GET",
+        query=None,
+        headers=None,
+        body: bytes = b"",
+        sockname=None,
     ):
         request = FakeWeb.Request()
         request.match_info = {}
@@ -158,6 +164,11 @@ class Routes(unittest.TestCase):
         request.path = plugin.PREFIX + path
         request.query = query or {}
         request.body = body
+        # The socket a route reads its own port off, when the case is about the tailnet address: a
+        # request that arrived over a real one has it, and the fake has only what it is given.
+        request.transport = types.SimpleNamespace(
+            get_extra_info=lambda name: sockname if name == "sockname" else None
+        )
         return asyncio.run(route(self.app, plugin.PREFIX + path, method)(request))
 
     def request(self, path: str):
@@ -189,6 +200,40 @@ class TalkRoute(Routes):
             talk_tokens.verify(self.store, BOT, payload["token"]),
             "the token the app is handed is the one the charm's turn will be judged by",
         )
+
+    def test_the_app_is_answered_the_tailnet_address_beside_the_public_one(self) -> None:
+        """The charm's address is this host's own: plain http, on the tailnet, on the port it holds."""
+        linked(self.home)
+        with mock.patch.object(talk_hosts, "tailnet_ip", return_value="100.64.0.9"):
+            answer = self.call(sockname=("127.0.0.1", 8642))
+        self.assertEqual(answer["status"], 200, answer)
+        payload = answer["payload"]
+        self.assertEqual(
+            payload["tailnet"],
+            "http://100.64.0.9:8642/api/plugins/gots",
+            "the scheme the charm speaks, the address only it can reach, the port this server holds",
+        )
+        self.assertEqual(
+            payload["host"],
+            "https://bot.example/api/plugins/gots",
+            "the app's own address is unchanged beside it",
+        )
+
+    def test_a_host_that_cannot_name_its_tailnet_address_omits_it(self) -> None:
+        """No 100.64 address is no answer: the key is absent rather than guessed at."""
+        linked(self.home)
+        with mock.patch.object(talk_hosts, "tailnet_ip", return_value=None):
+            answer = self.call(sockname=("127.0.0.1", 8642))
+        self.assertEqual(answer["status"], 200, answer)
+        self.assertNotIn("tailnet", answer["payload"])
+        self.assertIn("host", answer["payload"], "the app still gets the address it dialled")
+
+    def test_an_address_this_request_cannot_say_the_port_of_is_not_answered(self) -> None:
+        """A request with no socket of its own says no address at all, rather than port 443's."""
+        linked(self.home)
+        with mock.patch.object(talk_hosts, "tailnet_ip", return_value="100.64.0.9"):
+            answer = self.call()
+        self.assertNotIn("tailnet", answer["payload"])
 
     def test_the_token_is_kept_as_its_hash_and_answered_once(self) -> None:
         linked(self.home)
