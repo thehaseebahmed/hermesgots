@@ -38,6 +38,7 @@ import { readStt, type SttValue } from "@/lib/stt-settings"
 import { readGeneral } from "@/lib/general-settings"
 import { readLlmProviders, type LlmEndpointBody } from "@/lib/llm-providers"
 import { readFirmwareImage, type FirmwareImageProgress } from "@/lib/firmware-image"
+import { firmwareFetchToken } from "@/lib/firmware-fetch"
 import {
   parseMcpAccess,
   readMcpAccessOffer,
@@ -2941,6 +2942,25 @@ export async function getCharmFirmwareImage(
     signal: AbortSignal.timeout(FIRMWARE_IMAGE_TIMEOUT_MS),
   })
   return readFirmwareImage(response, onProgress)
+}
+
+/**
+ * The charm's fetch door, in the phone's hand: a short-lived token the host mints for one image
+ * fetch (`plugin/fetch_tokens.py`) — its own mint kind, so asking costs nothing of the token the
+ * charm's voice holds. This is the only answer in which this app ever sees the token: it goes
+ * straight into the URL the update hands the charm (`firmwareFetchUrl`), and the image's bytes stay
+ * pinned by the SHA-256 the phone sends with it either way.
+ */
+export async function getCharmFirmwareFetchToken(
+  config: HermesConfig,
+  signal?: AbortSignal,
+): Promise<string> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/charm/firmware/fetch`, {
+    method: "POST",
+    headers: headers(config),
+    signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
+  })
+  return firmwareFetchToken(await response.json())
 }
 
 /**
