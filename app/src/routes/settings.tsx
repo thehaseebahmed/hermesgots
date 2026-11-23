@@ -5,6 +5,7 @@ import { useTheme } from "next-themes"
 import { Navigate, useParams, useSearchParams } from "react-router"
 import {
   ActivityIcon,
+  BugIcon,
   AudioLinesIcon,
   BellIcon,
   BellRingIcon,
@@ -47,6 +48,7 @@ import type { BotSub } from "@/lib/bot-subs"
 import { botPageOf, botPath, botTabOf, botTabPath, type BotPage, type BotTab } from "@/lib/bot-tabs"
 import { botSubject, botSubOf, botSubPath } from "@/lib/bot-subs"
 import { Banner } from "@/components/banner"
+import { CharmDebugScreen } from "@/components/charm-debug"
 import { NetworkLogScreen } from "@/components/network-log"
 import { DeveloperOnly } from "@/components/developer-only"
 import { Bot } from "@/components/bot"
@@ -139,6 +141,7 @@ const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
   lab: { title: "Labs", render: () => <LabSettings /> },
   developer: { title: "Developer", render: () => developerOnly(<DeveloperSettings />) },
   network: { title: "Network log", render: () => developerOnly(<NetworkLogScreen />) },
+  "debug-charm": { title: "Debug Charm", render: () => developerOnly(<CharmDebugScreen />) },
 }
 
 /** A section behind Developer's switch: Developer itself, and what it holds. */
@@ -792,6 +795,12 @@ export function DeveloperSettings() {
             }
           />
         )}
+        <Row
+          to="debug-charm"
+          icon={BugIcon}
+          title="Debug Charm"
+          subtitle="What the last press refused at, and the charm's own log"
+        />
         {botsByLabel(bots ?? [], labels).map((bot) => (
           <LiveRow key={bot.id} bot={bot} title={labelOf(labels, bot)} />
         ))}

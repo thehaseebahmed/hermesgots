@@ -372,3 +372,26 @@ export const VOICE_NO_TAILNET =
 
 /** The Voice row's own end to a refusal: the firmware first, then the sync that offers it again. */
 export const VOICE_TAIL = ", then sync again"
+
+/**
+ * The doors a press's microphone can refuse at, as the firmware's own `talk::MicExit` numbers them:
+ * the band says "No mic" for all of them, which is one word where there are ten, and the Debug Charm
+ * page is where the number becomes a sentence. Kept in step with `docs/PROTOCOL.md`'s table.
+ */
+const MIC_EXIT_WORDS: Record<number, string> = {
+  1: "The last turn was busy",
+  2: "No island in PSRAM",
+  3: "No codec memory",
+  4: "No encoder",
+  5: "No decoder",
+  6: "No capture buffer",
+  7: "No queue",
+  8: "No playback buffer",
+  9: "The microphone refused",
+  10: "No capture task",
+}
+
+/** The door a press's microphone refused at, in the reader's words. */
+export function micExitWords(exit: number) {
+  return MIC_EXIT_WORDS[exit] ?? "A door this app does not know"
+}
