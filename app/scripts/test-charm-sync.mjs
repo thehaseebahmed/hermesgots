@@ -193,6 +193,7 @@ function fakeCharm({
   corruptPoseOnce = false,
   refusePet = false,
   refuseWake = false,
+  refuseTalk = false,
   battery = { percent: 85, charging: false },
 } = {}) {
   const held = new Map() // crc -> len
@@ -207,6 +208,8 @@ function fakeCharm({
   let posePending = null
   let poseDamaged = !corruptPoseOnce
   const ops = []
+  // Every address the talk hand-over carried, in the order the session wrote them.
+  const talked = []
   const answer = (code, op, needImage = false) =>
     parseStatus(new DataView(new Uint8Array([1, code, op, needImage ? 1 : 0]).buffer))
   return {
@@ -216,6 +219,7 @@ function fakeCharm({
     pet,
     wake,
     poses,
+    talked,
     get shown() {
       return shown
     },
@@ -289,6 +293,11 @@ function fakeCharm({
           return answer(0, op)
         }
         if (op === 6) return answer(0, op)
+        if (op === CharmOp.Talk) {
+          const urlLen = m[2]
+          talked.push(new TextDecoder().decode(m.subarray(3, 3 + urlLen)))
+          return answer(refuseTalk ? CharmCode.BadMessage : 0, op)
+        }
         if (op === 7) {
           const idLen = m[7]
           pet.enabled = m[2] === 1
@@ -383,6 +392,37 @@ test("a bot's two pictures go over, and one the charm holds does not", async () 
   assert.equal(second.sent, 2, "an answer about either picture sends the pair")
   assert.ok(charm.held.has(crc32(nova.image)))
   assert.ok(charm.held.has(crc32(nova.waiting)))
+})
+
+test("a sync that owes voice writes it last, and a refusal there leaves the sync a success", async () => {
+  const charm = fakeCharm()
+  const nova = { id: "nova", name: "Nova", accent: 1, image: picture(1), waiting: picture(5) }
+  const talk = {
+    address: "https://bot.example/api/plugins/gots",
+    mint: async () => "tk_5d0d9a7c4b1e",
+  }
+
+  const done = await syncCharm(charm.link, [nova], undefined, { talk })
+  assert.equal(done.voice, "sent", "the charm kept it")
+  assert.deepEqual(charm.talked, [talk.address], "the address the scheme picked is what went")
+  assert.equal(charm.ops.at(-1), CharmOp.Talk, "voice is the session's last op")
+
+  // A charm that will not keep it is still a sync that landed its bots: the page says so, and the
+  // next sync offers the address again.
+  const refusing = fakeCharm({ refuseTalk: true })
+  const second = await syncCharm(refusing.link, [nova], undefined, { talk })
+  assert.equal(second.voice, "refused")
+  assert.equal(second.voiceCode, CharmCode.BadMessage, "the charm's own word, for the page to draw")
+  assert.equal(second.done, 1, "the bots are on the charm")
+  assert.equal(refusing.shown.length, 1)
+})
+
+test("a sync with no voice to hand over writes no talk op", async () => {
+  const charm = fakeCharm()
+  const nova = { id: "nova", name: "Nova", accent: 1, image: picture(1), waiting: picture(5) }
+  const done = await syncCharm(charm.link, [nova])
+  assert.equal(done.voice, undefined)
+  assert.ok(!charm.ops.includes(CharmOp.Talk), "nothing is asked of a charm that owes nothing")
 })
 
 test("a bot with no waiting picture announces one picture", async () => {

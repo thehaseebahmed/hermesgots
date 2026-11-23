@@ -12,9 +12,9 @@ import { MemoryRouter, Route, Routes } from "react-router"
 
 import {
   CharmNetwork,
-  CharmVoice,
+  CharmVoiceHeld,
+  CharmVoiceScheme,
   type CharmNetworkApi,
-  type CharmVoiceApi,
 } from "@/components/settings/charm"
 import { useCharmReport } from "@/lib/charm"
 import {
@@ -833,281 +833,63 @@ test("the battery row asks when tapped, and draws a failed ask in the charm's wo
   )
 })
 
-/** The token the host mints: 32 bytes, hex, as `talk_tokens.mint` answers one. */
-const TOKEN = "9c".repeat(32)
-/** The address a charm can call: the host on the tailnet, in the plain http its client speaks. */
-const TAILNET = "http://100.64.0.2:8642/api/plugins/gots"
-/** The address the host answers with: where this phone dialled it. */
-const APP_HOST = "https://bot.example/api/plugins/gots"
-
-/** The Voice row's two reaches, over a stand-in: one ask of the host, one write to the charm. */
-function voice(overrides: Partial<CharmVoiceApi> = {}): CharmVoiceApi {
-  return {
-    offer: async () => ({ host: TAILNET, bot: "4f1c2a90", token: TOKEN }),
-    send: async () => CharmCode.Ok,
-    ...overrides,
-  }
-}
+/** The switch itself: one per row, and the only one this component draws. */
+const voiceSwitch = () => find('[role="switch"]')
 
 /**
- * A bot's host as the Voice row asks it: its feature list, and its one hand-over answer. Every ask
- * is recorded with the key it carried, since the hand-over is the app's key and no other.
+ * The switch beside Sync: the reader's pick of the route the charm's turns take. It is kept on this
+ * phone and handed over by the next sync, so moving it opens no radio and writes nothing to the charm.
  */
-function serveTalk(name: string, features: string[], answer: unknown) {
-  const profile = connection(name)
-  const asked: { path: string; authorization: string | null }[] = []
-  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(String(input instanceof Request ? input.url : input))
-    asked.push({
-      path: url.pathname + url.search,
-      authorization: new Headers(init?.headers).get("Authorization"),
-    })
-    if (url.pathname.endsWith("/plugins/gots/info"))
-      return json({ name: "gots", version: "1.0.0", features })
-    if (url.pathname.endsWith("/plugins/gots/talk")) return json(answer)
-    return json({ error: { message: "no route" } }, 404)
-  }) as unknown as typeof fetch
-  return { profile, asked: () => asked }
-}
-
-test("the voice row is offered only where the host advertises talk", async () => {
-  // A host older than the route has nothing to mint, so the row is not drawn at all.
-  const older = serveTalk("talk-absent", ["charm_firmware"], {})
-  await mount(<CharmVoice profile={older.profile} api={voice()} />, async () => {
+test("the voice switch is https by default, and its off position says what http needs", async () => {
+  await mount(<CharmVoiceScheme scheme="https" onChange={() => {}} />, async () => {
     await settle()
-    assert.ok(!text().includes("Voice"), "no row for a host with no token to mint")
-    assert.ok(!find("#charm-talk-address"), "and no address field either")
+    assert.ok(text().includes("Voice over https"), "the row names the setting")
+    assert.ok(text().includes("clock"), "https says what it needs of the charm")
+    assert.ok(voiceSwitch()?.hasAttribute("data-checked"), "https is where it sits by default")
   })
 
-  const newer = serveTalk("talk-offered", ["charm_firmware", "talk"], {})
-  await mount(<CharmVoice profile={newer.profile} api={voice()} />, async () => {
-    await until(
-      async () => text().includes("Voice"),
-      "the row, once the host says it has the route",
-    )
-    assert.ok(text().includes("Hold B on your charm"), "and what the setting is for")
+  await mount(<CharmVoiceScheme scheme="http" onChange={() => {}} />, async () => {
+    await settle()
+    assert.ok(text().includes("tailnet"), "the other position says what it needs of the tailnet")
+    assert.ok(!text().includes("clock"), "and claims no clock it will not use")
+    assert.ok(voiceSwitch()?.hasAttribute("data-unchecked"), "and the switch sits off")
   })
 })
 
-test("a write that never landed keeps the token, so one drop costs no second mint", async () => {
-  // The link, not the address: the charm is out of reach before the write can be answered.
-  const api = voice({
-    offer: async () => ({ host: TAILNET, bot: "4f1c2a90", token: TOKEN }),
-    send: async () => {
-      throw new Error("The charm went out of reach")
-    },
-  })
-  await mount(<CharmVoice api={api} profile={connection("talk-drop")} />, async () => {
-    await until(async () => Boolean(find("#charm-talk-setup")), "the row's controls")
-    await click(find("#charm-talk-setup"))
-    await settle()
-    await click(find("#charm-talk-send"))
-    await settle()
-    assert.ok(text().includes("The charm went out of reach"), "the row says why nothing landed")
-    assert.equal(
-      (find("#charm-talk-send") as HTMLButtonElement | null)?.disabled,
-      false,
-      "the token is still this phone's to hand over: setting up again would revoke the charm's",
-    )
-    // And a second Send is the same token, not a fresh ask of the host.
-    await click(find("#charm-talk-send"))
-    await settle()
-    assert.ok(text().includes("The charm went out of reach"), "the same write, tried again")
-  })
-})
-
-test("an answer that did not keep it leaves the token here, and the row says so", async () => {
-  const cases = [
-    ["busy", CharmCode.Busy],
-    ["full", CharmCode.StorageFailed],
-  ] as const
-  for (const [why, code] of cases) {
-    const wrote: string[] = []
-    const api = voice({
-      send: async (_address, token) => {
-        wrote.push(token)
-        return code
-      },
-    })
-    await mount(<CharmVoice api={api} profile={connection(`talk-keep-${why}`)} />, async () => {
-      await until(async () => Boolean(find("#charm-talk-setup")), "the row's controls")
-      await click(find("#charm-talk-setup"))
-      await settle()
-      await click(find("#charm-talk-send"))
-      await settle()
-      assert.ok(text().includes(codeWords(code)), "the charm's answer is what the row draws")
-      assert.ok(
-        text().includes("still on this phone"),
-        "and that the token is still here to send: the charm never kept it",
-      )
-      assert.equal(
-        (find("#charm-talk-send") as HTMLButtonElement | null)?.disabled,
-        false,
-        "Send is not spent, since nothing was kept",
-      )
-      // The same token goes again rather than a new one minted over the token the charm never kept.
-      await click(find("#charm-talk-send"))
-      await settle()
-      assert.deepEqual(wrote, [TOKEN, TOKEN], "the retry is the same token")
-    })
-  }
-})
-
-test("a charm already set up is offered Set up again, and told what that spends", async () => {
+test("moving the voice switch keeps the pick", async () => {
+  const picks: CharmScheme[] = []
   await mount(
-    <CharmVoice talk api={voice()} profile={connection("talk-set-up")} />,
+    <CharmVoiceScheme scheme="https" onChange={(next) => picks.push(next)} />,
     async () => {
-      await until(async () => Boolean(find("#charm-talk-setup")), "the row's controls")
-      assert.equal(
-        (find("#charm-talk-setup") as HTMLElement | null)?.textContent?.trim(),
-        "Set up again",
-        "the charm holds a token, so the row says what the tap does to it",
-      )
-      assert.ok(
-        text().includes("mints a new token and revokes the one your charm holds"),
-        "and that setting up again spends it",
-      )
+      await settle()
+      await click(voiceSwitch())
+      assert.deepEqual(picks, ["http"], "off is the tailnet's plain http")
     },
   )
-  await mount(<CharmVoice api={voice()} profile={connection("talk-never")} />, async () => {
-    await until(async () => Boolean(find("#charm-talk-setup")), "the row's controls")
-    assert.equal(
-      (find("#charm-talk-setup") as HTMLElement | null)?.textContent?.trim(),
-      "Set up",
-      "the first set-up is the plain one",
-    )
-    assert.ok(!text().includes("revokes"), "there is nothing of the charm's to spend yet")
+})
+
+test("a charm mid-sync cannot have its scheme moved under the sync", async () => {
+  await mount(<CharmVoiceScheme scheme="https" disabled onChange={() => {}} />, async () => {
+    await settle()
+    assert.ok(voiceSwitch()?.hasAttribute("data-disabled"), "the switch is shut while the page is busy")
   })
 })
 
-test("the voice row asks the host for the address and the token, with the app's key", async () => {
-  const host = serveTalk("talk-handover", ["talk"], {
-    object: "gots.talk",
-    host: APP_HOST,
-    bot: "4f1c2a90",
-    token: TOKEN,
-  })
-  // The row's own reaches, not a stand-in's: this is the ask the app really makes.
-  await mount(<CharmVoice profile={host.profile} />, async () => {
-    await until(async () => Boolean(find("#charm-talk-setup")), "the row's controls")
-    await click(find("#charm-talk-setup"))
+test("the charm's own answer about its voice is drawn as the charm said it", async () => {
+  await mount(<CharmVoiceHeld address="https://h.example/api/plugins/gots" />, async () => {
     await settle()
-    assert.equal(
-      (find("#charm-talk-address") as HTMLInputElement | null)?.value,
-      APP_HOST,
-      "the address the host answered is filled in, and editable",
-    )
-    const asked = host.asked().find((one) => one.path.endsWith("/plugins/gots/talk"))
-    assert.ok(asked, "the hand-over route was asked")
-    assert.equal(
-      asked.authorization,
-      `Bearer ${host.profile.apiKey}`,
-      "with the app's key, as every plugin route is",
-    )
-    assert.ok(!text().includes(TOKEN), "the token is held for the write, not drawn on the page")
+    assert.ok(text().includes("Your charm holds"), "the row names whose answer it is")
+    assert.ok(text().includes("https://h.example/api"), "the address the charm says it kept")
   })
-})
 
-test("Set up fills the address in, and Send writes what the reader left", async () => {
-  const wrote: [string, string][] = []
-  const api = voice({
-    send: async (address, token) => {
-      wrote.push([address, token])
-      return CharmCode.Ok
-    },
-  })
-  await mount(<CharmVoice api={api} profile={connection("talk-writes")} />, async () => {
-    await until(async () => Boolean(find("#charm-talk-setup")), "the row's controls")
-    assert.equal(
-      (find("#charm-talk-send") as HTMLButtonElement | null)?.disabled,
-      true,
-      "Send waits on the host's answer",
-    )
-    await click(find("#charm-talk-setup"))
+  await mount(<CharmVoiceHeld address={null} />, async () => {
     await settle()
-    assert.equal((find("#charm-talk-address") as HTMLInputElement | null)?.value, TAILNET)
-    await click(find("#charm-talk-send"))
-    await settle()
-    assert.deepEqual(wrote, [[TAILNET, TOKEN]], "the address and the minted token, as one write")
-    assert.ok(text().includes("Sent to your charm."), "and the row says it went")
-    assert.ok(!text().includes(TOKEN), "nothing draws it")
-    assert.ok(
-      !JSON.stringify({ ...localStorage }).includes(TOKEN),
-      "and nothing keeps it on the phone after the write",
-    )
-    assert.equal(
-      (find("#charm-talk-send") as HTMLButtonElement | null)?.disabled,
-      true,
-      "a second Send would write nothing: a new token is the host's to mint",
-    )
+    assert.ok(text().includes("Nothing yet"), "a charm holding none says so")
   })
-})
 
-test("an address the charm could not call is refused in words, and nothing is written", async () => {
-  const wrote: string[] = []
-  const api = voice({
-    offer: async () => ({ host: APP_HOST, bot: "4f1c2a90", token: TOKEN }),
-    send: async (address) => {
-      wrote.push(address)
-      return CharmCode.Ok
-    },
-  })
-  await mount(<CharmVoice api={api} profile={connection("talk-https")} />, async () => {
-    await until(async () => Boolean(find("#charm-talk-setup")), "the row's controls")
-    await click(find("#charm-talk-setup"))
+  // A firmware older than the ask cannot answer at all, and that is not the same as an empty answer.
+  await mount(<CharmVoiceHeld failed />, async () => {
     await settle()
-    // The host answers the address this phone dialled: https, which the charm does not speak.
-    await click(find("#charm-talk-send"))
-    await settle()
-    assert.deepEqual(wrote, [], "nothing went over the link")
-    assert.ok(text().includes("plain http"), "the row says what the charm speaks instead")
-    assert.ok(text().includes("tailnet address"), "and where to find the one it can call")
-    assert.equal(
-      (find("#charm-talk-send") as HTMLButtonElement | null)?.disabled,
-      false,
-      "the token is still held: the reader can fix the address and send again",
-    )
-    // Edited to the address the charm reaches the host at, the same write goes.
-    await type(find("#charm-talk-address"), TAILNET)
-    await click(find("#charm-talk-send"))
-    await settle()
-    assert.deepEqual(wrote, [TAILNET], "the address the reader left is the one written")
-  })
-})
-
-test("a plaintext charm's keep is said in the charm's own words, and the token in the hint", async () => {
-  // 11 on the wire: the charm kept the address and the token, and warns that the chip gives them away.
-  const api = voice({ send: async () => CharmCode.KeptReadable })
-  await mount(<CharmVoice api={api} profile={connection("talk-readable")} />, async () => {
-    await until(async () => Boolean(find("#charm-talk-setup")), "the row's controls")
-    await click(find("#charm-talk-setup"))
-    await settle()
-    // The row prefill is the host's answer here, so send what the charm can call.
-    await type(find("#charm-talk-address"), TAILNET)
-    await click(find("#charm-talk-send"))
-    await settle()
-    assert.ok(
-      text().includes(codeWords(CharmCode.KeptReadable)),
-      "code 11 is the charm's own sentence, not a second one for this row",
-    )
-    assert.ok(text().includes("read it off the chip"), "and it is not glossed")
-    // What is *the token's* about it is the row's hint, said once for the row rather than once more
-    // for one code: a charm whose flash isn't sealed lets anyone holding it read the token off it.
-    assert.ok(text().includes("read the token off the chip"), "the hint names the token")
-  })
-})
-
-test("a charm that does not speak the op is named, and not blamed on the sync", async () => {
-  // An app may land before the firmware that speaks Talk: the row sends the reader to the update.
-  const api = voice({ send: async () => CharmCode.BadMessage })
-  await mount(<CharmVoice api={api} profile={connection("talk-old-firmware")} />, async () => {
-    await until(async () => Boolean(find("#charm-talk-setup")), "the row's controls")
-    await click(find("#charm-talk-setup"))
-    await settle()
-    await type(find("#charm-talk-address"), TAILNET)
-    await click(find("#charm-talk-send"))
-    await settle()
-    assert.ok(text().includes("older than the app"), "the charm's firmware is what needs updating")
-    assert.ok(!text().includes("didn't understand the sync"), "not the sync's refusal")
+    assert.ok(text().includes("can't say"), "the ask that did not land is the row's own word")
   })
 })

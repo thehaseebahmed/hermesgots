@@ -12,15 +12,17 @@ import {
   CharmCode,
   CharmOp,
   codeWords,
+  parseTalkState,
   talkFrame,
   updateMessage,
 } from "../src/lib/charm-protocol.ts"
 import { refusalWords, TALK_SENT } from "../src/lib/charm-words.ts"
 import {
-  TALK_FEATURE,
   talkMessage,
   talkOffer,
   talkProblem,
+  voiceAddress,
+  voiceOwed,
   talkRoute,
   talkWords,
 } from "../src/lib/talk.ts"
@@ -34,7 +36,6 @@ const HOST = "https://bot.example/api/plugins/gots"
 const encoder = new TextEncoder()
 
 test("the voice row fetches the host, keeps the token it minted, and writes both", () => {
-  assert.equal(TALK_FEATURE, "talk", "the feature the row is offered by")
   // The ask: the plugin's own route, on the address the app already talks to this host on.
   assert.equal(talkRoute("https://bot.example/v1"), `${HOST}/talk`)
   assert.equal(
@@ -88,32 +89,29 @@ test("the row says what the charm answered, in the charm's own words", () => {
   assert.doesNotMatch(codeWords(4242), /sync/, "and an unknown code is the charm's own, not a sync's")
 })
 
-test("an answer that did not keep it says the token is still this phone's to send", () => {
-  // Busy and StorageFailed both leave the secret where it was: the row has the only copy the
-  // reader can still hand over, so it says so rather than drawing a refusal that sounds final.
+test("a refusal names the charm and the sync, not a button that is gone", () => {
+  // There is no Send to press any more: the token came from a mint and was never this phone's to
+  // hold, so the repair a refusal can name is the next sync.
   for (const code of [CharmCode.Busy, CharmCode.StorageFailed]) {
-    assert.match(
-      talkWords(code),
-      /still on this phone/,
-      "a charm that never kept it leaves the token with the phone",
-    )
-    assert.match(talkWords(code), /send it again/, "and Send is the way it goes")
+    assert.doesNotMatch(talkWords(code), /still on this phone/, "the token was never the phone's")
+    assert.doesNotMatch(talkWords(code), /send it again/, "nor is there a send to press")
   }
-  // A keep spends the token, so there is nothing left to say about it.
-  assert.doesNotMatch(talkWords(CharmCode.Ok), /still on this phone/)
-  assert.doesNotMatch(talkWords(CharmCode.KeptReadable), /still on this phone/)
+  // The one code whose repair is the reader's own — an older firmware — hands them the next step.
+  assert.match(talkWords(CharmCode.BadMessage), /then sync again/)
+  // A keep needs no repair at all.
+  assert.equal(talkWords(CharmCode.Ok), TALK_SENT)
 })
 
 test("a charm that refuses the op is named, and told apart from the sync's refusal", () => {
   assert.ok(
     talkWords(CharmCode.BadMessage).startsWith(
-      refusalWords(CharmCode.BadMessage, ", then set voice up again"),
+      refusalWords(CharmCode.BadMessage, ", then sync again"),
     ),
     "the row does not keep a second sentence for the same fact",
   )
   assert.match(talkWords(CharmCode.BadMessage), /older than the app/, "the firmware is what to update")
   assert.match(talkWords(CharmCode.BadMessage), /update it/)
-  assert.match(talkWords(CharmCode.BadMessage), /set voice up again/, "and the row is set up after")
+  assert.match(talkWords(CharmCode.BadMessage), /sync again/, "and a sync is what offers it again")
   assert.doesNotMatch(
     talkWords(CharmCode.BadMessage),
     /didn't understand the sync/,
@@ -124,11 +122,12 @@ test("a charm that refuses the op is named, and told apart from the sync's refus
 })
 
 test("the charm is given an address it can reach, and a frame within its bounds", () => {
-  // The host answers with the address the phone dialled — https, public, and not the charm's.
-  assert.ok(talkProblem(HOST), "the https address the app uses is not one the charm can call")
-  assert.match(talkProblem(HOST) ?? "", /plain http/)
-  assert.equal(talkProblem("   "), "Your charm needs the address it can reach.")
-  assert.equal(talkProblem("bot.example/api"), "Your charm needs the address it can reach.")
+  // Both schemes are the charm's now: the host's own https address, and the tailnet's plain http.
+  assert.equal(talkProblem(HOST), null, "the address the app uses is one the charm can call")
+  assert.equal(talkProblem("https://h.example:8443/api/plugins/gots"), null)
+  assert.match(talkProblem("   ") ?? "", /needs the address/)
+  assert.match(talkProblem("bot.example/api") ?? "", /needs the address/)
+  assert.match(talkProblem("ftp://h/api") ?? "", /needs the address/, "a scheme it cannot speak")
   const long = `http://100.64.0.2/${"a".repeat(CHARM_MAX_URL_BYTES)}`
   assert.match(talkProblem(long) ?? "", /longer than the charm/)
   // The sentence the row shows is built from the bound the frame enforces, so moving the bound
@@ -161,14 +160,80 @@ test("the charm is given an address it can reach, and a frame within its bounds"
   )
 })
 
+test("the charm's answer about what it holds is the address, and never the token", () => {
+  const answer = (extra) =>
+    new DataView(new Uint8Array([1, 0, CharmOp.TalkState, 0, extra.length, ...extra]).buffer)
+
+  assert.deepEqual(parseTalkState(answer([0])), { address: null }, "a charm holding none")
+  const url = encoder.encode("https://h.example/api/plugins/gots")
+  assert.deepEqual(parseTalkState(answer([url.length, ...url])), {
+    address: "https://h.example/api/plugins/gots",
+  })
+  // A length that disagrees with the frame is no answer at all, rather than a cut address.
+  assert.equal(parseTalkState(answer([url.length + 1, ...url])), null)
+  // And an answer to another op is somebody else's.
+  const other = new DataView(new Uint8Array([1, 0, CharmOp.Battery, 0, 1, 0]).buffer)
+  assert.equal(parseTalkState(other), null)
+})
+
+test("a sync owes voice when the address or the bot differs, or the charm says it holds nothing", () => {
+  const address = "https://h.example/api/plugins/gots"
+  assert.equal(voiceOwed(undefined, address, BOT), true, "no record of a hand-over")
+  assert.equal(voiceOwed({ talk: true }, address, BOT), true, "a bare record from before addresses")
+  assert.equal(
+    voiceOwed({ talk: address, talkBot: BOT }, address, BOT),
+    false,
+    "this address, for this bot, is held",
+  )
+  assert.equal(
+    voiceOwed({ talk: "http://100.64.0.2:8642/api", talkBot: BOT }, address, BOT),
+    true,
+    "another address is not",
+  )
+  // A token is one bot's, and both ids here are the host's own: a profile id never meets a bot id.
+  assert.equal(
+    voiceOwed({ talk: address, talkBot: "another" }, address, BOT),
+    true,
+    "the token on the charm is another bot's",
+  )
+  assert.equal(
+    voiceOwed({ talk: address, talkBot: BOT }, address, BOT, null),
+    true,
+    "the charm itself says it holds nothing",
+  )
+  assert.equal(
+    voiceOwed({ talk: address, talkBot: BOT }, address, BOT, address),
+    false,
+    "and the charm agreeing with the record owes nothing",
+  )
+})
+
+test("the scheme picks the address the host answered with", () => {
+  const both = {
+    host: "https://bot.example/api/plugins/gots",
+    tailnet: "http://100.64.0.2:8642/api/plugins/gots",
+    bot: "4f1c2a90",
+    token: TOKEN,
+  }
+  assert.equal(voiceAddress(both, "https"), both.host, "https is the address the phone dials")
+  assert.equal(voiceAddress(both, "http"), both.tailnet, "http is the host's own tailnet address")
+  assert.equal(
+    voiceAddress({ host: both.host, bot: both.bot, token: both.token }, "http"),
+    null,
+    "a host that named no tailnet address names none, rather than borrowing the https one",
+  )
+})
+
 test("each address op takes the scheme the charm speaks for it", () => {
-  // The charm fetches an image itself, so that address is https; and it calls its host from the
-  // tailnet's plain http client, so a talk address is http. One rule reads both, and refuses the
-  // scheme the op cannot use rather than encoding a URL the charm would fail to open.
+  // The charm fetches an image itself, so that address is https; and a turn's is either, because the
+  // firmware has a door for each. One rule reads them, and refuses the scheme the op cannot use
+  // rather than encoding a URL the charm would fail to open.
+  assert.doesNotThrow(() => talkFrame("https://bot.example/api", TOKEN), "a turn may be https")
+  assert.doesNotThrow(() => talkFrame("http://100.64.0.2:8642/api/plugins/gots", TOKEN))
   assert.throws(
-    () => talkFrame("https://bot.example/api", TOKEN),
-    /must be http:\/\//,
-    "an https address is not one the charm's client can call",
+    () => talkFrame("ftp://bot.example/api", TOKEN),
+    /must be http:\/\/ or https:\/\//,
+    "and nothing else",
   )
   assert.throws(
     () => updateMessage("http://h/image.bin", new Uint8Array(32)),

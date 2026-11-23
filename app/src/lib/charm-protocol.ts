@@ -52,6 +52,8 @@ export const CharmOp = {
   // Voice: the address the charm's turns are posted to and the token it proves itself with, handed
   // over by the app. One write, and the charm keeps both.
   Talk: 0x40,
+  // What the charm holds: the address, never the token.
+  TalkState: 0x41,
 } as const
 
 type CharmOp = (typeof CharmOp)[keyof typeof CharmOp]
@@ -652,20 +654,23 @@ export function tailnetMessage(key: string): Uint8Array {
 
 /**
  * A URL as an address op carries it: the bytes of it, refused here for a scheme the charm cannot use
- * or a length past what it holds, and never encoded twice by two ops that disagree. The two want
- * opposite schemes — the charm fetches an image over https, and calls its host in the plain http its
- * tailnet client speaks — so the scheme is the caller's, the bound is this module's, and `needs` is
- * an op's own wording for the refusal where it has been said one way already.
+ * or a length past what it holds, and never encoded twice by two ops that disagree. The ops want
+ * different schemes — the charm fetches an image over https only, and a turn's address is either,
+ * because it has a door for each — so the schemes are the caller's, the bound is this module's, and
+ * `needs` is an op's own wording for the refusal where it has been said one way already.
  */
 function addressBytes(
   url: string,
-  scheme: "http" | "https",
+  scheme: "http" | "https" | readonly ("http" | "https")[],
   what: string,
-  needs = `${what} must be ${scheme}://`,
+  needs = `${what} must be ${(Array.isArray(scheme) ? scheme : [scheme])
+    .map((one) => `${one}://`)
+    .join(" or ")}`,
 ) {
   const bytes = encoder.encode(url)
   if (bytes.length === 0) throw new Error(`${what} is at least 1 byte`)
-  if (schemeOf(url) !== scheme) throw new Error(needs)
+  const allowed = Array.isArray(scheme) ? scheme : [scheme]
+  if (!allowed.includes(schemeOf(url) as "http" | "https")) throw new Error(needs)
   if (bytes.length > CHARM_MAX_URL_BYTES)
     throw new Error(`${what} is at most ${CHARM_MAX_URL_BYTES} bytes`)
   return bytes
@@ -674,19 +679,39 @@ function addressBytes(
 /**
  * The address the charm's turns are posted to and the token it presents with them, as
  * `[urlLen u8][url][tokenLen u8][token]`. The charm appends `/talk/v1/turn` to the address, keeps
- * both, and never answers either back — `Forget` sweeps them with its other secrets.
+ * both, and answers the address back only (`talkStateMessage`) — the token is never answered —
+ * `Forget` sweeps them with its other secrets.
  *
  * The bounds are the firmware's own: `CHARM_MAX_URL_BYTES` for the address and
  * `CHARM_MAX_TOKEN_BYTES` for the token. Which addresses the charm can actually call is `talk.ts`'s
  * rule, since only it knows what the reader was told; here one is only refused.
  */
 export function talkFrame(address: string, token: string): Uint8Array {
-  const url = addressBytes(address, "http", "A talk address")
+  const url = addressBytes(address, ["http", "https"], "A talk address")
   const secret = encoder.encode(token)
   if (secret.length === 0) throw new Error("A talk token is at least 1 byte")
   if (secret.length > CHARM_MAX_TOKEN_BYTES)
     throw new Error(`A talk token is at most ${CHARM_MAX_TOKEN_BYTES} bytes`)
   return control(CharmOp.Talk).str(url).str(secret).done()
+}
+
+/**
+ * The ask whose answer is what the charm holds: `[extraLen u8][urlLen u8][url]`, the address never
+ * the token. `null` is a charm that holds none — and a charm older than the op refuses it outright,
+ * which the page draws as a firmware without the answer rather than as an empty one.
+ */
+export const talkStateMessage = () => control(CharmOp.TalkState).done()
+
+export function parseTalkState(view: DataView): { address: string | null } | null {
+  if (view.byteLength < 6) return null
+  if (view.getUint8(2) !== CharmOp.TalkState) return null
+  const extra = view.getUint8(4)
+  if (extra < 1 || view.byteLength < 5 + extra) return null
+  const urlLen = view.getUint8(5)
+  if (extra !== 1 + urlLen) return null
+  if (urlLen === 0) return { address: null }
+  const bytes = new Uint8Array(view.buffer, view.byteOffset + 6, urlLen)
+  return { address: decoder.decode(bytes) }
 }
 
 /**

@@ -14,25 +14,23 @@
  *
  * Pure, so the row's rules are tested with no radio and no host (`scripts/test-charm-talk.mjs`).
  */
-import { CHARM_MAX_URL_BYTES, CharmCode, charmKept, encoder, talkFrame } from "./charm-protocol.ts"
+import { CHARM_MAX_URL_BYTES, CharmCode, encoder, talkFrame } from "./charm-protocol.ts"
+import type { CharmScheme } from "./charm.ts"
 import {
   TALK_NEEDS_ADDRESS,
-  TALK_NEEDS_HTTP,
   TALK_SENT,
-  TALK_STILL_HELD,
   TALK_TOO_LONG,
   VOICE_TAIL,
   refusalWords,
 } from "./charm-words.ts"
 import { pluginRoot, schemeOf } from "./host-url.ts"
 
-/** The route's own name in the plugin's feature list: a host older than it has no Voice row. */
-export const TALK_FEATURE = "talk"
-
 /** What the host answers the app's one ask with (`GET talk` in `plugin/__init__.py`). */
 export interface TalkOffer {
   /** Where the charm's turns go, which the charm appends `/talk/v1/turn` to. */
   host: string
+  /** The host's own tailnet address, plain http, when it can name one: the `http` scheme's address. */
+  tailnet?: string
   /** The bot the token was minted for, as the id the charm knows it by. */
   bot: string
   /** The one copy of the token this axis of the world ever sees in the clear. */
@@ -48,16 +46,31 @@ export const talkRoute = (baseUrl: string) => `${pluginRoot(baseUrl)}/talk`
  * that cannot prove itself.
  */
 export function talkOffer(body: unknown): TalkOffer {
-  const held = body as { host?: unknown; bot?: unknown; token?: unknown } | null
+  const held = body as { host?: unknown; tailnet?: unknown; bot?: unknown; token?: unknown } | null
+  if (typeof held?.token !== "string" || held.token === "")
+    throw new Error("The host's answer about your charm's voice was unreadable.")
+  return { ...talkAddresses(body), token: held.token }
+}
+
+/**
+ * The two addresses in a host's answer, and the bot they were minted for, with no token: the shape
+ * `?mint=0` answers, so an app can tell whether it has an address before it spends a token.
+ */
+export function talkAddresses(body: unknown): Omit<TalkOffer, "token"> {
+  const held = body as { host?: unknown; tailnet?: unknown; bot?: unknown } | null
   if (
     typeof held?.host !== "string" ||
     held.host.trim() === "" ||
     typeof held.bot !== "string" ||
-    typeof held.token !== "string" ||
-    held.token === ""
+    (held.tailnet !== undefined &&
+      (typeof held.tailnet !== "string" || held.tailnet.trim() === ""))
   )
     throw new Error("The host's answer about your charm's voice was unreadable.")
-  return { host: held.host, bot: held.bot, token: held.token }
+  return {
+    host: held.host,
+    bot: held.bot,
+    ...(held.tailnet === undefined ? {} : { tailnet: held.tailnet as string }),
+  }
 }
 
 /** The address as the frame carries it: trimmed, and without a slash the charm would double. */
@@ -65,16 +78,14 @@ export const talkAddress = (address: string) => address.trim().replace(/\/+$/, "
 
 /**
  * Why this address is not one the charm can be given, in the reader's words, or null for one it can.
- * The host answers the address the app dialled — https, on a public name — and the charm reaches the
- * host on the tailnet in plain http, so an https answer is a starting point rather than an address.
- * The scheme is read by the one rule `host-url.ts` holds, and the bound is the frame's own.
+ * Both schemes are the charm's now — https over its own Wi-Fi with a certificate, plain http over the
+ * tailnet — so the scheme is read to refuse what is neither, and the bound is the frame's own.
  */
 export function talkProblem(address: string): string | null {
   const trimmed = address.trim()
   if (trimmed === "") return TALK_NEEDS_ADDRESS
   const scheme = schemeOf(trimmed)
-  if (scheme === "https") return TALK_NEEDS_HTTP
-  if (scheme !== "http") return TALK_NEEDS_ADDRESS
+  if (scheme !== "http" && scheme !== "https") return TALK_NEEDS_ADDRESS
   if (encoder.encode(talkAddress(trimmed)).length > CHARM_MAX_URL_BYTES) return TALK_TOO_LONG
   return null
 }
@@ -98,6 +109,41 @@ export function talkMessage(address: string, token: string): Uint8Array {
  */
 export function talkWords(code: number): string {
   if (code === CharmCode.Ok) return TALK_SENT
-  const words = refusalWords(code, VOICE_TAIL)
-  return charmKept(code) ? words : `${words} ${TALK_STILL_HELD}`
+  // The charm's own sentence, and the sync that offers it again: the token is not this phone's to
+  // send, and there is no row left to send it from.
+  return refusalWords(code, VOICE_TAIL)
+}
+
+/**
+ * Whether this sync owes the charm a hand-over: the address it holds is not the one the scheme names
+ * now, the token on it was minted for another bot, or the charm itself says it holds nothing while
+ * this phone's record says otherwise. The address and the bot are the host's answer, so the two ids
+ * compared are both the host's — a profile id and a bot id are different namespaces and never meet.
+ */
+export function voiceOwed(
+  record: { talk?: boolean | string; talkBot?: string } | null | undefined,
+  address: string,
+  bot: string,
+  held?: string | null,
+): boolean {
+  const kept = record?.talk
+  // No address, or a record from before addresses were kept: the charm holds nothing this phone can
+  // vouch for.
+  if (typeof kept !== "string") return true
+  if (kept !== address || record?.talkBot !== bot) return true
+  // The charm's own answer, when the page has read one: a charm that says it holds nothing is owed a
+  // hand-over however sure the record is — a swept secret or a reflash leaves exactly that.
+  return held !== undefined && held !== kept
+}
+
+/**
+ * The address a host's answer names for `scheme`: its own public address for https, its tailnet
+ * address for plain http — and null when it did not name a tailnet one, which is a sync that says so
+ * rather than one that hands the charm an address it cannot dial.
+ */
+export function voiceAddress(
+  offer: { host: string; tailnet?: string },
+  scheme: CharmScheme,
+): string | null {
+  return scheme === "https" ? offer.host : (offer.tailnet ?? null)
 }

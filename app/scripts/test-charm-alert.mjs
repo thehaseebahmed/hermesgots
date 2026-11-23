@@ -734,15 +734,33 @@ test("a tailnet key never reaches the paired-charm record", () => {
 })
 
 /**
- * The Voice row's write keeps no part of the token either, and records only that the hand-over
- * happened: the token lives on the charm, and the record is what lets the row say a second set-up
- * would revoke the one the charm is using.
+ * A hand-over the charm refused is not a hand-over: the record is what says nothing is owed, so a
+ * refusal written there would leave a charm the page believes is set up and never offer it again.
  */
-test("a talk token never reaches the paired-charm record", () => {
-  const body = functionText("src/lib/charm.ts", "setCharmTalk")
-  assert.match(body, /talkMessage\(address, token\)/, "the address and the token go into the write")
+test("a refused hand-over moves no record, so the next sync offers it again", () => {
+  const body = functionText("src/lib/charm.ts", "recordCharmTalk")
+  assert.match(body, /voice !== "sent"/, "only a kept write is recorded")
+  assert.match(body, /talkBot/, "and the bot the token was minted for rides beside it")
+})
+
+/**
+ * The voice hand-over keeps the address and never the token: the write happens inside a sync, and the
+ * record is only what says which address the charm holds — the token lives on the charm and nowhere
+ * else, so the sync that carried it keeps nothing of it either.
+ */
+test("a voice hand-over keeps the address and never the token", () => {
+  const body = functionText("src/lib/charm.ts", "recordCharmTalk")
   const records = [...body.matchAll(/write\(\{([^}]*)\}\)/g)].map((match) => `{${match[1]}}`)
-  assert.deepEqual(records, ["{ ...paired, talk: true }"], "the hand-over, and nothing of it")
+  assert.deepEqual(
+    records,
+    ["{ ...paired, talk: address, talkBot: bot }"],
+    "the address and the bot it was minted for, and nothing of the token",
+  )
   assert.doesNotMatch(records[0], /token/, "no part of the token is kept")
   assert.doesNotMatch(body, /console\./, "and it is never logged")
+  assert.doesNotMatch(
+    functionText("src/lib/charm-sync.ts", "syncCharm"),
+    /write\(/,
+    "the sync that carries the token keeps nothing of it",
+  )
 })

@@ -335,22 +335,21 @@ export function refusalWords(code: number, tail = "") {
  * charm's settings read; `talk.ts` holds the rules that read an address and build the frame.
  */
 
-/** The row's line under its title: what holding B does, which is the whole point of the setting. */
-export const VOICE_ASK = "Hold B on your charm and talk to this bot"
-
 /**
- * Under the address field: why the address the host answered is not the address the charm gets, in
- * the reader's own terms. Said once, before they have had to guess at it.
+ * The switch beside Sync: what each of its positions needs of the reader's host and charm.
  */
-export const VOICE_HINT =
-  "Your phone reaches this bot at its own address; your charm needs one it can reach on your tailnet, and calls /talk/v1/turn on it."
+export const VOICE_HTTPS =
+  "Your charm calls your host at the address your phone uses, with the certificate checked against the charm's own roots. It needs the charm's clock, which a sync sets."
 
-/**
- * Under the field for a charm already set up: what the second tap spends. Asking the host again mints
- * a new token and revokes the one the charm holds, so the row says so before the reader taps it.
- */
-export const VOICE_AGAIN =
-  "Setting up again mints a new token and revokes the one your charm holds, so send it again after."
+export const VOICE_HTTP =
+  "Your charm calls your host on your tailnet in plain http. It needs your host to know its tailnet address, and the charm to be on the tailnet."
+
+/** The row under the switch: the charm's own answer about what it holds, never this phone's guess. */
+export const VOICE_HELD_TITLE = "Your charm holds"
+export const VOICE_HELD_PURPOSE = "What the charm says it was handed"
+export const VOICE_HELD_NONE = "Nothing yet — the next sync hands it over"
+export const VOICE_HELD_UNKNOWN = "This charm's firmware can't say"
+export const VOICE_HELD_ASKING = "Asking…"
 
 /**
  * Under the row: a charm keeps the token in its flash, and a flash that isn't sealed gives it away to
@@ -363,22 +362,13 @@ export const VOICE_KEPT =
 /** Nothing was typed: the charm would have nowhere to send a turn. */
 export const TALK_NEEDS_ADDRESS = "Your charm needs the address it can reach."
 
-/** The charm's own call is plain http — the tailnet is the encrypted boundary, not its client. */
-export const TALK_NEEDS_HTTP =
-  "The charm speaks plain http on your tailnet — give it your host's tailnet address, not the https one your phone uses."
-
 /** The firmware's own bound on the address it keeps, built from the constant the frame enforces. */
 export const TALK_TOO_LONG = `That address is longer than the charm holds (${CHARM_MAX_URL_BYTES} bytes at most).`
 
 export const TALK_SENT = "Sent to your charm."
 
-/**
- * After an answer that did not keep it: the token is this phone's still, and the same one can go
- * again. Said only where the charm's answer is not a keep (``charmKept``), since an answer that
- * kept it spends the token and there is nothing left to send.
- */
-export const TALK_STILL_HELD =
-  "The token is still on this phone: send it again once the charm can keep it."
+export const VOICE_NO_TAILNET =
+  "Your bots synced. This host didn't say its tailnet address, so voice stayed as it was — use https, or let your host join a tailnet."
 
-/** The Voice row's own end to a refusal: the firmware first, then this row set up again. */
-export const VOICE_TAIL = ", then set voice up again"
+/** The Voice row's own end to a refusal: the firmware first, then the sync that offers it again. */
+export const VOICE_TAIL = ", then sync again"

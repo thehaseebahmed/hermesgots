@@ -40,9 +40,11 @@ import {
   parseFirmware,
   parseNetworkReport,
   parseStatus,
+  parseTalkState,
   parseUpdateStatus,
   rgb565,
   tailnetMessage,
+  talkStateMessage,
   updateStatusMessage,
   wifiMessage,
   wifiRecord,
@@ -58,7 +60,6 @@ import {
   type CharmWifiRecord,
 } from "./charm-protocol.ts"
 import { type CharmWake, wakeMessage } from "./charm-protocol.ts"
-import { talkMessage } from "./talk.ts"
 import {
   CharmRefused,
   syncCharm,
@@ -83,11 +84,22 @@ export interface PairedCharm {
   /** Whether the charm has a tailnet key. The key itself is the charm's, and is never kept here. */
   tailnet?: boolean
   /**
-   * Whether the charm was handed the address its turns go to and the token it proves itself with.
-   * Neither is kept here — only that the hand-over happened, so the row knows a second set-up would
-   * revoke the token the charm is using.
+   * The address the charm was handed last, or `true` for a record written before this phone kept the
+   * address: the hand-over happened, the address it wrote is unknown. The token is never here — only
+   * the address, so a sync knows whether the charm already holds one and nothing is minted twice.
    */
-  talk?: boolean
+  talk?: boolean | string
+  /**
+   * The bot the token now on the charm was minted for. A token is one bot's (`talk_tokens.mint`), so a
+   * phone that switches bot owes the charm a new one even though the address is unchanged.
+   */
+  talkBot?: string
+  /**
+   * Which scheme the charm's turns are handed over with: https over the charm's own Wi-Fi, where a
+   * certificate is checked against the firmware's roots, or plain http over the tailnet. Absent is
+   * https — the route that needs no tailnet and no typed address.
+   */
+  voice?: CharmScheme
   /** The glass's own settings, as the reader last chose them here. */
   wake?: CharmWake
   /**
@@ -107,6 +119,9 @@ const CHARM_PLUGIN = "Charm"
  * ones that need an action from the reader. A finished run asks for nothing, so it draws no alert.
  */
 export type CharmReason = "question" | "approval"
+
+/** The two schemes a charm's turn can be handed over with: TLS over its own Wi-Fi, or the tailnet. */
+export type CharmScheme = "http" | "https"
 
 interface CharmBridge {
   save(options: { deviceId: string }): Promise<void>
@@ -460,7 +475,9 @@ export async function setCharmWifi(ssid: string, pass: string): Promise<number> 
 /** Makes the charm forget its network. It drops off Wi-Fi, and the record forgets the name. */
 export async function forgetCharmWifi(): Promise<number> {
   const { status } = await askCharm(forgetMessage())
-  if (paired && status.code === CharmCode.Ok) write({ ...paired, wifi: undefined })
+  // The charm's own `Forget` sweeps the talk secret with the Wi-Fi keys and the tailnet's, so this
+  // phone's record of the address goes with the network it was handed over on.
+  if (paired && status.code === CharmCode.Ok) write({ ...paired, wifi: undefined, talk: undefined })
   return status.code
 }
 
@@ -484,16 +501,47 @@ export async function setCharmTailnetKey(key: string): Promise<number> {
 }
 
 /**
- * Hands the charm the address its turns go to and the token it proves itself with. Neither is kept
- * here — not in this phone's store and not beside the paired charm — because the charm is the only
- * place they were ever for: the row holds the token from the host's answer until this write lands,
- * and no longer. Only the hand-over is recorded, since a second set-up revokes the token this one
- * left the charm holding. An address the charm could not call is refused before a link is opened.
+ * Keeps the address a sync's hand-over wrote, once the charm has answered that it kept it. The write
+ * itself is the sync's own voice step; this is the phone's memory of it. The token is nowhere here —
+ * it lives on the charm and nowhere else.
+ *
+ * The answer is handed in rather than assumed: a refusal is a sync that has to offer the address
+ * again, so recording it there would leave a charm the record says is set up and the reader is told
+ * the next sync will try again.
  */
-export async function setCharmTalk(address: string, token: string): Promise<number> {
-  const { status } = await askCharm(talkMessage(address, token))
-  if (paired && charmKept(status.code)) write({ ...paired, talk: true })
-  return status.code
+export function recordCharmTalk(
+  voice: "sent" | "refused" | undefined,
+  address: string,
+  bot: string,
+): void {
+  if (voice !== "sent" || !paired) return
+  write({ ...paired, talk: address, talkBot: bot })
+}
+
+/** The scheme the next sync hands over: the reader's pick, https unless they moved it. */
+export function charmVoice(record: PairedCharm | null | undefined): CharmScheme {
+  return record?.voice === "http" ? "http" : "https"
+}
+
+/**
+ * What the charm itself says it holds: the address it kept, or null for a charm holding none. The
+ * record beside it is what this phone wrote; this is what landed, and a page that draws both cannot
+ * lie about a hand-over that failed.
+ */
+export async function readCharmTalk(): Promise<string | null> {
+  const { status, bytes } = await askCharm(talkStateMessage())
+  if (status.code !== CharmCode.Ok) throw new CharmRefused(status.code)
+  const state = parseTalkState(bytes)
+  if (!state) throw new Error("The charm's voice answer was too short")
+  return state.address
+}
+
+/**
+ * The switch beside Sync. It is this phone's decision and nothing else: no radio is opened and the
+ * charm is told nothing until a sync, which is what hands the address the scheme picks over.
+ */
+export function setCharmVoice(scheme: CharmScheme): void {
+  if (paired) write({ ...paired, voice: scheme })
 }
 
 /** Where the charm's firmware download has got to. */

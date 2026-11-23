@@ -65,17 +65,21 @@ import {
   hostForActiveBot,
   pairCharm,
   PUBLISHED_FIRMWARE,
+  charmVoice,
   readCharmBattery,
+  readCharmTalk,
+  recordCharmTalk,
   sendTestAlert,
   setCharmPet,
   setCharmTailnetKey,
-  setCharmTalk,
+  setCharmVoice,
   setCharmWifi,
   setCharmWake,
   syncToCharm,
   uploadCharmFirmware,
   useCharmReport,
   usePairedCharm,
+  type CharmScheme,
 } from "@/lib/charm"
 import {
   CHARM_QUIET_PRESETS,
@@ -98,8 +102,8 @@ import { type FirmwareProgress, versionAfterReboot } from "@/lib/charm-firmware"
 import type { SyncProgress } from "@/lib/charm-sync"
 import { serverConfig } from "@/lib/connection"
 import { getActiveProfile, listProfiles } from "@/lib/db"
-import { usePluginFeatureOn, type PluginServer } from "@/lib/features"
-import { getCharmFirmwareImage, getTalkToken } from "@/lib/hermes"
+import type { PluginServer } from "@/lib/features"
+import { getCharmFirmwareImage, getTalkAddress, getTalkToken } from "@/lib/hermes"
 import { useHostRecord } from "@/lib/host-record"
 import {
   BATTERY_ASK,
@@ -123,10 +127,14 @@ import {
   tailnetWords,
   updateWords,
   updateProgressWords,
-  VOICE_AGAIN,
-  VOICE_ASK,
-  VOICE_HINT,
-  VOICE_KEPT,
+  VOICE_HTTP,
+  VOICE_HTTPS,
+  VOICE_HELD_ASKING,
+  VOICE_HELD_NONE,
+  VOICE_HELD_PURPOSE,
+  VOICE_HELD_TITLE,
+  VOICE_HELD_UNKNOWN,
+  VOICE_NO_TAILNET,
   wifiWords,
   type CharmLink,
   type CharmRead,
@@ -134,7 +142,7 @@ import {
   type CharmSeen,
 } from "@/lib/charm-words"
 import { quietly } from "@/lib/report"
-import { TALK_FEATURE, talkProblem, talkWords, type TalkOffer } from "@/lib/talk"
+import { talkWords, voiceAddress, voiceOwed } from "@/lib/talk"
 import { tell } from "@/lib/tell"
 import { useBotLabels } from "@/lib/use-bot-labels"
 
@@ -660,154 +668,61 @@ export function CharmNetwork({
 }
 
 /**
- * The Voice row's own reach into the world: one ask of the bot's host, and one control write to the
- * charm. An interface, so the row's states can be drawn without a host or a radio to stand them up.
+ * The scheme the charm reaches its host by: https over the charm's own Wi-Fi with a certificate
+ * checked against the roots the firmware ships, or plain http over the tailnet. The reader's choice
+ * and nothing else: this touches no radio, it is kept on this phone's record of the charm, and the
+ * next sync is what hands the address it picks to the charm.
  */
-export interface CharmVoiceApi {
-  /** The host's answer: the address the charm's turns go to, and the token it minted for it. */
-  offer(server: PluginServer): Promise<TalkOffer>
-  /** The Talk write, and the charm's own word about keeping what it carried. */
-  send(address: string, token: string): Promise<number>
-}
-
-/** The one implementation: the host's route and the phone's radio. */
-const VOICE: CharmVoiceApi = {
-  offer: (server) => getTalkToken(serverConfig(server)),
-  send: setCharmTalk,
+export function CharmVoiceScheme({
+  scheme,
+  disabled,
+  onChange,
+}: {
+  scheme: CharmScheme
+  disabled?: boolean
+  onChange: (scheme: CharmScheme) => void
+}) {
+  const https = scheme === "https"
+  return (
+    <SwitchRow
+      id="charm-voice-https"
+      icon={MicIcon}
+      title="Voice over https"
+      subtitle={https ? VOICE_HTTPS : VOICE_HTTP}
+      checked={https}
+      disabled={Boolean(disabled)}
+      onCheckedChange={(on) => onChange(on ? "https" : "http")}
+    />
+  )
 }
 
 /**
- * Voice: the address the charm's turns are posted to and the token it proves itself with, handed to
- * the charm over its own link. The row is offered only where the host advertises the route — a host
- * older than it has no token to mint — and it is the reader's two taps rather than one, because
- * asking the host mints a new token and revokes the one the charm already holds: a page that fetched
- * on opening would break a charm that was set up yesterday. A charm this phone's record says was set
- * up already says so on the button, and the hint says what that tap spends.
- *
- * The address the host answers with is the one this phone dialled, so the field is prefilled and
- * editable: the charm calls over the tailnet in plain http, and the reader is the one who knows the
- * address it reaches the host at. The token is held here from the host's answer until the charm
- * answers that it kept it (`Ok` or `KeptReadable`), and then not at all — it lives on the charm, and
- * nowhere on this phone. A write that never landed, and an answer that did not keep it, keep it:
- * nothing was spent, and a second mint would revoke the token the charm can still be given.
+ * What the charm itself says it holds, drawn under the switch: its own answer rather than this
+ * phone's record, so a hand-over that failed and one that never ran are the charm's word and not a
+ * guess. A firmware older than the ask cannot answer at all, and the row says that instead.
  */
-export function CharmVoice({
-  api = VOICE,
-  profile,
-  talk,
+export function CharmVoiceHeld({
+  address,
+  failed,
 }: {
-  /** The host and the radio, or a stand-in under test. */
-  api?: CharmVoiceApi
-  /** The bot whose host mints the token: the row exists only where that host advertises it. */
-  profile?: PluginServer
-  /** What this phone's record says of the charm: it was handed an address and a token already. */
-  talk?: boolean
+  /** The charm's answer, or undefined while it is being asked. */
+  address?: string | null
+  /** The ask itself did not land: no radio, or a firmware that has no such op. */
+  failed?: boolean
 }) {
-  const offered = usePluginFeatureOn(profile, TALK_FEATURE)
-  /** The address the charm will be given: what the host answered, until the reader says otherwise. */
-  const [address, setAddress] = useState("")
-  /** The token the host minted, held only until the write that hands it over has an answer. */
-  const [token, setToken] = useState("")
-  const [busy, setBusy] = useState<"setup" | "send" | null>(null)
-  /** The charm's answer, or the reason nothing reached it: the row's one line. */
-  const [said, setSaid] = useState<string | null>(null)
-
-  if (!offered) return null
-
-  /**
-   * The row's one state machine, for both of its taps: busy with the step it is on, the last line
-   * cleared, and then whatever the work said — the charm's answer, or why there is none — in its
-   * place.
-   */
-  const run = async (step: "setup" | "send", work: () => Promise<string | null>) => {
-    setBusy(step)
-    setSaid(null)
-    try {
-      setSaid(await work())
-    } catch (error) {
-      setSaid(message(error))
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  /** The host's one ask: what the address is, and the token this charm will keep. */
-  const setup = () =>
-    run("setup", async () => {
-      const offer = await api.offer(profile)
-      setAddress(offer.host)
-      setToken(offer.token)
-      return null
-    })
-
-  /**
-   * The write. An address the charm could not call is refused here, before any link is opened, and
-   * the token stays where it is so the reader can fix the address and send again. Only an answer
-   * that says the charm kept the secret spends the token: a write that threw may never have reached
-   * it, and a charm that was busy or full never wrote it, so minting another would revoke the one
-   * the charm can still be given.
-   */
-  const send = () => {
-    const problem = talkProblem(address)
-    if (problem) {
-      setSaid(problem)
-      return
-    }
-    return run("send", async () => {
-      const code = await api.send(address, token)
-      // Only an answer that says the charm kept it spends the token: one that is busy or full never
-      // wrote it, and minting another would revoke the one the charm is about to be given.
-      if (charmKept(code)) setToken("")
-      return talkWords(code)
-    })
-  }
-
+  const value = failed
+    ? VOICE_HELD_UNKNOWN
+    : address === undefined
+      ? VOICE_HELD_ASKING
+      : (address ?? VOICE_HELD_NONE)
   return (
-    <>
-      <Group>
-        <div className={headerRowClass}>
-          <MicIcon className="size-5 shrink-0 text-muted-foreground" />
-          <RowText title="Voice" subtitle={VOICE_ASK} />
-        </div>
-        <div className={formRowClass}>
-          <Field
-            id="charm-talk-address"
-            label="Host address"
-            placeholder="http://100.64.0.2:8642/api/plugins/gots"
-            autoCapitalize="none"
-            value={address}
-            disabled={busy !== null}
-            onChange={(event) => setAddress(event.target.value)}
-            hint={talk ? `${VOICE_HINT} ${VOICE_AGAIN}` : VOICE_HINT}
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              id="charm-talk-setup"
-              type="button"
-              variant="ghost"
-              disabled={busy !== null}
-              onClick={() => void setup()}
-            >
-              {busy === "setup" ? "Asking…" : talk ? "Set up again" : "Set up"}
-            </Button>
-            <Button
-              id="charm-talk-send"
-              type="button"
-              disabled={busy !== null || token === ""}
-              onClick={() => void send()}
-            >
-              {busy === "send" ? "Sending…" : "Send"}
-            </Button>
-          </div>
-          {said && <p className="px-1 text-xs text-muted-foreground">{said}</p>}
-        </div>
-      </Group>
-      <Caption>
-        Set up asks your bot&rsquo;s host for this charm&rsquo;s own token; Send hands the address
-        and the token to the charm, which keeps them. This phone keeps no copy of the token.{" "}
-        {VOICE_KEPT}
-      </Caption>
-    </>
+    <ValueRow
+      title={VOICE_HELD_TITLE}
+      purpose={VOICE_HELD_PURPOSE}
+      value={value}
+      muted={Boolean(failed) || !address}
+      disabled
+    />
   )
 }
 
@@ -867,6 +782,9 @@ export function CharmSettings() {
   const [progress, setProgress] = useState<SyncProgress | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const [batteryNote, setBatteryNote] = useState<string | undefined>(undefined)
+  /** What the charm says it holds, and whether the ask itself landed: `undefined` is "being asked". */
+  const [held, setHeld] = useState<string | null | undefined>(undefined)
+  const [heldFailed, setHeldFailed] = useState(false)
   const [forgetting, setForgetting] = useState(false)
   const [picking, setPicking] = useState(false)
   const sending = useRef(false)
@@ -874,6 +792,9 @@ export function CharmSettings() {
   // The glass's own settings as this phone holds them, put back to the charm's defaults where the
   // stored copy says something it could not have chosen.
   const wake = charmWakeOf(charm?.wake)
+  // Which scheme the next sync hands the charm: the reader's, kept on the record, https unless they
+  // moved it.
+  const scheme = charmVoice(charm)
 
   // A change goes at once, in its own connection: a switch that waited for the next sync would look
   // broken for as long as the reader does not sync. The phone's copy is written first, so the switch
@@ -917,6 +838,20 @@ export function CharmSettings() {
       .then(() => setBatteryNote(undefined))
       .catch((error) => setBatteryNote(message(error)))
   }, [deviceId])
+
+  // The charm's own answer about its voice, read when the page opens and again after a sync.
+  const readVoice = useCallback(async () => {
+    try {
+      setHeld(await readCharmTalk())
+      setHeldFailed(false)
+    } catch {
+      setHeldFailed(true)
+    }
+  }, [])
+  useEffect(() => {
+    if (!deviceId) return
+    void readVoice()
+  }, [deviceId, readVoice])
 
   if (!charmAvailable())
     return (
@@ -964,10 +899,45 @@ export function CharmSettings() {
       // Pictures are the character's, so the pet's are drawn from its profile's botId.
       const petBot = sources.find((p) => p.id === settings.petBotId)
       const poses = settings.enabled && petBot ? await charmPoses(petBot.botId) : []
-      const done = await syncToCharm(bots, setProgress, { pet: { settings, poses } })
+      // The voice hand-over, when the host's own answer says this charm holds another address, another
+      // bot's token, or nothing at all. Asked without a token, because a mint revokes the one the charm
+      // holds; the mint itself runs at the frame's write, deep in the sync.
+      let talk: { address: string; bot: string; mint: () => Promise<string> } | undefined
+      let voiceNote: string | undefined
+      if (profile) {
+        try {
+          const addresses = await getTalkAddress(serverConfig(profile))
+          const address = voiceAddress(addresses, scheme)
+          if (address && voiceOwed(charm, address, addresses.bot, held)) {
+            talk = {
+              address,
+              bot: addresses.bot,
+              mint: async () => (await getTalkToken(serverConfig(profile))).token,
+            }
+          } else if (!address && typeof charm?.talk === "string") {
+            // Voice was set up and this scheme cannot be given an address: say so rather than let the
+            // charm keep calling an address the reader has just stopped using.
+            voiceNote = VOICE_NO_TAILNET
+          }
+        } catch (error) {
+          voiceNote = message(error)
+        }
+      }
+      const done = await syncToCharm(bots, setProgress, {
+        pet: { settings, poses },
+        talk: talk ? { address: talk.address, mint: talk.mint } : undefined,
+      })
+      // Only a kept write is recorded: the record is what says nothing is owed, so a refusal written
+      // there would leave a charm the page believes is set up and never offer it again.
+      if (talk) recordCharmTalk(done.voice, talk.address, talk.bot)
       tell.success(done.total === 1 ? "1 bot on your charm" : `${done.total} bots on your charm`)
       if (done.petRefused && settings.enabled)
         tell.info("Your bots synced. This charm's firmware has no pet mode yet.")
+      if (talk && done.voice !== "sent")
+        voiceNote = talkWords(done.voiceCode ?? CharmCode.BadMessage)
+      if (voiceNote) tell.info(voiceNote)
+      // The charm is awake on the other end, and its own answer is the row's truth.
+      if (talk) await readVoice()
       // A sync just spent a connection and the charm is awake on the other end: the battery is
       // cheap to ask now, and the row is one sync fresher for it.
       await readCharmBattery().catch(quietly("reading the charm's battery"))
@@ -1053,6 +1023,12 @@ export function CharmSettings() {
                 }
               />
             </button>
+            <CharmVoiceScheme
+              scheme={scheme}
+              disabled={busy !== null}
+              onChange={setCharmVoice}
+            />
+            <CharmVoiceHeld address={held} failed={heldFailed} />
           </Group>
           <WakingGroup wake={wake} busy={busy !== null} onChange={applyWake} />
           <Group>
@@ -1099,7 +1075,6 @@ export function CharmSettings() {
             read={status}
             refresh={refreshStatus}
           />
-          <CharmVoice profile={profile} talk={charm.talk} />
           <Group>
             <ActionRow
               icon={UnlinkIcon}
