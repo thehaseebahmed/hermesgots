@@ -21,7 +21,11 @@ import { quietly } from "@/lib/report"
 import { registryId } from "@/lib/registry"
 
 import { charmBotId, charmButtons } from "./charm-alert.ts"
-import { type FirmwareProgress, uploadFirmware } from "./charm-firmware.ts"
+import {
+  type CharmRefusal,
+  type FirmwareProgress,
+  uploadFirmware,
+} from "./charm-firmware.ts"
 import { oneAtATime } from "./charm-queue.ts"
 import { readFailed, refusalWords, type CharmRead } from "./charm-words.ts"
 import {
@@ -31,6 +35,7 @@ import {
   CHARM_STATUS,
   CharmCode,
   batteryMessage,
+  busyFill,
   charmKept,
   diagnoseMessage,
   firmwareMessage,
@@ -368,15 +373,15 @@ export async function charmBots(
 interface CharmLink extends CharmTransport {
   /** Writes one control message and answers the notification with the bytes the charm sent. */
   ask(message: Uint8Array): Promise<DataView>
-  /** Whether the charm refused the last data write for buffer room, once per refusal. */
-  refused(): boolean
+  /** The charm's refusal of a data write just made, latched from its Busy notice and read once. */
+  refusal(): CharmRefusal | null
   close(): Promise<void>
 }
 
 async function openTransport(deviceId: string): Promise<CharmLink> {
   let pending: { resolve: (answer: DataView) => void; reject: (e: Error) => void } | null = null
   let dropped = false
-  let refused = false
+  let latched: CharmRefusal | null = null
   await BleClient.connect(deviceId, () => {
     dropped = true
     pending?.reject(new Error("The charm went out of reach"))
@@ -387,14 +392,16 @@ async function openTransport(deviceId: string): Promise<CharmLink> {
     // Already bonded resolves at once; a charm that lost its bond asks for the passkey again.
     await BleClient.createBond(deviceId, { timeout: 60_000 })
     await BleClient.startNotifications(deviceId, CHARM_SERVICE, CHARM_STATUS, (answer) => {
-      // A `Busy` for op 0 is the charm refusing the data write just made, whether or not an ask is
-      // waiting: the upload resends that chunk rather than moving to an offset it would refuse.
+      // A `Busy` for op 0 is the charm refusing the data write just made, whether or not an ask
+      // is waiting. The notice's extra, when it carries one, is the fill's offset — where the
+      // charm is waiting for the image to resume — and a charm from before the fix sends the
+      // four bytes alone, which reads as a fill of null.
       if (
         answer.byteLength >= 3 &&
         answer.getUint8(1) === CharmCode.Busy &&
         answer.getUint8(2) === 0
       )
-        refused = true
+        latched = { fill: busyFill(answer) }
       const waiting = pending
       pending = null
       waiting?.resolve(answer)
@@ -427,9 +434,9 @@ async function openTransport(deviceId: string): Promise<CharmLink> {
     // A sync's answers are a status and nothing more; a network ask's answer carries its own extra.
     control: async (message) => parseStatus(await ask(message)),
     ask,
-    refused() {
-      const was = refused
-      refused = false
+    refusal() {
+      const was = latched
+      latched = null
       return was
     },
     data(chunk) {

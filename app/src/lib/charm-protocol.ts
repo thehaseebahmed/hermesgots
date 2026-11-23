@@ -563,19 +563,27 @@ export function botMessage(index: number, bot: CharmBot): Uint8Array {
     .done()
 }
 
-/** A picture as `data` writes: `[offset u32][bytes]`, each at most `size` bytes long. */
-export function* imageChunks(image: Uint8Array, size: number): Generator<Uint8Array> {
+/**
+ * One `data` write, cut wherever the send position stands: the image's bytes from `at` — the
+ * fill a Busy notice names is an offset of the image, not a boundary of the phone's own
+ * chunking — prefixed with the offset they start at, at most `size` bytes long like every
+ * other.
+ */
+export function chunkAt(image: Uint8Array, at: number, size: number): Uint8Array {
   const room = size - 4
   if (room < 1) throw new Error("Chunks too small")
+  const part = image.subarray(at, Math.min(image.length, at + room))
+  const chunk = new Uint8Array(4 + part.length)
+  new DataView(chunk.buffer).setUint32(0, at, true)
+  chunk.set(part, 4)
+  return chunk
+}
+
+/** A picture as `data` writes: `[offset u32][bytes]`, each at most `size` bytes long. */
+export function* imageChunks(image: Uint8Array, size: number): Generator<Uint8Array> {
   // One chunk at a time: a firmware image is over a megabyte, and a second copy of it held in
   // chunks is what a phone with the image already in memory cannot afford.
-  for (let at = 0; at < image.length; at += room) {
-    const part = image.subarray(at, Math.min(image.length, at + room))
-    const chunk = new Uint8Array(4 + part.length)
-    new DataView(chunk.buffer).setUint32(0, at, true)
-    chunk.set(part, 4)
-    yield chunk
-  }
+  for (let at = 0; at < image.length; at += size - 4) yield chunkAt(image, at, size)
 }
 
 /**
@@ -905,6 +913,18 @@ export function parseUpdateStatus(view: DataView): CharmUpdateStatus | null {
   const extra = view.getUint8(4)
   if (extra < 3 || view.byteLength < 5 + extra) return null
   return { state: view.getUint8(5), percent: view.getUint8(6), reason: view.getUint8(7) }
+}
+
+/**
+ * The fill a Busy notice carries as its extra — `[extraLen u8][fill u32 LE]`, the offset the
+ * charm's updater is waiting for the image to resume at, which the fixed charm sends (the
+ * plan's step 2, `docs/PROTOCOL.md` in hermesgots-charm). Null for the four-byte notice every
+ * charm before the fix sends, which names no position to resume from.
+ */
+export function busyFill(view: DataView): number | null {
+  if (view.byteLength < 9) return null
+  if (view.getUint8(4) !== 4) return null
+  return view.getUint32(5, true)
 }
 
 /**
