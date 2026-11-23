@@ -27,20 +27,24 @@ TAILNET = ipaddress.ip_network("100.64.0.0/10")
 TAIL = "/talk"
 
 
+def _address(value: Any) -> Optional[ipaddress.IPv4Address | ipaddress.IPv6Address]:
+    """The address ``value`` names, or None where it names none this module can read."""
+    try:
+        return ipaddress.ip_address(str(value).strip())
+    except ValueError:
+        return None
+
+
 def _on_loopback(address: Any) -> bool:
     """Whether a socket bound to ``address`` is one only this machine can dial."""
-    try:
-        return ipaddress.ip_address(str(address)).is_loopback
-    except ValueError:
-        return False  # a host name, or nothing the kernel wrote as an address
+    parsed = _address(address)
+    return parsed is not None and parsed.is_loopback
 
 
 def _on_tailnet(address: Any) -> bool:
     """Whether ``address`` is one the tailnet handed out. Anything unparsable is not."""
-    try:
-        return ipaddress.ip_address(str(address).strip()) in TAILNET
-    except ValueError:
-        return False
+    parsed = _address(address)
+    return parsed is not None and parsed in TAILNET
 
 
 def _from_cli() -> Optional[str]:

@@ -18,7 +18,6 @@ import {
 } from "../src/lib/charm-protocol.ts"
 import { refusalWords, TALK_SENT } from "../src/lib/charm-words.ts"
 import {
-  TALK_FEATURE,
   talkMessage,
   talkOffer,
   talkProblem,
@@ -37,7 +36,6 @@ const HOST = "https://bot.example/api/plugins/gots"
 const encoder = new TextEncoder()
 
 test("the voice row fetches the host, keeps the token it minted, and writes both", () => {
-  assert.equal(TALK_FEATURE, "talk", "the feature the row is offered by")
   // The ask: the plugin's own route, on the address the app already talks to this host on.
   assert.equal(talkRoute("https://bot.example/v1"), `${HOST}/talk`)
   assert.equal(

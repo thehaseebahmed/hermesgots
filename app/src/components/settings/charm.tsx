@@ -934,7 +934,7 @@ export function CharmSettings() {
         voiceNote = talkWords(done.voiceCode ?? CharmCode.BadMessage)
       if (voiceNote) tell.info(voiceNote)
       // The charm is awake on the other end, and its own answer is the row's truth.
-      if (talk) await readVoice().catch(quietly("reading what the charm holds"))
+      if (talk) await readVoice()
       // A sync just spent a connection and the charm is awake on the other end: the battery is
       // cheap to ask now, and the row is one sync fresher for it.
       await readCharmBattery().catch(quietly("reading the charm's battery"))

@@ -2945,11 +2945,7 @@ export async function getCharmFirmwareImage(config: HermesConfig): Promise<Uint8
  * caller asks only when the reader has said to set the charm up.
  */
 export async function getTalkToken(config: HermesConfig, signal?: AbortSignal): Promise<TalkOffer> {
-  const response = await request(talkRoute(config.baseUrl), {
-    headers: headers(config),
-    signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
-  })
-  return talkOffer(await response.json())
+  return talkOffer(await askTalk(config, true, signal))
 }
 
 /**
@@ -2961,13 +2957,17 @@ export async function getTalkAddress(
   config: HermesConfig,
   signal?: AbortSignal,
 ): Promise<Omit<TalkOffer, "token">> {
-  const url = `${talkRoute(config.baseUrl)}?mint=0`
+  return talkAddresses(await askTalk(config, false, signal))
+}
+
+/** The one request behind both asks: `mint` is the only word that differs, and the parser. */
+async function askTalk(config: HermesConfig, mint: boolean, signal?: AbortSignal): Promise<unknown> {
+  const url = mint ? talkRoute(config.baseUrl) : `${talkRoute(config.baseUrl)}?mint=0`
   const response = await request(url, {
     headers: headers(config),
     signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
   })
-  const body = (await response.json()) as { host?: unknown; tailnet?: unknown; bot?: unknown }
-  return talkAddresses(body)
+  return response.json()
 }
 
 /** What the plugin's media route answers a mint: where the file can be read, and what it is. */

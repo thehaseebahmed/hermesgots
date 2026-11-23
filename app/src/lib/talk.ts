@@ -26,9 +26,6 @@ import {
 } from "./charm-words.ts"
 import { pluginRoot, schemeOf } from "./host-url.ts"
 
-/** The route's own name in the plugin's feature list: a host older than it has no Voice row. */
-export const TALK_FEATURE = "talk"
-
 /** What the host answers the app's one ask with (`GET talk` in `plugin/__init__.py`). */
 export interface TalkOffer {
   /** Where the charm's turns go, which the charm appends `/talk/v1/turn` to. */

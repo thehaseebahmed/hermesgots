@@ -703,8 +703,8 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                     # older plugin has no route, and the row draws no published version at all.
                     "charm_firmware",
                     # A per-charm talk token and the address the charm's turns go to (`GET talk`),
-                    # minted when the reader sets the Voice row up (talk_tokens.py, the PTT plan).
-                    # Advertised so the row is drawn only where a host can hand both over.
+                    # minted when a sync hands voice over (talk_tokens.py, the PTT plan). Advertised
+                    # as the version gate: a host older than it has no hand-over to ask for.
                     "talk",
                     # How long a Research or Meetings model call may take, per bot (model_timeout.py).
                     "model_timeout",
