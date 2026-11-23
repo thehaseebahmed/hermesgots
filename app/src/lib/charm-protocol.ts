@@ -52,6 +52,9 @@ export const CharmOp = {
   // Voice: the address the charm's turns are posted to and the token it proves itself with, handed
   // over by the app. One write, and the charm keeps both.
   Talk: 0x40,
+  // What the charm holds, so a page draws what is on it rather than what this phone wrote: the
+  // address, never the token. A charm older than the op answers BadMessage.
+  TalkState: 0x41,
 } as const
 
 type CharmOp = (typeof CharmOp)[keyof typeof CharmOp]
@@ -690,6 +693,25 @@ export function talkFrame(address: string, token: string): Uint8Array {
   if (secret.length > CHARM_MAX_TOKEN_BYTES)
     throw new Error(`A talk token is at most ${CHARM_MAX_TOKEN_BYTES} bytes`)
   return control(CharmOp.Talk).str(url).str(secret).done()
+}
+
+/**
+ * The ask whose answer is what the charm holds: `[extraLen u8][urlLen u8][url]`, the address never
+ * the token. `null` is a charm that holds none — and a charm older than the op refuses it outright,
+ * which the page draws as a firmware without the answer rather than as an empty one.
+ */
+export const talkStateMessage = () => control(CharmOp.TalkState).done()
+
+export function parseTalkState(view: DataView): { address: string | null } | null {
+  if (view.byteLength < 6) return null
+  if (view.getUint8(2) !== CharmOp.TalkState) return null
+  const extra = view.getUint8(4)
+  if (extra < 1 || view.byteLength < 5 + extra) return null
+  const urlLen = view.getUint8(5)
+  if (extra !== 1 + urlLen) return null
+  if (urlLen === 0) return { address: null }
+  const bytes = new Uint8Array(view.buffer, view.byteOffset + 6, urlLen)
+  return { address: decoder.decode(bytes) }
 }
 
 /**

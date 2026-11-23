@@ -12,6 +12,7 @@ import { MemoryRouter, Route, Routes } from "react-router"
 
 import {
   CharmNetwork,
+  CharmVoiceHeld,
   CharmVoiceScheme,
   type CharmNetworkApi,
 } from "@/components/settings/charm"
@@ -871,5 +872,24 @@ test("a charm mid-sync cannot have its scheme moved under the sync", async () =>
   await mount(<CharmVoiceScheme scheme="https" disabled onChange={() => {}} />, async () => {
     await settle()
     assert.ok(voiceSwitch()?.hasAttribute("data-disabled"), "the switch is shut while the page is busy")
+  })
+})
+
+test("the charm's own answer about its voice is drawn as the charm said it", async () => {
+  await mount(<CharmVoiceHeld address="https://h.example/api/plugins/gots" />, async () => {
+    await settle()
+    assert.ok(text().includes("Your charm holds"), "the row names whose answer it is")
+    assert.ok(text().includes("https://h.example/api"), "the address the charm says it kept")
+  })
+
+  await mount(<CharmVoiceHeld address={null} />, async () => {
+    await settle()
+    assert.ok(text().includes("Nothing yet"), "a charm holding none says so")
+  })
+
+  // A firmware older than the ask cannot answer at all, and that is not the same as an empty answer.
+  await mount(<CharmVoiceHeld failed />, async () => {
+    await settle()
+    assert.ok(text().includes("can't say"), "the ask that did not land is the row's own word")
   })
 })

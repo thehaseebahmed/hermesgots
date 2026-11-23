@@ -67,6 +67,7 @@ import {
   PUBLISHED_FIRMWARE,
   charmVoice,
   readCharmBattery,
+  readCharmTalk,
   recordCharmTalk,
   sendTestAlert,
   setCharmPet,
@@ -128,6 +129,11 @@ import {
   updateProgressWords,
   VOICE_HTTP,
   VOICE_HTTPS,
+  VOICE_HELD_ASKING,
+  VOICE_HELD_NONE,
+  VOICE_HELD_PURPOSE,
+  VOICE_HELD_TITLE,
+  VOICE_HELD_UNKNOWN,
   VOICE_NO_TAILNET,
   VOICE_NOT_KEPT,
   VOICE_SENT,
@@ -693,6 +699,36 @@ export function CharmVoiceScheme({
 }
 
 /**
+ * What the charm itself says it holds, drawn under the switch: its own answer rather than this
+ * phone's record, so a hand-over that failed and one that never ran are the charm's word and not a
+ * guess. A firmware older than the ask cannot answer at all, and the row says that instead.
+ */
+export function CharmVoiceHeld({
+  address,
+  failed,
+}: {
+  /** The charm's answer, or undefined while it is being asked. */
+  address?: string | null
+  /** The ask itself did not land: no radio, or a firmware that has no such op. */
+  failed?: boolean
+}) {
+  const value = failed
+    ? VOICE_HELD_UNKNOWN
+    : address === undefined
+      ? VOICE_HELD_ASKING
+      : (address ?? VOICE_HELD_NONE)
+  return (
+    <ValueRow
+      title={VOICE_HELD_TITLE}
+      purpose={VOICE_HELD_PURPOSE}
+      value={value}
+      muted={Boolean(failed) || !address}
+      disabled
+    />
+  )
+}
+
+/**
  * The paired section's first row: its name with a mark for each link that is down, and its level as
  * the line beneath — the row's subtitle, as every row in this page's groups keeps its value. Its own
  * component so a test can draw it with props and no radio, as the battery row and the waking group
@@ -748,6 +784,9 @@ export function CharmSettings() {
   const [progress, setProgress] = useState<SyncProgress | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
   const [batteryNote, setBatteryNote] = useState<string | undefined>(undefined)
+  /** What the charm says it holds, and whether the ask itself landed: `undefined` is "being asked". */
+  const [held, setHeld] = useState<string | null | undefined>(undefined)
+  const [heldFailed, setHeldFailed] = useState(false)
   const [forgetting, setForgetting] = useState(false)
   const [picking, setPicking] = useState(false)
   const sending = useRef(false)
@@ -800,6 +839,22 @@ export function CharmSettings() {
     void readCharmBattery()
       .then(() => setBatteryNote(undefined))
       .catch((error) => setBatteryNote(message(error)))
+  }, [deviceId])
+
+  // The charm's own answer about its voice, read when the page opens and again after a sync: what it
+  // holds, or that this firmware cannot say. The record is what this phone wrote; this is what landed.
+  const readVoice = async () => {
+    try {
+      setHeld(await readCharmTalk())
+      setHeldFailed(false)
+    } catch {
+      setHeldFailed(true)
+    }
+  }
+  useEffect(() => {
+    if (!deviceId) return
+    void readVoice()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one read per charm, as the battery's
   }, [deviceId])
 
   if (!charmAvailable())
@@ -870,6 +925,8 @@ export function CharmSettings() {
       if (talk && done.voice !== "sent") voiceNote = VOICE_NOT_KEPT
       if (talk && done.voice === "sent") tell.success(VOICE_SENT)
       if (voiceNote) tell.info(voiceNote)
+      // The charm is awake on the other end, and its own answer is the row's truth.
+      if (talk) await readVoice().catch(quietly("reading what the charm holds"))
       // A sync just spent a connection and the charm is awake on the other end: the battery is
       // cheap to ask now, and the row is one sync fresher for it.
       await readCharmBattery().catch(quietly("reading the charm's battery"))
@@ -960,6 +1017,7 @@ export function CharmSettings() {
               disabled={busy !== null}
               onChange={setCharmVoice}
             />
+            <CharmVoiceHeld address={held} failed={heldFailed} />
           </Group>
           <WakingGroup wake={wake} busy={busy !== null} onChange={applyWake} />
           <Group>

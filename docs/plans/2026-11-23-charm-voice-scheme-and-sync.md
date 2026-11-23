@@ -8,12 +8,13 @@ Two repositories. The firmware steps land in `hermesgots-charm`; the rest in `he
   charm accepts either.
 - **G2** Voice setup is part of Sync. The Voice section is gone from Settings → Charm, and there is no
   separate "set up voice" act.
+- **G3** The reader sees what the charm actually holds, because the charm says so: the page draws the
+  address read back off the charm, not the one this phone wrote.
 
 ## Non-goals
 
 - Rotating or revoking a token from the app beyond what a hand-over does today.
 - Certificate pinning per host.
-- A charm op that reports back which address it holds.
 - Making https work through the tailnet dial: a tailnet-only host stays http.
 - Clearing the record's other stale flag (`tailnet`) on `Forget`; it is the same defect class as the
   voice record but nobody is waiting on it.
@@ -24,6 +25,8 @@ Two repositories. The firmware steps land in `hermesgots-charm`; the rest in `he
 |---|---|---|---|
 | `talk::Address` / `parseAddress` (`src/talk.cpp`) | changed | G1 | `test/test_talk.cpp` |
 | `talk::Why` / `talk::Turn` / `Tick` | changed | G1 | `test/test_talk.cpp` |
+| `talk::Talk::addressReport` / `Op::TalkState` | new | G3 | `test/test_talk.cpp` |
+| Control's dispatch (`src/control.cpp`) | changed | G3 | `pio run` |
 | `talk_board::Board` — the turn's line | changed | G1 | `pio run` |
 | The https line (board, new file beside `talk_board.cpp`) | new | G1 | `pio run` |
 | The loop's turn tick (`src/main.cpp`) | changed | G1 | `pio run` |
@@ -32,6 +35,7 @@ Two repositories. The firmware steps land in `hermesgots-charm`; the rest in `he
 | Plugin turn route (`talk_turn`) | affected | G1 | `plugin/tests/test_talk_route.py` |
 | The host's tailnet address (`plugin/talk_hosts.py`) | new | G1 | `plugin/tests/test_talk_route.py` |
 | The paired charm's record (`app/src/lib/charm.ts`) | changed | G2 | `scripts/test-charm-talk.mjs` |
+| The charm's read-back (`talkStateMessage`, `parseTalkState`) | new | G3 | `scripts/test-charm-talk.mjs` |
 | Voice rules (`app/src/lib/talk.ts`) | changed | G1, G2 | `scripts/test-charm-talk.mjs` |
 | Sync (`app/src/lib/charm-sync.ts`) | changed | G2 | `scripts/test-charm-sync.mjs` |
 | Settings → Charm (`app/src/components/settings/charm.tsx`) | changed | G1, G2 | `scripts/test-charm-settings.tsx` |
@@ -122,6 +126,21 @@ sequenceDiagram
   end
 ```
 
+### F5: the page asks the charm what it holds (new). Test: "the charm's own answer about its voice is drawn as the charm said it"
+
+```mermaid
+sequenceDiagram
+  actor Reader
+  participant Page as Settings → Charm
+  participant Charm as the charm, over BLE
+  Reader->>Page: opens the charm's page
+  Page->>Charm: TalkState
+  Charm-->>Page: the address it kept, or none — and no token
+  rect rgb(255, 245, 200)
+  Page-->>Reader: "Your charm holds" that address, or "Nothing yet"
+  end
+```
+
 ## Steps
 
 1. **Preparatory refactor: the address's scheme is read once.** `parseAddress` reads the scheme at the
@@ -194,6 +213,18 @@ sequenceDiagram
    `test-charm-talk.mjs`'s "a sync owes voice when the charm holds nothing, or the other scheme's
    address" and "the scheme picks the address the host answered with" red first, then green. Done.
 
+8. **The charm says what it holds, and the page draws that.** `TalkState` (`0x41`) answers the address
+   the charm kept — `[urlLen u8][url]`, zero for none, the token never in it — and an older charm
+   answers `BadMessage`. The page reads it when it opens and after a sync, and draws "Your charm
+   holds" with that address, "Nothing yet", or the one word for a firmware that cannot say. Goals: G3.
+   After: 2, 6. Layers: `talk::Talk::addressReport` / `Op::TalkState`, control's dispatch, the charm's
+   read-back, Settings → Charm, the page's words, route contract. Check:
+   `CXX="python3 -m ziglang c++" bash scripts/test-host.sh` — "the held address is read back without
+   its token" red first, then green; `PATH=/opt/data/tmp-home/.platformio/penv/bin:$PATH pio run`
+   builds the board; `cd app && pnpm test` — `test-charm-talk.mjs` "the charm's answer about what it
+   holds is the address, and never the token" and `test-charm-settings.tsx` "the charm's own answer
+   about its voice is drawn as the charm said it" red first, then green. Done.
+
 ## Decisions
 
 - **The reader chooses the scheme, and the charm accepts either.** Made by the user, in the request:
@@ -220,6 +251,10 @@ sequenceDiagram
 - **The token is minted at the voice step, not when the sync opens.** Made by the agent, because a
   mint revokes the token the charm is holding, and the shortest window is the one where the frame is
   already being written.
+- **The charm answers what it holds, and the page draws that rather than the record.** Made by the
+  user, in the request: "include all the breadth items". The address is repeated back and the token
+  never is, because the token is the one thing no op reads out; a firmware without the op is drawn as
+  a firmware that cannot say, not as a charm holding nothing.
 - **Voice is last in the session and never fails the bots sync.** Made by the agent, because bots and
   pet have landed by then, and the next sync repairs what a refusal left undone.
 

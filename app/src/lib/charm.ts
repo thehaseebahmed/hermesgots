@@ -40,9 +40,11 @@ import {
   parseFirmware,
   parseNetworkReport,
   parseStatus,
+  parseTalkState,
   parseUpdateStatus,
   rgb565,
   tailnetMessage,
+  talkStateMessage,
   updateStatusMessage,
   wifiMessage,
   wifiRecord,
@@ -505,6 +507,19 @@ export function recordCharmTalk(address: string): void {
 /** The scheme the next sync hands over: the reader's pick, https unless they moved it. */
 export function charmVoice(record: PairedCharm | null | undefined): CharmScheme {
   return record?.voice === "http" ? "http" : "https"
+}
+
+/**
+ * What the charm itself says it holds: the address it kept, or null for a charm holding none. The
+ * record beside it is what this phone wrote; this is what landed, and a page that draws both cannot
+ * lie about a hand-over that failed.
+ */
+export async function readCharmTalk(): Promise<string | null> {
+  const { status, bytes } = await askCharm(talkStateMessage())
+  if (status.code !== CharmCode.Ok) throw new CharmRefused(status.code)
+  const state = parseTalkState(bytes)
+  if (!state) throw new Error("The charm's voice answer was too short")
+  return state.address
 }
 
 /**

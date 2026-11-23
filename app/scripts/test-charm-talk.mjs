@@ -12,6 +12,7 @@ import {
   CharmCode,
   CharmOp,
   codeWords,
+  parseTalkState,
   talkFrame,
   updateMessage,
 } from "../src/lib/charm-protocol.ts"
@@ -162,6 +163,22 @@ test("the charm is given an address it can reach, and a frame within its bounds"
     () => talkFrame("http://h", "a".repeat(CHARM_MAX_TOKEN_BYTES)),
     `${CHARM_MAX_TOKEN_BYTES} bytes is a token still`,
   )
+})
+
+test("the charm's answer about what it holds is the address, and never the token", () => {
+  const answer = (extra) =>
+    new DataView(new Uint8Array([1, 0, CharmOp.TalkState, 0, extra.length, ...extra]).buffer)
+
+  assert.deepEqual(parseTalkState(answer([0])), { address: null }, "a charm holding none")
+  const url = encoder.encode("https://h.example/api/plugins/gots")
+  assert.deepEqual(parseTalkState(answer([url.length, ...url])), {
+    address: "https://h.example/api/plugins/gots",
+  })
+  // A length that disagrees with the frame is no answer at all, rather than a cut address.
+  assert.equal(parseTalkState(answer([url.length + 1, ...url])), null)
+  // And an answer to another op is somebody else's.
+  const other = new DataView(new Uint8Array([1, 0, CharmOp.Battery, 0, 1, 0]).buffer)
+  assert.equal(parseTalkState(other), null)
 })
 
 test("a sync owes voice when the charm holds nothing, or the other scheme's address", () => {

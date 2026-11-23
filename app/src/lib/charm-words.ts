@@ -348,6 +348,13 @@ export const VOICE_HTTPS =
 export const VOICE_HTTP =
   "Your charm calls your host on your tailnet in plain http. It needs your host to know its tailnet address, and the charm to be on the tailnet."
 
+/** The row under the switch: the charm's own answer about what it holds, never this phone's guess. */
+export const VOICE_HELD_TITLE = "Your charm holds"
+export const VOICE_HELD_PURPOSE = "What the charm says it was handed"
+export const VOICE_HELD_NONE = "Nothing yet — the next sync hands it over"
+export const VOICE_HELD_UNKNOWN = "This charm's firmware can't say"
+export const VOICE_HELD_ASKING = "Asking…"
+
 /**
  * Under the row: a charm keeps the token in its flash, and a flash that isn't sealed gives it away to
  * anyone holding the charm. The token's own caveat, said once for the row rather than as a second
