@@ -186,6 +186,10 @@ test("chunks carry their offset and fit the link", () => {
   assert.equal(chunkSize(1000), 512)
 })
 
+/** The status a charm notifies, built the way a link parses one. */
+const answer = (code, op, needImage = false) =>
+  parseStatus(new DataView(new Uint8Array([1, code, op, needImage ? 1 : 0]).buffer))
+
 /** A charm in memory, following the firmware's sync session. */
 function fakeCharm({
   corruptOnce = false,
@@ -210,8 +214,6 @@ function fakeCharm({
   const ops = []
   // Every address the talk hand-over carried, in the order the session wrote them.
   const talked = []
-  const answer = (code, op, needImage = false) =>
-    parseStatus(new DataView(new Uint8Array([1, code, op, needImage ? 1 : 0]).buffer))
   return {
     held,
     imagesSent,
@@ -505,7 +507,7 @@ test("a link is handed the phone's clock, and a charm too old for the op says so
     mtu: 23,
     async control(message) {
       writes.push([...message])
-      return { code, op: message[1], needImage: 0 }
+      return answer(code, message[1])
     },
     async data() {},
   })
@@ -516,6 +518,8 @@ test("a link is handed the phone's clock, and a charm too old for the op says so
   // all, and neither is a reason to fail the link the reader opened for something else.
   assert.equal(await sendClock(linkAnswering(CharmCode.KeptReadable), 1795176000000), true)
   assert.equal(await sendClock(linkAnswering(CharmCode.BadMessage), 1795176000000), false)
+  // One write a link and no retry: a clock the charm refused is not a picture to send again.
+  assert.equal(writes.length, 3)
 })
 
 test("a damaged pet picture is sent again", async () => {
