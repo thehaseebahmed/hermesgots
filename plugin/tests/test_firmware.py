@@ -451,6 +451,21 @@ class FetchRouteTest(unittest.TestCase):
         self.assertEqual(headers["content-length"], str(len(IMAGE)))
         self.assertEqual(headers["content-type"], "application/octet-stream")
 
+    def test_the_mint_answers_the_route_its_own_walk_is_served_at(self):
+        """The path is the host's knowledge, so the answer is walked back through this host.
+
+        The phone appends the path the mint just named to the address the voice hand-over kept; a
+        walk of that exact answer is the round trip the app can no longer check on its own, because
+        it no longer carries a path to compare against.
+        """
+        answer = self.call("/charm/firmware/fetch", "POST")["payload"]
+        path = answer["path"]
+        self.assertEqual(path, plugin.CHARM_FIRMWARE_FETCH_PATH, "the route, named once")
+        self.assertTrue(path.startswith("/"), "a path under the plugin root, not an address")
+        with patch.object(firmware, "_open", serve()):
+            walked = self.call(path, query={"token": answer["token"]})
+        self.assertEqual(walked.body, IMAGE, "the path the mint answered is a route this host serves")
+
     def test_the_charms_image_is_the_same_bytes_the_phone_fetches(self):
         token = self.call("/charm/firmware/fetch", "POST")["payload"]["token"]
         with patch.object(firmware, "_open", serve()):

@@ -163,12 +163,20 @@ export function botProfile(name: string, patch: Partial<Profile> = {}): Profile 
 export const FIRMWARE_FETCH_TOKEN = "1f".repeat(32)
 
 /**
+ * The image route's path the fake host answers beside that token, as the plugin answers its own:
+ * the component tests hold the walk's URL to the path the host named, never to one the app keeps.
+ */
+export const FIRMWARE_FETCH_PATH = "/charm/firmware/image/fetch"
+
+/**
  * A bot's host, as the app's own reader asks it for a charm's firmware: the plugin's feature list,
  * the tag's answer, and the image's bytes. `published` is that answer — a package, or the sentence
  * the host refuses with — and a function is asked once per read, so a tag that moved is one test's
  * own. The image answers with its length named and, where a gate is given, in halves the test
  * releases, so a Downloading bar can be watched moving rather than assumed; `fetchToken` mints the
- * short-lived door a charm's own walk is admitted by, which no test turns on that opens no door.
+ * short-lived door a charm's own walk is admitted by, which no test turns on that opens no door,
+ * and `fetchPath` is the route the mint answers beside that token — `false` for a host from before
+ * the route was answered at all, which leaves the walk no path to append.
  */
 export function serveFirmware(
   name: string,
@@ -177,7 +185,12 @@ export function serveFirmware(
   {
     stream,
     fetchToken,
-  }: { stream?: { hold: Promise<void>; release: () => void }; fetchToken?: boolean } = {},
+    fetchPath,
+  }: {
+    stream?: { hold: Promise<void>; release: () => void }
+    fetchToken?: boolean
+    fetchPath?: string | false
+  } = {},
 ) {
   const profile = connection(name)
   let reads = 0
@@ -189,7 +202,9 @@ export function serveFirmware(
       return json({ name: "gots", version: "1.0.0", features: ["charm_firmware"] })
     if (fetchToken && url.pathname.endsWith("/charm/firmware/fetch")) {
       mints += 1
-      return json({ object: "gots.charm_firmware_fetch", token: FIRMWARE_FETCH_TOKEN })
+      const answered = { object: "gots.charm_firmware_fetch", token: FIRMWARE_FETCH_TOKEN }
+      if (fetchPath === false) return json(answered)
+      return json({ ...answered, path: fetchPath ?? FIRMWARE_FETCH_PATH })
     }
     if (url.pathname.endsWith("/charm/firmware/image")) {
       imageReads += 1
