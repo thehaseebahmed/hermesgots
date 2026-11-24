@@ -13,6 +13,7 @@ import {
   CharmOp,
   CharmUpdateReason,
   CharmUpdateState,
+  busyFill,
   chunkSize,
   firmwareMessage,
   imageChunks,
@@ -41,6 +42,9 @@ const spell = (text) => [...new TextEncoder().encode(text)]
 const viewOf = (bytes) => new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
 const sha256Of = (bytes) => new Uint8Array(createHash("sha256").update(bytes).digest())
 const image = (n, seed = 3) => new Uint8Array(n).map((_, i) => (i * 13 + seed) & 0xff)
+
+/** The fake charm below has no clock of its own, so the upload's paced gap waits nothing. */
+const NO_PACE = { pace: async () => {} }
 
 test("the firmware ops are the ones PROTOCOL.md numbers", () => {
   assert.equal(CharmOp.Firmware, UPDATE_WIRE.firmware)
@@ -87,6 +91,21 @@ test("a Firmware answer reads the version, and a charm too old to know it says n
   )
 })
 
+test("a Busy notice's extra names the fill, and a charm from before the fix names none", () => {
+  const notice = (fill) => new Uint8Array([1, CharmCode.Busy, 0, 0, 4, ...u32(fill)])
+  // The fixed charm: the offset its updater waits at, four little-endian bytes of extra.
+  assert.equal(busyFill(viewOf(notice(4096))), 4096)
+  assert.equal(busyFill(viewOf(notice(0xdeadbeef))), 0xdeadbeef)
+  // Every charm before the fix: the four bytes alone, which name no position to resume from.
+  assert.equal(busyFill(viewOf(new Uint8Array([1, CharmCode.Busy, 0, 0]))), null)
+  // An extra that is not the fill's four bytes is no fill to read.
+  assert.equal(busyFill(viewOf(new Uint8Array([1, CharmCode.Busy, 0, 0, 2, 1, 2]))), null)
+  // And every cut of a real notice is short of the fill it promised.
+  const full = notice(4096)
+  for (let at = 0; at < full.length; at++)
+    assert.equal(busyFill(viewOf(full.subarray(0, at))), null, `cut at ${at}`)
+})
+
 /**
  * A charm in memory, following the firmware's upload session: the begin announces an image, the
  * data writes carry it at their offsets, a status ask answers how much has arrived, and the end
@@ -102,7 +121,7 @@ function fakeCharm({ version = "0.2.0", busy = false, failAt = null, strayOnce =
   let gap = false
   let strayed = false
   let failure = null
-  let refused = false
+  let latched = null // the Busy notice's stand-in: the link's latch, held until the upload reads it
   let refusedOnce = false
   const answer = (code, op) => new Uint8Array([1, code, op, 0])
   // The asks whose answer carries extra put its length in front of it; a plain answer is the four.
@@ -119,10 +138,11 @@ function fakeCharm({ version = "0.2.0", busy = false, failAt = null, strayOnce =
     },
     link: {
       mtu: 185,
-      // Whether the charm answered a data write with `Busy`: the same chunk has to go again.
-      refused() {
-        const was = refused
-        refused = false
+      // The charm's refusal of a data write, as the link latches it: this charm's notice names
+      // no fill, so the chunk just written is the one that goes again.
+      refusal() {
+        const was = latched
+        latched = null
         return was
       },
       // As `charm.ts`'s link answers: the bytes the charm sent, as a view.
@@ -175,7 +195,7 @@ function fakeCharm({ version = "0.2.0", busy = false, failAt = null, strayOnce =
         // chunk when it comes again: nothing is lost and the offset stays the next one.
         if (refuseAt !== null && offset === refuseAt && !refusedOnce) {
           refusedOnce = true
-          refused = true
+          latched = { fill: null }
           return
         }
         writes.push(chunk)
@@ -195,7 +215,7 @@ test("an image goes over as offset-prefixed chunks, in order, then the end", asy
   const charm = fakeCharm()
   const bytes = image(4000)
   const sha = sha256Of(bytes)
-  const result = await uploadFirmware(charm.link, bytes, sha)
+  const result = await uploadFirmware(charm.link, bytes, sha, undefined, NO_PACE)
 
   assert.equal(charm.ops[0], UPDATE_WIRE.begin, "the size and the hash are announced first")
   assert.equal(charm.ops.at(-1), UPDATE_WIRE.end)
@@ -215,7 +235,7 @@ test("progress rises, and only the charm's own count is a percentage", async () 
   const charm = fakeCharm()
   const bytes = image(200 * 1024)
   const seen = []
-  await uploadFirmware(charm.link, bytes, sha256Of(bytes), (progress) => seen.push(progress))
+  await uploadFirmware(charm.link, bytes, sha256Of(bytes), (progress) => seen.push(progress), NO_PACE)
 
   // Every report says how much the phone has written, and that count never runs back.
   const sent = seen.map((progress) => progress.sent)
@@ -247,7 +267,7 @@ test("a status ask answered by a refused data write is no progress, and no reaso
   const bytes = image(200 * 1024)
   const seen = []
   const result = await uploadFirmware(charm.link, bytes, sha256Of(bytes), (progress) =>
-    seen.push(progress),
+    seen.push(progress), NO_PACE,
   )
   assert.equal(result.percent, 100)
   assert.equal(charm.ops.filter((op) => op === UPDATE_WIRE.end).length, 1)
@@ -260,7 +280,7 @@ test("a charm already updating refuses the begin, and nothing is written", async
   const charm = fakeCharm({ busy: true })
   const bytes = image(1000)
   await assert.rejects(
-    () => uploadFirmware(charm.link, bytes, sha256Of(bytes)),
+    () => uploadFirmware(charm.link, bytes, sha256Of(bytes), undefined, NO_PACE),
     (error) => error instanceof FirmwareRefused && error.code === CharmCode.Busy,
   )
   assert.equal(charm.writes.length, 0)
@@ -273,7 +293,7 @@ test("an image the charm refuses at the end throws the reason it gave", async ()
   // A hash that is not this image's: the charm checks the bytes it got against the one announced.
   const wrong = sha256Of(image(3000, 4))
   await assert.rejects(
-    () => uploadFirmware(charm.link, bytes, wrong),
+    () => uploadFirmware(charm.link, bytes, wrong, undefined, NO_PACE),
     (error) =>
       error instanceof FirmwareRefused &&
       error.reason === CharmUpdateReason.BadHash &&
@@ -287,7 +307,7 @@ test("a status that says failed stops the upload before its end", async () => {
   const charm = fakeCharm({ failAt: 2 * 64 * 1024 })
   const bytes = image(200 * 1024)
   await assert.rejects(
-    () => uploadFirmware(charm.link, bytes, sha256Of(bytes)),
+    () => uploadFirmware(charm.link, bytes, sha256Of(bytes), undefined, NO_PACE),
     (error) => error instanceof FirmwareRefused && error.reason === CharmUpdateReason.WriteFailed,
   )
   assert.ok(!charm.ops.includes(UPDATE_WIRE.end), "a failed attempt is not ended")
@@ -312,7 +332,7 @@ test("a chunk the charm refuses for room goes again, and the image completes", a
   // The third chunk meets a full buffer once: the charm says `Busy`, and takes it on the resend.
   const charm = fakeCharm({ refuseAt: refusedAt })
   const bytes = image(4000)
-  const result = await uploadFirmware(charm.link, bytes, sha256Of(bytes))
+  const result = await uploadFirmware(charm.link, bytes, sha256Of(bytes), undefined, NO_PACE)
 
   assert.equal(result.percent, 100)
   assert.deepEqual([...charm.received], [...bytes], "every byte landed once, in order")
@@ -337,9 +357,21 @@ test("the version read answers whether the rebooted charm changed", async () => 
     "0.1.0",
     { tries: 3, waitMs: 0 },
   )
-  assert.deepEqual(changed, { changed: true, version: "0.2.0" })
+  assert.deepEqual(changed, { changed: true, version: "0.2.0", answered: "0.2.0" })
 
   // Every ask says the build it started on: the row has to be able to say it did not change.
   const same = await versionAfterReboot(async () => "0.1.0", "0.1.0", { tries: 2, waitMs: 0 })
-  assert.deepEqual(same, { changed: false, version: "0.1.0" })
+  assert.deepEqual(same, { changed: false, version: "0.1.0", answered: "0.1.0" })
+
+  // A charm that never answered at all: unchanged, and `answered` says so by saying nothing —
+  // an unchanged version and a version nobody read are different ends, and the walk's gates
+  // read the difference.
+  const gone = await versionAfterReboot(
+    async () => {
+      throw new Error("The charm went out of reach")
+    },
+    "0.1.0",
+    { tries: 2, waitMs: 0 },
+  )
+  assert.deepEqual(gone, { changed: false, version: "0.1.0", answered: undefined })
 })

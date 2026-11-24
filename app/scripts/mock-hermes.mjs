@@ -30,6 +30,10 @@
 // them); tapping a file opens it from the URL the media route signs for it.
 // It lists Hermes Projects on GET /api/plugins/gots/projects. GET /api/plugins/gots/github and
 // github/repos stand in for the host's GitHub account (MOCK_NO_GITHUB=1 leaves it signed out), and
+// the charm's fetch door is served as the plugin answers it: POST charm/firmware/fetch mints the
+// short-lived token the phone puts in the URL it hands the charm, and GET charm/firmware/image/fetch
+// serves the mock's own stand-in image to a token it minted, refusing one nobody did or whose life
+// (MOCK_CHARM_FETCH_MS, ten minutes by default) is past.
 // POST /api/plugins/gots/projects answers at once with a project that clones its repos in the
 // background (1.5s each; a repo named like `fail` fails it, as does MOCK_FAIL_CLONE=1), and
 // POST projects/{id}, projects/{id}/retry and projects/{id}/remove edit (name, description,
@@ -566,6 +570,18 @@ const MEETINGS = process.env.MOCK_MEETINGS !== "0"
 // The dictation log (plugin/dictations.py): MOCK_DICTATIONS=0 is a plugin from before it, so its
 // routes 404 and `dictations` is missing from the features — the screen then has no host copy.
 const DICTATIONS = process.env.MOCK_DICTATIONS !== "0"
+// The charm's fetch door (plugin/fetch_tokens.py): the phone's mint answers a token that lives
+// MOCK_CHARM_FETCH_MS — ten minutes, as the plugin keeps it; a test runs it shorter so an expired
+// door can be watched — and the image route's tokened variant admits the charm by the one in the
+// URL. Its own mint kind: nothing of the voice token's is touched, a rule plugin/tests hold against
+// the real mints. The image itself is this mock's own stand-in for the one the plugin reads from
+// ghcr.io, since nothing here reaches the network: fixed bytes, the same behind the door.
+const CHARM_FETCH_MS = Number(process.env.MOCK_CHARM_FETCH_MS ?? 600_000)
+const charmFetchTokens = new Map()
+const CHARM_FIRMWARE_IMAGE = Buffer.concat([
+  Buffer.from("the charm's firmware image, as the mock host serves it\0"),
+  Buffer.alloc(384, 7),
+])
 // A bot's MCP servers, as the plugin's read reports them: each with Gots' own state word, the source
 // it comes from, and the Host's own reason on a failed one. Every word the screen renders has a row.
 // MOCK_MCP=off is a Hermes whose plugin can't offer them at all: no route and no `mcps` feature.
@@ -5405,6 +5421,37 @@ http
     if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/github/repos") {
       if (!GITHUB) return json(res, 409, { error: { message: "No GitHub account on the server." } })
       return json(res, 200, { object: "gots.github.repos", repos: githubRepos })
+    }
+    // The charm's fetch door, as the plugin's `charm/firmware/fetch` routes answer it: the phone's
+    // mint of a short-lived token, and the image route's tokened variant that admits the charm by
+    // the one in the URL. The bytes are the mock's own stand-in for the published image, and the
+    // words of a refusal are the plugin's (`test-firmware-fetch.mjs` holds the two together).
+    if (
+      PLUGIN &&
+      !profile &&
+      req.method === "POST" &&
+      url.pathname === "/api/plugins/gots/charm/firmware/fetch"
+    ) {
+      const token = randomBytes(32).toString("hex")
+      charmFetchTokens.set(token, Date.now())
+      return json(res, 200, { object: "gots.charm_firmware_fetch", token })
+    }
+    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/charm/firmware/image/fetch") {
+      const token = url.searchParams.get("token") ?? ""
+      const minted = charmFetchTokens.get(token)
+      if (minted === undefined || Date.now() - minted > CHARM_FETCH_MS)
+        return json(res, 401, {
+          error: {
+            message: "This fetch token isn't one this host minted, or its short life is past.",
+            code: "bad_token",
+          },
+        })
+      res.writeHead(200, {
+        "Content-Type": "application/octet-stream",
+        "Content-Length": String(CHARM_FIRMWARE_IMAGE.length),
+        ...cors,
+      })
+      return res.end(CHARM_FIRMWARE_IMAGE)
     }
     if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/afk") {
       // The bot's own AFK row, beside the projects and naming none of them: the budget this bot

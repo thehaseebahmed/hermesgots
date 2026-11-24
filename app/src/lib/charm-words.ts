@@ -16,6 +16,7 @@ import {
   type CharmBatterySeen,
 } from "./charm-protocol.ts"
 import { compareVersions } from "./version-compare.ts"
+import { formatBytes } from "./attachment-caps.ts"
 export interface CharmSeen {
   name: string
   syncedAt?: number
@@ -239,12 +240,6 @@ export function firmwareOffers({ running, published, answered }: CharmFirmwareSe
   return compareVersions(running.version, published) === -1
 }
 
-/** The update as it runs, from the phone's own count of the bytes it has written. */
-export function updateProgressWords(progress: { sent: number; total: number }): string {
-  const percent = progress.total > 0 ? Math.round((progress.sent / progress.total) * 100) : 0
-  return `Updating… ${percent}%`
-}
-
 /** A file a reader picked that cannot fit a slot, refused here rather than a minute into a stream. */
 export const FILE_TOO_BIG = "That file is larger than a slot, so the charm could not hold it."
 
@@ -265,6 +260,56 @@ export const FIRMWARE_SENT = "Sent. The charm is restarting on it."
 
 /** The row's word when the charm never answered on the build it was sent. */
 export const FIRMWARE_NOT_BACK = "The charm didn't come back on the new build."
+
+/**
+ * Under every failure the update screen draws: the sure path. The over-the-air hop is the one this
+ * app made sound, but a charm that keeps cancelling — the builds already in the field, whose
+ * refusals name no position — can always be flashed by cable, and a reader who has met the same
+ * failure twice should not meet it a third time.
+ */
+export const FIRMWARE_CABLE =
+  "If the charm keeps cancelling, flash it by cable instead — that always works."
+
+/** The Downloading step's line: the bytes that have landed, of the whole the length named. */
+export function downloadWords(progress: { received: number; total: number }): string {
+  if (progress.total <= 0) return formatBytes(progress.received)
+  const percent = Math.round((progress.received / progress.total) * 100)
+  return `${percent}% of ${formatBytes(progress.total)}`
+}
+
+/** The update screen's end: the build the charm came back on, as its own answer read it. */
+export function firmwareDoneWords(version: string): string {
+  return `The charm runs ${version}.`
+}
+
+/**
+ * The Downloading step's line when the charm fetches the image itself: which door it walks, said
+ * so the reader knows why this phone is only watching. https is the host's own address over the
+ * charm's Wi-Fi; http is its tailnet address, called by the same name the voice rows call it.
+ */
+export function fetchWords(scheme: "http" | "https"): string {
+  return scheme === "http"
+    ? "The charm is fetching it itself over your tailnet"
+    : "The charm is fetching it itself over Wi-Fi"
+}
+
+/**
+ * The fetch walk's line for a charm that says it is downloading forever: the walk is bounded by the
+ * fetch token's own short life, past which the door is shut whatever the charm says — a walk that
+ * outlives its door is over, in the walk's own words.
+ */
+export const FIRMWARE_NOT_ENDED = "The charm didn't finish the fetch it started."
+
+/**
+ * The upload's line for a charm that never says it holds the whole image it was sent: the last
+ * byte went out with no answer of its own, so the charm's own count is the only yes there is — and
+ * a charm wedged but alive would otherwise be waited on without an end.
+ */
+export const FIRMWARE_NOT_HELD = "The charm didn't say it had the whole image."
+
+/** The update screen's line when the host's read names no image to send. */
+export const FIRMWARE_NOT_PUBLISHED =
+  "This host isn't offering a firmware image. A file can still be sent."
 
 /** Why a download failed, as the charm's code means it. */
 export function updateReasonWords(reason: number): string {

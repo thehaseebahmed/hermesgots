@@ -225,9 +225,11 @@ test("the scheme picks the address the host answered with", () => {
 })
 
 test("each address op takes the scheme the charm speaks for it", () => {
-  // The charm fetches an image itself, so that address is https; and a turn's is either, because the
-  // firmware has a door for each. One rule reads them, and refuses the scheme the op cannot use
-  // rather than encoding a URL the charm would fail to open.
+  // A turn's address is either scheme, because the firmware has a door for each; and since the
+  // charm now takes an image over its tailnet too, an update's address is the same two — the
+  // phone's door-picking is what hands the http one only to a charm whose tunnel is up. One rule
+  // reads them, and refuses the scheme neither door speaks rather than encoding a URL the charm
+  // would fail to open.
   assert.doesNotThrow(() => talkFrame("https://bot.example/api", TOKEN), "a turn may be https")
   assert.doesNotThrow(() => talkFrame("http://100.64.0.2:8642/api/plugins/gots", TOKEN))
   assert.throws(
@@ -235,10 +237,10 @@ test("each address op takes the scheme the charm speaks for it", () => {
     /must be http:\/\/ or https:\/\//,
     "and nothing else",
   )
-  assert.throws(
-    () => updateMessage("http://h/image.bin", new Uint8Array(32)),
-    /https address/,
-    "and an image is not fetched over plain http",
+  assert.doesNotThrow(
+    () => updateMessage("http://100.64.0.2:8642/fw.bin", new Uint8Array(32)),
+    "an image may be fetched over the charm's tailnet",
   )
-  assert.doesNotThrow(() => updateMessage("https://h/image.bin", new Uint8Array(32)))
+  assert.doesNotThrow(() => updateMessage("https://h/fw.bin", new Uint8Array(32)))
+  assert.throws(() => updateMessage("ftp://h/fw.bin", new Uint8Array(32)), /must be https/)
 })

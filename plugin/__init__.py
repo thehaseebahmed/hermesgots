@@ -52,6 +52,7 @@ from . import (
     meetings,
     events,
     failures,
+    fetch_tokens,
     firmware,
     general,
     github,
@@ -2012,21 +2013,63 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), error.status)
         return web.json_response({"object": "gots.charm_firmware", **answer})
 
-    async def charm_firmware_image(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
+    async def _serve_charm_image(web: Any) -> Any:
+        # The length is stated rather than left to the body, since what the app hands the charm is
+        # measured against the size it read — and what the charm fetches has to end whole for the
+        # hash to match; the type is the layer's own, unread.
         home = hermes_home()
         try:
             found = await asyncio.to_thread(firmware.image, home)
         except firmware.FirmwareError as error:
             return _error(web, str(error), error.status)
-        # The length is stated rather than left to the body, since what the app hands the charm is
-        # measured against the size it read; the type is the layer's own, whole and unread.
         return web.Response(
             body=found["data"],
             headers={"Content-Type": found["type"], "Content-Length": str(len(found["data"]))},
         )
+
+    async def charm_firmware_image(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        return await _serve_charm_image(web)
+
+    async def charm_firmware_fetch(request: "web.Request") -> "web.Response":
+        """The phone's ask: a short-lived token the charm's image fetch is admitted by.
+
+        Its own mint kind (`fetch_tokens`), so a firmware fetch never revokes the token the charm's
+        voice holds — the talk mint spends a held token when it mints again, and a charm mid-update
+        must not lose its voice to the update. The token is in the clear exactly once, in this one
+        answer, as the voice token is in the hand-over's: the app puts it in the URL it hands the
+        charm, and no route or log repeats it.
+        """
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        # The store is read on the loop thread, where the request's profile scope is visible.
+        path = store_path()
+        token = await asyncio.to_thread(fetch_tokens.mint, path)
+        return web.json_response({"object": "gots.charm_firmware_fetch", "token": token})
+
+    async def charm_firmware_image_fetch(request: "web.Request") -> "web.Response":
+        """The charm's own walk: the published image, admitted by the token in the URL.
+
+        The charm holds no key of the account's — the token the phone minted is the door, judged
+        before the registry is reached at all, so a stranger's ask spends nothing of the host's
+        outbound calls. The image's bytes are pinned by the SHA-256 the phone sends the charm either
+        way — the hash is the trust anchor, and the token is only the door — so a token nobody
+        minted, or one whose short life is past, is refused and the bytes stay where they are.
+        """
+        token = request.query.get("token") or ""
+        # As the mint's, on the loop thread where the request's profile scope is visible.
+        path = store_path()
+        if not await asyncio.to_thread(fetch_tokens.verify, path, token):
+            return _error(
+                web,
+                "This fetch token isn't one this host minted, or its short life is past.",
+                401,
+                "bad_token",
+            )
+        return await _serve_charm_image(web)
 
     async def get_talk(request: "web.Request") -> "web.Response":
         """The app's one hand-over: where the charm calls, which bot it is, and a token, once.
@@ -3134,6 +3177,12 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     app.router.add_get(f"{PREFIX}/github/repos", github_repos)
     app.router.add_get(f"{PREFIX}/charm/firmware", charm_firmware)
     app.router.add_get(f"{PREFIX}/charm/firmware/image", charm_firmware_image)
+    # The charm's own fetch of that image: the phone mints a short-lived token of a kind of its own
+    # (`fetch_tokens`, so a firmware fetch never revokes the token the charm's voice holds), and the
+    # image route's tokened variant admits the charm by the token in the URL instead of the phone's
+    # key — the same bytes, one more door.
+    app.router.add_post(f"{PREFIX}/charm/firmware/fetch", charm_firmware_fetch)
+    app.router.add_get(f"{PREFIX}/charm/firmware/image/fetch", charm_firmware_image_fetch)
     # The app's hand-over of the host's address and a per-charm token, and the charm's own turn,
     # which takes that token rather than the bot's key (`talk_tokens`, the PTT plan's step 1). The
     # path's version is `talk.VERSION`, the same number the charm is answered its version in: one

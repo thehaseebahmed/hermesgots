@@ -642,6 +642,13 @@ test("a key and an address go over with their own lengths", () => {
     [...updateMessage(url, sha)],
     [1, NETWORK_WIRE.update, url.length, ...spell(url), ...sha],
   )
+  // The tailnet door is plain http, and the charm takes it while its tunnel is up — the phone's own
+  // door-picking is what hands an http address only to a charm whose tunnel is.
+  const tail = "http://100.64.0.9:8642/gots.bin"
+  assert.deepEqual(
+    [...updateMessage(tail, sha)],
+    [1, NETWORK_WIRE.update, tail.length, ...spell(tail), ...sha],
+  )
 })
 
 test("a name, a passphrase, a key, an address and a hash are refused before any write", () => {
@@ -650,9 +657,11 @@ test("a name, a passphrase, a key, an address and a hash are refused before any 
   assert.throws(() => wifiMessage("Home", "p".repeat(CHARM_MAX_PASS_BYTES + 1)), /at most 63 bytes/)
   assert.throws(() => tailnetMessage("k".repeat(CHARM_MAX_KEY_BYTES + 1)), /at most 96 bytes/)
   assert.throws(() => tailnetMessage(""), /at least 1 byte/)
-  // The charm makes the request itself, so it can only be one it can fetch: https, never http.
-  assert.throws(() => updateMessage("http://e.test/fw.bin", new Uint8Array(32)), /https address/)
-  assert.throws(() => updateMessage("ftp://e.test/fw.bin", new Uint8Array(32)), /https address/)
+  // The charm makes the request itself, so it can only be one it can fetch: https over the Wi-Fi
+  // it joins, or plain http over its tailnet while the tunnel is up — the same two doors a turn's
+  // address takes, and the door-picking on the phone is what keeps the pairing honest.
+  assert.doesNotThrow(() => updateMessage("http://e.test/fw.bin", new Uint8Array(32)))
+  assert.throws(() => updateMessage("ftp://e.test/fw.bin", new Uint8Array(32)), /must be https/)
   assert.throws(() => updateMessage("https://e.test/fw.bin", new Uint8Array(31)), /32-byte SHA-256/)
   assert.throws(
     () => updateMessage(`https://e.test/${"a".repeat(CHARM_MAX_URL_BYTES)}`, new Uint8Array(32)),

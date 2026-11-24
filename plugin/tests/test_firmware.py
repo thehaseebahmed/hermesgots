@@ -17,13 +17,14 @@ import urllib.request
 from unittest.mock import patch
 
 import plugin
-from plugin import firmware, github
+from plugin import fetch_tokens, firmware, github, store, talk_tokens
 from plugin.tests._helpers import FakeWeb, RouteAdapter, route, temp_hermes_home, wire
 
 TOKEN = "ghp_the_hosts_token"
 PULL_TOKEN = "a_pull_token"
 IMAGE = b"\x00\x01\x02the-charm's-image"
 SHA = "9f2c41aa0b7d5e63" * 4
+BOT = "0123456789abcdef"
 
 
 def manifest(**annotations: str) -> dict:
@@ -413,3 +414,87 @@ class RouteTest(unittest.TestCase):
             answer = self.call("/charm/firmware/image")
         self.assertEqual(answer["status"], 403)
         self.assertIn("read:packages", answer["payload"]["error"]["message"])
+
+
+class FetchRouteTest(unittest.TestCase):
+    """The charm's own fetch of the image: the phone's mint of a short-lived token, and the image
+    route's tokened variant that admits the charm by it instead of the phone's key."""
+
+    def setUp(self) -> None:
+        self.home = temp_hermes_home(self)
+        self.adapter = RouteAdapter()
+        self.app = wire(self, self.adapter)
+        self.addCleanup(patch.stopall)
+        patch.object(firmware.github, "token", lambda home: (TOKEN, "env")).start()
+        self.store = store.db_path(self.home)
+
+    def call(self, path: str, method: str = "GET", query: dict | None = None):
+        request = FakeWeb.Request()
+        request.match_info, request.headers = {}, {}
+        request.query = query or {}
+        return asyncio.run(route(self.app, plugin.PREFIX + path, method)(request))
+
+    def test_the_mint_answers_a_token_the_charms_fetch_is_admitted_by(self):
+        answer = self.call("/charm/firmware/fetch", "POST")
+        self.assertEqual(answer["status"], 200, answer)
+        payload = answer["payload"]
+        self.assertEqual(payload["object"], "gots.charm_firmware_fetch")
+        token = payload["token"]
+        self.assertTrue(
+            fetch_tokens.verify(self.store, token),
+            "the token a charm's image fetch will be judged by",
+        )
+        with patch.object(firmware, "_open", serve()):
+            served = self.call("/charm/firmware/image/fetch", query={"token": token})
+        self.assertEqual(served.body, IMAGE)
+        headers = {k.lower(): v for k, v in served.headers.items()}
+        self.assertEqual(headers["content-length"], str(len(IMAGE)))
+        self.assertEqual(headers["content-type"], "application/octet-stream")
+
+    def test_the_charms_image_is_the_same_bytes_the_phone_fetches(self):
+        token = self.call("/charm/firmware/fetch", "POST")["payload"]["token"]
+        with patch.object(firmware, "_open", serve()):
+            phone = self.call("/charm/firmware/image")
+            charm = self.call("/charm/firmware/image/fetch", query={"token": token})
+        self.assertEqual(phone.body, charm.body, "one image behind two doors")
+
+    def test_a_fetch_with_no_token_or_one_nobody_minted_is_refused(self):
+        for query in ({}, {"token": "0" * 64}, {"token": "not-a-token"}):
+            with self.subTest(query=query):
+                answer = self.call("/charm/firmware/image/fetch", query=query)
+                self.assertEqual(answer["status"], 401, answer)
+                self.assertEqual(answer["payload"]["error"]["code"], "bad_token")
+                self.assertIn(
+                    "fetch token", answer["payload"]["error"]["message"].lower()
+                )
+
+    def test_a_token_past_its_short_life_is_refused(self):
+        token = self.call("/charm/firmware/fetch", "POST")["payload"]["token"]
+        held = store.get_setting(self.store, fetch_tokens.SETTING)
+        store.put_setting(
+            self.store,
+            fetch_tokens.SETTING,
+            {**held, "at": held["at"] - fetch_tokens.TTL_MS - 1},
+        )
+        answer = self.call("/charm/firmware/image/fetch", query={"token": token})
+        self.assertEqual(answer["status"], 401, answer)
+        self.assertEqual(answer["payload"]["error"]["code"], "bad_token")
+
+    def test_minting_a_fetch_token_leaves_the_charms_voice_token_live(self):
+        """The plan's own decision: the talk mint revokes on a re-mint, so the fetch is its own kind."""
+        voice = talk_tokens.mint(self.store, BOT)
+        self.call("/charm/firmware/fetch", "POST")
+        self.assertTrue(
+            talk_tokens.verify(self.store, BOT, voice),
+            "a firmware fetch never revokes the token the charm's voice holds",
+        )
+
+    def test_the_mint_takes_the_phones_key(self):
+        self.adapter.denied = FakeWeb.json_response({"error": {"message": "no"}}, 401)
+        answer = self.call("/charm/firmware/fetch", "POST")
+        self.assertEqual(answer["status"], 401, "a stranger asks no token of this host")
+        self.assertEqual(
+            store.get_setting(self.store, fetch_tokens.SETTING),
+            None,
+            "and nothing was minted",
+        )

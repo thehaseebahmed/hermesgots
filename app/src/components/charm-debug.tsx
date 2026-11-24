@@ -5,9 +5,7 @@ import { formatBytes } from "@/lib/attachment-caps"
 import { charmDiagnose, charmLog, setCharmLog, usePairedCharm, type PairedCharm } from "@/lib/charm"
 import type { CharmDiagnose, CharmLogRow } from "@/lib/charm-protocol"
 import { micExitWords } from "@/lib/charm-words"
-
-/** How often the page reads the charm: a reader watches a failure's log, they do not ask for it. */
-export const CHARM_DEBUG_POLL_MS = 2000
+import { CHARM_POLL_MS } from "@/lib/freshness"
 
 /** What the page needs of the charm. A page mounted in a test is handed a stand-in, as the network's is. */
 export interface CharmDebugApi {
@@ -79,7 +77,7 @@ export function CharmDebugScreen({
       }
     }
     void read()
-    const timer = setInterval(() => void read(), CHARM_DEBUG_POLL_MS)
+    const timer = setInterval(() => void read(), CHARM_POLL_MS)
     return () => {
       open = false
       clearInterval(timer)

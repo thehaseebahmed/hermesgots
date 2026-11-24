@@ -563,19 +563,27 @@ export function botMessage(index: number, bot: CharmBot): Uint8Array {
     .done()
 }
 
-/** A picture as `data` writes: `[offset u32][bytes]`, each at most `size` bytes long. */
-export function* imageChunks(image: Uint8Array, size: number): Generator<Uint8Array> {
+/**
+ * One `data` write, cut wherever the send position stands: the image's bytes from `at` — the
+ * fill a Busy notice names is an offset of the image, not a boundary of the phone's own
+ * chunking — prefixed with the offset they start at, at most `size` bytes long like every
+ * other.
+ */
+export function chunkAt(image: Uint8Array, at: number, size: number): Uint8Array {
   const room = size - 4
   if (room < 1) throw new Error("Chunks too small")
+  const part = image.subarray(at, Math.min(image.length, at + room))
+  const chunk = new Uint8Array(4 + part.length)
+  new DataView(chunk.buffer).setUint32(0, at, true)
+  chunk.set(part, 4)
+  return chunk
+}
+
+/** A picture as `data` writes: `[offset u32][bytes]`, each at most `size` bytes long. */
+export function* imageChunks(image: Uint8Array, size: number): Generator<Uint8Array> {
   // One chunk at a time: a firmware image is over a megabyte, and a second copy of it held in
   // chunks is what a phone with the image already in memory cannot afford.
-  for (let at = 0; at < image.length; at += room) {
-    const part = image.subarray(at, Math.min(image.length, at + room))
-    const chunk = new Uint8Array(4 + part.length)
-    new DataView(chunk.buffer).setUint32(0, at, true)
-    chunk.set(part, 4)
-    yield chunk
-  }
+  for (let at = 0; at < image.length; at += size - 4) yield chunkAt(image, at, size)
 }
 
 /**
@@ -664,9 +672,11 @@ export function tailnetMessage(key: string): Uint8Array {
  * or a length past what it holds, and never encoded twice by two ops that disagree. The ops want
  * different schemes — the charm fetches an image over https only, and a turn's address is either,
  * because it has a door for each — so the schemes are the caller's, the bound is this module's, and
- * `needs` is an op's own wording for the refusal where it has been said one way already.
+ * `needs` is an op's own wording for the refusal where it has been said one way already. The update
+ * screen's fetch URL is built on it too, so the one address the phone hands the charm is bounded
+ * the one way every address it carries is.
  */
-function addressBytes(
+export function addressBytes(
   url: string,
   scheme: "http" | "https" | readonly ("http" | "https")[],
   what: string,
@@ -796,15 +806,13 @@ export function parseTalkState(view: DataView): { address: string | null } | nul
 
 /**
  * The image to fetch, and the SHA-256 that has to match it. The charm makes the request itself, so
- * the address must be one it can fetch: https, and nothing else.
+ * the address must be one it can fetch: https over the Wi-Fi it joins — a certificate checked
+ * against its own roots — or plain http over its tailnet, which the charm takes only while its
+ * tunnel is up. The rule is the firmware's own (`Updater::update`); the phone's door-picking
+ * (`firmwareDoor`) is what hands an http address only to a charm whose tunnel is up.
  */
 export function updateMessage(url: string, sha256: Uint8Array): Uint8Array {
-  const address = addressBytes(
-    url,
-    "https",
-    "An update address",
-    "An update needs an https address",
-  )
+  const address = addressBytes(url, ["https", "http"], "An update address")
   if (sha256.length !== CHARM_SHA256_BYTES)
     throw new Error("An update carries the image's 32-byte SHA-256")
   return control(CharmOp.Update).str(address).raw(sha256).done()
@@ -905,6 +913,18 @@ export function parseUpdateStatus(view: DataView): CharmUpdateStatus | null {
   const extra = view.getUint8(4)
   if (extra < 3 || view.byteLength < 5 + extra) return null
   return { state: view.getUint8(5), percent: view.getUint8(6), reason: view.getUint8(7) }
+}
+
+/**
+ * The fill a Busy notice carries as its extra — `[extraLen u8][fill u32 LE]`, the offset the
+ * charm's updater is waiting for the image to resume at, which the fixed charm sends (the
+ * plan's step 2, `docs/PROTOCOL.md` in hermesgots-charm). Null for the four-byte notice every
+ * charm before the fix sends, which names no position to resume from.
+ */
+export function busyFill(view: DataView): number | null {
+  if (view.byteLength < 9) return null
+  if (view.getUint8(4) !== 4) return null
+  return view.getUint32(5, true)
 }
 
 /**

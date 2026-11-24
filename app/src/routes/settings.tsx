@@ -49,6 +49,7 @@ import { botPageOf, botPath, botTabOf, botTabPath, type BotPage, type BotTab } f
 import { botSubject, botSubOf, botSubPath } from "@/lib/bot-subs"
 import { Banner } from "@/components/banner"
 import { CharmDebugScreen } from "@/components/charm-debug"
+import { CharmUpdateScreen } from "@/components/charm-update"
 import { NetworkLogScreen } from "@/components/network-log"
 import { DeveloperOnly } from "@/components/developer-only"
 import { Bot } from "@/components/bot"
@@ -135,6 +136,7 @@ const SECTIONS: Record<string, { title: string; render: () => ReactNode }> = {
   appearance: { title: "Appearance", render: () => <AppearanceSettings /> },
   dictation: { title: "AI Dictation", render: () => <DictationSettings /> },
   charm: { title: CHARM, render: () => <CharmSettings /> },
+  "charm-firmware": { title: "Firmware update", render: () => <CharmUpdateScreen /> },
   community: { title: "Community", render: () => <CommunitySettings /> },
   notifications: { title: NOTIFICATIONS, render: () => <NotificationsSettings /> },
   data: { title: "Local data", render: () => <DataSettings /> },

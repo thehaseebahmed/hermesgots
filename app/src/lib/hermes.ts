@@ -37,6 +37,8 @@ import type { NtfyState } from "@/lib/push-transport"
 import { readStt, type SttValue } from "@/lib/stt-settings"
 import { readGeneral } from "@/lib/general-settings"
 import { readLlmProviders, type LlmEndpointBody } from "@/lib/llm-providers"
+import { readFirmwareImage, type FirmwareImageProgress } from "@/lib/firmware-image"
+import { firmwareFetchToken } from "@/lib/firmware-fetch"
 import {
   parseMcpAccess,
   readMcpAccessOffer,
@@ -2928,14 +2930,37 @@ export async function getCharmFirmware(
 /**
  * The published image's bytes, read from the same host: the tag is resolved again there, so what the
  * phone sends is the image the version it just read names, even when a merge published another one
- * in between.
+ * in between. The body is read as it lands — a megabyte and a half drawn by the update screen's
+ * Downloading step — with the fetch's own timeout unchanged.
  */
-export async function getCharmFirmwareImage(config: HermesConfig): Promise<Uint8Array> {
+export async function getCharmFirmwareImage(
+  config: HermesConfig,
+  onProgress?: (progress: FirmwareImageProgress) => void,
+): Promise<Uint8Array> {
   const response = await request(`${pluginRoot(config.baseUrl)}/charm/firmware/image`, {
     headers: headers(config),
     signal: AbortSignal.timeout(FIRMWARE_IMAGE_TIMEOUT_MS),
   })
-  return new Uint8Array(await response.arrayBuffer())
+  return readFirmwareImage(response, onProgress)
+}
+
+/**
+ * The charm's fetch door, in the phone's hand: a short-lived token the host mints for one image
+ * fetch (`plugin/fetch_tokens.py`) — its own mint kind, so asking costs nothing of the token the
+ * charm's voice holds. This is the only answer in which this app ever sees the token: it goes
+ * straight into the URL the update hands the charm (`firmwareFetchUrl`), and the image's bytes stay
+ * pinned by the SHA-256 the phone sends with it either way.
+ */
+export async function getCharmFirmwareFetchToken(
+  config: HermesConfig,
+  signal?: AbortSignal,
+): Promise<string> {
+  const response = await request(`${pluginRoot(config.baseUrl)}/charm/firmware/fetch`, {
+    method: "POST",
+    headers: headers(config),
+    signal: signal ?? AbortSignal.timeout(READ_TIMEOUT_MS),
+  })
+  return firmwareFetchToken(await response.json())
 }
 
 /**

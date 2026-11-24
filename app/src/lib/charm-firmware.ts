@@ -8,8 +8,8 @@ import {
   CharmCode,
   CharmUpdateReason,
   CharmUpdateState,
+  chunkAt,
   chunkSize,
-  imageChunks,
   parseStatus,
   parseUpdateStatus,
   updateBeginMessage,
@@ -18,7 +18,7 @@ import {
   type CharmUpdateStatus,
 } from "./charm-protocol.ts"
 import type { CharmTransport } from "./charm-sync.ts"
-import { refusalWords, updateReasonWords } from "./charm-words.ts"
+import { refusalWords, updateReasonWords, FIRMWARE_NOT_HELD } from "./charm-words.ts"
 
 /** How long the row waits between asks for the rebooted charm's version, and how many asks. */
 export const REBOOT_MS = 3_000
@@ -26,17 +26,38 @@ export const REBOOT_TRIES = 4
 
 /**
  * A link an image goes over: a sync's transport, plus the answer as the bytes the charm sent. A
- * status ask can be answered by the notification a refused data write raises, and that answer has
- * no extra to read, so the upload sees the answer itself rather than a parsed status.
+ * status ask can be answered by the notification a refused data write raises — the ask has no way
+ * to tell — so the upload sees the answer itself rather than a parsed status, and reads a refusal
+ * off the link's latch rather than out of an answer.
  */
 export interface FirmwareLink extends CharmTransport {
   ask(message: Uint8Array): Promise<DataView>
-  /** Whether the charm refused the data write just made for buffer room, once per refusal. */
-  refused(): boolean
+  /**
+   * The charm's refusal of a data write just made, latched from its Busy notice and read once
+   * per notice: null while none has landed, and a fill of null when the notice carried none,
+   * which is every charm from before the fill rode the notice.
+   */
+  refusal(): CharmRefusal | null
+}
+
+/**
+ * The Busy notice's account of a refused data write: where the charm is waiting for the image to
+ * resume, when the notice says.
+ */
+export interface CharmRefusal {
+  /**
+   * The fill's byte offset as the notice's extra carried it; null for the four-byte notice every
+   * charm before the fix sends, which names no position to resume from.
+   */
+  fill: number | null
 }
 
 export interface FirmwareProgress {
-  /** Bytes the phone has written, and the image's whole length. */
+  /**
+   * The furthest byte the phone has written, and the image's whole length. A re-anchor moves the
+   * next write back to the charm's fill; this count never runs back with it — it is a counter the
+   * row draws, and the charm's own percent is the true progress.
+   */
   sent: number
   total: number
   /** The charm's own count, in whole percent, once a status answer has said one. */
@@ -64,10 +85,49 @@ export class FirmwareRefused extends Error {
 }
 
 /**
+ * The refusal a `Failed` update status is, wherever one is read — mid-upload or while the screen
+ * watches the charm's own fetch: the charm's own reason for an attempt it started, carried by a
+ * status rather than an op's answer, so the code is `Ok`'s and the reason is all there is.
+ */
+export function updateFailedRefusal(status: Pick<CharmUpdateStatus, "reason">): FirmwareRefused {
+  return new FirmwareRefused(CharmCode.Ok, status.reason)
+}
+
+/**
  * How many bytes go over between status asks: often enough to notice a failure early, seldom enough
  * that a slow link carries the image rather than the questions about it.
  */
 const STATUS_BYTES = 64 * 1024
+
+/**
+ * How many asks the tail of an upload may take, and how many notices may re-anchor the send to
+ * the very place it is stuck at: after the last byte is written, the charm's own count is what
+ * says it landed, and a healthy drain outruns the paced writes — but a charm wedged yet answering
+ * is an unbounded wait either way, so both are counted and the row's own words end them.
+ * Generous by design: it is a bound, not a pace.
+ */
+const TAIL_TRIES = 120
+
+/**
+ * How long the phone leaves between one data write and the next. A write carries no answer, so the
+ * charm's refusal arrives as a notification, at least a connection event behind the write it
+ * answers; a gap longer than that is what lands a refusal's notice before the write that follows
+ * it. It is also longer than a pass of the charm's drain, so a charm that empties its whole buffer
+ * per pass is never refused at all. Empirical rather than provable: the drain's flash timing is the
+ * charm's, not the phone's. The margin is one skipped connection event past the first: a refused
+ * notice one interval late is ordinary BLE, and a gap that short loses the race it exists for — a
+ * repro against the rig cancels the attempt at 60 ms, so the gap is kept at two intervals, not one.
+ */
+export const PACE_MS = 100
+
+/**
+ * The upload's one knob: the wait between data writes. A rig stands in for it, and a build whose
+ * Busy notice names the fill it waits at is handed no wait at all — the notice re-anchors the send,
+ * so the gap would only cost the image its minutes.
+ */
+export interface UploadOptions {
+  pace?: () => Promise<void>
+}
 
 /**
  * Sends an image the phone holds: announce its length and hash, write it in link-sized chunks,
@@ -79,7 +139,10 @@ export async function uploadFirmware(
   image: Uint8Array,
   sha256: Uint8Array,
   onProgress?: (progress: FirmwareProgress) => void,
+  options: UploadOptions = {},
 ): Promise<FirmwareProgress> {
+  const pace: () => Promise<void> =
+    options.pace ?? (() => new Promise<void>((done) => setTimeout(done, PACE_MS)))
   const progress: FirmwareProgress = { sent: 0, total: image.length }
   const begin = parseStatus(await link.ask(updateBeginMessage(image.length, sha256)))
   if (begin.code !== CharmCode.Ok) throw new FirmwareRefused(begin.code)
@@ -96,29 +159,72 @@ export async function uploadFirmware(
 
   const size = chunkSize(link.mtu)
   let sinceAsk = 0
-  let last: Uint8Array | null = null
-  for (const chunk of imageChunks(image, size)) {
-    // A data write carries no answer: a chunk the charm refused for buffer room is announced on
-    // the status characteristic instead. The chunk just written goes again before a new offset —
-    // whether the notice landed at once or answered the status ask since — because the next
-    // offset would be a gap, which the charm ends the whole image over.
-    while (last && link.refused()) await link.data(last)
-    last = chunk
-    await link.data(chunk)
-    while (link.refused()) await link.data(chunk)
-    progress.sent += chunk.length - 4
-    sinceAsk += chunk.length - 4
-    report()
-    if (sinceAsk < STATUS_BYTES) continue
-    sinceAsk = 0
+  let at = 0
+  let last = 0 // where the write before it went, for the notice that names no fill
+  // Null when a stray Busy notice answered the ask with no status of its own, which is no progress
+  // and no failure — `test-charm-upload.mjs` holds that rule, over a charm that strays once.
+  const askStatus = async (): Promise<CharmUpdateStatus | null> => {
     const status = await updateStatusOf(link)
-    // A stray notice answers the ask with no status of its own, which is no progress and no
-    // failure: `test-charm-upload.mjs` holds that rule, over a charm that strays once.
-    if (!status) continue
-    if (status.state === CharmUpdateState.Failed)
-      throw new FirmwareRefused(CharmCode.Ok, status.reason)
+    if (!status) return null
+    if (status.state === CharmUpdateState.Failed) throw updateFailedRefusal(status)
     progress.percent = status.percent
     report()
+    return status
+  }
+  // Settle asks since the walk last wrote: re-anchoring on a refusal starts the count over, since
+  // the walk is writing again rather than waiting on a charm that has everything it was sent.
+  let tail = 0
+  // Notices that re-anchored the send to the very place the last one did: a charm whose fill
+  // never moves is answering, not draining — a stonewall, counted so the row's own words end
+  // the wait rather than the flood running forever.
+  let wall = 0
+  let anchor = -1 // where the last notice re-anchored the send
+  for (;;) {
+    // The gap is what a Busy notice needs to land: the write before it carried no answer, and a
+    // notification is at least a connection event behind.
+    await pace()
+    const refusal = link.refusal()
+    if (refusal) {
+      // A notice that names the charm's fill re-anchors the send position there — the fill is
+      // where the charm waits for the image, which the phone may already have written past. A
+      // notice that names none is about the chunk just written, so that one goes again: the
+      // next offset would be a gap, which the charm ends the whole image over.
+      at = refusal.fill ?? last
+      // The re-anchor that moves is the drain running under the notice — the walk is truly
+      // writing again wherever the charm now waits. The re-anchor that does not is a charm
+      // answering at a fill that never moves: nothing it says will advance the send, and the
+      // row's own words end the wait once enough of its notices have said the same position.
+      if (at > anchor) {
+        anchor = at
+        wall = 0
+      } else if ((wall += 1) === TAIL_TRIES) {
+        throw new Error(FIRMWARE_NOT_HELD)
+      }
+      tail = 0
+    }
+    if (at < image.length) {
+      const chunk = chunkAt(image, at, size)
+      await link.data(chunk)
+      last = at
+      at += chunk.length - 4
+      if (at > progress.sent) {
+        sinceAsk += at - progress.sent
+        progress.sent = at
+        report()
+      }
+      if (sinceAsk < STATUS_BYTES) continue
+      sinceAsk = 0
+      await askStatus()
+      continue
+    }
+    // The last byte is written, but a write carries no answer: the charm's own count is what
+    // says it landed, and a refusal's notice can outlast the gap that wrote it. Until the
+    // count says the charm holds the whole image, the loop keeps answering refusals; the end
+    // goes out only to a charm that has it all — and a charm that says everything but 100 this
+    // many asks over is waited on no further, in the row's own words.
+    if (image.length === 0) break
+    if ((await askStatus())?.percent === 100) break
+    if ((tail += 1) === TAIL_TRIES) throw new Error(FIRMWARE_NOT_HELD)
   }
 
   const end = parseStatus(await link.ask(updateEndMessage()))
@@ -134,22 +240,26 @@ export async function uploadFirmware(
  * The version the charm answers once it is back after an upload, or the one it never left: `read`
  * is asked `tries` times, `waitMs` apart, and a change is what says the new build booted. `was` is
  * the build the row read before the upload — null where it read none, so any answer is a change.
+ * `answered` is the last answer that landed — the version the charm itself said, for a caller whose
+ * end gate reads the answer rather than only its change, and undefined where none ever did.
  */
 export async function versionAfterReboot(
   read: () => Promise<string | null>,
   was: string | null,
   { tries = REBOOT_TRIES, waitMs = REBOOT_MS } = {},
-): Promise<{ changed: boolean; version: string | null }> {
+): Promise<{ changed: boolean; version: string | null; answered?: string | null }> {
+  let answered: string | null | undefined
   for (let attempt = 0; attempt < tries; attempt += 1) {
     try {
       const now = await read()
-      if (now !== was) return { changed: true, version: now }
+      answered = now
+      if (now !== was) return { changed: true, version: now, answered }
     } catch {
       // The link is going down under it, which is the reboot itself.
     }
     await new Promise((done) => setTimeout(done, waitMs))
   }
-  return { changed: false, version: was }
+  return { changed: false, version: was, answered }
 }
 
 /**
