@@ -25,6 +25,7 @@ import {
   type CharmRefusal,
   type FirmwareProgress,
   uploadFirmware,
+  type UploadOptions,
 } from "./charm-firmware.ts"
 import { oneAtATime } from "./charm-queue.ts"
 import { readFailed, refusalWords, type CharmRead } from "./charm-words.ts"
@@ -645,10 +646,11 @@ export async function uploadCharmFirmware(
   image: Uint8Array,
   sha256Hex: string,
   onProgress?: (progress: FirmwareProgress) => void,
+  options: UploadOptions = {},
 ): Promise<FirmwareProgress> {
   // Read here, so a hash that is not one is refused before a connection is opened.
   const sha256 = hexBytes(sha256Hex)
-  return withCharm((link) => uploadFirmware(link, image, sha256, onProgress))
+  return withCharm((link) => uploadFirmware(link, image, sha256, onProgress, options))
 }
 
 /**

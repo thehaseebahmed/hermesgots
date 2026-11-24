@@ -19,22 +19,20 @@ import {
 import { useCharmReport } from "@/lib/charm"
 import { CharmLinkState, CharmUpdateState } from "@/lib/charm-protocol"
 import { db } from "@/lib/db"
-import type { CharmFirmware } from "@/lib/hermes"
 import { SettingsPage } from "@/routes/settings"
 import { BatteryRow, CharmStatusRow, WakingGroup } from "@/components/settings/charm"
 import { report } from "./fixtures/charm-report.ts"
 import {
   Path,
   click,
-  connection,
   findAll,
   find,
   findText,
-  json,
   labelled,
   missing,
   mount,
   seedSettings,
+  serveFirmware,
   settle,
   text,
   type,
@@ -213,35 +211,6 @@ test("a charm that kept the secret readable says so, in its own words", async ()
 const button = (label: string) => findText("button", label)
 
 const PUBLISHED = { version: "0.2.0", size: 4, sha256: "cd".repeat(32) }
-
-/**
- * A bot's host, as the app's own reader asks it for a charm's firmware: the plugin's feature list,
- * the tag's answer, and the image's bytes. `published` is that answer — a package, or the sentence
- * the host refuses with — and a function is asked once per read, so a tag that moved is one test's
- * own. The connection is named, since what a host answered is remembered per connection.
- */
-function serveFirmware(
-  name: string,
-  published: CharmFirmware | string | ((reads: number) => CharmFirmware | string),
-  image = new Uint8Array(),
-) {
-  const profile = connection(name)
-  let reads = 0
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = new URL(String(input instanceof Request ? input.url : input))
-    if (url.pathname.endsWith("/plugins/gots/info"))
-      return json({ name: "gots", version: "1.0.0", features: ["charm_firmware"] })
-    if (url.pathname.endsWith("/charm/firmware/image")) return new Response(image)
-    if (url.pathname.endsWith("/charm/firmware")) {
-      reads += 1
-      const answer = typeof published === "function" ? published(reads) : published
-      if (typeof answer === "string") return json({ error: { message: answer } }, 403)
-      return json(answer)
-    }
-    return json({ error: { message: "no route" } }, 404)
-  }) as unknown as typeof fetch
-  return { profile, reads: () => reads }
-}
 
 test("the firmware row offers the published one when the charm is older", async () => {
   const host = serveFirmware("firmware-offered", PUBLISHED)

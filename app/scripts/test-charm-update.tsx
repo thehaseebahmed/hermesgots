@@ -22,16 +22,15 @@ import {
   CharmUpdateState,
 } from "@/lib/charm-protocol"
 import { db } from "@/lib/db"
-import type { CharmFirmware } from "@/lib/hermes"
 import {
   click,
-  connection,
   findAll,
   find,
   findText,
-  json,
+  FIRMWARE_FETCH_TOKEN,
   mount,
   seedSettings,
+  serveFirmware,
   settle,
   text,
   until,
@@ -112,9 +111,6 @@ const IMAGE = new Uint8Array([9, 9, 9, 9])
 const IMAGE_SHA = createHash("sha256").update(IMAGE).digest("hex")
 const IMAGE_PUBLISHED = { version: "0.2.0", size: IMAGE.length, sha256: IMAGE_SHA }
 
-/** The token the test host mints, as the real one's: bytes that ride the URL and nothing else. */
-const FETCH_TOKEN = "1f".repeat(32)
-
 /**
  * A paired charm holding a voice hand-over: the address the last sync wrote it, on the scheme the
  * reader had picked — the two facts the door is picked from.
@@ -130,59 +126,6 @@ const charmedOver = (talk: string, voice: "http" | "https"): PairedCharm => ({
 const ONLINE_WIFI = {
   wifi: { state: CharmLinkState.Online, reason: 0, ip: "192.168.1.20", ssid: "Home" },
   tailnet: { state: CharmLinkState.Off, ip: "" },
-}
-
-/**
- * A bot's host, as the app's own reader asks it for a charm's firmware: the plugin's feature list,
- * the tag's answer, and the image's bytes. `published` is that answer — a package, or the sentence
- * the host refuses with — and a function is asked once per read, so a tag that moved is one test's
- * own. The image answers with its length named and, where a gate is given, in halves the test
- * releases, so the Downloading bar can be watched moving rather than assumed.
- */
-function serveFirmware(
-  name: string,
-  published: CharmFirmware | string | ((reads: number) => CharmFirmware | string),
-  image = new Uint8Array(),
-  stream?: { hold: Promise<void>; release: () => void },
-) {
-  const profile = connection(name)
-  let reads = 0
-  let mints = 0
-  let imageReads = 0
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    const url = new URL(String(input instanceof Request ? input.url : input))
-    if (url.pathname.endsWith("/plugins/gots/info"))
-      return json({ name: "gots", version: "1.0.0", features: ["charm_firmware"] })
-    if (url.pathname.endsWith("/charm/firmware/fetch")) {
-      // The fetch token's mint, the one ask the walk makes only when a door is open.
-      mints += 1
-      return json({ object: "gots.charm_firmware_fetch", token: FETCH_TOKEN })
-    }
-    if (url.pathname.endsWith("/charm/firmware/image")) {
-      imageReads += 1
-      if (!stream)
-        return new Response(image, { headers: { "Content-Length": String(image.length) } })
-      const held = stream
-      const half = Math.ceil(image.length / 2)
-      const body = new ReadableStream({
-        async start(controller) {
-          controller.enqueue(image.subarray(0, half))
-          await held.hold
-          controller.enqueue(image.subarray(half))
-          controller.close()
-        },
-      })
-      return new Response(body, { headers: { "Content-Length": String(image.length) } })
-    }
-    if (url.pathname.endsWith("/charm/firmware")) {
-      reads += 1
-      const answer = typeof published === "function" ? published(reads) : published
-      if (typeof answer === "string") return json({ error: { message: answer } }, 403)
-      return json(answer)
-    }
-    return json({ error: { message: "no route" } }, 404)
-  }) as unknown as typeof fetch
-  return { profile, reads: () => reads, mints: () => mints, imageReads: () => imageReads }
 }
 
 test("the steps appear in the order they walk, each bar moving, and the image that went is the host's", async () => {
@@ -204,7 +147,7 @@ test("the steps appear in the order they walk, each bar moving, and the image th
     "update-walk",
     { version: "0.2.0", size: image.length, sha256 },
     image,
-    stream,
+    { stream },
   )
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
@@ -253,7 +196,7 @@ test("a charm online on Wi-Fi fetches the image itself, its own percent on the D
       throw new Error("the BLE transfer ran")
     },
   })
-  const host = serveFirmware("update-fetch", IMAGE_PUBLISHED, IMAGE)
+  const host = serveFirmware("update-fetch", IMAGE_PUBLISHED, IMAGE, { fetchToken: true })
   const charm = charmedOver("https://update-fetch.test/api/plugins/gots", "https")
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
@@ -269,7 +212,7 @@ test("a charm online on Wi-Fi fetches the image itself, its own percent on the D
       assert.equal(handed.length, 1, "one Update op went")
       assert.equal(
         handed[0].url,
-        `https://update-fetch.test/api/plugins/gots/charm/firmware/image/fetch?token=${FETCH_TOKEN}`,
+        `https://update-fetch.test/api/plugins/gots/charm/firmware/image/fetch?token=${FIRMWARE_FETCH_TOKEN}`,
         "the host the voice hand-over kept, the image route's tokened variant, the token",
       )
       assert.equal(handed[0].sha256Hex, IMAGE_PUBLISHED.sha256, "the published SHA-256, as the record's hex")
@@ -295,7 +238,7 @@ test("a charm online on its tailnet fetches over the http door it was handed", a
       throw new Error("the BLE transfer ran")
     },
   })
-  const host = serveFirmware("update-tailnet", IMAGE_PUBLISHED, IMAGE)
+  const host = serveFirmware("update-tailnet", IMAGE_PUBLISHED, IMAGE, { fetchToken: true })
   const charm = charmedOver("http://100.64.0.9:8642/api/plugins/gots", "http")
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
@@ -304,7 +247,7 @@ test("a charm online on its tailnet fetches over the http door it was handed", a
       assert.equal(handed.length, 1, "one Update op went")
       assert.equal(
         handed[0].url,
-        `http://100.64.0.9:8642/api/plugins/gots/charm/firmware/image/fetch?token=${FETCH_TOKEN}`,
+        `http://100.64.0.9:8642/api/plugins/gots/charm/firmware/image/fetch?token=${FIRMWARE_FETCH_TOKEN}`,
         "plain http, over the charm's tailnet",
       )
       assert.ok(
@@ -358,7 +301,7 @@ test("a fetch the charm fails is drawn in its own reason words, with Try again a
       throw new Error("the BLE transfer ran")
     },
   })
-  const host = serveFirmware("update-fetch-failed", IMAGE_PUBLISHED, IMAGE)
+  const host = serveFirmware("update-fetch-failed", IMAGE_PUBLISHED, IMAGE, { fetchToken: true })
   const charm = charmedOver("https://update-fetch-failed.test/api/plugins/gots", "https")
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),

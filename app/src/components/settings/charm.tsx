@@ -99,6 +99,7 @@ import type { SyncProgress } from "@/lib/charm-sync"
 import { serverConfig } from "@/lib/connection"
 import { getActiveProfile, listProfiles } from "@/lib/db"
 import type { PluginServer } from "@/lib/features"
+import { CHARM_POLL_MS } from "@/lib/freshness"
 import { getTalkAddress, getTalkToken } from "@/lib/hermes"
 import { useHostRecord } from "@/lib/host-record"
 import {
@@ -139,9 +140,6 @@ import { useBotLabels } from "@/lib/use-bot-labels"
 
 const message = (error: unknown) =>
   error instanceof Error && error.message ? error.message : "Something went wrong"
-
-/** How often a running firmware download is asked where it has got to. */
-const UPDATE_POLL_MS = 2_000
 
 /**
  * The Network section's radio, as the page reaches it: every call is one control ask over the
@@ -376,7 +374,7 @@ export function CharmNetwork({
           setUpdate((before) => readFailed(before))
           setWatching(false)
         })
-    }, UPDATE_POLL_MS)
+    }, CHARM_POLL_MS)
     return () => {
       live = false
       clearInterval(timer)

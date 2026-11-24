@@ -13,7 +13,7 @@ import { AfkPopup } from "@/components/afk"
 import { AppShell } from "@/components/app-shell"
 import { DEFAULT_SETTINGS, db, type Message, type Profile, type Settings } from "@/lib/db"
 import { fingerprintOf, orderOf } from "@/lib/dictation-log"
-import type { SessionMessage } from "@/lib/hermes"
+import type { CharmFirmware, SessionMessage } from "@/lib/hermes"
 import { clearShare } from "@/lib/share"
 
 import { spyToaster } from "./toaster-spy.ts"
@@ -157,6 +157,66 @@ export function botProfile(name: string, patch: Partial<Profile> = {}): Profile 
     updatedAt: 1,
     ...patch,
   }
+}
+
+/** The token the fake host mints, as the real one's: bytes that ride the URL and nothing else. */
+export const FIRMWARE_FETCH_TOKEN = "1f".repeat(32)
+
+/**
+ * A bot's host, as the app's own reader asks it for a charm's firmware: the plugin's feature list,
+ * the tag's answer, and the image's bytes. `published` is that answer — a package, or the sentence
+ * the host refuses with — and a function is asked once per read, so a tag that moved is one test's
+ * own. The image answers with its length named and, where a gate is given, in halves the test
+ * releases, so a Downloading bar can be watched moving rather than assumed; `fetchToken` mints the
+ * short-lived door a charm's own walk is admitted by, which no test turns on that opens no door.
+ */
+export function serveFirmware(
+  name: string,
+  published: CharmFirmware | string | ((reads: number) => CharmFirmware | string),
+  image = new Uint8Array(),
+  {
+    stream,
+    fetchToken,
+  }: { stream?: { hold: Promise<void>; release: () => void }; fetchToken?: boolean } = {},
+) {
+  const profile = connection(name)
+  let reads = 0
+  let mints = 0
+  let imageReads = 0
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input instanceof Request ? input.url : input))
+    if (url.pathname.endsWith("/plugins/gots/info"))
+      return json({ name: "gots", version: "1.0.0", features: ["charm_firmware"] })
+    if (fetchToken && url.pathname.endsWith("/charm/firmware/fetch")) {
+      // The fetch token's mint, the one ask a walk makes only when a door is open.
+      mints += 1
+      return json({ object: "gots.charm_firmware_fetch", token: FIRMWARE_FETCH_TOKEN })
+    }
+    if (url.pathname.endsWith("/charm/firmware/image")) {
+      imageReads += 1
+      if (!stream)
+        return new Response(image, { headers: { "Content-Length": String(image.length) } })
+      const held = stream
+      const half = Math.ceil(image.length / 2)
+      const body = new ReadableStream({
+        async start(controller) {
+          controller.enqueue(image.subarray(0, half))
+          await held.hold
+          controller.enqueue(image.subarray(half))
+          controller.close()
+        },
+      })
+      return new Response(body, { headers: { "Content-Length": String(image.length) } })
+    }
+    if (url.pathname.endsWith("/charm/firmware")) {
+      reads += 1
+      const answer = typeof published === "function" ? published(reads) : published
+      if (typeof answer === "string") return json({ error: { message: answer } }, 403)
+      return json(answer)
+    }
+    return json({ error: { message: "no route" } }, 404)
+  }) as unknown as typeof fetch
+  return { profile, reads: () => reads, mints: () => mints, imageReads: () => imageReads }
 }
 
 /** What a host answers about its log: the totals it counts, across the fingerprint beside them. */

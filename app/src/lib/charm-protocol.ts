@@ -672,9 +672,11 @@ export function tailnetMessage(key: string): Uint8Array {
  * or a length past what it holds, and never encoded twice by two ops that disagree. The ops want
  * different schemes — the charm fetches an image over https only, and a turn's address is either,
  * because it has a door for each — so the schemes are the caller's, the bound is this module's, and
- * `needs` is an op's own wording for the refusal where it has been said one way already.
+ * `needs` is an op's own wording for the refusal where it has been said one way already. The update
+ * screen's fetch URL is built on it too, so the one address the phone hands the charm is bounded
+ * the one way every address it carries is.
  */
-function addressBytes(
+export function addressBytes(
   url: string,
   scheme: "http" | "https" | readonly ("http" | "https")[],
   what: string,

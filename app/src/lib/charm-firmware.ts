@@ -18,7 +18,7 @@ import {
   type CharmUpdateStatus,
 } from "./charm-protocol.ts"
 import type { CharmTransport } from "./charm-sync.ts"
-import { refusalWords, updateReasonWords } from "./charm-words.ts"
+import { refusalWords, updateReasonWords, FIRMWARE_NOT_HELD } from "./charm-words.ts"
 
 /** How long the row waits between asks for the rebooted charm's version, and how many asks. */
 export const REBOOT_MS = 3_000
@@ -85,10 +85,27 @@ export class FirmwareRefused extends Error {
 }
 
 /**
+ * The refusal a `Failed` update status is, wherever one is read — mid-upload or while the screen
+ * watches the charm's own fetch: the charm's own reason for an attempt it started, carried by a
+ * status rather than an op's answer, so the code is `Ok`'s and the reason is all there is.
+ */
+export function updateFailedRefusal(status: Pick<CharmUpdateStatus, "reason">): FirmwareRefused {
+  return new FirmwareRefused(CharmCode.Ok, status.reason)
+}
+
+/**
  * How many bytes go over between status asks: often enough to notice a failure early, seldom enough
  * that a slow link carries the image rather than the questions about it.
  */
 const STATUS_BYTES = 64 * 1024
+
+/**
+ * How many asks the tail of an upload may take: after the last byte is written, the charm's own
+ * count is what says it landed, and a healthy drain outruns the paced writes — but a charm wedged
+ * yet answering would be an unbounded hot poll, so the asks are counted and the row's own words end
+ * the wait. Generous by design: it is a bound, not a pace.
+ */
+const TAIL_TRIES = 120
 
 /**
  * How long the phone leaves between one data write and the next. A write carries no answer, so the
@@ -100,7 +117,11 @@ const STATUS_BYTES = 64 * 1024
  */
 export const PACE_MS = 50
 
-/** The upload's one knob a rig stands in for: the wait between data writes. */
+/**
+ * The upload's one knob: the wait between data writes. A rig stands in for it, and a build whose
+ * Busy notice names the fill it waits at is handed no wait at all — the notice re-anchors the send,
+ * so the gap would only cost the image its minutes.
+ */
 export interface UploadOptions {
   pace?: () => Promise<void>
 }
@@ -144,12 +165,14 @@ export async function uploadFirmware(
   const askStatus = async (): Promise<CharmUpdateStatus | null> => {
     const status = await updateStatusOf(link)
     if (!status) return null
-    if (status.state === CharmUpdateState.Failed)
-      throw new FirmwareRefused(CharmCode.Ok, status.reason)
+    if (status.state === CharmUpdateState.Failed) throw updateFailedRefusal(status)
     progress.percent = status.percent
     report()
     return status
   }
+  // Settle asks since the walk last wrote: re-anchoring on a refusal starts the count over, since
+  // the walk is writing again rather than waiting on a charm that has everything it was sent.
+  let tail = 0
   for (;;) {
     // The gap is what a Busy notice needs to land: the write before it carried no answer, and a
     // notification is at least a connection event behind.
@@ -161,6 +184,7 @@ export async function uploadFirmware(
       // notice that names none is about the chunk just written, so that one goes again: the
       // next offset would be a gap, which the charm ends the whole image over.
       at = refusal.fill ?? last
+      tail = 0
     }
     if (at < image.length) {
       const chunk = chunkAt(image, at, size)
@@ -180,9 +204,11 @@ export async function uploadFirmware(
     // The last byte is written, but a write carries no answer: the charm's own count is what
     // says it landed, and a refusal's notice can outlast the gap that wrote it. Until the
     // count says the charm holds the whole image, the loop keeps answering refusals; the end
-    // goes out only to a charm that has it all.
+    // goes out only to a charm that has it all — and a charm that says everything but 100 this
+    // many asks over is waited on no further, in the row's own words.
     if (image.length === 0) break
     if ((await askStatus())?.percent === 100) break
+    if ((tail += 1) === TAIL_TRIES) throw new Error(FIRMWARE_NOT_HELD)
   }
 
   const end = parseStatus(await link.ask(updateEndMessage()))

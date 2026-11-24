@@ -160,3 +160,10 @@ export const MEDIA_URL_SKEW_MS = 60_000
  * files are let go of, so this is what stops every draw from being a write.
  */
 export const MEDIA_TOUCH_MS = 60 * 60_000
+
+/**
+ * How often a charm screen asks the charm while it watches something that moves on its own: the
+ * Firmware row's running download, the update screen's follow of the charm's own fetch, and the
+ * Debug page's read of a failure's log. A state the screen can change is asked once, not polled.
+ */
+export const CHARM_POLL_MS = 2_000

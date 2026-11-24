@@ -18,10 +18,14 @@ import {
   type CharmScheme,
   type PairedCharm,
 } from "@/lib/charm"
-import { FirmwareRefused, versionAfterReboot, type FirmwareProgress } from "@/lib/charm-firmware"
+import {
+  updateFailedRefusal,
+  versionAfterReboot,
+  type FirmwareProgress,
+  type UploadOptions,
+} from "@/lib/charm-firmware"
 import {
   CHARM_SLOT_BYTES,
-  CharmCode,
   CharmUpdateState,
   hexOf,
   type CharmNetworkReport,
@@ -34,6 +38,7 @@ import {
   firmwareDoneWords,
   FIRMWARE_CABLE,
   FIRMWARE_NOT_BACK,
+  FIRMWARE_NOT_ENDED,
   FIRMWARE_NOT_PUBLISHED,
   FIRMWARE_NOT_STARTED,
   FIRMWARE_SENT,
@@ -41,6 +46,7 @@ import {
 } from "@/lib/charm-words"
 import { firmwareDoor, firmwareFetchUrl } from "@/lib/firmware-fetch"
 import { getActiveProfile } from "@/lib/db"
+import { CHARM_POLL_MS } from "@/lib/freshness"
 import {
   getCharmFirmwareFetchToken,
   getCharmFirmwareImage,
@@ -48,9 +54,8 @@ import {
 } from "@/lib/hermes"
 import { useHostRecord } from "@/lib/host-record"
 import type { PluginServer } from "@/lib/features"
-
-const message = (error: unknown) =>
-  error instanceof Error && error.message ? error.message : "Something went wrong"
+import { compareVersions } from "@/lib/version-compare"
+import { spoken } from "@/lib/words"
 
 /** The SHA-256 of bytes this phone holds, as the lowercase hex the link takes. */
 const sha256Of = async (image: Uint8Array) =>
@@ -72,11 +77,15 @@ export interface CharmUpdateApi {
   updateStatus(): Promise<CharmUpdateStatus>
   /** Hands the charm the image to fetch itself: the URL and the SHA-256 it must hash to. */
   update(url: string, sha256Hex: string): Promise<void>
-  /** One image over the charm's link, drawing where the phone has got to. */
+  /**
+   * One image over the charm's link, drawing where the phone has got to; `options` carries the
+   * pace the charm's own build asks for.
+   */
   upload(
     image: Uint8Array,
     sha256Hex: string,
     onProgress?: (progress: FirmwareProgress) => void,
+    options?: UploadOptions,
   ): Promise<FirmwareProgress>
 }
 
@@ -97,9 +106,6 @@ type FirmwareHand =
   | { kind: "transfer"; image: Uint8Array; sha256Hex: string }
   | { kind: "fetch"; url: string; sha256Hex: string; scheme: CharmScheme }
 
-/** How often the charm's own percent is asked while it fetches: the settings row's watching pace. */
-const FETCH_POLL_MS = 2_000
-
 /**
  * How many asks in a row may say nothing is running before the walk calls the fetch one that never
  * started. An `Idle` answer right after the write is the fetch arming itself; a few together are a
@@ -107,6 +113,27 @@ const FETCH_POLL_MS = 2_000
  * without an end.
  */
 const FETCH_IDLE_TRIES = 3
+
+/**
+ * The walk's own bound: the fetch token's short life (`TTL_MS` in `plugin/fetch_tokens.py`), past
+ * which the door the charm was handed is shut anyway. A charm that says Downloading forever is said
+ * so in the walk's own words rather than waited on without an end, mirroring the idle rule above.
+ */
+const FETCH_WALK_MS = 600_000
+
+/**
+ * The first build whose Busy notice names the fill it waits at (the plan's step 2). Against it the
+ * paced gap buys nothing — the notice re-anchors the send wherever the charm has got to — while it
+ * costs the image its idle minutes (two and a half for a megabyte and a half); anything older, or a
+ * charm that cannot say, keeps the paced fallback, the only defence a notice that names no fill has.
+ */
+const SPEAKS_FILL = "0.2.1-beta"
+
+/** The upload's own knob, from the build the charm runs: no wait for one that names its fill. */
+const uploadPace = (version: string | null): UploadOptions =>
+  version !== null && (compareVersions(version, SPEAKS_FILL) ?? -1) >= 0
+    ? { pace: async () => {} }
+    : {}
 
 /**
  * The charm's own percent, followed to the end of its fetch. `Ready` is the slot written and the
@@ -118,15 +145,16 @@ async function watchCharmFetch(
   onProgress?: (update: CharmUpdateStatus) => void,
 ): Promise<void> {
   let idles = 0
+  const until = Date.now() + FETCH_WALK_MS
   for (;;) {
     const update = await ask()
-    if (update.state === CharmUpdateState.Failed)
-      throw new FirmwareRefused(CharmCode.Ok, update.reason)
+    if (update.state === CharmUpdateState.Failed) throw updateFailedRefusal(update)
     if (update.state === CharmUpdateState.Ready) return
     if (update.state === CharmUpdateState.Downloading) idles = 0
     else if ((idles += 1) >= FETCH_IDLE_TRIES) throw new Error(FIRMWARE_NOT_STARTED)
     onProgress?.(update)
-    await new Promise((done) => setTimeout(done, FETCH_POLL_MS))
+    if (Date.now() > until) throw new Error(FIRMWARE_NOT_ENDED)
+    await new Promise((done) => setTimeout(done, CHARM_POLL_MS))
   }
 }
 
@@ -240,11 +268,16 @@ export function CharmUpdateScreen({
         )
       } else {
         show("transfer", { percent: 0 })
-        await api.upload(next.image, next.sha256Hex, (progress) => {
-          const percent =
-            progress.total > 0 ? Math.round((progress.sent / progress.total) * 100) : 0
-          show("transfer", { percent })
-        })
+        await api.upload(
+          next.image,
+          next.sha256Hex,
+          (progress) => {
+            const percent =
+              progress.total > 0 ? Math.round((progress.sent / progress.total) * 100) : 0
+            show("transfer", { percent })
+          },
+          uploadPace(was),
+        )
         show("transfer", { percent: 100 })
       }
       // The end is a yes only once the slot is bootable: the charm reboots a moment later, and the
@@ -260,7 +293,7 @@ export function CharmUpdateScreen({
       await firmware.reload()
       setEnd({ kind: "failed", said: FIRMWARE_NOT_BACK })
     } catch (error) {
-      setEnd({ kind: "failed", said: message(error) })
+      setEnd({ kind: "failed", said: spoken(error, "Something went wrong") })
     } finally {
       sending.current = false
       setBusy(false)

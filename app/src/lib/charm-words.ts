@@ -240,12 +240,6 @@ export function firmwareOffers({ running, published, answered }: CharmFirmwareSe
   return compareVersions(running.version, published) === -1
 }
 
-/** The update as it runs, from the phone's own count of the bytes it has written. */
-export function updateProgressWords(progress: { sent: number; total: number }): string {
-  const percent = progress.total > 0 ? Math.round((progress.sent / progress.total) * 100) : 0
-  return `Updating… ${percent}%`
-}
-
 /** A file a reader picked that cannot fit a slot, refused here rather than a minute into a stream. */
 export const FILE_TOO_BIG = "That file is larger than a slot, so the charm could not hold it."
 
@@ -301,6 +295,20 @@ export function fetchWords(scheme: "http" | "https"): string {
 
 /** The fetch walk's line for a charm that took the address and started nothing. */
 export const FIRMWARE_NOT_STARTED = "The charm didn't start the fetch it was handed."
+
+/**
+ * The fetch walk's line for a charm that says it is downloading forever: the walk is bounded by the
+ * fetch token's own short life, past which the door is shut whatever the charm says — a walk that
+ * outlives its door is over, in the walk's own words.
+ */
+export const FIRMWARE_NOT_ENDED = "The charm didn't finish the fetch it started."
+
+/**
+ * The upload's line for a charm that never says it holds the whole image it was sent: the last
+ * byte went out with no answer of its own, so the charm's own count is the only yes there is — and
+ * a charm wedged but alive would otherwise be waited on without an end.
+ */
+export const FIRMWARE_NOT_HELD = "The charm didn't say it had the whole image."
 
 /** The update screen's line when the host's read names no image to send. */
 export const FIRMWARE_NOT_PUBLISHED =

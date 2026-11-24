@@ -2013,21 +2013,25 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
             return _error(web, str(error), error.status)
         return web.json_response({"object": "gots.charm_firmware", **answer})
 
-    async def charm_firmware_image(request: "web.Request") -> "web.Response":
-        denied = unauthorized(request)
-        if denied is not None:
-            return denied
+    async def _serve_charm_image(web: Any) -> Any:
+        # The length is stated rather than left to the body, since what the app hands the charm is
+        # measured against the size it read — and what the charm fetches has to end whole for the
+        # hash to match; the type is the layer's own, unread.
         home = hermes_home()
         try:
             found = await asyncio.to_thread(firmware.image, home)
         except firmware.FirmwareError as error:
             return _error(web, str(error), error.status)
-        # The length is stated rather than left to the body, since what the app hands the charm is
-        # measured against the size it read; the type is the layer's own, whole and unread.
         return web.Response(
             body=found["data"],
             headers={"Content-Type": found["type"], "Content-Length": str(len(found["data"]))},
         )
+
+    async def charm_firmware_image(request: "web.Request") -> "web.Response":
+        denied = unauthorized(request)
+        if denied is not None:
+            return denied
+        return await _serve_charm_image(web)
 
     async def charm_firmware_fetch(request: "web.Request") -> "web.Response":
         """The phone's ask: a short-lived token the charm's image fetch is admitted by.
@@ -2065,17 +2069,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
                 401,
                 "bad_token",
             )
-        home = hermes_home()
-        try:
-            found = await asyncio.to_thread(firmware.image, home)
-        except firmware.FirmwareError as error:
-            return _error(web, str(error), error.status)
-        # The length is stated as the phone's own image route states it, since what the charm
-        # fetches has to end whole for the hash to match; the type is the layer's own, unread.
-        return web.Response(
-            body=found["data"],
-            headers={"Content-Type": found["type"], "Content-Length": str(len(found["data"]))},
-        )
+        return await _serve_charm_image(web)
 
     async def get_talk(request: "web.Request") -> "web.Response":
         """The app's one hand-over: where the charm calls, which bot it is, and a token, once.

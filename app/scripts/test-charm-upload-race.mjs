@@ -183,3 +183,21 @@ test("a paced upload against a charm that names no fill still completes", async 
   assert.equal(charm.reason, null, "no write ever named an offset the charm had not taken")
   assert.ok(charm.refusals > 0, "the drain really did fall behind")
 })
+
+test("an upload the phone does not pace still completes against the charm that names its fill", async () => {
+  // The gate the update screen runs: a build whose Busy notice carries the fill is handed no
+  // wait at all, so the phone writes as fast as the link takes. The rig's clock turns on every
+  // write and every ask, so the drain still runs its pass a second and the notices still land —
+  // the upload holds on the fills they name alone, with nothing but refusals to slow it.
+  const charm = timedCharm({ fill: true, passEvery: 1_000, noticeEvery: 100 })
+  const bytes = image(20 * 1024)
+  const sha = sha256Of(bytes)
+
+  const result = await uploadFirmware(charm.link, bytes, sha, undefined, {
+    pace: async () => {},
+  })
+  assert.equal(result.percent, 100)
+  assert.deepEqual([...charm.received], [...bytes])
+  assert.equal(charm.reason, null)
+  assert.ok(charm.refusals > 0, "the un-paced writes really did outrun the drain")
+})

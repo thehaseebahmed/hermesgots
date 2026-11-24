@@ -14,12 +14,13 @@
  * `getCharmFirmwareImage`'s.
  */
 import {
-  CHARM_MAX_URL_BYTES,
+  addressBytes,
   CharmLinkState,
   encoder,
   type CharmNetworkReport,
 } from "./charm-protocol.ts"
 import { schemeOf } from "./host-url.ts"
+import { talkAddress } from "./talk.ts"
 
 /** The image route's tokened variant under the plugin prefix, as the phone already knows it. */
 const FIRMWARE_FETCH_PATH = "/charm/firmware/image/fetch"
@@ -37,20 +38,22 @@ export function firmwareFetchToken(body: unknown): string {
 }
 
 /**
- * The URL the phone hands the charm: the voice hand-over's own base, with the tokened image route
- * on it and the fetch token as the door. Throws the reader's sentence for a base the charm cannot
- * dial — a scheme neither door speaks — before any connection is opened, so a record gone stale
- * costs no link; the whole URL is bounded by the charm's own frame, as every address it carries is.
+ * The URL the phone hands the charm: the voice hand-over's own base, read by the rule every
+ * charm-held address is (`talkAddress`), with the tokened image route on it and the fetch token as
+ * the door. Throws the reader's sentence for a base the charm cannot dial — a scheme neither door
+ * speaks — before any connection is opened, so a record gone stale costs no link; the whole URL is
+ * bounded by the charm's own frame, as every address it carries is.
  */
 export function firmwareFetchUrl(base: string, token: string): string {
-  const trimmed = base.trim().replace(/\/+$/, "")
-  const scheme = schemeOf(trimmed)
-  if (scheme !== "http" && scheme !== "https")
-    throw new Error("The charm fetches over https on its Wi-Fi or http on its tailnet.")
+  const trimmed = talkAddress(base)
   if (encoder.encode(token).length === 0) throw new Error("A fetch token is at least 1 byte")
   const url = `${trimmed}${FIRMWARE_FETCH_PATH}?token=${encodeURIComponent(token)}`
-  if (encoder.encode(url).length > CHARM_MAX_URL_BYTES)
-    throw new Error(`An update address is at most ${CHARM_MAX_URL_BYTES} bytes`)
+  addressBytes(
+    url,
+    ["http", "https"],
+    "An update address",
+    "The charm fetches over https on its Wi-Fi or http on its tailnet.",
+  )
   return url
 }
 

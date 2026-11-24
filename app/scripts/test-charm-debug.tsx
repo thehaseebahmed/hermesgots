@@ -7,8 +7,9 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { CHARM_DEBUG_POLL_MS, CharmDebugScreen } from "@/components/charm-debug"
+import { CharmDebugScreen } from "@/components/charm-debug"
 import type { CharmDiagnose, CharmLogRow } from "@/lib/charm-protocol"
+import { CHARM_POLL_MS } from "@/lib/freshness"
 import { mount, text, until } from "./component-kit.tsx"
 
 const charm = { deviceId: "c1", name: "Charm" }
@@ -51,7 +52,7 @@ test("the page says which door refused, and keeps reading without a button", asy
     assert.deepEqual(armed, [true], "the page arms the charm's log when it opens")
 
     const reads = calls.diagnose
-    await new Promise((resolve) => setTimeout(resolve, CHARM_DEBUG_POLL_MS + 200))
+    await new Promise((resolve) => setTimeout(resolve, CHARM_POLL_MS + 200))
     assert.ok(calls.diagnose > reads, "the page reads again on its own")
     assert.ok(calls.log > 1, "the log is read again with it")
   })
