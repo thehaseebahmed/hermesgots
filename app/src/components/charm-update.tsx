@@ -40,7 +40,6 @@ import {
   FIRMWARE_NOT_BACK,
   FIRMWARE_NOT_ENDED,
   FIRMWARE_NOT_PUBLISHED,
-  FIRMWARE_NOT_STARTED,
   FIRMWARE_SENT,
   PUBLISHED_CHANGED,
 } from "@/lib/charm-words"
@@ -107,17 +106,9 @@ type FirmwareHand =
   | { kind: "fetch"; url: string; sha256Hex: string; scheme: CharmScheme }
 
 /**
- * How many asks in a row may say nothing is running before the walk calls the fetch one that never
- * started. An `Idle` answer right after the write is the fetch arming itself; a few together are a
- * charm that took the address and started nothing, which is a failure to say rather than a wait
- * without an end.
- */
-const FETCH_IDLE_TRIES = 3
-
-/**
  * The walk's own bound: the fetch token's short life (`TTL_MS` in `plugin/fetch_tokens.py`), past
  * which the door the charm was handed is shut anyway. A charm that says Downloading forever is said
- * so in the walk's own words rather than waited on without an end, mirroring the idle rule above.
+ * so in the walk's own words rather than waited on without an end.
  */
 const FETCH_WALK_MS = 600_000
 
@@ -144,14 +135,11 @@ async function watchCharmFetch(
   ask: () => Promise<CharmUpdateStatus>,
   onProgress?: (update: CharmUpdateStatus) => void,
 ): Promise<void> {
-  let idles = 0
   const until = Date.now() + FETCH_WALK_MS
   for (;;) {
     const update = await ask()
     if (update.state === CharmUpdateState.Failed) throw updateFailedRefusal(update)
     if (update.state === CharmUpdateState.Ready) return
-    if (update.state === CharmUpdateState.Downloading) idles = 0
-    else if ((idles += 1) >= FETCH_IDLE_TRIES) throw new Error(FIRMWARE_NOT_STARTED)
     onProgress?.(update)
     if (Date.now() > until) throw new Error(FIRMWARE_NOT_ENDED)
     await new Promise((done) => setTimeout(done, CHARM_POLL_MS))
@@ -257,9 +245,6 @@ export function CharmUpdateScreen({
       const was = await api.version().catch(() => null)
       const next = await hand()
       if (next.kind === "fetch") {
-        // The charm fetches the image itself: this phone's whole part is the one ask that hands it
-        // the address, and the charm's own percent then feeds the bar — the poll the settings row
-        // runs, at the row's own pace — until the charm says its slot is ready.
         show("download", { subtitle: fetchWords(next.scheme), percent: 0 })
         await api.update(next.url, next.sha256Hex)
         await watchCharmFetch(
@@ -493,7 +478,6 @@ function PickGroup({
           <FileUpIcon />
           Choose a file…
         </Button>
-        {/* A web file input is the whole Android picker: the WebView opens the system's own. */}
         <input
           ref={fileRef}
           id="charm-update-file"

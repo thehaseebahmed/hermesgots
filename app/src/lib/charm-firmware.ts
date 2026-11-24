@@ -156,12 +156,10 @@ export async function uploadFirmware(
 
   const size = chunkSize(link.mtu)
   let sinceAsk = 0
-  let at = 0 // the send position: where the next write goes
+  let at = 0
   let last = 0 // where the write before it went, for the notice that names no fill
-  // Where the charm has got to, as one ask says it: its own failure report ends the upload, and
-  // its percent is otherwise drawn beside the phone's count. Null when a stray Busy notice
-  // answered the ask with no status of its own, which is no progress and no failure —
-  // `test-charm-upload.mjs` holds that rule, over a charm that strays once.
+  // Null when a stray Busy notice answered the ask with no status of its own, which is no progress
+  // and no failure — `test-charm-upload.mjs` holds that rule, over a charm that strays once.
   const askStatus = async (): Promise<CharmUpdateStatus | null> => {
     const status = await updateStatusOf(link)
     if (!status) return null

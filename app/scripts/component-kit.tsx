@@ -188,7 +188,6 @@ export function serveFirmware(
     if (url.pathname.endsWith("/plugins/gots/info"))
       return json({ name: "gots", version: "1.0.0", features: ["charm_firmware"] })
     if (fetchToken && url.pathname.endsWith("/charm/firmware/fetch")) {
-      // The fetch token's mint, the one ask a walk makes only when a door is open.
       mints += 1
       return json({ object: "gots.charm_firmware_fetch", token: FIRMWARE_FETCH_TOKEN })
     }

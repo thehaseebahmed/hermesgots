@@ -293,9 +293,6 @@ export function fetchWords(scheme: "http" | "https"): string {
     : "The charm is fetching it itself over Wi-Fi"
 }
 
-/** The fetch walk's line for a charm that took the address and started nothing. */
-export const FIRMWARE_NOT_STARTED = "The charm didn't start the fetch it was handed."
-
 /**
  * The fetch walk's line for a charm that says it is downloading forever: the walk is bounded by the
  * fetch token's own short life, past which the door is shut whatever the charm says — a walk that
