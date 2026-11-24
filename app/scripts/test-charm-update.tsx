@@ -353,10 +353,12 @@ test("a host that cannot mint the door's token is no door: the transfer runs ins
   )
 })
 
-test("a kept address whose fetch URL cannot fit opens no door, and the transfer runs", async () => {
-  // 93 bytes: inside the voice row's own 180-byte rule, but the fetch URL adds the image route
-  // and the host's 64-hex token on top of it — no room, so the charm could never dial the door
-  // the rule would otherwise pick.
+test("a kept address whose fetch URL cannot fit walks the transfer after the mint", async () => {
+  // 93 bytes: inside the voice row's own 180-byte rule, but the fetch URL adds the host's own
+  // route and its 64-hex token on top of it — no room, so the charm could never dial the door.
+  // The route is the host's and arrives with the token, so the length is known only after the
+  // mint: the door is picked, the mint answers, the builder refuses the URL, and the walk falls to
+  // the transfer it can always drive.
   const handed: unknown[] = []
   const uploads: Uint8Array[] = []
   const api = radio({
@@ -376,7 +378,6 @@ test("a kept address whose fetch URL cannot fit opens no door, and the transfer 
     async () => {
       await until(async () => text().includes("The charm runs 0.2.0"), "the transfer's end", 10_000)
       assert.deepEqual(handed, [], "no Update op went: the URL could never fit")
-      assert.equal(host.mints(), 0, "nothing was minted for a door that cannot open")
       assert.equal(uploads.length, 1, "the image went over the link instead")
     },
   )
@@ -409,6 +410,71 @@ test("a kept address with an upper-case scheme is handed to the charm lower-case
         `https://update-case-door.test/api/plugins/gots/charm/firmware/image/fetch?token=${FIRMWARE_FETCH_TOKEN}`,
         "the scheme lower-cased, everything else as kept",
       )
+    },
+  )
+})
+
+test("the URL handed to the charm walks the path the host answered, not one the app knows", async () => {
+  // The whole point of the answer: a host that renames or re-prefixes its image route is walked by
+  // the charm at the new path with nothing changed on the phone. The fake host answers a route no
+  // constant in this app spells, and the Update op carries exactly it.
+  const handed: { url: string }[] = []
+  const api = radio({
+    network: async () => ONLINE_WIFI,
+    updateStatus: async () => ({ state: CharmUpdateState.Ready, percent: 100, reason: 0 }),
+    update: async (url: string) => {
+      handed.push({ url })
+    },
+    upload: async () => {
+      throw new Error("the BLE transfer ran")
+    },
+  })
+  const host = serveFirmware("update-renamed-route", IMAGE_PUBLISHED, IMAGE, {
+    fetchToken: true,
+    fetchPath: "/charm/firmware/v2/image/fetch",
+  })
+  const charm = charmedOver("https://update-renamed-route.test/api/plugins/gots", "https")
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
+    async () => {
+      await until(async () => text().includes("The charm runs 0.2.0"), "the walk's end", 10_000)
+      assert.equal(handed.length, 1, "one Update op went")
+      assert.equal(
+        handed[0].url,
+        `https://update-renamed-route.test/api/plugins/gots/charm/firmware/v2/image/fetch?token=${FIRMWARE_FETCH_TOKEN}`,
+        "the route the host named, hung off the address the voice hand-over kept",
+      )
+    },
+  )
+})
+
+test("a host that answers no route walks the transfer, as an older host's door is shut", async () => {
+  // A host from before the route rode the answer names the token alone, and a token with no route
+  // to append is no door: the walk falls to the transfer this phone can always drive rather than
+  // handing the charm a URL this app guessed.
+  const handed: unknown[] = []
+  const uploads: Uint8Array[] = []
+  const api = radio({
+    network: async () => ONLINE_WIFI,
+    update: async () => {
+      handed.push(1)
+    },
+    upload: async (image: Uint8Array) => {
+      uploads.push(image)
+      return { sent: image.length, total: image.length, percent: 100 }
+    },
+  })
+  const host = serveFirmware("update-unrouted-host", IMAGE_PUBLISHED, IMAGE, {
+    fetchToken: true,
+    fetchPath: false,
+  })
+  const charm = charmedOver("https://update-unrouted-host.test/api/plugins/gots", "https")
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
+    async () => {
+      await until(async () => text().includes("The charm runs 0.2.0"), "the transfer's end", 10_000)
+      assert.deepEqual(handed, [], "no Update op went: the host named no route to walk")
+      assert.equal(uploads.length, 1, "the image went over the link instead")
     },
   )
 })

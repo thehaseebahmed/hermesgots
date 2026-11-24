@@ -2,14 +2,19 @@
  * The charm's fetch door, as the phone builds it: the URL the update hands the charm — the host
  * address the voice hand-over already keeps, https over the charm's Wi-Fi or plain http over its
  * tailnet, with the short-lived fetch token in it (`src/lib/firmware-fetch.ts`; the mint itself is
- * `getCharmFirmwareFetchToken`'s own business in hermes.ts, the way the streamed read is
+ * `getCharmFirmwareFetch`'s own business in hermes.ts, the way the streamed read is
  * `getCharmFirmwareImage`'s).
+ *
+ * The image route's path is the host's answer, never this app's constant: the mint names it beside
+ * the token, so the tests below hand the builder a path a host could answer and then hold the dev
+ * mock to the plugin's own spelling of it — a renamed or re-prefixed route on the host crosses to
+ * the charm through that one answer, with nothing here to chase by hand.
  *
  * The host's own two routes are pinned twice: the real rules in `plugin/tests` (`test_fetch_tokens`
  * for the mint kind and its short life, `test_firmware` for the routes, including the plan's own
  * decision that a firmware mint never revokes a live voice token), and here against the dev mock
  * (`scripts/mock-hermes.mjs`), which serves them for the Android app a browser flow can't reach —
- * mint → token, the charm's fetch → the image's bytes, an unknown or expired token refused.
+ * mint → token and path, the charm's fetch → the image's bytes, an unknown or expired token refused.
  */
 import assert from "node:assert/strict"
 import { spawn } from "node:child_process"
@@ -20,28 +25,30 @@ import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { CharmLinkState } from "../src/lib/charm-protocol.ts"
-import { firmwareDoor, firmwareFetchToken, firmwareFetchUrl } from "../src/lib/firmware-fetch.ts"
+import { firmwareDoor, firmwareFetchAnswer, firmwareFetchUrl } from "../src/lib/firmware-fetch.ts"
 
 const here = dirname(fileURLToPath(import.meta.url))
 const appDir = resolve(here, "..")
 
 const TOKEN = "1f".repeat(32)
-const IMAGE_ROUTE = "/charm/firmware/image/fetch"
+// The path a host answers for the image route, as the plugin names its own: this file never reads
+// the app for one, because the app no longer carries one.
+const ANSWERED_PATH = "/charm/firmware/image/fetch"
 
 test("the charm's fetch URL is the host the voice hand-over kept, with the token in it", () => {
   assert.equal(
-    firmwareFetchUrl("https://bot.example/api/plugins/gots", TOKEN),
-    `https://bot.example/api/plugins/gots${IMAGE_ROUTE}?token=${TOKEN}`,
-    "the Wi-Fi door: the recorded address, the image route's tokened variant, the token",
+    firmwareFetchUrl("https://bot.example/api/plugins/gots", ANSWERED_PATH, TOKEN),
+    `https://bot.example/api/plugins/gots${ANSWERED_PATH}?token=${TOKEN}`,
+    "the Wi-Fi door: the recorded address, the route the host answered, the token",
   )
   assert.equal(
-    firmwareFetchUrl("http://100.64.0.9:8642/api/plugins/gots/", TOKEN),
-    `http://100.64.0.9:8642/api/plugins/gots${IMAGE_ROUTE}?token=${TOKEN}`,
+    firmwareFetchUrl("http://100.64.0.9:8642/api/plugins/gots/", ANSWERED_PATH, TOKEN),
+    `http://100.64.0.9:8642/api/plugins/gots${ANSWERED_PATH}?token=${TOKEN}`,
     "the tailnet door is plain http, and the trailing slash is one the charm would double",
   )
   assert.equal(
-    firmwareFetchUrl("HTTPS://bot.example/api/plugins/gots", TOKEN),
-    `https://bot.example/api/plugins/gots${IMAGE_ROUTE}?token=${TOKEN}`,
+    firmwareFetchUrl("HTTPS://bot.example/api/plugins/gots", ANSWERED_PATH, TOKEN),
+    `https://bot.example/api/plugins/gots${ANSWERED_PATH}?token=${TOKEN}`,
     "the scheme lowercased: the voice row keeps the case the reader typed and the charm's own talk door folds it, but its update door reads the scheme case-exactly",
   )
 })
@@ -49,26 +56,73 @@ test("the charm's fetch URL is the host the voice hand-over kept, with the token
 test("a base that is neither door's scheme is refused before any connection is opened", () => {
   for (const base of ["", "  ", "bot.example/api/plugins/gots", "ftp://files.example/gots"]) {
     assert.throws(
-      () => firmwareFetchUrl(base, TOKEN),
+      () => firmwareFetchUrl(base, ANSWERED_PATH, TOKEN),
       /https/,
       `${JSON.stringify(base)} is not an address the charm can dial`,
     )
   }
 })
 
+test("the route the host answers is read as a route under its own root, or refused", () => {
+  // The path is the host's, so it is judged rather than trusted: an answer that is really an
+  // address, one that would double the root's slash, or one carrying a query of its own would hand
+  // the charm a different door than the token was minted for.
+  for (const path of [
+    "",
+    "charm/firmware/image/fetch",
+    "//evil.example/fetch",
+    "https://evil.example/fetch",
+    "/charm/firmware/image/fetch?token=x",
+    "/charm/firmware/image/fetch#frag",
+    "/charm firmware/image/fetch",
+  ]) {
+    assert.throws(
+      () => firmwareFetchUrl("https://bot.example/api/plugins/gots", path, TOKEN),
+      /path under the host's own root/,
+      `${JSON.stringify(path)} is not a route the phone can hang off the host's root`,
+    )
+  }
+  assert.equal(
+    firmwareFetchUrl("https://bot.example/api/plugins/gots", "/charm/firmware/fetch", TOKEN),
+    `https://bot.example/api/plugins/gots/charm/firmware/fetch?token=${TOKEN}`,
+    "any route the host names is walked as it is, not one this app knows by name",
+  )
+})
+
 test("a URL past the charm's own bound is refused", () => {
   const long = `https://${"a".repeat(170)}.example/api/plugins/gots`
-  assert.throws(() => firmwareFetchUrl(long, TOKEN), /180 bytes/)
+  assert.throws(() => firmwareFetchUrl(long, ANSWERED_PATH, TOKEN), /180 bytes/)
 })
 
 test("a token that is nothing is refused rather than hung on the door", () => {
-  assert.throws(() => firmwareFetchUrl("https://bot.example/api/plugins/gots", ""), /token/)
+  assert.throws(
+    () => firmwareFetchUrl("https://bot.example/api/plugins/gots", ANSWERED_PATH, ""),
+    /token/,
+  )
 })
 
-test("the token the host answers is read once, or the answer is refused as unreadable", () => {
-  assert.equal(firmwareFetchToken({ object: "gots.charm_firmware_fetch", token: TOKEN }), TOKEN)
-  for (const body of [{}, { token: "" }, { token: 7 }, null]) {
-    assert.throws(() => firmwareFetchToken(body), /unreadable/)
+test("the token and the route the host answers are read once, or the answer is refused", () => {
+  assert.deepEqual(
+    firmwareFetchAnswer({
+      object: "gots.charm_firmware_fetch",
+      token: TOKEN,
+      path: ANSWERED_PATH,
+    }),
+    { token: TOKEN, path: ANSWERED_PATH },
+    "both halves of the door, as the mint answers them",
+  )
+  for (const body of [
+    {},
+    { token: TOKEN },
+    { path: ANSWERED_PATH },
+    { token: "", path: ANSWERED_PATH },
+    { token: 7, path: ANSWERED_PATH },
+    { token: TOKEN, path: "" },
+    { token: TOKEN, path: 7 },
+    { token: TOKEN, path: "//evil.example/fetch" },
+    null,
+  ]) {
+    assert.throws(() => firmwareFetchAnswer(body), /unreadable/, JSON.stringify(body))
   }
 })
 
@@ -188,27 +242,33 @@ test("the http door opens only for a build that takes it; the https door opens f
   )
 })
 
-test("an address whose fetch URL cannot fit the charm's frame opens no door", () => {
-  // The voice row keeps an address up to the frame's own 180 bytes; the fetch URL adds the image
-  // route and the host's 64-hex token on top of it, so an address can be one the voice hand-over
-  // keeps and still leave no room for the door. The rule answers the transfer before anything is
-  // minted, and the builder's own bound stays the backstop for a host that mints longer tokens.
+test("a door whose URL cannot fit the charm's frame is refused by the builder, after the mint", () => {
+  // The voice row keeps an address up to the frame's own 180 bytes; the fetch URL adds the host's
+  // route and its 64-hex token on top of it, so an address can be one the voice hand-over keeps and
+  // still leave no room for the door. The route is the host's and arrives with the token, so the
+  // door rule has no length to measure: it picks the base the links allow, and the builder's own
+  // bound is the one rule — a walk it refuses falls to the transfer, which is the door that cannot
+  // be refused on the wire.
   const over = `https://${"h".repeat(60)}.example/api/plugins/gots`
   assert.equal(over.length, 93, "inside the voice row's own 180-byte rule")
   assert.equal(
     firmwareDoor({ wifi: ONLINE_WIFI, tailnet: TUNNEL_DOWN }, "https", over, "0.2.1-beta"),
-    "transfer",
-    "no door: the URL the walk would hand the charm cannot fit the frame",
+    "fetch",
+    "the door rule reads the links and the build, not a URL the host has yet to name",
+  )
+  assert.throws(
+    () => firmwareFetchUrl(over, ANSWERED_PATH, TOKEN),
+    /180 bytes/,
+    "the builder refuses the walk, and the update falls to the transfer",
   )
   assert.equal(
-    firmwareDoor(
-      { wifi: ONLINE_WIFI, tailnet: TUNNEL_DOWN },
-      "https",
+    firmwareFetchUrl(
       "https://bot.example/api/plugins/gots",
-      "0.2.1-beta",
-    ),
-    "fetch",
-    "an address with room for the route and the token still opens the door",
+      ANSWERED_PATH,
+      TOKEN,
+    ).length < 180,
+    true,
+    "an address with room for the route and the token still walks",
   )
 })
 
@@ -258,7 +318,7 @@ async function untilUp(origin, ms = 10_000) {
   }
 }
 
-test("the dev mock's fetch door: a mint answers a token, the charm's fetch serves the image", async () => {
+test("the dev mock's fetch door: a mint answers a token and a path, the fetch serves the image", async () => {
   const port = await freePort()
   const origin = `http://127.0.0.1:${port}`
   // A short life for the token, so an expired door can be watched without waiting out ten minutes.
@@ -273,12 +333,14 @@ test("the dev mock's fetch door: a mint answers a token, the charm's fetch serve
       method: "POST",
     })
     assert.equal(minted.status, 200)
-    const answer = await minted.json()
-    assert.equal(answer.object, "gots.charm_firmware_fetch")
+    const answer = firmwareFetchAnswer(await minted.json())
     assert.match(answer.token, /^[0-9a-f]{64}$/, "a token the phone can put in the URL")
+    assert.equal(answer.path, ANSWERED_PATH, "and the image route's path, as the host names it")
 
-    const url = firmwareFetchUrl(`${origin}/api/plugins/gots`, answer.token)
-    assert.equal(url, `${origin}/api/plugins/gots${IMAGE_ROUTE}?token=${answer.token}`)
+    // The URL is built from the answer alone: the base the voice record keeps, the host's path, the
+    // host's token — nothing on the phone chooses the route.
+    const url = firmwareFetchUrl(`${origin}/api/plugins/gots`, answer.path, answer.token)
+    assert.equal(url, `${origin}/api/plugins/gots${answer.path}?token=${answer.token}`)
     const served = await fetch(url)
     assert.equal(served.status, 200)
     const image = Buffer.from(await served.arrayBuffer())
@@ -294,7 +356,7 @@ test("the dev mock's fetch door: a mint answers a token, the charm's fetch serve
     )
 
     for (const wrong of ["", "0".repeat(64), answer.token.slice(0, 63)]) {
-      const refused = await fetch(`${origin}/api/plugins/gots${IMAGE_ROUTE}?token=${wrong}`)
+      const refused = await fetch(`${origin}/api/plugins/gots${answer.path}?token=${wrong}`)
       assert.equal(refused.status, 401, `a token nobody minted (${JSON.stringify(wrong)})`)
       assert.equal((await refused.json()).error.code, "bad_token")
     }
@@ -306,6 +368,25 @@ test("the dev mock's fetch door: a mint answers a token, the charm's fetch serve
   } finally {
     mock.kill()
   }
+})
+
+test("the path the mock answers is the plugin's own, and the plugin's route is that same path", () => {
+  // One fact in two halves that never meet at run time: the plugin registers the image route and
+  // names it in the mint's answer from one constant, and the dev mock — the host the app is driven
+  // against, since a browser flow can't reach the Android app's — answers a path of its own. Held
+  // to each other here, the way the token's ten-minute life is, so a route renamed on the host
+  // cannot answer a path the mock or the app still spells the old way.
+  const plugin = readFileSync(resolve(appDir, "../plugin/__init__.py"), "utf8")
+  const named = /^CHARM_FIRMWARE_FETCH_PATH\s*=\s*"([^"]+)"$/m.exec(plugin)
+  assert.ok(named, "the plugin still names the image route's path once")
+  const mock = readFileSync(resolve(here, "mock-hermes.mjs"), "utf8")
+  const answered = /^const CHARM_FETCH_PATH = "([^"]+)"$/m.exec(mock)
+  assert.ok(answered, "the mock still answers a path of its own")
+  assert.equal(answered[1], named[1], "the mock answers the route the plugin serves")
+  assert.ok(
+    plugin.includes(`f"{PREFIX}{CHARM_FIRMWARE_FETCH_PATH}"`),
+    "and the route it answers is registered from that same constant",
+  )
 })
 
 test("the dev mock refuses a token with the plugin's own words", () => {

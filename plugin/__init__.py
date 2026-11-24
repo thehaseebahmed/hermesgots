@@ -98,6 +98,11 @@ from .store import current_path, home_of
 logger = logging.getLogger(__name__)
 
 PREFIX = "/api/plugins/gots"
+# The image route's tokened variant, relative to the plugin's own prefix: the charm's own walk of
+# the published image, admitted by the token the phone minted. The route is registered with this
+# one spelling and the mint answers it, so the path is this host's knowledge and never the app's —
+# a rename or a re-prefixing here reaches the charm with nothing hand-synced on the phone side.
+CHARM_FIRMWARE_FETCH_PATH = "/charm/firmware/image/fetch"
 # A batch read of sessions' pull requests waits this long before answering with the rest unread. A
 # screen asks after every session it lists, and each session's read is a chain of outbound calls
 # (see `github.py`); the calls themselves are bounded there, once, for every route.
@@ -2034,13 +2039,17 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         return await _serve_charm_image(web)
 
     async def charm_firmware_fetch(request: "web.Request") -> "web.Response":
-        """The phone's ask: a short-lived token the charm's image fetch is admitted by.
+        """The phone's ask: a short-lived token the charm's image fetch is admitted by, and where.
 
         Its own mint kind (`fetch_tokens`), so a firmware fetch never revokes the token the charm's
         voice holds — the talk mint spends a held token when it mints again, and a charm mid-update
         must not lose its voice to the update. The token is in the clear exactly once, in this one
         answer, as the voice token is in the hand-over's: the app puts it in the URL it hands the
         charm, and no route or log repeats it.
+
+        The path comes with it, relative to the plugin root the voice hand-over keeps: this host
+        owns the names of its own routes, so the app appends the route it is handed rather than one
+        it carries — a rename or a re-prefixing here is answered, never chased by hand on the phone.
         """
         denied = unauthorized(request)
         if denied is not None:
@@ -2048,7 +2057,13 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
         # The store is read on the loop thread, where the request's profile scope is visible.
         path = store_path()
         token = await asyncio.to_thread(fetch_tokens.mint, path)
-        return web.json_response({"object": "gots.charm_firmware_fetch", "token": token})
+        return web.json_response(
+            {
+                "object": "gots.charm_firmware_fetch",
+                "token": token,
+                "path": CHARM_FIRMWARE_FETCH_PATH,
+            }
+        )
 
     async def charm_firmware_image_fetch(request: "web.Request") -> "web.Response":
         """The charm's own walk: the published image, admitted by the token in the URL.
@@ -3182,7 +3197,7 @@ def _wire_api_server(app: Any, adapter: Any) -> None:
     # image route's tokened variant admits the charm by the token in the URL instead of the phone's
     # key — the same bytes, one more door.
     app.router.add_post(f"{PREFIX}/charm/firmware/fetch", charm_firmware_fetch)
-    app.router.add_get(f"{PREFIX}/charm/firmware/image/fetch", charm_firmware_image_fetch)
+    app.router.add_get(f"{PREFIX}{CHARM_FIRMWARE_FETCH_PATH}", charm_firmware_image_fetch)
     # The app's hand-over of the host's address and a per-charm token, and the charm's own turn,
     # which takes that token rather than the bot's key (`talk_tokens`, the PTT plan's step 1). The
     # path's version is `talk.VERSION`, the same number the charm is answered its version in: one
