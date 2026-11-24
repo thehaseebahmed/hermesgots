@@ -51,6 +51,8 @@ const WIRE = {
    * byte, no version: one ask consumes the answer.
    */
   handoff: 0x22,
+  /** `Time`: the phone's clock in UTC seconds, so an https turn can judge a certificate. */
+  time: 0x0b,
   /**
    * Only a moment that needs an action from the reader reaches the charm: a question and an
    * approval, a plan waiting being one. A finished run asks for nothing, so it names no reason.
@@ -73,6 +75,8 @@ const WIRE = {
   ],
   /** `[subjectLen u8][subject]`. */
   clearPayload: [["field", "subject"]],
+  /** `[epoch u32 LE]`: one unsigned second, UTC. */
+  timePayload: [["u32", "epochSeconds"]],
   /**
    * The answer to the ask: which button the charm was pressed on, and the session it was about —
    * `[actionLen u8][action][subjectLen u8][subject]`, after the version and the op.
@@ -123,7 +127,7 @@ function bodyOf(name) {
 
 /** The writes a builder makes, in the order it makes them: a byte, or a length and its bytes. */
 function payloadOf(name) {
-  return [...bodyOf(name).matchAll(/\.(u8|u16|field|words|actions)\((\w+)/g)].map((match) => [
+  return [...bodyOf(name).matchAll(/\.(u8|u16|u32|field|words|actions)\((\w+)/g)].map((match) => [
     match[1] === "words" ? "field" : match[1],
     match[2],
   ])
@@ -134,6 +138,7 @@ test("the frames are the ones PROTOCOL.md documents", () => {
   assert.equal(constant("OP_ALERT"), WIRE.alert, "Alert is 0x20")
   assert.equal(constant("OP_CLEAR"), WIRE.clear, "Clear is 0x21")
   assert.equal(constant("OP_HANDOFF"), WIRE.handoff, "Handoff is 0x22")
+  assert.equal(constant("OP_TIME"), WIRE.time, "Time is 0x0B")
   for (const [name, value] of Object.entries(WIRE.reasons)) {
     assert.equal(constant(`REASON_${name}`), value, `${name} is ${value}`)
   }
@@ -153,6 +158,9 @@ test("the frames are the ones PROTOCOL.md documents", () => {
   // charm reads as part of the ask, and one ask is the whole of it.
   assert.match(bodyOf("handoff"), /OP_HANDOFF/, "the ask is the Handoff op")
   assert.doesNotMatch(bodyOf("handoff"), /VERSION|frame\(/, "and nothing else rides with it")
+  // The clock is the Time op, and its payload is the one unsigned second the charm reads as an epoch.
+  assert.match(bodyOf("time"), /frame\(OP_TIME\)/, "a clock is the Time op")
+  assert.deepEqual(payloadOf("time"), WIRE.timePayload, "a clock's payload is one 32-bit second")
   // `[version u8][op][payload]`: the version leads and the op follows, on every control write.
   assert.match(bodyOf("frame"), /u8\(VERSION\)[\s\S]*u8\(op\)/, "version first, then the op")
 })
@@ -689,6 +697,19 @@ test("the phone asks for a pending handoff, and waits for a tap", () => {
   assert.match(notifier, /setCharacteristicNotification/, "with the answers subscribed to")
   assert.match(notifier, /CharmWire\.handoffAnswer/, "and the answer read as what it is")
   assert.match(notifier, /NoticeOpen\.link/, "opening the session by the link a tap opens")
+})
+
+/**
+ * The link an alert opens hands the charm the clock before the moment it was opened for: with the app
+ * closed it is the only contact the phone makes by itself, and a charm that lost its RTC's backup has
+ * no other way to learn the time before a press asks it to speak.
+ */
+test("the alert's link hands the charm the clock before the moment", () => {
+  const notifier = sourceOf("android/app/src/main/java/dev/hermesgots/CharmNotifier.kt")
+  const ready = kotlinBody(notifier, "ready")
+  const clock = ready.indexOf("CharmWire.time(")
+  assert.ok(clock >= 0, "the clock is written on the link")
+  assert.ok(clock < ready.indexOf("if (fits(full))"), "and before the moment it was opened for")
 })
 
 /**

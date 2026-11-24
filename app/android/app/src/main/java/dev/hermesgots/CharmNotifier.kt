@@ -285,6 +285,11 @@ object CharmNotifier {
         @SuppressLint("MissingPermission")
         private fun ready(gatt: BluetoothGatt, negotiated: Int) {
             mtu = negotiated
+            // The clock first: an alert is the one contact this phone makes with the app closed, and a
+            // charm that lost its RTC's backup refuses an https turn with "No clock" until a link
+            // hands it the time. A time it cannot believe is answered `BadMessage`, and this link
+            // reads no answer, so a wrong phone clock costs nothing here.
+            owed.addLast(CharmWire.time(System.currentTimeMillis() / 1000))
             owed.addLast(if (fits(full)) full else brief)
             owed.addLast(CharmWire.handoff())
             // Subscribed before anything is written, so the answer to the ask cannot be missed.
