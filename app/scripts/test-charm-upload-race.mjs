@@ -201,3 +201,28 @@ test("an upload the phone does not pace still completes against the charm that n
   assert.equal(charm.reason, null)
   assert.ok(charm.refusals > 0, "the un-paced writes really did outrun the drain")
 })
+
+test("a charm whose drain wedges behind a full buffer, refusals forever, ends in the row's own words", async () => {
+  // The stonewall the walk's bound was written for: the flash's drain stuck (a pass that never
+  // comes) behind a buffer already full, so every write is refused with the fill it waits at —
+  // answering, not draining. Every notice re-anchors the send to the very offset it is stuck
+  // at, so the settle asks of the tail are never reached and nothing else bounds the loop; the
+  // re-anchors that never move are what the walk counts, and the row's own words end the wait.
+  const charm = timedCharm({ fill: true, passEvery: Infinity, noticeEvery: 100 })
+  const bytes = image(20 * 1024)
+  const sha = sha256Of(bytes)
+
+  // A deadline over the fixed walk only: the bound is notices the rig's own clock makes fast,
+  // so a walk still running seconds later is the unbounded one the finding names. The timer is
+  // unref'd so a walk that ends never waits out its own deadline.
+  const settled = await new Promise((resolve) => {
+    const deadline = setTimeout(() => resolve("still running after 5 s"), 5_000)
+    if (typeof deadline.unref === "function") deadline.unref()
+    uploadFirmware(charm.link, bytes, sha, undefined, { pace: async () => {} }).then(
+      () => resolve("settled"),
+      (error) => resolve(`refused: ${error.message}`),
+    )
+  })
+  assert.match(settled, /^refused: .*whole image/, "the walk ends in the row's own words, not a flood")
+  assert.ok(charm.refusals > 0, "the charm really did keep refusing at the fill it waits at")
+})

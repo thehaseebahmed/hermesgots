@@ -357,9 +357,21 @@ test("the version read answers whether the rebooted charm changed", async () => 
     "0.1.0",
     { tries: 3, waitMs: 0 },
   )
-  assert.deepEqual(changed, { changed: true, version: "0.2.0" })
+  assert.deepEqual(changed, { changed: true, version: "0.2.0", answered: "0.2.0" })
 
   // Every ask says the build it started on: the row has to be able to say it did not change.
   const same = await versionAfterReboot(async () => "0.1.0", "0.1.0", { tries: 2, waitMs: 0 })
-  assert.deepEqual(same, { changed: false, version: "0.1.0" })
+  assert.deepEqual(same, { changed: false, version: "0.1.0", answered: "0.1.0" })
+
+  // A charm that never answered at all: unchanged, and `answered` says so by saying nothing —
+  // an unchanged version and a version nobody read are different ends, and the walk's gates
+  // read the difference.
+  const gone = await versionAfterReboot(
+    async () => {
+      throw new Error("The charm went out of reach")
+    },
+    "0.1.0",
+    { tries: 2, waitMs: 0 },
+  )
+  assert.deepEqual(gone, { changed: false, version: "0.1.0", answered: undefined })
 })

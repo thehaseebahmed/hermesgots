@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useSearchParams } from "react-router"
 import { FileUpIcon } from "lucide-react"
 
-import { Caption, Group, RowText } from "@/components/settings-chrome"
+import { Caption, Group, RowText, rowClass } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
 import {
   charmFirmwareVersion,
@@ -15,10 +15,10 @@ import {
   startCharmFirmwareFetch,
   uploadCharmFirmware,
   usePairedCharm,
-  type CharmScheme,
   type PairedCharm,
 } from "@/lib/charm"
 import {
+  FirmwareRefused,
   updateFailedRefusal,
   versionAfterReboot,
   type FirmwareProgress,
@@ -47,6 +47,7 @@ import { firmwareDoor, firmwareFetchUrl } from "@/lib/firmware-fetch"
 import { getActiveProfile } from "@/lib/db"
 import { CHARM_POLL_MS } from "@/lib/freshness"
 import {
+  getCharmFirmware,
   getCharmFirmwareFetchToken,
   getCharmFirmwareImage,
   type CharmFirmware,
@@ -54,7 +55,15 @@ import {
 import { useHostRecord } from "@/lib/host-record"
 import type { PluginServer } from "@/lib/features"
 import { compareVersions } from "@/lib/version-compare"
+import {
+  setWalk,
+  useWalk,
+  walk,
+  type FirmwareHand,
+  type StepView,
+} from "@/lib/charm-update-walk"
 import { spoken } from "@/lib/words"
+import { cn } from "@/lib/utils"
 
 /** The SHA-256 of bytes this phone holds, as the lowercase hex the link takes. */
 const sha256Of = async (image: Uint8Array) =>
@@ -98,14 +107,6 @@ const LIVE: CharmUpdateApi = {
 }
 
 /**
- * One image's way onto the charm: the bytes this phone sends over the link, or the door the charm
- * walks itself — the URL this phone hands it, and the hash the bytes it fetches must carry.
- */
-type FirmwareHand =
-  | { kind: "transfer"; image: Uint8Array; sha256Hex: string }
-  | { kind: "fetch"; url: string; sha256Hex: string; scheme: CharmScheme }
-
-/**
  * The walk's own bound: the fetch token's short life (`TTL_MS` in `plugin/fetch_tokens.py`), past
  * which the door the charm was handed is shut anyway. A charm that says Downloading forever is said
  * so in the walk's own words rather than waited on without an end.
@@ -127,9 +128,10 @@ const uploadPace = (version: string | null): UploadOptions =>
     : {}
 
 /**
- * The charm's own percent, followed to the end of its fetch. `Ready` is the slot written and the
- * reboot a moment away; `Failed` is the charm's own reason, in the same words an upload's refusal
- * wears — so the failure path is the same either way.
+ * The charm's own percent, followed to the end of its fetch. Each answer's percent is drawn before
+ * its state is read — the one answer that carries percent 100 is the slot written and the reboot a
+ * moment away, and it is still the bar's own last word; `Failed` is the charm's own reason, in the
+ * same words an upload's refusal wears — so the failure path is the same either way.
  */
 async function watchCharmFetch(
   ask: () => Promise<CharmUpdateStatus>,
@@ -139,18 +141,11 @@ async function watchCharmFetch(
   for (;;) {
     const update = await ask()
     if (update.state === CharmUpdateState.Failed) throw updateFailedRefusal(update)
-    if (update.state === CharmUpdateState.Ready) return
     onProgress?.(update)
+    if (update.state === CharmUpdateState.Ready) return
     if (Date.now() > until) throw new Error(FIRMWARE_NOT_ENDED)
     await new Promise((done) => setTimeout(done, CHARM_POLL_MS))
   }
-}
-
-/** One step of the walk, as the screen holds it: its line, and its bar while it moves. */
-interface StepView {
-  name: "download" | "transfer" | "restart"
-  subtitle?: string
-  percent?: number
 }
 
 /** What each step is called, in the reader's words and the order they walk in. */
@@ -169,7 +164,8 @@ const STEP_TITLES: Record<StepView["name"], string> = {
  * row's Update button opens it straight into the published image; its picker opens it ready for a
  * file, which walks the same steps minus the download — and always over the link, since a file the
  * phone holds has no door to walk. The reader can step back at any point — the send is driven by
- * its own promise, not by the screen, so leaving changes nothing about what the charm takes.
+ * its own promise, not by the screen, and the walk it drives is the shared one above, so leaving
+ * changes nothing about what the charm takes and returning changes nothing about what runs.
  */
 export function CharmUpdateScreen({
   api = LIVE,
@@ -198,59 +194,61 @@ export function CharmUpdateScreen({
   const published = seen?.state === "published" ? seen.firmware : undefined
   const checkSaid = seen?.state === "refused" ? seen.said : null
 
-  const [steps, setSteps] = useState<StepView[]>([])
-  const [title, setTitle] = useState<string | null>(null)
-  const [note, setNote] = useState<string | null>(null)
-  const [end, setEnd] = useState<
-    { kind: "done"; version: string } | { kind: "failed"; said: string } | null
-  >(null)
-  const [busy, setBusy] = useState(false)
-  /** `busy` is a render behind, so a double tap in one tick would both reach the radio. */
-  const sending = useRef(false)
-  /** The last hand the charm was given, in the words it went under: what a failure's Try again re-runs. */
-  const again = useRef<{
-    hand: () => Promise<FirmwareHand>
-    title: string
-  } | null>(null)
-  const started = useRef(false)
+  const { running: busy, steps, title, note, end } = useWalk()
   const file = useRef<HTMLInputElement | null>(null)
 
   /** One step drawn or moved: a step appears where it starts and stays for the rest of the walk. */
-  const show = (name: StepView["name"], patch: Partial<StepView>) =>
-    setSteps((now) => {
-      const at = now.findIndex((step) => step.name === name)
-      if (at === -1) return [...now, { name, ...patch }]
-      const next = [...now]
-      next[at] = { ...next[at], ...patch }
-      return next
+  const show = (name: StepView["name"], patch: Partial<StepView>) => {
+    const at = walk.steps.findIndex((step) => step.name === name)
+    setWalk({
+      steps:
+        at === -1
+          ? [...walk.steps, { name, ...patch }]
+          : walk.steps.map((step, i) => (i === at ? { ...step, ...patch } : step)),
     })
+  }
 
   /**
-   * One image through the whole walk, however it goes on. `hand` is where the image and its hash
-   * come from — the host's package streamed to this phone, a file the reader picked, or a door the
-   * charm walks itself — and it can draw a Downloading step of its own on the way in.
+   * One image through the whole walk, however it goes on. `hand` is handed the build the charm
+   * answered before anything goes, and is where the image and its hash come from — the host's
+   * package streamed to this phone, a file the reader picked, or a door the charm walks itself —
+   * and it can draw a Downloading step of its own on the way in.
    */
-  const send = async (hand: () => Promise<FirmwareHand>, heading: string) => {
-    if (sending.current) return
-    again.current = { hand, title: heading }
-    sending.current = true
-    setBusy(true)
-    setEnd(null)
-    setNote(null)
-    setTitle(heading)
-    setSteps([])
+  const send = async (hand: (was: string | null) => Promise<FirmwareHand>, heading: string) => {
+    if (walk.running) return
+    setWalk({
+      again: { hand, title: heading },
+      running: true,
+      end: null,
+      note: null,
+      title: heading,
+      steps: [],
+    })
+    // A poll that throws while the fetch watch runs: the link going down under it, which is the
+    // reboot's own shape — the charm holds its Ready only briefly before it reboots, so on an
+    // unlucky phase the next ask meets a charm already restarting. Held here and thrown again
+    // only when the read-back below says the walk did not land.
+    let dropped: unknown = null
     try {
       // The build the charm runs now, read before anything goes: the answer the reboot's read is
-      // compared against, so a charm that could not say before is one whose any answer is the change.
+      // compared against, so a charm that could not say before is one whose any answer is the
+      // change — and the one fact the door rule needs of the build the charm runs.
       const was = await api.version().catch(() => null)
-      const next = await hand()
+      const next = await hand(was)
       if (next.kind === "fetch") {
         show("download", { subtitle: fetchWords(next.scheme), percent: 0 })
+        // A refusal here is the charm's own answer to the hand, drawn as the failure it is.
         await api.update(next.url, next.sha256Hex)
-        await watchCharmFetch(
-          () => api.updateStatus(),
-          (update) => show("download", { percent: update.percent }),
-        )
+        try {
+          await watchCharmFetch(
+            () => api.updateStatus(),
+            (update) => show("download", { percent: update.percent }),
+          )
+        } catch (error) {
+          // The charm's own Failed reason is an answer, not a reboot: drawn now, in its words.
+          if (error instanceof FirmwareRefused) throw error
+          dropped = error
+        }
       } else {
         show("transfer", { percent: 0 })
         await api.upload(
@@ -268,48 +266,73 @@ export function CharmUpdateScreen({
       // The end is a yes only once the slot is bootable: the charm reboots a moment later, and the
       // window is the phone's own asks for the version the new build answers with.
       show("restart", { subtitle: FIRMWARE_SENT })
-      const { changed, version } = await versionAfterReboot(() => api.version(), was)
+      const { changed, version, answered } = await versionAfterReboot(() => api.version(), was)
       if (changed && version !== null) {
-        setEnd({ kind: "done", version })
+        setWalk({ end: { kind: "done", version } })
         return
       }
+      // A reader's file names no newer build: the charm came back on the build it was sent, and
+      // the version it answered — unchanged — is the walk landing, not failing. The published
+      // door keeps the changed-gate: it names a build newer than the charm's own.
+      if (next.door === "file" && typeof answered === "string") {
+        setWalk({ end: { kind: "done", version: answered } })
+        return
+      }
+      if (dropped !== null) throw dropped
       // The charm never answered on the new build: what is published is read again too, since a
       // merge may have moved the tag while this one was being tried.
       await firmware.reload()
-      setEnd({ kind: "failed", said: FIRMWARE_NOT_BACK })
+      setWalk({ end: { kind: "failed", said: FIRMWARE_NOT_BACK } })
     } catch (error) {
-      setEnd({ kind: "failed", said: spoken(error, "Something went wrong") })
+      setWalk({ end: { kind: "failed", said: spoken(error, "Something went wrong") } })
     } finally {
-      sending.current = false
-      setBusy(false)
+      setWalk({ running: false })
     }
   }
 
   /**
    * The published image, however the charm takes it. The door is asked first — the charm's own
-   * report of its links, against the address the voice hand-over kept — and only a door that is
-   * open mints a token and hands the charm the address, so the screen never offers a walk the charm
-   * cannot make; a report that could not be read is no door either, since an unread fact is not a
-   * fact. No door open is the transfer: the image streamed to this phone, checked against the
-   * version this screen read, so a package that moved between the two reads is refused here rather
-   * than by the charm after the whole image — unless the re-read names these bytes, when they are
-   * exactly the image to send.
+   * report of its links and the build it answered, against the address the voice hand-over kept —
+   * and only a door that is open mints a token and hands the charm the address, so the screen never
+   * offers a walk the charm cannot make; a report that could not be read is no door either, since
+   * an unread fact is not a fact. The hand reads the record again on every run, exactly as the
+   * transfer path defends a moved tag: the charm fetches what the host serves now, so the hash it
+   * is handed names the bytes it will fetch — and a mint that fails, or a URL that cannot be
+   * built, is no door either, so the walk falls to the transfer this phone can always drive. No
+   * door open is that transfer too: the image streamed to this phone, checked against the version
+   * this screen read, so a package that moved between the two reads is refused here rather than by
+   * the charm after the whole image — unless the re-read names these bytes, when they are exactly
+   * the image to send.
    */
   const runPublished = (record: CharmFirmware) =>
-    send(async () => {
+    send(async (was: string | null) => {
       const scheme = charmVoice(charm)
       const address = typeof charm?.talk === "string" ? charm.talk : undefined
       const report = await api.network().catch(() => null)
-      if (report && firmwareDoor(report, scheme, address) === "fetch" && address) {
+      if (report && address && firmwareDoor(report, scheme, address, was) === "fetch") {
+        // The record as the host answers it now: a read that fails or names no image is no fetch
+        // to send the charm walking on — the transfer's own words say it better below.
+        const served = await getCharmFirmware(hostForActiveBot(profile)).catch(() => null)
         // The one answer in which this phone ever sees the token: it rides the URL it builds, and
         // the image's bytes stay pinned by the SHA-256 of the record — the charm checks it before
         // it writes the slot, so a tag that moved is refused by the hash, not trusted by the URL.
-        const token = await getCharmFirmwareFetchToken(hostForActiveBot(profile))
-        return {
-          kind: "fetch",
-          url: firmwareFetchUrl(address, token),
-          sha256Hex: record.sha256,
-          scheme,
+        const token =
+          served === null
+            ? null
+            : await getCharmFirmwareFetchToken(hostForActiveBot(profile)).catch(() => null)
+        if (served !== null && token !== null) {
+          try {
+            return {
+              kind: "fetch",
+              url: firmwareFetchUrl(address, token),
+              sha256Hex: served.sha256,
+              scheme,
+              door: "published",
+            }
+          } catch {
+            // The URL could not fit the frame after all: the builder's bound is the backstop,
+            // and the transfer below is the walk that cannot be refused on the wire.
+          }
         }
       }
       const image = await getCharmFirmwareImage(hostForActiveBot(profile), (progress) =>
@@ -325,11 +348,11 @@ export function CharmUpdateScreen({
       })
       const sha256Hex = await sha256Of(image)
       if (image.length === record.size && sha256Hex === record.sha256)
-        return { kind: "transfer", image, sha256Hex }
+        return { kind: "transfer", image, sha256Hex, door: "published" }
       const fresh = await firmware.reload()
       const again = fresh?.state === "published" ? fresh.firmware : undefined
       if (again && again.size === image.length && again.sha256 === sha256Hex)
-        return { kind: "transfer", image, sha256Hex }
+        return { kind: "transfer", image, sha256Hex, door: "published" }
       throw new Error(PUBLISHED_CHANGED)
     }, `Updating to ${record.version}`)
 
@@ -342,28 +365,34 @@ export function CharmUpdateScreen({
    */
   const sendFile = (chosen: File) => {
     if (chosen.size > (published?.slot ?? CHARM_SLOT_BYTES)) {
-      setNote(FILE_TOO_BIG)
+      setWalk({ note: FILE_TOO_BIG })
       return
     }
-    void send(async () => {
-      const image = new Uint8Array(await chosen.arrayBuffer())
-      return { kind: "transfer", image, sha256Hex: await sha256Of(image) }
-    }, `Sending ${chosen.name}`)
+    void send(
+      async () => {
+        const image = new Uint8Array(await chosen.arrayBuffer())
+        return { kind: "transfer", image, sha256Hex: await sha256Of(image), door: "file" }
+      },
+      `Sending ${chosen.name}`,
+    )
   }
 
   // The published walk starts on its own once the host's own read is over: the bytes are checked
   // against the version that read named, and a cached copy is not this visit's answer. A screen
-  // opened for a file waits for the reader to pick one.
+  // opened for a file waits for the reader to pick one. The started gate is the shared walk's own:
+  // a visit that comes back joins the walk it names rather than starting a second beside it, while
+  // an offer that names a new version is a new ask, and starts its own walk.
   useEffect(() => {
-    if (pickMode || started.current || !firmware.settled) return
-    started.current = true
-    if (published) void runPublished(published)
+    if (pickMode || !published || !firmware.settled) return
+    if (walk.started === published.version) return
+    setWalk({ started: published.version })
+    void runPublished(published)
   }, [pickMode, firmware.settled, published])
 
   /** What a failure's way forward re-runs: the same hand — the bytes read again, or the door asked again. */
   const retry = () => {
-    const last = again.current
-    if (sending.current || !last) return
+    const last = walk.again
+    if (walk.running || !last) return
     void send(last.hand, last.title)
   }
 
@@ -384,18 +413,18 @@ export function CharmUpdateScreen({
       )}
       {end?.kind === "done" && (
         <Group>
-          <div className="bg-card px-5 py-3">
+          <div className={rowClass}>
             <RowText title="Done" subtitle={firmwareDoneWords(end.version)} />
           </div>
         </Group>
       )}
       {end?.kind === "failed" && (
         <Group>
-          <div className="flex flex-col gap-1 bg-card px-5 py-3">
+          <div className={cn(rowClass, "flex-col items-start gap-1")}>
             <p className="text-sm">{end.said}</p>
             <p className="text-[13px] text-muted-foreground">{FIRMWARE_CABLE}</p>
           </div>
-          <div className="bg-card px-5 py-3">
+          <div className={rowClass}>
             <Button id="charm-update-retry" type="button" disabled={busy} onClick={retry}>
               Try again
             </Button>
@@ -426,7 +455,7 @@ function StepRow({
   percent?: number
 }) {
   return (
-    <div className="flex flex-col gap-2 bg-card px-5 py-3">
+    <div className={cn(rowClass, "flex-col items-start gap-2")}>
       <RowText title={title} subtitle={subtitle} />
       {percent !== undefined && <Bar value={percent} />}
     </div>
@@ -467,7 +496,7 @@ function PickGroup({
 }) {
   return (
     <Group>
-      <div className="bg-card px-5 py-3">
+      <div className={rowClass}>
         <Button
           id="charm-update-choose"
           type="button"

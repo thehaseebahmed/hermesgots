@@ -100,10 +100,11 @@ export function updateFailedRefusal(status: Pick<CharmUpdateStatus, "reason">): 
 const STATUS_BYTES = 64 * 1024
 
 /**
- * How many asks the tail of an upload may take: after the last byte is written, the charm's own
- * count is what says it landed, and a healthy drain outruns the paced writes — but a charm wedged
- * yet answering would be an unbounded hot poll, so the asks are counted and the row's own words end
- * the wait. Generous by design: it is a bound, not a pace.
+ * How many asks the tail of an upload may take, and how many notices may re-anchor the send to
+ * the very place it is stuck at: after the last byte is written, the charm's own count is what
+ * says it landed, and a healthy drain outruns the paced writes — but a charm wedged yet answering
+ * is an unbounded wait either way, so both are counted and the row's own words end them.
+ * Generous by design: it is a bound, not a pace.
  */
 const TAIL_TRIES = 120
 
@@ -171,6 +172,11 @@ export async function uploadFirmware(
   // Settle asks since the walk last wrote: re-anchoring on a refusal starts the count over, since
   // the walk is writing again rather than waiting on a charm that has everything it was sent.
   let tail = 0
+  // Notices that re-anchored the send to the very place the last one did: a charm whose fill
+  // never moves is answering, not draining — a stonewall, counted so the row's own words end
+  // the wait rather than the flood running forever.
+  let wall = 0
+  let anchor = -1 // where the last notice re-anchored the send
   for (;;) {
     // The gap is what a Busy notice needs to land: the write before it carried no answer, and a
     // notification is at least a connection event behind.
@@ -182,6 +188,16 @@ export async function uploadFirmware(
       // notice that names none is about the chunk just written, so that one goes again: the
       // next offset would be a gap, which the charm ends the whole image over.
       at = refusal.fill ?? last
+      // The re-anchor that moves is the drain running under the notice — the walk is truly
+      // writing again wherever the charm now waits. The re-anchor that does not is a charm
+      // answering at a fill that never moves: nothing it says will advance the send, and the
+      // row's own words end the wait once enough of its notices have said the same position.
+      if (at > anchor) {
+        anchor = at
+        wall = 0
+      } else if ((wall += 1) === TAIL_TRIES) {
+        throw new Error(FIRMWARE_NOT_HELD)
+      }
       tail = 0
     }
     if (at < image.length) {
@@ -222,22 +238,26 @@ export async function uploadFirmware(
  * The version the charm answers once it is back after an upload, or the one it never left: `read`
  * is asked `tries` times, `waitMs` apart, and a change is what says the new build booted. `was` is
  * the build the row read before the upload — null where it read none, so any answer is a change.
+ * `answered` is the last answer that landed — the version the charm itself said, for a caller whose
+ * end gate reads the answer rather than only its change, and undefined where none ever did.
  */
 export async function versionAfterReboot(
   read: () => Promise<string | null>,
   was: string | null,
   { tries = REBOOT_TRIES, waitMs = REBOOT_MS } = {},
-): Promise<{ changed: boolean; version: string | null }> {
+): Promise<{ changed: boolean; version: string | null; answered?: string | null }> {
+  let answered: string | null | undefined
   for (let attempt = 0; attempt < tries; attempt += 1) {
     try {
       const now = await read()
-      if (now !== was) return { changed: true, version: now }
+      answered = now
+      if (now !== was) return { changed: true, version: now, answered }
     } catch {
       // The link is going down under it, which is the reboot itself.
     }
     await new Promise((done) => setTimeout(done, waitMs))
   }
-  return { changed: false, version: was }
+  return { changed: false, version: was, answered }
 }
 
 /**

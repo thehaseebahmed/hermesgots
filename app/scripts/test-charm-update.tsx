@@ -13,6 +13,7 @@ import { type ComponentProps, type ReactElement, act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
 import { CharmUpdateScreen, type CharmUpdateApi } from "@/components/charm-update"
+import { resetCharmUpdateWalk } from "@/lib/charm-update-walk"
 import { CharmNetwork, type CharmNetworkApi } from "@/components/settings/charm"
 import { useCharmReport, type PairedCharm } from "@/lib/charm"
 import {
@@ -37,6 +38,8 @@ import {
 } from "./component-kit.tsx"
 
 test.beforeEach(async () => {
+  // The walk outlives a screen, so each test's screens start where a fresh load would.
+  resetCharmUpdateWalk()
   await db.delete()
   await db.open()
   await seedSettings()
@@ -51,18 +54,31 @@ const at = (entry: string, screen: ReactElement) => (
   </MemoryRouter>
 )
 
-/** The screen's own asks of the charm, as the phone's radio would answer them. */
+/**
+ * The screen's own asks of the charm, as the phone's radio would answer them. The build the charm
+ * runs is modelled as the charm itself keeps it: 0.1.0 until a walk's own reboot lands it on
+ * 0.2.0 — the flip is the reboot a SUCCEEDED walk produces, an upload the charm took or the
+ * fetch watch's own Ready, never a failed one. A charm that refused never reboots, so a retry's
+ * own re-read still finds the build it started on.
+ */
 function radio(overrides: Partial<ComponentProps<typeof CharmUpdateScreen>["api"]> = {}) {
-  let reads = 0
+  let rebooted = false
+  const { upload, updateStatus, ...rest } = overrides
   return {
-    version: async () => (++reads > 1 ? "0.2.0" : "0.1.0"),
+    version: async () => (rebooted ? "0.2.0" : "0.1.0"),
     // A report with both links down, so no door is open: the walk the tests around here pin is the
     // transfer's, and the fetch walks name the report of their own.
     network: async () => ({
       wifi: { state: CharmLinkState.Off, reason: 0, ip: "", ssid: "" },
       tailnet: { state: CharmLinkState.Off, ip: "" },
     }),
-    updateStatus: async () => ({ state: CharmUpdateState.Idle, percent: 0, reason: 0 }),
+    updateStatus: async () => {
+      const answer = await (updateStatus
+        ? updateStatus()
+        : { state: CharmUpdateState.Idle, percent: 0, reason: 0 })
+      if (answer.state === CharmUpdateState.Ready) rebooted = true
+      return answer
+    },
     // The Update op the fetch walk hands the charm: unused unless a test stands one up.
     update: async () => {},
     upload: async (
@@ -70,11 +86,17 @@ function radio(overrides: Partial<ComponentProps<typeof CharmUpdateScreen>["api"
       _sha256Hex: string,
       onProgress?: (progress: { sent: number; total: number; percent?: number }) => void,
     ) => {
-      const done = { sent: image.length, total: image.length, percent: 100 }
-      onProgress?.(done)
+      const done = upload
+        ? await upload(image, _sha256Hex, onProgress)
+        : (() => {
+            const landed = { sent: image.length, total: image.length, percent: 100 }
+            onProgress?.(landed)
+            return landed
+          })()
+      rebooted = true
       return done
     },
-    ...overrides,
+    ...rest,
   }
 }
 
@@ -224,13 +246,20 @@ test("a charm online on Wi-Fi fetches the image itself, its own percent on the D
 })
 
 test("a charm online on its tailnet fetches over the http door it was handed", async () => {
+  // A charm whose own build takes the http door — 0.2.1-beta is the first that does — updating
+  // to the build after it: exactly the charm the http door was written for.
+  let booted = false
   const handed: { url: string }[] = []
   const api = radio({
+    version: async () => (booted ? "0.2.2-beta" : "0.2.1-beta"),
     network: async () => ({
       wifi: { state: CharmLinkState.Off, reason: 0, ip: "", ssid: "" },
       tailnet: { state: CharmLinkState.Online, ip: "100.64.0.9" },
     }),
-    updateStatus: async () => ({ state: CharmUpdateState.Ready, percent: 100, reason: 0 }),
+    updateStatus: async () => {
+      booted = true
+      return { state: CharmUpdateState.Ready, percent: 100, reason: 0 }
+    },
     update: async (url: string) => {
       handed.push({ url })
     },
@@ -238,12 +267,17 @@ test("a charm online on its tailnet fetches over the http door it was handed", a
       throw new Error("the BLE transfer ran")
     },
   })
-  const host = serveFirmware("update-tailnet", IMAGE_PUBLISHED, IMAGE, { fetchToken: true })
+  const host = serveFirmware(
+    "update-tailnet",
+    { ...IMAGE_PUBLISHED, version: "0.2.2-beta" },
+    IMAGE,
+    { fetchToken: true },
+  )
   const charm = charmedOver("http://100.64.0.9:8642/api/plugins/gots", "http")
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
-      await until(async () => text().includes("The charm runs 0.2.0"), "the end of the walk")
+      await until(async () => text().includes("The charm runs 0.2.2-beta"), "the end of the walk")
       assert.equal(handed.length, 1, "one Update op went")
       assert.equal(
         handed[0].url,
@@ -281,6 +315,333 @@ test("a door that is shut runs the transfer this phone drives, and mints nothing
       assert.equal(uploads.length, 1, "the image went over the link this phone drives")
       assert.equal(host.imageReads(), 1, "and it came to the phone first")
       assert.ok(text().includes("Downloading"), "the phone's own download is the bar")
+    },
+  )
+})
+
+test("a host that cannot mint the door's token is no door: the transfer runs instead", async () => {
+  // A host one release behind this app: it serves the record and the image but has no fetch
+  // route, so the mint 404s exactly when the walk has already picked the door. The mint's
+  // failure means no door, not a dead end — the transfer this phone always drives runs, with
+  // its own steps drawn.
+  const handed: unknown[] = []
+  const uploads: Uint8Array[] = []
+  const api = radio({
+    network: async () => ONLINE_WIFI,
+    update: async () => {
+      handed.push(1)
+      throw new Error("the fetch door was walked")
+    },
+    upload: async (image: Uint8Array) => {
+      uploads.push(image)
+      return { sent: image.length, total: image.length, percent: 100 }
+    },
+  })
+  // fetchToken left off: the host predates the mint route, as a host one release behind does.
+  const host = serveFirmware("update-old-host", IMAGE_PUBLISHED, IMAGE)
+  const charm = charmedOver("https://update-old-host.test/api/plugins/gots", "https")
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
+    async () => {
+      await until(async () => text().includes("The charm runs 0.2.0"), "the transfer's end", 10_000)
+      assert.deepEqual(handed, [], "no Update op went")
+      assert.equal(uploads.length, 1, "the image went over the link this phone drives")
+      assert.equal(host.imageReads(), 1, "and it came to the phone first")
+      assert.ok(text().includes("Transferring"), "the transfer's own steps drawn, not a dead end")
+      assert.ok(!text().includes("Try again"), "no failure to offer again")
+    },
+  )
+})
+
+test("a kept address whose fetch URL cannot fit opens no door, and the transfer runs", async () => {
+  // 93 bytes: inside the voice row's own 180-byte rule, but the fetch URL adds the image route
+  // and the host's 64-hex token on top of it — no room, so the charm could never dial the door
+  // the rule would otherwise pick.
+  const handed: unknown[] = []
+  const uploads: Uint8Array[] = []
+  const api = radio({
+    network: async () => ONLINE_WIFI,
+    update: async () => {
+      handed.push(1)
+    },
+    upload: async (image: Uint8Array) => {
+      uploads.push(image)
+      return { sent: image.length, total: image.length, percent: 100 }
+    },
+  })
+  const host = serveFirmware("update-long-address", IMAGE_PUBLISHED, IMAGE, { fetchToken: true })
+  const charm = charmedOver(`https://${"h".repeat(60)}.example/api/plugins/gots`, "https")
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
+    async () => {
+      await until(async () => text().includes("The charm runs 0.2.0"), "the transfer's end", 10_000)
+      assert.deepEqual(handed, [], "no Update op went: the URL could never fit")
+      assert.equal(host.mints(), 0, "nothing was minted for a door that cannot open")
+      assert.equal(uploads.length, 1, "the image went over the link instead")
+    },
+  )
+})
+
+test("a kept address with an upper-case scheme is handed to the charm lower-cased", async () => {
+  // The voice row keeps the case the reader typed and the charm's own talk door folds it, but
+  // its update door reads the scheme case-exactly — so the URL the walk builds carries the
+  // scheme lower-cased, the one spelling both doors take.
+  const handed: { url: string }[] = []
+  const api = radio({
+    network: async () => ONLINE_WIFI,
+    updateStatus: async () => ({ state: CharmUpdateState.Ready, percent: 100, reason: 0 }),
+    update: async (url: string) => {
+      handed.push({ url })
+    },
+    upload: async () => {
+      throw new Error("the BLE transfer ran")
+    },
+  })
+  const host = serveFirmware("update-case-door", IMAGE_PUBLISHED, IMAGE, { fetchToken: true })
+  const charm = charmedOver("HTTPS://update-case-door.test/api/plugins/gots", "https")
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
+    async () => {
+      await until(async () => text().includes("The charm runs 0.2.0"), "the walk's end", 10_000)
+      assert.equal(handed.length, 1, "one Update op went")
+      assert.equal(
+        handed[0].url,
+        `https://update-case-door.test/api/plugins/gots/charm/firmware/image/fetch?token=${FIRMWARE_FETCH_TOKEN}`,
+        "the scheme lower-cased, everything else as kept",
+      )
+    },
+  )
+})
+
+test("a build too old for the http door is walked through the transfer instead", async () => {
+  // The http update door is new on the charm side — first in 0.2.1-beta — while a build from
+  // before it can hold an http voice address over its tailnet, a state this app's own Voice
+  // switch writes. Handing that build the http URL is a BadMessage on the wire; the door rule
+  // reads the build the charm answered and answers the transfer, the one door it always takes.
+  const handed: unknown[] = []
+  const uploads: Uint8Array[] = []
+  const api = radio({
+    network: async () => ({
+      wifi: { state: CharmLinkState.Off, reason: 0, ip: "", ssid: "" },
+      tailnet: { state: CharmLinkState.Online, ip: "100.64.0.9" },
+    }),
+    update: async () => {
+      handed.push(1)
+    },
+    upload: async (image: Uint8Array) => {
+      uploads.push(image)
+      return { sent: image.length, total: image.length, percent: 100 }
+    },
+  })
+  const host = serveFirmware("update-old-http", IMAGE_PUBLISHED, IMAGE, { fetchToken: true })
+  const charm = charmedOver("http://100.64.0.9:8642/api/plugins/gots", "http")
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
+    async () => {
+      await until(async () => text().includes("The charm runs 0.2.0"), "the transfer's end", 10_000)
+      assert.deepEqual(handed, [], "no Update op went to a build that would refuse it")
+      assert.equal(host.mints(), 0, "no token minted for a door the build cannot take")
+      assert.equal(uploads.length, 1, "the transfer is the one door an older build always takes")
+    },
+  )
+})
+
+test("the fetch hand reads the record again, so a tag that moved is walked against what the host serves now", async () => {
+  // The screen opened on the stale record; a merge published the fresh one before the charm
+  // fetched. The charm fetches the bytes the host serves NOW, so the hash it is handed is the
+  // one that names those bytes — the hand reads the record again every time it runs, which is
+  // what a failure's Try again re-runs.
+  const handed: { sha256Hex: string }[] = []
+  const api = radio({
+    network: async () => ONLINE_WIFI,
+    // The charm's own gate: the bytes it fetched match the hash it was handed, or they do not.
+    updateStatus: async () =>
+      handed.at(-1)?.sha256Hex === IMAGE_SHA
+        ? { state: CharmUpdateState.Ready, percent: 100, reason: 0 }
+        : { state: CharmUpdateState.Failed, percent: 0, reason: CharmUpdateReason.BadHash },
+    update: async (_url: string, sha256Hex: string) => {
+      handed.push({ sha256Hex })
+    },
+    upload: async () => {
+      throw new Error("the BLE transfer ran")
+    },
+  })
+  const host = serveFirmware(
+    "update-tag-moved",
+    (reads) => (reads === 1 ? { ...PUBLISHED, version: "0.1.9" } : IMAGE_PUBLISHED),
+    IMAGE,
+    { fetchToken: true },
+  )
+  const charm = charmedOver("https://update-tag-moved.test/api/plugins/gots", "https")
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
+    async () => {
+      await until(async () => text().includes("The charm runs 0.2.0"), "the walk against the fresh record", 10_000)
+      assert.equal(handed.length, 1, "one hand, already the right one")
+      assert.equal(handed[0].sha256Hex, IMAGE_SHA, "the hash the host's own bytes answer to now")
+      assert.ok(host.reads() >= 2, "the record was read again before the charm was handed anything")
+    },
+  )
+})
+
+test("a poll that meets the charm rebooting is the reboot's own shape, and the walk ends Done", async () => {
+  // The charm holds its Ready for 1500 ms before it reboots (src/update_board.cpp in the
+  // firmware repo) and the watch polls every 2000: on unlucky phases no poll sees Ready, the
+  // next ask meets the link gone, and the charm is already coming back on the new build. A
+  // thrown poll is the reboot's own shape — the walk falls into the reboot window the transfer
+  // uses, and the read-back decides, not the failure block.
+  let asks = 0
+  let booted = false
+  const api = radio({
+    version: async () => (booted ? "0.2.1-beta" : "0.2.0-beta"),
+    network: async () => ONLINE_WIFI,
+    update: async () => {},
+    updateStatus: async () => {
+      asks += 1
+      if (asks <= 2)
+        return { state: CharmUpdateState.Downloading, percent: asks === 1 ? 40 : 71, reason: 0 }
+      // Ready came and went between polls; the link is gone and the new build is up.
+      booted = true
+      throw new Error("The charm went out of reach")
+    },
+    upload: async () => {
+      throw new Error("the BLE transfer ran")
+    },
+  })
+  const host = serveFirmware(
+    "update-ready-window",
+    { ...IMAGE_PUBLISHED, version: "0.2.1-beta" },
+    IMAGE,
+    { fetchToken: true },
+  )
+  const charm = charmedOver("https://update-ready-window.test/api/plugins/gots", "https")
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
+    async () => {
+      await until(async () => text().includes("The charm runs 0.2.1-beta"), "the read-back of the new build", 10_000)
+      assert.ok(!text().includes("went out of reach"), "the reboot is not drawn as a failure")
+      assert.ok(!text().includes("Try again"), "and there is nothing to try again")
+    },
+  )
+})
+
+test("the answer that says Ready still draws the percent it carried", async () => {
+  // The one answer that carries percent 100 is the slot written and the reboot a moment away:
+  // drawn before the watch returns, so a completed walk's bar is at the whole image rather
+  // than frozen at the last percent the walk happened to see.
+  const api = radio({
+    network: async () => ONLINE_WIFI,
+    updateStatus: async () => ({ state: CharmUpdateState.Ready, percent: 100, reason: 0 }),
+    update: async () => {},
+    upload: async () => {
+      throw new Error("the BLE transfer ran")
+    },
+  })
+  const host = serveFirmware("update-ready-percent", IMAGE_PUBLISHED, IMAGE, { fetchToken: true })
+  const charm = charmedOver("https://update-ready-percent.test/api/plugins/gots", "https")
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
+    async () => {
+      await until(async () => text().includes("The charm runs 0.2.0"), "the walk's end", 10_000)
+      assert.ok(bars().includes(100), "the Downloading bar at the whole image, as the Ready answer said")
+    },
+  )
+})
+
+test("stepping back mid-walk and returning joins the walk already running", async () => {
+  // The send is driven by its own promise, not by the screen, so leaving changes nothing — and
+  // the reader who steps back mid-walk and returns finds the same walk on screen rather than
+  // a second, unrequested one started beside it.
+  let releaseUpload: (() => void) | undefined
+  let uploads = 0
+  const api = radio({
+    upload: async (image: Uint8Array) => {
+      uploads += 1
+      await new Promise<void>((done) => (releaseUpload = done))
+      return { sent: image.length, total: image.length, percent: 100 }
+    },
+  })
+  const host = serveFirmware("update-remount", IMAGE_PUBLISHED, IMAGE)
+  // The reader opens the screen; the published walk starts on its own.
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
+    async () => {
+      await until(async () => text().includes("Transferring"), "the walk started", 10_000)
+    },
+  ) // <- the screen unmounts; the send's promise stays alive
+  // The reader comes back while the first upload is still held.
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
+    async () => {
+      assert.ok(text().includes("Transferring"), "the returned screen shows the walk in flight")
+      // Long enough for the returned screen's own reads to land: it had every chance to
+      // start a walk of its own, and must not have.
+      await act(async () => {
+        await new Promise((done) => setTimeout(done, 300))
+      })
+      assert.equal(uploads, 1, "no second send was started by the return")
+      releaseUpload?.()
+      await until(async () => text().includes("The charm runs 0.2.0"), "the one walk's end", 10_000)
+      assert.equal(uploads, 1, "one update asked for, one update run")
+    },
+  )
+})
+
+test("re-flashing the build the charm already runs ends Done on the build it answered", async () => {
+  // The classic fix-a-sick-charm move: the file IS the build the charm runs. The transfer
+  // succeeds and the charm comes back on that same build — an unchanged version is the walk
+  // landing, not failing, since a reader's file names no newer build.
+  const api = radio({
+    version: async () => "0.2.0",
+    upload: async (image: Uint8Array) => ({ sent: image.length, total: image.length, percent: 100 }),
+  })
+  const host = serveFirmware("update-reflash", IMAGE_PUBLISHED, IMAGE)
+  await mount(
+    at("/settings/charm-firmware?file=1", <CharmUpdateScreen api={api} profile={host.profile} />),
+    async () => {
+      await until(async () => Boolean(find("#charm-update-choose")), "the picker", 10_000)
+      await pick("charm-0.2.0.bin", 8)
+      await until(async () => text().includes("Restarting"), "the transfer taken", 10_000)
+      // The reboot window is the screen's own four asks, 3 s apart.
+      await act(async () => {
+        await new Promise((done) => setTimeout(done, 12_500))
+      })
+      await settle()
+      const page = text()
+      assert.ok(page.includes("The charm runs 0.2.0"), "the charm came back on the build it was sent")
+      assert.ok(
+        !page.includes("didn't come back on the new build"),
+        "a same-build re-flash is not drawn as the failure it wasn't",
+      )
+    },
+  )
+})
+
+test("a retry whose second walk succeeds ends Done on the new build", async () => {
+  // The rig's own shape: the first upload fails, the reader taps Try again, and the second
+  // upload lands. A failed attempt never reboots the charm, so the retry's own re-read still
+  // finds the build it started on — and its end is the change to the new one, not the failure
+  // an unchanged version would draw.
+  let uploads = 0
+  const api = radio({
+    upload: async (image: Uint8Array) => {
+      uploads += 1
+      if (uploads === 1) throw new Error("The update failed: it was cancelled")
+      return { sent: image.length, total: image.length, percent: 100 }
+    },
+  })
+  const host = serveFirmware("update-retry-done", IMAGE_PUBLISHED, IMAGE)
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
+    async () => {
+      await until(async () => text().includes("The update failed: it was cancelled"), "the first walk's failure", 10_000)
+      await click(find("#charm-update-retry"))
+      await until(async () => text().includes("The charm runs 0.2.0"), "the retry's end", 10_000)
+      assert.equal(uploads, 2, "the retry re-ran the send")
+      assert.ok(
+        !text().includes("didn't come back on the new build"),
+        "the charm did come back, on the new build",
+      )
     },
   )
 })

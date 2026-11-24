@@ -134,12 +134,10 @@ import {
   type CharmSeen,
 } from "@/lib/charm-words"
 import { quietly } from "@/lib/report"
+import { spoken } from "@/lib/words"
 import { talkWords, voiceAddress, voiceOwed } from "@/lib/talk"
 import { tell } from "@/lib/tell"
 import { useBotLabels } from "@/lib/use-bot-labels"
-
-const message = (error: unknown) =>
-  error instanceof Error && error.message ? error.message : "Something went wrong"
 
 /**
  * The Network section's radio, as the page reaches it: every call is one control ask over the
@@ -394,7 +392,7 @@ export function CharmNetwork({
       if (charmKept(code)) await Promise.all([refresh(), readUpdate()])
       return code
     } catch (error) {
-      setSaid(message(error))
+      setSaid(spoken(error, "Something went wrong"))
       return null
     } finally {
       setBusy(null)
@@ -692,7 +690,7 @@ export function CharmSettings() {
     try {
       await setCharmWake(next)
     } catch (error) {
-      setFailure(message(error))
+      setFailure(spoken(error, "Something went wrong"))
     } finally {
       setBusy(null)
     }
@@ -708,7 +706,7 @@ export function CharmSettings() {
       await readCharmBattery()
       setBatteryNote(undefined)
     } catch (error) {
-      setBatteryNote(message(error))
+      setBatteryNote(spoken(error, "Something went wrong"))
     } finally {
       sending.current = false
       setBusy(null)
@@ -723,7 +721,7 @@ export function CharmSettings() {
     if (!deviceId) return
     void readCharmBattery()
       .then(() => setBatteryNote(undefined))
-      .catch((error) => setBatteryNote(message(error)))
+      .catch((error) => setBatteryNote(spoken(error, "Something went wrong")))
   }, [deviceId])
 
   // The charm's own answer about its voice, read when the page opens and again after a sync.
@@ -756,7 +754,7 @@ export function CharmSettings() {
       tell.success(`Paired with ${next.name}`)
     } catch (error) {
       // Closing the picker is a choice, not a failure.
-      if (!/cancel/i.test(message(error))) setFailure(message(error))
+      if (!/cancel/i.test(spoken(error, "Something went wrong"))) setFailure(spoken(error, "Something went wrong"))
     } finally {
       setBusy(null)
     }
@@ -807,7 +805,7 @@ export function CharmSettings() {
             voiceNote = VOICE_NO_TAILNET
           }
         } catch (error) {
-          voiceNote = message(error)
+          voiceNote = spoken(error, "Something went wrong")
         }
       }
       const done = await syncToCharm(bots, setProgress, {
@@ -829,7 +827,7 @@ export function CharmSettings() {
       // cheap to ask now, and the row is one sync fresher for it.
       await readCharmBattery().catch(quietly("reading the charm's battery"))
     } catch (error) {
-      setFailure(message(error))
+      setFailure(spoken(error, "Something went wrong"))
     } finally {
       sending.current = false
       setBusy(null)
@@ -874,7 +872,7 @@ export function CharmSettings() {
       await sendTestAlert(first)
       tell.success("Sent a test alert")
     } catch (error) {
-      setFailure(message(error))
+      setFailure(spoken(error, "Something went wrong"))
     } finally {
       setBusy(null)
     }
