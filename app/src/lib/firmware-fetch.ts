@@ -9,22 +9,41 @@
  * The image's bytes are pinned by the SHA-256 the phone sends the charm either way — the hash is
  * the trust anchor, and the token is only the door.
  *
+ * The image route's own path comes back with that token, in the mint's one answer: the route's name
+ * is the host's knowledge, as the turn route's is for the voice hand-over (`get_talk`), and this app
+ * carries neither. A renamed or re-prefixed image route on the host is answered here, and the charm
+ * walks the path the host just named — no string on the phone chases it by hand.
+ *
  * Pure, so `scripts/test-firmware-fetch.mjs` runs it as a rule; the ask that mints the token is
- * `getCharmFirmwareFetchToken`'s own business in hermes.ts, as the streamed read is
+ * `getCharmFirmwareFetch`'s own business in hermes.ts, as the streamed read is
  * `getCharmFirmwareImage`'s.
  */
 import {
   addressBytes,
   CharmLinkState,
-  encoder,
   type CharmNetworkReport,
 } from "./charm-protocol.ts"
-import { schemeOf } from "./host-url.ts"
+import { PLUGIN_ROOT, schemeOf } from "./host-url.ts"
 import { compareVersions } from "./version-compare.ts"
 import { talkAddress } from "./talk.ts"
 
-/** The image route's tokened variant under the plugin prefix, as the phone already knows it. */
-const FIRMWARE_FETCH_PATH = "/charm/firmware/image/fetch"
+/**
+ * A route under the plugin root the voice hand-over keeps: segments that name something, and no
+ * scheme, query or fragment of its own — the token's query is the only one the URL wears, added by
+ * the builder. The host answers this path and this app reads it, so it is judged rather than
+ * trusted: an answer that is really an address, one that climbs out of the root with a `.` segment,
+ * one ending on an empty segment, or one carrying the plugin root again — a host that answered its
+ * own full path — would hand the charm a door that is not the one the token was minted for.
+ */
+function routeOf(path: unknown): path is string {
+  if (typeof path !== "string" || !path.startsWith("/") || path.startsWith("//")) return false
+  if (/[\s?#]/.test(path)) return false
+  if (path.startsWith(`${PLUGIN_ROOT}/`)) return false
+  return path
+    .slice(1)
+    .split("/")
+    .every((segment) => segment !== "" && segment !== "." && segment !== "..")
+}
 
 /**
  * The first build whose update door takes a plain http address. Before it the charm's `Update`
@@ -34,36 +53,38 @@ const FIRMWARE_FETCH_PATH = "/charm/firmware/image/fetch"
  */
 const HTTP_DOOR_BUILD = "0.2.1-beta"
 
-/** The host's token at its widest, as `fetch_tokens.py`'s `TOKEN_BYTES` spells it: 64 hex. */
-const TOKEN_HEX = 64
+export type CharmFirmwareFetch = { token: string; path: string }
 
 /**
- * The token the host's mint answers, or the one sentence for an answer this app cannot read. A body
- * that names no token is no door at all: handing the charm a URL without one would send it walking
- * into a refusal the phone could have seen here.
+ * The token and the path the host's mint answers, or the one sentence for an answer this app cannot
+ * read. A body missing either is no door at all: handing the charm a URL without one would send it
+ * walking into a refusal the phone could have seen here.
  */
-export function firmwareFetchToken(body: unknown): string {
-  const held = body as { token?: unknown } | null
+export function firmwareFetchAnswer(body: unknown): CharmFirmwareFetch {
+  const held = body as { token?: unknown; path?: unknown } | null
   if (typeof held?.token !== "string" || held.token === "")
     throw new Error("The host's answer about the charm's fetch token was unreadable.")
-  return held.token
+  if (!routeOf(held.path))
+    throw new Error("The host's answer about the charm's fetch route was unreadable.")
+  return { token: held.token, path: held.path }
 }
 
 /**
  * The URL the phone hands the charm: the voice hand-over's own base, read by the rule every
  * charm-held address is (`talkAddress`), with the scheme lower-cased — the voice row keeps the
  * case the reader typed and the charm's own talk door folds it, but its update door reads the
- * scheme case-exactly, so the lower case is the one spelling both doors take. Throws the
- * reader's sentence for a base the charm cannot dial — a scheme neither door speaks — before
- * any connection is opened, so a record gone stale costs no link; the whole URL is bounded by
- * the charm's own frame, as every address it carries is.
+ * scheme case-exactly, so the lower case is the one spelling both doors take. The route and the
+ * token are the mint's answer as `firmwareFetchAnswer` read it, so the shape of a route is judged
+ * once, where it arrives, and never by two rules that could disagree. Throws the reader's
+ * sentence for a base the charm cannot dial — a scheme neither door speaks — before any
+ * connection is opened, so a record gone stale costs no link; the whole URL is bounded by the
+ * charm's own frame, as every address it carries is.
  */
-export function firmwareFetchUrl(base: string, token: string): string {
+export function firmwareFetchUrl(base: string, fetch: CharmFirmwareFetch): string {
   const trimmed = talkAddress(base).replace(/^[A-Za-z][A-Za-z0-9+.-]*:\/\//, (scheme) =>
     scheme.toLowerCase(),
   )
-  if (encoder.encode(token).length === 0) throw new Error("A fetch token is at least 1 byte")
-  const url = `${trimmed}${FIRMWARE_FETCH_PATH}?token=${encodeURIComponent(token)}`
+  const url = `${trimmed}${fetch.path}?token=${encodeURIComponent(fetch.token)}`
   addressBytes(
     url,
     ["http", "https"],
@@ -77,30 +98,18 @@ export function firmwareFetchUrl(base: string, token: string): string {
 export type FirmwareDoor = "fetch" | "transfer"
 
 /**
- * Whether the fetch URL this address opens can fit the charm's own frame: the URL is the address
- * plus the image route and the host's token, so an address the voice row keeps can still leave no
- * room for the door. The builder's own bound is the rule, asked with the widest token the host
- * mints — and the builder's throw stays the backstop on the walk itself, for a host that mints
- * wider.
- */
-function fetchUrlFits(base: string): boolean {
-  try {
-    firmwareFetchUrl(base, "f".repeat(TOKEN_HEX))
-    return true
-  } catch {
-    return false
-  }
-}
-
-/**
  * The door the update walks, from the charm's own report of its links, the voice hand-over this
  * phone keeps, and the build the charm itself answered. The door is the address the hand-over
  * wrote the charm: https is the host's own address, which the charm fetches over the Wi-Fi it
  * joins; http is its tailnet address, which the charm takes only while its tunnel is up — and
  * only from the first build that learned to take it, so a scheme switched since the last sync
  * is a preference the charm has not been handed, not a door it holds. No address kept, no door;
- * no room in the frame for the URL, no door either — the transfer is the one walk that cannot
- * be refused on the wire.
+ * the transfer is the one walk that cannot be refused on the wire.
+ *
+ * Whether the whole URL fits the charm's frame is the builder's own bound, not this rule's: the
+ * image route's path is the host's and arrives with the token, so the app has no length to measure
+ * before the mint — and a walk the builder refuses leaves the update on the transfer, the door that
+ * cannot be refused on the wire.
  *
  * Pure, like the rest of this module: the ask the report comes from is `charmNetwork`'s, the one
  * the settings page already makes, and the build is the version read the update itself takes
@@ -120,6 +129,5 @@ export function firmwareDoor(
     return "transfer"
   const link = scheme === "https" ? report.wifi.state : report.tailnet.state
   if (link !== CharmLinkState.Online) return "transfer"
-  if (!fetchUrlFits(address)) return "transfer"
   return "fetch"
 }

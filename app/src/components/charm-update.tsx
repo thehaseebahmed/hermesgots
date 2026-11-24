@@ -48,7 +48,7 @@ import { getActiveProfile } from "@/lib/db"
 import { CHARM_POLL_MS } from "@/lib/freshness"
 import {
   getCharmFirmware,
-  getCharmFirmwareFetchToken,
+  getCharmFirmwareFetch,
   getCharmFirmwareImage,
   type CharmFirmware,
 } from "@/lib/hermes"
@@ -313,18 +313,19 @@ export function CharmUpdateScreen({
         // The record as the host answers it now: a read that fails or names no image is no fetch
         // to send the charm walking on — the transfer's own words say it better below.
         const served = await getCharmFirmware(hostForActiveBot(profile)).catch(() => null)
-        // The one answer in which this phone ever sees the token: it rides the URL it builds, and
-        // the image's bytes stay pinned by the SHA-256 of the record — the charm checks it before
-        // it writes the slot, so a tag that moved is refused by the hash, not trusted by the URL.
-        const token =
+        // The one answer in which this phone ever sees the token and the route it walks: they ride
+        // the URL it builds, and the image's bytes stay pinned by the SHA-256 of the record — the
+        // charm checks it before it writes the slot, so a tag that moved is refused by the hash,
+        // not trusted by the URL.
+        const mint =
           served === null
             ? null
-            : await getCharmFirmwareFetchToken(hostForActiveBot(profile)).catch(() => null)
-        if (served !== null && token !== null) {
+            : await getCharmFirmwareFetch(hostForActiveBot(profile)).catch(() => null)
+        if (served !== null && mint !== null) {
           try {
             return {
               kind: "fetch",
-              url: firmwareFetchUrl(address, token),
+              url: firmwareFetchUrl(address, mint),
               sha256Hex: served.sha256,
               scheme,
               door: "published",

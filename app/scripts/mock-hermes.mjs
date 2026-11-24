@@ -31,9 +31,10 @@
 // It lists Hermes Projects on GET /api/plugins/gots/projects. GET /api/plugins/gots/github and
 // github/repos stand in for the host's GitHub account (MOCK_NO_GITHUB=1 leaves it signed out), and
 // the charm's fetch door is served as the plugin answers it: POST charm/firmware/fetch mints the
-// short-lived token the phone puts in the URL it hands the charm, and GET charm/firmware/image/fetch
-// serves the mock's own stand-in image to a token it minted, refusing one nobody did or whose life
-// (MOCK_CHARM_FETCH_MS, ten minutes by default) is past.
+// short-lived token and answers the image route's path beside it — the phone puts both in the URL it
+// hands the charm — and GET charm/firmware/image/fetch serves the mock's own stand-in image to a
+// token it minted, refusing one nobody did or whose life (MOCK_CHARM_FETCH_MS, ten minutes by
+// default) is past.
 // POST /api/plugins/gots/projects answers at once with a project that clones its repos in the
 // background (1.5s each; a repo named like `fail` fails it, as does MOCK_FAIL_CLONE=1), and
 // POST projects/{id}, projects/{id}/retry and projects/{id}/remove edit (name, description,
@@ -572,11 +573,14 @@ const MEETINGS = process.env.MOCK_MEETINGS !== "0"
 const DICTATIONS = process.env.MOCK_DICTATIONS !== "0"
 // The charm's fetch door (plugin/fetch_tokens.py): the phone's mint answers a token that lives
 // MOCK_CHARM_FETCH_MS — ten minutes, as the plugin keeps it; a test runs it shorter so an expired
-// door can be watched — and the image route's tokened variant admits the charm by the one in the
-// URL. Its own mint kind: nothing of the voice token's is touched, a rule plugin/tests hold against
-// the real mints. The image itself is this mock's own stand-in for the one the plugin reads from
-// ghcr.io, since nothing here reaches the network: fixed bytes, the same behind the door.
+// door can be watched — and the image route's path the charm walks, answered beside it exactly as
+// the plugin answers it (`CHARM_FIRMWARE_FETCH_PATH` there, held to this one by
+// `test-firmware-fetch.mjs`). The image route's tokened variant admits the charm by the token in
+// the URL. Its own mint kind: nothing of the voice token's is touched, a rule plugin/tests hold
+// against the real mints. The image itself is this mock's own stand-in for the one the plugin reads
+// from ghcr.io, since nothing here reaches the network: fixed bytes, the same behind the door.
 const CHARM_FETCH_MS = Number(process.env.MOCK_CHARM_FETCH_MS ?? 600_000)
+const CHARM_FETCH_PATH = "/charm/firmware/image/fetch"
 const charmFetchTokens = new Map()
 const CHARM_FIRMWARE_IMAGE = Buffer.concat([
   Buffer.from("the charm's firmware image, as the mock host serves it\0"),
@@ -5423,9 +5427,10 @@ http
       return json(res, 200, { object: "gots.github.repos", repos: githubRepos })
     }
     // The charm's fetch door, as the plugin's `charm/firmware/fetch` routes answer it: the phone's
-    // mint of a short-lived token, and the image route's tokened variant that admits the charm by
-    // the one in the URL. The bytes are the mock's own stand-in for the published image, and the
-    // words of a refusal are the plugin's (`test-firmware-fetch.mjs` holds the two together).
+    // mint of a short-lived token and the image route's path the charm walks beside it, and the
+    // image route's tokened variant that admits the charm by the token in the URL. The bytes are
+    // the mock's own stand-in for the published image, and the words of a refusal are the plugin's
+    // (`test-firmware-fetch.mjs` holds the two together).
     if (
       PLUGIN &&
       !profile &&
@@ -5434,9 +5439,13 @@ http
     ) {
       const token = randomBytes(32).toString("hex")
       charmFetchTokens.set(token, Date.now())
-      return json(res, 200, { object: "gots.charm_firmware_fetch", token })
+      return json(res, 200, {
+        object: "gots.charm_firmware_fetch",
+        token,
+        path: CHARM_FETCH_PATH,
+      })
     }
-    if (PLUGIN && !profile && url.pathname === "/api/plugins/gots/charm/firmware/image/fetch") {
+    if (PLUGIN && !profile && url.pathname === `/api/plugins/gots${CHARM_FETCH_PATH}`) {
       const token = url.searchParams.get("token") ?? ""
       const minted = charmFetchTokens.get(token)
       if (minted === undefined || Date.now() - minted > CHARM_FETCH_MS)
