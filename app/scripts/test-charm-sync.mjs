@@ -51,7 +51,13 @@ import {
   wifiRecord,
   wakeMessage,
 } from "../src/lib/charm-protocol.ts"
-import { CharmRefused, syncCharm } from "../src/lib/charm-sync.ts"
+import {
+  CharmRefused,
+  CLOCK_TRUSTED_MS,
+  sendClock,
+  syncCharm,
+  withLink,
+} from "../src/lib/charm-sync.ts"
 import { batteryWords, refusalWords } from "../src/lib/charm-words.ts"
 
 test("crc32 is zlib's", () => {
@@ -72,6 +78,21 @@ test("utf8Clip never splits a character", () => {
 })
 
 const u32 = (v) => [v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff]
+
+/**
+ * The answer the charm gives a battery ask, as the firmware writes one: the four status bytes, then
+ * the extra behind its own length — the level, then the charger. Seven bytes, and a frame shorter
+ * than that reads as no answer at all (`parseBattery`).
+ */
+const batteryAnswer = ({ percent, charging }) => [
+  1,
+  0,
+  CharmOp.Battery,
+  0,
+  2,
+  percent & 0xff,
+  charging ? 1 : 0,
+]
 
 test("messages are laid out as the firmware reads them", () => {
   assert.deepEqual([...beginMessage(3)], [1, 1, 3])
@@ -186,12 +207,16 @@ test("chunks carry their offset and fit the link", () => {
   assert.equal(chunkSize(1000), 512)
 })
 
+const answer = (code, op, needImage = false) =>
+  parseStatus(new DataView(new Uint8Array([1, code, op, needImage ? 1 : 0]).buffer))
+
 /** A charm in memory, following the firmware's sync session. */
 function fakeCharm({
   corruptOnce = false,
   refuseCommit = false,
   corruptPoseOnce = false,
   refusePet = false,
+  refuseClock = false,
   refuseWake = false,
   refuseTalk = false,
   battery = { percent: 85, charging: false },
@@ -210,8 +235,6 @@ function fakeCharm({
   const ops = []
   // Every address the talk hand-over carried, in the order the session wrote them.
   const talked = []
-  const answer = (code, op, needImage = false) =>
-    parseStatus(new DataView(new Uint8Array([1, code, op, needImage ? 1 : 0]).buffer))
   return {
     held,
     imagesSent,
@@ -236,12 +259,8 @@ function fakeCharm({
           return answer(0, op)
         }
         if (op === 0x0d) {
-          // Six bytes, as the firmware answers: the op byte is what makes the shape unmistakable.
-          return parseStatus(
-            new DataView(
-              new Uint8Array([1, 0, op, 0, battery.percent & 0xff, battery.charging ? 1 : 0]).buffer,
-            ),
-          )
+          // The status bytes and the level and charger behind their length, as the firmware answers.
+          return parseStatus(new DataView(new Uint8Array(batteryAnswer(battery)).buffer))
         }
         if (op === 1) {
           pending = new Array(m[2])
@@ -298,6 +317,9 @@ function fakeCharm({
           talked.push(new TextDecoder().decode(m.subarray(3, 3 + urlLen)))
           return answer(refuseTalk ? CharmCode.BadMessage : 0, op)
         }
+        // A charm on firmware from before pet mode knows none of the pet's ops, the clock included.
+        if (refusePet && op >= CharmOp.PetSettings && op <= CharmOp.Time)
+          return answer(CharmCode.BadMessage, op)
         if (op === 7) {
           const idLen = m[7]
           pet.enabled = m[2] === 1
@@ -332,8 +354,8 @@ function fakeCharm({
           return answer(0, op)
         }
         if (op === 11) {
-          // A charm on firmware from before pet mode answers the first pet op this way.
-          if (refusePet) return answer(CharmCode.BadMessage, op)
+          // A clock the charm cannot believe, as `rtc::set` answers one from before 2020.
+          if (refuseClock) return answer(CharmCode.BadMessage, op)
           pet.clock = v.getUint32(2, true)
           return answer(0, op)
         }
@@ -495,6 +517,139 @@ test("pet mode off sends the toggle and no pictures", async () => {
   assert.equal(charm.poses.size, 0)
   // The clock still goes over: the phone is the charm's only source of time.
   assert.equal(charm.pet.clock, 1795176000)
+})
+
+test("sendClock answers whether the charm kept the time, and a refusal is not an error", async () => {
+  const writes = []
+  const linkAnswering = (code) => ({
+    mtu: 23,
+    async control(message) {
+      writes.push([...message])
+      return answer(code, message[1])
+    },
+    async data() {},
+  })
+
+  assert.equal(await sendClock(linkAnswering(CharmCode.Ok), 1795176000000), true)
+  assert.deepEqual(writes.at(-1), [1, 11, ...u32(1795176000)])
+  // Any code the charm kept is a yes; a refusal is an answer rather than an error, since a firmware
+  // older than the op has never heard of it.
+  assert.equal(await sendClock(linkAnswering(CharmCode.KeptReadable), 1795176000000), true)
+  assert.equal(await sendClock(linkAnswering(CharmCode.BadMessage), 1795176000000), false)
+  assert.equal(writes.length, 3)
+})
+
+test("a link is opened, handed the clock, then the op, and closed whatever either of them did", async () => {
+  const seen = []
+  const session = (code) => ({
+    mtu: 23,
+    async control(message) {
+      seen.push(message[1])
+      return answer(code, message[1])
+    },
+    async data() {},
+    async close() {
+      seen.push("closed")
+    },
+  })
+  const opened = (code) => async () => session(code)
+
+  // The clock first, then the op the link was opened for, then the close.
+  await withLink(opened(CharmCode.Ok), async (link) => {
+    await link.control(new Uint8Array([1, 13]))
+    seen.push("op")
+  }, { now: 1795176000000 })
+  assert.deepEqual(seen, [CharmOp.Time, 13, "op", "closed"])
+
+  // A clock the charm refuses is not the errand's failure: the op still runs, and the link still closes.
+  seen.length = 0
+  await withLink(opened(CharmCode.BadMessage), async () => seen.push("op"), { now: 1795176000000 })
+  assert.deepEqual(seen, [CharmOp.Time, "op", "closed"])
+
+  // An op that throws closes the link on the way out.
+  seen.length = 0
+  await assert.rejects(
+    withLink(opened(CharmCode.Ok), async () => {
+      throw new Error("the charm stopped answering")
+    }, { now: 1795176000000 }),
+    /stopped answering/,
+  )
+  assert.deepEqual(seen, [CharmOp.Time, "closed"])
+})
+
+test("a clock the charm kept is not written again by the next link in the same errand", async () => {
+  const at = 1795176000000
+  const writes = []
+  const open = async () => ({
+    mtu: 23,
+    async control(message) {
+      writes.push(message[1])
+      return answer(CharmCode.Ok, message[1])
+    },
+    async data() {},
+    async close() {},
+  })
+  const clock = { at: Number.NEGATIVE_INFINITY }
+
+  // A sync's battery read, a log's pages and two update polls: one clock, not four.
+  for (const step of [0, 1_000, 20_000, 22_000])
+    await withLink(open, async () => {}, { now: at + step, clock })
+  assert.deepEqual(writes, [CharmOp.Time])
+  assert.equal(clock.at, at)
+
+  // Past the window, the next link writes it again.
+  await withLink(open, async () => {}, { now: at + CLOCK_TRUSTED_MS + 1, clock })
+  assert.deepEqual(writes, [CharmOp.Time, CharmOp.Time])
+
+  // A clock the charm refused starts no window: the next link tries it again, since a phone's clock
+  // that could not be believed may have been mended in between.
+  const refused = []
+  const refusing = async () => ({
+    mtu: 23,
+    async control(message) {
+      refused.push(message[1])
+      return answer(CharmCode.BadMessage, message[1])
+    },
+    async data() {},
+    async close() {},
+  })
+  const remembered = { at: Number.NEGATIVE_INFINITY }
+  await withLink(refusing, async () => {}, { now: at, clock: remembered })
+  await withLink(refusing, async () => {}, { now: at + 1, clock: remembered })
+  assert.deepEqual(refused, [CharmOp.Time, CharmOp.Time])
+  assert.equal(remembered.at, Number.NEGATIVE_INFINITY)
+})
+
+test("a charm that refuses the clock is never given the pet settings", async () => {
+  const charm = fakeCharm({ refuseClock: true })
+  const result = await syncCharm(charm.link, [nova], undefined, {
+    pet: { settings: petOn, poses: [{ mood: "hungry", image: picture(12, 900) }] },
+    now: 1795176000000,
+  })
+  // The meters would never move, so the pet stays as it was and the page is told, which is what a
+  // charm without pet mode at all gets.
+  assert.equal(result.petRefused, true)
+  assert.equal(charm.pet.enabled, false)
+  assert.equal(charm.pet.clock, 0)
+  assert.equal(charm.poses.size, 0)
+  // The phone's own clock was sane, so this refusal is not the clock's: it is a charm that does not
+  // know the pet's ops, and the page says so.
+  assert.ok(!result.petClockRefused)
+})
+
+test("a phone whose own clock reads before 2020 says the clock kept the pet off", async () => {
+  const charm = fakeCharm()
+  const result = await syncCharm(charm.link, [nova], undefined, {
+    pet: { settings: petOn, poses: [{ mood: "hungry", image: picture(12, 900) }] },
+    // 1970-01-12, as a phone whose date was never set reads.
+    now: 1_000_000,
+  })
+  assert.equal(result.petRefused, true)
+  assert.equal(result.petClockRefused, true)
+  assert.equal(charm.pet.enabled, false)
+  // The charm is not even sent a time it would refuse, so nothing of the pet reaches it.
+  assert.ok(!charm.ops.includes(CharmOp.Time))
+  assert.ok(!charm.ops.includes(CharmOp.PetSettings))
 })
 
 test("a damaged pet picture is sent again", async () => {
@@ -844,6 +999,11 @@ test("the glass's messages are laid out as the firmware reads them", () => {
 
 test("the battery answer is a level and a charger, and an unread one is unknown", () => {
   const bytes = (list) => new DataView(new Uint8Array(list).buffer)
+  // The fake charm answers what the firmware does, so the parser is read against the same shape.
+  assert.deepEqual(parseBattery(bytes(batteryAnswer({ percent: 85, charging: true }))), {
+    percent: 85,
+    charging: true,
+  })
   // Two bytes of extra behind a length, as the network's report is: the level, then the charger.
   assert.deepEqual(parseBattery(bytes([1, 0, 0x0d, 0, 2, 85, 1])), { percent: 85, charging: true })
   assert.deepEqual(parseBattery(bytes([1, 0, 0x0d, 0, 2, 85, 0])), { percent: 85, charging: false })

@@ -384,7 +384,7 @@ export function refusalWords(code: number, tail = "") {
  * The switch beside Sync: what each of its positions needs of the reader's host and charm.
  */
 export const VOICE_HTTPS =
-  "Your charm calls your host at the address your phone uses, with the certificate checked against the charm's own roots. It needs the charm's clock, which a sync sets."
+  "Your charm calls your host at the address your phone uses, with the certificate checked against the charm's own roots. It needs the charm's clock, which the app sets whenever it reaches the charm."
 
 export const VOICE_HTTP =
   "Your charm calls your host on your tailnet in plain http. It needs your host to know its tailnet address, and the charm to be on the tailnet."

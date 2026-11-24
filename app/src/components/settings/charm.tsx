@@ -817,7 +817,11 @@ export function CharmSettings() {
       if (talk) recordCharmTalk(done.voice, talk.address, talk.bot)
       tell.success(done.total === 1 ? "1 bot on your charm" : `${done.total} bots on your charm`)
       if (done.petRefused && settings.enabled)
-        tell.info("Your bots synced. This charm's firmware has no pet mode yet.")
+        tell.info(
+          done.petClockRefused
+            ? "Your bots synced. Your phone's clock reads before 2020, so the charm would not take it and the pet's meters would stand still. Check the phone's date, then sync again."
+            : "Your bots synced. This charm's firmware has no pet mode yet.",
+        )
       if (talk && done.voice !== "sent")
         voiceNote = talkWords(done.voiceCode ?? CharmCode.BadMessage)
       if (voiceNote) tell.info(voiceNote)

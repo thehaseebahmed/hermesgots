@@ -77,7 +77,9 @@ import { type CharmWake, wakeMessage } from "./charm-protocol.ts"
 import {
   CharmRefused,
   syncCharm,
+  withLink,
   type CharmTransport,
+  type ClockMemo,
   type SyncProgress,
   type SyncOptions,
 } from "./charm-sync.ts"
@@ -165,6 +167,9 @@ const ACCENT = "#7b7d7b"
 const ANSWER_MS = 10_000
 
 let paired: PairedCharm | null = read()
+
+/** The last clock a charm kept from this phone, so one errand's run of links writes it once. */
+const clockGiven: ClockMemo = { at: Number.NEGATIVE_INFINITY }
 const listeners = new Set<() => void>()
 
 function read(): PairedCharm | null {
@@ -245,13 +250,9 @@ export async function pairCharm(): Promise<PairedCharm> {
     services: [CHARM_SERVICE],
     optionalServices: [CHARM_SERVICE],
   })
-  // Bonding asks for the passkey the charm shows; once bonded, later syncs need nothing.
-  await BleClient.connect(device.deviceId)
-  try {
-    await BleClient.createBond(device.deviceId, { timeout: 60_000 })
-  } finally {
-    await BleClient.disconnect(device.deviceId).catch(() => {})
-  }
+  // Bonding asks for the passkey the charm shows; once bonded, later syncs need nothing. Pairing
+  // runs no op of its own, so this link carries the bond — and the clock every link carries.
+  await withLink(() => openTransport(device.deviceId), async () => {}, { clock: clockGiven })
   const next = { deviceId: device.deviceId, name: device.name ?? "Gots Charm" }
   write(next)
   await keepCharm(next.deviceId)
@@ -756,7 +757,10 @@ function rethrowOlderFirmware(error: unknown): never {
   throw error
 }
 
-/** One short connection: connect, one op, one answer, disconnect — one caller at a time. */
+/**
+ * One link to the charm, opened the one way there is: `openTransport`, which also bonds. The clock
+ * and the close are `withLink`'s, in the sync module, where a test can drive them.
+ */
 async function withCharm<T>(run: (link: CharmLink) => Promise<T>): Promise<T> {
   const charm = paired
   if (!charm) throw new Error("No charm paired")
@@ -764,11 +768,6 @@ async function withCharm<T>(run: (link: CharmLink) => Promise<T>): Promise<T> {
   // one, and its `close()` disconnects the device whoever opened it.
   return oneAtATime(async () => {
     await ready()
-    const link = await openTransport(charm.deviceId)
-    try {
-      return await run(link)
-    } finally {
-      await link.close()
-    }
+    return withLink(() => openTransport(charm.deviceId), run, { clock: clockGiven })
   })
 }

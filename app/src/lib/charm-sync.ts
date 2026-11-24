@@ -41,6 +41,30 @@ export interface CharmTransport {
   mtu: number
 }
 
+/** A link the caller opened, which the caller also closes. */
+export interface CharmSession extends CharmTransport {
+  close(): Promise<void>
+}
+
+/** What the phone remembers of the clock it last gave a charm, so one errand's links write one. */
+export interface ClockMemo {
+  /** When the charm last kept the phone's clock, in epoch milliseconds. */
+  at: number
+}
+
+/** How long a clock the charm kept is trusted before the next link writes it again. */
+export const CLOCK_TRUSTED_MS = 30_000
+
+/** Anything older is a clock the charm refuses: 2020-01-01T00:00:00Z, the charm's own line. */
+const SANE_CLOCK_MS = 1_577_836_800_000
+
+export interface LinkOptions {
+  /** The phone's clock, in epoch milliseconds; a test pins it. */
+  now?: number
+  /** Remembered by this helper when the charm keeps the clock, and read on the next link. */
+  clock?: ClockMemo
+}
+
 export interface SyncOptions {
   /** Pet mode as the sheet has it, with the pet's pictures ready to send. */
   pet?: { settings: CharmPetSettings; poses: CharmPose[] }
@@ -59,6 +83,8 @@ export interface SyncProgress {
   sent: number
   /** The charm would not take pet mode: firmware without it, or a clock it did not believe. */
   petRefused?: boolean
+  /** The refusal was the clock, because this phone's own time reads before 2020. */
+  petClockRefused?: boolean
   /** Whether the voice hand-over landed: the page's line, and what its record keeps. */
   voice?: "sent" | "refused"
   /** The charm's own code when it refused, so the page can say which refusal it was. */
@@ -117,13 +143,20 @@ export async function syncCharm(
       onProgress?.({ ...progress })
     }
     await ask(link, commitMessage())
-    try {
-      await sendPet(link, size, options)
-    } catch (error) {
-      // The bots are already on the charm. A charm that cannot run a pet must not turn a good sync
-      // into a failed one, and a dead link still fails.
-      if (!(error instanceof CharmRefused)) throw error
+    // A phone whose clock reads before 2020 hands the charm a time it refuses, and the pet's meters
+    // would never move: the sync says which refusal that is instead of blaming the firmware for it.
+    if (options.pet && (options.now ?? Date.now()) < SANE_CLOCK_MS) {
       progress.petRefused = true
+      progress.petClockRefused = true
+    } else {
+      try {
+        await sendPet(link, size, options)
+      } catch (error) {
+        // The bots are already on the charm. A charm that cannot run a pet must not turn a good sync
+        // into a failed one, and a dead link still fails.
+        if (!(error instanceof CharmRefused)) throw error
+        progress.petRefused = true
+      }
     }
     // The voice hand-over is last and never fails the sync: a charm that refuses it, a host that will
     // not mint and a link that goes at the last write all leave the bots and the pet landed, and the
@@ -149,10 +182,51 @@ export async function syncCharm(
   }
 }
 
+/**
+ * Hands the charm the phone's clock, and answers whether it kept it. A refusal is an answer and not
+ * an error: a firmware older than `Time` says `BadMessage`, and a clock the charm cannot believe is
+ * no reason to fail a link the reader opened for something else.
+ */
+export async function sendClock(link: CharmTransport, nowMs = Date.now()): Promise<boolean> {
+  const answer = await link.control(timeMessage(Math.floor(nowMs / 1000)))
+  return charmKept(answer.code)
+}
+
+/**
+ * One link, in the only order there is: opened, handed the phone's clock, then the caller's op, and
+ * closed whatever either of them did. A refused clock costs this link a round trip and nothing else,
+ * because the op it was opened for is what the reader asked for. The opener belongs to the caller,
+ * so this is drivable without a radio, and a memo of the last clock kept means one errand's run of
+ * links — a sync's battery read, a log's pages, an update's polls — writes it once.
+ */
+export async function withLink<L extends CharmSession, T>(
+  open: () => Promise<L>,
+  run: (link: L) => Promise<T>,
+  options: LinkOptions = {},
+): Promise<T> {
+  const link = await open()
+  try {
+    const now = options.now ?? Date.now()
+    const memo = options.clock
+    if (!memo || now - memo.at > CLOCK_TRUSTED_MS) {
+      // Only a clock the charm kept restarts the window: one it refused is worth trying again, since
+      // what the charm could not believe may have been mended in between.
+      const kept = await sendClock(link, now).catch(() => false)
+      if (kept && memo) memo.at = now
+    }
+    return await run(link)
+  } finally {
+    await link.close()
+  }
+}
+
 async function sendPet(link: CharmTransport, size: number, options: SyncOptions) {
   if (!options.pet) return
   const { settings, poses } = options.pet
-  await ask(link, timeMessage(Math.floor((options.now ?? Date.now()) / 1000)))
+  // The clock the pet's meters run on. A charm that refuses it is left with the pet as it was
+  // rather than switched on with a clock that never moves, and the page is told — as it is for a
+  // firmware with no pet mode at all.
+  if (!(await sendClock(link, options.now))) throw new CharmRefused(CharmCode.BadMessage)
   if (settings.enabled) {
     for (const pose of poses) {
       if (!(await ask(link, poseMessage(pose.mood, pose.image))).needImage) continue

@@ -1,14 +1,16 @@
 package dev.hermesgots
 
 /**
- * The charm's alert, as bytes: the three control writes the phone makes so a bot can tap the reader
- * on the shoulder, pick up a tap the phone could not answer at the time, and nothing else.
+ * The charm's alert, as bytes: the control writes the phone makes so a bot can tap the reader on the
+ * shoulder, pick up a tap the phone could not answer at the time, and tell the charm what the time
+ * is — and nothing else.
  *
  * The wire is `docs/PROTOCOL.md` in the `hermesgots-charm` repo, protocol version 1: every control
  * write is `[version u8 = 1][op][payload]`, `Alert` (`0x20`) carries
  * `[reason u8][minute u16 LE][titleLen u8][title][bodyLen u8][body][actionCount u8][per action:
  * idLen u8, id, labelLen u8, label][subjectLen u8][subject][idLen u8][botId]`, `Clear` (`0x21`)
- * carries `[subjectLen u8][subject]`, and `Handoff` (`0x22`) is the op alone. The app's own copy of
+ * carries `[subjectLen u8][subject]`, `Handoff` (`0x22`) is the op alone, and `Time` (`0x0B`) carries
+ * `[epoch u32 LE]`. The app's own copy of
  * this protocol is `src/lib/charm-protocol.ts`; this object is the copy that runs with the app
  * closed, and `app/scripts/test-charm-alert.mjs` compares these constants and this field order to
  * the document's literals, so a drift here fails a test rather than reaching the charm as silence.
@@ -31,6 +33,13 @@ object CharmWire {
      * never before it.
      */
     const val OP_HANDOFF = 0x22
+
+    /**
+     * `Time`: the phone's clock, in UTC seconds, which the charm keeps in its RTC. An https turn is
+     * judged against it, so the link an alert opens is the one contact with the app closed that can
+     * give a charm back a clock it lost with a flat battery.
+     */
+    const val OP_TIME = 0x0B
 
     // The moments a charm draws: a question, and an approval a plan waiting is. Nothing else is
     // forwarded to it — a finished run, a failure, a room or a routine's news is not a bot's face
@@ -116,6 +125,16 @@ object CharmWire {
     }
 
     /**
+     * The phone's clock, in UTC seconds. A time the charm cannot believe — anything before 2020 — is
+     * answered `BadMessage` and changes nothing, and this link reads no answer, so a wrong phone
+     * clock costs the reader only the clock it had.
+     */
+    fun time(epochSeconds: Long): ByteArray {
+        require(epochSeconds in 0..0xffff_ffffL) { "A clock is one unsigned 32-bit second" }
+        return frame(OP_TIME).u32(epochSeconds).done()
+    }
+
+    /**
      * The button a handoff ask was answered with, or null for an answer with nothing pending and for
      * anything that is not this answer at all. A status is exactly four bytes and this answer is seven
      * or more, so the two are never read for each other: a status whose third byte happened to be
@@ -177,6 +196,11 @@ object CharmWire {
         /** A 16-bit field, little endian, as the charm reads its own. */
         fun u16(value: Int): Writer {
             return u8(value).u8(value ushr 8)
+        }
+
+        /** A 32-bit field, little endian: the clock is the one thing on this wire that wide. */
+        fun u32(value: Long): Writer {
+            return u16((value and 0xffff).toInt()).u16(((value ushr 16) and 0xffff).toInt())
         }
 
         /** A string as `[length u8][bytes]`. An empty one is a frame the charm answers `BadMessage`. */
