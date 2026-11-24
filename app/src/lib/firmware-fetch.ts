@@ -57,8 +57,8 @@ export type CharmFirmwareFetch = { token: string; path: string }
 
 /**
  * The token and the path the host's mint answers, or the one sentence for an answer this app cannot
- * read. A body that names neither is no door at all: handing the charm a URL without one would send
- * it walking into a refusal the phone could have seen here.
+ * read. A body missing either is no door at all: handing the charm a URL without one would send it
+ * walking into a refusal the phone could have seen here.
  */
 export function firmwareFetchAnswer(body: unknown): CharmFirmwareFetch {
   const held = body as { token?: unknown; path?: unknown } | null

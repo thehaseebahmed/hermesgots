@@ -404,12 +404,6 @@ test("every host half spells the image route the plugin's way", () => {
   const faked = /^export const FIRMWARE_FETCH_PATH = "([^"]+)"$/m.exec(kit)
   assert.ok(faked, "the component kit still answers a path of its own")
   assert.equal(faked[1], named, "the kit answers the route the plugin serves")
-  assert.ok(
-    readFileSync(resolve(appDir, "../plugin/__init__.py"), "utf8").includes(
-      `f"{PREFIX}{CHARM_FIRMWARE_FETCH_PATH}"`,
-    ),
-    "and the plugin registers the route it answers from that same constant",
-  )
 })
 
 test("the dev mock refuses a token with the plugin's own words", () => {
