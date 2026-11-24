@@ -76,6 +76,7 @@ import {
 import { type CharmWake, wakeMessage } from "./charm-protocol.ts"
 import {
   CharmRefused,
+  sendClock,
   syncCharm,
   type CharmTransport,
   type SyncProgress,
@@ -246,11 +247,13 @@ export async function pairCharm(): Promise<PairedCharm> {
     optionalServices: [CHARM_SERVICE],
   })
   // Bonding asks for the passkey the charm shows; once bonded, later syncs need nothing.
-  await BleClient.connect(device.deviceId)
+  const link = await openTransport(device.deviceId)
   try {
-    await BleClient.createBond(device.deviceId, { timeout: 60_000 })
+    // A charm that has just been bonded is the one that has never held a clock, so it is told the
+    // time before the reader goes looking for the Sync button.
+    await sendClock(link).catch(() => {})
   } finally {
-    await BleClient.disconnect(device.deviceId).catch(() => {})
+    await link.close()
   }
   const next = { deviceId: device.deviceId, name: device.name ?? "Gots Charm" }
   write(next)
@@ -766,6 +769,11 @@ async function withCharm<T>(run: (link: CharmLink) => Promise<T>): Promise<T> {
     await ready()
     const link = await openTransport(charm.deviceId)
     try {
+      // The clock first, whatever the charm answers: a charm that has lost its RTC's backup refuses
+      // an https turn with "No clock" before the microphone opens, and this is the one moment the
+      // phone is close enough to tell it the time. An extra a charm may not know — or a write that
+      // fails — costs this link a round trip, not the op the reader opened it for.
+      await sendClock(link).catch(() => {})
       return await run(link)
     } finally {
       await link.close()
