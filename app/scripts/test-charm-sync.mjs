@@ -51,7 +51,13 @@ import {
   wifiRecord,
   wakeMessage,
 } from "../src/lib/charm-protocol.ts"
-import { CharmRefused, sendClock, syncCharm, withLink } from "../src/lib/charm-sync.ts"
+import {
+  CharmRefused,
+  CLOCK_TRUSTED_MS,
+  sendClock,
+  syncCharm,
+  withLink,
+} from "../src/lib/charm-sync.ts"
 import { batteryWords, refusalWords } from "../src/lib/charm-words.ts"
 
 test("crc32 is zlib's", () => {
@@ -72,6 +78,21 @@ test("utf8Clip never splits a character", () => {
 })
 
 const u32 = (v) => [v & 0xff, (v >>> 8) & 0xff, (v >>> 16) & 0xff, (v >>> 24) & 0xff]
+
+/**
+ * The answer the charm gives a battery ask, as the firmware writes one: the four status bytes, then
+ * the extra behind its own length — the level, then the charger. Seven bytes, and a frame shorter
+ * than that reads as no answer at all (`parseBattery`).
+ */
+const batteryAnswer = ({ percent, charging }) => [
+  1,
+  0,
+  CharmOp.Battery,
+  0,
+  2,
+  percent & 0xff,
+  charging ? 1 : 0,
+]
 
 test("messages are laid out as the firmware reads them", () => {
   assert.deepEqual([...beginMessage(3)], [1, 1, 3])
@@ -238,12 +259,8 @@ function fakeCharm({
           return answer(0, op)
         }
         if (op === 0x0d) {
-          // Six bytes, as the firmware answers: the op byte is what makes the shape unmistakable.
-          return parseStatus(
-            new DataView(
-              new Uint8Array([1, 0, op, 0, battery.percent & 0xff, battery.charging ? 1 : 0]).buffer,
-            ),
-          )
+          // The status bytes and the level and charger behind their length, as the firmware answers.
+          return parseStatus(new DataView(new Uint8Array(batteryAnswer(battery)).buffer))
         }
         if (op === 1) {
           pending = new Array(m[2])
@@ -541,12 +558,12 @@ test("a link is opened, handed the clock, then the op, and closed whatever eithe
   await withLink(opened(CharmCode.Ok), async (link) => {
     await link.control(new Uint8Array([1, 13]))
     seen.push("op")
-  }, 1795176000000)
+  }, { now: 1795176000000 })
   assert.deepEqual(seen, [CharmOp.Time, 13, "op", "closed"])
 
   // A clock the charm refuses is not the errand's failure: the op still runs, and the link still closes.
   seen.length = 0
-  await withLink(opened(CharmCode.BadMessage), async () => seen.push("op"), 1795176000000)
+  await withLink(opened(CharmCode.BadMessage), async () => seen.push("op"), { now: 1795176000000 })
   assert.deepEqual(seen, [CharmOp.Time, "op", "closed"])
 
   // An op that throws closes the link on the way out.
@@ -554,10 +571,53 @@ test("a link is opened, handed the clock, then the op, and closed whatever eithe
   await assert.rejects(
     withLink(opened(CharmCode.Ok), async () => {
       throw new Error("the charm stopped answering")
-    }),
+    }, { now: 1795176000000 }),
     /stopped answering/,
   )
   assert.deepEqual(seen, [CharmOp.Time, "closed"])
+})
+
+test("a clock the charm kept is not written again by the next link in the same errand", async () => {
+  const at = 1795176000000
+  const writes = []
+  const open = async () => ({
+    mtu: 23,
+    async control(message) {
+      writes.push(message[1])
+      return answer(CharmCode.Ok, message[1])
+    },
+    async data() {},
+    async close() {},
+  })
+  const clock = { at: Number.NEGATIVE_INFINITY }
+
+  // A sync's battery read, a log's pages and two update polls: one clock, not four.
+  for (const step of [0, 1_000, 20_000, 22_000])
+    await withLink(open, async () => {}, { now: at + step, clock })
+  assert.deepEqual(writes, [CharmOp.Time])
+  assert.equal(clock.at, at)
+
+  // Past the window, the next link writes it again.
+  await withLink(open, async () => {}, { now: at + CLOCK_TRUSTED_MS + 1, clock })
+  assert.deepEqual(writes, [CharmOp.Time, CharmOp.Time])
+
+  // A clock the charm refused starts no window: the next link tries it again, since a phone's clock
+  // that could not be believed may have been mended in between.
+  const refused = []
+  const refusing = async () => ({
+    mtu: 23,
+    async control(message) {
+      refused.push(message[1])
+      return answer(CharmCode.BadMessage, message[1])
+    },
+    async data() {},
+    async close() {},
+  })
+  const remembered = { at: Number.NEGATIVE_INFINITY }
+  await withLink(refusing, async () => {}, { now: at, clock: remembered })
+  await withLink(refusing, async () => {}, { now: at + 1, clock: remembered })
+  assert.deepEqual(refused, [CharmOp.Time, CharmOp.Time])
+  assert.equal(remembered.at, Number.NEGATIVE_INFINITY)
 })
 
 test("a charm that refuses the clock is never given the pet settings", async () => {
@@ -572,6 +632,24 @@ test("a charm that refuses the clock is never given the pet settings", async () 
   assert.equal(charm.pet.enabled, false)
   assert.equal(charm.pet.clock, 0)
   assert.equal(charm.poses.size, 0)
+  // The phone's own clock was sane, so this refusal is not the clock's: it is a charm that does not
+  // know the pet's ops, and the page says so.
+  assert.ok(!result.petClockRefused)
+})
+
+test("a phone whose own clock reads before 2020 says the clock kept the pet off", async () => {
+  const charm = fakeCharm()
+  const result = await syncCharm(charm.link, [nova], undefined, {
+    pet: { settings: petOn, poses: [{ mood: "hungry", image: picture(12, 900) }] },
+    // 1970-01-12, as a phone whose date was never set reads.
+    now: 1_000_000,
+  })
+  assert.equal(result.petRefused, true)
+  assert.equal(result.petClockRefused, true)
+  assert.equal(charm.pet.enabled, false)
+  // The charm is not even sent a time it would refuse, so nothing of the pet reaches it.
+  assert.ok(!charm.ops.includes(CharmOp.Time))
+  assert.ok(!charm.ops.includes(CharmOp.PetSettings))
 })
 
 test("a damaged pet picture is sent again", async () => {
@@ -921,6 +999,11 @@ test("the glass's messages are laid out as the firmware reads them", () => {
 
 test("the battery answer is a level and a charger, and an unread one is unknown", () => {
   const bytes = (list) => new DataView(new Uint8Array(list).buffer)
+  // The fake charm answers what the firmware does, so the parser is read against the same shape.
+  assert.deepEqual(parseBattery(bytes(batteryAnswer({ percent: 85, charging: true }))), {
+    percent: 85,
+    charging: true,
+  })
   // Two bytes of extra behind a length, as the network's report is: the level, then the charger.
   assert.deepEqual(parseBattery(bytes([1, 0, 0x0d, 0, 2, 85, 1])), { percent: 85, charging: true })
   assert.deepEqual(parseBattery(bytes([1, 0, 0x0d, 0, 2, 85, 0])), { percent: 85, charging: false })

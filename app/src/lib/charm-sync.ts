@@ -46,6 +46,25 @@ export interface CharmSession extends CharmTransport {
   close(): Promise<void>
 }
 
+/** What the phone remembers of the clock it last gave a charm, so one errand's links write one. */
+export interface ClockMemo {
+  /** When the charm last kept the phone's clock, in epoch milliseconds. */
+  at: number
+}
+
+/** How long a clock the charm kept is trusted before the next link writes it again. */
+export const CLOCK_TRUSTED_MS = 30_000
+
+/** Anything older is a clock the charm refuses: 2020-01-01T00:00:00Z, the charm's own line. */
+const SANE_CLOCK_MS = 1_577_836_800_000
+
+export interface LinkOptions {
+  /** The phone's clock, in epoch milliseconds; a test pins it. */
+  now?: number
+  /** Remembered by this helper when the charm keeps the clock, and read on the next link. */
+  clock?: ClockMemo
+}
+
 export interface SyncOptions {
   /** Pet mode as the sheet has it, with the pet's pictures ready to send. */
   pet?: { settings: CharmPetSettings; poses: CharmPose[] }
@@ -64,6 +83,8 @@ export interface SyncProgress {
   sent: number
   /** The charm would not take pet mode: firmware without it, or a clock it did not believe. */
   petRefused?: boolean
+  /** The refusal was the clock, because this phone's own time reads before 2020. */
+  petClockRefused?: boolean
   /** Whether the voice hand-over landed: the page's line, and what its record keeps. */
   voice?: "sent" | "refused"
   /** The charm's own code when it refused, so the page can say which refusal it was. */
@@ -122,13 +143,20 @@ export async function syncCharm(
       onProgress?.({ ...progress })
     }
     await ask(link, commitMessage())
-    try {
-      await sendPet(link, size, options)
-    } catch (error) {
-      // The bots are already on the charm. A charm that cannot run a pet must not turn a good sync
-      // into a failed one, and a dead link still fails.
-      if (!(error instanceof CharmRefused)) throw error
+    // A phone whose clock reads before 2020 hands the charm a time it refuses, and the pet's meters
+    // would never move: the sync says which refusal that is instead of blaming the firmware for it.
+    if (options.pet && (options.now ?? Date.now()) < SANE_CLOCK_MS) {
       progress.petRefused = true
+      progress.petClockRefused = true
+    } else {
+      try {
+        await sendPet(link, size, options)
+      } catch (error) {
+        // The bots are already on the charm. A charm that cannot run a pet must not turn a good sync
+        // into a failed one, and a dead link still fails.
+        if (!(error instanceof CharmRefused)) throw error
+        progress.petRefused = true
+      }
     }
     // The voice hand-over is last and never fails the sync: a charm that refuses it, a host that will
     // not mint and a link that goes at the last write all leave the bots and the pet landed, and the
@@ -168,16 +196,24 @@ export async function sendClock(link: CharmTransport, nowMs = Date.now()): Promi
  * One link, in the only order there is: opened, handed the phone's clock, then the caller's op, and
  * closed whatever either of them did. A refused clock costs this link a round trip and nothing else,
  * because the op it was opened for is what the reader asked for. The opener belongs to the caller,
- * so this is drivable without a radio.
+ * so this is drivable without a radio, and a memo of the last clock kept means one errand's run of
+ * links — a sync's battery read, a log's pages, an update's polls — writes it once.
  */
 export async function withLink<L extends CharmSession, T>(
   open: () => Promise<L>,
   run: (link: L) => Promise<T>,
-  nowMs?: number,
+  options: LinkOptions = {},
 ): Promise<T> {
   const link = await open()
   try {
-    await sendClock(link, nowMs).catch(() => {})
+    const now = options.now ?? Date.now()
+    const memo = options.clock
+    if (!memo || now - memo.at > CLOCK_TRUSTED_MS) {
+      // Only a clock the charm kept restarts the window: one it refused is worth trying again, since
+      // what the charm could not believe may have been mended in between.
+      const kept = await sendClock(link, now).catch(() => false)
+      if (kept && memo) memo.at = now
+    }
     return await run(link)
   } finally {
     await link.close()
