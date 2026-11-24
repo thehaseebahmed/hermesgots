@@ -11,11 +11,14 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from plugin import store, talk_tokens
+from plugin import store, talk_tokens, token_mint
 
 BOT = "0123456789abcdef"
 OTHER = "fedcba9876543210"
+HOUR = 3_600_000
+DECADE = 10 * 365 * 24 * HOUR
 
 
 class Tokens(unittest.TestCase):
@@ -29,7 +32,7 @@ class Tokens(unittest.TestCase):
 
     def test_a_minted_token_is_kept_as_its_hash(self) -> None:
         token = talk_tokens.mint(self.path, BOT)
-        self.assertRegex(token, talk_tokens.TOKEN, "a token the app can hand a charm")
+        self.assertRegex(token, token_mint.TOKEN, "a token the app can hand a charm")
         kept = self.held()
         self.assertNotIn(token, json.dumps(kept), "the token itself is never written")
         self.assertEqual(kept["sha256"], hashlib.sha256(token.encode("utf-8")).hexdigest())
@@ -47,6 +50,30 @@ class Tokens(unittest.TestCase):
         self.assertFalse(talk_tokens.verify(self.path, BOT, first), "and the charm's old token is spent")
         self.assertTrue(talk_tokens.verify(self.path, BOT, second))
         self.assertEqual(list(self.held()), ["sha256", "at"], "one token per bot, not a list of them")
+
+    def test_a_token_minted_long_ago_still_verifies(self) -> None:
+        token = talk_tokens.mint(self.path, BOT)
+        now = store.now_ms()
+        for later in (now + HOUR, now + DECADE):
+            with self.subTest(age=later - now):
+                with mock.patch.object(token_mint, "now_ms", lambda: later):
+                    self.assertTrue(
+                        talk_tokens.verify(self.path, BOT, token),
+                        "no life was stated, so age is not asked",
+                    )
+
+    def test_the_kind_states_a_life_that_never_ends(self) -> None:
+        token = talk_tokens.mint(self.path, BOT)
+        with mock.patch.object(token_mint, "verify", wraps=token_mint.verify) as mint_verify:
+            talk_tokens.verify(self.path, BOT, token)
+        self.assertIsNone(
+            mint_verify.call_args.kwargs["lifetime"], "forever, stated rather than left by omission"
+        )
+
+    def test_the_row_name_is_the_one_a_shipped_charm_still_needs(self) -> None:
+        self.assertEqual(
+            talk_tokens.SETTING, "talk_token", "renaming it orphans every provisioned charm"
+        )
 
     def test_a_bot_no_token_was_minted_for_is_refused(self) -> None:
         talk_tokens.mint(self.path, BOT)
@@ -67,13 +94,6 @@ class Tokens(unittest.TestCase):
         for value in ("", "nope", "0" * 63, "0" * 65, "A" * 64, None, 42):
             with self.subTest(value=value):
                 self.assertFalse(talk_tokens.verify(self.path, BOT, value))
-
-    def test_a_tokens_shape_is_the_length_it_is_minted_at(self) -> None:
-        width = talk_tokens.TOKEN_BYTES * 2
-        self.assertRegex("0" * width, talk_tokens.TOKEN)
-        for value in ("0" * (width - 1), "0" * (width + 1)):
-            with self.subTest(value=value):
-                self.assertIsNone(talk_tokens.TOKEN.match(value))
 
     def test_a_bot_id_is_judged_by_one_predicate(self) -> None:
         self.assertTrue(talk_tokens.valid_bot(BOT))

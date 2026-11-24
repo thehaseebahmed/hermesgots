@@ -17,7 +17,7 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
-from plugin import fetch_tokens, store, talk_tokens
+from plugin import fetch_tokens, store, talk_tokens, token_mint
 
 BOT = "0123456789abcdef"
 
@@ -33,7 +33,7 @@ class Tokens(unittest.TestCase):
 
     def test_a_minted_token_is_kept_as_its_hash(self) -> None:
         token = fetch_tokens.mint(self.path)
-        self.assertRegex(token, fetch_tokens.TOKEN, "a token the phone can hand a charm")
+        self.assertRegex(token, token_mint.TOKEN, "a token the phone can hand a charm")
         kept = self.held()
         self.assertNotIn(token, json.dumps(kept), "the token itself is never written")
         self.assertEqual(kept["sha256"], hashlib.sha256(token.encode("utf-8")).hexdigest())
@@ -62,16 +62,9 @@ class Tokens(unittest.TestCase):
     def test_a_store_nothing_was_minted_on_refuses_every_token(self) -> None:
         self.assertFalse(fetch_tokens.verify(self.path, "0" * 64))
 
-    def test_a_tokens_shape_is_the_length_it_is_minted_at(self) -> None:
-        width = fetch_tokens.TOKEN_BYTES * 2
-        self.assertRegex("0" * width, fetch_tokens.TOKEN)
-        for value in ("0" * (width - 1), "0" * (width + 1)):
-            with self.subTest(value=value):
-                self.assertIsNone(fetch_tokens.TOKEN.match(value))
-
     def test_a_token_lives_only_its_short_life(self) -> None:
         clock = [store.now_ms()]
-        with mock.patch.object(fetch_tokens, "now_ms", lambda: clock[0]):
+        with mock.patch.object(token_mint, "now_ms", lambda: clock[0]):
             minted = fetch_tokens.mint(self.path)
             self.assertTrue(fetch_tokens.verify(self.path, minted), "fresh from the mint")
             clock[0] += fetch_tokens.TTL_MS
@@ -84,6 +77,11 @@ class Tokens(unittest.TestCase):
                 fetch_tokens.verify(self.path, minted),
                 "one millisecond past the life the door is shut",
             )
+
+    def test_the_row_name_is_the_one_a_shipped_phone_still_needs(self) -> None:
+        self.assertEqual(
+            fetch_tokens.SETTING, "firmware_fetch_token", "renaming it orphans every image fetch"
+        )
 
     def test_a_row_nobody_minted_is_refused(self) -> None:
         # A row a later hand-edit or a broken write leaves without its clock is not a live token.
