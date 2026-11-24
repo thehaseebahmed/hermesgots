@@ -41,6 +41,11 @@ export interface CharmTransport {
   mtu: number
 }
 
+/** A link the caller opened, which the caller also closes. */
+export interface CharmSession extends CharmTransport {
+  close(): Promise<void>
+}
+
 export interface SyncOptions {
   /** Pet mode as the sheet has it, with the pet's pictures ready to send. */
   pet?: { settings: CharmPetSettings; poses: CharmPose[] }
@@ -159,10 +164,33 @@ export async function sendClock(link: CharmTransport, nowMs = Date.now()): Promi
   return charmKept(answer.code)
 }
 
+/**
+ * One link, in the only order there is: opened, handed the phone's clock, then the caller's op, and
+ * closed whatever either of them did. A refused clock costs this link a round trip and nothing else,
+ * because the op it was opened for is what the reader asked for. The opener belongs to the caller,
+ * so this is drivable without a radio.
+ */
+export async function withLink<L extends CharmSession, T>(
+  open: () => Promise<L>,
+  run: (link: L) => Promise<T>,
+  nowMs?: number,
+): Promise<T> {
+  const link = await open()
+  try {
+    await sendClock(link, nowMs).catch(() => {})
+    return await run(link)
+  } finally {
+    await link.close()
+  }
+}
+
 async function sendPet(link: CharmTransport, size: number, options: SyncOptions) {
   if (!options.pet) return
   const { settings, poses } = options.pet
-  await sendClock(link, options.now)
+  // The clock the pet's meters run on. A charm that refuses it is left with the pet as it was
+  // rather than switched on with a clock that never moves, and the page is told — as it is for a
+  // firmware with no pet mode at all.
+  if (!(await sendClock(link, options.now))) throw new CharmRefused(CharmCode.BadMessage)
   if (settings.enabled) {
     for (const pose of poses) {
       if (!(await ask(link, poseMessage(pose.mood, pose.image))).needImage) continue

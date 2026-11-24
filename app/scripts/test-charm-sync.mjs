@@ -51,7 +51,7 @@ import {
   wifiRecord,
   wakeMessage,
 } from "../src/lib/charm-protocol.ts"
-import { CharmRefused, sendClock, syncCharm } from "../src/lib/charm-sync.ts"
+import { CharmRefused, sendClock, syncCharm, withLink } from "../src/lib/charm-sync.ts"
 import { batteryWords, refusalWords } from "../src/lib/charm-words.ts"
 
 test("crc32 is zlib's", () => {
@@ -195,6 +195,7 @@ function fakeCharm({
   refuseCommit = false,
   corruptPoseOnce = false,
   refusePet = false,
+  refuseClock = false,
   refuseWake = false,
   refuseTalk = false,
   battery = { percent: 85, charging: false },
@@ -336,6 +337,8 @@ function fakeCharm({
           return answer(0, op)
         }
         if (op === 11) {
+          // A clock the charm cannot believe, as `rtc::set` answers one from before 2020.
+          if (refuseClock) return answer(CharmCode.BadMessage, op)
           pet.clock = v.getUint32(2, true)
           return answer(0, op)
         }
@@ -499,7 +502,7 @@ test("pet mode off sends the toggle and no pictures", async () => {
   assert.equal(charm.pet.clock, 1795176000)
 })
 
-test("a link is handed the phone's clock, and a charm too old for the op says so without failing the link", async () => {
+test("sendClock answers whether the charm kept the time, and a refusal is not an error", async () => {
   const writes = []
   const linkAnswering = (code) => ({
     mtu: 23,
@@ -517,6 +520,58 @@ test("a link is handed the phone's clock, and a charm too old for the op says so
   assert.equal(await sendClock(linkAnswering(CharmCode.KeptReadable), 1795176000000), true)
   assert.equal(await sendClock(linkAnswering(CharmCode.BadMessage), 1795176000000), false)
   assert.equal(writes.length, 3)
+})
+
+test("a link is opened, handed the clock, then the op, and closed whatever either of them did", async () => {
+  const seen = []
+  const session = (code) => ({
+    mtu: 23,
+    async control(message) {
+      seen.push(message[1])
+      return answer(code, message[1])
+    },
+    async data() {},
+    async close() {
+      seen.push("closed")
+    },
+  })
+  const opened = (code) => async () => session(code)
+
+  // The clock first, then the op the link was opened for, then the close.
+  await withLink(opened(CharmCode.Ok), async (link) => {
+    await link.control(new Uint8Array([1, 13]))
+    seen.push("op")
+  }, 1795176000000)
+  assert.deepEqual(seen, [CharmOp.Time, 13, "op", "closed"])
+
+  // A clock the charm refuses is not the errand's failure: the op still runs, and the link still closes.
+  seen.length = 0
+  await withLink(opened(CharmCode.BadMessage), async () => seen.push("op"), 1795176000000)
+  assert.deepEqual(seen, [CharmOp.Time, "op", "closed"])
+
+  // An op that throws closes the link on the way out.
+  seen.length = 0
+  await assert.rejects(
+    withLink(opened(CharmCode.Ok), async () => {
+      throw new Error("the charm stopped answering")
+    }),
+    /stopped answering/,
+  )
+  assert.deepEqual(seen, [CharmOp.Time, "closed"])
+})
+
+test("a charm that refuses the clock is never given the pet settings", async () => {
+  const charm = fakeCharm({ refuseClock: true })
+  const result = await syncCharm(charm.link, [nova], undefined, {
+    pet: { settings: petOn, poses: [{ mood: "hungry", image: picture(12, 900) }] },
+    now: 1795176000000,
+  })
+  // The meters would never move, so the pet stays as it was and the page is told, which is what a
+  // charm without pet mode at all gets.
+  assert.equal(result.petRefused, true)
+  assert.equal(charm.pet.enabled, false)
+  assert.equal(charm.pet.clock, 0)
+  assert.equal(charm.poses.size, 0)
 })
 
 test("a damaged pet picture is sent again", async () => {
