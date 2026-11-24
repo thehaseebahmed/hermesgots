@@ -51,7 +51,7 @@ import {
   wifiRecord,
   wakeMessage,
 } from "../src/lib/charm-protocol.ts"
-import { CharmRefused, syncCharm } from "../src/lib/charm-sync.ts"
+import { CharmRefused, sendClock, syncCharm } from "../src/lib/charm-sync.ts"
 import { batteryWords, refusalWords } from "../src/lib/charm-words.ts"
 
 test("crc32 is zlib's", () => {
@@ -298,6 +298,10 @@ function fakeCharm({
           talked.push(new TextDecoder().decode(m.subarray(3, 3 + urlLen)))
           return answer(refuseTalk ? CharmCode.BadMessage : 0, op)
         }
+        // A charm on firmware from before pet mode knows none of the pet's ops, the clock included,
+        // and answers each of them the way it answers any op it does not know.
+        if (refusePet && op >= CharmOp.PetSettings && op <= CharmOp.Time)
+          return answer(CharmCode.BadMessage, op)
         if (op === 7) {
           const idLen = m[7]
           pet.enabled = m[2] === 1
@@ -332,8 +336,6 @@ function fakeCharm({
           return answer(0, op)
         }
         if (op === 11) {
-          // A charm on firmware from before pet mode answers the first pet op this way.
-          if (refusePet) return answer(CharmCode.BadMessage, op)
           pet.clock = v.getUint32(2, true)
           return answer(0, op)
         }
@@ -495,6 +497,25 @@ test("pet mode off sends the toggle and no pictures", async () => {
   assert.equal(charm.poses.size, 0)
   // The clock still goes over: the phone is the charm's only source of time.
   assert.equal(charm.pet.clock, 1795176000)
+})
+
+test("a link is handed the phone's clock, and a charm too old for the op says so without failing the link", async () => {
+  const writes = []
+  const linkAnswering = (code) => ({
+    mtu: 23,
+    async control(message) {
+      writes.push([...message])
+      return { code, op: message[1], needImage: 0 }
+    },
+    async data() {},
+  })
+
+  assert.equal(await sendClock(linkAnswering(CharmCode.Ok), 1795176000000), true)
+  assert.deepEqual(writes.at(-1), [1, 11, ...u32(1795176000)])
+  // A plaintext charm keeps the time and says so; a firmware older than the op does not know it at
+  // all, and neither is a reason to fail the link the reader opened for something else.
+  assert.equal(await sendClock(linkAnswering(CharmCode.KeptReadable), 1795176000000), true)
+  assert.equal(await sendClock(linkAnswering(CharmCode.BadMessage), 1795176000000), false)
 })
 
 test("a damaged pet picture is sent again", async () => {

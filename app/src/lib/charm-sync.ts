@@ -149,10 +149,22 @@ export async function syncCharm(
   }
 }
 
+/**
+ * Hands the charm the phone's clock, and answers whether it kept it. A refusal is an answer and not
+ * an error: a firmware older than `Time` says `BadMessage`, and a clock the charm cannot believe is
+ * no reason to fail a link the reader opened for something else. Every link the app opens writes
+ * this (see `charm.ts`), and a sync writes it again after its pictures, which is the freshest time a
+ * sync can give the pet's meters.
+ */
+export async function sendClock(link: CharmTransport, nowMs = Date.now()): Promise<boolean> {
+  const answer = await link.control(timeMessage(Math.floor(nowMs / 1000)))
+  return charmKept(answer.code)
+}
+
 async function sendPet(link: CharmTransport, size: number, options: SyncOptions) {
   if (!options.pet) return
   const { settings, poses } = options.pet
-  await ask(link, timeMessage(Math.floor((options.now ?? Date.now()) / 1000)))
+  await sendClock(link, options.now)
   if (settings.enabled) {
     for (const pose of poses) {
       if (!(await ask(link, poseMessage(pose.mood, pose.image))).needImage) continue
