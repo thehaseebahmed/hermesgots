@@ -186,7 +186,6 @@ test("chunks carry their offset and fit the link", () => {
   assert.equal(chunkSize(1000), 512)
 })
 
-/** The status a charm notifies, built the way a link parses one. */
 const answer = (code, op, needImage = false) =>
   parseStatus(new DataView(new Uint8Array([1, code, op, needImage ? 1 : 0]).buffer))
 
@@ -300,8 +299,7 @@ function fakeCharm({
           talked.push(new TextDecoder().decode(m.subarray(3, 3 + urlLen)))
           return answer(refuseTalk ? CharmCode.BadMessage : 0, op)
         }
-        // A charm on firmware from before pet mode knows none of the pet's ops, the clock included,
-        // and answers each of them the way it answers any op it does not know.
+        // A charm on firmware from before pet mode knows none of the pet's ops, the clock included.
         if (refusePet && op >= CharmOp.PetSettings && op <= CharmOp.Time)
           return answer(CharmCode.BadMessage, op)
         if (op === 7) {
@@ -514,11 +512,10 @@ test("a link is handed the phone's clock, and a charm too old for the op says so
 
   assert.equal(await sendClock(linkAnswering(CharmCode.Ok), 1795176000000), true)
   assert.deepEqual(writes.at(-1), [1, 11, ...u32(1795176000)])
-  // A plaintext charm keeps the time and says so; a firmware older than the op does not know it at
-  // all, and neither is a reason to fail the link the reader opened for something else.
+  // Any code the charm kept is a yes; a refusal is an answer rather than an error, since a firmware
+  // older than the op has never heard of it.
   assert.equal(await sendClock(linkAnswering(CharmCode.KeptReadable), 1795176000000), true)
   assert.equal(await sendClock(linkAnswering(CharmCode.BadMessage), 1795176000000), false)
-  // One write a link and no retry: a clock the charm refused is not a picture to send again.
   assert.equal(writes.length, 3)
 })
 
