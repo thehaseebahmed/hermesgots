@@ -116,7 +116,7 @@ const FETCH_WALK_MS = 600_000
 /**
  * The first build whose Busy notice names the fill it waits at (the plan's step 2). Against it the
  * paced gap buys nothing — the notice re-anchors the send wherever the charm has got to — while it
- * costs the image its idle minutes (two and a half for a megabyte and a half); anything older, or a
+ * costs the image its idle minutes (five for a megabyte and a half); anything older, or a
  * charm that cannot say, keeps the paced fallback, the only defence a notice that names no fill has.
  */
 const SPEAKS_FILL = "0.2.1-beta"

@@ -114,9 +114,11 @@ const TAIL_TRIES = 120
  * answers; a gap longer than that is what lands a refusal's notice before the write that follows
  * it. It is also longer than a pass of the charm's drain, so a charm that empties its whole buffer
  * per pass is never refused at all. Empirical rather than provable: the drain's flash timing is the
- * charm's, not the phone's.
+ * charm's, not the phone's. The margin is one skipped connection event past the first: a refused
+ * notice one interval late is ordinary BLE, and a gap that short loses the race it exists for — a
+ * repro against the rig cancels the attempt at 60 ms, so the gap is kept at two intervals, not one.
  */
-export const PACE_MS = 50
+export const PACE_MS = 100
 
 /**
  * The upload's one knob: the wait between data writes. A rig stands in for it, and a build whose
