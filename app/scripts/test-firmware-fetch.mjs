@@ -31,24 +31,36 @@ const here = dirname(fileURLToPath(import.meta.url))
 const appDir = resolve(here, "..")
 
 const TOKEN = "1f".repeat(32)
-// The path a host answers for the image route, as the plugin names its own: this file never reads
-// the app for one, because the app no longer carries one.
-const ANSWERED_PATH = "/charm/firmware/image/fetch"
+// A route as a host answers one, chosen here rather than taken from the plugin: the builder reads
+// whatever the host names, and the mock round trip below holds the plugin's own spelling.
+const HOST_PATH = "/charm/firmware/v2/image/fetch"
+// A mint's answer as the app holds it after reading the host's body: the token and the route it
+// walks, in one value, so the builder cannot be handed them in the other order.
+const ANSWER = { token: TOKEN, path: HOST_PATH }
+
+/** A string constant the plugin writes once, read from its own source: one spelling to hold to. */
+function pluginConstant(name) {
+  const found = new RegExp(`^${name}\\s*=\\s*"([^"]+)"$`, "m").exec(
+    readFileSync(resolve(appDir, "../plugin/__init__.py"), "utf8"),
+  )
+  assert.ok(found, `the plugin still writes ${name}`)
+  return found[1]
+}
 
 test("the charm's fetch URL is the host the voice hand-over kept, with the token in it", () => {
   assert.equal(
-    firmwareFetchUrl("https://bot.example/api/plugins/gots", ANSWERED_PATH, TOKEN),
-    `https://bot.example/api/plugins/gots${ANSWERED_PATH}?token=${TOKEN}`,
+    firmwareFetchUrl("https://bot.example/api/plugins/gots", ANSWER),
+    `https://bot.example/api/plugins/gots${HOST_PATH}?token=${TOKEN}`,
     "the Wi-Fi door: the recorded address, the route the host answered, the token",
   )
   assert.equal(
-    firmwareFetchUrl("http://100.64.0.9:8642/api/plugins/gots/", ANSWERED_PATH, TOKEN),
-    `http://100.64.0.9:8642/api/plugins/gots${ANSWERED_PATH}?token=${TOKEN}`,
+    firmwareFetchUrl("http://100.64.0.9:8642/api/plugins/gots/", ANSWER),
+    `http://100.64.0.9:8642/api/plugins/gots${HOST_PATH}?token=${TOKEN}`,
     "the tailnet door is plain http, and the trailing slash is one the charm would double",
   )
   assert.equal(
-    firmwareFetchUrl("HTTPS://bot.example/api/plugins/gots", ANSWERED_PATH, TOKEN),
-    `https://bot.example/api/plugins/gots${ANSWERED_PATH}?token=${TOKEN}`,
+    firmwareFetchUrl("HTTPS://bot.example/api/plugins/gots", ANSWER),
+    `https://bot.example/api/plugins/gots${HOST_PATH}?token=${TOKEN}`,
     "the scheme lowercased: the voice row keeps the case the reader typed and the charm's own talk door folds it, but its update door reads the scheme case-exactly",
   )
 })
@@ -56,7 +68,7 @@ test("the charm's fetch URL is the host the voice hand-over kept, with the token
 test("a base that is neither door's scheme is refused before any connection is opened", () => {
   for (const base of ["", "  ", "bot.example/api/plugins/gots", "ftp://files.example/gots"]) {
     assert.throws(
-      () => firmwareFetchUrl(base, ANSWERED_PATH, TOKEN),
+      () => firmwareFetchUrl(base, ANSWER),
       /https/,
       `${JSON.stringify(base)} is not an address the charm can dial`,
     )
@@ -64,26 +76,32 @@ test("a base that is neither door's scheme is refused before any connection is o
 })
 
 test("the route the host answers is read as a route under its own root, or refused", () => {
-  // The path is the host's, so it is judged rather than trusted: an answer that is really an
-  // address, one that would double the root's slash, or one carrying a query of its own would hand
-  // the charm a different door than the token was minted for.
   for (const path of [
     "",
+    "/",
+    "/..",
+    "/./fetch",
     "charm/firmware/image/fetch",
+    "/charm/firmware/image/fetch/",
+    "/charm/firmware//image/fetch",
     "//evil.example/fetch",
     "https://evil.example/fetch",
     "/charm/firmware/image/fetch?token=x",
     "/charm/firmware/image/fetch#frag",
     "/charm firmware/image/fetch",
+    "/api/plugins/gots/charm/firmware/image/fetch",
   ]) {
     assert.throws(
-      () => firmwareFetchUrl("https://bot.example/api/plugins/gots", path, TOKEN),
-      /path under the host's own root/,
+      () => firmwareFetchAnswer({ token: TOKEN, path }),
+      /fetch route was unreadable/,
       `${JSON.stringify(path)} is not a route the phone can hang off the host's root`,
     )
   }
   assert.equal(
-    firmwareFetchUrl("https://bot.example/api/plugins/gots", "/charm/firmware/fetch", TOKEN),
+    firmwareFetchUrl("https://bot.example/api/plugins/gots", {
+      token: TOKEN,
+      path: "/charm/firmware/fetch",
+    }),
     `https://bot.example/api/plugins/gots/charm/firmware/fetch?token=${TOKEN}`,
     "any route the host names is walked as it is, not one this app knows by name",
   )
@@ -91,13 +109,13 @@ test("the route the host answers is read as a route under its own root, or refus
 
 test("a URL past the charm's own bound is refused", () => {
   const long = `https://${"a".repeat(170)}.example/api/plugins/gots`
-  assert.throws(() => firmwareFetchUrl(long, ANSWERED_PATH, TOKEN), /180 bytes/)
+  assert.throws(() => firmwareFetchUrl(long, ANSWER), /180 bytes/)
 })
 
 test("a token that is nothing is refused rather than hung on the door", () => {
   assert.throws(
-    () => firmwareFetchUrl("https://bot.example/api/plugins/gots", ANSWERED_PATH, ""),
-    /token/,
+    () => firmwareFetchAnswer({ token: "", path: HOST_PATH }),
+    /fetch token was unreadable/,
   )
 })
 
@@ -106,17 +124,17 @@ test("the token and the route the host answers are read once, or the answer is r
     firmwareFetchAnswer({
       object: "gots.charm_firmware_fetch",
       token: TOKEN,
-      path: ANSWERED_PATH,
+      path: HOST_PATH,
     }),
-    { token: TOKEN, path: ANSWERED_PATH },
+    { token: TOKEN, path: HOST_PATH },
     "both halves of the door, as the mint answers them",
   )
   for (const body of [
     {},
     { token: TOKEN },
-    { path: ANSWERED_PATH },
-    { token: "", path: ANSWERED_PATH },
-    { token: 7, path: ANSWERED_PATH },
+    { path: HOST_PATH },
+    { token: "", path: HOST_PATH },
+    { token: 7, path: HOST_PATH },
     { token: TOKEN, path: "" },
     { token: TOKEN, path: 7 },
     { token: TOKEN, path: "//evil.example/fetch" },
@@ -257,15 +275,14 @@ test("a door whose URL cannot fit the charm's frame is refused by the builder, a
     "the door rule reads the links and the build, not a URL the host has yet to name",
   )
   assert.throws(
-    () => firmwareFetchUrl(over, ANSWERED_PATH, TOKEN),
+    () => firmwareFetchUrl(over, ANSWER),
     /180 bytes/,
     "the builder refuses the walk, and the update falls to the transfer",
   )
   assert.equal(
     firmwareFetchUrl(
       "https://bot.example/api/plugins/gots",
-      ANSWERED_PATH,
-      TOKEN,
+      ANSWER,
     ).length < 180,
     true,
     "an address with room for the route and the token still walks",
@@ -335,11 +352,13 @@ test("the dev mock's fetch door: a mint answers a token and a path, the fetch se
     assert.equal(minted.status, 200)
     const answer = firmwareFetchAnswer(await minted.json())
     assert.match(answer.token, /^[0-9a-f]{64}$/, "a token the phone can put in the URL")
-    assert.equal(answer.path, ANSWERED_PATH, "and the image route's path, as the host names it")
+    assert.equal(
+      answer.path,
+      pluginConstant("CHARM_FIRMWARE_FETCH_PATH"),
+      "the route the plugin serves, as the mock answers it",
+    )
 
-    // The URL is built from the answer alone: the base the voice record keeps, the host's path, the
-    // host's token — nothing on the phone chooses the route.
-    const url = firmwareFetchUrl(`${origin}/api/plugins/gots`, answer.path, answer.token)
+    const url = firmwareFetchUrl(`${origin}/api/plugins/gots`, answer)
     assert.equal(url, `${origin}/api/plugins/gots${answer.path}?token=${answer.token}`)
     const served = await fetch(url)
     assert.equal(served.status, 200)
@@ -370,22 +389,26 @@ test("the dev mock's fetch door: a mint answers a token and a path, the fetch se
   }
 })
 
-test("the path the mock answers is the plugin's own, and the plugin's route is that same path", () => {
-  // One fact in two halves that never meet at run time: the plugin registers the image route and
-  // names it in the mint's answer from one constant, and the dev mock — the host the app is driven
-  // against, since a browser flow can't reach the Android app's — answers a path of its own. Held
-  // to each other here, the way the token's ten-minute life is, so a route renamed on the host
-  // cannot answer a path the mock or the app still spells the old way.
-  const plugin = readFileSync(resolve(appDir, "../plugin/__init__.py"), "utf8")
-  const named = /^CHARM_FIRMWARE_FETCH_PATH\s*=\s*"([^"]+)"$/m.exec(plugin)
-  assert.ok(named, "the plugin still names the image route's path once")
+test("every host half spells the image route the plugin's way", () => {
+  // The plugin writes the route once and registers and answers it from that constant; the dev mock
+  // and the component kit each stand in for a host the app is driven against, since a browser flow
+  // can't reach the real one — so the three spellings are held to each other here, as the token's
+  // ten-minute life is, and a rename that misses one of them fails this test rather than a charm on
+  // hardware. The phone carries none of them: it reads the path from the mint's answer.
+  const named = pluginConstant("CHARM_FIRMWARE_FETCH_PATH")
   const mock = readFileSync(resolve(here, "mock-hermes.mjs"), "utf8")
   const answered = /^const CHARM_FETCH_PATH = "([^"]+)"$/m.exec(mock)
   assert.ok(answered, "the mock still answers a path of its own")
-  assert.equal(answered[1], named[1], "the mock answers the route the plugin serves")
+  assert.equal(answered[1], named, "the mock answers the route the plugin serves")
+  const kit = readFileSync(resolve(here, "component-kit.tsx"), "utf8")
+  const faked = /^export const FIRMWARE_FETCH_PATH = "([^"]+)"$/m.exec(kit)
+  assert.ok(faked, "the component kit still answers a path of its own")
+  assert.equal(faked[1], named, "the kit answers the route the plugin serves")
   assert.ok(
-    plugin.includes(`f"{PREFIX}{CHARM_FIRMWARE_FETCH_PATH}"`),
-    "and the route it answers is registered from that same constant",
+    readFileSync(resolve(appDir, "../plugin/__init__.py"), "utf8").includes(
+      `f"{PREFIX}{CHARM_FIRMWARE_FETCH_PATH}"`,
+    ),
+    "and the plugin registers the route it answers from that same constant",
   )
 })
 

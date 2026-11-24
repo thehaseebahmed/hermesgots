@@ -317,15 +317,15 @@ export function CharmUpdateScreen({
         // the URL it builds, and the image's bytes stay pinned by the SHA-256 of the record — the
         // charm checks it before it writes the slot, so a tag that moved is refused by the hash,
         // not trusted by the URL.
-        const fetch =
+        const mint =
           served === null
             ? null
             : await getCharmFirmwareFetch(hostForActiveBot(profile)).catch(() => null)
-        if (served !== null && fetch !== null) {
+        if (served !== null && mint !== null) {
           try {
             return {
               kind: "fetch",
-              url: firmwareFetchUrl(address, fetch.path, fetch.token),
+              url: firmwareFetchUrl(address, mint),
               sha256Hex: served.sha256,
               scheme,
               door: "published",

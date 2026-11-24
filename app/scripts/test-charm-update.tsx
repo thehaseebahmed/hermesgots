@@ -28,6 +28,7 @@ import {
   findAll,
   find,
   findText,
+  FIRMWARE_FETCH_PATH,
   FIRMWARE_FETCH_TOKEN,
   mount,
   seedSettings,
@@ -234,7 +235,7 @@ test("a charm online on Wi-Fi fetches the image itself, its own percent on the D
       assert.equal(handed.length, 1, "one Update op went")
       assert.equal(
         handed[0].url,
-        `https://update-fetch.test/api/plugins/gots/charm/firmware/image/fetch?token=${FIRMWARE_FETCH_TOKEN}`,
+        `https://update-fetch.test/api/plugins/gots${FIRMWARE_FETCH_PATH}?token=${FIRMWARE_FETCH_TOKEN}`,
         "the host the voice hand-over kept, the image route's tokened variant, the token",
       )
       assert.equal(handed[0].sha256Hex, IMAGE_PUBLISHED.sha256, "the published SHA-256, as the record's hex")
@@ -281,7 +282,7 @@ test("a charm online on its tailnet fetches over the http door it was handed", a
       assert.equal(handed.length, 1, "one Update op went")
       assert.equal(
         handed[0].url,
-        `http://100.64.0.9:8642/api/plugins/gots/charm/firmware/image/fetch?token=${FIRMWARE_FETCH_TOKEN}`,
+        `http://100.64.0.9:8642/api/plugins/gots${FIRMWARE_FETCH_PATH}?token=${FIRMWARE_FETCH_TOKEN}`,
         "plain http, over the charm's tailnet",
       )
       assert.ok(
@@ -356,9 +357,7 @@ test("a host that cannot mint the door's token is no door: the transfer runs ins
 test("a kept address whose fetch URL cannot fit walks the transfer after the mint", async () => {
   // 93 bytes: inside the voice row's own 180-byte rule, but the fetch URL adds the host's own
   // route and its 64-hex token on top of it — no room, so the charm could never dial the door.
-  // The route is the host's and arrives with the token, so the length is known only after the
-  // mint: the door is picked, the mint answers, the builder refuses the URL, and the walk falls to
-  // the transfer it can always drive.
+  // The route arrives only with the token, so the length is unknown until after the mint.
   const handed: unknown[] = []
   const uploads: Uint8Array[] = []
   const api = radio({
@@ -378,6 +377,7 @@ test("a kept address whose fetch URL cannot fit walks the transfer after the min
     async () => {
       await until(async () => text().includes("The charm runs 0.2.0"), "the transfer's end", 10_000)
       assert.deepEqual(handed, [], "no Update op went: the URL could never fit")
+      assert.equal(host.mints(), 1, "the mint answered first; only then could the URL be measured")
       assert.equal(uploads.length, 1, "the image went over the link instead")
     },
   )
@@ -407,7 +407,7 @@ test("a kept address with an upper-case scheme is handed to the charm lower-case
       assert.equal(handed.length, 1, "one Update op went")
       assert.equal(
         handed[0].url,
-        `https://update-case-door.test/api/plugins/gots/charm/firmware/image/fetch?token=${FIRMWARE_FETCH_TOKEN}`,
+        `https://update-case-door.test/api/plugins/gots${FIRMWARE_FETCH_PATH}?token=${FIRMWARE_FETCH_TOKEN}`,
         "the scheme lower-cased, everything else as kept",
       )
     },
@@ -415,9 +415,6 @@ test("a kept address with an upper-case scheme is handed to the charm lower-case
 })
 
 test("the URL handed to the charm walks the path the host answered, not one the app knows", async () => {
-  // The whole point of the answer: a host that renames or re-prefixes its image route is walked by
-  // the charm at the new path with nothing changed on the phone. The fake host answers a route no
-  // constant in this app spells, and the Update op carries exactly it.
   const handed: { url: string }[] = []
   const api = radio({
     network: async () => ONLINE_WIFI,
@@ -449,9 +446,8 @@ test("the URL handed to the charm walks the path the host answered, not one the 
 })
 
 test("a host that answers no route walks the transfer, as an older host's door is shut", async () => {
-  // A host from before the route rode the answer names the token alone, and a token with no route
-  // to append is no door: the walk falls to the transfer this phone can always drive rather than
-  // handing the charm a URL this app guessed.
+  // A host from before the answer carried a route: no path to append is no door, and this app must
+  // not guess one.
   const handed: unknown[] = []
   const uploads: Uint8Array[] = []
   const api = radio({

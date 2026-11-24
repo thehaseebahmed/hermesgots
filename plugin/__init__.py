@@ -98,10 +98,8 @@ from .store import current_path, home_of
 logger = logging.getLogger(__name__)
 
 PREFIX = "/api/plugins/gots"
-# The image route's tokened variant, relative to the plugin's own prefix: the charm's own walk of
-# the published image, admitted by the token the phone minted. The route is registered with this
-# one spelling and the mint answers it, so the path is this host's knowledge and never the app's —
-# a rename or a re-prefixing here reaches the charm with nothing hand-synced on the phone side.
+# The route the charm's image fetch is served at, in the one spelling the route is registered with
+# and the mint answers: a rename here cannot be served one way and handed to the phone another.
 CHARM_FIRMWARE_FETCH_PATH = "/charm/firmware/image/fetch"
 # A batch read of sessions' pull requests waits this long before answering with the rest unread. A
 # screen asks after every session it lists, and each session's read is a chain of outbound calls

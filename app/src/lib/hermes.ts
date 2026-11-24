@@ -2950,8 +2950,7 @@ export async function getCharmFirmwareImage(
  * charm's voice holds — and the image route's path it walks. This is the only answer in which this
  * app ever sees the token: both go straight into the URL the update hands the charm
  * (`firmwareFetchUrl`), and the image's bytes stay pinned by the SHA-256 the phone sends with it
- * either way. The path is answered rather than carried because the host owns the names of its own
- * routes: a renamed or re-prefixed image route reaches the charm through this answer alone.
+ * either way.
  */
 export async function getCharmFirmwareFetch(
   config: HermesConfig,
