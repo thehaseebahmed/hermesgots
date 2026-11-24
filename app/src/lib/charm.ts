@@ -246,15 +246,9 @@ export async function pairCharm(): Promise<PairedCharm> {
     services: [CHARM_SERVICE],
     optionalServices: [CHARM_SERVICE],
   })
-  // Bonding asks for the passkey the charm shows; once bonded, later syncs need nothing.
-  const link = await openTransport(device.deviceId)
-  try {
-    // A charm that has just been bonded is the one that has never held a clock, so it is told the
-    // time before the reader goes looking for the Sync button.
-    await sendClock(link).catch(() => {})
-  } finally {
-    await link.close()
-  }
+  // Bonding asks for the passkey the charm shows; once bonded, later syncs need nothing. Pairing
+  // runs no op of its own, so this link is the bond alone — and the clock every link carries.
+  await withLink(device.deviceId, async () => {})
   const next = { deviceId: device.deviceId, name: device.name ?? "Gots Charm" }
   write(next)
   await keepCharm(next.deviceId)
@@ -759,6 +753,24 @@ function rethrowOlderFirmware(error: unknown): never {
   throw error
 }
 
+/**
+ * One link to the charm: opened, handed the phone's clock, and closed when `run` is done. The clock
+ * goes first, whatever the charm answers — a charm that has lost its RTC's backup refuses an https
+ * turn with "No clock" before the microphone opens, and this is the one moment the phone is close
+ * enough to tell it the time. A refusal is an answer and not an error: an op this firmware doesn't
+ * know, or a write that doesn't land, costs this link a round trip rather than the errand the reader
+ * opened it for.
+ */
+async function withLink<T>(deviceId: string, run: (link: CharmLink) => Promise<T>): Promise<T> {
+  const link = await openTransport(deviceId)
+  try {
+    await sendClock(link).catch(quietly("handing the charm the clock"))
+    return await run(link)
+  } finally {
+    await link.close()
+  }
+}
+
 /** One short connection: connect, one op, one answer, disconnect — one caller at a time. */
 async function withCharm<T>(run: (link: CharmLink) => Promise<T>): Promise<T> {
   const charm = paired
@@ -767,16 +779,6 @@ async function withCharm<T>(run: (link: CharmLink) => Promise<T>): Promise<T> {
   // one, and its `close()` disconnects the device whoever opened it.
   return oneAtATime(async () => {
     await ready()
-    const link = await openTransport(charm.deviceId)
-    try {
-      // The clock first, whatever the charm answers: a charm that has lost its RTC's backup refuses
-      // an https turn with "No clock" before the microphone opens, and this is the one moment the
-      // phone is close enough to tell it the time. An extra a charm may not know — or a write that
-      // fails — costs this link a round trip, not the op the reader opened it for.
-      await sendClock(link).catch(() => {})
-      return await run(link)
-    } finally {
-      await link.close()
-    }
+    return withLink(charm.deviceId, run)
   })
 }
