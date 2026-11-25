@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react"
+import { CopyIcon } from "lucide-react"
 
-import { Group } from "@/components/settings-chrome"
+import { Group, useHeaderAction } from "@/components/settings-chrome"
+import { Button } from "@/components/ui/button"
 import { formatBytes } from "@/lib/attachment-caps"
 import {
   charmDiagnose,
@@ -10,10 +12,12 @@ import {
   usePairedCharm,
   type PairedCharm,
 } from "@/lib/charm"
-import { lines, place, type CharmBook } from "@/lib/charm-book"
+import { lines, place, text, type CharmBook } from "@/lib/charm-book"
 import type { CharmDiagnose, CharmLogRow, CharmLogSincePage } from "@/lib/charm-protocol"
 import { micExitWords } from "@/lib/charm-words"
+import { copyText } from "@/lib/copied"
 import { CHARM_POLL_MS } from "@/lib/freshness"
+import { tell } from "@/lib/tell"
 
 /**
  * What the page needs of the charm. A page mounted in a test is handed a stand-in, as the network's
@@ -48,6 +52,9 @@ const LIVE: CharmDebugApi = {
  * the ring holds a handful of seconds and drops its oldest as it fills, so a list replaced whole every
  * two seconds loses the line that fell off between reads. A charm older than that ask answers
  * `BadMessage` to it, so its tail is read and replaced instead.
+ *
+ * The book leaves the phone whole, through the header's copy: a line per line, oldest first, with
+ * nothing added, since a log is pasted into a report far more often than it is read here twice.
  */
 export function CharmDebugScreen({
   api = LIVE,
@@ -122,6 +129,26 @@ export function CharmDebugScreen({
     }
   }, [live, api])
 
+  // Copy hands over the book the page is showing, and the header republishes this node on every
+  // render, so the handler can never be older than the lines on screen. Shut while there is nothing
+  // to copy: an empty clipboard is a worse answer than a button that says it has none.
+  const drawn = book ? lines(book) : []
+  useHeaderAction(
+    "charm-debug",
+    <Button
+      variant="outline"
+      size="icon-lg"
+      className="size-11 rounded-full"
+      aria-label="Copy the charm's log"
+      disabled={!drawn.length}
+      onClick={() => {
+        if (book) void copyText(text(book), () => tell.note("Charm log copied"))
+      }}
+    >
+      <CopyIcon />
+    </Button>,
+  )
+
   if (!live) {
     return (
       <p className="px-5 text-sm text-muted-foreground">Pair a charm in Settings › Charm first.</p>
@@ -131,7 +158,6 @@ export function CharmDebugScreen({
   // A record nobody has written is not a reading: three zeros would say the charm had no bytes left
   // rather than that no press has asked it for a microphone.
   const counted = report?.asked ? report : null
-  const drawn = book ? lines(book) : []
   return (
     <>
       <p className="px-5 text-sm text-muted-foreground">The last press</p>

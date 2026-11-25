@@ -9,11 +9,23 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import { CharmDebugScreen } from "@/components/charm-debug"
+import { Screen } from "@/components/settings-chrome"
 import type { CharmDiagnose, CharmLogRow, CharmLogSincePage } from "@/lib/charm-protocol"
 import { CHARM_POLL_MS } from "@/lib/freshness"
-import { mount, text, until } from "./component-kit.tsx"
+import { click, labelled, mount, text, until, withNotes } from "./component-kit.tsx"
 
 const charm = { deviceId: "c1", name: "Charm" }
+
+/** What the app copied, so a case reads the block rather than the clipboard's own absence. */
+const copied: string[] = []
+Object.defineProperty(globalThis.navigator, "clipboard", {
+  configurable: true,
+  value: {
+    writeText: async (text: string) => {
+      copied.push(text)
+    },
+  },
+})
 
 const refused: CharmDiagnose = {
   asked: true,
@@ -176,4 +188,51 @@ test("a charm whose firmware has no book still shows its tail", async () => {
       "the tail is folded into the lines the panel printed",
     )
   })
+})
+
+test("a copy takes the whole book as it stands", async () => {
+  const api = {
+    setLog: async () => true,
+    diagnose: async () => refused,
+    log: async (): Promise<CharmLogRow[]> => [],
+    since: async (): Promise<CharmLogSincePage[]> => [
+      {
+        base: 0,
+        rows: [
+          { text: "boot: 1", carried: false },
+          { text: "log armed: 41 rows", carried: false },
+          { text: "E (1041) talk: the mic", carried: false },
+          { text: " was busy", carried: true },
+        ],
+      },
+    ],
+  }
+
+  // The header's slot lives on the Screen above the page, and a page that has none publishes into
+  // nothing: without this wrapper the button would never be drawn and the case would pass on air.
+  await mount(
+    <Screen title="Debug Charm">
+      <CharmDebugScreen api={api} charm={charm} />
+    </Screen>,
+    () =>
+      withNotes(async (said) => {
+        await until(async () => text().includes("was busy"), "the book")
+        const copy = labelled("button", "Copy the charm's log")
+        assert.ok(copy, "the page offers its copy in the header")
+        await click(copy)
+        await until(async () => copied.length > 0, "the copy")
+        const drawn = [...document.querySelectorAll(".font-mono > div")].map((one) => one.textContent)
+        assert.deepEqual(
+          copied,
+          [drawn.join("\n")],
+          "the copy is every line the page drew, and the panel's fragments were rejoined",
+        )
+        assert.deepEqual(
+          copied,
+          ["boot: 1\nlog armed: 41 rows\nE (1041) talk: the mic was busy"],
+          "one line per line, oldest first, with nothing added",
+        )
+        assert.deepEqual(said, ["Charm log copied"], "the app says the copy landed")
+      }),
+  )
 })
