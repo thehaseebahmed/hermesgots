@@ -76,13 +76,15 @@ function restarted(book: CharmBook, page: CharmLogSincePage) {
 
 /**
  * Where the next ask starts after this page. A page with rows leaves its last one, which is asked for
- * again so it can grow; a page with none leaves `next` where it was, unless its base is behind the book
- * — the charm's count began again, and asking from the old count would wait for an index it never
- * reaches.
+ * again so it can grow; a page with none leaves `next` where it was — unless its base is behind the
+ * book, which is the charm's count beginning again. That page named the new count's end, not its first
+ * row, so the book has to ask from zero to be answered with the run it has not read: asking from the
+ * end would be answered at the end for the rest of the visit, and the new boot's own lines would never
+ * arrive.
  */
 function nextAfter(book: CharmBook, page: CharmLogSincePage) {
   if (page.rows.length) return page.base + page.rows.length - 1
-  return restarted(book, page) ? page.base : book.next
+  return restarted(book, page) ? 0 : book.next
 }
 
 /**

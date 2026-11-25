@@ -93,12 +93,17 @@ test("a page whose base is behind the book's own means the charm's count began a
     ["boot: 1", "log armed: 41 rows"],
     "the lines it read stay, since a count that went backwards can only be a boot",
   )
-  assert.equal(rebooted.next, 3, "and the next ask counts from where the new run began")
-  const joined = place(rebooted, page(3, [row("boot: 2"), row(" still booting", true)]))
+  assert.equal(
+    rebooted.next,
+    0,
+    "the book asks from zero: that answer named the new count's end, not its first row",
+  )
+  // The ask from zero is answered from the ring's oldest, and the new run joins what the reader has.
+  const joined = place(rebooted, page(0, [row("boot: 2"), row(" still booting", true)]))
   assert.deepEqual(lines(joined), ["boot: 1", "log armed: 41 rows", "boot: 2 still booting"])
   const grown = place(
     joined,
-    page(3, [row("boot: 2"), row(" still booting", true), row("and ready")]),
+    page(0, [row("boot: 2"), row(" still booting", true), row("and ready")]),
   )
   assert.equal(grown.rows.length, 5, "the lines from before the boot are still held")
   assert.deepEqual(
@@ -106,6 +111,25 @@ test("a page whose base is behind the book's own means the charm's count began a
     ["boot: 1", "log armed: 41 rows", "boot: 2 still booting", "and ready"],
     "and the new run is replaced where it stands, like any other",
   )
+})
+
+test("a reboot does not leave the book asking from a row the new run never reaches", () => {
+  // Asking from the end of the new count is answered at that end for the rest of the visit: the
+  // first ask after a boot has to be zero, or the new boot's own lines never arrive.
+  let book = place(EMPTY, page(600, [row("before the boot")]))
+  book = place(book, page(3, []))
+  let asks = 0
+  while (book.next !== 0 && asks < 5) {
+    book = place(book, page(3, []))
+    asks++
+  }
+  assert.equal(book.next, 0, "the book is asking from the start of the new count")
+  const read = place(book, page(0, [row("rst:0xc (SW_CPU_RESET)"), row("boot: 0x13")]))
+  assert.deepEqual(lines(read), [
+    "before the boot",
+    "rst:0xc (SW_CPU_RESET)",
+    "boot: 0x13",
+  ])
 })
 
 test("the oldest lines go past the cap and are trimmed whole", () => {
