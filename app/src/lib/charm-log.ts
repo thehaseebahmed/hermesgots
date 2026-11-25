@@ -4,7 +4,7 @@
  * the one link a drain opens — which is what keeps the paging decision out of the module a test
  * cannot load.
  */
-import type { CharmLogPage, CharmLogRow } from "./charm-protocol.ts"
+import type { CharmLogPage, CharmLogRow, CharmLogSincePage } from "./charm-protocol.ts"
 
 /**
  * Pages one drain asks for before it stops trusting the charm to finish: a ring is two kilobytes of
@@ -29,4 +29,29 @@ export async function drain(ask: (from: number) => Promise<CharmLogPage>): Promi
     if (answered.rows.length === 0 || from >= answered.total) break
   }
   return rows
+}
+
+/**
+ * The pages a book's read takes, from the row it already holds: each asked for from the page's own
+ * last row, that row again so a line the charm is still printing grows rather than freezing at its
+ * first twenty-six columns. Asking for that row means a caught-up charm answers it and nothing more,
+ * so a page carrying nothing after the row asked for is the end — an empty page alone would never
+ * arrive, and the drain would spend its whole budget re-reading one row every poll. Null is a charm
+ * whose firmware predates the op, which answers `BadMessage` to the first ask and keeps no book.
+ */
+export async function drainSince(
+  ask: (from: number) => Promise<CharmLogSincePage | null>,
+  from: number,
+): Promise<CharmLogSincePage[] | null> {
+  const pages: CharmLogSincePage[] = []
+  let at = from
+  for (let page = 0; page < MOST_PAGES; page++) {
+    const answered = await ask(at)
+    if (!answered) return null
+    pages.push(answered)
+    const last = answered.base + answered.rows.length - 1
+    if (answered.rows.length === 0 || last <= at) break
+    at = last
+  }
+  return pages
 }

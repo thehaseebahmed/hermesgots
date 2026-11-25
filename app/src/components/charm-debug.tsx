@@ -75,6 +75,9 @@ export function CharmDebugScreen({
   // trips, and two over the charm's one link would fight for its answers.
   const held = useRef<CharmBook>({ rows: [], next: 0 })
   const reading = useRef(false)
+  // How many times the reader has cleared the book. A read answers with the book it started from, so
+  // one that lands after a clear is dropped rather than drawn.
+  const cleared = useRef(0)
 
   // Armed while the page is open, released when it closes. The charm's own minute is what covers a
   // page closed by a dead battery rather than by the reader, so nothing here has to be trusted.
@@ -105,6 +108,9 @@ export function CharmDebugScreen({
       // and a second one would ask the charm for an answer the first is still waiting on.
       if (reading.current) return
       reading.current = true
+      // The clear this read started before: a drain that answers after the reader emptied the book is
+      // the book it was reading, and placing it would put the cleared lines back.
+      const sinceClear = cleared.current
       const pull = async () => {
         const pages = await api.since(held.current.next)
         // No book is a charm whose firmware predates the op: its tail is read whole and replaced.
@@ -112,7 +118,7 @@ export function CharmDebugScreen({
       }
       try {
         const [next, grown] = await Promise.all([api.diagnose(), pull()])
-        if (!open) return
+        if (!open || sinceClear !== cleared.current) return
         held.current = grown
         setReport(next)
         setBook(grown)
@@ -161,6 +167,7 @@ export function CharmDebugScreen({
         onClick={() => {
           const emptied = clear(held.current)
           held.current = emptied
+          cleared.current++
           setBook(emptied)
         }}
       >

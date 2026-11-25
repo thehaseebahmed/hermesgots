@@ -8,7 +8,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { drain } from "../src/lib/charm-log.ts"
+import { drain, drainSince } from "../src/lib/charm-log.ts"
 import {
   CHARM_VERSION,
   CharmOp,
@@ -196,4 +196,32 @@ test("a drain keeps the rows in the order the charm sent them", async () => {
   ]
   const { ask } = scripted(page(0, 5, first), page(3, 5, second))
   assert.deepEqual(await drain(ask), [...first, ...second])
+})
+
+test("a page of new rows ends the read when it carries nothing after the row asked for", async () => {
+  // The row asked for comes back so a line still being printed can grow: a caught-up charm answers
+  // that one row and nothing after it, which is the end of the read rather than the start of another
+  // ask. An empty page alone never arrives, so this is the stop a book's read has.
+  const asks = []
+  const pages = await drainSince(async (from) => {
+    asks.push(from)
+    return { base: 7, rows: [{ text: "still printing", carried: false }] }
+  }, 7)
+  assert.deepEqual(asks, [7], "one ask, not the whole budget")
+  assert.equal(pages.length, 1)
+})
+
+test("a page of new rows asks again while the charm has rows after the one asked for", async () => {
+  const asks = []
+  const pages = await drainSince(async (from) => {
+    asks.push(from)
+    if (from === 0) return { base: 0, rows: rowsFrom(0, 6) }
+    return { base: 5, rows: [{ text: "last", carried: false }] }
+  }, 0)
+  assert.deepEqual(asks, [0, 5], "the second ask starts at the last row of the first page")
+  assert.equal(pages.length, 2)
+})
+
+test("a charm without the op answers no pages at all", async () => {
+  assert.equal(await drainSince(async () => null, 0), null)
 })

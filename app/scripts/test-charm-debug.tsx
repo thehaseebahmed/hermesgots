@@ -284,3 +284,46 @@ test("a clear empties the book and the next lines still arrive", async () => {
     },
   )
 })
+
+test("a clear is not undone by the read that was out when it was pressed", async () => {
+  // A drain is several round trips, so a read can answer after the reader has emptied the book. It
+  // answers with the book it started from, and placing that would put the cleared lines back.
+  let release: ((pages: CharmLogSincePage[] | null) => void) | null = null
+  let reads = 0
+  const line = { base: 0, rows: [{ text: "boot: 1", carried: false }] }
+  const api = {
+    setLog: async () => true,
+    diagnose: async () => refused,
+    log: async (): Promise<CharmLogRow[]> => [],
+    since: (): Promise<CharmLogSincePage[] | null> => {
+      reads++
+      // The first read answers at once; the second is held until the test lets it go, so the clear
+      // lands while a drain is still out.
+      if (reads === 1) return Promise.resolve([line])
+      return new Promise<CharmLogSincePage[] | null>((resolve) => {
+        release = resolve
+      })
+    },
+  }
+
+  await mount(
+    <Screen title="Debug Charm">
+      <CharmDebugScreen api={api} charm={charm} />
+    </Screen>,
+    () =>
+      withNotes(async () => {
+        await until(async () => text().includes("boot: 1"), "the book")
+        await until(async () => release !== null, "the read in flight", CHARM_POLL_MS + 500)
+        const clear = labelled("button", "Clear the charm's log")
+        assert.ok(clear, "the page offers its clear in the header")
+        await click(clear)
+        await until(async () => !text().includes("boot: 1"), "the empty book")
+        release!([line])
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        assert.ok(
+          !text().includes("boot: 1"),
+          "the read that was out when Clear was pressed does not put the line back",
+        )
+      }),
+  )
+})
