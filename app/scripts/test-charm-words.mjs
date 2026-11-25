@@ -22,8 +22,6 @@ import {
   readValue,
   refusalWords,
   TALK_TOO_LONG,
-  VOICE_HTTP,
-  VOICE_HTTPS,
 } from "../src/lib/charm-words.ts"
 import { compareVersions } from "../src/lib/version-compare.ts"
 import { CHARM_MAX_URL_BYTES, CharmCode, CharmLinkState } from "../src/lib/charm-protocol.ts"
@@ -191,9 +189,6 @@ test("the battery's age is said where the reading has one, and only then", () =>
 test("the charm's reader-facing sentences live together, and one refusal serves every row", () => {
   // Voice's words are the settings page's like every other row's, not the rules module's: the switch's
   // two positions each say what they need, and the count in its sentence is read from here.
-  assert.match(VOICE_HTTPS, /certificate/, "https says what verifies it")
-  assert.match(VOICE_HTTPS, /clock/, "and the one thing it needs of the charm")
-  assert.match(VOICE_HTTP, /tailnet/, "the other position says what it needs")
   assert.match(TALK_TOO_LONG, new RegExp(`\\(${CHARM_MAX_URL_BYTES} bytes at most\\)`), "no count typed twice")
 
   // A firmware older than the app is one sentence, and a row adds only its own next step to it.

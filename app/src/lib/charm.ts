@@ -792,14 +792,6 @@ export async function readCharmTalk(): Promise<string | null> {
   return state.address
 }
 
-/**
- * The switch beside Sync. It is this phone's decision and nothing else: no radio is opened and the
- * charm is told nothing until a sync, which is what hands the address the scheme picks over.
- */
-export function setCharmVoice(scheme: CharmScheme): void {
-  if (paired) write({ ...paired, voice: scheme })
-}
-
 /** Where the charm's firmware download has got to. */
 export async function charmUpdateStatus(): Promise<CharmUpdateStatus> {
   const { status, bytes } = await askCharm(updateStatusMessage())

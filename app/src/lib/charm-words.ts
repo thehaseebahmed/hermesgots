@@ -517,8 +517,6 @@ export function chargeBlocks(battery: CharmBattery | undefined): boolean {
  * Under the battery row's title. The level itself is the status row's line, so this row says what a
  * tap does, and a failure is the only thing it says over that.
  */
-export const BATTERY_ASK = "Tap to ask the charm"
-
 /**
  * A refusal in the row's own words. BadMessage on a settings or battery op is a charm that never
  * heard of it — its firmware is older than this app — and saying "the charm didn't understand the
@@ -539,19 +537,6 @@ export function refusalWords(code: number, tail = "") {
 /**
  * The switch beside Sync: what each of its positions needs of the reader's host and charm.
  */
-export const VOICE_HTTPS =
-  "Your charm calls your host at the address your phone uses, with the certificate checked against the charm's own roots. It needs the charm's clock, which the app sets whenever it reaches the charm."
-
-export const VOICE_HTTP =
-  "Your charm calls your host on your tailnet in plain http. It needs your host to know its tailnet address, and the charm to be on the tailnet."
-
-/** The row under the switch: the charm's own answer about what it holds, never this phone's guess. */
-export const VOICE_HELD_TITLE = "Your charm holds"
-export const VOICE_HELD_PURPOSE = "What the charm says it was handed"
-export const VOICE_HELD_NONE = "Nothing yet — the next sync hands it over"
-export const VOICE_HELD_UNKNOWN = "This charm's firmware can't say"
-export const VOICE_HELD_ASKING = "Asking…"
-
 /**
  * Under the row: a charm keeps the token in its flash, and a flash that isn't sealed gives it away to
  * anyone holding the charm. The token's own caveat, said once for the row rather than as a second
