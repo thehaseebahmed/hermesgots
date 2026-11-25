@@ -310,6 +310,24 @@ test("the network section draws no Firmware group and neither caption", async ()
   })
 })
 
+/**
+ * Every spinner in the app stops under `prefers-reduced-motion`: `motion-safe:` is what makes the
+ * arrow that says a sync is running a courtesy rather than a flicker the reader cannot switch off.
+ */
+test("the sync row's spinner stops for a reader who asked for less motion", async () => {
+  await mount(sections({ busy: "sync" }), async () => {
+    await settle()
+    const moving = findAll("svg").filter(
+      (one) => one.classList.contains("animate-spin") || one.classList.contains("motion-safe:animate-spin"),
+    )
+    assert.equal(moving.length, 1, "one mark on the page says the sync is running")
+    assert.ok(
+      moving[0].classList.contains("motion-safe:animate-spin"),
+      "and it is drawn for a reader who did not ask for less motion",
+    )
+  })
+})
+
 const PUBLISHED = { version: "0.2.0", size: 4, sha256: "cd".repeat(32) }
 
 /**
@@ -885,6 +903,12 @@ test("Sync your bots lands on /settings/charm?sync=1, syncs once, and leaves the
   assert.equal(asked.afterReady, 1, "the parameter runs the sync once the page is ready")
   assert.equal(asked.afterRedraw, 1, "a redraw syncs nothing more: the parameter is gone")
   assert.equal(asked.where, "REPLACE:/settings/charm", "and the URL no longer carries it")
+
+  // The page's own address may carry something else: the return clears the parameter it read and
+  // leaves the rest of the URL as it found it.
+  const kept = await returned("/settings/charm?sync=1&keep=1")
+  assert.equal(kept.afterReady, 1, "the parameter still runs the sync")
+  assert.equal(kept.where, "REPLACE:/settings/charm?keep=1", "and only the sync parameter goes")
 
   const plain = await returned("/settings/charm")
   assert.equal(plain.afterReady, 0, "no parameter, no sync")

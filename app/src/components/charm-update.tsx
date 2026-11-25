@@ -56,6 +56,7 @@ import {
   fetchWords,
   FILE_TOO_BIG,
   FIRMWARE_CAPTION,
+  FIRMWARE_CHECKED,
   FIRMWARE_REPO,
   firmwareDoneWords,
   FIRMWARE_LEAVE,
@@ -323,10 +324,12 @@ export function CharmUpdateScreen({
         setWalk({ end: { kind: "done", version, was } })
         return
       }
-      // A reader's file names no newer build: the charm came back on the build it was sent, and
-      // the version it answered — unchanged — is the walk landing, not failing. The published
-      // door keeps the changed-gate: it names a build newer than the charm's own.
-      if (next.door === "file" && typeof answered === "string") {
+      // The build the charm answered is the one it was sent, which is the walk landing even where
+      // the version never moved: a re-flash of the build the charm already runs is the fix-a-sick-
+      // charm move, not a failure. A hand that names no build — the reader's own file — is landed on
+      // by any answer; a published one names the build it sent, so an answer of another build, or
+      // none at all, is the charm not coming back on it.
+      if (typeof answered === "string" && (next.sends === null || answered === next.sends)) {
         setWalk({ end: { kind: "done", version: answered, was } })
         return
       }
@@ -398,7 +401,7 @@ export function CharmUpdateScreen({
               url: firmwareFetchUrl(address, mint),
               sha256Hex: served.sha256,
               scheme,
-              door: "published",
+              sends: record.version,
             }
           } catch (error) {
             // The URL could not fit the frame after all: the builder's bound is the backstop, and
@@ -410,6 +413,9 @@ export function CharmUpdateScreen({
         // and the walk says so — the reader is about to watch a longer bar than the one promised.
         setWalk({ note: FETCH_FALLBACK })
       }
+      // The step is drawn as the read begins rather than with its first bytes: a host that refuses
+      // the image outright still leaves the reader one row saying where the walk stopped.
+      show("download", { percent: 0 })
       const image = await getCharmFirmwareImage(hostForActiveBot(profile), (progress) =>
         show("download", {
           subtitle: downloadWords(progress),
@@ -423,11 +429,11 @@ export function CharmUpdateScreen({
       })
       const sha256Hex = await sha256Of(image)
       if (image.length === record.size && sha256Hex === record.sha256)
-        return { kind: "transfer", image, sha256Hex, door: "published" }
+        return { kind: "transfer", image, sha256Hex, sends: record.version }
       const fresh = await firmware.reload()
       const again = fresh?.state === "published" ? fresh.firmware : undefined
       if (again && again.size === image.length && again.sha256 === sha256Hex)
-        return { kind: "transfer", image, sha256Hex, door: "published" }
+        return { kind: "transfer", image, sha256Hex, sends: record.version }
       throw new Error(PUBLISHED_CHANGED)
     }, `Updating to ${record.version}`)
   }
@@ -446,8 +452,10 @@ export function CharmUpdateScreen({
     }
     void send(
       async () => {
+        // The transfer is drawn as the file is read, so a read that fails leaves the row it was in.
+        show("transfer", { percent: 0 })
         const image = new Uint8Array(await chosen.arrayBuffer())
-        return { kind: "transfer", image, sha256Hex: await sha256Of(image), door: "file" }
+        return { kind: "transfer", image, sha256Hex: await sha256Of(image), sends: null }
       },
       `Sending ${chosen.name}`,
     )
@@ -586,7 +594,12 @@ export function CharmUpdateScreen({
         />
       )}
       {pickMode && !offering && (
-        <PickGroup disabled={busy || blocked} onPick={sendFile} fileRef={file} />
+        <>
+          <PickGroup disabled={busy || blocked} onPick={sendFile} fileRef={file} />
+          {/* The third way this door is drawn, and the same rule on it: a door shut with no word
+              beside it is a door a reader presses and cannot understand. */}
+          {blocked && <Caption>{CHARGE_FIRST}</Caption>}
+        </>
       )}
       {!pickMode && firmware.settled && !published && !end && !busy && (
         <>
@@ -605,7 +618,8 @@ export function CharmUpdateScreen({
 /**
  * One step as it walks: its name, the line under it, and its bar while it has one. The step a
  * failure stopped at wears the destructive tone on its title and one line saying the walk stopped
- * there — which of the three failed is then read off the list, not guessed from the reason.
+ * there, under the line the step itself was saying — so which of the three failed is read off the
+ * list without the progress that step had already reported being taken away from it.
  */
 function StepRow({
   title,
@@ -626,8 +640,9 @@ function StepRow({
     >
       <RowText
         title={<span className={stopped ? "text-destructive" : undefined}>{title}</span>}
-        subtitle={stopped ? STEP_STOPPED : subtitle}
+        subtitle={subtitle}
       />
+      {stopped && <p className="text-sm text-muted-foreground">{STEP_STOPPED}</p>}
       {percent !== undefined && <Bar value={percent} />}
     </div>
   )
@@ -691,7 +706,7 @@ function Offer({
         <div className={rowClass}>
           <RowText title={KEEP_CLOSE} />
         </div>
-        {record && (record.notes || record.notesSaid) && (
+        {record && (record.notes || record.notesRefusal) && (
           <SheetRow
             icon={SparklesIcon}
             title={NOTES_TITLE}
@@ -700,11 +715,12 @@ function Offer({
                 {record.notes ? (
                   <p className="whitespace-pre-line py-2 text-sm">{record.notes}</p>
                 ) : (
-                  <p className="py-2 text-sm text-muted-foreground">{record.notesSaid}</p>
+                  <p className="py-2 text-sm text-muted-foreground">{record.notesRefusal}</p>
                 )}
                 <p className="py-2 text-sm text-muted-foreground">{notesSizeWords(record.size)}</p>
                 {built && <p className="py-2 text-sm text-muted-foreground">{built}</p>}
                 <p className="py-2 text-sm text-muted-foreground">{FIRMWARE_CAPTION}</p>
+                <p className="py-2 text-sm text-muted-foreground">{FIRMWARE_CHECKED}</p>
               </PickSurface>
             )}
           />

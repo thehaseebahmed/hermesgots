@@ -245,36 +245,19 @@ export function SheetRow({
   )
 }
 
-/** A row that runs something: the row chrome, its icon, its title, and a chevron like a link's. */
-export function ActionRow({
-  icon: Icon,
-  title,
-  onClick,
-}: {
-  icon: LucideIcon
-  title: string
-  onClick: () => void
-}) {
-  return (
-    <button type="button" onClick={onClick} className={linkRowClass}>
-      <Icon className="size-5 shrink-0 text-muted-foreground" />
-      <RowText title={title} />
-      <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />
-    </button>
-  )
-}
-
 /**
- * A row that runs something in place — a sync, an alert, a fresh reading — rather than opening
- * anything: its icon, its title over the line saying what the tap does. No chevron, since these
- * rows do not navigate (ADR 0055 draws a row's jump, never its work), and `disabled` is the row's
- * own: a send already running, or nothing to send to.
+ * A row that runs something: its icon, its title over the line saying what it does, and the chevron
+ * a row that opens something wears. A row that works in place rather than opening anything draws
+ * `chevron={false}` (ADR 0055 draws a row's jump, never its work); `disabled` is the row's own — a
+ * send already running, or nothing to send to — and `iconClassName` is where the icon moves with what
+ * the row is doing, as the sync's arrow spins.
  */
-export function TapRow({
+export function ActionRow({
   icon: Icon,
   iconClassName,
   title,
   subtitle,
+  chevron = true,
   disabled,
   onClick,
 }: {
@@ -283,13 +266,21 @@ export function TapRow({
   iconClassName?: string
   title: string
   subtitle?: string
+  /** Whether the row wears the chevron of one that opens something; a row that works in place does not. */
+  chevron?: boolean
   disabled?: boolean
   onClick: () => void
 }) {
   return (
-    <button type="button" onClick={onClick} disabled={disabled} className={rowClass}>
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={chevron ? linkRowClass : rowClass}
+    >
       <Icon className={cn("size-5 shrink-0 text-muted-foreground", iconClassName)} />
       <RowText title={title} subtitle={subtitle} />
+      {chevron && <ChevronRightIcon className="size-4 shrink-0 text-muted-foreground" />}
     </button>
   )
 }

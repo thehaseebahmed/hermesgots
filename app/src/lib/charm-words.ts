@@ -14,7 +14,6 @@ import {
   CharmCode,
   codeWords,
   type CharmBattery,
-  type CharmBatterySeen,
 } from "./charm-protocol.ts"
 import { compareVersions } from "./version-compare.ts"
 import { formatBytes } from "./attachment-caps.ts"
@@ -281,6 +280,14 @@ export function builtWords(built: string): string | null {
 export const FIRMWARE_CAPTION =
   "The published image is the everyday build, not a sealed one: it installs over the air on any charm whose flash isn't sealed. A sealed charm refuses it, and says so in its own words."
 
+/**
+ * In the same sheet, the other half of the caption that left the Firmware row: the charm checks the
+ * bytes against the SHA-256 the walk handed it before it writes the slot, so a tag that moved in the
+ * registry is refused by the charm rather than trusted by its URL.
+ */
+export const FIRMWARE_CHECKED =
+  "The charm checks the image against the SHA-256 it was given before it writes the slot."
+
 /** The row's word that an image went, while the charm is still coming back. */
 export const FIRMWARE_SENT = "Sent. The charm is restarting on it."
 
@@ -343,13 +350,14 @@ export function downloadWords(progress: { received: number; total: number }): st
 
 /**
  * The update screen's end: the build the charm came back on, as its own answer read it — and, when
- * the walk started on another build, the one it came from. A re-flash of the build the charm
- * already runs names one build, since there is no change to read.
+ * the charm named the build it started on and that build is another, the one it came from. A walk
+ * that landed on a build with no start to compare it against still changed something, so it says so
+ * without a `from` clause it never read; only a walk that provably landed on the build it began on
+ * says one build, since only that walk has no change to read.
  */
 export function firmwareDoneWords(was: string | null, version: string): string {
-  return was !== null && was !== version
-    ? `Updated to ${version} from ${was}.`
-    : `The charm runs ${version}.`
+  if (was === version) return `The charm runs ${version}.`
+  return was === null ? `Updated to ${version}.` : `Updated to ${version} from ${was}.`
 }
 
 /**
@@ -430,15 +438,11 @@ export const QUIET_TITLE = "Stays lit for"
  * A reading with no age — the update offer's own, asked as the screen opens — says the level and
  * the charger alone.
  */
-export function batteryWords(
-  battery: CharmBattery | CharmBatterySeen | undefined,
-  now = Date.now(),
-) {
+export function batteryWords(battery: CharmBattery | undefined, now = Date.now()) {
   if (!battery) return "Not read yet"
   if (battery.percent < 0) return "Unknown"
   const charge = `${battery.percent}%${battery.charging ? " · Charging" : ""}`
-  // The settings page's reading carries its age; the offer's ask answers the level alone.
-  return "at" in battery ? `${charge} · ${since(battery.at, now)}` : charge
+  return battery.at === undefined ? charge : `${charge} · ${since(battery.at, now)}`
 }
 
 /**

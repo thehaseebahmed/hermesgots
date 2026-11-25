@@ -36,7 +36,6 @@ import {
   PickSurface,
   RowText,
   SwitchRow,
-  TapRow,
   ValueRow,
   fieldInnerClass,
   fieldInputClass,
@@ -579,9 +578,10 @@ export function SyncRow({
   onSync: () => void
 }) {
   return (
-    <TapRow
+    <ActionRow
       icon={RefreshCwIcon}
-      iconClassName={syncing ? "animate-spin" : undefined}
+      iconClassName={syncing ? "motion-safe:animate-spin" : undefined}
+      chevron={false}
       title={syncing ? "Syncing…" : "Sync"}
       subtitle={
         progress
@@ -616,8 +616,9 @@ export function TestAlertRow({
   onSend: () => void
 }) {
   return (
-    <TapRow
+    <ActionRow
       icon={BellRingIcon}
+      chevron={false}
       title={sending ? "Sending…" : "Send a test alert"}
       subtitle={
         canSend
@@ -665,7 +666,7 @@ export function CharmSections({
   charm: PairedCharm
   /** The page's own read of the charm's links, and the ask that reads them again after a write. */
   report: { read: CharmRead<CharmNetworkReport>; refresh: () => Promise<void> }
-  /** The firmware's four facts, read by the page above this. */
+  /** What the page above read of the firmware: the charm's build and the host's record. */
   firmware: CharmFirmwareFacts
   /** Every bot the charm can be sent, in the picker's own order. */
   sources: Profile[]
@@ -1154,8 +1155,9 @@ export function BatteryRow({
   onRefresh: () => void
 }) {
   return (
-    <TapRow
+    <ActionRow
       icon={BatteryMediumIcon}
+      chevron={false}
       title="Battery"
       subtitle={note ?? BATTERY_ASK}
       disabled={busy}

@@ -2900,10 +2900,10 @@ export interface CharmFirmware {
    */
   notes?: string
   /**
-   * The host's own sentence where the release's notes were too long to draw: the sheet says this
-   * instead of them, and the version, size and hash are answered as they always were.
+   * The host's refusal of the notes the release wrote: its own sentence, which the sheet says
+   * instead of them, while the version, the size and the hash answer all the same.
    */
-  notesSaid?: string
+  notesRefusal?: string
   /** When the release's build was made, as the ISO 8601 the host read; absent where it named none. */
   built?: string
 }
@@ -2947,7 +2947,7 @@ export async function getCharmFirmware(
     sha256: body.sha256,
     slot,
     notes: word(body.notes),
-    notesSaid: word(body.notesSaid),
+    notesRefusal: word(body.notesRefusal),
     built: word(body.built),
   }
 }

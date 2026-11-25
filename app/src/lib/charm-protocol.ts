@@ -164,6 +164,11 @@ export const CHARM_WAKE_DEFAULT: CharmWake = { doubleTap: true, quietSeconds: 15
 export interface CharmBattery {
   percent: number
   charging: boolean
+  /**
+   * When the charm gave the reading, where the phone keeps it as a record: the settings page's own
+   * reading carries it, while the update offer's ask — taken for that visit's gate — does not.
+   */
+  at?: number
 }
 
 /** The last reading the phone keeps: the reading, and when the charm gave it. */

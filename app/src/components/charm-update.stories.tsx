@@ -20,7 +20,7 @@ import type { PairedCharm } from "@/lib/charm"
 import { CharmLinkState, CharmUpdateState } from "@/lib/charm-protocol"
 import type { CharmFirmware } from "@/lib/hermes"
 
-const meta = { title: "Screens/Charm update" } satisfies Meta
+const meta = { title: "UI/Charm update" } satisfies Meta
 
 export default meta
 type Story = StoryObj<typeof meta>

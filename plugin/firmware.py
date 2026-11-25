@@ -164,10 +164,10 @@ def describe(manifest: Any) -> Dict[str, Any]:
 
     Three are optional, each because a release published before it exists without it: the slot (the
     app then measures a picked file against its own constant), the notes and the build date. Notes
-    over ``NOTES_CAP`` are dropped and answered as the sentence ``notesSaid`` carries instead of
-    being refused — a chatty release must not take its own record down with it, since ``latest()``
-    and ``image()`` give back whatever this raises. A date nobody can read is left off for the same
-    reason: nothing is installed by it.
+    over ``NOTES_CAP`` are refused as the sentence ``notesRefusal`` carries, and counted as the
+    release wrote them rather than as they survive its whitespace — a chatty release must not take
+    its own record down with it, since ``latest()`` and ``image()`` give back whatever this raises. A
+    date nobody can read is left off for the same reason: nothing is installed by it.
     """
     found = manifest.get("annotations") if isinstance(manifest, dict) else None
     found = found if isinstance(found, dict) else {}
@@ -194,14 +194,15 @@ def describe(manifest: Any) -> Dict[str, Any]:
         described["slot"] = byte_count(slot.strip(), "slot")
     notes = found.get(NOTES_ANNOTATION)
     if isinstance(notes, str) and notes.strip():
-        kept = notes.strip()
-        if len(kept) <= NOTES_CAP:
-            described["notes"] = kept
-        else:
-            described["notesSaid"] = (
+        # The cap counts what the release wrote, not what survives the trim: a release that wrote
+        # 2,001 characters wrote 2,001, and trimming one newline off would draw a length it never gave.
+        if len(notes) > NOTES_CAP:
+            described["notesRefusal"] = (
                 f"The published charm firmware's notes are longer than the {NOTES_CAP:,} characters "
                 "this app draws, so they aren't shown."
             )
+        else:
+            described["notes"] = notes.strip()
     built = found.get(BUILT_ANNOTATION)
     at = iso_date(built) if isinstance(built, str) else None
     if at is not None:

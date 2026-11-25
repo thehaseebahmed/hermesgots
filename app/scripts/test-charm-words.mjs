@@ -10,6 +10,7 @@ import { BluetoothIcon, WaypointsIcon, WifiIcon } from "lucide-react"
 import {
   batteryWords,
   chargeBlocks,
+  firmwareDoneWords,
   firmwareOffers,
   firmwareWords,
   LINKS,
@@ -159,6 +160,32 @@ test("the offer's link line says what the charm reported, and what a down link n
   )
   // The offer's reading has no age to say: the level and the charger alone.
   assert.equal(batteryWords({ percent: 12, charging: true }), "12% · Charging")
+})
+
+test("the end reads the change it made, and a walk whose start went unread still made one", () => {
+  // Both builds where both were read: the change is what the reader is told.
+  assert.equal(firmwareDoneWords("0.1.0", "0.2.1"), "Updated to 0.2.1 from 0.1.0.")
+  // A charm that could not say its starting build: the walk landed a build, and the sentence says
+  // so without a `from` clause it never read.
+  assert.equal(firmwareDoneWords(null, "0.2.2"), "Updated to 0.2.2.")
+  // Only a walk that provably landed on the build it began on says one build.
+  assert.equal(firmwareDoneWords("0.2.1", "0.2.1"), "The charm runs 0.2.1.")
+})
+
+test("the battery's age is said where the reading has one, and only then", () => {
+  const now = Date.parse("2026-03-03T12:00:00Z")
+  assert.equal(
+    batteryWords({ percent: 50, charging: false, at: now - 120_000 }, now),
+    "50% · 2 min ago",
+    "the page's reading carries when the charm gave it",
+  )
+  assert.equal(
+    batteryWords({ percent: 50, charging: false }),
+    "50%",
+    "the offer's own ask is the level and the charger alone",
+  )
+  assert.equal(batteryWords(undefined), "Not read yet", "an ask nobody has made")
+  assert.equal(batteryWords({ percent: -1, charging: false }), "Unknown", "not 0%, and not a reading")
 })
 
 test("the charm's reader-facing sentences live together, and one refusal serves every row", () => {

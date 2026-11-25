@@ -1,6 +1,6 @@
 # An update is offered, from the row of the device it belongs to, and only a tap sends it
 
-Status: built on the branch, in the ten steps the plan records. Design: [ADR 0175](../adr/0175-an-update-is-offered-before-it-runs.md), which records why an update is a state the reader enters rather than a walk that starts when the screen opens. The change map, the flows and the nine build steps with their checks are in the plan this spec writes down; every test named below is a case that exists in the two suites, quoted as it is spelled there.
+Status: built on the branch, in the ten steps the plan records. Design: [ADR 0175](../adr/0175-an-update-is-offered-before-it-runs.md), which records why an update is a state the reader enters rather than a walk that starts when the screen opens. The change map, the flows and the ten build steps with their checks are in the plan this spec writes down; every test named below is a case that exists in the suites, quoted as it is spelled there.
 
 ## Goal
 
@@ -28,11 +28,11 @@ The send is driven by its own promise rather than by the screen, in `charm-updat
 
 ## Done, and one sync
 
-Done names the build it came from and the one it runs: `Updated to 0.2.1 from 0.1.0.` A walk that lands on the build the charm already ran says one build instead — `The charm runs 0.2.1.` — because there is no change to read, and a re-flash of the same package is the fix-a-sick-charm move, not a failure. Under it, `Sync your bots` lands on `/settings/charm?sync=1`; the page reads the parameter once it has a paired charm and its bots, clears it with a `replace` *before* the sync runs, and runs the sync through a ref, so a redraw finds nothing to read and the radio is reached exactly once. A build usually wants the bots, the pet and the voice hand-over again, which is the whole of what that one sync is for.
+Done names the build it came from and the one it runs: `Updated to 0.2.1 from 0.1.0.` A charm that answered after the reboot with no start read for it still changed something, so it says `Updated to 0.2.2.` — no `from` clause it never read — and only a walk that provably landed on the build it began on says one build, `The charm runs 0.2.1.`, since only that walk has no change to read. A re-flash of the same package is the fix-a-sick-charm move, not a failure: the end asks whether the build the charm answered is the one it was sent, so the published image lands on a charm already running it, over the phone's link and over the charm's own fetch alike, exactly as a reader's file does. Under it, `Sync your bots` lands on `/settings/charm?sync=1`; the page reads the parameter once it has a paired charm and its bots, clears it — that parameter alone, leaving the rest of the address as it arrived, with a `replace` *before* the sync runs — and runs the sync through a ref, so a redraw finds nothing to read and the radio is reached exactly once. A build usually wants the bots, the pet and the voice hand-over again, which is the whole of what that one sync is for.
 
 ## A failure, and the cable
 
-A failure draws the charm's own reason in words, `Try again`, and `Flash it by cable`. The step it stopped at is marked — one row, `data-stopped`, with *The update stopped here.* under it — and the steps after it are not drawn, since they never began. The cable row opens a sheet of three sentences: what the charm's own cancel means (the image never reached the slot, so the charm still runs the build it came on), what the path needs of the reader (a cable and a computer, no Bluetooth and no app), and where the flasher, its port and its steps live. Under them is one row, `Open the firmware repository`, which calls `openExternal` on `https://github.com/thehaseebahmed/hermesgots-charm` — the repository's root, not a deep path, because a path rots and a repository does not. The sheet carries no flashing steps of its own: that repository owns them, and a copy here would be a second, staler set.
+A failure draws the charm's own reason in words, `Try again`, and `Flash it by cable`. The step it stopped at is marked — one row, `data-stopped`, its title in the destructive tone, the line it was already saying kept, and *The update stopped here.* after it — and the steps after it are not drawn, since they never began. Each step is drawn as it starts rather than with its first byte, so a host that refuses the image outright still leaves the step the walk was in on screen, marked, rather than a failure card with no row saying where it stopped. The cable row opens a sheet of three sentences: what the charm's own cancel means (the image never reached the slot, so the charm still runs the build it came on), what the path needs of the reader (a cable and a computer, no Bluetooth and no app), and where the flasher, its port and its steps live. Under them is one row, `Open the firmware repository`, which calls `openExternal` on `https://github.com/thehaseebahmed/hermesgots-charm` — the repository's root, not a deep path, because a path rots and a repository does not. The sheet carries no flashing steps of its own: that repository owns them, and a copy here would be a second, staler set.
 
 A `Read the charm's log` row into `/settings/debug-charm` is drawn on a failure only while **Developer** is on, because the route behind it is `DeveloperOnly` and a row drawn without the switch would bounce the reader back to the menu.
 
@@ -41,11 +41,11 @@ A `Read the charm's log` row into `/settings/debug-charm` is drawn on a failure 
 A release's own words travel annotation → plugin → app record → sheet, and each hop does one thing:
 
 1. **The release writes `dev.gots.charm.notes` and `org.opencontainers.image.created`** onto the tag's manifest, beside the three required annotations. Both are optional, because every release published today names neither.
-2. **`firmware.describe`** (`plugin/firmware.py`) answers `{ version, size, sha256, slot?, notes?, notesSaid?, built? }`. Notes over `NOTES_CAP` (2,000 characters) are dropped and answered as the sentence `notesSaid` carries — *The published charm firmware's notes are longer than the 2,000 characters this app draws, so they aren't shown.* — rather than refused, and the refusal is **scoped to the notes alone**: `describe` still answers the version, the size and the SHA-256, so a chatty release is still offered and still installs. That scoping is what keeps a courtesy from taking the record down, since `latest()` and `image()` give back whatever `describe` raises.
+2. **`firmware.describe`** (`plugin/firmware.py`) answers `{ version, size, sha256, slot?, notes?, notesRefusal?, built? }`. Notes over `NOTES_CAP` (2,000 characters) are refused as the sentence `notesRefusal` carries — *The published charm firmware's notes are longer than the 2,000 characters this app draws, so they aren't shown.* — and the cap counts what the release wrote rather than what survives its whitespace: a 2,001-character note ending in a newline is over the cap, not at it. The refusal is **scoped to the notes alone**: `describe` still answers the version, the size and the SHA-256, so a chatty release is still offered and still installs. That scoping is what keeps a courtesy from taking the record down, since `latest()` and `image()` give back whatever `describe` raises.
 3. **The build date is optional and left off when it does not parse**, not refused: a date nobody can read installs nothing, and a required one would stop every release in the field from being offered.
 4. **The firmware route spreads the reader's record** (`plugin/__init__.py`), so the extra keys reach the app without a second read.
-5. **`CharmFirmware`** (`app/src/lib/hermes.ts`) carries the four facts the screen needs, and the offer draws a **What's new** row where the record has notes or a `notesSaid`, and no row at all where it has neither.
-6. **The sheet** holds the notes as they arrived (or the host's sentence, where it refused them), the image's own size in the app's bytes (*Size 1.5 MB*), the build date as `Built 3 Mar 2026` where the release named one, and the everyday-build caveat the Firmware row used to carry: the published image is the ordinary, unsealed build, and a sealed charm refuses it in its own words.
+5. **`CharmFirmware`** (`app/src/lib/hermes.ts`) carries the record the screen needs, and the offer draws a **What's new** row where the record has notes or a `notesRefusal`, and no row at all where it has neither.
+6. **The sheet** holds the notes as they arrived (or the host's sentence, where it refused them), the image's own size in the app's bytes (*Size 1.5 MB*), the build date as `Built 3 Mar 2026` where the release named one, and the two sentences the Firmware row's captions used to carry: the published image is the ordinary, unsealed build, and a sealed charm refuses it in its own words; and the charm checks the image against the SHA-256 it was given before it writes the slot.
 
 ## Where it lives
 
@@ -54,9 +54,9 @@ A release's own words travel annotation → plugin → app record → sheet, and
 | `app/src/components/settings/charm.tsx` | The page's shell (gate, live queries, handlers) and the pure `CharmSections` it draws: Device, Bots, Waking, Voice, Wi-Fi, Tailnet, Forget, one caption; `FirmwareRow` |
 | `app/src/components/charm-update.tsx` | The update screen: the offer and its gate, the steps, the failure card, the cable sheet, the log row, Done and its sync, the What's-new sheet |
 | `app/src/lib/charm-update-walk.ts` | The walk that outlives the screen: `started`, `running`, `again`, the reset a fresh load takes |
-| `app/src/lib/charm-words.ts` | Every sentence: `firmwareWords`, `firmwareOffers`, `chargeBlocks`, `CHARGE_FIRST`, `KEEP_CLOSE`, `FIRMWARE_LEAVE`, `firmwareDoneWords`, `FETCH_FALLBACK`, `CABLE_WORDS`, `REPO_ROW`, `NOTES_TITLE`, `builtWords`, `FIRMWARE_CAPTION` |
+| `app/src/lib/charm-words.ts` | Every sentence: `firmwareWords`, `firmwareOffers`, `chargeBlocks`, `CHARGE_FIRST`, `KEEP_CLOSE`, `FIRMWARE_LEAVE`, `firmwareDoneWords`, `FETCH_FALLBACK`, `CABLE_WORDS`, `REPO_ROW`, `NOTES_TITLE`, `builtWords`, `FIRMWARE_CAPTION`, `FIRMWARE_CHECKED` |
 | `app/src/lib/hermes.ts` | `CharmFirmware`, the record the route answers |
-| `app/src/lib/charm.ts` | `CharmUpdateApi`, the battery ask the offer makes, and the page's own reads beside `useCharmReport`: `CharmFirmwareFacts`, `useCharmFirmware` (one poll, the facts handed to the row) and `useReturnSync` |
+| `app/src/lib/charm.ts` | The page's own reads beside `useCharmReport`: `CharmFirmwareFacts`, `useCharmFirmware` (one poll, the facts handed to the row) and `useReturnSync`. `readCharmBattery` already answered the battery ask and is untouched |
 | `app/src/lib/native.ts` | `openExternal`, the one way out to the repository |
 | `plugin/firmware.py` | The annotations, `NOTES_CAP`, `describe` |
 | `plugin/__init__.py` | The firmware route, which spreads `describe`'s record |
@@ -78,7 +78,8 @@ Cheapest tier that fails for the reason the change can fail (ADR 0019), and the 
 - *"the firmware row offers the published one when the charm is older"*, *"the firmware row says the charm is up to date when the versions match"*, *"a charm ahead of the package is said, and never offered a downgrade"*, *"a charm too old to say its version is not compared with the package"*, *"a host that can't answer says it couldn't check, in its own words"* — the versions line and the **Update** tag, one case each way.
 - *"a download running is the row's own line, over the versions"* — the live download line, which is why the poll had to move with the row.
 - *"a busy page opens no screen from the firmware row"* — the row is disabled with the rest of the page.
-- *"Sync your bots lands on /settings/charm?sync=1, syncs once, and leaves the URL without the parameter"* — the return sync, one call, the parameter cleared.
+- *"Sync your bots lands on /settings/charm?sync=1, syncs once, and leaves the URL without the parameter"* — the return sync, one call, the parameter cleared, and the rest of the address left as it arrived.
+- *"the sync row's spinner stops for a reader who asked for less motion"* — the one mark that moves is drawn `motion-safe`, as every spinner in the app is.
 - *"the sections draw at 390 and at 768, in light and in dark"* — structure at all four combinations.
 
 **The screen** (`app/scripts/test-charm-update.tsx`):
@@ -88,20 +89,28 @@ Cheapest tier that fails for the reason the change can fail (ADR 0019), and the 
 - *"a returning visit joins the running walk and draws no offer"* and *"stepping back mid-walk and returning joins the walk already running"* — no second offer, no second battery ask, no second send.
 - *"the leaving line is drawn once the walk runs, and on neither the offer nor an end"* — the sentence, its one place, and its two absences.
 - *"Done reads the build it came from and the one it runs"* — `Updated to 0.2.1 from 0.1.0.`, `Sync your bots` landing on `/settings/charm?sync=1`, and a re-flash saying one build.
-- *"the transfer step is marked when it fails"* — one marked row, the step it stopped at, the line under it, and the restart not drawn.
+- *"a re-flash of the published build ends Done, over the phone's link and the charm's own fetch"* — the same build on both published doors, landed and said as one build, never as the failure it is not.
+- *"a walk that could not name its start still says the build changed"* — `Updated to 0.2.2.` with no `from`, and never the re-flash sentence.
+- *"the transfer step is marked when it fails"* — one marked row, the step it stopped at, the restart not drawn — and *"a failure before a byte still draws and marks the step the walk was in"*, for a host that refuses the image itself.
+- *"the file door left after a walk says what shuts it"* — the door the picker is left with, shut by a charge that lands late, with the line saying what opens it.
 - *"the cable sheet says what the cable path is, and opens the firmware repository"* — the three sentences, the row, and `openExternal` called with the repository's URL and nothing else.
 - *"the log row is absent with Developer off and present with it"* — the row and its words, both ways.
-- *"the sheet draws the notes, the size and the date, and no row without notes"* — the notes, *Size 1.5 MB*, the built line, the caveat, an undated release with no date line, a refused release with the host's sentence, and a release naming none with no row and no sheet.
+- *"the sheet draws the notes, the size and the date, and no row without notes"* — the notes, *Size 1.5 MB*, the built line, the unsealed-build caveat, the sentence about the SHA-256 the charm checks, an undated release with no date line, a refused release with the host's sentence, and a release naming none with no row and no sheet.
 - *"the offer and the walk's steps draw at 390 and at 768, in light and in dark"* — the offer's rows and the three steps, at all four combinations.
 - *"a screen that opens with nothing published says so, and takes a file"* — the host's sentence and the picker as the way through, with nothing to retry.
+
+**The words** (`app/scripts/test-charm-words.mjs`):
+
+- *"the end reads the change it made, and a walk whose start went unread still made one"* — `Updated to 0.2.1 from 0.1.0.`, `Updated to 0.2.2.` and `The charm runs 0.2.1.`, one case each.
+- *"the battery's age is said where the reading has one, and only then"* — the page's reading carries when the charm gave it, the offer's ask does not, and an unreadable charge is neither.
 
 **The plugin** (`plugin/tests/test_firmware.py`):
 
 - *"the notes and the build date ride the answer"*, *"the route carries the notes and the build date"* — the two new annotations, read and answered.
-- *"notes at the cap are drawn and one character over is not"* — 2,000 characters is drawable, 2,001 is not.
-- *"notes over the cap are refused in a sentence naming it and the record answers"* and *"a release over the notes cap answers the record rather than a refusal"* — `notesSaid` names the cap and never the notes, and the version, size and SHA-256 still answer, at the reader and at the route.
+- *"notes at the cap are drawn and one character over is not"* and *"the cap counts what the release wrote whatever whitespace it ends in"* — 2,000 characters is drawable, 2,001 is not, and a 2,001st newline is over the cap rather than trimmed away.
+- *"notes over the cap are refused in a sentence naming it and the record answers"* and *"a release over the notes cap answers the record rather than a refusal"* — `notesRefusal` names the cap and never the notes, and the version, size and SHA-256 still answer, at the reader and at the route.
 - *"a missing build date leaves the key off"* and *"a date that isn't a date is left off rather than refused"* — the date is optional and never a fault.
-- *"a release that names no notes is answered without them"* — no `notes`, no `notesSaid`; the row is drawn from what the release says.
+- *"a release that names no notes is answered without them"* — no `notes`, no `notesRefusal`; the row is drawn from what the release says.
 
 ## The two limits this build cannot lift
 
@@ -115,4 +124,4 @@ Cheapest tier that fails for the reason the change can fail (ADR 0019), and the 
 
 ## Gates
 
-From `app/`: `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build-storybook`. From the repo root: `python3 -m unittest discover -s plugin/tests -t .`. This change is docs only, so all of them are green before it and must be green after it.
+From `app/`: `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build-storybook`. From the repo root: `python3 -m unittest discover -s plugin/tests -t .`. The change is code, docs and the plugin, so every gate is read against it: the two component suites, the words suite, the plugin's tests and the storybook build all have to be green, and each behaviour above names the case that proves it.

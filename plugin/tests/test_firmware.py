@@ -203,16 +203,28 @@ class NotesTest(unittest.TestCase):
     def test_notes_at_the_cap_are_drawn_and_one_character_over_is_not(self):
         kept = firmware.describe(manifest(**{firmware.NOTES_ANNOTATION: "n" * firmware.NOTES_CAP}))
         self.assertEqual(len(kept["notes"]), firmware.NOTES_CAP, "the cap itself is drawable")
-        self.assertNotIn("notesSaid", kept)
+        self.assertNotIn("notesRefusal", kept)
 
         refused = firmware.describe(manifest(**{firmware.NOTES_ANNOTATION: "n" * (firmware.NOTES_CAP + 1)}))
         self.assertNotIn("notes", refused)
+
+    def test_the_cap_counts_what_the_release_wrote_whatever_whitespace_it_ends_in(self):
+        """A release that wrote 2,001 characters wrote 2,001, newline or no newline."""
+        written = "n" * firmware.NOTES_CAP + "\n"
+        self.assertEqual(len(written), firmware.NOTES_CAP + 1)
+        refused = firmware.describe(manifest(**{firmware.NOTES_ANNOTATION: written}))
+        self.assertNotIn("notes", refused, "trimming it to the cap would draw what the release did not write")
+        self.assertIn("2,000 characters", refused["notesRefusal"])
+
+        # And the whitespace around a note inside the cap is still trimmed before it is drawn.
+        kept = firmware.describe(manifest(**{firmware.NOTES_ANNOTATION: "\n  Something changed.  \n"}))
+        self.assertEqual(kept["notes"], "Something changed.")
 
     def test_notes_over_the_cap_are_refused_in_a_sentence_naming_it_and_the_record_answers(self):
         refused = firmware.describe(
             manifest(**{firmware.NOTES_ANNOTATION: "n" * (firmware.NOTES_CAP + 1)})
         )
-        said = refused["notesSaid"]
+        said = refused["notesRefusal"]
         self.assertIn("2,000", said, "the cap, as a reader reads it")
         self.assertIn("notes", said)
         self.assertIn("longer", said)
@@ -234,7 +246,7 @@ class NotesTest(unittest.TestCase):
     def test_a_release_that_names_no_notes_is_answered_without_them(self):
         answer = firmware.describe(manifest())
         self.assertNotIn("notes", answer, "the row is drawn from what the release says")
-        self.assertNotIn("notesSaid", answer, "and nothing was refused either")
+        self.assertNotIn("notesRefusal", answer, "and nothing was refused either")
 
 
 class RefusalTest(unittest.TestCase):
@@ -483,7 +495,7 @@ class RouteTest(unittest.TestCase):
         self.assertEqual(payload["size"], len(IMAGE))
         self.assertEqual(payload["sha256"], SHA)
         self.assertNotIn("notes", payload)
-        self.assertIn("2,000 characters", payload["notesSaid"])
+        self.assertIn("2,000 characters", payload["notesRefusal"])
 
     def test_the_image_route_sends_the_bytes_and_their_length(self):
         with patch.object(firmware, "_open", serve()):

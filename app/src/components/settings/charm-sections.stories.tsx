@@ -1,7 +1,7 @@
 /**
  * The charm's own page, drawn from fixtures alone: the sections take every fact they draw as a
- * prop, so a story needs no radio and no store — a paired charm, its report, the firmware's four
- * facts, two bots and the labels this phone calls them. Two stories, because the one thing a reader
+ * prop, so a story needs no radio and no store — a paired charm, its report, what the page read of
+ * the firmware, two bots and the labels this phone calls them. Two stories, because the one thing a reader
  * checks at a glance is whether the Firmware row offers a build: tagged **Update** when it does,
  * and untagged when the charm is already on it.
  *
@@ -17,7 +17,7 @@ import { CharmLinkState, CharmUpdateState, type CharmNetworkReport } from "@/lib
 import type { Profile } from "@/lib/db"
 import { bot } from "@/stories/device"
 
-const meta = { title: "Screens/Charm page" } satisfies Meta
+const meta = { title: "UI/Charm page" } satisfies Meta
 
 export default meta
 type Story = StoryObj<typeof meta>

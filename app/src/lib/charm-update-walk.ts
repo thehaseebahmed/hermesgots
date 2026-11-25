@@ -22,21 +22,21 @@ export interface StepView {
 }
 
 /**
- * One image's way onto the charm: the bytes this phone sends over the link, or the door the
- * charm walks itself — the URL this phone hands it, and the hash the bytes it fetches must
- * carry. The `door` names where the hand came from, which is how the walk's end gate reads:
- * the published package names a build newer than the charm's own, so its end waits on the
- * version changing, while a reader's file names none — an unchanged version is the charm back
- * on the build it was sent.
+ * One image's way onto the charm: the bytes this phone sends over the link, or the door the charm
+ * walks itself — the URL this phone hands it, and the hash the bytes it fetches must carry.
+ * `sends` is the build the hand sends where it names one, and it is what the walk's end gate reads:
+ * the published package names a build newer than the charm's own, so the walk lands only where that
+ * build is the one the charm answers with, while a reader's file names none — an answer of any build
+ * is the charm back on the image it was sent.
  */
 export type FirmwareHand =
-  | { kind: "transfer"; image: Uint8Array; sha256Hex: string; door: "published" | "file" }
+  | { kind: "transfer"; image: Uint8Array; sha256Hex: string; sends: string | null }
   | {
       kind: "fetch"
       url: string
       sha256Hex: string
       scheme: CharmScheme
-      door: "published"
+      sends: string | null
     }
 
 /** The one walk at a time, as every mount of the update screen shares it. */

@@ -269,7 +269,7 @@ export interface CharmFirmwareFacts {
 }
 
 /**
- * The firmware's four facts, read in one place: the page reads them, and the row drawing them asks
+ * The firmware's facts, read in one place: the page reads them, and the row drawing them asks
  * nothing of the charm. A poll in each of two rows would put two asks on one link, so this is asked
  * once by the page and the facts ride down to the row — a section with a poll of its own is how two
  * asks reach one link.
@@ -403,10 +403,13 @@ export function useReturnSync({
     if (!ready || busy || !returned || ran.current) return
     ran.current = true
     // Cleared before the run: the parameter still in the URL when this page redraws would be a
-    // second return, and the sync would go twice.
-    setParams({}, { replace: true })
+    // second return, and the sync would go twice. Only this parameter goes — the address may carry
+    // something else, and a return is not a reason to drop what the reader arrived with.
+    const left = new URLSearchParams(params)
+    left.delete("sync")
+    setParams(left, { replace: true })
     onSync()
-  }, [ready, busy, returned, onSync, setParams])
+  }, [ready, busy, returned, onSync, setParams, params])
 }
 
 /** Only the Android app has a radio to reach the charm with. */
