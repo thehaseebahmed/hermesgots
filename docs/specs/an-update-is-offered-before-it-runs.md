@@ -58,7 +58,8 @@ A release's own words travel annotation → plugin → app record → sheet, and
 | `app/src/lib/charm-update-walk.ts` | The walk that outlives the screen: `started`, `running`, `again`, the reset a fresh load takes |
 | `app/src/lib/charm-words.ts` | Every sentence: `firmwareWords`, `firmwareOffers`, `chargeBlocks`, `CHARGE_FIRST`, `KEEP_CLOSE`, `FIRMWARE_LEAVE`, `firmwareDoneWords`, `FETCH_FALLBACK`, `CABLE_WORDS`, `REPO_ROW`, `NOTES_TITLE`, `builtWords`, `FIRMWARE_CAPTION`, `FIRMWARE_CHECKED` |
 | `app/src/lib/hermes.ts` | `CharmFirmware`, the record the route answers |
-| `app/src/lib/charm.ts` | The page's own reads beside `useCharmReport`: `CharmFirmwareFacts`, `useCharmFirmware` (one poll, the facts handed to the row) and `useReturnSync`. `readCharmBattery` already answered the battery ask and is untouched |
+| `app/src/lib/charm.ts` | The page's own reads beside `useCharmReport`: `CharmFirmwareFacts`, `useCharmFirmware` (the build and the download asked on one link as `charmFirmwareSnapshot`, one poll, the facts handed to the row) and `useReturnSync`. `charmFirmwareVersion` and `charmUpdateStatus` stay for every other caller; `readCharmBattery` already answered the battery ask and is untouched |
+| `app/src/components/developer-only.tsx` | `useDeveloper`, the one read of Developer's switch (`undefined` while the settings are unread), and the `DeveloperOnly` gate the routes share with the update screen's log row |
 | `app/src/lib/native.ts` | `openExternal`, the one way out to the repository |
 | `plugin/firmware.py` | The annotations, `NOTES_CAP`, `describe` |
 | `plugin/__init__.py` | The firmware route, which spreads `describe`'s record |
@@ -79,6 +80,7 @@ Cheapest tier that fails for the reason the change can fail (ADR 0019), and the 
 - *"the network section draws no Firmware group and neither caption"* — the row and both captions are gone from the network section, which keeps only its two links.
 - *"the firmware row offers the published one when the charm is older"*, *"the firmware row says the charm is up to date when the versions match"*, *"a charm ahead of the package is said, and never offered a downgrade"*, *"a charm too old to say its version is not compared with the package"*, *"a host that can't answer says it couldn't check, in its own words"* — the versions line and the **Update** tag, one case each way.
 - *"a download running is the row's own line, over the versions"* — the live download line, which is why the poll had to move with the row.
+- *"the firmware's facts are asked once on one link, and a row handed them asks nothing"* — one ask carrying the build and the download, no separate version or download ask on mount, and a row handed the facts asking nothing.
 - *"a busy page opens no screen from the firmware row"* — the row is disabled with the rest of the page.
 - *"Sync your bots lands on /settings/charm?sync=1, syncs once, and leaves the URL without the parameter"* — the return sync, one call, the parameter cleared, and the rest of the address left as it arrived.
 - *"the sync row's spinner stops for a reader who asked for less motion"* — the one mark that moves is drawn `motion-safe`, as every spinner in the app is.
@@ -119,7 +121,7 @@ Cheapest tier that fails for the reason the change can fail (ADR 0019), and the 
 ## The two limits this build cannot lift
 
 - **The gate is read at the tap, and not during the walk.** A charm that falls below 20% after the send has begun is not stopped mid-transfer: nothing re-reads the charge between the tap's answer and the end, and the charm's own cancel is what ends a walk that must not go on.
-- **Colour is judged in Storybook, not in jsdom.** The component tests read structure — which rows, which words, which widths, which theme class — because a DOM lays nothing out and paints nothing. Contrast, the accent on the **Update** tag and both screens' look at 390 and 768 are the two stories' (`settings/charm-sections.stories.tsx`, `charm-update.stories.tsx`) and a device's to judge, and no case here can stand in for that.
+- **Colour is judged in the screenshots, not in jsdom.** The component tests read structure — which rows, which words, which widths, which theme class — because a DOM lays nothing out and paints nothing. Contrast, the accent on the **Update** tag and both screens' look at 390 and 768 are the screenshots under `assets/screenshots/ui-charm-*`, taken from the two stories (`settings/charm-sections.stories.tsx`, `charm-update.stories.tsx`) at both widths in both themes, and a device's to judge; no case here can stand in for that.
 
 ## Risks
 

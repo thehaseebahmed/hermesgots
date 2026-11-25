@@ -1,9 +1,9 @@
 import { useState, type ReactNode } from "react"
-import { useLiveQuery } from "dexie-react-hooks"
 import { CheckIcon, PlusIcon, XIcon } from "lucide-react"
 import { useNavigate } from "react-router"
 
 import { Banner, Retry } from "@/components/banner"
+import { useDeveloper } from "@/components/developer-only"
 import {
   Caption,
   FormActions,
@@ -26,7 +26,7 @@ import { Label } from "@/components/ui/label"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { botSubPath, type BotSub } from "@/lib/bot-subs"
-import { getSettings, updateProfile, type Profile } from "@/lib/db"
+import { updateProfile, type Profile } from "@/lib/db"
 import { useSpeech } from "@/lib/host-speech"
 import { botModel, fullModel, useModelInfo } from "@/lib/model-info"
 import {
@@ -105,7 +105,7 @@ export function DictationTab({ profile, sub }: { profile: Profile; sub?: BotSub 
     void speech.measure()
   }
   // The Hearing prompt's value is the bot's, on the host, however many devices write it.
-  const developer = useLiveQuery(async () => Boolean((await getSettings()).developer), [])
+  const developer = useDeveloper()
 
   // A detail takes the page's place at either width: below 1024px the route pushed it, and from
   // 1024px it is the pane the page would have drawn in. A provider's page is asked for first, since

@@ -55,7 +55,7 @@ import { botsByLabel, labelOf } from "@/lib/bot-name"
 import {
   charmAvailable,
   charmBots,
-  charmFirmwareVersion,
+  charmFirmwareSnapshot,
   charmNetwork,
   charmPoses,
   charmUpdateStatus,
@@ -78,6 +78,7 @@ import {
   usePairedCharm,
   useReturnSync,
   type CharmFirmwareFacts,
+  type CharmFirmwareSnapshot,
   type CharmScheme,
   type PairedCharm,
 } from "@/lib/charm"
@@ -148,9 +149,10 @@ export interface CharmNetworkApi {
   saveWifi(ssid: string, pass: string): Promise<number>
   forget(): Promise<number>
   saveTailnet(key: string): Promise<number>
+  /** Where the charm's download has got to, asked again after a write or while one runs. */
   updateStatus(): Promise<CharmUpdateStatus>
-  /** Which build the charm runs; null for a firmware too old to have the ask. */
-  version(): Promise<string | null>
+  /** The build it runs and its download, off one link: the row's one ask when the page opens. */
+  snapshot(): Promise<CharmFirmwareSnapshot>
 }
 
 /** The one implementation: the phone's own functions. */
@@ -160,7 +162,7 @@ const RADIO: CharmNetworkApi = {
   forget: forgetCharmWifi,
   saveTailnet: setCharmTailnetKey,
   updateStatus: charmUpdateStatus,
-  version: charmFirmwareVersion,
+  snapshot: charmFirmwareSnapshot,
 }
 
 /** One form's body in a group: the card's own fill, under the row that heads it. */

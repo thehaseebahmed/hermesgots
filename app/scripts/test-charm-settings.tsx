@@ -124,7 +124,7 @@ function radio(overrides: Partial<CharmNetworkApi> = {}): CharmNetworkApi {
     forget: async () => 0,
     saveTailnet: async () => 0,
     updateStatus: async () => ({ state: 0, percent: 0, reason: 0 }),
-    version: async () => "0.1.0",
+    snapshot: async () => ({ version: "0.1.0", update: { state: 0, percent: 0, reason: 0 } }),
     ...overrides,
   }
 }
@@ -375,17 +375,18 @@ function firmwareFacts(overrides: Partial<CharmFirmwareFacts> = {}): CharmFirmwa
 }
 
 /**
- * The firmware's facts are the page's one read: the risk the split carries is a row that polls
- * beside them, which would put two asks on one link. Read here as the hook a page calls, and then
- * as the row handed what it read — the hook asks each thing once, and the row asks nothing at all.
+ * The firmware's facts are the page's one read, and one link's: the build the charm runs and its
+ * download's progress ride the same ask, because the charm holds one connection at a time and two
+ * asks would be two of them. Read here as the hook a page calls, and then as the row handed what it
+ * read — the hook asks once, and the row asks nothing at all.
  */
-test("the firmware's facts are asked once, and a row handed them asks nothing", async () => {
-  let versions = 0
+test("the firmware's facts are asked once on one link, and a row handed them asks nothing", async () => {
+  let links = 0
   let downloads = 0
   const api = radio({
-    version: async () => {
-      versions += 1
-      return "0.1.0"
+    snapshot: async () => {
+      links += 1
+      return { version: "0.1.0", update: { state: CharmUpdateState.Idle, percent: 0, reason: 0 } }
     },
     updateStatus: async () => {
       downloads += 1
@@ -401,14 +402,18 @@ test("the firmware's facts are asked once, and a row handed them asks nothing", 
   }
   await mount(<Page />, async () => {
     await until(async () => text().includes("Charm 0.1.0 · 0.2.0 available"), "the row's line")
-    assert.deepEqual([versions, downloads], [1, 1], "one ask of each — and not one per render")
+    assert.deepEqual(
+      [links, downloads],
+      [1, 0],
+      "one ask carrying both answers — and not one per render",
+    )
   })
 
   const facts = held
   assert.ok(facts, "the hook answered the page its facts")
   await mount(<FirmwareRow facts={facts} busy={false} onOpenFirmware={() => {}} />, async () => {
     await settle()
-    assert.deepEqual([versions, downloads], [1, 1], "a row handed the facts asks the charm nothing")
+    assert.deepEqual([links, downloads], [1, 0], "a row handed the facts asks the charm nothing")
   })
 })
 

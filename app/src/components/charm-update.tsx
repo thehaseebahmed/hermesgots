@@ -3,6 +3,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 import { useNavigate, useSearchParams } from "react-router"
 import { CableIcon, ExternalLinkIcon, FileUpIcon, SparklesIcon } from "lucide-react"
 
+import { useDeveloper } from "@/components/developer-only"
 import {
   ActionRow,
   Caption,
@@ -73,7 +74,7 @@ import {
   STEP_STOPPED,
 } from "@/lib/charm-words"
 import { firmwareDoor, firmwareFetchUrl } from "@/lib/firmware-fetch"
-import { getActiveProfile, getSettings } from "@/lib/db"
+import { getActiveProfile } from "@/lib/db"
 import { openExternal } from "@/lib/native"
 import { quietly } from "@/lib/report"
 import { CHARM_POLL_MS } from "@/lib/freshness"
@@ -214,7 +215,7 @@ export function CharmUpdateScreen({
   charm?: PairedCharm | null
 }) {
   const active = useLiveQuery(getActiveProfile, [])
-  const settings = useLiveQuery(getSettings, [])
+  const developer = useDeveloper()
   const profile = given ?? active
   const paired = usePairedCharm()
   const charm = givenCharm ?? paired
@@ -585,7 +586,7 @@ export function CharmUpdateScreen({
           />
           {/* The route behind this row is `DeveloperOnly`: drawn without the switch, it would
               bounce the reader back to the menu, so it waits for the settings to say it is on. */}
-          {settings?.developer && <LinkRow to="/settings/debug-charm" title={CHARM_LOG} />}
+          {developer && <LinkRow to="/settings/debug-charm" title={CHARM_LOG} />}
         </Group>
       )}
       {note && <Caption>{note}</Caption>}
@@ -605,7 +606,7 @@ export function CharmUpdateScreen({
       )}
       {pickMode && !offering && (
         <>
-          <PickGroup disabled={busy || blocked} onPick={sendFile} fileRef={file} />
+          <FileDoor alone disabled={busy || blocked} onPick={sendFile} fileRef={file} />
           {/* The third way this door is drawn, and the same rule on it: a door shut with no word
               beside it is a door a reader presses and cannot understand. */}
           {blocked && <Caption>{CHARGE_FIRST}</Caption>}
@@ -617,7 +618,7 @@ export function CharmUpdateScreen({
           <Caption>{FIRMWARE_NOT_PUBLISHED}</Caption>
           {/* The same gate, and the same line: a file door shut with no word beside it is a door a
               reader presses and cannot understand. */}
-          <PickGroup disabled={busy || blocked} onPick={sendFile} fileRef={file} />
+          <FileDoor alone disabled={busy || blocked} onPick={sendFile} fileRef={file} />
           {blocked && <Caption>{CHARGE_FIRST}</Caption>}
         </>
       )}
@@ -755,17 +756,24 @@ function Offer({
  * The reader's own way onto the walk: a file the phone already holds. A web file input is the
  * whole Android picker — the WebView opens the system's own — and it is cleared after each pick,
  * so a second try at a failed upload is exactly when picking the same file again works.
+ *
+ * `alone` is the door drawn by itself — a screen with nothing published, or a walk already ended —
+ * rather than beside the offer's `Install`. It is the same button and the same input either way:
+ * one door written once, wrapped in the row it stands in when it has no row of its own.
  */
 function FileDoor({
   disabled,
   onPick,
   fileRef,
+  alone,
 }: {
   disabled?: boolean
   onPick: (file: File) => void
   fileRef: { current: HTMLInputElement | null }
+  /** Whether this is the screen's only door: it draws the group and row around itself. */
+  alone?: boolean
 }) {
-  return (
+  const door = (
     <>
       <Button
         id="charm-update-choose"
@@ -793,23 +801,10 @@ function FileDoor({
       />
     </>
   )
-}
-
-/** The file door on its own, under a screen that has nothing published or a walk already ended. */
-function PickGroup({
-  disabled,
-  onPick,
-  fileRef,
-}: {
-  disabled?: boolean
-  onPick: (file: File) => void
-  fileRef: { current: HTMLInputElement | null }
-}) {
+  if (!alone) return door
   return (
     <Group>
-      <div className={rowClass}>
-        <FileDoor disabled={disabled} onPick={onPick} fileRef={fileRef} />
-      </div>
+      <div className={rowClass}>{door}</div>
     </Group>
   )
 }
