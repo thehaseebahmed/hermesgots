@@ -110,6 +110,7 @@ draws for every charm.
    Check: `cd app && node --max-old-space-size=1536 --test --import ./scripts/component-hooks.mjs
    scripts/test-charm-settings.tsx`; a stand-in radio that answers `Joining`, then `Failed` with
    `BadKey`, draws the refusal without the section being reopened — red before, green after.
+   Done.
 
 ## Decisions
 

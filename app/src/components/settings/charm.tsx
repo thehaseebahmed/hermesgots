@@ -83,6 +83,7 @@ import {
 import {
   CHARM_QUIET_PRESETS,
   CharmCode,
+  CharmLinkState,
   CharmUpdateState,
   charmKept,
   charmWakeOf,
@@ -311,6 +312,31 @@ export function CharmNetwork({
   /** What the charm last answered about its two links, and where its download had got to. */
   const links = readValue(read)
   const downloading = readValue(update)
+
+  /**
+   * The tailnet is the one link here the charm starts on its own, after the write that gave it a key:
+   * an answer taken as the key was saved is a report from before the charm did anything with it, and
+   * the reason it settles on is the whole point of the row. So while it is joining, or off with a key
+   * this phone handed over and no reason yet, the section asks again — and stops when the charm is up,
+   * has said why it is not, or the ask itself failed and there is nothing to follow.
+   */
+  const following =
+    read.state !== "failed" &&
+    (links?.tailnet.state === CharmLinkState.Joining ||
+      (links?.tailnet.state === CharmLinkState.Off &&
+        Boolean(tailnet) &&
+        links.tailnet.reason === undefined))
+  useEffect(() => {
+    if (!following) return
+    let live = true
+    const timer = setInterval(() => {
+      if (live) void refresh()
+    }, CHARM_POLL_MS)
+    return () => {
+      live = false
+      clearInterval(timer)
+    }
+  }, [following, refresh])
 
   /**
    * Where the charm's download has got to, asked when the section opens and again after each write. A
