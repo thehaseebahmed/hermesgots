@@ -177,7 +177,9 @@ export const FIRMWARE_FETCH_PATH = "/charm/firmware/image/fetch"
  * releases, so a Downloading bar can be watched moving rather than assumed; `fetchToken` mints the
  * short-lived door a charm's own walk is admitted by, which no test turns on that opens no door,
  * and `fetchPath` is the route the mint answers beside that token — `false` for a host from before
- * the route was answered at all, which leaves the walk no path to append.
+ * the route was answered at all, which leaves the walk no path to append. The record rides as
+ * `CharmFirmware` reads it: a release with notes and a build date, with notes alone, or with
+ * neither, is the same object served to the screen.
  */
 export function serveFirmware(
   name: string,

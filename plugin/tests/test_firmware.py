@@ -177,6 +177,66 @@ class AnnotationsTest(unittest.TestCase):
         self.assertIn("image", str(raised.exception))
 
 
+class NotesTest(unittest.TestCase):
+    """The release's own words: the notes a What's-new sheet draws, the build date under them, and
+    the cap that keeps a chatty release from filling the screen — or from taking the record down.
+
+    The notes are the one annotation read here that may be too long to draw, and the refusal is
+    scoped to it: `describe` drops them and says so, while the version, size and SHA-256 still
+    answer, because a release whose notes nobody can read is still a release to install.
+    """
+
+    def test_the_notes_and_the_build_date_ride_the_answer(self):
+        answer = firmware.describe(
+            manifest(
+                **{
+                    firmware.NOTES_ANNOTATION: "The pet blinks again, and the clock keeps time.",
+                    firmware.BUILT_ANNOTATION: "2026-03-03T09:30:00Z",
+                }
+            )
+        )
+        self.assertEqual(answer["notes"], "The pet blinks again, and the clock keeps time.")
+        self.assertTrue(
+            answer["built"].startswith("2026-03-03T09:30:00"), "the date the release was built"
+        )
+
+    def test_notes_at_the_cap_are_drawn_and_one_character_over_is_not(self):
+        kept = firmware.describe(manifest(**{firmware.NOTES_ANNOTATION: "n" * firmware.NOTES_CAP}))
+        self.assertEqual(len(kept["notes"]), firmware.NOTES_CAP, "the cap itself is drawable")
+        self.assertNotIn("notesSaid", kept)
+
+        refused = firmware.describe(manifest(**{firmware.NOTES_ANNOTATION: "n" * (firmware.NOTES_CAP + 1)}))
+        self.assertNotIn("notes", refused)
+
+    def test_notes_over_the_cap_are_refused_in_a_sentence_naming_it_and_the_record_answers(self):
+        refused = firmware.describe(
+            manifest(**{firmware.NOTES_ANNOTATION: "n" * (firmware.NOTES_CAP + 1)})
+        )
+        said = refused["notesSaid"]
+        self.assertIn("2,000", said, "the cap, as a reader reads it")
+        self.assertIn("notes", said)
+        self.assertIn("longer", said)
+        self.assertNotIn("n" * 20, said, "and never the notes themselves")
+        self.assertEqual(refused["version"], "0.2.0", "the record still answers")
+        self.assertEqual(refused["size"], len(IMAGE))
+        self.assertEqual(refused["sha256"], SHA)
+
+    def test_a_missing_build_date_leaves_the_key_off(self):
+        answer = firmware.describe(manifest(**{firmware.NOTES_ANNOTATION: "Something changed."}))
+        self.assertNotIn("built", answer, "every release published today names no date")
+
+    def test_a_date_that_isnt_a_date_is_left_off_rather_than_refused(self):
+        for said in ("last tuesday", "2026-13-45", "yesterday"):
+            answer = firmware.describe(manifest(**{firmware.BUILT_ANNOTATION: said}))
+            self.assertNotIn("built", answer, said)
+            self.assertEqual(answer["version"], "0.2.0", "a date nobody can read is not a fault")
+
+    def test_a_release_that_names_no_notes_is_answered_without_them(self):
+        answer = firmware.describe(manifest())
+        self.assertNotIn("notes", answer, "the row is drawn from what the release says")
+        self.assertNotIn("notesSaid", answer, "and nothing was refused either")
+
+
 class RefusalTest(unittest.TestCase):
     def test_a_token_that_cannot_read_packages_says_which_scope_to_add(self):
         for code in (401, 403):
@@ -394,6 +454,36 @@ class RouteTest(unittest.TestCase):
         with patch.object(firmware, "_open", serve(manifest(**{firmware.SLOT_ANNOTATION: "6553600"}))):
             payload = self.call("/charm/firmware")["payload"]
         self.assertEqual(payload["slot"], 6553600, "what the app measures a picked file against")
+
+    def test_the_route_carries_the_notes_and_the_build_date(self):
+        with patch.object(
+            firmware,
+            "_open",
+            serve(
+                manifest(
+                    **{
+                        firmware.NOTES_ANNOTATION: "The pet blinks again.",
+                        firmware.BUILT_ANNOTATION: "2026-03-03T09:30:00Z",
+                    }
+                )
+            ),
+        ):
+            payload = self.call("/charm/firmware")["payload"]
+        self.assertEqual(payload["notes"], "The pet blinks again.")
+        self.assertTrue(payload["built"].startswith("2026-03-03T09:30:00"))
+
+    def test_a_release_over_the_notes_cap_answers_the_record_rather_than_a_refusal(self):
+        """The refusal is the notes', not the package's: a chatty release is still installable."""
+        chatty = manifest(**{firmware.NOTES_ANNOTATION: "n" * (firmware.NOTES_CAP + 1)})
+        with patch.object(firmware, "_open", serve(chatty)):
+            answer = self.call("/charm/firmware")
+        self.assertEqual(answer["status"], 200, "the image is still offered")
+        payload = answer["payload"]
+        self.assertEqual(payload["version"], "0.2.0")
+        self.assertEqual(payload["size"], len(IMAGE))
+        self.assertEqual(payload["sha256"], SHA)
+        self.assertNotIn("notes", payload)
+        self.assertIn("2,000 characters", payload["notesSaid"])
 
     def test_the_image_route_sends_the_bytes_and_their_length(self):
         with patch.object(firmware, "_open", serve()):

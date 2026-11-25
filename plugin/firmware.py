@@ -15,6 +15,7 @@ told to expect, so that too is said in words the row can draw.
 from __future__ import annotations
 
 import base64
+import datetime
 import json
 import logging
 import os
@@ -44,6 +45,14 @@ SIZE_ANNOTATION = "dev.gots.charm.size"
 # The app partition's size, which a release from this one on names: a package from before it carries
 # no slot, and the app measures a picked file against its own.
 SLOT_ANNOTATION = "dev.gots.charm.slot"
+# The release's own words and the moment its build was made: what the update offer's What's-new
+# sheet draws. Both are optional — every release published today names neither — and the notes are
+# the one thing here that may be too long to draw, which is said rather than refused.
+NOTES_ANNOTATION = "dev.gots.charm.notes"
+BUILT_ANNOTATION = "org.opencontainers.image.created"
+# How much of a release's notes the sheet can draw. A release that writes more is answered without
+# its notes: the notes are a courtesy, and the version, the bytes and their hash are the record.
+NOTES_CAP = 2000
 ANNOTATIONS = (
     ("version", VERSION_ANNOTATION, "version"),
     ("sha256", SHA256_ANNOTATION, "SHA-256"),
@@ -130,13 +139,35 @@ def byte_count(value: str, what: str) -> int:
     return count
 
 
-def describe(manifest: Any) -> Dict[str, Any]:
-    """The version, byte count, SHA-256 and slot a tag's manifest carries, or the refusal saying
-    which is missing. They are annotations rather than fields, so a manifest that has none is
-    answered in words — never as a zero size or an empty version the app would compare against.
+def iso_date(value: str) -> Optional[str]:
+    """An ISO 8601 date or date-time in the one spelling the app reads, or None when it isn't one.
 
-    The slot is the one annotation a package may leave out: a release from before it names none, and
-    the app then measures a picked file against its own constant.
+    The release writes this from its own clock, so the reader takes either a date or a date-time,
+    with or without a zone, and answers it in the `T` form JavaScript parses everywhere — a
+    manifest's own spelling is kept in nothing else, and a date nobody can read is left off rather
+    than refused: nothing about the image turns on it.
+    """
+    written = value.strip()
+    for parse in (datetime.datetime.fromisoformat, datetime.date.fromisoformat):
+        try:
+            return parse(written).isoformat()
+        except ValueError:
+            continue
+    return None
+
+
+def describe(manifest: Any) -> Dict[str, Any]:
+    """The version, byte count, SHA-256, slot, notes and build date a tag's manifest carries, or the
+    refusal saying which of the required ones is missing. They are annotations rather than fields,
+    so a manifest that has none is answered in words — never as a zero size or an empty version the
+    app would compare against.
+
+    Three are optional, each because a release published before it exists without it: the slot (the
+    app then measures a picked file against its own constant), the notes and the build date. Notes
+    over ``NOTES_CAP`` are dropped and answered as the sentence ``notesSaid`` carries instead of
+    being refused — a chatty release must not take its own record down with it, since ``latest()``
+    and ``image()`` give back whatever this raises. A date nobody can read is left off for the same
+    reason: nothing is installed by it.
     """
     found = manifest.get("annotations") if isinstance(manifest, dict) else None
     found = found if isinstance(found, dict) else {}
@@ -161,6 +192,20 @@ def describe(manifest: Any) -> Dict[str, Any]:
     slot = found.get(SLOT_ANNOTATION)
     if isinstance(slot, str) and slot.strip():
         described["slot"] = byte_count(slot.strip(), "slot")
+    notes = found.get(NOTES_ANNOTATION)
+    if isinstance(notes, str) and notes.strip():
+        kept = notes.strip()
+        if len(kept) <= NOTES_CAP:
+            described["notes"] = kept
+        else:
+            described["notesSaid"] = (
+                f"The published charm firmware's notes are longer than the {NOTES_CAP:,} characters "
+                "this app draws, so they aren't shown."
+            )
+    built = found.get(BUILT_ANNOTATION)
+    at = iso_date(built) if isinstance(built, str) else None
+    if at is not None:
+        described["built"] = at
     return described
 
 

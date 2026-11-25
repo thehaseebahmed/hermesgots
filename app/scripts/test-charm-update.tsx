@@ -314,6 +314,100 @@ test("a returning visit joins the running walk and draws no offer", async () => 
 })
 
 /**
+ * The release's own words, over the offer: what changed, how big it is, when it was built, and the
+ * caveat the charm's page gave up when the offer took it. Each string is spelled here rather than
+ * read off `charm-words`, so a rewording that reaches the screen without this test is a rewording
+ * the test sees; the date is the house's own style, built the way the screen builds it.
+ */
+const NOTES_ROW = "What's new"
+const NOTES = "The pet blinks again, and the clock keeps time."
+const BUILT = "2026-03-03T09:30:00Z"
+const builtLine = `Built ${new Date(BUILT).toLocaleDateString([], {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+})}`
+const EVERYDAY_BUILD =
+  "The published image is the everyday build, not a sealed one: it installs over the air on any charm whose flash isn't sealed. A sealed charm refuses it, and says so in its own words."
+/** A package's own size, as a release names it: a megabyte and a half of firmware. */
+const RELEASE = { ...IMAGE_PUBLISHED, size: 1_572_864 }
+/** A host's own sentence for a release whose notes it would not draw: the app repeats it as given. */
+const NOTES_REFUSED =
+  "The release's notes are longer than the 2,000 characters this app draws, so they aren't shown."
+
+test("the sheet draws the notes, the size and the date, and no row without notes", async () => {
+  const notesRow = () => findAll("button").find((one) => wordsOf(one) === NOTES_ROW)
+
+  // A release that says what changed and when it was built: a row on the offer, one sheet behind it.
+  const said = serveFirmware("update-notes", { ...RELEASE, notes: NOTES, built: BUILT }, IMAGE)
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={radio()} profile={said.profile} />),
+    async () => {
+      await until(async () => Boolean(find("#charm-update-install")), "the offer")
+      assert.equal(find("[role='dialog']"), null, "nothing is drawn until the reader asks")
+      const row = notesRow()
+      assert.ok(row, "the row that says what is new")
+      await click(row)
+
+      const sheet = find("[role='dialog']")
+      assert.ok(sheet, "the sheet opened")
+      const words = wordsOf(sheet)
+      assert.ok(words.includes(NOTES), "the release's notes, as they arrived")
+      assert.ok(words.includes("Size 1.5 MB"), "the image's size, in the app's own bytes")
+      assert.ok(words.includes(builtLine), `the build date: ${builtLine}`)
+      assert.ok(words.includes(EVERYDAY_BUILD), "and the everyday build's caveat, said once here")
+    },
+  )
+
+  // A release from before the date annotation: the notes and the size, no date line.
+  resetCharmUpdateWalk()
+  const undated = serveFirmware("update-notes-undated", { ...RELEASE, notes: NOTES }, IMAGE)
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={radio()} profile={undated.profile} />),
+    async () => {
+      await until(async () => Boolean(find("#charm-update-install")), "the offer")
+      const row = notesRow()
+      assert.ok(row, "a release with notes draws the row")
+      await click(row)
+      const words = wordsOf(find("[role='dialog']"))
+      assert.ok(words.includes(NOTES), "its notes")
+      assert.ok(words.includes("Size 1.5 MB"), "its size")
+      assert.ok(!words.includes("Built"), "and no date line where the release names none")
+    },
+  )
+
+  // A release whose notes the host refused to draw: the row is still drawn, and the host's own
+  // sentence is what the sheet says — the record around it was never in question.
+  resetCharmUpdateWalk()
+  const refused = serveFirmware("update-notes-refused", { ...RELEASE, notesSaid: NOTES_REFUSED }, IMAGE)
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={radio()} profile={refused.profile} />),
+    async () => {
+      await until(async () => Boolean(find("#charm-update-install")), "the offer")
+      const row = notesRow()
+      assert.ok(row, "a refused release draws the row too, so the reader learns why")
+      await click(row)
+      const words = wordsOf(find("[role='dialog']"))
+      assert.ok(words.includes(NOTES_REFUSED), "the host's sentence, as it was given")
+      assert.ok(words.includes("Size 1.5 MB"), "and the record still answers its size")
+    },
+  )
+
+  // A release that names no notes: no row, and no sheet to open.
+  resetCharmUpdateWalk()
+  const quiet = serveFirmware("update-notes-none", RELEASE, IMAGE)
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={radio()} profile={quiet.profile} />),
+    async () => {
+      await until(async () => Boolean(find("#charm-update-install")), "the offer")
+      await settle()
+      assert.equal(notesRow(), undefined, "no row where the release names no notes")
+      assert.equal(find("[role='dialog']"), null, "and nothing to open")
+    },
+  )
+})
+
+/**
  * The walk's own line about leaving, and where it is drawn: under the title while the walk runs,
  * and nowhere else — an offer has nothing in flight to keep going, and an end has already stopped.
  * The sentence is spelled here rather than read off `charm-words`, so a rewording that reaches the

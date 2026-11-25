@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useNavigate, useSearchParams } from "react-router"
-import { CableIcon, ExternalLinkIcon, FileUpIcon } from "lucide-react"
+import { CableIcon, ExternalLinkIcon, FileUpIcon, SparklesIcon } from "lucide-react"
 
 import {
   ActionRow,
@@ -45,6 +45,7 @@ import {
 } from "@/lib/charm-protocol"
 import {
   batteryWords,
+  builtWords,
   CABLE_TITLE,
   CABLE_WORDS,
   CHARM_LOG,
@@ -53,6 +54,7 @@ import {
   downloadWords,
   fetchWords,
   FILE_TOO_BIG,
+  FIRMWARE_CAPTION,
   FIRMWARE_REPO,
   firmwareDoneWords,
   FIRMWARE_LEAVE,
@@ -61,6 +63,8 @@ import {
   FIRMWARE_NOT_PUBLISHED,
   FIRMWARE_SENT,
   KEEP_CLOSE,
+  NOTES_TITLE,
+  notesSizeWords,
   offerLinkWords,
   PUBLISHED_CHANGED,
   REPO_ROW,
@@ -195,8 +199,10 @@ const STEP_TITLES: Record<StepView["name"], string> = {
  * a cable needs and a row opening the firmware's repository, where the flasher and its steps live,
  * with the charm's log a row further down wherever this device's Developer switch is on.
  * Nothing goes until the reader taps: a fresh visit first draws an offer of the published image —
- * the charm's charge, its link, the one instruction the link needs, and the doors, `Install` and a
- * file the phone holds — and a charge under 20% off the charger shuts both until the charm is
+ * the charm's charge, its link, the one instruction the link needs, the doors, `Install` and a
+ * file the phone holds, and, where the release says what changed or why it could not be said, a
+ * What's-new row whose sheet holds the notes, the image's size, the build date and the everyday
+ * build's caveat — and a charge under 20% off the charger shuts both until the charm is
  * charged. The Firmware row's Update button opens that offer on the published image; its picker
  * opens the same offer with the file door alone, which walks the same steps minus the download —
  * and always over the link, since a file the phone holds has no door to walk. The reader can
@@ -556,6 +562,7 @@ export function CharmUpdateScreen({
           battery={battery}
           link={link}
           blocked={blocked}
+          record={pickMode ? undefined : published}
           install={
             !pickMode && published
               ? { version: published.version, onInstall: () => void runPublished(published) }
@@ -630,15 +637,22 @@ function Bar({ value }: { value: number }) {
 
 /**
  * The offer a fresh visit reads before anything goes: the charm's charge as the gate reads it, the
- * link the charm reported, the one instruction the link needs, and the doors — the published image
- * by name, or a file the phone already holds. The charge is the gate: under 20% and off the
- * charger, both doors are shut and one line says what opens them.
+ * link the charm reported, the one instruction the link needs, what the release says changed, and
+ * the doors — the published image by name, or a file the phone already holds. The charge is the
+ * gate: under 20% and off the charger, both doors are shut and one line says what opens them.
+ *
+ * The What's-new row is the release's own words: drawn only where the package names notes, or
+ * where the host refused them in a sentence of its own, so a release that says nothing draws no
+ * row and no sheet. Everything the sheet holds is the record's — the notes as they arrived, the
+ * image's size, the build date where it named one, and the everyday build's caveat, which the
+ * charm's page carried until the offer took it.
  */
 function Offer({
   battery,
   link,
   blocked,
   install,
+  record,
   onPick,
   fileRef,
 }: {
@@ -648,9 +662,12 @@ function Offer({
   blocked: boolean
   /** The published door, on the build it names; a screen opened for a file draws none. */
   install?: { version: string; onInstall: () => void }
+  /** The record the offer is drawn from: its notes, its size and the date it was built. */
+  record?: CharmFirmware
   onPick: (file: File) => void
   fileRef: { current: HTMLInputElement | null }
 }) {
+  const built = record?.built ? builtWords(record.built) : null
   return (
     <>
       <Group>
@@ -659,6 +676,24 @@ function Offer({
         <div className={rowClass}>
           <RowText title={KEEP_CLOSE} />
         </div>
+        {record && (record.notes || record.notesSaid) && (
+          <SheetRow
+            icon={SparklesIcon}
+            title={NOTES_TITLE}
+            sheet={({ open, onOpenChange }) => (
+              <PickSurface open={open} onOpenChange={onOpenChange} title={NOTES_TITLE}>
+                {record.notes ? (
+                  <p className="whitespace-pre-line py-2 text-sm">{record.notes}</p>
+                ) : (
+                  <p className="py-2 text-sm text-muted-foreground">{record.notesSaid}</p>
+                )}
+                <p className="py-2 text-sm text-muted-foreground">{notesSizeWords(record.size)}</p>
+                {built && <p className="py-2 text-sm text-muted-foreground">{built}</p>}
+                <p className="py-2 text-sm text-muted-foreground">{FIRMWARE_CAPTION}</p>
+              </PickSurface>
+            )}
+          />
+        )}
         <div className={cn(rowClass, "flex-wrap")}>
           {install && (
             <Button

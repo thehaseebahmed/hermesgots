@@ -2894,6 +2894,18 @@ export interface CharmFirmware {
    * A package from before that annotation carries none, and the app uses its own constant.
    */
   slot?: number
+  /**
+   * What the release says changed, drawn in the offer's What's-new sheet. A release that names
+   * none — every one published today — draws no sheet at all.
+   */
+  notes?: string
+  /**
+   * The host's own sentence where the release's notes were too long to draw: the sheet says this
+   * instead of them, and the version, size and hash are answered as they always were.
+   */
+  notesSaid?: string
+  /** When the release's build was made, as the ISO 8601 the host read; absent where it named none. */
+  built?: string
 }
 
 /** A firmware image is a megabyte and a half, and the host has to fetch it from the registry first. */
@@ -2924,7 +2936,20 @@ export async function getCharmFirmware(
   const slot = body.slot
   if (slot !== undefined && (typeof slot !== "number" || !Number.isInteger(slot) || slot <= 0))
     throw new HermesError("The host's answer about the charm firmware was unreadable")
-  return { version: body.version, size: body.size, sha256: body.sha256, slot }
+  // The release's own words are the answer's courtesy, never its record: a host that names none,
+  // or names one in a shape this app cannot read, still answers a version, a size and a hash that
+  // install. Anything but a non-empty string is no word at all, and the sheet draws what it has.
+  const word = (value: unknown) =>
+    typeof value === "string" && value.trim() ? value : undefined
+  return {
+    version: body.version,
+    size: body.size,
+    sha256: body.sha256,
+    slot,
+    notes: word(body.notes),
+    notesSaid: word(body.notesSaid),
+    built: word(body.built),
+  }
 }
 
 /**
