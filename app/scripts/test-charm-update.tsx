@@ -1,10 +1,7 @@
 /**
- * Settings → Charm's update screen: the steps a firmware update walks, drawn over a stand-in
- * for the radio and a faked host, because a browser has neither. The row's send-flow guarantees
- * moved here with the flow itself — the published image is checked against the version the screen
- * read, a moved tag is re-read, a file over the slot never goes, a failed upload is drawn in the
- * charm's own words, and a charm that does not come back is said — beside the walk's own: the
- * steps in order, each bar moving, and the failure's words with what to do.
+ * Settings → Charm's update screen, over a stand-in for the radio and a faked host, because a
+ * browser has neither: the offer and its gate, the walk's steps and bars, the end and the failure,
+ * the cable sheet, the notes, and both widths and modes.
  */
 import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
@@ -12,10 +9,9 @@ import test from "node:test"
 import { type ComponentProps, type ReactElement, act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
-import { CharmUpdateScreen, type CharmUpdateApi } from "@/components/charm-update"
-import { resetCharmUpdateWalk } from "@/lib/charm-update-walk"
-import { CharmNetwork, type CharmNetworkApi } from "@/components/settings/charm"
-import { useCharmReport, type PairedCharm } from "@/lib/charm"
+import { CharmUpdateScreen } from "@/components/charm-update"
+import { resetCharmUpdateWalk, walk } from "@/lib/charm-update-walk"
+import { type PairedCharm } from "@/lib/charm"
 import {
   CHARM_SLOT_BYTES,
   CharmLinkState,
@@ -24,18 +20,24 @@ import {
 } from "@/lib/charm-protocol"
 import { db } from "@/lib/db"
 import {
+  PHONE_AND_TABLET_IN_BOTH_MODES,
+  FIRMWARE_FETCH_PATH,
+  FIRMWARE_FETCH_TOKEN,
+  Nav,
+  atMode,
   click,
   findAll,
   find,
-  findText,
-  FIRMWARE_FETCH_PATH,
-  FIRMWARE_FETCH_TOKEN,
+  missing,
   mount,
+  nav,
   seedSettings,
   serveFirmware,
   settle,
   text,
   until,
+  watchNotes,
+  wordsOf,
 } from "./component-kit.tsx"
 
 test.beforeEach(async () => {
@@ -46,7 +48,7 @@ test.beforeEach(async () => {
   await seedSettings()
 })
 
-/** The screen as its route mounts it: the URL carries the mode, as the row's buttons write it. */
+/** The screen as its route mounts it, the URL carrying the mode, as the row's buttons write it. */
 const at = (entry: string, screen: ReactElement) => (
   <MemoryRouter initialEntries={[entry]}>
     <Routes>
@@ -55,24 +57,34 @@ const at = (entry: string, screen: ReactElement) => (
   </MemoryRouter>
 )
 
+/** The screen with the charm's own page behind it, so a door that leaves for it is read by its URL. */
+const atBoth = (entry: string, screen: ReactElement) => (
+  <MemoryRouter initialEntries={[entry]}>
+    <Nav />
+    <Routes>
+      <Route path="/settings/charm-firmware" element={screen} />
+      <Route path="/settings/charm" element={<p>the charm page</p>} />
+    </Routes>
+  </MemoryRouter>
+)
+
 /**
  * The screen's own asks of the charm, as the phone's radio would answer them. The build the charm
- * runs is modelled as the charm itself keeps it: 0.1.0 until a walk's own reboot lands it on
- * 0.2.0 — the flip is the reboot a SUCCEEDED walk produces, an upload the charm took or the
- * fetch watch's own Ready, never a failed one. A charm that refused never reboots, so a retry's
- * own re-read still finds the build it started on.
+ * runs is modelled as the charm keeps it: 0.1.0 until a walk's reboot lands it on 0.2.0 — an upload
+ * the charm took or a fetch watch's Ready, never a failure, so a retry re-reads what it started on.
  */
 function radio(overrides: Partial<ComponentProps<typeof CharmUpdateScreen>["api"]> = {}) {
   let rebooted = false
   const { upload, updateStatus, ...rest } = overrides
   return {
     version: async () => (rebooted ? "0.2.0" : "0.1.0"),
-    // A report with both links down, so no door is open: the walk the tests around here pin is the
-    // transfer's, and the fetch walks name the report of their own.
+    // Both links down, so no fetch door is open: these cases pin the transfer's walk.
     network: async () => ({
       wifi: { state: CharmLinkState.Off, reason: 0, ip: "", ssid: "" },
       tailnet: { state: CharmLinkState.Off, ip: "" },
     }),
+    // Over the gate's 20% and off the charger, so the doors are open unless a case says otherwise.
+    battery: async () => ({ percent: 80, charging: false }),
     updateStatus: async () => {
       const answer = await (updateStatus
         ? updateStatus()
@@ -105,8 +117,8 @@ function radio(overrides: Partial<ComponentProps<typeof CharmUpdateScreen>["api"
 const bars = () =>
   findAll('[role="progressbar"]').map((bar) => Number(bar.getAttribute("aria-valuenow")))
 
-/** The first button on screen with these words. */
-const button = (label: string) => findText("button", label)
+/** The screen's foot: the last thing it draws, where the keep-close line stands. */
+const foot = () => wordsOf(document.body.lastElementChild?.lastElementChild ?? null)
 
 /** Hands the screen a file the way the WebView hands it one: the input's change, with the file on it. */
 async function pick(name: string, size: number) {
@@ -125,6 +137,13 @@ function gate() {
   let release: (() => void) | undefined
   const hold = new Promise<void>((done) => (release = done))
   return { hold, release: () => release?.() }
+}
+
+/** The offer's own `Install`, tapped once it has drawn: a case waits here, not on its first step. */
+async function installFromOffer() {
+  await until(async () => Boolean(find("#charm-update-install")), "the offer")
+  await click(find("#charm-update-install"))
+  await until(async () => walk.running || walk.end !== null, "the walk to start")
 }
 
 const PUBLISHED = { version: "0.2.0", size: 4, sha256: "cd".repeat(32) }
@@ -151,6 +170,664 @@ const ONLINE_WIFI = {
   tailnet: { state: CharmLinkState.Off, ip: "" },
 }
 
+test("the screen opens on the offer, asks the battery as it draws, and sends nothing until Install", async () => {
+  let batteries = 0
+  let uploads = 0
+  const api = radio({
+    battery: async () => {
+      batteries += 1
+      return { percent: 64, charging: false }
+    },
+    // A link the charm reports up, so the instruction row's words are its own and not the link's.
+    network: async () => ONLINE_WIFI,
+    upload: async (image: Uint8Array) => {
+      uploads += 1
+      return { sent: image.length, total: image.length, percent: 100 }
+    },
+  })
+  const host = serveFirmware("update-offer", IMAGE_PUBLISHED, IMAGE)
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
+    async () => {
+      await until(async () => Boolean(find("#charm-update-install")), "the offer")
+      await until(async () => batteries === 1, "the one battery ask")
+      await settle()
+
+      assert.equal(batteries, 1, "the battery was asked once, when the offer drew")
+      assert.ok(text().includes("64%"), "the charm's charge, in the offer")
+      assert.ok(text().includes("Wi-Fi up"), "the charm's link, as it reported it")
+      assert.ok(
+        foot().includes("Keep the phone near the charm"),
+        "and the instruction the link needs, at the screen's foot",
+      )
+      assert.ok(
+        !wordsOf(find("[data-settings-group]")).includes("Keep the phone near the charm"),
+        "not a row inside the offer's group",
+      )
+      assert.equal(
+        find("#charm-update-install")?.textContent,
+        "Install 0.2.0",
+        "the published build is named on the door",
+      )
+      assert.deepEqual(
+        [uploads, host.imageReads(), host.mints()],
+        [0, 0, 0],
+        "nothing left the phone before a tap",
+      )
+      assert.ok(!text().includes("Downloading"), "no walk drew its steps before the tap")
+
+      await click(find("#charm-update-install"))
+      await until(async () => text().includes("Updated to 0.2.0 from 0.1.0."), "the walk the tap began")
+      assert.equal(uploads, 1, "the tap is what sent the image")
+      assert.equal(batteries, 2, "the second ask is the tap's own reading of the charge")
+    },
+  )
+})
+
+/**
+ * The gate is about the charm, so the charge is asked as the screen opens rather than after the
+ * host's own read: a registry slow to answer must not leave the offer's charge row blank, nor hold
+ * the gate back until it does. Only `Install`'s label waits on the published record.
+ */
+test("the charge and the link are asked as the screen opens, not after the host's read", async () => {
+  let batteries = 0
+  let links = 0
+  const api = radio({
+    battery: async () => {
+      batteries += 1
+      return { percent: 64, charging: false }
+    },
+    network: async () => {
+      links += 1
+      return ONLINE_WIFI
+    },
+  })
+  const host = serveFirmware("update-charge-early", IMAGE_PUBLISHED, IMAGE)
+  // The host's record held open, as a slow registry holds it: everything else answers at once.
+  const served = globalThis.fetch
+  let release: (() => void) | undefined
+  const held = new Promise<void>((done) => (release = done))
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input instanceof Request ? input.url : input))
+    if (url.pathname.endsWith("/charm/firmware")) await held
+    return served(input, init)
+  }) as typeof fetch
+  try {
+    await mount(
+      at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
+      async () => {
+        await until(
+          async () => batteries === 1 && links === 1,
+          "the charm's charge and link, asked before the host answered",
+        )
+        assert.ok(
+          missing("#charm-update-install"),
+          "the host's read is still out, so no door is named yet",
+        )
+
+        release?.()
+        await until(
+          async () => Boolean(find("#charm-update-install")),
+          "the offer, once it answered",
+        )
+        assert.ok(text().includes("64%"), "and the charge it asked for is already in the row")
+        assert.ok(text().includes("Wi-Fi up"), "so is the link")
+        assert.deepEqual([batteries, links], [1, 1], "the host's own answer asks neither again")
+      },
+    )
+  } finally {
+    release?.()
+  }
+})
+
+/**
+ * The same screen at the phone's width and the tablet's, each in both modes — the convention
+ * `AGENTS.md` asks of every screen. A DOM lays nothing out and paints nothing, so this reads
+ * structure, never a pixel: the colour and the contrast are the stories' and the device's.
+ */
+test("the offer and the walk's steps draw at 390 and at 768, in light and in dark", async () => {
+  for (const { width, dark, said } of PHONE_AND_TABLET_IN_BOTH_MODES) {
+    // The walk outlives a screen, so each combination opens on the offer it is about.
+    resetCharmUpdateWalk()
+    const room = `${width}-${dark ? "dark" : "light"}`
+    const host = serveFirmware(`update-modes-${room}`, IMAGE_PUBLISHED, IMAGE)
+    const api = radio({
+      network: async () => ONLINE_WIFI,
+      battery: async () => ({ percent: 38, charging: false }),
+    })
+    await atMode(width, dark, async () => {
+      await mount(
+        at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
+        async () => {
+          await until(async () => Boolean(find("#charm-update-install")), `${said}: the offer`)
+          await settle()
+          assert.equal(
+            document.documentElement.classList.contains("dark"),
+            dark,
+            `${said}: the mode this case reads the screen under`,
+          )
+          const offer = wordsOf(find("[data-settings-group]"))
+          assert.ok(offer.includes("Battery"), `${said}: the charge the gate reads`)
+          assert.ok(offer.includes("38%"), `${said}: at the level the charm gave`)
+          assert.ok(offer.includes("Link"), `${said}: the link the charm reported`)
+          assert.ok(offer.includes("Wi-Fi up"), `${said}: and its own words`)
+          assert.ok(
+            foot().includes("Keep the phone near the charm"),
+            `${said}: the one instruction the link needs, at the screen's foot`,
+          )
+          assert.equal(
+            find("#charm-update-install")?.textContent,
+            "Install 0.2.0",
+            `${said}: the published build, named on its door`,
+          )
+          assert.equal(
+            find("#charm-update-choose")?.textContent,
+            "Choose a file…",
+            `${said}: and the file door beside it`,
+          )
+          assert.ok(find("#charm-update-file"), `${said}: with the input the door opens`)
+
+          await installFromOffer()
+          await until(
+            async () => text().includes("Updated to 0.2.0 from 0.1.0."),
+            `${said}: the walk's end`,
+            10_000,
+          )
+          const steps = wordsOf(find("[data-settings-group]"))
+          assert.ok(steps.includes("Downloading"), `${said}: the download step, drawn as it ran`)
+          assert.ok(steps.includes("Transferring"), `${said}: the transfer step`)
+          assert.ok(steps.includes("Restarting"), `${said}: and the restart over the reboot`)
+          assert.ok(
+            findAll('[role="progressbar"]').length >= 2,
+            `${said}: a bar for each step that reported one`,
+          )
+        },
+      )
+    })
+  }
+})
+
+/**
+ * The gate's own cases, from SwitchBot's rule: under 20% and off the charger shuts both doors, and
+ * nothing else does — charging passes at the same 12%, a charm that answered -1 never read its own
+ * charge, and an ask that did not land is no fact at all.
+ */
+const GATE_CASES = [
+  { said: "12% not charging", battery: { percent: 12, charging: false }, shut: true },
+  { said: "12% charging", battery: { percent: 12, charging: true }, shut: false },
+  { said: "−1, the charge unknown", battery: { percent: -1, charging: false }, shut: false },
+  { said: "an ask the charm refused", battery: null, shut: false },
+] as const
+
+/** Every case's doors, drawn once at `entry`: the published offer's, or the file door alone. */
+async function gateDoors(entry: string) {
+  for (const [index, gateCase] of GATE_CASES.entries()) {
+    let asked = 0
+    const api = radio({
+      battery: async () => {
+        asked += 1
+        if (!gateCase.battery) throw new Error("the charm didn't answer")
+        return gateCase.battery
+      },
+    })
+    const host = serveFirmware(`update-gate-${index}`, IMAGE_PUBLISHED, IMAGE)
+    await mount(
+      at(entry, <CharmUpdateScreen api={api} profile={host.profile} />),
+      async () => {
+        await until(async () => Boolean(find("#charm-update-choose")), "the offer")
+        await until(async () => asked === 1, "the one battery ask")
+        await settle()
+        const install = find("#charm-update-install") as HTMLButtonElement | null
+        const choose = find("#charm-update-choose") as HTMLButtonElement
+        assert.equal(choose.disabled, gateCase.shut, `${gateCase.said}: the file door`)
+        if (entry.includes("file=1")) {
+          assert.equal(install, null, `${gateCase.said}: the file door draws no Install`)
+        } else {
+          assert.ok(install, `${gateCase.said}: Install is drawn`)
+          assert.equal(install.disabled, gateCase.shut, `${gateCase.said}: Install`)
+        }
+        assert.equal(
+          text().includes("Charge the charm above 20% before updating."),
+          gateCase.shut,
+          `${gateCase.said}: the line under the group says to charge it`,
+        )
+        assert.equal(asked, 1, `${gateCase.said}: the battery was asked once`)
+      },
+    )
+  }
+}
+
+test("the 20% gate shuts the published offer's doors, and only under 20% off the charger", async () => {
+  await gateDoors("/settings/charm-firmware")
+})
+
+test("the 20% gate shuts the file door the same way, and the file door offers no Install", async () => {
+  await gateDoors("/settings/charm-firmware?file=1")
+})
+
+/**
+ * The third place the file door is drawn: a host with nothing published still offers a file, and a
+ * charge under 20% off the charger shuts that door as it shuts the other two. It is the same rule,
+ * so a reader who meets the door here meets the same sentence with it.
+ */
+test("a host with nothing published shuts its file door on the same charge", async () => {
+  const said = "GitHub refused this server's token for the charm firmware."
+  const host = serveFirmware("update-none-gated", said)
+  const api = radio({ battery: async () => ({ percent: 12, charging: false }) })
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
+    async () => {
+      await until(async () => text().includes(said), "the host's own sentence")
+      await until(async () => Boolean(find("#charm-update-choose")), "the picker")
+      const choose = find("#charm-update-choose") as HTMLButtonElement
+      assert.equal(choose.disabled, true, "12% off the charger shuts this door too")
+      assert.ok(
+        text().includes("Charge the charm above 20% before updating."),
+        "and the line beside it says what opens it",
+      )
+    },
+  )
+})
+
+/**
+ * The tap's own ask: the offer draws on a charge read as it opened, and the door is pressed later —
+ * a charm that has fallen under 20% in between must not install on the reading it was offered
+ * under. The tap asks again, so what it refuses leaves the offer standing with the line, no step
+ * drawn and no walk begun.
+ */
+test("a charge that lands under 20% after the offer draws shuts the tap, and no walk begins", async () => {
+  let asked = 0
+  let uploads = 0
+  const api = radio({
+    battery: async () => {
+      asked += 1
+      return asked === 1 ? { percent: 80, charging: false } : { percent: 12, charging: false }
+    },
+    upload: async (image: Uint8Array) => {
+      uploads += 1
+      return { sent: image.length, total: image.length, percent: 100 }
+    },
+  })
+  const host = serveFirmware("update-tap-install", IMAGE_PUBLISHED, IMAGE)
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
+    async () => {
+      await until(async () => Boolean(find("#charm-update-install")), "the offer")
+      await until(async () => asked === 1, "the charge the offer drew")
+      assert.ok(
+        !text().includes("Charge the charm above 20% before updating."),
+        "the offer's own reading opened the door",
+      )
+
+      await click(find("#charm-update-install"))
+      await until(async () => asked === 2, "the charge read again at the tap")
+      await settle()
+
+      assert.equal(uploads, 0, "nothing went: the tap's own reading shut the door")
+      assert.equal(host.imageReads(), 0, "and no image was read for it")
+      assert.equal(walk.running, false, "no walk began")
+      assert.equal(walk.started, null, "so this visit has begun no walk to join")
+      assert.deepEqual(walk.steps, [], "and no step was drawn")
+      assert.ok(!missing("#charm-update-install"), "the offer is still on screen")
+      assert.ok(
+        text().includes("Charge the charm above 20% before updating."),
+        "with the line that says what opens the door",
+      )
+    },
+  )
+})
+
+/** The same tap, on the file door: a package the phone holds is held to the same reading. */
+test("a file picked after the offer is held to the charge the tap reads", async () => {
+  let asked = 0
+  let uploads = 0
+  const api = radio({
+    battery: async () => {
+      asked += 1
+      return asked === 1 ? { percent: 80, charging: false } : { percent: 12, charging: false }
+    },
+    upload: async (image: Uint8Array) => {
+      uploads += 1
+      return { sent: image.length, total: image.length, percent: 100 }
+    },
+  })
+  const host = serveFirmware("update-tap-file", IMAGE_PUBLISHED, IMAGE)
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
+    async () => {
+      await until(async () => Boolean(find("#charm-update-choose")), "the offer")
+      await until(async () => asked === 1, "the charge the offer drew")
+
+      await pick("charm-0.2.0.bin", 8)
+      await until(async () => asked === 2, "the charge read again at the pick")
+      await settle()
+
+      assert.equal(uploads, 0, "the file did not go")
+      assert.equal(walk.running, false, "no walk began")
+      assert.equal(walk.started, null, "and nothing was begun for a later visit to join")
+      assert.deepEqual(walk.steps, [], "no step was drawn")
+      assert.ok(!missing("#charm-update-choose"), "the file door is still on screen")
+      assert.ok(
+        text().includes("Charge the charm above 20% before updating."),
+        "with the line that says what opens it",
+      )
+    },
+  )
+})
+
+/**
+ * The failure's own tap is a send like any other: `Try again` asks the charge before it re-runs the
+ * hand, and a charm that has fallen under 20% leaves the failure card standing with the line.
+ */
+test("a failure's Try again is held by the charge the tap reads", async () => {
+  let asked = 0
+  let uploads = 0
+  const api = radio({
+    battery: async () => {
+      asked += 1
+      return asked <= 2 ? { percent: 80, charging: false } : { percent: 12, charging: false }
+    },
+    upload: async () => {
+      uploads += 1
+      throw new Error("The update failed: it was cancelled")
+    },
+  })
+  const host = serveFirmware("update-tap-retry", IMAGE_PUBLISHED, IMAGE)
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
+    async () => {
+      await installFromOffer()
+      await until(
+        async () => text().includes("The update failed: it was cancelled"),
+        "the walk's end",
+      )
+      await click(find("#charm-update-retry"))
+      await until(async () => asked === 3, "the charge read again at the retry")
+      await settle()
+
+      assert.equal(uploads, 1, "the hand was not run again")
+      assert.equal(walk.running, false, "and no walk began")
+      assert.ok(
+        text().includes("Charge the charm above 20% before updating."),
+        "with the line that says what opens the door",
+      )
+    },
+  )
+})
+
+/**
+ * The tap's ask is a confirmation, so it shuts only what the rule shuts: a charm charging at 12%,
+ * one that answered -1 and an ask that did not land all go on to send, on both doors.
+ */
+const TAP_PASSES = [
+  { said: "12% while charging", battery: { percent: 12, charging: true } },
+  { said: "−1, the charge unknown", battery: { percent: -1, charging: false } },
+  { said: "an ask that did not land", battery: null },
+] as const
+
+test("a charge that still passes the rule at the tap sends, on both doors", async () => {
+  const doors: [string, string][] = [
+    ["install", "/settings/charm-firmware"],
+    ["file", "/settings/charm-firmware?file=1"],
+  ]
+  for (const [door, entry] of doors) {
+    for (const [index, tapCase] of TAP_PASSES.entries()) {
+      resetCharmUpdateWalk()
+      let asked = 0
+      let uploads = 0
+      const api = radio({
+        battery: async () => {
+          asked += 1
+          if (asked === 1) return { percent: 80, charging: false }
+          if (!tapCase.battery) throw new Error("the charm didn't answer")
+          return tapCase.battery
+        },
+        upload: async (image: Uint8Array) => {
+          uploads += 1
+          return { sent: image.length, total: image.length, percent: 100 }
+        },
+      })
+      const host = serveFirmware(`update-tap-pass-${door}-${index}`, IMAGE_PUBLISHED, IMAGE)
+      await mount(
+        at(entry, <CharmUpdateScreen api={api} profile={host.profile} />),
+        async () => {
+          await until(async () => Boolean(find("#charm-update-choose")), "the offer")
+          await until(async () => asked === 1, "the charge the offer drew")
+          if (door === "file") await pick("charm-0.2.0.bin", 8)
+          else await click(find("#charm-update-install"))
+          await until(async () => uploads === 1, `${tapCase.said}: the ${door} door sent`)
+          await until(
+            async () => walk.end?.kind === "done",
+            `${tapCase.said}: the walk the ${door} door began`,
+          )
+          assert.equal(
+            text().includes("Charge the charm above 20% before updating."),
+            false,
+            `${tapCase.said}: no line, since nothing was shut`,
+          )
+        },
+      )
+    }
+  }
+})
+
+/**
+ * The file door drawn alone after a failed walk: this visit read no charge, so the door is open —
+ * and the tap is what holds it, drawing the same sentence beside it. A shut door with no word next
+ * to it is a door a reader presses and cannot understand.
+ */
+test("the file door left after a walk is held by the tap, and says what shuts it", async () => {
+  let uploads = 0
+  const failed = radio({
+    upload: async () => {
+      uploads += 1
+      throw new Error("The update failed: it was cancelled")
+    },
+  })
+  const host = serveFirmware("update-ended-door", IMAGE_PUBLISHED, IMAGE)
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={failed} profile={host.profile} />),
+    async () => {
+      await installFromOffer()
+      await until(
+        async () => text().includes("The update failed: it was cancelled"),
+        "the walk's end",
+      )
+    },
+  )
+  // The reader comes back to the file door with the failed end still standing, on a charm that has
+  // fallen under 20% since: nothing has read the charge on this visit, so the tap is the gate.
+  const shut = radio({ battery: async () => ({ percent: 12, charging: false }) })
+  await mount(
+    at("/settings/charm-firmware?file=1", <CharmUpdateScreen api={shut} profile={host.profile} />),
+    async () => {
+      await until(async () => Boolean(find("#charm-update-choose")), "the picker")
+      await pick("charm-0.2.0.bin", 8)
+      await until(
+        async () => text().includes("Charge the charm above 20% before updating."),
+        "the tap's own line",
+      )
+      assert.equal(uploads, 1, "the file did not go: the tap's reading shut the door")
+    },
+  )
+})
+
+test("a returning visit joins the running walk and draws no offer", async () => {
+  let releaseUpload: (() => void) | undefined
+  let uploads = 0
+  let batteries = 0
+  const api = radio({
+    battery: async () => {
+      batteries += 1
+      return { percent: 80, charging: false }
+    },
+    upload: async (image: Uint8Array) => {
+      uploads += 1
+      await new Promise<void>((done) => (releaseUpload = done))
+      return { sent: image.length, total: image.length, percent: 100 }
+    },
+  })
+  const host = serveFirmware("update-offer-join", IMAGE_PUBLISHED, IMAGE)
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
+    async () => {
+      await installFromOffer()
+      await until(async () => text().includes("Transferring"), "the walk started", 10_000)
+    },
+  )
+  // The reader comes back while the upload is still held: the walk is the screen, not an offer.
+  const askedBeforeReturn = batteries
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
+    async () => {
+      assert.ok(text().includes("Transferring"), "the walk in flight is drawn")
+      assert.ok(missing("#charm-update-install"), "and no offer is drawn over it")
+      await act(async () => {
+        await new Promise((done) => setTimeout(done, 300))
+      })
+      assert.equal(
+        batteries,
+        askedBeforeReturn,
+        "the return asks the battery nothing: there is no offer to draw",
+      )
+      assert.equal(uploads, 1, "no second send")
+      releaseUpload?.()
+      await until(async () => text().includes("Updated to 0.2.0 from 0.1.0."), "the one walk's end", 10_000)
+    },
+  )
+})
+
+/**
+ * The release's own words, over the offer: what changed, how big it is, when it was built. Each
+ * string is spelled here rather than read off `charm-words`, so a rewording that reaches the screen
+ * without this test is a rewording the test sees — and the date is the house's format written out,
+ * not rebuilt from the options the screen builds it with.
+ */
+const NOTES_ROW = "What's new"
+const NOTES = "The pet blinks again, and the clock keeps time."
+const BUILT = "2026-03-03T09:30:00Z"
+const BUILT_LINE = "Built Mar 3, 2026"
+const EVERYDAY_BUILD =
+  "The published image is the everyday build, not a sealed one: it installs over the air on any charm whose flash isn't sealed. A sealed charm refuses it, and says so in its own words."
+/** What the charm does with the bytes before it keeps them, said in the same sheet. */
+const SAVED_BY_HASH =
+  "The charm checks the image against the SHA-256 it was given before it writes the slot."
+/** A package's own size, as a release names it: a megabyte and a half of firmware. */
+const RELEASE = { ...IMAGE_PUBLISHED, size: 1_572_864 }
+/** A host's own sentence for a release whose notes it would not draw: the app repeats it as given. */
+const NOTES_REFUSED =
+  "The release's notes are longer than the 2,000 characters this app draws, so they aren't shown."
+
+test("the sheet draws the notes, the size and the date, and no row without notes", async () => {
+  const notesRow = () => findAll("button").find((one) => wordsOf(one) === NOTES_ROW)
+
+  // A release that says what changed and when it was built: a row on the offer, one sheet behind it.
+  const said = serveFirmware("update-notes", { ...RELEASE, notes: NOTES, built: BUILT }, IMAGE)
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={radio()} profile={said.profile} />),
+    async () => {
+      await until(async () => Boolean(find("#charm-update-install")), "the offer")
+      assert.ok(missing("[role='dialog']"), "nothing is drawn until the reader asks")
+      const row = notesRow()
+      assert.ok(row, "the row that says what is new")
+      await click(row)
+
+      const sheet = find("[role='dialog']")
+      assert.ok(sheet, "the sheet opened")
+      const words = wordsOf(sheet)
+      assert.ok(words.includes(NOTES), "the release's notes, as they arrived")
+      assert.ok(words.includes("Size 1.5 MB"), "the image's size, in the app's own bytes")
+      assert.ok(words.includes(BUILT_LINE), `the build date: ${BUILT_LINE}`)
+      assert.ok(words.includes(EVERYDAY_BUILD), "and the everyday build's caveat, said once here")
+      assert.ok(words.includes(SAVED_BY_HASH), "and the hash the charm checks before it writes")
+    },
+  )
+
+  // A release from before the date annotation: the notes and the size, no date line.
+  resetCharmUpdateWalk()
+  const undated = serveFirmware("update-notes-undated", { ...RELEASE, notes: NOTES }, IMAGE)
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={radio()} profile={undated.profile} />),
+    async () => {
+      await until(async () => Boolean(find("#charm-update-install")), "the offer")
+      const row = notesRow()
+      assert.ok(row, "a release with notes draws the row")
+      await click(row)
+      const words = wordsOf(find("[role='dialog']"))
+      assert.ok(words.includes(NOTES), "its notes")
+      assert.ok(words.includes("Size 1.5 MB"), "its size")
+      assert.ok(!words.includes("Built"), "and no date line where the release names none")
+    },
+  )
+
+  // A release whose notes the host refused to draw: the row is still drawn, and the host's own
+  // sentence is what the sheet says — the record around it was never in question.
+  resetCharmUpdateWalk()
+  const refused = serveFirmware("update-notes-refused", { ...RELEASE, notesRefusal: NOTES_REFUSED }, IMAGE)
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={radio()} profile={refused.profile} />),
+    async () => {
+      await until(async () => Boolean(find("#charm-update-install")), "the offer")
+      const row = notesRow()
+      assert.ok(row, "a refused release draws the row too, so the reader learns why")
+      await click(row)
+      const words = wordsOf(find("[role='dialog']"))
+      assert.ok(words.includes(NOTES_REFUSED), "the host's sentence, as it was given")
+      assert.ok(words.includes("Size 1.5 MB"), "and the record still answers its size")
+    },
+  )
+
+  // A release that names no notes: no row, and no sheet to open.
+  resetCharmUpdateWalk()
+  const quiet = serveFirmware("update-notes-none", RELEASE, IMAGE)
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={radio()} profile={quiet.profile} />),
+    async () => {
+      await until(async () => Boolean(find("#charm-update-install")), "the offer")
+      await settle()
+      assert.equal(notesRow(), undefined, "no row where the release names no notes")
+      assert.ok(missing("[role='dialog']"), "and nothing to open")
+    },
+  )
+})
+
+/**
+ * The walk's own line about leaving, and where it is drawn: under the title while the walk runs,
+ * and nowhere else — an offer has nothing in flight to keep going, and an end has already stopped.
+ * The sentence is spelled here rather than read off `charm-words`, so a rewording that reaches the
+ * screen without this test is a rewording the test can see.
+ */
+const LEAVING =
+  "You can leave this screen — the charm keeps going, and the Firmware row on the charm's page follows it."
+const leavingLines = () => text().split(LEAVING).length - 1
+
+test("the leaving line is drawn once the walk runs, and on neither the offer nor an end", async () => {
+  let releaseUpload: (() => void) | undefined
+  const api = radio({
+    upload: async (image: Uint8Array) => {
+      await new Promise<void>((done) => (releaseUpload = done))
+      return { sent: image.length, total: image.length, percent: 100 }
+    },
+  })
+  const host = serveFirmware("update-leaving", IMAGE_PUBLISHED, IMAGE)
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
+    async () => {
+      await until(async () => Boolean(find("#charm-update-install")), "the offer")
+      await settle()
+      assert.equal(leavingLines(), 0, "the offer has nothing in flight, so it says nothing about leaving")
+
+      await installFromOffer()
+      await until(async () => text().includes("Transferring"), "the walk running", 10_000)
+      assert.equal(leavingLines(), 1, "the running walk says it once, under the title")
+
+      releaseUpload?.()
+      await until(async () => text().includes("Updated to 0.2.0 from 0.1.0."), "the walk's end", 10_000)
+      assert.equal(leavingLines(), 0, "and the line goes when the walk ends")
+    },
+  )
+})
+
 test("the steps appear in the order they walk, each bar moving, and the image that went is the host's", async () => {
   const sent: { bytes: Uint8Array; sha256: string }[] = []
   let releaseUpload: (() => void) | undefined
@@ -175,6 +852,7 @@ test("the steps appear in the order they walk, each bar moving, and the image th
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
     async () => {
+      await installFromOffer()
       // The first half of the image has landed: the download's bar is half way, and nothing is
       // transferring yet.
       await until(async () => text().includes("50% of 8 B"), "the download's first half")
@@ -184,13 +862,13 @@ test("the steps appear in the order they walk, each bar moving, and the image th
       assert.deepEqual(bars(), [100, 50], "the download full, the transfer half way")
       releaseUpload?.()
       await until(async () => text().includes("Restarting"), "the reboot window")
-      await until(async () => text().includes("The charm runs 0.2.0"), "the version read back")
+      await until(async () => text().includes("Updated to 0.2.0 from 0.1.0."), "the version read back")
 
       const page = text()
       assert.ok(
         page.indexOf("Downloading") < page.indexOf("Transferring") &&
           page.indexOf("Transferring") < page.indexOf("Restarting") &&
-          page.indexOf("Restarting") < page.indexOf("The charm runs 0.2.0"),
+          page.indexOf("Restarting") < page.indexOf("Updated to 0.2.0 from 0.1.0."),
         "the steps in the order they walked",
       )
       assert.equal(sent.length, 1, "one image went")
@@ -224,13 +902,14 @@ test("a charm online on Wi-Fi fetches the image itself, its own percent on the D
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
+      await installFromOffer()
       await until(async () => bars().includes(40), "the charm's own first percent on the bar")
       assert.ok(
         text().includes("The charm is fetching it itself over Wi-Fi"),
         "the door it picked, in the reader's words",
       )
       await until(async () => bars().includes(71), "the charm's percent moving on its own")
-      await until(async () => text().includes("The charm runs 0.2.0"), "the end of the walk")
+      await until(async () => text().includes("Updated to 0.2.0 from 0.1.0."), "the end of the walk")
 
       assert.equal(handed.length, 1, "one Update op went")
       assert.equal(
@@ -278,7 +957,8 @@ test("a charm online on its tailnet fetches over the http door it was handed", a
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
-      await until(async () => text().includes("The charm runs 0.2.2-beta"), "the end of the walk")
+      await installFromOffer()
+      await until(async () => text().includes("Updated to 0.2.2-beta from 0.2.1-beta."), "the end of the walk")
       assert.equal(handed.length, 1, "one Update op went")
       assert.equal(
         handed[0].url,
@@ -310,12 +990,17 @@ test("a door that is shut runs the transfer this phone drives, and mints nothing
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
-      await until(async () => text().includes("The charm runs 0.2.0"), "the end of the walk")
+      await installFromOffer()
+      await until(async () => text().includes("Updated to 0.2.0 from 0.1.0."), "the end of the walk")
       assert.deepEqual(handed, [], "no Update op went: no door is open")
       assert.equal(host.mints(), 0, "no token was minted for a door that is shut")
       assert.equal(uploads.length, 1, "the image went over the link this phone drives")
       assert.equal(host.imageReads(), 1, "and it came to the phone first")
       assert.ok(text().includes("Downloading"), "the phone's own download is the bar")
+      assert.ok(
+        !text().includes("The charm couldn't take the image itself"),
+        "and nothing is said about a door the charm never had",
+      )
     },
   )
 })
@@ -324,7 +1009,7 @@ test("a host that cannot mint the door's token is no door: the transfer runs ins
   // A host one release behind this app: it serves the record and the image but has no fetch
   // route, so the mint 404s exactly when the walk has already picked the door. The mint's
   // failure means no door, not a dead end — the transfer this phone always drives runs, with
-  // its own steps drawn.
+  // its own steps drawn, and the walk says why the bytes are going the other way.
   const handed: unknown[] = []
   const uploads: Uint8Array[] = []
   const api = radio({
@@ -341,17 +1026,37 @@ test("a host that cannot mint the door's token is no door: the transfer runs ins
   // fetchToken left off: the host predates the mint route, as a host one release behind does.
   const host = serveFirmware("update-old-host", IMAGE_PUBLISHED, IMAGE)
   const charm = charmedOver("https://update-old-host.test/api/plugins/gots", "https")
-  await mount(
-    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
-    async () => {
-      await until(async () => text().includes("The charm runs 0.2.0"), "the transfer's end", 10_000)
-      assert.deepEqual(handed, [], "no Update op went")
-      assert.equal(uploads.length, 1, "the image went over the link this phone drives")
-      assert.equal(host.imageReads(), 1, "and it came to the phone first")
-      assert.ok(text().includes("Transferring"), "the transfer's own steps drawn, not a dead end")
-      assert.ok(!text().includes("Try again"), "no failure to offer again")
-    },
-  )
+  const notes = watchNotes("minting the fetch door")
+  try {
+    await mount(
+      at(
+        "/settings/charm-firmware",
+        <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />,
+      ),
+      async () => {
+        await installFromOffer()
+        await until(
+          async () => text().includes("Updated to 0.2.0 from 0.1.0."),
+          "the transfer's end",
+          10_000,
+        )
+        assert.deepEqual(handed, [], "no Update op went")
+        assert.equal(uploads.length, 1, "the image went over the link this phone drives")
+        assert.equal(host.imageReads(), 1, "and it came to the phone first")
+        assert.ok(text().includes("Transferring"), "the transfer's own steps drawn, not a dead end")
+        assert.ok(!text().includes("Try again"), "no failure to offer again")
+        assert.ok(
+          text().includes(
+            "The charm couldn't take the image itself, so this phone is sending it over the link instead.",
+          ),
+          "the walk says the whole image is going over this phone's link now",
+        )
+        assert.equal(notes.count(), 1, "and the console keeps the reason the mint gave")
+      },
+    )
+  } finally {
+    notes.stop()
+  }
 })
 
 test("a kept address whose fetch URL cannot fit walks the transfer after the mint", async () => {
@@ -375,7 +1080,8 @@ test("a kept address whose fetch URL cannot fit walks the transfer after the min
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
-      await until(async () => text().includes("The charm runs 0.2.0"), "the transfer's end", 10_000)
+      await installFromOffer()
+      await until(async () => text().includes("Updated to 0.2.0 from 0.1.0."), "the transfer's end", 10_000)
       assert.deepEqual(handed, [], "no Update op went: the URL could never fit")
       assert.equal(host.mints(), 1, "the mint answered first; only then could the URL be measured")
       assert.equal(uploads.length, 1, "the image went over the link instead")
@@ -403,7 +1109,8 @@ test("a kept address with an upper-case scheme is handed to the charm lower-case
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
-      await until(async () => text().includes("The charm runs 0.2.0"), "the walk's end", 10_000)
+      await installFromOffer()
+      await until(async () => text().includes("Updated to 0.2.0 from 0.1.0."), "the walk's end", 10_000)
       assert.equal(handed.length, 1, "one Update op went")
       assert.equal(
         handed[0].url,
@@ -434,7 +1141,8 @@ test("the URL handed to the charm walks the path the host answered, not one the 
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
-      await until(async () => text().includes("The charm runs 0.2.0"), "the walk's end", 10_000)
+      await installFromOffer()
+      await until(async () => text().includes("Updated to 0.2.0 from 0.1.0."), "the walk's end", 10_000)
       assert.equal(handed.length, 1, "one Update op went")
       assert.equal(
         handed[0].url,
@@ -468,7 +1176,8 @@ test("a host that answers no route walks the transfer, as an older host's door i
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
-      await until(async () => text().includes("The charm runs 0.2.0"), "the transfer's end", 10_000)
+      await installFromOffer()
+      await until(async () => text().includes("Updated to 0.2.0 from 0.1.0."), "the transfer's end", 10_000)
       assert.deepEqual(handed, [], "no Update op went: the host named no route to walk")
       assert.equal(uploads.length, 1, "the image went over the link instead")
     },
@@ -500,7 +1209,8 @@ test("a build too old for the http door is walked through the transfer instead",
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
-      await until(async () => text().includes("The charm runs 0.2.0"), "the transfer's end", 10_000)
+      await installFromOffer()
+      await until(async () => text().includes("Updated to 0.2.0 from 0.1.0."), "the transfer's end", 10_000)
       assert.deepEqual(handed, [], "no Update op went to a build that would refuse it")
       assert.equal(host.mints(), 0, "no token minted for a door the build cannot take")
       assert.equal(uploads.length, 1, "the transfer is the one door an older build always takes")
@@ -538,7 +1248,8 @@ test("the fetch hand reads the record again, so a tag that moved is walked again
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
-      await until(async () => text().includes("The charm runs 0.2.0"), "the walk against the fresh record", 10_000)
+      await installFromOffer()
+      await until(async () => text().includes("Updated to 0.2.0 from 0.1.0."), "the walk against the fresh record", 10_000)
       assert.equal(handed.length, 1, "one hand, already the right one")
       assert.equal(handed[0].sha256Hex, IMAGE_SHA, "the hash the host's own bytes answer to now")
       assert.ok(host.reads() >= 2, "the record was read again before the charm was handed anything")
@@ -580,7 +1291,8 @@ test("a poll that meets the charm rebooting is the reboot's own shape, and the w
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
-      await until(async () => text().includes("The charm runs 0.2.1-beta"), "the read-back of the new build", 10_000)
+      await installFromOffer()
+      await until(async () => text().includes("Updated to 0.2.1-beta from 0.2.0-beta."), "the read-back of the new build", 10_000)
       assert.ok(!text().includes("went out of reach"), "the reboot is not drawn as a failure")
       assert.ok(!text().includes("Try again"), "and there is nothing to try again")
     },
@@ -604,7 +1316,8 @@ test("the answer that says Ready still draws the percent it carried", async () =
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
-      await until(async () => text().includes("The charm runs 0.2.0"), "the walk's end", 10_000)
+      await installFromOffer()
+      await until(async () => text().includes("Updated to 0.2.0 from 0.1.0."), "the walk's end", 10_000)
       assert.ok(bars().includes(100), "the Downloading bar at the whole image, as the Ready answer said")
     },
   )
@@ -628,6 +1341,7 @@ test("stepping back mid-walk and returning joins the walk already running", asyn
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
     async () => {
+      await installFromOffer()
       await until(async () => text().includes("Transferring"), "the walk started", 10_000)
     },
   ) // <- the screen unmounts; the send's promise stays alive
@@ -643,7 +1357,7 @@ test("stepping back mid-walk and returning joins the walk already running", asyn
       })
       assert.equal(uploads, 1, "no second send was started by the return")
       releaseUpload?.()
-      await until(async () => text().includes("The charm runs 0.2.0"), "the one walk's end", 10_000)
+      await until(async () => text().includes("Updated to 0.2.0 from 0.1.0."), "the one walk's end", 10_000)
       assert.equal(uploads, 1, "one update asked for, one update run")
     },
   )
@@ -679,6 +1393,171 @@ test("re-flashing the build the charm already runs ends Done on the build it ans
   )
 })
 
+/**
+ * The same package on a charm already running it. The Firmware row is a door like any other, so a
+ * reader can open the screen and install the build the charm runs — the fix-a-sick-charm move. The
+ * published door's end asks whether the build it answered is the one it sent, not whether the
+ * version moved, so the walk lands; and Done reads one build, since there is no change to read.
+ */
+test("a re-flash of the published build ends Done, over the phone's link and the charm's own fetch", async () => {
+  const unchanged = radio({ version: async () => "0.2.1" })
+  const host = serveFirmware(
+    "update-reflash-published",
+    { ...IMAGE_PUBLISHED, version: "0.2.1" },
+    IMAGE,
+  )
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={unchanged} profile={host.profile} />),
+    async () => {
+      await installFromOffer()
+      await until(async () => walk.end !== null, "the walk's end", 15_000)
+      assert.equal(walk.end?.kind, "done", "the walk landed on the build it was sent")
+      assert.ok(text().includes("The charm runs 0.2.1."), "and says the build the charm runs")
+      assert.ok(
+        !text().includes("didn't come back on the new build"),
+        "a re-flash is not the failure it wasn't",
+      )
+    },
+  )
+
+  // The charm walking the door itself: the same rule, whichever door the image went through.
+  resetCharmUpdateWalk()
+  const fetched = radio({
+    version: async () => "0.2.1",
+    network: async () => ONLINE_WIFI,
+    updateStatus: async () => ({ state: CharmUpdateState.Ready, percent: 100, reason: 0 }),
+  })
+  const door = serveFirmware(
+    "update-reflash-fetched",
+    { ...IMAGE_PUBLISHED, version: "0.2.1" },
+    IMAGE,
+    { fetchToken: true },
+  )
+  const charm = charmedOver("https://update-reflash-fetched.test/api/plugins/gots", "https")
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={fetched} profile={door.profile} charm={charm} />),
+    async () => {
+      await installFromOffer()
+      await until(async () => walk.end !== null, "the walk's end", 15_000)
+      assert.equal(walk.end?.kind, "done", "the fetched re-flash lands too")
+      assert.ok(text().includes("The charm runs 0.2.1."), "and says the build the charm runs")
+      assert.ok(
+        !text().includes("didn't come back on the new build"),
+        "and is not drawn as a failure",
+      )
+    },
+  )
+})
+
+/**
+ * A charm that could not say which build it started on: the walk that lands another build has
+ * changed something, so the end says so without a `from` clause it never read. Only a walk that
+ * provably landed on the build it began on gets to say one build.
+ */
+test("a walk that could not name its start still says the build changed", async () => {
+  let asked = 0
+  const api = radio({
+    // The ask before the send never opened the link; the charm answers after the reboot.
+    version: async () => {
+      asked += 1
+      if (asked === 1) throw new Error("the charm's link never opened")
+      return "0.2.2"
+    },
+    upload: async (image: Uint8Array) => ({
+      sent: image.length,
+      total: image.length,
+      percent: 100,
+    }),
+  })
+  const host = serveFirmware("update-unknown-start", { ...IMAGE_PUBLISHED, version: "0.2.2" }, IMAGE)
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
+    async () => {
+      await installFromOffer()
+      await until(async () => text().includes("Updated to 0.2.2."), "the end's words", 15_000)
+      assert.ok(
+        !text().includes("The charm runs 0.2.2."),
+        "a build that changed is not said as a re-flash",
+      )
+    },
+  )
+})
+
+test("Done reads the build it came from and the one it runs", async () => {
+  // A walk that started on 0.1.0 and landed on 0.2.1: the end names both builds, so the reader
+  // reads what changed rather than only what the charm now holds.
+  let booted = false
+  const api = radio({
+    version: async () => (booted ? "0.2.1" : "0.1.0"),
+    upload: async (image: Uint8Array) => {
+      booted = true
+      return { sent: image.length, total: image.length, percent: 100 }
+    },
+  })
+  const host = serveFirmware(
+    "update-done-both-builds",
+    { ...IMAGE_PUBLISHED, version: "0.2.1" },
+    IMAGE,
+  )
+  await mount(
+    atBoth("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
+    async () => {
+      await installFromOffer()
+      await until(
+        async () => text().includes("Updated to 0.2.1 from 0.1.0."),
+        "the end, naming both builds",
+        10_000,
+      )
+      // The end's own next step: the charm's page, asking it to sync once.
+      await click(find("#charm-update-sync"))
+      await settle()
+      assert.equal(
+        nav(),
+        "PUSH:/settings/charm?sync=1",
+        "Sync your bots pushes the charm's page with one sync asked for",
+      )
+    },
+  )
+
+  // A re-flash of the build the charm already runs names one build: there is no change to read.
+  const same = radio({
+    version: async () => "0.2.1",
+    upload: async (image: Uint8Array) => ({
+      sent: image.length,
+      total: image.length,
+      percent: 100,
+    }),
+  })
+  await mount(at("/settings/charm-firmware?file=1", <CharmUpdateScreen api={same} />), async () => {
+    await until(async () => Boolean(find("#charm-update-choose")), "the picker", 10_000)
+    await pick("charm-0.2.1.bin", 8)
+    await until(async () => text().includes("The charm runs 0.2.1."), "the one build it runs", 20_000)
+    assert.ok(!text().includes("Updated to"), "a re-flash says one build, not a change")
+  })
+})
+
+/**
+ * The walk's own memory of how it was started is what `Try again` re-runs, and a walk that ended
+ * Done has nothing to re-run. A file walk's hand closes over the `File` the reader picked, so
+ * keeping it after the end pins up to a slot of bytes for as long as the app runs.
+ */
+test("a walk that ends Done keeps no hand to run again", async () => {
+  const api = radio({
+    upload: async (image: Uint8Array) => ({
+      sent: image.length,
+      total: image.length,
+      percent: 100,
+    }),
+  })
+  await mount(at("/settings/charm-firmware?file=1", <CharmUpdateScreen api={api} />), async () => {
+    await until(async () => Boolean(find("#charm-update-choose")), "the picker")
+    await pick("charm-0.2.0.bin", 8)
+    await until(async () => text().includes("Updated to 0.2.0 from 0.1.0."), "the end of the walk")
+    assert.equal(walk.end?.kind, "done", "the walk landed")
+    assert.equal(walk.again, null, "and holds no hand: the file it closed over is let go")
+  })
+})
+
 test("a retry whose second walk succeeds ends Done on the new build", async () => {
   // The rig's own shape: the first upload fails, the reader taps Try again, and the second
   // upload lands. A failed attempt never reboots the charm, so the retry's own re-read still
@@ -696,9 +1575,10 @@ test("a retry whose second walk succeeds ends Done on the new build", async () =
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
     async () => {
+      await installFromOffer()
       await until(async () => text().includes("The update failed: it was cancelled"), "the first walk's failure", 10_000)
       await click(find("#charm-update-retry"))
-      await until(async () => text().includes("The charm runs 0.2.0"), "the retry's end", 10_000)
+      await until(async () => text().includes("Updated to 0.2.0 from 0.1.0."), "the retry's end", 10_000)
       assert.equal(uploads, 2, "the retry re-ran the send")
       assert.ok(
         !text().includes("didn't come back on the new build"),
@@ -729,11 +1609,12 @@ test("a fetch the charm fails is drawn in its own reason words, with Try again a
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
+      await installFromOffer()
       await until(
         async () => text().includes("The update failed: it was cancelled"),
         "the charm's reason in words",
       )
-      assert.ok(text().includes("flash it by cable"), "the sure path is said beside it")
+      assert.ok(text().includes("Flash it by cable"), "the sure path is said beside it")
       await click(find("#charm-update-retry"))
       await until(async () => handed === 2, "the retry walks the fetch again")
       assert.equal(host.mints(), 2, "a fresh token for the fresh walk")
@@ -752,7 +1633,7 @@ test("a picked file skips the download and walks the rest, with the hash the pho
   await mount(at("/settings/charm-firmware?file=1", <CharmUpdateScreen api={api} />), async () => {
     await until(async () => Boolean(find("#charm-update-choose")), "the screen's picker")
     await pick("charm.bin", 8)
-    await until(async () => text().includes("The charm runs 0.2.0"), "the end of the walk")
+    await until(async () => text().includes("Updated to 0.2.0 from 0.1.0."), "the end of the walk")
     assert.ok(!text().includes("Downloading"), "a file the phone already holds is not downloaded")
     assert.equal(sent.length, 1, "one image went")
     // The hash of eight zero bytes, computed here rather than trusted from the picker.
@@ -777,6 +1658,7 @@ test("an image that is not the one the version names is refused before it goes",
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
     async () => {
+      await installFromOffer()
       await until(async () => text().includes("isn't the one the version names"), "the screen says why")
       assert.deepEqual(uploads, [], "no UpdateBegin reached the charm")
       assert.ok(text().includes("Try again"), "the way to try again")
@@ -802,6 +1684,7 @@ test("a version that moved between the read and the image is read again, and its
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
     async () => {
+      await installFromOffer()
       await until(async () => sent.length === 1, "the image that arrived")
       assert.equal(sent[0].sha256, IMAGE_SHA, "with the hash computed over it")
       assert.ok(host.reads() >= 2, "the tag was read again before it went")
@@ -888,13 +1771,163 @@ test("a failed upload is drawn with the reason the charm gave, the cable sentenc
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
     async () => {
+      await installFromOffer()
       await until(
         async () => text().includes("The update failed: it was cancelled"),
         "the reason the charm gave",
       )
-      assert.ok(text().includes("flash it by cable"), "the sure path is said beside it")
+      assert.ok(text().includes("Flash it by cable"), "the sure path is said beside it")
       await click(find("#charm-update-retry"))
       await until(async () => uploads === 2, "the retry re-ran the send")
+    },
+  )
+})
+
+/**
+ * The failure card's own words, spelled here rather than read off `charm-words`, so a rewording
+ * that reaches the screen without this test is a rewording the test sees — as the leaving line's
+ * are. The repository is the firmware's own root: the sheet sends a reader there to flash by cable.
+ */
+const CABLE_TITLE = "Flash it by cable"
+const CABLE_WORDS = [
+  "When the charm cancels, it stopped the write itself: the new image never reached the slot, so the charm still runs the build it came on.",
+  "This way needs neither Bluetooth nor this app — a cable and a computer are all it takes.",
+  "The flasher, the port it listens on and the steps live in the charm firmware's repository, which the row below opens.",
+]
+const REPO_ROW = "Open the firmware repository"
+const FIRMWARE_REPO = "https://github.com/thehaseebahmed/hermesgots-charm"
+/** The restart step's own line while the charm comes back, and the sentence under a step that stopped. */
+const FIRMWARE_SENT = "Sent. The charm is restarting on it."
+const STEP_STOPPED = "The update stopped here."
+const LOG_ROW = "Read the charm's log"
+
+/** A walk whose upload the charm cancels: the failure every case around here starts from. */
+const cancelled = () =>
+  radio({
+    upload: async () => {
+      throw new Error("The update failed: it was cancelled")
+    },
+  })
+
+test("the transfer step is marked when it fails", async () => {
+  const host = serveFirmware("update-marked-step", IMAGE_PUBLISHED, IMAGE)
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={cancelled()} profile={host.profile} />),
+    async () => {
+      await installFromOffer()
+      await until(
+        async () => text().includes("The update failed: it was cancelled"),
+        "the failure's words",
+      )
+      const marked = findAll("[data-stopped]")
+      assert.equal(marked.length, 1, "one step of the walk is marked")
+      assert.ok(
+        wordsOf(marked[0]).includes("Transferring"),
+        "the transfer is the step it stopped at",
+      )
+      assert.ok(wordsOf(marked[0]).includes(STEP_STOPPED), "and the line under it says so")
+      assert.ok(text().includes("Downloading"), "the download behind it is drawn")
+      assert.ok(!wordsOf(marked[0]).includes("Downloading"), "and it is not the marked one")
+      assert.ok(!text().includes("Restarting"), "the restart never began, so it is not drawn")
+    },
+  )
+})
+
+/**
+ * A host that refuses the image before a byte lands: the walk stopped in the download, so the
+ * download is drawn and marked. A failure with no step beside it leaves a reader guessing where the
+ * walk stopped, and an empty group is the one shape the failure card never draws.
+ */
+test("a failure before a byte still draws and marks the step the walk was in", async () => {
+  const host = serveFirmware("update-image-refused", IMAGE_PUBLISHED, IMAGE, { imageStatus: 502 })
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={radio()} profile={host.profile} />),
+    async () => {
+      await installFromOffer()
+      await until(
+        async () => text().includes("GitHub Packages answered 502."),
+        "the host's refusal",
+      )
+      const marked = findAll("[data-stopped]")
+      assert.equal(marked.length, 1, "one step of the walk is marked")
+      assert.ok(wordsOf(marked[0]).includes("Downloading"), "the step the walk was in")
+      assert.ok(wordsOf(marked[0]).includes(STEP_STOPPED), "and the line saying it stopped")
+      assert.ok(!text().includes("Restarting"), "the restart never began, so it is not drawn")
+    },
+  )
+})
+
+test("the cable sheet says what the cable path is, and opens the firmware repository", async () => {
+  // The tab a row opens is stubbed: nothing here opens a real one.
+  const real = window.open
+  const opened: string[] = []
+  window.open = ((url: string | URL) => {
+    opened.push(String(url))
+    return null
+  }) as typeof window.open
+  const host = serveFirmware("update-cable-sheet", IMAGE_PUBLISHED, IMAGE)
+  try {
+    await mount(
+      at("/settings/charm-firmware", <CharmUpdateScreen api={cancelled()} profile={host.profile} />),
+      async () => {
+        await installFromOffer()
+        await until(
+          async () => text().includes("The update failed: it was cancelled"),
+          "the failure's words",
+        )
+        assert.deepEqual(opened, [], "nothing is opened until the reader asks")
+
+        const cable = findAll("button").find((one) => wordsOf(one) === CABLE_TITLE)
+        assert.ok(cable, "the row that leads to the cable")
+        await click(cable)
+
+        const sheet = find("[role='dialog']")
+        assert.ok(sheet, "the sheet opened")
+        const said = wordsOf(sheet)
+        for (const sentence of CABLE_WORDS)
+          assert.ok(said.includes(sentence), `the sheet says: ${sentence}`)
+
+        const repo = findAll("[role='dialog'] button").find((one) => wordsOf(one) === REPO_ROW)
+        assert.ok(repo, "the row that opens the repository")
+        await click(repo)
+        assert.deepEqual(opened, [FIRMWARE_REPO], "the firmware repository, opened outside the app")
+      },
+    )
+  } finally {
+    window.open = real
+  }
+})
+
+test("the log row is absent with Developer off and present with it", async () => {
+  const host = serveFirmware("update-log-row", IMAGE_PUBLISHED, IMAGE)
+  const logRow = () => find('a[href="/settings/debug-charm"]')
+  const failing = async () =>
+    until(async () => text().includes("The update failed: it was cancelled"), "the failure's words")
+
+  // The seed's own settings: Developer off, which is every device out of the box.
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={cancelled()} profile={host.profile} />),
+    async () => {
+      await installFromOffer()
+      await failing()
+      await settle()
+      assert.equal(logRow(), null, "no way into the charm's log with Developer off")
+      assert.ok(!text().includes(LOG_ROW), "and not even its words")
+    },
+  )
+
+  await seedSettings({ developer: true })
+  resetCharmUpdateWalk()
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={cancelled()} profile={host.profile} />),
+    async () => {
+      await installFromOffer()
+      await failing()
+      await until(async () => Boolean(logRow()), "the log row")
+      assert.ok(
+        wordsOf(logRow()).includes(LOG_ROW),
+        "the row into the charm's log, worded as it is",
+      )
     },
   )
 })
@@ -912,6 +1945,7 @@ test("an image the charm refuses for its build is drawn in the charm's own reaso
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
     async () => {
+      await installFromOffer()
       await until(
         async () => text().includes("The update failed: that image was built for a different kind of charm"),
         "the charm's reason in words",
@@ -931,6 +1965,7 @@ test("a charm that does not come back on the new build is said, and what is publ
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
     async () => {
+      await installFromOffer()
       // The screen's four asks, 3 s apart: the charm never answers on the new build.
       await act(async () => {
         await new Promise((done) => setTimeout(done, 12_500))
@@ -942,6 +1977,13 @@ test("a charm that does not come back on the new build is said, and what is publ
       )
       assert.ok(text().includes("cable"), "and what to do instead is said beside it")
       assert.ok(host.reads() >= 2, "and what is published is read again")
+      // The step it stopped at keeps the line it was saying — the reader had already seen the
+      // charm sent and restarting — and the sentence saying it stopped follows it.
+      const marked = findAll("[data-stopped]")
+      assert.equal(marked.length, 1, "one step is marked, the one the walk was in")
+      assert.ok(wordsOf(marked[0]).includes("Restarting"), "the restart")
+      assert.ok(wordsOf(marked[0]).includes(FIRMWARE_SENT), "its own line, kept")
+      assert.ok(wordsOf(marked[0]).includes(STEP_STOPPED), "and the line saying it stopped there")
     },
   )
 })
@@ -957,116 +1999,4 @@ test("a screen that opens with nothing published says so, and takes a file", asy
       assert.ok(!find("#charm-update-retry"), "nothing ran, so nothing is offered to re-run")
     },
   )
-})
-
-/**
- * The Network section as the page draws it — the row the Update button leaves — with the update
- * screen at its own address, as the settings route holds both.
- */
-function Network({
-  api,
-  ...rest
-}: { api: CharmNetworkApi } & Omit<
-  ComponentProps<typeof CharmNetwork>,
-  "api" | "read" | "refresh"
->) {
-  const { read, refresh } = useCharmReport(api)
-  return <CharmNetwork api={api} read={read} refresh={refresh} {...rest} />
-}
-
-/** The row and the screen it opens, on the addresses the settings route gives them. */
-function Routed({
-  api,
-  profile,
-}: {
-  api: CharmNetworkApi & CharmUpdateApi
-  profile: ComponentProps<typeof CharmNetwork>["profile"]
-}) {
-  return (
-    <MemoryRouter initialEntries={["/settings/charm"]}>
-      <Routes>
-        <Route path="/settings/charm" element={<Network api={api} profile={profile} />} />
-        <Route
-          path="/settings/charm-firmware"
-          element={<CharmUpdateScreen api={api} profile={profile} />}
-        />
-      </Routes>
-    </MemoryRouter>
-  )
-}
-
-test("tapping Update leaves the section, and the status poll stops while the upload holds the link", async () => {
-  let polls = 0
-  let landed = false
-  let releaseUpload: (() => void) | undefined
-  const links = {
-    wifi: { state: CharmLinkState.Online, reason: 0, ip: "192.168.1.20", ssid: "Home" },
-    tailnet: { state: CharmLinkState.Off, ip: "" },
-  }
-  const api: CharmNetworkApi & CharmUpdateApi = {
-    status: async () => links,
-    network: async () => links,
-    saveWifi: async () => 0,
-    forget: async () => 0,
-    saveTailnet: async () => 0,
-    // A download already running when the row opens starts the poll.
-    updateStatus: async () => {
-      polls += 1
-      return { state: CharmUpdateState.Downloading, percent: 10, reason: 0 }
-    },
-    version: async () => (landed ? "0.2.0" : "0.1.0"),
-    update: async () => {},
-    upload: async () => {
-      await new Promise<void>((done) => (releaseUpload = done))
-      landed = true
-      return { sent: IMAGE.length, total: IMAGE.length, percent: 100 }
-    },
-  }
-  const host = serveFirmware("update-poll", IMAGE_PUBLISHED, IMAGE)
-  await mount(<Routed api={api} profile={host.profile} />, async () => {
-    await until(async () => Boolean(button("Update to 0.2.0")), "the offer")
-    const before = polls
-    assert.ok(before >= 1, "the row's own snapshot asked")
-    await click(button("Update to 0.2.0"))
-    await until(async () => text().includes("Transferring"), "the upload holding the link")
-    // Longer than the poll's interval: the row the poll lived in is gone, and the screen asks
-    // nothing on a timer of its own, so nothing opens a link beside the upload.
-    await act(async () => {
-      await new Promise((done) => setTimeout(done, 2_300))
-    })
-    assert.equal(polls, before, "the poll did not ask while the upload held the link")
-    releaseUpload?.()
-    await settle()
-  })
-})
-
-test("the row's picker opens the same screen ready for a file", async () => {
-  const api: CharmNetworkApi & CharmUpdateApi = {
-    status: async () => ({
-      wifi: { state: CharmLinkState.Online, reason: 0, ip: "192.168.1.20", ssid: "Home" },
-      tailnet: { state: CharmLinkState.Off, ip: "" },
-    }),
-    network: async () => ({
-      wifi: { state: CharmLinkState.Online, reason: 0, ip: "192.168.1.20", ssid: "Home" },
-      tailnet: { state: CharmLinkState.Off, ip: "" },
-    }),
-    saveWifi: async () => 0,
-    forget: async () => 0,
-    saveTailnet: async () => 0,
-    updateStatus: async () => ({ state: CharmUpdateState.Idle, percent: 0, reason: 0 }),
-    version: async () => "0.1.0",
-    update: async () => {},
-    upload: async (image: Uint8Array) => ({
-      sent: image.length,
-      total: image.length,
-      percent: 100,
-    }),
-  }
-  const host = serveFirmware("update-pick-route", PUBLISHED)
-  await mount(<Routed api={api} profile={host.profile} />, async () => {
-    await until(async () => Boolean(button("Choose a file…")), "the row's picker")
-    await click(button("Choose a file…"))
-    await until(async () => Boolean(find("#charm-update-choose")), "the screen's own picker")
-    assert.ok(!find("#charm-update-start"), "the row the reader left")
-  })
 })
