@@ -11,6 +11,7 @@ import { MemoryRouter, Route, Routes, useLocation, useNavigate, useNavigationTyp
 
 import { AfkPopup } from "@/components/afk"
 import { AppShell } from "@/components/app-shell"
+import { walk } from "@/lib/charm-update-walk"
 import { DEFAULT_SETTINGS, db, type Message, type Profile, type Settings } from "@/lib/db"
 import { fingerprintOf, orderOf } from "@/lib/dictation-log"
 import type { CharmFirmware, SessionMessage } from "@/lib/hermes"
@@ -231,6 +232,19 @@ export function serveFirmware(
     return json({ error: { message: "no route" } }, 404)
   }) as unknown as typeof fetch
   return { profile, reads: () => reads, mints: () => mints, imageReads: () => imageReads }
+}
+
+/**
+ * The update screen's walk begun the way a reader begins it: the offer's own Install where the
+ * screen draws one, and otherwise the walk its mount has already started. A case waits here rather
+ * than on its own first step, so a screen that offers before it sends and one that still sends on
+ * its own are one call — and a walk that has already ended counts as begun, since a refusal can be
+ * drawn before a case gets to look.
+ */
+export async function start() {
+  const install = find("#charm-update-install")
+  if (install) await click(install)
+  await until(async () => walk.running || walk.end !== null, "the walk to start")
 }
 
 /** What a host answers about its log: the totals it counts, across the fingerprint beside them. */

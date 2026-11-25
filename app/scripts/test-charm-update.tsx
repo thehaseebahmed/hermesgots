@@ -34,6 +34,7 @@ import {
   seedSettings,
   serveFirmware,
   settle,
+  start,
   text,
   until,
 } from "./component-kit.tsx"
@@ -175,6 +176,7 @@ test("the steps appear in the order they walk, each bar moving, and the image th
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
     async () => {
+      await start()
       // The first half of the image has landed: the download's bar is half way, and nothing is
       // transferring yet.
       await until(async () => text().includes("50% of 8 B"), "the download's first half")
@@ -224,6 +226,7 @@ test("a charm online on Wi-Fi fetches the image itself, its own percent on the D
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
+      await start()
       await until(async () => bars().includes(40), "the charm's own first percent on the bar")
       assert.ok(
         text().includes("The charm is fetching it itself over Wi-Fi"),
@@ -278,6 +281,7 @@ test("a charm online on its tailnet fetches over the http door it was handed", a
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
+      await start()
       await until(async () => text().includes("The charm runs 0.2.2-beta"), "the end of the walk")
       assert.equal(handed.length, 1, "one Update op went")
       assert.equal(
@@ -310,6 +314,7 @@ test("a door that is shut runs the transfer this phone drives, and mints nothing
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
+      await start()
       await until(async () => text().includes("The charm runs 0.2.0"), "the end of the walk")
       assert.deepEqual(handed, [], "no Update op went: no door is open")
       assert.equal(host.mints(), 0, "no token was minted for a door that is shut")
@@ -344,6 +349,7 @@ test("a host that cannot mint the door's token is no door: the transfer runs ins
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
+      await start()
       await until(async () => text().includes("The charm runs 0.2.0"), "the transfer's end", 10_000)
       assert.deepEqual(handed, [], "no Update op went")
       assert.equal(uploads.length, 1, "the image went over the link this phone drives")
@@ -375,6 +381,7 @@ test("a kept address whose fetch URL cannot fit walks the transfer after the min
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
+      await start()
       await until(async () => text().includes("The charm runs 0.2.0"), "the transfer's end", 10_000)
       assert.deepEqual(handed, [], "no Update op went: the URL could never fit")
       assert.equal(host.mints(), 1, "the mint answered first; only then could the URL be measured")
@@ -403,6 +410,7 @@ test("a kept address with an upper-case scheme is handed to the charm lower-case
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
+      await start()
       await until(async () => text().includes("The charm runs 0.2.0"), "the walk's end", 10_000)
       assert.equal(handed.length, 1, "one Update op went")
       assert.equal(
@@ -434,6 +442,7 @@ test("the URL handed to the charm walks the path the host answered, not one the 
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
+      await start()
       await until(async () => text().includes("The charm runs 0.2.0"), "the walk's end", 10_000)
       assert.equal(handed.length, 1, "one Update op went")
       assert.equal(
@@ -468,6 +477,7 @@ test("a host that answers no route walks the transfer, as an older host's door i
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
+      await start()
       await until(async () => text().includes("The charm runs 0.2.0"), "the transfer's end", 10_000)
       assert.deepEqual(handed, [], "no Update op went: the host named no route to walk")
       assert.equal(uploads.length, 1, "the image went over the link instead")
@@ -500,6 +510,7 @@ test("a build too old for the http door is walked through the transfer instead",
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
+      await start()
       await until(async () => text().includes("The charm runs 0.2.0"), "the transfer's end", 10_000)
       assert.deepEqual(handed, [], "no Update op went to a build that would refuse it")
       assert.equal(host.mints(), 0, "no token minted for a door the build cannot take")
@@ -538,6 +549,7 @@ test("the fetch hand reads the record again, so a tag that moved is walked again
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
+      await start()
       await until(async () => text().includes("The charm runs 0.2.0"), "the walk against the fresh record", 10_000)
       assert.equal(handed.length, 1, "one hand, already the right one")
       assert.equal(handed[0].sha256Hex, IMAGE_SHA, "the hash the host's own bytes answer to now")
@@ -580,6 +592,7 @@ test("a poll that meets the charm rebooting is the reboot's own shape, and the w
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
+      await start()
       await until(async () => text().includes("The charm runs 0.2.1-beta"), "the read-back of the new build", 10_000)
       assert.ok(!text().includes("went out of reach"), "the reboot is not drawn as a failure")
       assert.ok(!text().includes("Try again"), "and there is nothing to try again")
@@ -604,6 +617,7 @@ test("the answer that says Ready still draws the percent it carried", async () =
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
+      await start()
       await until(async () => text().includes("The charm runs 0.2.0"), "the walk's end", 10_000)
       assert.ok(bars().includes(100), "the Downloading bar at the whole image, as the Ready answer said")
     },
@@ -628,6 +642,7 @@ test("stepping back mid-walk and returning joins the walk already running", asyn
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
     async () => {
+      await start()
       await until(async () => text().includes("Transferring"), "the walk started", 10_000)
     },
   ) // <- the screen unmounts; the send's promise stays alive
@@ -696,6 +711,7 @@ test("a retry whose second walk succeeds ends Done on the new build", async () =
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
     async () => {
+      await start()
       await until(async () => text().includes("The update failed: it was cancelled"), "the first walk's failure", 10_000)
       await click(find("#charm-update-retry"))
       await until(async () => text().includes("The charm runs 0.2.0"), "the retry's end", 10_000)
@@ -729,6 +745,7 @@ test("a fetch the charm fails is drawn in its own reason words, with Try again a
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
     async () => {
+      await start()
       await until(
         async () => text().includes("The update failed: it was cancelled"),
         "the charm's reason in words",
@@ -777,6 +794,7 @@ test("an image that is not the one the version names is refused before it goes",
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
     async () => {
+      await start()
       await until(async () => text().includes("isn't the one the version names"), "the screen says why")
       assert.deepEqual(uploads, [], "no UpdateBegin reached the charm")
       assert.ok(text().includes("Try again"), "the way to try again")
@@ -802,6 +820,7 @@ test("a version that moved between the read and the image is read again, and its
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
     async () => {
+      await start()
       await until(async () => sent.length === 1, "the image that arrived")
       assert.equal(sent[0].sha256, IMAGE_SHA, "with the hash computed over it")
       assert.ok(host.reads() >= 2, "the tag was read again before it went")
@@ -888,6 +907,7 @@ test("a failed upload is drawn with the reason the charm gave, the cable sentenc
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
     async () => {
+      await start()
       await until(
         async () => text().includes("The update failed: it was cancelled"),
         "the reason the charm gave",
@@ -912,6 +932,7 @@ test("an image the charm refuses for its build is drawn in the charm's own reaso
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
     async () => {
+      await start()
       await until(
         async () => text().includes("The update failed: that image was built for a different kind of charm"),
         "the charm's reason in words",
@@ -931,6 +952,7 @@ test("a charm that does not come back on the new build is said, and what is publ
   await mount(
     at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
     async () => {
+      await start()
       // The screen's four asks, 3 s apart: the charm never answers on the new build.
       await act(async () => {
         await new Promise((done) => setTimeout(done, 12_500))
@@ -1028,6 +1050,7 @@ test("tapping Update leaves the section, and the status poll stops while the upl
     const before = polls
     assert.ok(before >= 1, "the row's own snapshot asked")
     await click(button("Update to 0.2.0"))
+    await start()
     await until(async () => text().includes("Transferring"), "the upload holding the link")
     // Longer than the poll's interval: the row the poll lived in is gone, and the screen asks
     // nothing on a timer of its own, so nothing opens a link beside the upload.
