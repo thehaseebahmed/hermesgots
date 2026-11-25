@@ -78,16 +78,10 @@ function Page({ firmware }: { firmware: CharmFirmwareFacts }) {
           busy={null}
           progress={null}
           wake={{ doubleTap: true, quietSeconds: 15 }}
-          scheme="https"
-          held="https://bots.example/api/plugins/gots"
-          heldFailed={false}
           onSync={nothing}
-          onTest={nothing}
           onTogglePet={nothing}
           onPickPet={nothing}
           onWake={nothing}
-          onScheme={nothing}
-          onBattery={nothing}
           onForget={nothing}
           onOpenFirmware={nothing}
         />

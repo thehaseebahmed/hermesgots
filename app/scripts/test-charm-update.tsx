@@ -117,6 +117,9 @@ function radio(overrides: Partial<ComponentProps<typeof CharmUpdateScreen>["api"
 const bars = () =>
   findAll('[role="progressbar"]').map((bar) => Number(bar.getAttribute("aria-valuenow")))
 
+/** The screen's foot: the last thing it draws, where the keep-close line stands. */
+const foot = () => wordsOf(document.body.lastElementChild?.lastElementChild ?? null)
+
 /** Hands the screen a file the way the WebView hands it one: the input's change, with the file on it. */
 async function pick(name: string, size: number) {
   const input = find("#charm-update-file") as HTMLInputElement | null
@@ -193,7 +196,14 @@ test("the screen opens on the offer, asks the battery as it draws, and sends not
       assert.equal(batteries, 1, "the battery was asked once, when the offer drew")
       assert.ok(text().includes("64%"), "the charm's charge, in the offer")
       assert.ok(text().includes("Wi-Fi up"), "the charm's link, as it reported it")
-      assert.ok(text().includes("Keep the phone near the charm"), "and the instruction the link needs")
+      assert.ok(
+        foot().includes("Keep the phone near the charm"),
+        "and the instruction the link needs, at the screen's foot",
+      )
+      assert.ok(
+        !wordsOf(find("[data-settings-group]")).includes("Keep the phone near the charm"),
+        "not a row inside the offer's group",
+      )
       assert.equal(
         find("#charm-update-install")?.textContent,
         "Install 0.2.0",
@@ -302,8 +312,8 @@ test("the offer and the walk's steps draw at 390 and at 768, in light and in dar
           assert.ok(offer.includes("Link"), `${said}: the link the charm reported`)
           assert.ok(offer.includes("Wi-Fi up"), `${said}: and its own words`)
           assert.ok(
-            offer.includes("Keep the phone near the charm"),
-            `${said}: the one instruction the link needs`,
+            foot().includes("Keep the phone near the charm"),
+            `${said}: the one instruction the link needs, at the screen's foot`,
           )
           assert.equal(
             find("#charm-update-install")?.textContent,

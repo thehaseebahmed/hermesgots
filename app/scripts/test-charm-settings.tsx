@@ -13,8 +13,6 @@ import { MemoryRouter, Route, Routes } from "react-router"
 import {
   CharmNetwork,
   CharmSections,
-  CharmVoiceHeld,
-  CharmVoiceScheme,
   FirmwareRow,
   type CharmNetworkApi,
 } from "@/components/settings/charm"
@@ -27,7 +25,7 @@ import {
 import { CharmLinkState, CharmTailnetReason, CharmUpdateState } from "@/lib/charm-protocol"
 import { db } from "@/lib/db"
 import { SettingsPage } from "@/routes/settings"
-import { BatteryRow, CharmStatusRow, WakingGroup } from "@/components/settings/charm"
+import { CharmStatusRow, WakingGroup } from "@/components/settings/charm"
 import { report } from "./fixtures/charm-report.ts"
 import {
   PHONE_AND_TABLET_IN_BOTH_MODES,
@@ -79,14 +77,6 @@ test("the charm section on the web says to pair from the phone", async () => {
     await settle()
     assert.ok(text().includes("pairs with the Android app"))
     assert.ok(!text().includes("Pair a charm"))
-  })
-})
-
-test("the web offers no test alert, since only the phone can write one", async () => {
-  await mount(at("/settings/charm"), async () => {
-    await settle()
-    assert.ok(!text().includes("Send a test alert"), "the row is the phone's")
-    assert.ok(!text().includes("Buzzes your charm"), "and its line is drawn nowhere beside it")
   })
 })
 
@@ -273,16 +263,10 @@ function sections(overrides: Partial<ComponentProps<typeof CharmSections>> = {})
         busy={null}
         progress={null}
         wake={{ doubleTap: true, quietSeconds: 15 }}
-        scheme="https"
-        held={null}
-        heldFailed={false}
         onSync={nothing}
-        onTest={nothing}
         onTogglePet={nothing}
         onPickPet={nothing}
         onWake={nothing}
-        onScheme={nothing}
-        onBattery={nothing}
         onForget={nothing}
         onOpenFirmware={nothing}
         {...overrides}
@@ -294,15 +278,12 @@ function sections(overrides: Partial<ComponentProps<typeof CharmSections>> = {})
 /** Each card on the page, in the order the page draws it, as the words inside it. */
 const cards = () => findAll("[data-settings-group]").map((card) => card.textContent ?? "")
 
-/** The muted sentence a card does not hold: the page's caption. */
-const captions = () => findAll('p[class*="text-[13px]"]')
-
-test("the sections run Device, Bots, Waking, Voice, Wi-Fi, Tailnet, Forget, one caption", async () => {
+test("the sections run Device, Bots, Waking, Wi-Fi, Tailnet, Forget", async () => {
   await mount(sections(), async () => {
     await settle()
     const drawn = cards()
-    assert.equal(drawn.length, 7, "seven cards: the device first, then each thing about it")
-    const [device, bots, waking, voice, wifi, tailnet, forget] = drawn
+    assert.equal(drawn.length, 6, "six cards: the device first, then each thing about it")
+    const [device, bots, waking, wifi, tailnet, forget] = drawn
     /** A card's rows, in the order the reader meets them. */
     const rows = (card: string, ...names: string[]) => {
       let seen = -1
@@ -312,15 +293,12 @@ test("the sections run Device, Bots, Waking, Voice, Wi-Fi, Tailnet, Forget, one 
         seen = at
       }
     }
-    rows(device, "Desk charm", "Battery", "Firmware")
-    rows(bots, "Sync", "Pet mode", "Send a test alert")
+    rows(device, "Desk charm", "Firmware")
+    rows(bots, "Sync", "Pet mode")
     rows(waking, "Double tap to wake", "Stays lit for")
-    rows(voice, "Voice over https", "Your charm holds")
-    assert.ok(wifi.includes("Wi-Fi"), "the network's own card, after the voice")
+    assert.ok(wifi.includes("Wi-Fi"), "the network's own card, after the waking group")
     assert.ok(tailnet.includes("Tailnet"), "and the tailnet's")
     assert.ok(forget.includes("Forget this charm"), "the page ends on the way out")
-    assert.equal(captions().length, 1, "one caption, the page's last word")
-    assert.ok(captions()[0].textContent?.includes("Keep the charm close"), "which is the close one")
   })
 })
 
@@ -540,10 +518,9 @@ test("the sections draw at 390 and at 768, in light and in dark", async () => {
           `${said}: the mode this case reads the page under`,
         )
         const drawn = cards()
-        assert.equal(drawn.length, 7, `${said}: seven cards, Device first and Forget last`)
-        const [device, bots, waking, voice, wifi, tailnet, forget] = drawn
+        assert.equal(drawn.length, 6, `${said}: six cards, Device first and Forget last`)
+        const [device, bots, waking, wifi, tailnet, forget] = drawn
         assert.ok(device.includes("Desk charm"), `${said}: the charm, named in the Device card`)
-        assert.ok(device.includes("Battery"), `${said}: its charge, the row that asks for it`)
         assert.ok(
           device.includes("Charm 0.1.0 · 0.2.0 available"),
           `${said}: the build and the one published ahead of it`,
@@ -555,19 +532,16 @@ test("the sections draw at 390 and at 768, in light and in dark", async () => {
         )
         assert.ok(bots.includes("Sync"), `${said}: the Bots card's sync`)
         assert.ok(bots.includes("Pet mode"), `${said}: its pet switch`)
-        assert.ok(bots.includes("Send a test alert"), `${said}: and the alert that proves it`)
         assert.ok(
           waking.includes("Double tap to wake") && waking.includes("Stays lit for"),
           `${said}: the Waking card`,
         )
-        assert.ok(voice.includes("Voice over https"), `${said}: the Voice card`)
         assert.ok(
           wifi.includes("Network name") && wifi.includes("Passphrase"),
           `${said}: the Wi-Fi card's two fields`,
         )
         assert.ok(tailnet.includes("Auth key"), `${said}: the Tailnet card's field`)
         assert.ok(forget.includes("Forget this charm"), `${said}: the page ends on the way out`)
-        assert.equal(captions().length, 1, `${said}: one caption, the page's last word`)
       })
     })
   }
@@ -762,113 +736,6 @@ test("a read that failed marks the phone's link and leaves the charm's lines unr
     assert.ok(labelled('[role="img"]', "Bluetooth is down"), "the ask that did not open")
     assert.ok(text().includes("Not set"), "and the Wi-Fi line is what the phone last knew")
     assert.ok(!text().includes("Connected"), "never an answer the charm did not give")
-  })
-})
-
-test("the level is drawn once, and the battery row asks for it", async () => {
-  // A reader who scrolls the paired group sees the level in one place: the status row's line. The
-  // battery row is the control that asks the charm again, so it says what a tap does instead.
-  const now = Date.now()
-  await mount(
-    <>
-      <CharmStatusRow
-        charm={{ name: "Desk charm" }}
-        status={{ state: "read", value: report(CharmLinkState.Online, CharmLinkState.Online) }}
-        battery={{ percent: 82, charging: true, at: now }}
-      />
-      <BatteryRow busy={false} onRefresh={() => {}} />
-    </>,
-    async () => {
-      await settle()
-      assert.equal((text().match(/82%/g) ?? []).length, 1, "the level is drawn once on the page")
-      assert.ok(text().includes("Tap to ask the charm"), "and the row that asks says so")
-    },
-  )
-})
-
-test("the battery row asks when tapped, and draws a failed ask in the charm's words", async () => {
-  let asked = 0
-  await mount(<BatteryRow busy={false} onRefresh={() => asked++} />, async () => {
-    await settle()
-    assert.ok(text().includes("Tap to ask the charm"), "the row says what a tap does")
-    assert.ok(!text().includes("%"), "and the level is the status row's to draw")
-    await click(rowButton("Battery"))
-    assert.equal(asked, 1) // tapping the row asks the charm again
-  })
-
-  // A failed ask is this row's own line: the battery is the one thing it is about.
-  await mount(
-    <BatteryRow
-      note="This charm's firmware is older than the app — update it"
-      busy={false}
-      onRefresh={() => {}}
-    />,
-    async () => {
-      await settle()
-      assert.ok(text().includes("firmware is older than the app"), "why the ask failed")
-      assert.ok(!text().includes("Tap to ask the charm"), "said over what a tap would do")
-    },
-  )
-})
-
-/** The switch itself: one per row, and the only one this component draws. */
-const voiceSwitch = () => find('[role="switch"]')
-
-/**
- * The switch beside Sync: the reader's pick of the route the charm's turns take. It is kept on this
- * phone and handed over by the next sync, so moving it opens no radio and writes nothing to the charm.
- */
-test("the voice switch is https by default, and its off position says what http needs", async () => {
-  await mount(<CharmVoiceScheme scheme="https" onChange={() => {}} />, async () => {
-    await settle()
-    assert.ok(text().includes("Voice over https"), "the row names the setting")
-    assert.ok(text().includes("clock"), "https says what it needs of the charm")
-    assert.ok(voiceSwitch()?.hasAttribute("data-checked"), "https is where it sits by default")
-  })
-
-  await mount(<CharmVoiceScheme scheme="http" onChange={() => {}} />, async () => {
-    await settle()
-    assert.ok(text().includes("tailnet"), "the other position says what it needs of the tailnet")
-    assert.ok(!text().includes("clock"), "and claims no clock it will not use")
-    assert.ok(voiceSwitch()?.hasAttribute("data-unchecked"), "and the switch sits off")
-  })
-})
-
-test("moving the voice switch keeps the pick", async () => {
-  const picks: CharmScheme[] = []
-  await mount(
-    <CharmVoiceScheme scheme="https" onChange={(next) => picks.push(next)} />,
-    async () => {
-      await settle()
-      await click(voiceSwitch())
-      assert.deepEqual(picks, ["http"], "off is the tailnet's plain http")
-    },
-  )
-})
-
-test("a charm mid-sync cannot have its scheme moved under the sync", async () => {
-  await mount(<CharmVoiceScheme scheme="https" disabled onChange={() => {}} />, async () => {
-    await settle()
-    assert.ok(voiceSwitch()?.hasAttribute("data-disabled"), "the switch is shut while the page is busy")
-  })
-})
-
-test("the charm's own answer about its voice is drawn as the charm said it", async () => {
-  await mount(<CharmVoiceHeld address="https://h.example/api/plugins/gots" />, async () => {
-    await settle()
-    assert.ok(text().includes("Your charm holds"), "the row names whose answer it is")
-    assert.ok(text().includes("https://h.example/api"), "the address the charm says it kept")
-  })
-
-  await mount(<CharmVoiceHeld address={null} />, async () => {
-    await settle()
-    assert.ok(text().includes("Nothing yet"), "a charm holding none says so")
-  })
-
-  // A firmware older than the ask cannot answer at all, and that is not the same as an empty answer.
-  await mount(<CharmVoiceHeld failed />, async () => {
-    await settle()
-    assert.ok(text().includes("can't say"), "the ask that did not land is the row's own word")
   })
 })
 

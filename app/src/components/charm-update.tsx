@@ -625,6 +625,9 @@ export function CharmUpdateScreen({
       {/* The tap's own reading, under whichever door was pressed: the offer stands, and the line
           that says what opens it is the only thing the refusal adds. */}
       {shutAtTap && <Caption>{CHARGE_FIRST}</Caption>}
+      {/* The screen's foot, under every group rather than a row in the offer: the instruction holds
+          whenever a door can send, and the offer is not the only screen one is pressed on. */}
+      <Caption>{KEEP_CLOSE}</Caption>
     </>
   )
 }
@@ -711,9 +714,6 @@ function Offer({
       <Group>
         <ValueRow title="Battery" value={batteryWords(battery)} muted={battery === undefined} />
         <ValueRow title="Link" value={offerLinkWords(link)} muted={link === undefined} />
-        <div className={rowClass}>
-          <RowText title={KEEP_CLOSE} />
-        </div>
         {record && (record.notes || record.notesRefusal) && (
           <SheetRow
             icon={SparklesIcon}
