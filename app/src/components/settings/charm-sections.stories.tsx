@@ -11,10 +11,11 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { MemoryRouter } from "react-router"
 
-import { CharmSections, type CharmFirmwareFacts } from "@/components/settings/charm"
-import type { PairedCharm } from "@/lib/charm"
+import { CharmSections } from "@/components/settings/charm"
+import type { CharmFirmwareFacts, PairedCharm } from "@/lib/charm"
 import { CharmLinkState, CharmUpdateState, type CharmNetworkReport } from "@/lib/charm-protocol"
 import type { Profile } from "@/lib/db"
+import { bot } from "@/stories/device"
 
 const meta = { title: "Screens/Charm page" } satisfies Meta
 
@@ -44,26 +45,8 @@ const ONLINE: CharmNetworkReport = {
 
 /** Two bots the charm can be sent, so the pet's row has a name to say. */
 const BOTS: Profile[] = [
-  {
-    id: "bot-pocket",
-    name: "Pocket",
-    baseUrl: "http://pocket.test/v1",
-    apiKey: "story-pocket",
-    model: "test/model",
-    botId: "bot-pocket",
-    createdAt: 1,
-    updatedAt: 1,
-  },
-  {
-    id: "bot-desk",
-    name: "Desk",
-    baseUrl: "http://desk.test/v1",
-    apiKey: "story-desk",
-    model: "test/model",
-    botId: "bot-desk",
-    createdAt: 1,
-    updatedAt: 1,
-  },
+  bot({ id: "bot-pocket", name: "Pocket", botId: "bot-pocket" }),
+  bot({ id: "bot-desk", name: "Desk", botId: "bot-desk" }),
 ]
 
 /** What this phone calls each bot, against every other one. */
@@ -98,7 +81,6 @@ function Page({ firmware }: { firmware: CharmFirmwareFacts }) {
           labels={LABELS}
           busy={null}
           progress={null}
-          failure={null}
           wake={{ doubleTap: true, quietSeconds: 15 }}
           scheme="https"
           held="https://bots.example/api/plugins/gots"

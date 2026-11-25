@@ -51,12 +51,12 @@ A release's own words travel annotation → plugin → app record → sheet, and
 
 | Path | What it is |
 | --- | --- |
-| `app/src/components/settings/charm.tsx` | The page's shell (gate, live queries, handlers) and the pure `CharmSections` it draws: Device, Bots, Waking, Voice, Wi-Fi, Tailnet, Forget, one caption; `FirmwareRow`; `useReturnSync` |
+| `app/src/components/settings/charm.tsx` | The page's shell (gate, live queries, handlers) and the pure `CharmSections` it draws: Device, Bots, Waking, Voice, Wi-Fi, Tailnet, Forget, one caption; `FirmwareRow` |
 | `app/src/components/charm-update.tsx` | The update screen: the offer and its gate, the steps, the failure card, the cable sheet, the log row, Done and its sync, the What's-new sheet |
 | `app/src/lib/charm-update-walk.ts` | The walk that outlives the screen: `started`, `running`, `again`, the reset a fresh load takes |
-| `app/src/lib/charm-words.ts` | Every sentence: `firmwareWords`, `firmwareOffers`, `chargeBlocks`, `CHARGE_FIRST`, `KEEP_CLOSE`, `FIRMWARE_LEAVE`, `firmwareDoneWords`, `CABLE_WORDS`, `REPO_ROW`, `NOTES_TITLE`, `builtWords`, `FIRMWARE_CAPTION` |
+| `app/src/lib/charm-words.ts` | Every sentence: `firmwareWords`, `firmwareOffers`, `chargeBlocks`, `CHARGE_FIRST`, `KEEP_CLOSE`, `FIRMWARE_LEAVE`, `firmwareDoneWords`, `FETCH_FALLBACK`, `CABLE_WORDS`, `REPO_ROW`, `NOTES_TITLE`, `builtWords`, `FIRMWARE_CAPTION` |
 | `app/src/lib/hermes.ts` | `CharmFirmware`, the record the route answers |
-| `app/src/lib/charm.ts` | `CharmUpdateApi`, and the battery ask the offer makes |
+| `app/src/lib/charm.ts` | `CharmUpdateApi`, the battery ask the offer makes, and the page's own reads beside `useCharmReport`: `CharmFirmwareFacts`, `useCharmFirmware` (one poll, the facts handed to the row) and `useReturnSync` |
 | `app/src/lib/native.ts` | `openExternal`, the one way out to the repository |
 | `plugin/firmware.py` | The annotations, `NOTES_CAP`, `describe` |
 | `plugin/__init__.py` | The firmware route, which spreads `describe`'s record |

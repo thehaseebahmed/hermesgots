@@ -14,6 +14,7 @@ import {
   CharmCode,
   codeWords,
   type CharmBattery,
+  type CharmBatterySeen,
 } from "./charm-protocol.ts"
 import { compareVersions } from "./version-compare.ts"
 import { formatBytes } from "./attachment-caps.ts"
@@ -370,6 +371,14 @@ export function fetchWords(scheme: "http" | "https"): string {
 export const FIRMWARE_NOT_ENDED = "The charm didn't finish the fetch it started."
 
 /**
+ * The walk's note where the charm's door was open and could not be walked — the host refused the
+ * token, named no route, or the address left no room for the URL. The image then streams over this
+ * phone's own link, and the reader is told why the bar is the phone's rather than the charm's.
+ */
+export const FETCH_FALLBACK =
+  "The charm couldn't take the image itself, so this phone is sending it over the link instead. Keep the phone near the charm until it finishes."
+
+/**
  * The upload's line for a charm that never says it holds the whole image it was sent: the last
  * byte went out with no answer of its own, so the charm's own count is the only yes there is — and
  * a charm wedged but alive would otherwise be waited on without an end.
@@ -421,13 +430,15 @@ export const QUIET_TITLE = "Stays lit for"
  * A reading with no age — the update offer's own, asked as the screen opens — says the level and
  * the charger alone.
  */
-export function batteryWords(battery: CharmBattery | undefined, now = Date.now()) {
+export function batteryWords(
+  battery: CharmBattery | CharmBatterySeen | undefined,
+  now = Date.now(),
+) {
   if (!battery) return "Not read yet"
   if (battery.percent < 0) return "Unknown"
   const charge = `${battery.percent}%${battery.charging ? " · Charging" : ""}`
   // The settings page's reading carries its age; the offer's ask answers the level alone.
-  const seen = battery as { at?: number }
-  return typeof seen.at === "number" ? `${charge} · ${since(seen.at, now)}` : charge
+  return "at" in battery ? `${charge} · ${since(battery.at, now)}` : charge
 }
 
 /**

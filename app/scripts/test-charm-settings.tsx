@@ -10,18 +10,22 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { type ComponentProps, act, useState } from "react"
-import { MemoryRouter, Route, Routes, useLocation } from "react-router"
+import { MemoryRouter, Route, Routes } from "react-router"
 
 import {
   CharmNetwork,
   CharmSections,
   CharmVoiceHeld,
   CharmVoiceScheme,
-  useReturnSync,
-  type CharmFirmwareFacts,
+  FirmwareRow,
   type CharmNetworkApi,
 } from "@/components/settings/charm"
-import { useCharmReport } from "@/lib/charm"
+import {
+  useCharmFirmware,
+  useCharmReport,
+  useReturnSync,
+  type CharmFirmwareFacts,
+} from "@/lib/charm"
 import { CharmLinkState, CharmUpdateState } from "@/lib/charm-protocol"
 import { db } from "@/lib/db"
 import { SettingsPage } from "@/routes/settings"
@@ -29,6 +33,7 @@ import { BatteryRow, CharmStatusRow, WakingGroup } from "@/components/settings/c
 import { report } from "./fixtures/charm-report.ts"
 import {
   PHONE_AND_TABLET_IN_BOTH_MODES,
+  Nav,
   Path,
   atMode,
   botProfile,
@@ -39,7 +44,9 @@ import {
   labelled,
   missing,
   mount,
+  nav,
   seedSettings,
+  serveFirmware,
   settle,
   text,
   type,
@@ -238,7 +245,6 @@ function sections(overrides: Partial<ComponentProps<typeof CharmSections>> = {})
         labels={new Map()}
         busy={null}
         progress={null}
-        failure={null}
         wake={{ doubleTap: true, quietSeconds: 15 }}
         scheme="https"
         held={null}
@@ -322,6 +328,44 @@ function firmwareFacts(overrides: Partial<CharmFirmwareFacts> = {}): CharmFirmwa
     ...overrides,
   }
 }
+
+/**
+ * The firmware's facts are the page's one read: the risk the split carries is a row that polls
+ * beside them, which would put two asks on one link. Read here as the hook a page calls, and then
+ * as the row handed what it read — the hook asks each thing once, and the row asks nothing at all.
+ */
+test("the firmware's facts are asked once, and a row handed them asks nothing", async () => {
+  let versions = 0
+  let downloads = 0
+  const api = radio({
+    version: async () => {
+      versions += 1
+      return "0.1.0"
+    },
+    updateStatus: async () => {
+      downloads += 1
+      return { state: CharmUpdateState.Idle, percent: 0, reason: 0 }
+    },
+  })
+  const host = serveFirmware("charm-firmware-once", PUBLISHED)
+  let held: CharmFirmwareFacts | undefined
+  function Page() {
+    const facts = useCharmFirmware(api, host.profile)
+    held = facts
+    return <FirmwareRow facts={facts} busy={false} onOpenFirmware={() => {}} />
+  }
+  await mount(<Page />, async () => {
+    await until(async () => text().includes("Charm 0.1.0 · 0.2.0 available"), "the row's line")
+    assert.deepEqual([versions, downloads], [1, 1], "one ask of each — and not one per render")
+  })
+
+  const facts = held
+  assert.ok(facts, "the hook answered the page its facts")
+  await mount(<FirmwareRow facts={facts} busy={false} onOpenFirmware={() => {}} />, async () => {
+    await settle()
+    assert.deepEqual([versions, downloads], [1, 1], "a row handed the facts asks the charm nothing")
+  })
+})
 
 test("the firmware row offers the published one when the charm is older", async () => {
   let opened = 0
@@ -781,16 +825,23 @@ test("the charm's own answer about its voice is drawn as the charm said it", asy
 /**
  * The update screen's Done hands this page a sync through the URL: `?sync=1` says a build just
  * landed and the bots, the pet and the voice hand-over are owed again. The shell cannot be mounted
- * in the web build, so this probe is the hook itself: the URL it leaves and a redraw button, and
- * nothing else that could sync.
+ * in the web build, so this probe is the hook itself: the address it leaves, read through the kit's
+ * own probe, and a redraw button — and nothing else that could sync.
  */
-function ReturnProbe({ ready, onSync }: { ready: boolean; onSync: () => void }) {
-  useReturnSync({ ready, onSync })
-  const where = useLocation()
+function ReturnProbe({
+  ready,
+  busy,
+  onSync,
+}: {
+  ready: boolean
+  busy?: boolean
+  onSync: () => void
+}) {
+  useReturnSync({ ready, busy, onSync })
   const [, redraw] = useState(0)
   return (
     <>
-      <p data-where>{`${where.pathname}${where.search}`}</p>
+      <Nav />
       <button type="button" data-redraw onClick={() => redraw((n) => n + 1)}>
         redraw
       </button>
@@ -822,7 +873,7 @@ test("Sync your bots lands on /settings/charm?sync=1, syncs once, and leaves the
         await act(async () => ready?.())
         await settle()
         afterReady = syncs.length
-        where = find("[data-where]")?.textContent ?? ""
+        where = nav()
         await click(find("[data-redraw]"))
         await settle()
       },
@@ -833,8 +884,44 @@ test("Sync your bots lands on /settings/charm?sync=1, syncs once, and leaves the
   const asked = await returned("/settings/charm?sync=1")
   assert.equal(asked.afterReady, 1, "the parameter runs the sync once the page is ready")
   assert.equal(asked.afterRedraw, 1, "a redraw syncs nothing more: the parameter is gone")
-  assert.equal(asked.where, "/settings/charm", "and the URL no longer carries it")
+  assert.equal(asked.where, "REPLACE:/settings/charm", "and the URL no longer carries it")
 
   const plain = await returned("/settings/charm")
   assert.equal(plain.afterReady, 0, "no parameter, no sync")
+})
+
+/**
+ * The page's own send is not doubled by a return: a `?sync=1` that arrives while the page is busy
+ * waits, with the parameter still in the URL, for the moment the send it would have doubled is over
+ * — rather than being dropped and promising a sync nobody runs.
+ */
+test("a returned sync waits for the page to be free instead of landing in its own send", async () => {
+  const syncs: number[] = []
+  let ready: (() => void) | undefined
+  let free: ((busy: boolean) => void) | undefined
+  function Probe() {
+    const [isReady, setReady] = useState(false)
+    const [busy, setBusyState] = useState(true)
+    ready = () => setReady(true)
+    free = setBusyState
+    return <ReturnProbe ready={isReady} busy={busy} onSync={() => syncs.push(1)} />
+  }
+  await mount(
+    <MemoryRouter initialEntries={["/settings/charm?sync=1"]}>
+      <Routes>
+        <Route path="/settings/charm" element={<Probe />} />
+      </Routes>
+    </MemoryRouter>,
+    async () => {
+      await act(async () => ready?.())
+      await settle()
+      assert.equal(syncs.length, 0, "a page already sending takes no second send")
+      assert.equal(nav(), "POP:/settings/charm?sync=1", "and keeps the parameter for when it can")
+
+      await act(async () => free?.(false))
+      await settle()
+      assert.equal(syncs.length, 1, "the sync runs once the page is free")
+      assert.equal(nav(), "REPLACE:/settings/charm", "and the parameter goes with it")
+    },
+  )
 })

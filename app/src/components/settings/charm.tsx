@@ -12,7 +12,7 @@ import {
   type ReactNode,
 } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { useNavigate, useSearchParams } from "react-router"
+import { useNavigate } from "react-router"
 import {
   BatteryMediumIcon,
   BellRingIcon,
@@ -36,6 +36,7 @@ import {
   PickSurface,
   RowText,
   SwitchRow,
+  TapRow,
   ValueRow,
   fieldInnerClass,
   fieldInputClass,
@@ -62,7 +63,6 @@ import {
   forgetCharm,
   forgetCharmWifi,
   pairCharm,
-  PUBLISHED_FIRMWARE,
   charmVoice,
   readCharmBattery,
   readCharmTalk,
@@ -74,8 +74,11 @@ import {
   setCharmWake,
   setCharmWifi,
   syncToCharm,
+  useCharmFirmware,
   useCharmReport,
   usePairedCharm,
+  useReturnSync,
+  type CharmFirmwareFacts,
   type CharmScheme,
   type PairedCharm,
 } from "@/lib/charm"
@@ -97,10 +100,7 @@ import {
 import type { SyncProgress } from "@/lib/charm-sync"
 import { serverConfig } from "@/lib/connection"
 import { getActiveProfile, listProfiles, type Profile } from "@/lib/db"
-import type { PluginServer } from "@/lib/features"
-import { CHARM_POLL_MS } from "@/lib/freshness"
 import { getTalkAddress, getTalkToken } from "@/lib/hermes"
-import { useHostRecord } from "@/lib/host-record"
 import {
   BATTERY_ASK,
   batteryWords,
@@ -113,7 +113,6 @@ import {
   petSubtitle,
   QUIET_TITLE,
   quietWords,
-  readFailed,
   readValue,
   tailnetWords,
   updateWords,
@@ -128,7 +127,6 @@ import {
   wifiWords,
   type CharmLink,
   type CharmRead,
-  type CharmRunning,
   type CharmSeen,
 } from "@/lib/charm-words"
 import { quietly } from "@/lib/report"
@@ -162,133 +160,6 @@ const RADIO: CharmNetworkApi = {
   saveTailnet: setCharmTailnetKey,
   updateStatus: charmUpdateStatus,
   version: charmFirmwareVersion,
-}
-
-/**
- * What the Firmware row is drawn from: the build the charm says it runs, the package's own record of
- * what its host publishes, and where this charm's download has got to. The row draws these rather
- * than reading them, so the page can move it without a second read following it to its new place.
- */
-export interface CharmFirmwareFacts {
-  /** The charm's own answer about the build it runs. */
-  running: CharmRunning
-  /** The version the host publishes, where it answered with one. */
-  published?: string
-  /** Whether the host's read is over: nothing published is its refusal, not a wait. */
-  answered: boolean
-  /** The host's own sentence where its read was refused, or null where it answered. */
-  checkSaid: string | null
-  /** The charm's download, as it last answered. */
-  update: CharmRead<CharmUpdateStatus>
-  /** The download asked again, since a write the charm kept may have moved it. */
-  read: () => Promise<CharmUpdateStatus | undefined>
-}
-
-/**
- * The firmware's four facts, read in one place: the page reads them, and the row drawing them asks
- * nothing of the charm. A poll in each of two rows would put two asks on one link, so this is asked
- * once by the page and the facts ride down to the row — a section with a poll of its own is how two
- * asks reach one link.
- */
-function useCharmFirmware(
-  /** The radio to ask, or null where the facts were handed in and nothing is to be asked. */
-  api: Pick<CharmNetworkApi, "updateStatus" | "version"> | null,
-  /** The bot whose host publishes the firmware: the row's read of it is that host's record. */
-  profile: PluginServer,
-): CharmFirmwareFacts {
-  const [update, setUpdate] = useState<CharmRead<CharmUpdateStatus>>({ state: "reading" })
-  /** Which build the charm runs, as its own answer says. */
-  const [running, setRunning] = useState<CharmRunning>({ state: "reading" })
-  const [watching, setWatching] = useState(false)
-  /**
-   * What the host says `latest` holds, as one of its own records: read when the row opens, kept for
-   * its next open, and read again when a merge may have moved the tag. A plugin older than the route
-   * answers nothing, and the row says it couldn't check.
-   */
-  const firmware = useHostRecord(api ? profile : undefined, PUBLISHED_FIRMWARE, undefined)
-  const seen = firmware.value
-  const published = seen?.state === "published" ? seen.firmware : undefined
-
-  /**
-   * Where the charm's download has got to, asked when the row opens and again after each write. A
-   * failed ask keeps what an earlier one found — the charm is out of reach, not empty — and says why,
-   * since refused, disconnected and timed out are three facts rather than one silence.
-   */
-  const read = useCallback(
-    () =>
-      api
-        ? api.updateStatus().then(
-            (value) => {
-              setUpdate({ state: "read", value })
-              return value
-            },
-            (reason: unknown) => {
-              quietly("reading the charm's download")(reason)
-              setUpdate(readFailed)
-              return undefined
-            },
-          )
-        : Promise.resolve(undefined),
-    [api],
-  )
-
-  /**
-   * The charm's own version when the row opens: a version it can't say stays unsaid rather than
-   * guessed, and a link that never opened is its own fact. What the package publishes is the host's
-   * record above, read alongside it.
-   */
-  useEffect(() => {
-    if (!api) return
-    void api.version().then(
-      (found) =>
-        setRunning(found === null ? { state: "too-old" } : { state: "says", version: found }),
-      () => setRunning({ state: "unreachable" }),
-    )
-  }, [api])
-
-  // The download's own line: read once on opening, and again after each write.
-  useEffect(() => {
-    if (!api) return
-    void read().then((found) => {
-      // A download already running when the row opens is followed to its end, as one it started was.
-      if (found?.state === CharmUpdateState.Downloading) setWatching(true)
-    })
-  }, [api, read])
-
-  // A download that is running is asked where it has got to until it stops running.
-  useEffect(() => {
-    if (!api || !watching) return
-    const radio = api
-    let live = true
-    const timer = setInterval(() => {
-      void radio
-        .updateStatus()
-        .then((next) => {
-          if (!live) return
-          setUpdate({ state: "read", value: next })
-          if (next.state !== CharmUpdateState.Downloading) setWatching(false)
-        })
-        .catch(() => {
-          if (!live) return
-          // The charm stopped answering: the poll ends, and what it last said is still what it said.
-          setUpdate((before) => readFailed(before))
-          setWatching(false)
-        })
-    }, CHARM_POLL_MS)
-    return () => {
-      live = false
-      clearInterval(timer)
-    }
-  }, [watching, api])
-
-  return {
-    running,
-    published: published?.version,
-    answered: firmware.settled,
-    checkSaid: seen?.state === "refused" ? seen.said : null,
-    update,
-    read,
-  }
 }
 
 /** One form's body in a group: the card's own fill, under the row that heads it. */
@@ -708,23 +579,22 @@ export function SyncRow({
   onSync: () => void
 }) {
   return (
-    <button type="button" className={rowClass} onClick={onSync} disabled={busy || count === 0}>
-      <RefreshCwIcon
-        className={`size-5 shrink-0 text-muted-foreground ${syncing ? "animate-spin" : ""}`}
-      />
-      <RowText
-        title={syncing ? "Syncing…" : "Sync"}
-        subtitle={
-          progress
-            ? `${progress.done} of ${progress.total} bots`
-            : count === 0
-              ? "No bots to send"
-              : count === 1
-                ? "Sends your bot and its picture"
-                : `Sends your ${count} bots and their pictures`
-        }
-      />
-    </button>
+    <TapRow
+      icon={RefreshCwIcon}
+      iconClassName={syncing ? "animate-spin" : undefined}
+      title={syncing ? "Syncing…" : "Sync"}
+      subtitle={
+        progress
+          ? `${progress.done} of ${progress.total} bots`
+          : count === 0
+            ? "No bots to send"
+            : count === 1
+              ? "Sends your bot and its picture"
+              : `Sends your ${count} bots and their pictures`
+      }
+      disabled={busy || count === 0}
+      onClick={onSync}
+    />
   )
 }
 
@@ -746,17 +616,17 @@ export function TestAlertRow({
   onSend: () => void
 }) {
   return (
-    <button type="button" className={rowClass} onClick={onSend} disabled={busy || !canSend}>
-      <BellRingIcon className="size-5 shrink-0 text-muted-foreground" />
-      <RowText
-        title={sending ? "Sending…" : "Send a test alert"}
-        subtitle={
-          canSend
-            ? "Buzzes your charm as if your first bot needed an approval"
-            : "No bots on your charm to test with"
-        }
-      />
-    </button>
+    <TapRow
+      icon={BellRingIcon}
+      title={sending ? "Sending…" : "Send a test alert"}
+      subtitle={
+        canSend
+          ? "Buzzes your charm as if your first bot needed an approval"
+          : "No bots on your charm to test with"
+      }
+      disabled={busy || !canSend}
+      onClick={onSend}
+    />
   )
 }
 
@@ -776,7 +646,6 @@ export function CharmSections({
   labels,
   busy,
   progress,
-  failure,
   batteryNote,
   wake,
   scheme,
@@ -807,8 +676,6 @@ export function CharmSections({
   busy: CharmBusy
   /** How far the running send has got, or null while none runs. */
   progress: SyncProgress | null
-  /** What went wrong, in words: the page's banner while it stands. */
-  failure: string | null
   /** Why the last battery ask failed, in the row's own line. */
   batteryNote?: string
   wake: CharmWake
@@ -834,7 +701,6 @@ export function CharmSections({
   const petName = petProfile ? labelOf(labels, petProfile) : undefined
   return (
     <>
-      {failure && <Banner tone="error">{failure}</Banner>}
       <Group>
         <CharmStatusRow charm={charm} status={report.read} battery={charm.battery} />
         <BatteryRow note={batteryNote} busy={busy !== null} onRefresh={onBattery} />
@@ -899,29 +765,6 @@ export function CharmSections({
       </Caption>
     </>
   )
-}
-
-/**
- * The update screen's Done hands this page one sync through the URL: `?sync=1` says a build just
- * landed, so the bots, the pet and the voice hand-over are owed again. The shell cannot be mounted
- * by the web build, so this is a hook of its own — a test runs it under a probe.
- *
- * The parameter is read once the page is ready — a paired charm and the bots read — cleared with a
- * replace before the sync runs, so a redraw that would read it again finds nothing, and run through
- * a ref so a re-render cannot reach the radio twice.
- */
-export function useReturnSync({ ready, onSync }: { ready: boolean; onSync: () => void }) {
-  const [params, setParams] = useSearchParams()
-  const returned = params.get("sync") === "1"
-  const ran = useRef(false)
-  useEffect(() => {
-    if (!ready || !returned || ran.current) return
-    ran.current = true
-    // Cleared before the run: the parameter still in the URL when this page redraws would be a
-    // second return, and the sync would go twice.
-    setParams({}, { replace: true })
-    onSync()
-  }, [ready, returned, onSync, setParams])
 }
 
 /**
@@ -1110,8 +953,13 @@ export function CharmSettings() {
   }
 
   // The update screen's Done lands here with `?sync=1`: one sync once this page has a paired charm
-  // and the bots read, and the parameter cleared so a redraw syncs nothing.
-  useReturnSync({ ready: Boolean(charm && profiles), onSync: () => void sync() })
+  // and the bots read, and the parameter cleared so a redraw syncs nothing. A page already sending
+  // waits for that send: a second one would be dropped, and the reader promised a sync nobody ran.
+  useReturnSync({
+    ready: Boolean(charm && profiles),
+    busy: busy !== null,
+    onSync: () => void sync(),
+  })
 
   if (!charmAvailable())
     return (
@@ -1162,72 +1010,77 @@ export function CharmSettings() {
     }
   }
 
-  return charm ? (
+  return (
     <>
-      <CharmSections
-        charm={charm}
-        report={report}
-        firmware={firmware}
-        sources={sources}
-        botsRead={Boolean(profiles)}
-        labels={labels}
-        busy={busy}
-        progress={progress}
-        failure={failure}
-        batteryNote={batteryNote}
-        wake={wake}
-        scheme={scheme}
-        held={held}
-        heldFailed={heldFailed}
-        onSync={() => void sync()}
-        onTest={() => void test()}
-        onTogglePet={(on) => void togglePet(on)}
-        onPickPet={() => setPicking(true)}
-        onWake={(next) => void applyWake(next)}
-        onScheme={setCharmVoice}
-        onBattery={refreshBattery}
-        onForget={() => setForgetting(true)}
-        onOpenFirmware={() => navigate("/settings/charm-firmware")}
-      />
-      <PickSurface open={picking} onOpenChange={setPicking} title="The pet">
-        <PickList
-          label="Your bots"
-          searchable={false}
-          selected={pet?.botId}
-          options={sources.map((profile) => ({
-            id: profile.id,
-            label: labelOf(labels, profile),
-          }))}
-          onPick={choosePet}
-        />
-      </PickSurface>
-      <ConfirmDestructive
-        open={forgetting}
-        onOpenChange={setForgetting}
-        title="Forget this charm?"
-        description="This phone stops syncing to it. The charm keeps the bots it has. To pair again, remove it from Android's Bluetooth settings too."
-        confirmLabel="Forget"
-        onConfirm={async () => {
-          forgetCharm()
-          tell.success("Charm forgotten")
-        }}
-      />
-    </>
-  ) : (
-    <>
+      {/* One rule, one place: whichever page this is — the charm's own, or the ask to pair one —
+          its refusal stands above it. */}
       {failure && <Banner tone="error">{failure}</Banner>}
-      <Group>
-        <button type="button" className={rowClass} onClick={pair} disabled={busy !== null}>
-          <LinkIcon link="bluetooth" />
-          <RowText
-            title={busy === "pair" ? "Pairing…" : "Pair a charm"}
-            subtitle="Turn the charm on and keep it close"
+      {charm ? (
+        <>
+          <CharmSections
+            charm={charm}
+            report={report}
+            firmware={firmware}
+            sources={sources}
+            botsRead={Boolean(profiles)}
+            labels={labels}
+            busy={busy}
+            progress={progress}
+            batteryNote={batteryNote}
+            wake={wake}
+            scheme={scheme}
+            held={held}
+            heldFailed={heldFailed}
+            onSync={() => void sync()}
+            onTest={() => void test()}
+            onTogglePet={(on) => void togglePet(on)}
+            onPickPet={() => setPicking(true)}
+            onWake={(next) => void applyWake(next)}
+            onScheme={setCharmVoice}
+            onBattery={refreshBattery}
+            onForget={() => setForgetting(true)}
+            onOpenFirmware={() => navigate("/settings/charm-firmware")}
           />
-        </button>
-      </Group>
-      <Caption>
-        Pick “Gots Charm”, then type the six-digit code it shows. You only pair once.
-      </Caption>
+          <PickSurface open={picking} onOpenChange={setPicking} title="The pet">
+            <PickList
+              label="Your bots"
+              searchable={false}
+              selected={pet?.botId}
+              options={sources.map((profile) => ({
+                id: profile.id,
+                label: labelOf(labels, profile),
+              }))}
+              onPick={choosePet}
+            />
+          </PickSurface>
+          <ConfirmDestructive
+            open={forgetting}
+            onOpenChange={setForgetting}
+            title="Forget this charm?"
+            description="This phone stops syncing to it. The charm keeps the bots it has. To pair again, remove it from Android's Bluetooth settings too."
+            confirmLabel="Forget"
+            onConfirm={async () => {
+              forgetCharm()
+              tell.success("Charm forgotten")
+            }}
+          />
+        </>
+      ) : (
+        <>
+          <Group>
+            <button type="button" className={rowClass} onClick={pair} disabled={busy !== null}>
+              <LinkIcon link="bluetooth" />
+              <RowText
+                title={busy === "pair" ? "Pairing…" : "Pair a charm"}
+                subtitle="Turn the charm on and keep it close"
+              />
+            </button>
+          </Group>
+          <Caption>
+            Pick “Gots Charm”, then type the six-digit code it shows. You only pair once.
+          </Caption>
+        </>
+      )}
     </>
   )
 }
@@ -1301,9 +1154,12 @@ export function BatteryRow({
   onRefresh: () => void
 }) {
   return (
-    <button type="button" className={rowClass} onClick={onRefresh} disabled={busy}>
-      <BatteryMediumIcon className="size-5 shrink-0 text-muted-foreground" />
-      <RowText title="Battery" subtitle={note ?? BATTERY_ASK} />
-    </button>
+    <TapRow
+      icon={BatteryMediumIcon}
+      title="Battery"
+      subtitle={note ?? BATTERY_ASK}
+      disabled={busy}
+      onClick={onRefresh}
+    />
   )
 }

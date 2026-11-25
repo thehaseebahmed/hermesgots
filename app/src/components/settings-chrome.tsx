@@ -264,6 +264,36 @@ export function ActionRow({
   )
 }
 
+/**
+ * A row that runs something in place — a sync, an alert, a fresh reading — rather than opening
+ * anything: its icon, its title over the line saying what the tap does. No chevron, since these
+ * rows do not navigate (ADR 0055 draws a row's jump, never its work), and `disabled` is the row's
+ * own: a send already running, or nothing to send to.
+ */
+export function TapRow({
+  icon: Icon,
+  iconClassName,
+  title,
+  subtitle,
+  disabled,
+  onClick,
+}: {
+  icon: LucideIcon
+  /** The icon's own class, where it moves with what the row is doing: the sync's arrow spins. */
+  iconClassName?: string
+  title: string
+  subtitle?: string
+  disabled?: boolean
+  onClick: () => void
+}) {
+  return (
+    <button type="button" onClick={onClick} disabled={disabled} className={rowClass}>
+      <Icon className={cn("size-5 shrink-0 text-muted-foreground", iconClassName)} />
+      <RowText title={title} subtitle={subtitle} />
+    </button>
+  )
+}
+
 /** The row every Settings switch wears: an optional icon, a title over a muted line, and the switch. */
 export function SwitchRow({
   id,

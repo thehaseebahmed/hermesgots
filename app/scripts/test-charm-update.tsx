@@ -10,10 +10,10 @@ import assert from "node:assert/strict"
 import { createHash } from "node:crypto"
 import test from "node:test"
 import { type ComponentProps, type ReactElement, act } from "react"
-import { MemoryRouter, Route, Routes, useLocation } from "react-router"
+import { MemoryRouter, Route, Routes } from "react-router"
 
 import { CharmUpdateScreen } from "@/components/charm-update"
-import { resetCharmUpdateWalk } from "@/lib/charm-update-walk"
+import { resetCharmUpdateWalk, walk } from "@/lib/charm-update-walk"
 import { type PairedCharm } from "@/lib/charm"
 import {
   CHARM_SLOT_BYTES,
@@ -24,19 +24,22 @@ import {
 import { db } from "@/lib/db"
 import {
   PHONE_AND_TABLET_IN_BOTH_MODES,
+  FIRMWARE_FETCH_PATH,
+  FIRMWARE_FETCH_TOKEN,
+  Nav,
   atMode,
   click,
   findAll,
   find,
-  FIRMWARE_FETCH_PATH,
-  FIRMWARE_FETCH_TOKEN,
   mount,
+  nav,
   seedSettings,
   serveFirmware,
   settle,
   start,
   text,
   until,
+  watchNotes,
   wordsOf,
 } from "./component-kit.tsx"
 
@@ -48,7 +51,10 @@ test.beforeEach(async () => {
   await seedSettings()
 })
 
-/** The screen as its route mounts it: the URL carries the mode, as the row's buttons write it. */
+/**
+ * The screen as its route mounts it: the URL carries the mode, as the row's buttons write it. The
+ * address a door leaves is the kit's own probe, so how a move landed is read one way in every suite.
+ */
 const at = (entry: string, screen: ReactElement) => (
   <MemoryRouter initialEntries={[entry]}>
     <Routes>
@@ -57,16 +63,10 @@ const at = (entry: string, screen: ReactElement) => (
   </MemoryRouter>
 )
 
-/** The URL as the router holds it, path and query together: where a door landed. */
-function Where() {
-  const where = useLocation()
-  return <p data-where>{`${where.pathname}${where.search}`}</p>
-}
-
 /** The screen with the charm's own page behind it, so a door that leaves for it is read by its URL. */
 const atBoth = (entry: string, screen: ReactElement) => (
   <MemoryRouter initialEntries={[entry]}>
-    <Where />
+    <Nav />
     <Routes>
       <Route path="/settings/charm-firmware" element={screen} />
       <Route path="/settings/charm" element={<p>the charm page</p>} />
@@ -218,6 +218,63 @@ test("the screen opens on the offer, asks the battery once, and sends nothing un
 })
 
 /**
+ * The gate is about the charm, so the charge is asked as the screen opens rather than after the
+ * host's own read: a registry slow to answer must not leave the offer's charge row blank, nor hold
+ * the gate back until it does. Only `Install`'s label waits on the published record.
+ */
+test("the charge and the link are asked as the screen opens, not after the host's read", async () => {
+  let batteries = 0
+  let links = 0
+  const api = radio({
+    battery: async () => {
+      batteries += 1
+      return { percent: 64, charging: false }
+    },
+    network: async () => {
+      links += 1
+      return ONLINE_WIFI
+    },
+  })
+  const host = serveFirmware("update-charge-early", IMAGE_PUBLISHED, IMAGE)
+  // The host's record held open, as a slow registry holds it: everything else answers at once.
+  const served = globalThis.fetch
+  let release: (() => void) | undefined
+  const held = new Promise<void>((done) => (release = done))
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input instanceof Request ? input.url : input))
+    if (url.pathname.endsWith("/charm/firmware")) await held
+    return served(input, init)
+  }) as typeof fetch
+  try {
+    await mount(
+      at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
+      async () => {
+        await until(
+          async () => batteries === 1 && links === 1,
+          "the charm's charge and link, asked before the host answered",
+        )
+        assert.equal(
+          find("#charm-update-install"),
+          null,
+          "the host's read is still out, so no door is named yet",
+        )
+
+        release?.()
+        await until(
+          async () => Boolean(find("#charm-update-install")),
+          "the offer, once it answered",
+        )
+        assert.ok(text().includes("64%"), "and the charge it asked for is already in the row")
+        assert.ok(text().includes("Wi-Fi up"), "so is the link")
+        assert.deepEqual([batteries, links], [1, 1], "the host's own answer asks neither again")
+      },
+    )
+  } finally {
+    release?.()
+  }
+})
+
+/**
  * The same screen at the phone's width and the tablet's, each in both modes — the convention
  * `AGENTS.md` asks of every screen. A DOM lays nothing out and paints nothing, so what is read here
  * is the structure at each of the four combinations: the offer's two rows, the instruction, both
@@ -344,6 +401,30 @@ test("the 20% gate shuts the file door the same way, and the file door offers no
   await gateDoors("/settings/charm-firmware?file=1")
 })
 
+/**
+ * The third place the file door is drawn: a host with nothing published still offers a file, and a
+ * charge under 20% off the charger shuts that door as it shuts the other two. It is the same rule,
+ * so a reader who meets the door here meets the same sentence with it.
+ */
+test("a host with nothing published shuts its file door on the same charge", async () => {
+  const said = "GitHub refused this server's token for the charm firmware."
+  const host = serveFirmware("update-none-gated", said)
+  const api = radio({ battery: async () => ({ percent: 12, charging: false }) })
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
+    async () => {
+      await until(async () => text().includes(said), "the host's own sentence")
+      await until(async () => Boolean(find("#charm-update-choose")), "the picker")
+      const choose = find("#charm-update-choose") as HTMLButtonElement
+      assert.equal(choose.disabled, true, "12% off the charger shuts this door too")
+      assert.ok(
+        text().includes("Charge the charm above 20% before updating."),
+        "and the line beside it says what opens it",
+      )
+    },
+  )
+})
+
 test("a returning visit joins the running walk and draws no offer", async () => {
   let releaseUpload: (() => void) | undefined
   let uploads = 0
@@ -388,16 +469,13 @@ test("a returning visit joins the running walk and draws no offer", async () => 
  * The release's own words, over the offer: what changed, how big it is, when it was built, and the
  * caveat the charm's page gave up when the offer took it. Each string is spelled here rather than
  * read off `charm-words`, so a rewording that reaches the screen without this test is a rewording
- * the test sees; the date is the house's own style, built the way the screen builds it.
+ * the test sees — and the date is the house's format written out, not rebuilt from the options the
+ * screen builds it with, which would go on passing through a change to them.
  */
 const NOTES_ROW = "What's new"
 const NOTES = "The pet blinks again, and the clock keeps time."
 const BUILT = "2026-03-03T09:30:00Z"
-const builtLine = `Built ${new Date(BUILT).toLocaleDateString([], {
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-})}`
+const BUILT_LINE = "Built Mar 3, 2026"
 const EVERYDAY_BUILD =
   "The published image is the everyday build, not a sealed one: it installs over the air on any charm whose flash isn't sealed. A sealed charm refuses it, and says so in its own words."
 /** A package's own size, as a release names it: a megabyte and a half of firmware. */
@@ -425,7 +503,7 @@ test("the sheet draws the notes, the size and the date, and no row without notes
       const words = wordsOf(sheet)
       assert.ok(words.includes(NOTES), "the release's notes, as they arrived")
       assert.ok(words.includes("Size 1.5 MB"), "the image's size, in the app's own bytes")
-      assert.ok(words.includes(builtLine), `the build date: ${builtLine}`)
+      assert.ok(words.includes(BUILT_LINE), `the build date: ${BUILT_LINE}`)
       assert.ok(words.includes(EVERYDAY_BUILD), "and the everyday build's caveat, said once here")
     },
   )
@@ -684,6 +762,10 @@ test("a door that is shut runs the transfer this phone drives, and mints nothing
       assert.equal(uploads.length, 1, "the image went over the link this phone drives")
       assert.equal(host.imageReads(), 1, "and it came to the phone first")
       assert.ok(text().includes("Downloading"), "the phone's own download is the bar")
+      assert.ok(
+        !text().includes("The charm couldn't take the image itself"),
+        "and nothing is said about a door the charm never had",
+      )
     },
   )
 })
@@ -692,7 +774,7 @@ test("a host that cannot mint the door's token is no door: the transfer runs ins
   // A host one release behind this app: it serves the record and the image but has no fetch
   // route, so the mint 404s exactly when the walk has already picked the door. The mint's
   // failure means no door, not a dead end — the transfer this phone always drives runs, with
-  // its own steps drawn.
+  // its own steps drawn, and the walk says why the bytes are going the other way.
   const handed: unknown[] = []
   const uploads: Uint8Array[] = []
   const api = radio({
@@ -709,18 +791,37 @@ test("a host that cannot mint the door's token is no door: the transfer runs ins
   // fetchToken left off: the host predates the mint route, as a host one release behind does.
   const host = serveFirmware("update-old-host", IMAGE_PUBLISHED, IMAGE)
   const charm = charmedOver("https://update-old-host.test/api/plugins/gots", "https")
-  await mount(
-    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />),
-    async () => {
-      await start()
-      await until(async () => text().includes("Updated to 0.2.0 from 0.1.0."), "the transfer's end", 10_000)
-      assert.deepEqual(handed, [], "no Update op went")
-      assert.equal(uploads.length, 1, "the image went over the link this phone drives")
-      assert.equal(host.imageReads(), 1, "and it came to the phone first")
-      assert.ok(text().includes("Transferring"), "the transfer's own steps drawn, not a dead end")
-      assert.ok(!text().includes("Try again"), "no failure to offer again")
-    },
-  )
+  const notes = watchNotes("minting the fetch door")
+  try {
+    await mount(
+      at(
+        "/settings/charm-firmware",
+        <CharmUpdateScreen api={api} profile={host.profile} charm={charm} />,
+      ),
+      async () => {
+        await start()
+        await until(
+          async () => text().includes("Updated to 0.2.0 from 0.1.0."),
+          "the transfer's end",
+          10_000,
+        )
+        assert.deepEqual(handed, [], "no Update op went")
+        assert.equal(uploads.length, 1, "the image went over the link this phone drives")
+        assert.equal(host.imageReads(), 1, "and it came to the phone first")
+        assert.ok(text().includes("Transferring"), "the transfer's own steps drawn, not a dead end")
+        assert.ok(!text().includes("Try again"), "no failure to offer again")
+        assert.ok(
+          text().includes(
+            "The charm couldn't take the image itself, so this phone is sending it over the link instead.",
+          ),
+          "the walk says the whole image is going over this phone's link now",
+        )
+        assert.equal(notes.count(), 1, "and the console keeps the reason the mint gave")
+      },
+    )
+  } finally {
+    notes.stop()
+  }
 })
 
 test("a kept address whose fetch URL cannot fit walks the transfer after the mint", async () => {
@@ -1086,9 +1187,9 @@ test("Done reads the build it came from and the one it runs", async () => {
       await click(find("#charm-update-sync"))
       await settle()
       assert.equal(
-        find("[data-where]")?.textContent,
-        "/settings/charm?sync=1",
-        "Sync your bots lands on the charm's page with one sync asked for",
+        nav(),
+        "PUSH:/settings/charm?sync=1",
+        "Sync your bots pushes the charm's page with one sync asked for",
       )
     },
   )
@@ -1107,6 +1208,28 @@ test("Done reads the build it came from and the one it runs", async () => {
     await pick("charm-0.2.1.bin", 8)
     await until(async () => text().includes("The charm runs 0.2.1."), "the one build it runs", 20_000)
     assert.ok(!text().includes("Updated to"), "a re-flash says one build, not a change")
+  })
+})
+
+/**
+ * The walk's own memory of how it was started is what `Try again` re-runs, and a walk that ended
+ * Done has nothing to re-run. A file walk's hand closes over the `File` the reader picked, so
+ * keeping it after the end pins up to a slot of bytes for as long as the app runs.
+ */
+test("a walk that ends Done keeps no hand to run again", async () => {
+  const api = radio({
+    upload: async (image: Uint8Array) => ({
+      sent: image.length,
+      total: image.length,
+      percent: 100,
+    }),
+  })
+  await mount(at("/settings/charm-firmware?file=1", <CharmUpdateScreen api={api} />), async () => {
+    await until(async () => Boolean(find("#charm-update-choose")), "the picker")
+    await pick("charm-0.2.0.bin", 8)
+    await until(async () => text().includes("Updated to 0.2.0 from 0.1.0."), "the end of the walk")
+    assert.equal(walk.end?.kind, "done", "the walk landed")
+    assert.equal(walk.again, null, "and holds no hand: the file it closed over is let go")
   })
 })
 
