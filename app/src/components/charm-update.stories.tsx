@@ -1,13 +1,8 @@
 /**
- * Charm Settings' update screen, at the three moments a reader meets it: the offer of the published
- * build, a download on its way, and a failure that marks the step it stopped at and points at the
- * cable. The screen takes the charm as a stand-in `api`, so no story here drives a radio; it reads
- * the release from the bot's host rather than taking it as a prop, so this file answers that host's
- * two routes itself — the plugin's feature list and the tag's own record — and hands every other
- * request to the browser's own `fetch`, exactly as it would have gone.
- *
- * The mode is the toolbar's (`preview.tsx` toggles `dark` on the document) and the width the
- * viewport's; the frame is a phone's measure, since the screen is a phone's.
+ * Charm Settings' update screen, at the three moments a reader meets it: the offer, a download on
+ * its way, and a failure that marks the step it stopped at. The charm is a stand-in `api`, so no
+ * story drives a radio; the release comes from the bot's host rather than a prop, so this file
+ * answers that host's two routes and hands every other request to the browser's own `fetch`.
  */
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { type ReactNode, useRef } from "react"

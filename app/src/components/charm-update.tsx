@@ -113,8 +113,8 @@ export interface CharmUpdateApi {
   /** The charm's report of its two links — the ask the settings page already makes. */
   network(): Promise<CharmNetworkReport>
   /**
-   * The charm's charge, asked once as the offer draws: what the gate reads. No age — this is the
-   * reading taken for this visit's offer, not the record the settings page keeps.
+   * The charm's charge, asked as the offer draws and again as a door is pressed: what the gate
+   * reads. No age — a reading taken for this visit, not the record the settings page keeps.
    */
   battery(): Promise<CharmBattery | undefined>
   /** Where the charm's own fetch has got to, as the `UpdateStatus` ask answers it. */
@@ -193,25 +193,10 @@ const STEP_TITLES: Record<StepView["name"], string> = {
 }
 
 /**
- * Settings → Charm's update screen: the steps a firmware update walks, in the reader's words —
- * Downloading, whether the phone fetches the image or the charm fetches it itself through a door it
- * holds, Transferring with the bar the upload reports, Restarting over the reboot window, and the
- * end: the version the charm came back on and the build it started from, the way on to a sync of
- * the bots, the pet and the voice hand-over, or the failure — its reason, the step it stopped at
- * marked, `Try again`, and the sure path beside it: `Flash it by cable` opens a sheet saying what
- * a cable needs and a row opening the firmware's repository, where the flasher and its steps live,
- * with the charm's log a row further down wherever this device's Developer switch is on.
- * Nothing goes until the reader taps: a fresh visit first draws an offer of the published image —
- * the charm's charge, its link, the one instruction the link needs, the doors, `Install` and a
- * file the phone holds, and, where the release says what changed or why it could not be said, a
- * What's-new row whose sheet holds the notes, the image's size, the build date and the everyday
- * build's caveat — and a charge under 20% off the charger shuts both until the charm is
- * charged. The Firmware row's Update button opens that offer on the published image; its picker
- * opens the same offer with the file door alone, which walks the same steps minus the download —
- * and always over the link, since a file the phone holds has no door to walk. The reader can
- * step back at any point — the send is driven by its own promise, not by the screen, and the walk
- * it drives is the shared one above, so leaving changes nothing about what the charm takes and
- * returning changes nothing about what runs.
+ * Settings → Charm's update screen: the offer of the published build, the steps a send walks, and
+ * the end it reads back — a sync owed, or the failure with its marked step and the cable path.
+ * Nothing is read, minted or written before the reader taps, and the send is driven by its own
+ * promise, so stepping back leaves the walk running rather than ending it.
  */
 export function CharmUpdateScreen({
   api = LIVE,
@@ -358,24 +343,20 @@ export function CharmUpdateScreen({
   }
 
   /**
-   * The published image, however the charm takes it. The door is asked first — the charm's own
-   * report of its links and the build it answered, against the address the voice hand-over kept —
-   * and only a door that is open mints a token and hands the charm the address, so the screen never
-   * offers a walk the charm cannot make; a report that could not be read is no door either, since
-   * an unread fact is not a fact. The hand reads the record again on every run, exactly as the
-   * transfer path defends a moved tag: the charm fetches what the host serves now, so the hash it
-   * is handed names the bytes it will fetch — and a mint that fails, or a URL that cannot be
-   * built, is no door either, so the walk falls to the transfer this phone can always drive. No
-   * door open is that transfer too: the image streamed to this phone, checked against the version
-   * this screen read, so a package that moved between the two reads is refused here rather than by
-   * the charm after the whole image — unless the re-read names these bytes, when they are exactly
-   * the image to send.
+   * The published image, however the charm takes it: its own fetch where the charm's links allow
+   * one, this phone's streamed copy otherwise. The hand reads the record again on every run, since
+   * the charm fetches what the host serves now — and the SHA-256 it is handed, not the URL, is what
+   * pins the bytes.
    */
-  const runPublished = (record: CharmFirmware) => {
+  const runPublished = async (record: CharmFirmware) => {
+    if (walk.running) return
+    // The tap's own reading of the charge, before this visit is marked as begun: a refusal leaves
+    // the offer standing, so a reader who charges the charm can press the same door again.
+    if (!(await chargeHoldsAtTap())) return
     // This visit's walk began for this build: a visit that returns joins it rather than offering
     // the same build a second time.
     setWalk({ started: record.version })
-    return send(async (was: string | null) => {
+    await send(async (was: string | null) => {
       const scheme = charmVoice(charm)
       const address = typeof charm?.talk === "string" ? charm.talk : undefined
       const report = (await api.network().catch(quietly("reading the charm's links"))) ?? null
@@ -450,20 +431,42 @@ export function CharmUpdateScreen({
       setWalk({ note: FILE_TOO_BIG })
       return
     }
-    void send(
-      async () => {
-        // The transfer is drawn as the file is read, so a read that fails leaves the row it was in.
-        show("transfer", { percent: 0 })
-        const image = new Uint8Array(await chosen.arrayBuffer())
-        return { kind: "transfer", image, sha256Hex: await sha256Of(image), sends: null }
-      },
-      `Sending ${chosen.name}`,
-    )
+    void (async () => {
+      // The same rule the published door wears, on the pick: a file the phone holds is not a way
+      // round a charm that cannot take it.
+      if (!(await chargeHoldsAtTap())) return
+      await send(
+        async () => {
+          // The transfer is drawn as the file is read, so a read that fails leaves the row it was in.
+          show("transfer", { percent: 0 })
+          const image = new Uint8Array(await chosen.arrayBuffer())
+          return { kind: "transfer", image, sha256Hex: await sha256Of(image), sends: null }
+        },
+        `Sending ${chosen.name}`,
+      )
+    })()
   }
 
   const [battery, setBattery] = useState<CharmBattery | undefined>(undefined)
   const [link, setLink] = useState<CharmNetworkReport | undefined>(undefined)
+  const [shutAtTap, setShutAtTap] = useState(false)
   const asked = useRef(false)
+
+  /**
+   * The charge read again as a door is pressed. The offer drew on a reading taken when it opened,
+   * and a charm's charge falls: the rule is asked once more at the tap rather than trusted to a row
+   * drawn minutes ago. It is a confirmation and not a replacement — the offer keeps the reading it
+   * drew — and a refused ask is no fact, so only an answer that says no shuts the tap.
+   */
+  const chargeHoldsAtTap = async () => {
+    const now = await api.battery().catch(quietly("reading the charm's charge"))
+    if (!chargeBlocks(now)) {
+      setShutAtTap(false)
+      return true
+    }
+    setShutAtTap(true)
+    return false
+  }
 
   /**
    * Whether this visit draws the offer: nothing is running, nothing has ended, and this visit has
@@ -495,11 +498,18 @@ export function CharmUpdateScreen({
   /** The gate's answer, for the one door drawn outside the offer: a file under a host with nothing. */
   const blocked = chargeBlocks(battery)
 
-  /** What a failure's way forward re-runs: the same hand — the bytes read again, or the door asked again. */
+  /**
+   * What a failure's way forward re-runs: the same hand — the bytes read again, or the door asked
+   * again — and the charge asked again with it, since this is a tap that starts a send like any
+   * other.
+   */
   const retry = () => {
     const last = walk.again
     if (walk.running || !last) return
-    void send(last.hand, last.title)
+    void (async () => {
+      if (!(await chargeHoldsAtTap())) return
+      await send(last.hand, last.title)
+    })()
   }
 
   /** The step a failure stopped at, if it named one: the one row the walk marks. */
@@ -611,6 +621,9 @@ export function CharmUpdateScreen({
           {blocked && <Caption>{CHARGE_FIRST}</Caption>}
         </>
       )}
+      {/* The tap's own reading, under whichever door was pressed: the offer stands, and the line
+          that says what opens it is the only thing the refusal adds. */}
+      {shutAtTap && <Caption>{CHARGE_FIRST}</Caption>}
     </>
   )
 }
@@ -667,16 +680,10 @@ function Bar({ value }: { value: number }) {
 }
 
 /**
- * The offer a fresh visit reads before anything goes: the charm's charge as the gate reads it, the
- * link the charm reported, the one instruction the link needs, what the release says changed, and
- * the doors — the published image by name, or a file the phone already holds. The charge is the
- * gate: under 20% and off the charger, both doors are shut and one line says what opens them.
- *
- * The What's-new row is the release's own words: drawn only where the package names notes, or
- * where the host refused them in a sentence of its own, so a release that says nothing draws no
- * row and no sheet. Everything the sheet holds is the record's — the notes as they arrived, the
- * image's size, the build date where it named one, and the everyday build's caveat, which the
- * charm's page carried until the offer took it.
+ * The offer a fresh visit reads before anything goes: the charm's charge and link, the instruction
+ * the link needs, what the release says changed, and the doors. The charge is the gate — under 20%
+ * off the charger shuts both, with one line saying what opens them — and the What's-new row is
+ * drawn only where the release names notes or the host refused them.
  */
 function Offer({
   battery,

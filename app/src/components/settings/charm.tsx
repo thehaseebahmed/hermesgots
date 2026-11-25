@@ -290,10 +290,8 @@ export function FirmwareRow({
 /**
  * Settings → Charm's network: the Wi-Fi the charm joins, and the tailnet key it joins with. Every
  * row draws the charm's own answer rather than what was sent, and a passphrase or a key clears the
- * moment the write has gone: neither is ever drawn again, and neither is kept on this phone.
- *
- * The firmware is not here: its row is the Device group's, and it carries the page's facts, so a
- * poll on the charm's link is not put beside this section's write.
+ * moment the write has gone: neither is ever drawn again, and neither is kept on this phone. The
+ * firmware's row carries the page's facts, so no poll is put beside this section's write.
  */
 export function CharmNetwork({
   api = RADIO,
@@ -632,11 +630,8 @@ export function TestAlertRow({
 }
 
 /**
- * The paired page, drawn from facts alone: the charm and its charge first, then the bots and the
- * pet, the wake settings, the voice, the page's own read of the links, and the way out — Device,
- * Bots, Waking, Voice, Wi-Fi, Tailnet, Forget, and one caption for the page. Nothing here reads
- * Dexie or the radio and no effect asks the charm, so a test can mount the whole page with
- * fixtures.
+ * The paired page, drawn from facts alone: nothing here reads Dexie or the radio and no effect asks
+ * the charm, so a test can mount the whole page with fixtures.
  */
 export function CharmSections({
   charm,
@@ -769,9 +764,9 @@ export function CharmSections({
 }
 
 /**
- * Settings → Charm's shell: the gate, the phone's own reads, and the handlers a tap calls. The page
- * below it is drawn from what they hold, so the sections can be mounted with fixtures, and the
- * firmware's facts are read once here — wherever on the page the row drawing them ends up.
+ * Settings → Charm's shell: the gate, the phone's own reads, and the handlers a tap calls. Its page
+ * is drawn from what they hold, so the sections can be mounted with fixtures; the firmware's facts
+ * are read here once, so the row carrying them asks the charm nothing wherever it stands.
  */
 export function CharmSettings() {
   const navigate = useNavigate()

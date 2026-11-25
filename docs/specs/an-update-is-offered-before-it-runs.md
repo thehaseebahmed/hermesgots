@@ -8,7 +8,7 @@ The charm's firmware is the charm's, not the network's, and an update is somethi
 
 The Firmware row is a settings row like any other: **Firmware** over the versions line — *Charm 0.1.0 · 0.2.0 available*, *up to date*, *couldn't check for a newer one*, *this charm can't say which version it runs*, *newer than* — tagged **Update** only when the host publishes a build ahead of the charm's, its value replaced by the download's own line while a download runs, followed to its end rather than read once. A host that refused its read says so in its own sentence under the group; a tap opens `/settings/charm-firmware`. A page busy with another write opens no screen, since the row is disabled with the rest of the page.
 
-Opening that screen draws an offer, and nothing leaves the phone until a tap. The offer carries three facts — the charm's **Battery** (its level, and **Charging** when it is), its **Link** (*Wi-Fi up*, or a Wi-Fi that is joining or down), and the one instruction the link needs, **Keep the phone near the charm** — and one tap: `Install 0.2.0`, naming the build it will send. `Choose a file…` sits beside it for a package the phone already holds, and a screen opened at `?file=1` draws that door alone, with no `Install`, because there is no build to name. The screen asks the charm for its charge and its links once, as the offer draws, and reads no image, mints no fetch token and writes nothing to the charm before the tap. A reader who leaves mid-walk and returns joins the walk in flight and is not offered it again: the offer is drawn only where nothing is running, nothing has ended, and this visit has not already begun a walk for the published build.
+Opening that screen draws an offer, and nothing leaves the phone until a tap. The offer carries three facts — the charm's **Battery** (its level, and **Charging** when it is), its **Link** (*Wi-Fi up*, or a Wi-Fi that is joining or down), and the one instruction the link needs, **Keep the phone near the charm** — and one tap: `Install 0.2.0`, naming the build it will send. `Choose a file…` sits beside it for a package the phone already holds, and a screen opened at `?file=1` draws that door alone, with no `Install`, because there is no build to name. The screen asks the charm for its charge and its links as the offer draws, and asks the charge once more as a door is pressed: the offer's reading is what the row says, and the tap's is what decides. No image is read, no fetch token minted and nothing written to the charm before that second answer. A reader who leaves mid-walk and returns joins the walk in flight and is not offered it again: the offer is drawn only where nothing is running, nothing has ended, and this visit has not already begun a walk for the published build.
 
 ## What this is not
 
@@ -20,7 +20,9 @@ Opening that screen draws an offer, and nothing leaves the phone until a tap. Th
 
 ## The gate
 
-SwitchBot's own rule, in `chargeBlocks` (`app/src/lib/charm-words.ts`): a charm **under 20% and not charging** shuts both doors, and one line under the group says what opens them — *Charge the charm above 20% before updating.* **Charging passes at any level.** A charm that answers a percent below zero could not read its own charge, and an ask that failed is no fact at all, so neither ever blocks: an update is offered on what the charm said, never on what it did not. The same gate covers the file door, so a picked package cannot walk past a rule the published one is held to; a screen with the file door alone is gated the same way and still draws the same line.
+SwitchBot's own rule, in `chargeBlocks` (`app/src/lib/charm-words.ts`): a charm **under 20% and not charging** shuts both doors, and one line under the group says what opens them — *Charge the charm above 20% before updating.* **Charging passes at any level.** A charm that answers a percent below zero could not read its own charge, and an ask that failed is no fact at all, so neither ever blocks: an update is offered on what the charm said, never on what it did not.
+
+**The charge is read when the offer draws and again at the tap.** The offer's own ask is what its Battery row says; the tap's ask is a confirmation of that row rather than a replacement of it, and it is the one that decides. A charm that has fallen under 20% since the screen opened — or one that was still unread when the offer drew — is refused where the door is pressed: no step is drawn, no walk begins, nothing is marked as begun, and the offer stays on screen with the line under it. Every tap that starts a send asks the same way, so the rule reaches the file door, a screen opened for a file alone under a host with nothing published, and the failure's `Try again`.
 
 ## The walk outlives the screen
 
@@ -84,15 +86,17 @@ Cheapest tier that fails for the reason the change can fail (ADR 0019), and the 
 
 **The screen** (`app/scripts/test-charm-update.tsx`):
 
-- *"the screen opens on the offer, asks the battery once, and sends nothing until Install"* — the three facts, the version on the door, zero image reads, zero mints, zero uploads before the tap, and the tap as the one send.
+- *"the screen opens on the offer, asks the battery as it draws, and sends nothing until Install"* — the three facts, the version on the door, zero image reads, zero mints, zero uploads before the tap, the offer's ask, and then the tap's own ask as the one send.
 - *"the 20% gate shuts the published offer's doors, and only under 20% off the charger"* and *"the 20% gate shuts the file door the same way, and the file door offers no Install"* — 12% not charging shuts, 12% charging passes, −1 passes, a refused ask passes; both doors, and the line under the group.
+- *"a charge that lands under 20% after the offer draws shuts the tap, and no walk begins"*, *"a file picked after the offer is held to the charge the tap reads"* and *"a failure's Try again is held by the charge the tap reads"* — the charge 80% as the offer draws and 12% at the tap: zero uploads, no walk begun, no step drawn, the door still on screen with the line.
+- *"a charge that still passes the rule at the tap sends, on both doors"* — 12% charging, −1 and a refused ask each send on Install and on the picker, with no line drawn.
 - *"a returning visit joins the running walk and draws no offer"* and *"stepping back mid-walk and returning joins the walk already running"* — no second offer, no second battery ask, no second send.
 - *"the leaving line is drawn once the walk runs, and on neither the offer nor an end"* — the sentence, its one place, and its two absences.
 - *"Done reads the build it came from and the one it runs"* — `Updated to 0.2.1 from 0.1.0.`, `Sync your bots` landing on `/settings/charm?sync=1`, and a re-flash saying one build.
 - *"a re-flash of the published build ends Done, over the phone's link and the charm's own fetch"* — the same build on both published doors, landed and said as one build, never as the failure it is not.
 - *"a walk that could not name its start still says the build changed"* — `Updated to 0.2.2.` with no `from`, and never the re-flash sentence.
 - *"the transfer step is marked when it fails"* — one marked row, the step it stopped at, the restart not drawn — and *"a failure before a byte still draws and marks the step the walk was in"*, for a host that refuses the image itself.
-- *"the file door left after a walk says what shuts it"* — the door the picker is left with, shut by a charge that lands late, with the line saying what opens it.
+- *"the file door left after a walk is held by the tap, and says what shuts it"* — the door the picker is left with after a failure, shut at the pick with the line saying what opens it.
 - *"the cable sheet says what the cable path is, and opens the firmware repository"* — the three sentences, the row, and `openExternal` called with the repository's URL and nothing else.
 - *"the log row is absent with Developer off and present with it"* — the row and its words, both ways.
 - *"the sheet draws the notes, the size and the date, and no row without notes"* — the notes, *Size 1.5 MB*, the built line, the unsealed-build caveat, the sentence about the SHA-256 the charm checks, an undated release with no date line, a refused release with the host's sentence, and a release naming none with no row and no sheet.
@@ -114,7 +118,7 @@ Cheapest tier that fails for the reason the change can fail (ADR 0019), and the 
 
 ## The two limits this build cannot lift
 
-- **The gate is a snapshot.** It is read once, as the offer draws, and nothing re-reads the charge mid-walk or re-gates the send: a charm that falls below 20% while a walk runs is not stopped, and a tap already given is never reconsidered. Closing that would mean asking the charm on the send path, which is the kind of read `AGENTS.md` keeps off it.
+- **The gate is read at the tap, and not during the walk.** A charm that falls below 20% after the send has begun is not stopped mid-transfer: nothing re-reads the charge between the tap's answer and the end, and the charm's own cancel is what ends a walk that must not go on.
 - **Colour is judged in Storybook, not in jsdom.** The component tests read structure — which rows, which words, which widths, which theme class — because a DOM lays nothing out and paints nothing. Contrast, the accent on the **Update** tag and both screens' look at 390 and 768 are the two stories' (`settings/charm-sections.stories.tsx`, `charm-update.stories.tsx`) and a device's to judge, and no case here can stand in for that.
 
 ## Risks

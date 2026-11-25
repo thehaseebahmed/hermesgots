@@ -29,7 +29,7 @@ import {
 import { connectionKey } from "@/lib/connection"
 import { createConversation, type CodeSort, type Conversation, type Profile } from "@/lib/db"
 import { useDraft } from "@/lib/drafts"
-import { formatRelative } from "@/lib/format"
+import { formatDate, formatRelative } from "@/lib/format"
 import type { HermesProject } from "@/lib/hermes"
 import { codeOrder } from "@/lib/item-groups"
 import { useXLarge } from "@/lib/media"
@@ -421,7 +421,7 @@ const names = new Intl.ListFormat(undefined, { type: "conjunction" })
 
 function formatWhen(at: number, now: number) {
   if (now - at < DAY_MS) return formatRelative(at, now)
-  return new Date(at).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })
+  return formatDate(at)
 }
 
 function StateIcon({ state }: { state: SessionState }) {

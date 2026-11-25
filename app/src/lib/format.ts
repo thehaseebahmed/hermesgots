@@ -9,6 +9,20 @@ export function formatDuration(ms: number) {
   return `${minutes}m ${Math.round((ms % 60_000) / 1000)}s`
 }
 
+/**
+ * A day as the app writes one wherever a date stands alone: 3 Mar 2026. The formatter is built
+ * once, since a list asks this on every row it draws.
+ */
+const DATE = new Intl.DateTimeFormat(undefined, {
+  day: "numeric",
+  month: "short",
+  year: "numeric",
+})
+
+export function formatDate(at: number | string | Date) {
+  return DATE.format(new Date(at))
+}
+
 /** Compact token counts: 950, 12.3k, 339k, 1M. */
 export function formatTokens(tokens: number) {
   const compact = (value: number, unit: string) =>

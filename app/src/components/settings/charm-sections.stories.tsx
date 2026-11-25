@@ -1,12 +1,8 @@
 /**
- * The charm's own page, drawn from fixtures alone: the sections take every fact they draw as a
- * prop, so a story needs no radio and no store — a paired charm, its report, what the page read of
- * the firmware, two bots and the labels this phone calls them. Two stories, because the one thing a reader
- * checks at a glance is whether the Firmware row offers a build: tagged **Update** when it does,
- * and untagged when the charm is already on it.
- *
- * The mode comes from the toolbar's own switch (`preview.tsx` toggles `dark` on the document), and
- * the width from the viewport — this page is a phone's, so the frame is one phone's measure.
+ * The charm's own page, drawn from fixtures alone: the sections take every fact they draw as a prop,
+ * so a story needs no radio and no store. Two stories, since the one thing a reader checks at a
+ * glance is whether the Firmware row offers a build — tagged **Update** when it does, and untagged
+ * when the charm is already on it.
  */
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { MemoryRouter } from "react-router"
@@ -55,7 +51,7 @@ const LABELS = new Map([
   ["bot-desk", "Desk"],
 ])
 
-/** The firmware's four facts: the build the charm runs, and the one its host publishes. */
+/** The firmware facts the row draws: the build the charm runs, and the one its host publishes. */
 const firmwareFacts = (published: string, running = "0.2.0"): CharmFirmwareFacts => ({
   running: { state: "says", version: running },
   published,

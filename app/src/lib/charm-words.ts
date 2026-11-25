@@ -17,6 +17,7 @@ import {
 } from "./charm-protocol.ts"
 import { compareVersions } from "./version-compare.ts"
 import { formatBytes } from "./attachment-caps.ts"
+import { formatDate } from "./format.ts"
 export interface CharmSeen {
   name: string
   syncedAt?: number
@@ -260,30 +261,29 @@ export function notesSizeWords(size: number): string {
 }
 
 /**
- * The sheet's build-date line, where the release names one: the house's short date, the
- * `day numeric, month short, year numeric` the app's lists use. A date this app cannot read draws
- * no line at all rather than a broken one — the notes are worth reading without it, and the host
- * leaves an unreadable one off too.
+ * The sheet's build-date line, where the release names one. A date this app cannot read draws no
+ * line at all rather than a broken one — the notes are worth reading without it, and the host leaves
+ * an unreadable one off too.
  */
 export function builtWords(built: string): string | null {
   const at = new Date(built)
   if (Number.isNaN(at.getTime())) return null
-  return `Built ${at.toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })}`
+  return `Built ${formatDate(at)}`
 }
 
 /**
  * In the What's-new sheet, under the release's notes: the image published there is the ordinary,
  * unsealed build, so it is safe over the air; a sealed charm is the one that refuses it, and the
- * charm's own reason is what the row draws when it does. It was the Firmware row's caption until
- * the offer took it — the sheet is where a reader is about to install, so it is said there.
+ * charm's own reason is what the row draws when it does. It is said here because the sheet is where
+ * a reader is about to install.
  */
 export const FIRMWARE_CAPTION =
   "The published image is the everyday build, not a sealed one: it installs over the air on any charm whose flash isn't sealed. A sealed charm refuses it, and says so in its own words."
 
 /**
- * In the same sheet, the other half of the caption that left the Firmware row: the charm checks the
- * bytes against the SHA-256 the walk handed it before it writes the slot, so a tag that moved in the
- * registry is refused by the charm rather than trusted by its URL.
+ * In the same sheet: the charm checks the bytes against the SHA-256 the walk handed it before it
+ * writes the slot, so a tag that moved in the registry is refused by the charm rather than trusted
+ * by its URL.
  */
 export const FIRMWARE_CHECKED =
   "The charm checks the image against the SHA-256 it was given before it writes the slot."

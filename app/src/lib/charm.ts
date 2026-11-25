@@ -251,7 +251,7 @@ const FIRMWARE_RADIO: CharmFirmwareApi = {
 /**
  * What the Firmware row is drawn from: the build the charm says it runs, the package's own record of
  * what its host publishes, and where this charm's download has got to. The row draws these rather
- * than reading them, so the page can move it without a second read following it to its new place.
+ * than reading them, so wherever on the page it stands it asks the charm nothing.
  */
 export interface CharmFirmwareFacts {
   /** The charm's own answer about the build it runs. */
@@ -377,11 +377,9 @@ export function useCharmFirmware(
 }
 
 /**
- * The update screen's Done hands the charm's page one sync through the URL: `?sync=1` says a build
- * just landed, so the bots, the pet and the voice hand-over are owed again. The parameter is read
- * once the page is ready — a paired charm, the bots read, and no send of the page's own already
- * running — cleared with a replace before the sync runs, so a redraw that would read it again finds
- * nothing, and run through a ref so a re-render cannot reach the radio twice.
+ * The update screen's Done hands the charm's page one sync through `?sync=1`: a build just landed,
+ * so the bots, the pet and the voice hand-over are owed again. The parameter is cleared with a
+ * replace before the sync runs and the run goes through a ref, so a redraw finds nothing to read.
  *
  * `busy` is what keeps the return from being a promise nobody keeps: a page already sending drops a
  * second send, so this waits with the parameter still in the URL rather than run one into the void.

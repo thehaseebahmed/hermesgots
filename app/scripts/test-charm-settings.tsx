@@ -3,9 +3,7 @@
  * app, so the menu offers no row, and the section, reached by its address, says where to pair one.
  * The phone's own Network section is drawn here too, over a stand-in for the radio: what a charm's
  * answer reads as, and that a passphrase is never drawn back. The paired page is mounted from facts
- * alone, so its cards and the Firmware row inside them are read without a radio at all. The send
- * flow's assertions moved with the flow itself — `test-charm-update.tsx` holds them, beside the
- * screen that runs them.
+ * alone, so its cards and the Firmware row inside them are read without a radio at all.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -331,9 +329,9 @@ test("the sync row's spinner stops for a reader who asked for less motion", asyn
 const PUBLISHED = { version: "0.2.0", size: 4, sha256: "cd".repeat(32) }
 
 /**
- * The firmware's four facts, as the page reads them: the charm's own answer, the host's record of
- * what it publishes, and where this charm's download has got to. Drawn from these alone, the row
- * asks the charm nothing, so a case states each fact it means to read.
+ * The facts the page hands the row: the charm's own answer, the host's record of what it publishes,
+ * and where this charm's download has got to. Drawn from these alone, the row asks the charm
+ * nothing, so a case states each fact it means to read.
  */
 function firmwareFacts(overrides: Partial<CharmFirmwareFacts> = {}): CharmFirmwareFacts {
   return {
