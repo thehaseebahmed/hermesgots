@@ -331,6 +331,37 @@ export const atWidth = (width: number, body: () => Promise<void>) => async () =>
 
 export const laptop = (body: () => Promise<void>) => atWidth(1440, body)
 
+/**
+ * The two widths and the two modes `AGENTS.md` asks of every screen, as one list a case walks: the
+ * phone and the tablet, each in both of the app's modes. `said` names the combination a failure is
+ * about, so a case at four combinations fails on the one it broke rather than on the last.
+ */
+export const PHONE_AND_TABLET_IN_BOTH_MODES = [
+  { width: 390, dark: false, said: "390, light" },
+  { width: 390, dark: true, said: "390, dark" },
+  { width: 768, dark: false, said: "768, light" },
+  { width: 768, dark: true, said: "768, dark" },
+] as const
+
+/**
+ * Runs `body` as a reader whose screen is `width` px across, with the app's own dark class on the
+ * root or off, then puts the width and the class back — awaited, so one case can read the same
+ * screen at each combination in turn (`atWidth` hands back the case instead, for the one-width
+ * tests). The class is the whole of the mode a screen is drawn under (`index.css`'s `dark` variant
+ * reads it) — and a DOM lays nothing out and paints nothing, so this is the mode and the width a
+ * screen's structure is read at, never a colour.
+ */
+export async function atMode(width: number, dark: boolean, body: () => Promise<void>) {
+  const root = document.documentElement
+  const was = root.classList.contains("dark")
+  root.classList.toggle("dark", dark)
+  try {
+    await atWidth(width, body)()
+  } finally {
+    root.classList.toggle("dark", was)
+  }
+}
+
 export function SwitchTo({
   to,
   replace,

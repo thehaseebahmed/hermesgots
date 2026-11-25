@@ -23,6 +23,8 @@ import {
 } from "@/lib/charm-protocol"
 import { db } from "@/lib/db"
 import {
+  PHONE_AND_TABLET_IN_BOTH_MODES,
+  atMode,
   click,
   findAll,
   find,
@@ -213,6 +215,75 @@ test("the screen opens on the offer, asks the battery once, and sends nothing un
       assert.equal(batteries, 1, "the walk asked the battery no second time")
     },
   )
+})
+
+/**
+ * The same screen at the phone's width and the tablet's, each in both modes — the convention
+ * `AGENTS.md` asks of every screen. A DOM lays nothing out and paints nothing, so what is read here
+ * is the structure at each of the four combinations: the offer's two rows, the instruction, both
+ * doors, and then the three steps a tap begins. The colour and the contrast of any of it are the
+ * stories' to show and the device's to judge, not this case's.
+ */
+test("the offer and the walk's steps draw at 390 and at 768, in light and in dark", async () => {
+  for (const { width, dark, said } of PHONE_AND_TABLET_IN_BOTH_MODES) {
+    // The walk outlives a screen, so each combination opens on the offer it is about.
+    resetCharmUpdateWalk()
+    const room = `${width}-${dark ? "dark" : "light"}`
+    const host = serveFirmware(`update-modes-${room}`, IMAGE_PUBLISHED, IMAGE)
+    const api = radio({
+      network: async () => ONLINE_WIFI,
+      battery: async () => ({ percent: 38, charging: false }),
+    })
+    await atMode(width, dark, async () => {
+      await mount(
+        at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
+        async () => {
+          await until(async () => Boolean(find("#charm-update-install")), `${said}: the offer`)
+          await settle()
+          assert.equal(
+            document.documentElement.classList.contains("dark"),
+            dark,
+            `${said}: the mode this case reads the screen under`,
+          )
+          const offer = wordsOf(find("[data-settings-group]"))
+          assert.ok(offer.includes("Battery"), `${said}: the charge the gate reads`)
+          assert.ok(offer.includes("38%"), `${said}: at the level the charm gave`)
+          assert.ok(offer.includes("Link"), `${said}: the link the charm reported`)
+          assert.ok(offer.includes("Wi-Fi up"), `${said}: and its own words`)
+          assert.ok(
+            offer.includes("Keep the phone near the charm"),
+            `${said}: the one instruction the link needs`,
+          )
+          assert.equal(
+            find("#charm-update-install")?.textContent,
+            "Install 0.2.0",
+            `${said}: the published build, named on its door`,
+          )
+          assert.equal(
+            find("#charm-update-choose")?.textContent,
+            "Choose a file…",
+            `${said}: and the file door beside it`,
+          )
+          assert.ok(find("#charm-update-file"), `${said}: with the input the door opens`)
+
+          await start()
+          await until(
+            async () => text().includes("Updated to 0.2.0 from 0.1.0."),
+            `${said}: the walk's end`,
+            10_000,
+          )
+          const steps = wordsOf(find("[data-settings-group]"))
+          assert.ok(steps.includes("Downloading"), `${said}: the download step, drawn as it ran`)
+          assert.ok(steps.includes("Transferring"), `${said}: the transfer step`)
+          assert.ok(steps.includes("Restarting"), `${said}: and the restart over the reboot`)
+          assert.ok(
+            findAll('[role="progressbar"]').length >= 2,
+            `${said}: a bar for each step that reported one`,
+          )
+        },
+      )
+    })
+  }
 })
 
 /**

@@ -28,7 +28,9 @@ import { SettingsPage } from "@/routes/settings"
 import { BatteryRow, CharmStatusRow, WakingGroup } from "@/components/settings/charm"
 import { report } from "./fixtures/charm-report.ts"
 import {
+  PHONE_AND_TABLET_IN_BOTH_MODES,
   Path,
+  atMode,
   botProfile,
   click,
   findAll,
@@ -425,6 +427,56 @@ test("a busy page opens no screen from the firmware row", async () => {
     await click(rowButton("Firmware"))
     assert.equal(opened, 0, "a send under way is never left for the update's screen")
   })
+})
+
+/**
+ * The convention `AGENTS.md` asks of every screen, read here for this page: the phone and the tablet,
+ * light and dark. A DOM lays nothing out and paints nothing, so this is the page's own structure at
+ * each of the four combinations — every card in its place, the Firmware row and its tag — and not
+ * one pixel of it: the colour and the contrast are the stories' to show and the device's to judge.
+ */
+test("the sections draw at 390 and at 768, in light and in dark", async () => {
+  for (const { width, dark, said } of PHONE_AND_TABLET_IN_BOTH_MODES) {
+    await atMode(width, dark, async () => {
+      await mount(sections(), async () => {
+        await settle()
+        assert.equal(
+          document.documentElement.classList.contains("dark"),
+          dark,
+          `${said}: the mode this case reads the page under`,
+        )
+        const drawn = cards()
+        assert.equal(drawn.length, 7, `${said}: seven cards, Device first and Forget last`)
+        const [device, bots, waking, voice, wifi, tailnet, forget] = drawn
+        assert.ok(device.includes("Desk charm"), `${said}: the charm, named in the Device card`)
+        assert.ok(device.includes("Battery"), `${said}: its charge, the row that asks for it`)
+        assert.ok(
+          device.includes("Charm 0.1.0 · 0.2.0 available"),
+          `${said}: the build and the one published ahead of it`,
+        )
+        assert.equal(
+          find('[data-tag="Update"]')?.textContent,
+          "Update",
+          `${said}: and the row is tagged, since the host offers one`,
+        )
+        assert.ok(bots.includes("Sync"), `${said}: the Bots card's sync`)
+        assert.ok(bots.includes("Pet mode"), `${said}: its pet switch`)
+        assert.ok(bots.includes("Send a test alert"), `${said}: and the alert that proves it`)
+        assert.ok(
+          waking.includes("Double tap to wake") && waking.includes("Stays lit for"),
+          `${said}: the Waking card`,
+        )
+        assert.ok(voice.includes("Voice over https"), `${said}: the Voice card`)
+        assert.ok(
+          wifi.includes("Network name") && wifi.includes("Passphrase"),
+          `${said}: the Wi-Fi card's two fields`,
+        )
+        assert.ok(tailnet.includes("Auth key"), `${said}: the Tailnet card's field`)
+        assert.ok(forget.includes("Forget this charm"), `${said}: the page ends on the way out`)
+        assert.equal(captions().length, 1, `${said}: one caption, the page's last word`)
+      })
+    })
+  }
 })
 
 test("the waking group offers the switch, the three windows and what off leaves", async () => {
