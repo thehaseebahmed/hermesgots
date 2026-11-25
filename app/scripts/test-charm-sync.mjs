@@ -16,6 +16,7 @@ import {
   CharmCode,
   CharmLinkState,
   CharmOp,
+  CharmTailnetReason,
   CharmUpdateReason,
   CharmUpdateState,
   beginMessage,
@@ -835,7 +836,7 @@ test("a hash reads back from hex in either case, and refuses what is not hex", (
 })
 
 /** A `Network` answer as the charm sends one: the head, the extra's length, then the extra. */
-function networkAnswer({ state, reason, ip, ssid, tunnel, tunnelIp }) {
+function networkAnswer({ state, reason, ip, ssid, tunnel, tunnelIp, tunnelReason }) {
   const extra = [
     state,
     reason,
@@ -846,6 +847,8 @@ function networkAnswer({ state, reason, ip, ssid, tunnel, tunnelIp }) {
     tunnel,
     tunnelIp.length,
     ...spell(tunnelIp),
+    // A charm older than the field sends no reason: the answer ends at the tunnel's address.
+    ...(tunnelReason === undefined ? [] : [tunnelReason]),
   ]
   return new Uint8Array([1, 0, NETWORK_WIRE.network, 0, extra.length, ...extra])
 }
@@ -858,18 +861,45 @@ test("a Network answer reads the Wi-Fi link and the tunnel", () => {
     ssid: "Home",
     tunnel: CharmLinkState.Online,
     tunnelIp: "100.64.0.7",
+    tunnelReason: 0,
   })
   assert.deepEqual(parseNetworkReport(viewOf(answer)), {
     wifi: { state: 2, reason: 0, ip: "192.168.1.20", ssid: "Home" },
-    tailnet: { state: 2, ip: "100.64.0.7" },
+    tailnet: { state: 2, ip: "100.64.0.7", reason: 0 },
   })
   // A charm with neither link says so with the same shape: zero lengths, not missing fields.
   assert.deepEqual(
     parseNetworkReport(
-      viewOf(networkAnswer({ state: 0, reason: 0, ip: "", ssid: "", tunnel: 0, tunnelIp: "" })),
+      viewOf(
+        networkAnswer({
+          state: 0,
+          reason: 0,
+          ip: "",
+          ssid: "",
+          tunnel: 0,
+          tunnelIp: "",
+          tunnelReason: 1,
+        }),
+      ),
     ),
-    { wifi: { state: 0, reason: 0, ip: "", ssid: "" }, tailnet: { state: 0, ip: "" } },
+    { wifi: { state: 0, reason: 0, ip: "", ssid: "" }, tailnet: { state: 0, ip: "", reason: 1 } },
   )
+})
+
+test("a charm that sends no tunnel reason is an answer, not a fault", () => {
+  // Every charm in the field today: the report ends at the tunnel's address, and that is the whole of
+  // what it says. Its reason is absent rather than zero, so the row can say the state alone.
+  const answer = networkAnswer({
+    state: CharmLinkState.Online,
+    reason: 0,
+    ip: "192.168.1.20",
+    ssid: "Home",
+    tunnel: CharmLinkState.Failed,
+    tunnelIp: "",
+  })
+  const parsed = parseNetworkReport(viewOf(answer))
+  assert.deepEqual(parsed?.tailnet, { state: 3, ip: "" })
+  assert.equal(parsed?.tailnet.reason, undefined, "not sent is not 'no reason'")
 })
 
 test("a truncated or wrong-op answer is no report at all", () => {
@@ -948,6 +978,50 @@ test("the network lines are the charm's own state in words", async () => {
   assert.equal(tailnetWords({ state: 2, ip: "100.64.0.7" }), "On your tailnet at 100.64.0.7")
   assert.equal(tailnetWords({ state: 3, ip: "" }), "Couldn't reach the tailnet")
   assert.equal(tailnetWords(undefined, true), "Key saved; not joined")
+
+  // The charm's own reason, where it sends one: a tunnel that is off because there is no Wi-Fi under
+  // it is not a key that failed to join, and the reader is told which rather than left to guess.
+  const reason = (number) => ({ state: CharmLinkState.Off, ip: "", reason: number })
+  assert.equal(tailnetWords(reason(CharmTailnetReason.Offline), true), "The charm isn't on Wi-Fi")
+  assert.equal(
+    tailnetWords(reason(CharmTailnetReason.NoKey), true),
+    "The charm holds no key; save it again",
+  )
+  assert.equal(tailnetWords(reason(CharmTailnetReason.NoKey), false), "No key saved")
+  assert.equal(tailnetWords(reason(CharmTailnetReason.None), true), "Key saved; not joined")
+  // The phone could not ask, or a charm older than the byte: the state alone is all there is.
+  assert.equal(tailnetWords(reason(42), true), "Key saved; not joined", "a number it does not know")
+
+  // Every reason a failed link can carry, in the reader's words rather than the charm's number.
+  const failed = (number) => ({ state: CharmLinkState.Failed, ip: "", reason: number })
+  assert.equal(tailnetWords(failed(CharmTailnetReason.BadKey)), "The tailnet refused the key")
+  assert.equal(tailnetWords(failed(CharmTailnetReason.Offline)), "The charm isn't on Wi-Fi")
+  assert.equal(
+    tailnetWords(failed(CharmTailnetReason.Refused)),
+    "Tailscale wouldn't start on the charm",
+  )
+  assert.equal(
+    tailnetWords(failed(CharmTailnetReason.Setup)),
+    "Tailscale couldn't set itself up on the charm",
+  )
+  assert.equal(
+    tailnetWords(failed(CharmTailnetReason.NoTask)),
+    "Tailscale couldn't start its tasks on the charm",
+  )
+  assert.equal(
+    tailnetWords(failed(CharmTailnetReason.Stuck)),
+    "Tailscale's last run on the charm never stopped",
+  )
+  assert.equal(
+    tailnetWords(failed(CharmTailnetReason.Retrying)),
+    "Tailscale keeps failing to reach the tailnet and is retrying",
+  )
+  assert.equal(tailnetWords(failed(CharmTailnetReason.None)), "Couldn't reach the tailnet")
+  assert.equal(
+    tailnetWords({ state: 3, ip: "" }),
+    "Couldn't reach the tailnet",
+    "and a charm that sent none",
+  )
 
   assert.equal(updateWords(null), "No update running")
   assert.equal(

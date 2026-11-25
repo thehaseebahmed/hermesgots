@@ -83,6 +83,7 @@ import {
 import {
   CHARM_QUIET_PRESETS,
   CharmCode,
+  CharmLinkState,
   CharmUpdateState,
   charmKept,
   charmWakeOf,
@@ -168,6 +169,13 @@ const RADIO: CharmNetworkApi = {
 
 /** One form's body in a group: the card's own fill, under the row that heads it. */
 const formRowClass = "flex flex-col gap-4 bg-card px-5 py-4"
+
+/**
+ * How many times the Network section asks after a tunnel it has just watched start: fifteen at
+ * `CHARM_POLL_MS` is half a minute, which holds a join and a first refusal, and stops a phone left on
+ * the screen from working the radio all evening for a tunnel that is not moving.
+ */
+const TAILNET_FOLLOW_ASKS = 15
 
 /** A labelled field of the network forms: the label above, the filled pill below. */
 function Field({
@@ -311,6 +319,40 @@ export function CharmNetwork({
   /** What the charm last answered about its two links, and where its download had got to. */
   const links = readValue(read)
   const downloading = readValue(update)
+
+  /**
+   * The tailnet is the one link here the charm starts on its own, after the write that gave it a key:
+   * an answer taken as the key was saved is a report from before the charm did anything with it, and
+   * the reason it settles on is the whole point of the row. So while it is joining, or off with a key
+   * this phone handed over and no reason yet, the section asks again — and stops when the charm is up,
+   * has said why it is not, or the ask itself failed and there is nothing to follow.
+   */
+  const following =
+    read.state !== "failed" &&
+    (links?.tailnet.state === CharmLinkState.Joining ||
+      (links?.tailnet.state === CharmLinkState.Off &&
+        Boolean(tailnet) &&
+        links.tailnet.reason === undefined))
+  useEffect(() => {
+    if (!following) return
+    let live = true
+    let asked = 0
+    const timer = setInterval(() => {
+      // Bounded on purpose: a join and a first refusal land well inside half a minute, and a phone
+      // left on this screen must not work the radio all evening for a tunnel that is not moving.
+      if (asked >= TAILNET_FOLLOW_ASKS) {
+        clearInterval(timer)
+        return
+      }
+      if (!live) return
+      asked++
+      void refresh()
+    }, CHARM_POLL_MS)
+    return () => {
+      live = false
+      clearInterval(timer)
+    }
+  }, [following, refresh])
 
   /**
    * Where the charm's download has got to, asked when the section opens and again after each write. A

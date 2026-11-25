@@ -17,7 +17,7 @@ import {
   type CharmNetworkApi,
 } from "@/components/settings/charm"
 import { useCharmReport } from "@/lib/charm"
-import { CharmLinkState, CharmUpdateState } from "@/lib/charm-protocol"
+import { CharmLinkState, CharmTailnetReason, CharmUpdateState } from "@/lib/charm-protocol"
 import { db } from "@/lib/db"
 import { SettingsPage } from "@/routes/settings"
 import { BatteryRow, CharmStatusRow, WakingGroup } from "@/components/settings/charm"
@@ -166,6 +166,35 @@ test("a parsed answer says the charm is connected", async () => {
   await mount(<Network api={radio()} />, async () => {
     await settle()
     assert.ok(text().includes("Connected to Home"), "the Wi-Fi line, from the charm's own answer")
+  })
+})
+
+test("the section follows the tunnel until the charm says why it is not up", async () => {
+  // A key was just saved: the charm holds it and has not started the tunnel yet, so its first answer
+  // is off with no reason. It tries, fails and says which — and the row ends on that, without the
+  // reader closing and reopening the section to ask again.
+  let asked = 0
+  const api = radio({
+    status: async () => {
+      asked += 1
+      return {
+        wifi: { state: CharmLinkState.Online, reason: 0, ip: "192.168.1.20", ssid: "Home" },
+        tailnet:
+          asked === 1
+            ? { state: CharmLinkState.Off, ip: "" }
+            : { state: CharmLinkState.Failed, ip: "", reason: CharmTailnetReason.BadKey },
+      }
+    },
+  })
+  await mount(<Network api={api} tailnet />, async () => {
+    await settle()
+    assert.ok(text().includes("Key saved; not joined"), "the first answer, before the charm tried")
+    await until(
+      async () => text().includes("The tailnet refused the key"),
+      "the reason the tunnel failed",
+      6000,
+    )
+    assert.ok(asked > 1, "the section asked again on its own")
   })
 })
 
