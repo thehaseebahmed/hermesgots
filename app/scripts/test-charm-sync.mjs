@@ -983,7 +983,10 @@ test("the network lines are the charm's own state in words", async () => {
   // it is not a key that failed to join, and the reader is told which rather than left to guess.
   const reason = (number) => ({ state: CharmLinkState.Off, ip: "", reason: number })
   assert.equal(tailnetWords(reason(CharmTailnetReason.Offline), true), "The charm isn't on Wi-Fi")
-  assert.equal(tailnetWords(reason(CharmTailnetReason.NoKey), true), "The charm holds no key; save it again")
+  assert.equal(
+    tailnetWords(reason(CharmTailnetReason.NoKey), true),
+    "The charm holds no key; save it again",
+  )
   assert.equal(tailnetWords(reason(CharmTailnetReason.NoKey), false), "No key saved")
   assert.equal(tailnetWords(reason(CharmTailnetReason.None), true), "Key saved; not joined")
   // The phone could not ask, or a charm older than the byte: the state alone is all there is.
@@ -993,13 +996,32 @@ test("the network lines are the charm's own state in words", async () => {
   const failed = (number) => ({ state: CharmLinkState.Failed, ip: "", reason: number })
   assert.equal(tailnetWords(failed(CharmTailnetReason.BadKey)), "The tailnet refused the key")
   assert.equal(tailnetWords(failed(CharmTailnetReason.Offline)), "The charm isn't on Wi-Fi")
-  assert.equal(tailnetWords(failed(CharmTailnetReason.Refused)), "Tailscale wouldn't start on the charm")
-  assert.equal(tailnetWords(failed(CharmTailnetReason.Setup)), "Tailscale couldn't set itself up on the charm")
-  assert.equal(tailnetWords(failed(CharmTailnetReason.NoTask)), "Tailscale couldn't start its tasks on the charm")
-  assert.equal(tailnetWords(failed(CharmTailnetReason.Stuck)), "Tailscale's last run on the charm never stopped")
-  assert.equal(tailnetWords(failed(CharmTailnetReason.Retrying)), "Tailscale keeps dropping off the tailnet and retrying")
+  assert.equal(
+    tailnetWords(failed(CharmTailnetReason.Refused)),
+    "Tailscale wouldn't start on the charm",
+  )
+  assert.equal(
+    tailnetWords(failed(CharmTailnetReason.Setup)),
+    "Tailscale couldn't set itself up on the charm",
+  )
+  assert.equal(
+    tailnetWords(failed(CharmTailnetReason.NoTask)),
+    "Tailscale couldn't start its tasks on the charm",
+  )
+  assert.equal(
+    tailnetWords(failed(CharmTailnetReason.Stuck)),
+    "Tailscale's last run on the charm never stopped",
+  )
+  assert.equal(
+    tailnetWords(failed(CharmTailnetReason.Retrying)),
+    "Tailscale keeps failing to reach the tailnet and is retrying",
+  )
   assert.equal(tailnetWords(failed(CharmTailnetReason.None)), "Couldn't reach the tailnet")
-  assert.equal(tailnetWords({ state: 3, ip: "" }), "Couldn't reach the tailnet", "and a charm that sent none")
+  assert.equal(
+    tailnetWords({ state: 3, ip: "" }),
+    "Couldn't reach the tailnet",
+    "and a charm that sent none",
+  )
 
   assert.equal(updateWords(null), "No update running")
   assert.equal(

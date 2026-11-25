@@ -140,7 +140,7 @@ export function tailnetReasonWords(reason: number, saved?: boolean): string | nu
     case CharmTailnetReason.Stuck:
       return "Tailscale's last run on the charm never stopped"
     case CharmTailnetReason.Retrying:
-      return "Tailscale keeps dropping off the tailnet and retrying"
+      return "Tailscale keeps failing to reach the tailnet and is retrying"
     default:
       return null
   }

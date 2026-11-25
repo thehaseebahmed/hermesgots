@@ -170,6 +170,13 @@ const RADIO: CharmNetworkApi = {
 /** One form's body in a group: the card's own fill, under the row that heads it. */
 const formRowClass = "flex flex-col gap-4 bg-card px-5 py-4"
 
+/**
+ * How many times the Network section asks after a tunnel it has just watched start: fifteen at
+ * `CHARM_POLL_MS` is half a minute, which holds a join and a first refusal, and stops a phone left on
+ * the screen from working the radio all evening for a tunnel that is not moving.
+ */
+const TAILNET_FOLLOW_ASKS = 15
+
 /** A labelled field of the network forms: the label above, the filled pill below. */
 function Field({
   id,
@@ -329,8 +336,17 @@ export function CharmNetwork({
   useEffect(() => {
     if (!following) return
     let live = true
+    let asked = 0
     const timer = setInterval(() => {
-      if (live) void refresh()
+      // Bounded on purpose: a join and a first refusal land well inside half a minute, and a phone
+      // left on this screen must not work the radio all evening for a tunnel that is not moving.
+      if (asked >= TAILNET_FOLLOW_ASKS) {
+        clearInterval(timer)
+        return
+      }
+      if (!live) return
+      asked++
+      void refresh()
     }, CHARM_POLL_MS)
     return () => {
       live = false
