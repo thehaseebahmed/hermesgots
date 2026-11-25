@@ -69,6 +69,9 @@ export function CharmDebugScreen({
   const live = charm === undefined ? paired : charm
   const [report, setReport] = useState<CharmDiagnose | null>(null)
   const [book, setBook] = useState<CharmBook | null>(null)
+  // Whether the charm answers `LogSince` at all. A tail has no index, so there is nothing for a clear
+  // to read past: an emptied tail is filled again by the next read, which is not what Clear says.
+  const [indexed, setIndexed] = useState(false)
   const [armed, setArmed] = useState(false)
   const [error, setError] = useState<string | null>(null)
   // The book the next read starts from, and whether a read is still running: a drain is several round
@@ -113,15 +116,18 @@ export function CharmDebugScreen({
       const sinceClear = cleared.current
       const pull = async () => {
         const pages = await api.since(held.current.next)
-        // No book is a charm whose firmware predates the op: its tail is read whole and replaced.
-        return pages ? pages.reduce(place, held.current) : fromTail(await api.log())
+        // No book is a charm whose firmware predates the op: its tail is read whole and replaced,
+        // and nothing on this page can clear it.
+        if (!pages) return { book: fromTail(await api.log()), indexed: false }
+        return { book: pages.reduce(place, held.current), indexed: true }
       }
       try {
-        const [next, grown] = await Promise.all([api.diagnose(), pull()])
+        const [next, read] = await Promise.all([api.diagnose(), pull()])
         if (!open || sinceClear !== cleared.current) return
-        held.current = grown
+        held.current = read.book
         setReport(next)
-        setBook(grown)
+        setBook(read.book)
+        setIndexed(read.indexed)
         setError(null)
       } catch (why: unknown) {
         if (open) setError(why instanceof Error ? why.message : String(why))
@@ -158,21 +164,23 @@ export function CharmDebugScreen({
       >
         <CopyIcon />
       </Button>
-      <Button
-        variant="outline"
-        size="icon-lg"
-        className="ml-2 size-11 rounded-full"
-        aria-label="Clear the charm's log"
-        disabled={!drawn.length}
-        onClick={() => {
-          const emptied = clear(held.current)
-          held.current = emptied
-          cleared.current++
-          setBook(emptied)
-        }}
-      >
-        <Trash2Icon />
-      </Button>
+      {indexed && (
+        <Button
+          variant="outline"
+          size="icon-lg"
+          className="ml-2 size-11 rounded-full"
+          aria-label="Clear the charm's log"
+          disabled={!drawn.length}
+          onClick={() => {
+            const emptied = clear(held.current)
+            held.current = emptied
+            cleared.current++
+            setBook(emptied)
+          }}
+        >
+          <Trash2Icon />
+        </Button>
+      )}
     </>,
   )
 

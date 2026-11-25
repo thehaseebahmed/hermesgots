@@ -327,3 +327,29 @@ test("a clear is not undone by the read that was out when it was pressed", async
       }),
   )
 })
+
+test("a charm that keeps no book offers no clear", async () => {
+  // A tail has no index, so a clear has nothing to read past: an emptied tail is filled again by the
+  // next read two seconds later, which is the opposite of what the button says.
+  const api = {
+    setLog: async () => true,
+    diagnose: async () => refused,
+    since: async (): Promise<CharmLogSincePage[] | null> => null,
+    log: async (): Promise<CharmLogRow[]> => [{ text: "boot: 1", carried: false }],
+  }
+
+  await mount(
+    <Screen title="Debug Charm">
+      <CharmDebugScreen api={api} charm={charm} />
+    </Screen>,
+    () =>
+      withNotes(async () => {
+        await until(async () => text().includes("boot: 1"), "the tail")
+        assert.ok(labelled("button", "Copy the charm's log"), "the tail is still copyable")
+        assert.ok(
+          !labelled("button", "Clear the charm's log"),
+          "and there is no clear, because nothing could clear a tail",
+        )
+      }),
+  )
+})

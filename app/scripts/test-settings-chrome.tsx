@@ -160,6 +160,53 @@ test("a screen's action sits beside its title, and a screen that passes none dra
   })
 })
 
+/** A page whose own state decides what its header control says, without the page going away. */
+function PageWithChangingAction({ clicks }: { clicks: number[] }) {
+  const [rows, setRows] = useState(0)
+  useHeaderAction(
+    "log",
+    <Button
+      variant="outline"
+      size="icon-lg"
+      className="size-11 rounded-full"
+      aria-label={rows ? "Copy the log" : "Nothing to copy"}
+      disabled={!rows}
+      onClick={() => clicks.push(rows)}
+    >
+      <PlusIcon />
+    </Button>,
+  )
+  return (
+    <button type="button" onClick={() => setRows(1)}>
+      A row lands
+    </button>
+  )
+}
+
+test("a header action follows the page's own state after it mounts", async () => {
+  // The header is drawn by the Screen above, which does not render when the page does: a control that
+  // is shut until the page has something to act on has to reach the header on the page's next render.
+  pressed.length = 0
+  await mount(
+    <Screen title="Log">
+      <PageWithChangingAction clicks={pressed} />
+    </Screen>,
+    async () => {
+      const shut = named("button", "Nothing to copy")
+      assert.ok(shut, "the page's first render offers the control, shut")
+      assert.ok(shut.hasAttribute("disabled"), "and it is shut for want of anything to act on")
+
+      await click(named("button", "A row lands"))
+
+      const open = named("button", "Copy the log")
+      assert.ok(open, "the header shows what the page says after the page changed")
+      assert.ok(!open.hasAttribute("disabled"), "and it is open now")
+      await click(open)
+      assert.deepEqual(pressed, [1], "pressing it is the page's current handler, not the first one")
+    },
+  )
+})
+
 const opened: number[] = []
 const toggled: boolean[] = []
 
