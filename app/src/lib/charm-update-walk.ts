@@ -46,7 +46,16 @@ interface WalkState {
   title: string | null
   note: string | null
   steps: StepView[]
-  end: { kind: "done"; version: string } | { kind: "failed"; said: string } | null
+  end:
+    | {
+        kind: "done"
+        /** The build the charm came back on, as its own answer read it. */
+        version: string
+        /** The build the walk started on, read before anything went; null where the charm could not say. */
+        was: string | null
+      }
+    | { kind: "failed"; said: string }
+    | null
   /** The last hand, in the words it went under: what a failure's Try again re-runs. */
   again: { hand: (was: string | null) => Promise<FirmwareHand>; title: string } | null
   /**

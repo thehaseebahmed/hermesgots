@@ -285,9 +285,15 @@ export function downloadWords(progress: { received: number; total: number }): st
   return `${percent}% of ${formatBytes(progress.total)}`
 }
 
-/** The update screen's end: the build the charm came back on, as its own answer read it. */
-export function firmwareDoneWords(version: string): string {
-  return `The charm runs ${version}.`
+/**
+ * The update screen's end: the build the charm came back on, as its own answer read it — and, when
+ * the walk started on another build, the one it came from. A re-flash of the build the charm
+ * already runs names one build, since there is no change to read.
+ */
+export function firmwareDoneWords(was: string | null, version: string): string {
+  return was !== null && was !== version
+    ? `Updated to ${version} from ${was}.`
+    : `The charm runs ${version}.`
 }
 
 /**

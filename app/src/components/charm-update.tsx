@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { useSearchParams } from "react-router"
+import { useNavigate, useSearchParams } from "react-router"
 import { FileUpIcon } from "lucide-react"
 
 import { Caption, Group, RowText, rowClass, ValueRow } from "@/components/settings-chrome"
@@ -173,7 +173,8 @@ const STEP_TITLES: Record<StepView["name"], string> = {
  * Settings → Charm's update screen: the steps a firmware update walks, in the reader's words —
  * Downloading, whether the phone fetches the image or the charm fetches it itself through a door it
  * holds, Transferring with the bar the upload reports, Restarting over the reboot window, and the
- * end: the version the charm came back on, or the failure with its reason and what to do — try
+ * end: the version the charm came back on and the build it started from, the way on to a sync of
+ * the bots, the pet and the voice hand-over, or the failure with its reason and what to do — try
  * again, and, when the charm keeps cancelling, flash it by cable, which always works. Nothing goes
  * until the reader taps: a fresh visit first draws an offer of the published image — the charm's
  * charge, its link, the one instruction the link needs, and the doors, `Install` and a file the
@@ -204,6 +205,7 @@ export function CharmUpdateScreen({
   const profile = given ?? active
   const paired = usePairedCharm()
   const charm = givenCharm ?? paired
+  const navigate = useNavigate()
   const [params] = useSearchParams()
   const pickMode = params.get("file") === "1"
 
@@ -286,14 +288,14 @@ export function CharmUpdateScreen({
       show("restart", { subtitle: FIRMWARE_SENT })
       const { changed, version, answered } = await versionAfterReboot(() => api.version(), was)
       if (changed && version !== null) {
-        setWalk({ end: { kind: "done", version } })
+        setWalk({ end: { kind: "done", version, was } })
         return
       }
       // A reader's file names no newer build: the charm came back on the build it was sent, and
       // the version it answered — unchanged — is the walk landing, not failing. The published
       // door keeps the changed-gate: it names a build newer than the charm's own.
       if (next.door === "file" && typeof answered === "string") {
-        setWalk({ end: { kind: "done", version: answered } })
+        setWalk({ end: { kind: "done", version: answered, was } })
         return
       }
       if (dropped !== null) throw dropped
@@ -461,7 +463,18 @@ export function CharmUpdateScreen({
       {end?.kind === "done" && (
         <Group>
           <div className={rowClass}>
-            <RowText title="Done" subtitle={firmwareDoneWords(end.version)} />
+            <RowText title="Done" subtitle={firmwareDoneWords(end.was, end.version)} />
+          </div>
+          {/* The end's own next step: a new build usually wants the bots, the pet and the voice
+              hand-over again, and the page it leaves for runs that sync once on its return. */}
+          <div className={rowClass}>
+            <Button
+              id="charm-update-sync"
+              type="button"
+              onClick={() => navigate("/settings/charm?sync=1")}
+            >
+              Sync your bots
+            </Button>
           </div>
         </Group>
       )}

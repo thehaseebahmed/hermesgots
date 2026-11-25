@@ -9,14 +9,15 @@
  */
 import assert from "node:assert/strict"
 import test from "node:test"
-import { type ComponentProps, act } from "react"
-import { MemoryRouter, Route, Routes } from "react-router"
+import { type ComponentProps, act, useState } from "react"
+import { MemoryRouter, Route, Routes, useLocation } from "react-router"
 
 import {
   CharmNetwork,
   CharmSections,
   CharmVoiceHeld,
   CharmVoiceScheme,
+  useReturnSync,
   type CharmFirmwareFacts,
   type CharmNetworkApi,
 } from "@/components/settings/charm"
@@ -723,4 +724,65 @@ test("the charm's own answer about its voice is drawn as the charm said it", asy
     await settle()
     assert.ok(text().includes("can't say"), "the ask that did not land is the row's own word")
   })
+})
+
+/**
+ * The update screen's Done hands this page a sync through the URL: `?sync=1` says a build just
+ * landed and the bots, the pet and the voice hand-over are owed again. The shell cannot be mounted
+ * in the web build, so this probe is the hook itself: the URL it leaves and a redraw button, and
+ * nothing else that could sync.
+ */
+function ReturnProbe({ ready, onSync }: { ready: boolean; onSync: () => void }) {
+  useReturnSync({ ready, onSync })
+  const where = useLocation()
+  const [, redraw] = useState(0)
+  return (
+    <>
+      <p data-where>{`${where.pathname}${where.search}`}</p>
+      <button type="button" data-redraw onClick={() => redraw((n) => n + 1)}>
+        redraw
+      </button>
+    </>
+  )
+}
+
+test("Sync your bots lands on /settings/charm?sync=1, syncs once, and leaves the URL without the parameter", async () => {
+  /** The probe at `entry`, its `ready` flipped once it has drawn: the page's charm and bots reads. */
+  async function returned(entry: string) {
+    const syncs: number[] = []
+    let ready: (() => void) | undefined
+    function Probe() {
+      const [on, setOn] = useState(false)
+      ready = () => setOn(true)
+      return <ReturnProbe ready={on} onSync={() => syncs.push(1)} />
+    }
+    let afterReady = 0
+    let where = ""
+    await mount(
+      <MemoryRouter initialEntries={[entry]}>
+        <Routes>
+          <Route path="/settings/charm" element={<Probe />} />
+        </Routes>
+      </MemoryRouter>,
+      async () => {
+        await settle()
+        assert.equal(syncs.length, 0, "nothing runs before the page is ready")
+        await act(async () => ready?.())
+        await settle()
+        afterReady = syncs.length
+        where = find("[data-where]")?.textContent ?? ""
+        await click(find("[data-redraw]"))
+        await settle()
+      },
+    )
+    return { afterReady, afterRedraw: syncs.length, where }
+  }
+
+  const asked = await returned("/settings/charm?sync=1")
+  assert.equal(asked.afterReady, 1, "the parameter runs the sync once the page is ready")
+  assert.equal(asked.afterRedraw, 1, "a redraw syncs nothing more: the parameter is gone")
+  assert.equal(asked.where, "/settings/charm", "and the URL no longer carries it")
+
+  const plain = await returned("/settings/charm")
+  assert.equal(plain.afterReady, 0, "no parameter, no sync")
 })

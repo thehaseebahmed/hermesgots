@@ -12,7 +12,7 @@ import {
   type ReactNode,
 } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
-import { useNavigate } from "react-router"
+import { useNavigate, useSearchParams } from "react-router"
 import {
   BatteryMediumIcon,
   BellRingIcon,
@@ -902,6 +902,29 @@ export function CharmSections({
 }
 
 /**
+ * The update screen's Done hands this page one sync through the URL: `?sync=1` says a build just
+ * landed, so the bots, the pet and the voice hand-over are owed again. The shell cannot be mounted
+ * by the web build, so this is a hook of its own — a test runs it under a probe.
+ *
+ * The parameter is read once the page is ready — a paired charm and the bots read — cleared with a
+ * replace before the sync runs, so a redraw that would read it again finds nothing, and run through
+ * a ref so a re-render cannot reach the radio twice.
+ */
+export function useReturnSync({ ready, onSync }: { ready: boolean; onSync: () => void }) {
+  const [params, setParams] = useSearchParams()
+  const returned = params.get("sync") === "1"
+  const ran = useRef(false)
+  useEffect(() => {
+    if (!ready || !returned || ran.current) return
+    ran.current = true
+    // Cleared before the run: the parameter still in the URL when this page redraws would be a
+    // second return, and the sync would go twice.
+    setParams({}, { replace: true })
+    onSync()
+  }, [ready, returned, onSync, setParams])
+}
+
+/**
  * Settings → Charm's shell: the gate, the phone's own reads, and the handlers a tap calls. The page
  * below it is drawn from what they hold, so the sections can be mounted with fixtures, and the
  * firmware's facts are read once here — wherever on the page the row drawing them ends up.
@@ -995,14 +1018,6 @@ export function CharmSettings() {
     void readVoice()
   }, [deviceId, readVoice])
 
-  if (!charmAvailable())
-    return (
-      <Banner tone="info">
-        A Gots Charm pairs with the Android app over Bluetooth. Open Gots on your phone to set one
-        up.
-      </Banner>
-    )
-
   const pair = async () => {
     setBusy("pair")
     setFailure(null)
@@ -1093,6 +1108,18 @@ export function CharmSettings() {
       setProgress(null)
     }
   }
+
+  // The update screen's Done lands here with `?sync=1`: one sync once this page has a paired charm
+  // and the bots read, and the parameter cleared so a redraw syncs nothing.
+  useReturnSync({ ready: Boolean(charm && profiles), onSync: () => void sync() })
+
+  if (!charmAvailable())
+    return (
+      <Banner tone="info">
+        A Gots Charm pairs with the Android app over Bluetooth. Open Gots on your phone to set one
+        up.
+      </Banner>
+    )
 
   const applyPet = async (choice: CharmPetChoice) => {
     setCharmPet(choice)
