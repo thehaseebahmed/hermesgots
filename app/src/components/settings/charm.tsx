@@ -16,10 +16,8 @@ import { useNavigate } from "react-router"
 import {
   BatteryMediumIcon,
   BellRingIcon,
-  CloudDownloadIcon,
   EyeIcon,
   EyeOffIcon,
-  FileUpIcon,
   HandIcon,
   MicIcon,
   PawPrintIcon,
@@ -107,7 +105,6 @@ import {
   BATTERY_ASK,
   batteryWords,
   doubleTapSubtitle,
-  FIRMWARE_CAPTION,
   firmwareOffers,
   firmwareWords,
   LINK_DOWN_WORDS,
@@ -188,10 +185,10 @@ export interface CharmFirmwareFacts {
 }
 
 /**
- * The firmware's four facts, read in one place: the page reads them, and the row it draws them in
- * asks nothing of the charm. A poll in each of two rows would put two asks on one link, so only one
- * instance of this ever asks — a section handed the facts passes `null` and leaves the asking to
- * whichever component read them.
+ * The firmware's four facts, read in one place: the page reads them, and the row drawing them asks
+ * nothing of the charm. A poll in each of two rows would put two asks on one link, so this is asked
+ * once by the page and the facts ride down to the row — a section with a poll of its own is how two
+ * asks reach one link.
  */
 function useCharmFirmware(
   /** The radio to ask, or null where the facts were handed in and nothing is to be asked. */
@@ -382,23 +379,22 @@ function LinkIcon({ link }: { link: CharmLink }) {
 }
 
 /**
- * The Firmware group: the build the charm says it runs beside the one the package publishes, and the
- * two doors onto the update's own screen. It reads nothing — the facts are the page's, handed in —
- * so the row can be drawn anywhere on the page without a read following it there.
+ * The Firmware row: the build the charm says it runs beside the one the package publishes, in the
+ * Device group where a reader looks for what the device is. It is marked **Update** when the host
+ * publishes a build ahead of the charm's, and while a download runs its value is that download
+ * rather than the two versions. It reads nothing — the facts are the page's, handed in — and it
+ * opens the update's own screen, which is where the offer, the send and the failure all live.
  */
-export function FirmwareGroup({
+export function FirmwareRow({
   facts,
   busy,
-  onUpdate,
-  onPick,
+  onOpenFirmware,
 }: {
   facts: CharmFirmwareFacts
-  /** Whether the page is busy with something else: neither door opens under another send. */
+  /** Whether the page is busy with something else: a send under way is not left for another screen. */
   busy: boolean
   /** The update's own screen, where the send runs. */
-  onUpdate: () => void
-  /** The same screen, ready for a picked file. */
-  onPick: () => void
+  onOpenFirmware: () => void
 }) {
   const { running, published, answered } = facts
   /** The two versions the row compares: the charm's own, and the package's as its host reads it. */
@@ -406,64 +402,38 @@ export function FirmwareGroup({
   const offers = firmwareOffers(versions)
   const downloading = readValue(facts.update)
   return (
-    <>
-      <Group>
-        <div className={headerRowClass}>
-          <CloudDownloadIcon className="size-5 shrink-0 text-muted-foreground" />
-          <RowText title="Firmware" subtitle={firmwareWords(versions)} />
-        </div>
-        <div className={formRowClass}>
-          <div className="flex flex-wrap items-center gap-2">
-            {offers && published && (
-              <Button id="charm-update-start" type="button" disabled={busy} onClick={onUpdate}>
-                Update to {published}
-              </Button>
-            )}
-            <Button
-              id="charm-update-pick"
-              type="button"
-              variant="ghost"
-              disabled={busy}
-              onClick={onPick}
-            >
-              <FileUpIcon />
-              Choose a file…
-            </Button>
-          </div>
-        </div>
-      </Group>
-      {facts.checkSaid && <Caption>{facts.checkSaid}</Caption>}
-      <Caption>{FIRMWARE_CAPTION}</Caption>
-      {downloading && downloading.state !== CharmUpdateState.Idle && (
-        <Caption>{updateWords(downloading)}</Caption>
-      )}
-    </>
+    <ValueRow
+      title="Firmware"
+      tag={offers ? "Update" : undefined}
+      value={
+        downloading && downloading.state !== CharmUpdateState.Idle
+          ? updateWords(downloading)
+          : firmwareWords(versions)
+      }
+      muted={!offers}
+      onClick={onOpenFirmware}
+      disabled={busy}
+    />
   )
 }
 
 /**
- * Settings → Charm's network: the Wi-Fi the charm joins, the tailnet key it joins with, and the
- * firmware it runs — the version it says it has beside the one the package publishes, and the two
- * doors onto the update's own screen: an update when the published one is newer, a file otherwise.
- * Every row draws the charm's own answer rather than what was sent, and a passphrase or a key clears
- * the moment the write has gone: neither is ever drawn again, and neither is kept on this phone.
+ * Settings → Charm's network: the Wi-Fi the charm joins, and the tailnet key it joins with. Every
+ * row draws the charm's own answer rather than what was sent, and a passphrase or a key clears the
+ * moment the write has gone: neither is ever drawn again, and neither is kept on this phone.
  *
- * The firmware's facts are the page's, handed in, so the row can move out of this section without a
- * second read following it; drawn alone — as a test draws it — the section reads them itself.
+ * The firmware is not here: its row is the Device group's, and it carries the page's facts, so a
+ * poll on the charm's link is not put beside this section's write.
  */
 export function CharmNetwork({
   api = RADIO,
-  profile,
   record,
   tailnet,
   read,
   refresh,
-  firmware,
 }: {
   /** The radio, or a stand-in under test. */
   api?: CharmNetworkApi
-  /** The bot whose host publishes the firmware: the row's read of it is that host's record. */
-  profile?: PluginServer
   /** The network this phone last told the charm to join, while the charm itself is not answering. */
   record?: CharmWifiRecord
   /** Whether a tailnet key was handed over before, while the charm itself is not answering. */
@@ -475,16 +445,7 @@ export function CharmNetwork({
   read: CharmRead<CharmNetworkReport>
   /** Asks the charm's links again after a write: the section never makes that ask itself. */
   refresh: () => Promise<void>
-  /**
-   * The firmware's facts, where the page read them: handed in, this section asks the charm nothing
-   * about its firmware, and the page's one poll is the only one on the link.
-   */
-  firmware?: CharmFirmwareFacts
 }) {
-  // Nothing is asked here where the page handed the facts down: two rows with a poll of their own
-  // would put two asks on one link.
-  const own = useCharmFirmware(firmware ? null : api, profile)
-  const facts = firmware ?? own
   const [ssid, setSsid] = useState("")
   const [pass, setPass] = useState("")
   const [key, setKey] = useState("")
@@ -503,8 +464,8 @@ export function CharmNetwork({
       // A refusal gets the code's words. A plaintext charm's 11 is a yes whose words are the warning
       // that anyone holding the charm can read the secret off the chip, so it says them too.
       setSaid(code === CharmCode.Ok ? null : codeWords(code))
-      // A write the charm kept is read back: its links and its download, from the same asks as before.
-      if (charmKept(code)) await Promise.all([refresh(), facts.read()])
+      // A write the charm kept is read back: its links, from the same ask as before.
+      if (charmKept(code)) await refresh()
       return code
     } catch (error) {
       setSaid(spoken(error, "Something went wrong"))
@@ -530,13 +491,6 @@ export function CharmNetwork({
     // The key is the charm's from here on, and is never drawn again.
     if (code !== null) setKey("")
   }
-
-  /**
-   * The Firmware row's two doors onto the update's own screen, which is where the send runs now:
-   * the steps, the bars, the version read back and the failure's words all live there, and leaving
-   * this section is what stops the status poll below — the upload holds the charm's link alone.
-   */
-  const navigate = useNavigate()
 
   return (
     <>
@@ -622,18 +576,6 @@ export function CharmNetwork({
           </div>
         </form>
       </Group>
-      <FirmwareGroup
-        facts={facts}
-        busy={busy !== null}
-        onUpdate={() => navigate("/settings/charm-firmware")}
-        onPick={() => navigate("/settings/charm-firmware?file=1")}
-      />
-      <Caption>
-        The image goes over the charm's own link, and the charm checks it against the SHA-256 it was
-        given before it keeps it. A passphrase stays on the charm across a reboot: a charm whose
-        flash isn't sealed says so, and warns that anyone holding it can read the passphrase off the
-        chip.
-      </Caption>
     </>
   )
 }
@@ -819,11 +761,11 @@ export function TestAlertRow({
 }
 
 /**
- * The paired page, drawn from facts alone: the charm and its charge, the bots and the pet, the wake
- * settings, the voice, the page's own read of the links, and the firmware's four facts. Nothing here
- * reads Dexie or the radio and no effect asks the charm, so a test can mount the whole page with
- * fixtures — and the firmware's row can be drawn above the network section with no read of its own
- * following it there.
+ * The paired page, drawn from facts alone: the charm and its charge first, then the bots and the
+ * pet, the wake settings, the voice, the page's own read of the links, and the way out — Device,
+ * Bots, Waking, Voice, Wi-Fi, Tailnet, Forget, and one caption for the page. Nothing here reads
+ * Dexie or the radio and no effect asks the charm, so a test can mount the whole page with
+ * fixtures.
  */
 export function CharmSections({
   charm,
@@ -848,6 +790,7 @@ export function CharmSections({
   onScheme,
   onBattery,
   onForget,
+  onOpenFirmware,
 }: {
   /** The paired charm, as this phone's record holds it. */
   charm: PairedCharm
@@ -882,6 +825,8 @@ export function CharmSections({
   onScheme: (scheme: CharmScheme) => void
   onBattery: () => void
   onForget: () => void
+  /** The update's own screen, which the Firmware row opens. */
+  onOpenFirmware: () => void
 }) {
   const pet = charm.pet
   /** The bot that lives on the charm, where one does, and what this phone calls it. */
@@ -893,6 +838,10 @@ export function CharmSections({
       <Group>
         <CharmStatusRow charm={charm} status={report.read} battery={charm.battery} />
         <BatteryRow note={batteryNote} busy={busy !== null} onRefresh={onBattery} />
+        <FirmwareRow facts={firmware} busy={busy !== null} onOpenFirmware={onOpenFirmware} />
+      </Group>
+      {firmware.checkSaid && <Caption>{firmware.checkSaid}</Caption>}
+      <Group>
         <SyncRow
           count={sources.length}
           busy={busy !== null}
@@ -900,11 +849,6 @@ export function CharmSections({
           progress={progress}
           onSync={onSync}
         />
-        <CharmVoiceScheme scheme={scheme} disabled={busy !== null} onChange={onScheme} />
-        <CharmVoiceHeld address={held} failed={heldFailed} />
-      </Group>
-      <WakingGroup wake={wake} busy={busy !== null} onChange={onWake} />
-      <Group>
         <SwitchRow
           id="charm-pet-mode"
           icon={PawPrintIcon}
@@ -931,12 +875,19 @@ export function CharmSections({
           onSend={onTest}
         />
       </Group>
+      <WakingGroup wake={wake} busy={busy !== null} onChange={onWake} />
+      <Group>
+        <CharmVoiceScheme scheme={scheme} disabled={busy !== null} onChange={onScheme} />
+        <CharmVoiceHeld address={held} failed={heldFailed} />
+      </Group>
       <CharmNetwork
-        firmware={firmware}
         record={charm.wifi}
         tailnet={charm.tailnet}
         read={report.read}
-        refresh={report.refresh}
+        // A write the charm kept is read back: its links, and the download the Device row draws.
+        refresh={async () => {
+          await Promise.all([report.refresh(), firmware.read()])
+        }}
       />
       <Group>
         <ActionRow icon={UnlinkIcon} title="Forget this charm" onClick={onForget} />
@@ -956,6 +907,7 @@ export function CharmSections({
  * firmware's facts are read once here — wherever on the page the row drawing them ends up.
  */
 export function CharmSettings() {
+  const navigate = useNavigate()
   const charm = usePairedCharm()
   const profiles = useLiveQuery(listProfiles, [])
   /** The bot whose host publishes the firmware: the row's own read of it is that host's record. */
@@ -1208,6 +1160,7 @@ export function CharmSettings() {
         onScheme={setCharmVoice}
         onBattery={refreshBattery}
         onForget={() => setForgetting(true)}
+        onOpenFirmware={() => navigate("/settings/charm-firmware")}
       />
       <PickSurface open={picking} onOpenChange={setPicking} title="The pet">
         <PickList

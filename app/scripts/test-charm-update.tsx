@@ -12,10 +12,9 @@ import test from "node:test"
 import { type ComponentProps, type ReactElement, act } from "react"
 import { MemoryRouter, Route, Routes } from "react-router"
 
-import { CharmUpdateScreen, type CharmUpdateApi } from "@/components/charm-update"
+import { CharmUpdateScreen } from "@/components/charm-update"
 import { resetCharmUpdateWalk } from "@/lib/charm-update-walk"
-import { CharmNetwork, type CharmNetworkApi } from "@/components/settings/charm"
-import { useCharmReport, type PairedCharm } from "@/lib/charm"
+import { type PairedCharm } from "@/lib/charm"
 import {
   CHARM_SLOT_BYTES,
   CharmLinkState,
@@ -27,7 +26,6 @@ import {
   click,
   findAll,
   find,
-  findText,
   FIRMWARE_FETCH_PATH,
   FIRMWARE_FETCH_TOKEN,
   mount,
@@ -105,9 +103,6 @@ function radio(overrides: Partial<ComponentProps<typeof CharmUpdateScreen>["api"
 /** Every bar on screen, in the DOM's order: the value each was last drawn at. */
 const bars = () =>
   findAll('[role="progressbar"]').map((bar) => Number(bar.getAttribute("aria-valuenow")))
-
-/** The first button on screen with these words. */
-const button = (label: string) => findText("button", label)
 
 /** Hands the screen a file the way the WebView hands it one: the input's change, with the file on it. */
 async function pick(name: string, size: number) {
@@ -979,117 +974,4 @@ test("a screen that opens with nothing published says so, and takes a file", asy
       assert.ok(!find("#charm-update-retry"), "nothing ran, so nothing is offered to re-run")
     },
   )
-})
-
-/**
- * The Network section as the page draws it — the row the Update button leaves — with the update
- * screen at its own address, as the settings route holds both.
- */
-function Network({
-  api,
-  ...rest
-}: { api: CharmNetworkApi } & Omit<
-  ComponentProps<typeof CharmNetwork>,
-  "api" | "read" | "refresh"
->) {
-  const { read, refresh } = useCharmReport(api)
-  return <CharmNetwork api={api} read={read} refresh={refresh} {...rest} />
-}
-
-/** The row and the screen it opens, on the addresses the settings route gives them. */
-function Routed({
-  api,
-  profile,
-}: {
-  api: CharmNetworkApi & CharmUpdateApi
-  profile: ComponentProps<typeof CharmNetwork>["profile"]
-}) {
-  return (
-    <MemoryRouter initialEntries={["/settings/charm"]}>
-      <Routes>
-        <Route path="/settings/charm" element={<Network api={api} profile={profile} />} />
-        <Route
-          path="/settings/charm-firmware"
-          element={<CharmUpdateScreen api={api} profile={profile} />}
-        />
-      </Routes>
-    </MemoryRouter>
-  )
-}
-
-test("tapping Update leaves the section, and the status poll stops while the upload holds the link", async () => {
-  let polls = 0
-  let landed = false
-  let releaseUpload: (() => void) | undefined
-  const links = {
-    wifi: { state: CharmLinkState.Online, reason: 0, ip: "192.168.1.20", ssid: "Home" },
-    tailnet: { state: CharmLinkState.Off, ip: "" },
-  }
-  const api: CharmNetworkApi & CharmUpdateApi = {
-    status: async () => links,
-    network: async () => links,
-    saveWifi: async () => 0,
-    forget: async () => 0,
-    saveTailnet: async () => 0,
-    // A download already running when the row opens starts the poll.
-    updateStatus: async () => {
-      polls += 1
-      return { state: CharmUpdateState.Downloading, percent: 10, reason: 0 }
-    },
-    version: async () => (landed ? "0.2.0" : "0.1.0"),
-    update: async () => {},
-    upload: async () => {
-      await new Promise<void>((done) => (releaseUpload = done))
-      landed = true
-      return { sent: IMAGE.length, total: IMAGE.length, percent: 100 }
-    },
-  }
-  const host = serveFirmware("update-poll", IMAGE_PUBLISHED, IMAGE)
-  await mount(<Routed api={api} profile={host.profile} />, async () => {
-    await until(async () => Boolean(button("Update to 0.2.0")), "the offer")
-    const before = polls
-    assert.ok(before >= 1, "the row's own snapshot asked")
-    await click(button("Update to 0.2.0"))
-    await start()
-    await until(async () => text().includes("Transferring"), "the upload holding the link")
-    // Longer than the poll's interval: the row the poll lived in is gone, and the screen asks
-    // nothing on a timer of its own, so nothing opens a link beside the upload.
-    await act(async () => {
-      await new Promise((done) => setTimeout(done, 2_300))
-    })
-    assert.equal(polls, before, "the poll did not ask while the upload held the link")
-    releaseUpload?.()
-    await settle()
-  })
-})
-
-test("the row's picker opens the same screen ready for a file", async () => {
-  const api: CharmNetworkApi & CharmUpdateApi = {
-    status: async () => ({
-      wifi: { state: CharmLinkState.Online, reason: 0, ip: "192.168.1.20", ssid: "Home" },
-      tailnet: { state: CharmLinkState.Off, ip: "" },
-    }),
-    network: async () => ({
-      wifi: { state: CharmLinkState.Online, reason: 0, ip: "192.168.1.20", ssid: "Home" },
-      tailnet: { state: CharmLinkState.Off, ip: "" },
-    }),
-    saveWifi: async () => 0,
-    forget: async () => 0,
-    saveTailnet: async () => 0,
-    updateStatus: async () => ({ state: CharmUpdateState.Idle, percent: 0, reason: 0 }),
-    version: async () => "0.1.0",
-    update: async () => {},
-    upload: async (image: Uint8Array) => ({
-      sent: image.length,
-      total: image.length,
-      percent: 100,
-    }),
-  }
-  const host = serveFirmware("update-pick-route", PUBLISHED)
-  await mount(<Routed api={api} profile={host.profile} />, async () => {
-    await until(async () => Boolean(button("Choose a file…")), "the row's picker")
-    await click(button("Choose a file…"))
-    await until(async () => Boolean(find("#charm-update-choose")), "the screen's own picker")
-    assert.ok(!find("#charm-update-start"), "the row the reader left")
-  })
 })

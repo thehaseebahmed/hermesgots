@@ -2,8 +2,10 @@
  * Settings → Charm on the web: there is no radio to reach a Gots Charm with outside the Android
  * app, so the menu offers no row, and the section, reached by its address, says where to pair one.
  * The phone's own Network section is drawn here too, over a stand-in for the radio: what a charm's
- * answer reads as, and that a passphrase is never drawn back. The send flow's assertions moved
- * with the flow itself — `test-charm-update.tsx` holds them, beside the screen that runs them.
+ * answer reads as, and that a passphrase is never drawn back. The paired page is mounted from facts
+ * alone, so its cards and the Firmware row inside them are read without a radio at all. The send
+ * flow's assertions moved with the flow itself — `test-charm-update.tsx` holds them, beside the
+ * screen that runs them.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
@@ -12,8 +14,10 @@ import { MemoryRouter, Route, Routes } from "react-router"
 
 import {
   CharmNetwork,
+  CharmSections,
   CharmVoiceHeld,
   CharmVoiceScheme,
+  type CharmFirmwareFacts,
   type CharmNetworkApi,
 } from "@/components/settings/charm"
 import { useCharmReport } from "@/lib/charm"
@@ -24,6 +28,7 @@ import { BatteryRow, CharmStatusRow, WakingGroup } from "@/components/settings/c
 import { report } from "./fixtures/charm-report.ts"
 import {
   Path,
+  botProfile,
   click,
   findAll,
   find,
@@ -32,7 +37,6 @@ import {
   missing,
   mount,
   seedSettings,
-  serveFirmware,
   settle,
   text,
   type,
@@ -99,7 +103,8 @@ test("Developer ends with a Charm tests group holding one row per moment", async
 /**
  * The Network section's own link, as the phone would answer it. Each call is one control ask over
  * BLE; this stands in for the charm, since nothing here can drive a real radio. What the host says
- * about the published firmware is not the charm's: that is `serveFirmware` below.
+ * about the published firmware is not the charm's: the page's facts carry it, drawn from
+ * `firmwareFacts` below.
  */
 function radio(overrides: Partial<CharmNetworkApi> = {}): CharmNetworkApi {
   return {
@@ -207,106 +212,219 @@ test("a charm that kept the secret readable says so, in its own words", async ()
   })
 })
 
-/** The first button on screen with these words: the row's own control. */
-const button = (label: string) => findText("button", label)
+/** The first button whose words contain `label`: the sheet's rows and the page's rows are buttons. */
+const rowButton = (label: string) => findText("button", label)
+
+/**
+ * The page as the phone draws it, from facts alone: no radio, no store and no effect, so a case
+ * reads only what the sections do with what they are handed.
+ */
+function sections(overrides: Partial<ComponentProps<typeof CharmSections>> = {}) {
+  const nothing = () => {}
+  return (
+    <MemoryRouter>
+      <CharmSections
+        charm={{ deviceId: "charm-1", name: "Desk charm" }}
+        report={{
+          read: { state: "read", value: report(CharmLinkState.Online, CharmLinkState.Off) },
+          refresh: async () => {},
+        }}
+        firmware={firmwareFacts()}
+        sources={[botProfile("pocket")]}
+        botsRead
+        labels={new Map()}
+        busy={null}
+        progress={null}
+        failure={null}
+        wake={{ doubleTap: true, quietSeconds: 15 }}
+        scheme="https"
+        held={null}
+        heldFailed={false}
+        onSync={nothing}
+        onTest={nothing}
+        onTogglePet={nothing}
+        onPickPet={nothing}
+        onWake={nothing}
+        onScheme={nothing}
+        onBattery={nothing}
+        onForget={nothing}
+        onOpenFirmware={nothing}
+        {...overrides}
+      />
+    </MemoryRouter>
+  )
+}
+
+/** Each card on the page, in the order the page draws it, as the words inside it. */
+const cards = () => findAll("[data-settings-group]").map((card) => card.textContent ?? "")
+
+/** The muted sentence a card does not hold: the page's caption. */
+const captions = () => findAll('p[class*="text-[13px]"]')
+
+test("the sections run Device, Bots, Waking, Voice, Wi-Fi, Tailnet, Forget, one caption", async () => {
+  await mount(sections(), async () => {
+    await settle()
+    const drawn = cards()
+    assert.equal(drawn.length, 7, "seven cards: the device first, then each thing about it")
+    const [device, bots, waking, voice, wifi, tailnet, forget] = drawn
+    /** A card's rows, in the order the reader meets them. */
+    const rows = (card: string, ...names: string[]) => {
+      let seen = -1
+      for (const name of names) {
+        const at = card.indexOf(name)
+        assert.ok(at > seen, `"${name}" is drawn after the row before it`)
+        seen = at
+      }
+    }
+    rows(device, "Desk charm", "Battery", "Firmware")
+    rows(bots, "Sync", "Pet mode", "Send a test alert")
+    rows(waking, "Double tap to wake", "Stays lit for")
+    rows(voice, "Voice over https", "Your charm holds")
+    assert.ok(wifi.includes("Wi-Fi"), "the network's own card, after the voice")
+    assert.ok(tailnet.includes("Tailnet"), "and the tailnet's")
+    assert.ok(forget.includes("Forget this charm"), "the page ends on the way out")
+    assert.equal(captions().length, 1, "one caption, the page's last word")
+    assert.ok(captions()[0].textContent?.includes("Keep the charm close"), "which is the close one")
+  })
+})
+
+test("the network section draws no Firmware group and neither caption", async () => {
+  await mount(<Network api={radio()} />, async () => {
+    await settle()
+    assert.ok(text().includes("Tailnet"), "the two links are still the section's")
+    assert.ok(!text().includes("Firmware"), "the firmware row is the device's, not the network's")
+    assert.ok(!text().includes("everyday build"), "and the row's caption went with it")
+    assert.ok(
+      !text().includes("The image goes over the charm's own link"),
+      "so did the section's own",
+    )
+  })
+})
 
 const PUBLISHED = { version: "0.2.0", size: 4, sha256: "cd".repeat(32) }
 
+/**
+ * The firmware's four facts, as the page reads them: the charm's own answer, the host's record of
+ * what it publishes, and where this charm's download has got to. Drawn from these alone, the row
+ * asks the charm nothing, so a case states each fact it means to read.
+ */
+function firmwareFacts(overrides: Partial<CharmFirmwareFacts> = {}): CharmFirmwareFacts {
+  return {
+    running: { state: "says", version: "0.1.0" },
+    published: PUBLISHED.version,
+    answered: true,
+    checkSaid: null,
+    update: { state: "read", value: { state: CharmUpdateState.Idle, percent: 0, reason: 0 } },
+    read: async () => undefined,
+    ...overrides,
+  }
+}
+
 test("the firmware row offers the published one when the charm is older", async () => {
-  const host = serveFirmware("firmware-offered", PUBLISHED)
-  await mount(<Network api={radio()} profile={host.profile} />, async () => {
-    await until(async () => text().includes("Charm 0.1.0 · 0.2.0 available"), "the host's answer")
-    assert.ok(button("Update to 0.2.0"), "the newer one is offered")
-    assert.ok(button("Choose a file…"), "and a file is always taken")
+  let opened = 0
+  await mount(sections({ onOpenFirmware: () => opened++ }), async () => {
+    await settle()
+    assert.ok(text().includes("Charm 0.1.0 · 0.2.0 available"), "the host's answer, in the row")
+    assert.equal(
+      find('[data-tag="Update"]')?.textContent,
+      "Update",
+      "and the row is marked as an offer",
+    )
+    await click(rowButton("Firmware"))
+    assert.equal(opened, 1, "the row opens the update's own screen, where a file is taken")
   })
 })
 
 test("the firmware row says the charm is up to date when the versions match", async () => {
-  const host = serveFirmware("firmware-current", { ...PUBLISHED, version: "0.1.0" })
-  await mount(<Network api={radio()} profile={host.profile} />, async () => {
-    await until(async () => text().includes("Charm 0.1.0 · up to date"), "the host's answer")
-    assert.ok(!button("Update to"), "nothing to offer")
-    assert.ok(button("Choose a file…"), "but a file is still taken")
+  await mount(sections({ firmware: firmwareFacts({ published: "0.1.0" }) }), async () => {
+    await settle()
+    assert.ok(text().includes("Charm 0.1.0 · up to date"), "the host's answer, in the row")
+    assert.ok(missing('[data-tag="Update"]'), "nothing to offer")
   })
 })
 
 test("a charm ahead of the package is said, and never offered a downgrade", async () => {
-  const api = radio({ version: async () => "0.3.0" })
-  const host = serveFirmware("firmware-behind", PUBLISHED)
-  await mount(<Network api={api} profile={host.profile} />, async () => {
-    await until(async () => text().includes("Charm 0.3.0 · newer than 0.2.0"), "the two versions")
-    assert.ok(!find("#charm-update-start"), "and offers no update")
-  })
+  await mount(
+    sections({ firmware: firmwareFacts({ running: { state: "says", version: "0.3.0" } }) }),
+    async () => {
+      await settle()
+      assert.ok(
+        text().includes("Charm 0.3.0 · newer than 0.2.0"),
+        "the two versions, in the row",
+      )
+      assert.ok(missing('[data-tag="Update"]'), "and offers no update")
+    },
+  )
 })
 
 test("a charm too old to say its version is not compared with the package", async () => {
-  const api = radio({ version: async () => null })
-  const host = serveFirmware("firmware-too-old", PUBLISHED)
-  await mount(<Network api={api} profile={host.profile} />, async () => {
-    await until(async () => text().includes("can't say which version it runs"), "the row's line")
+  await mount(sections({ firmware: firmwareFacts({ running: { state: "too-old" } }) }), async () => {
+    await settle()
+    assert.ok(text().includes("can't say which version it runs"), "the row's line")
     assert.ok(text().includes("cable"), "and how the first one gets there")
-    assert.ok(!find("#charm-update-start"), "nothing is offered over the air")
-    assert.ok(button("Choose a file…"), "the picker still works")
+    assert.ok(missing('[data-tag="Update"]'), "nothing is offered over the air")
   })
 })
 
 test("a host that can't answer says it couldn't check, in its own words", async () => {
   const said = "GitHub refused this server's token for the charm firmware."
-  const host = serveFirmware("firmware-refused", said)
-  await mount(<Network api={radio()} profile={host.profile} />, async () => {
-    await until(async () => text().includes(said), "the host's sentence")
-    assert.ok(text().includes("couldn't check for a newer one"), "the row says the check failed")
-    assert.ok(button("Choose a file…"), "and the picker is not held hostage to it")
-  })
+  await mount(
+    sections({ firmware: firmwareFacts({ published: undefined, checkSaid: said }) }),
+    async () => {
+      await settle()
+      assert.ok(text().includes(said), "the host's sentence")
+      assert.ok(text().includes("couldn't check for a newer one"), "the row says the check failed")
+      assert.ok(
+        text().indexOf(said) > text().indexOf("Firmware"),
+        "and the sentence stands under the row it is about, not at the page's foot",
+      )
+    },
+  )
 })
 
 test("an image the charm refuses for its build is drawn in the charm's own reason", async () => {
   // 7 on the wire is the charm's `WrongScheme`: the image was built for the other kind of board, so
   // the row draws that reason rather than "the charm didn't say why".
-  const api = radio({
-    updateStatus: async () => ({ state: CharmUpdateState.Failed, percent: 0, reason: 7 }),
-  })
-  await mount(<Network api={api} />, async () => {
-    await until(
-      async () =>
-        text().includes("Update failed: that image was built for a different kind of charm"),
+  const update = { state: CharmUpdateState.Failed, percent: 0, reason: 7 }
+  await mount(sections({ firmware: firmwareFacts({ update: { state: "read", value: update } }) }), async () => {
+    await settle()
+    assert.ok(
+      text().includes("Update failed: that image was built for a different kind of charm"),
       "the charm's reason in words",
     )
     assert.ok(!text().includes("didn't say why"), "the reason is named, not left unnamed")
   })
 })
 
-test("a charm that cannot be reached is not a charm that didn't say", async () => {
-  const api = radio({
-    version: async () => {
-      throw new Error("The charm went out of reach")
-    },
+test("a download running is the row's own line, over the versions", async () => {
+  const update = { state: CharmUpdateState.Downloading, percent: 42, reason: 0 }
+  await mount(sections({ firmware: firmwareFacts({ update: { state: "read", value: update } }) }), async () => {
+    await settle()
+    assert.ok(text().includes("Downloading… 42%"), "where the charm's download has got to")
+    assert.ok(!text().includes("0.2.0 available"), "said in place of the versions while one runs")
   })
-  const host = serveFirmware("firmware-unreachable", PUBLISHED)
-  await mount(<Network api={api} profile={host.profile} />, async () => {
-    await until(
-      async () => text().includes("0.2.0 published · couldn't reach the charm"),
+})
+
+test("a charm that cannot be reached is not a charm that didn't say", async () => {
+  await mount(sections({ firmware: firmwareFacts({ running: { state: "unreachable" } }) }), async () => {
+    await settle()
+    assert.ok(
+      text().includes("0.2.0 published · couldn't reach the charm"),
       "the link's own sentence",
     )
     assert.ok(!text().includes("didn't say"), "not blamed on the charm's firmware")
-    assert.ok(!find("#charm-update-start"), "and nothing is offered on a version nobody read")
+    assert.ok(missing('[data-tag="Update"]'), "and nothing is offered on a version nobody read")
   })
 })
 
-test("the firmware group says the published image is the everyday build, once", async () => {
-  await mount(<Network api={radio()} />, async () => {
+test("a busy page opens no screen from the firmware row", async () => {
+  let opened = 0
+  await mount(sections({ busy: "sync", onOpenFirmware: () => opened++ }), async () => {
     await settle()
-    const warnings = (text().match(/everyday build/g) ?? []).length
-    assert.equal(warnings, 1, "said once, not beside every control")
-    assert.ok(
-      text().includes("A sealed charm refuses it"),
-      "and what a sealed charm does with it is said too",
-    )
+    await click(rowButton("Firmware"))
+    assert.equal(opened, 0, "a send under way is never left for the update's screen")
   })
 })
-
-/** The first button whose words contain `label`: the sheet's rows are buttons. */
-const rowButton = (label: string) => findText("button", label)
 
 test("the waking group offers the switch, the three windows and what off leaves", async () => {
   const changes: CharmWake[] = []
