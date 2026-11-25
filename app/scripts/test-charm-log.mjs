@@ -1,12 +1,14 @@
 /**
  * The charm's log, read past the window it happens to hold: the ask that names a row's own index,
- * and the page it is answered with — the base its rows really begin at, and rows in `LogTail`'s own
- * bytes. Pure, so what goes over the link is read as bytes here against the firmware's
- * `docs/PROTOCOL.md`, and a page read by one reader cannot drift from the other op's.
+ * the page it is answered with — the base its rows really begin at, and rows in `LogTail`'s own
+ * bytes — and the drain that walks those pages to the end. Pure, so what goes over the link is read
+ * as bytes here against the firmware's `docs/PROTOCOL.md`, a page read by one reader cannot drift
+ * from the other op's, and the paging rule is driven by a fake ask rather than a radio.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
 
+import { drain } from "../src/lib/charm-log.ts"
 import {
   CHARM_VERSION,
   CharmOp,
@@ -118,4 +120,80 @@ test("LogTail and LogSince read their rows the same way", () => {
   assert.equal(tail?.from, 4)
   assert.equal(tail?.total, 9)
   assert.equal(since?.base, 4)
+})
+
+/** A page as a drain reads one: where its rows start, the charm's count, and the rows themselves. */
+const page = (from, total, rows) => ({ from, total, rows })
+
+/** `count` rows as a parsed page holds them, each naming the place it was asked from. */
+const rowsFrom = (first, count, carried = false) =>
+  Array.from({ length: count }, (_, i) => ({ text: `row ${first + i}`, carried }))
+
+/**
+ * An ask over a scripted run of pages: it answers with the next page and records every place it was
+ * asked from, so a test reads where the drain went as well as what it kept. A drain that asks past
+ * the last scripted page throws rather than being handed one it never should have reached.
+ */
+function scripted(...pages) {
+  const asks = []
+  return {
+    asks,
+    ask: async (from) => {
+      asks.push(from)
+      const answered = pages[asks.length - 1]
+      if (!answered) throw new Error(`the drain asked for ${from} past the pages this test gave`)
+      return answered
+    },
+  }
+}
+
+test("a drain asks again from the row after the page it was given", async () => {
+  const first = rowsFrom(0, 6)
+  const second = rowsFrom(6, 6)
+  const third = rowsFrom(12, 2)
+  const { ask, asks } = scripted(page(0, 14, first), page(6, 14, second), page(12, 14, third))
+  assert.deepEqual(await drain(ask), [...first, ...second, ...third])
+  // A page names where its rows begin, and the next ask lands on the row after the last one this
+  // page carried: the ring's own six-row page is not what decides it.
+  assert.deepEqual(asks, [0, 6, 12])
+})
+
+test("a drain stops at the charm's total", async () => {
+  const { ask, asks } = scripted(page(0, 3, rowsFrom(0, 3)))
+  assert.equal((await drain(ask)).length, 3)
+  // The page reached the count the charm keeps, so there is nothing past it to ask for.
+  assert.deepEqual(asks, [0])
+})
+
+test("a drain stops on a page with no rows", async () => {
+  const { ask, asks } = scripted(page(0, 40, []))
+  assert.deepEqual(await drain(ask), [])
+  // An empty page under a total it never reached says the ring holds nothing more here; asking
+  // again would ask for the same place until the charm's log was armed again.
+  assert.deepEqual(asks, [0])
+})
+
+test("a drain stops after sixty-four pages", async () => {
+  // A charm that answers a full page from every place asked is asked sixty-four times and no more,
+  // so a page opened on it always comes back.
+  const pages = Array.from({ length: 80 }, (_, i) => page(i * 6, 100_000, rowsFrom(i * 6, 6)))
+  const { ask, asks } = scripted(...pages)
+  assert.equal((await drain(ask)).length, 64 * 6)
+  assert.equal(asks.length, 64)
+})
+
+test("a drain keeps the rows in the order the charm sent them", async () => {
+  // A line the panel wrapped: its second row carries the first one on, and the page boundary falls
+  // between two rows the charm printed side by side.
+  const first = [
+    { text: "E (1041) talk: no capture ", carried: false },
+    { text: "task at all", carried: true },
+    { text: "boot: 0.2.1", carried: false },
+  ]
+  const second = [
+    { text: "W (1042) wifi: rejoin ", carried: false },
+    { text: "in 2s", carried: true },
+  ]
+  const { ask } = scripted(page(0, 5, first), page(3, 5, second))
+  assert.deepEqual(await drain(ask), [...first, ...second])
 })

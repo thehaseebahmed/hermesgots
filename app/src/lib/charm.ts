@@ -27,6 +27,7 @@ import {
   uploadFirmware,
   type UploadOptions,
 } from "./charm-firmware.ts"
+import { drain } from "./charm-log.ts"
 import { oneAtATime } from "./charm-queue.ts"
 import { readFailed, refusalWords, type CharmRead } from "./charm-words.ts"
 import {
@@ -524,25 +525,21 @@ export async function setCharmLog(on: boolean): Promise<boolean> {
 }
 
 /**
- * The charm's log, oldest row first, as the ring wrapped it. A page carries six rows, so this asks
- * until the charm says the rows are exhausted — a log the charm is still writing runs to its size, not
- * to a page count.
+ * The charm's log, oldest row first, as the ring wrapped it: one link for the whole drain, since a
+ * full ring read a page per link is a dozen connect-and-close cycles, and the charm's own log keeps
+ * filling while they run. `drain` decides where each ask counts from and where the ring ends.
  */
 export async function charmLog(): Promise<CharmLogRow[]> {
-  const rows: CharmLogRow[] = []
-  let from = 0
-  // A ring is two kilobytes of twenty-six-column rows: well under this bound, and a charm that keeps
-  // answering past it is not a charm this page can show.
-  for (let page = 0; page < 64; page++) {
-    const { status, bytes } = await askCharm(logTailMessage(from))
-    if (status.code !== CharmCode.Ok) throw new CharmRefused(status.code)
-    const answered = parseLogPage(bytes)
-    if (!answered) throw new Error("The charm's log answer was too short")
-    rows.push(...answered.rows)
-    from = answered.from + answered.rows.length
-    if (answered.rows.length === 0 || from >= answered.total) break
-  }
-  return rows
+  return withCharm((link) =>
+    drain(async (from) => {
+      const bytes = await link.ask(logTailMessage(from))
+      const status = parseStatus(bytes)
+      if (status.code !== CharmCode.Ok) throw new CharmRefused(status.code)
+      const answered = parseLogPage(bytes)
+      if (!answered) throw new Error("The charm's log answer was too short")
+      return answered
+    }),
+  )
 }
 
 export async function charmNetwork(): Promise<CharmNetworkReport> {
