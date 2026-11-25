@@ -766,6 +766,14 @@ _Avoid_: telemetry, metrics, performance data, trace, diagnostics
 One call this device made to a bot's host, as the network log holds it: the route the app names it by, the bot it was for, when it was asked, how long until its answer began, the status it answered with, and how it ended — answered, refused, never landed, timed out or stopped. A request that opens a stream holds its first frame too, which is what reads as how long connecting took. It is neither a turn's duration nor a model's thinking, which are the host's to measure.
 _Avoid_: span, sample, entry, event, latency
 
+**The log book**:
+The lines the Developer page's **Debug Charm** screen has read from the charm's own log and still holds, oldest first, for as long as the page is open. Each read asks the charm only for the rows after the last one the book holds, so a ring that keeps a handful of seconds still leaves a reader the whole visit; it is capped at its newest thousand lines, and it is never stored, synced or uploaded — leaving the page ends it.
+_Avoid_: log history, log cache, session log, transcript
+
+**A line**:
+One line the firmware printed, however many of the ring's twenty-six-column rows carried it: a row flagged as carrying a line on belongs to the line above it rather than starting its own. The book draws and copies lines, so what a person reads and pastes is what the firmware printed rather than the panel's wrap.
+_Avoid_: record, entry, message
+
 **Stream open**:
 The wait between asking a bot's host for a stream and its first frame arriving: the time to first byte, plus however long the host took to send its first event. It is the closest this device comes to a connect time — DNS, TCP and TLS happen below it and are not visible here — so the strip draws it as **Connected in**, never as a handshake's own figure.
 _Avoid_: connect latency, handshake, connection time, round trip
