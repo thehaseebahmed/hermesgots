@@ -262,6 +262,14 @@ export const FIRMWARE_SENT = "Sent. The charm is restarting on it."
 export const FIRMWARE_NOT_BACK = "The charm didn't come back on the new build."
 
 /**
+ * Under the walk's title while it runs. The send is driven by its own promise rather than by the
+ * screen, so stepping back leaves the update going — and the Firmware row is where a reader who
+ * left reads the rest of it. Said before the steps, while there is still time to use it.
+ */
+export const FIRMWARE_LEAVE =
+  "You can leave this screen — the charm keeps going, and the Firmware row on the charm's page follows it."
+
+/**
  * Under every failure the update screen draws: the sure path. The over-the-air hop is the one this
  * app made sound, but a charm that keeps cancelling — the builds already in the field, whose
  * refusals name no position — can always be flashed by cable, and a reader who has met the same

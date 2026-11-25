@@ -295,6 +295,43 @@ test("a returning visit joins the running walk and draws no offer", async () => 
   )
 })
 
+/**
+ * The walk's own line about leaving, and where it is drawn: under the title while the walk runs,
+ * and nowhere else — an offer has nothing in flight to keep going, and an end has already stopped.
+ * The sentence is spelled here rather than read off `charm-words`, so a rewording that reaches the
+ * screen without this test is a rewording the test can see.
+ */
+const LEAVING =
+  "You can leave this screen — the charm keeps going, and the Firmware row on the charm's page follows it."
+const leavingLines = () => text().split(LEAVING).length - 1
+
+test("the leaving line is drawn once the walk runs, and on neither the offer nor an end", async () => {
+  let releaseUpload: (() => void) | undefined
+  const api = radio({
+    upload: async (image: Uint8Array) => {
+      await new Promise<void>((done) => (releaseUpload = done))
+      return { sent: image.length, total: image.length, percent: 100 }
+    },
+  })
+  const host = serveFirmware("update-leaving", IMAGE_PUBLISHED, IMAGE)
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
+    async () => {
+      await until(async () => Boolean(find("#charm-update-install")), "the offer")
+      await settle()
+      assert.equal(leavingLines(), 0, "the offer has nothing in flight, so it says nothing about leaving")
+
+      await start()
+      await until(async () => text().includes("Transferring"), "the walk running", 10_000)
+      assert.equal(leavingLines(), 1, "the running walk says it once, under the title")
+
+      releaseUpload?.()
+      await until(async () => text().includes("The charm runs 0.2.0"), "the walk's end", 10_000)
+      assert.equal(leavingLines(), 0, "and the line goes when the walk ends")
+    },
+  )
+})
+
 test("the steps appear in the order they walk, each bar moving, and the image that went is the host's", async () => {
   const sent: { bytes: Uint8Array; sha256: string }[] = []
   let releaseUpload: (() => void) | undefined

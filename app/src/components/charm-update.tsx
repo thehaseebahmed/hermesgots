@@ -42,6 +42,7 @@ import {
   FILE_TOO_BIG,
   firmwareDoneWords,
   FIRMWARE_CABLE,
+  FIRMWARE_LEAVE,
   FIRMWARE_NOT_BACK,
   FIRMWARE_NOT_ENDED,
   FIRMWARE_NOT_PUBLISHED,
@@ -444,6 +445,7 @@ export function CharmUpdateScreen({
   return (
     <>
       {title && <Caption>{title}</Caption>}
+      {busy && <Caption>{FIRMWARE_LEAVE}</Caption>}
       {steps.length > 0 && (
         <Group>
           {steps.map((step) => (
