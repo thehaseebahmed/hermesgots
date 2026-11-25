@@ -54,7 +54,16 @@ interface WalkState {
         /** The build the walk started on, read before anything went; null where the charm could not say. */
         was: string | null
       }
-    | { kind: "failed"; said: string }
+    | {
+        kind: "failed"
+        said: string
+        /**
+         * The step the walk was in when it stopped: the last one the screen drew. A refusal that
+         * came before any step began names none — there is no row to mark, and marking one the
+         * walk never reached would point a reader at the wrong place.
+         */
+        step?: StepView["name"]
+      }
     | null
   /** The last hand, in the words it went under: what a failure's Try again re-runs. */
   again: { hand: (was: string | null) => Promise<FirmwareHand>; title: string } | null

@@ -35,6 +35,7 @@ import {
   start,
   text,
   until,
+  wordsOf,
 } from "./component-kit.tsx"
 
 test.beforeEach(async () => {
@@ -1000,7 +1001,7 @@ test("a fetch the charm fails is drawn in its own reason words, with Try again a
         async () => text().includes("The update failed: it was cancelled"),
         "the charm's reason in words",
       )
-      assert.ok(text().includes("flash it by cable"), "the sure path is said beside it")
+      assert.ok(text().includes("Flash it by cable"), "the sure path is said beside it")
       await click(find("#charm-update-retry"))
       await until(async () => handed === 2, "the retry walks the fetch again")
       assert.equal(host.mints(), 2, "a fresh token for the fresh walk")
@@ -1162,9 +1163,132 @@ test("a failed upload is drawn with the reason the charm gave, the cable sentenc
         async () => text().includes("The update failed: it was cancelled"),
         "the reason the charm gave",
       )
-      assert.ok(text().includes("flash it by cable"), "the sure path is said beside it")
+      assert.ok(text().includes("Flash it by cable"), "the sure path is said beside it")
       await click(find("#charm-update-retry"))
       await until(async () => uploads === 2, "the retry re-ran the send")
+    },
+  )
+})
+
+/**
+ * The failure card's own words, spelled here rather than read off `charm-words`, so a rewording
+ * that reaches the screen without this test is a rewording the test sees — as the leaving line's
+ * are. The repository is the firmware's own root: the sheet sends a reader there to flash by cable.
+ */
+const CABLE_TITLE = "Flash it by cable"
+const CABLE_WORDS = [
+  "When the charm cancels, it stopped the write itself: the new image never reached the slot, so the charm still runs the build it came on.",
+  "This way needs neither Bluetooth nor this app — a cable and a computer are all it takes.",
+  "The flasher, the port it listens on and the steps live in the charm firmware's repository, which the row below opens.",
+]
+const REPO_ROW = "Open the firmware repository"
+const FIRMWARE_REPO = "https://github.com/thehaseebahmed/hermesgots-charm"
+const STEP_STOPPED = "The update stopped here."
+const LOG_ROW = "Read the charm's log"
+
+/** A walk whose upload the charm cancels: the failure every case around here starts from. */
+const cancelled = () =>
+  radio({
+    upload: async () => {
+      throw new Error("The update failed: it was cancelled")
+    },
+  })
+
+test("the transfer step is marked when it fails", async () => {
+  const host = serveFirmware("update-marked-step", IMAGE_PUBLISHED, IMAGE)
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={cancelled()} profile={host.profile} />),
+    async () => {
+      await start()
+      await until(
+        async () => text().includes("The update failed: it was cancelled"),
+        "the failure's words",
+      )
+      const marked = findAll("[data-stopped]")
+      assert.equal(marked.length, 1, "one step of the walk is marked")
+      assert.ok(
+        wordsOf(marked[0]).includes("Transferring"),
+        "the transfer is the step it stopped at",
+      )
+      assert.ok(wordsOf(marked[0]).includes(STEP_STOPPED), "and the line under it says so")
+      assert.ok(text().includes("Downloading"), "the download behind it is drawn")
+      assert.ok(!wordsOf(marked[0]).includes("Downloading"), "and it is not the marked one")
+      assert.ok(!text().includes("Restarting"), "the restart never began, so it is not drawn")
+    },
+  )
+})
+
+test("the cable sheet says what the cable path is, and opens the firmware repository", async () => {
+  // The tab a row opens is stubbed: nothing here opens a real one.
+  const real = window.open
+  const opened: string[] = []
+  window.open = ((url: string | URL) => {
+    opened.push(String(url))
+    return null
+  }) as typeof window.open
+  const host = serveFirmware("update-cable-sheet", IMAGE_PUBLISHED, IMAGE)
+  try {
+    await mount(
+      at("/settings/charm-firmware", <CharmUpdateScreen api={cancelled()} profile={host.profile} />),
+      async () => {
+        await start()
+        await until(
+          async () => text().includes("The update failed: it was cancelled"),
+          "the failure's words",
+        )
+        assert.deepEqual(opened, [], "nothing is opened until the reader asks")
+
+        const cable = findAll("button").find((one) => wordsOf(one) === CABLE_TITLE)
+        assert.ok(cable, "the row that leads to the cable")
+        await click(cable)
+
+        const sheet = find("[role='dialog']")
+        assert.ok(sheet, "the sheet opened")
+        const said = wordsOf(sheet)
+        for (const sentence of CABLE_WORDS)
+          assert.ok(said.includes(sentence), `the sheet says: ${sentence}`)
+
+        const repo = findAll("[role='dialog'] button").find((one) => wordsOf(one) === REPO_ROW)
+        assert.ok(repo, "the row that opens the repository")
+        await click(repo)
+        assert.deepEqual(opened, [FIRMWARE_REPO], "the firmware repository, opened outside the app")
+      },
+    )
+  } finally {
+    window.open = real
+  }
+})
+
+test("the log row is absent with Developer off and present with it", async () => {
+  const host = serveFirmware("update-log-row", IMAGE_PUBLISHED, IMAGE)
+  const logRow = () => find('a[href="/settings/debug-charm"]')
+  const failing = async () =>
+    until(async () => text().includes("The update failed: it was cancelled"), "the failure's words")
+
+  // The seed's own settings: Developer off, which is every device out of the box.
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={cancelled()} profile={host.profile} />),
+    async () => {
+      await start()
+      await failing()
+      await settle()
+      assert.equal(logRow(), null, "no way into the charm's log with Developer off")
+      assert.ok(!text().includes(LOG_ROW), "and not even its words")
+    },
+  )
+
+  await seedSettings({ developer: true })
+  resetCharmUpdateWalk()
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={cancelled()} profile={host.profile} />),
+    async () => {
+      await start()
+      await failing()
+      await until(async () => Boolean(logRow()), "the log row")
+      assert.ok(
+        wordsOf(logRow()).includes(LOG_ROW),
+        "the row into the charm's log, worded as it is",
+      )
     },
   )
 })

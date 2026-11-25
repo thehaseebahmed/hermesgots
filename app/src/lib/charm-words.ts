@@ -270,13 +270,43 @@ export const FIRMWARE_LEAVE =
   "You can leave this screen — the charm keeps going, and the Firmware row on the charm's page follows it."
 
 /**
- * Under every failure the update screen draws: the sure path. The over-the-air hop is the one this
- * app made sound, but a charm that keeps cancelling — the builds already in the field, whose
- * refusals name no position — can always be flashed by cable, and a reader who has met the same
- * failure twice should not meet it a third time.
+ * Under every failure the update screen draws, the sure path: a cable. The over-the-air hop is the
+ * one this app made sound, but a charm that keeps cancelling — the builds already in the field,
+ * whose refusals name no position — can always be flashed by cable, and a reader who has met the
+ * same failure twice should not meet it a third time. The row opens the sheet whose sentences are
+ * below, rather than printing one sentence that promises a way it never names.
  */
-export const FIRMWARE_CABLE =
-  "If the charm keeps cancelling, flash it by cable instead — that always works."
+export const CABLE_TITLE = "Flash it by cable"
+
+/**
+ * The cable path, in three sentences a reader can act on: what the charm's own cancel means, what
+ * the path needs of them, and where the flasher and its steps are. Each stands on its own — the
+ * sheet's third sentence hands the reader to the repository row under it.
+ */
+export const CABLE_WORDS = [
+  "When the charm cancels, it stopped the write itself: the new image never reached the slot, so the charm still runs the build it came on.",
+  "This way needs neither Bluetooth nor this app — a cable and a computer are all it takes.",
+  "The flasher, the port it listens on and the steps live in the charm firmware's repository, which the row below opens.",
+]
+
+/** The sheet's own row: the firmware's repository, opened outside the app. */
+export const REPO_ROW = "Open the firmware repository"
+
+/**
+ * The firmware's repository root, not a path inside it: a path rots as the tree moves, and a
+ * repository does not. Where the flasher, its port and its steps are is that repository's business.
+ */
+export const FIRMWARE_REPO = "https://github.com/thehaseebahmed/hermesgots-charm"
+
+/** The line under the step the walk stopped at, so a reader sees which of the three failed. */
+export const STEP_STOPPED = "The update stopped here."
+
+/**
+ * The failure card's way into the charm's log. The route behind it is drawn only while this
+ * device's Developer switch is on, so the row is drawn on the same condition — a row without it
+ * would bounce the reader straight back to the menu.
+ */
+export const CHARM_LOG = "Read the charm's log"
 
 /** The Downloading step's line: the bytes that have landed, of the whole the length named. */
 export function downloadWords(progress: { received: number; total: number }): string {

@@ -1,9 +1,19 @@
 import { useEffect, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useNavigate, useSearchParams } from "react-router"
-import { FileUpIcon } from "lucide-react"
+import { CableIcon, ExternalLinkIcon, FileUpIcon } from "lucide-react"
 
-import { Caption, Group, RowText, rowClass, ValueRow } from "@/components/settings-chrome"
+import {
+  ActionRow,
+  Caption,
+  Group,
+  LinkRow,
+  PickSurface,
+  RowText,
+  rowClass,
+  SheetRow,
+  ValueRow,
+} from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
 import {
   charmFirmwareVersion,
@@ -35,13 +45,16 @@ import {
 } from "@/lib/charm-protocol"
 import {
   batteryWords,
+  CABLE_TITLE,
+  CABLE_WORDS,
+  CHARM_LOG,
   chargeBlocks,
   CHARGE_FIRST,
   downloadWords,
   fetchWords,
   FILE_TOO_BIG,
+  FIRMWARE_REPO,
   firmwareDoneWords,
-  FIRMWARE_CABLE,
   FIRMWARE_LEAVE,
   FIRMWARE_NOT_BACK,
   FIRMWARE_NOT_ENDED,
@@ -50,9 +63,12 @@ import {
   KEEP_CLOSE,
   offerLinkWords,
   PUBLISHED_CHANGED,
+  REPO_ROW,
+  STEP_STOPPED,
 } from "@/lib/charm-words"
 import { firmwareDoor, firmwareFetchUrl } from "@/lib/firmware-fetch"
-import { getActiveProfile } from "@/lib/db"
+import { getActiveProfile, getSettings } from "@/lib/db"
+import { openExternal } from "@/lib/native"
 import { CHARM_POLL_MS } from "@/lib/freshness"
 import {
   getCharmFirmware,
@@ -174,17 +190,19 @@ const STEP_TITLES: Record<StepView["name"], string> = {
  * Downloading, whether the phone fetches the image or the charm fetches it itself through a door it
  * holds, Transferring with the bar the upload reports, Restarting over the reboot window, and the
  * end: the version the charm came back on and the build it started from, the way on to a sync of
- * the bots, the pet and the voice hand-over, or the failure with its reason and what to do — try
- * again, and, when the charm keeps cancelling, flash it by cable, which always works. Nothing goes
- * until the reader taps: a fresh visit first draws an offer of the published image — the charm's
- * charge, its link, the one instruction the link needs, and the doors, `Install` and a file the
- * phone holds — and a charge under 20% off the charger shuts both until the charm is charged. The
- * Firmware row's Update button opens that offer on the published image; its picker opens the same
- * offer with the file door alone, which walks the same steps minus the download — and always over
- * the link, since a file the phone holds has no door to walk. The reader can step back at any
- * point — the send is driven by its own promise, not by the screen, and the walk it drives is the
- * shared one above, so leaving changes nothing about what the charm takes and returning changes
- * nothing about what runs.
+ * the bots, the pet and the voice hand-over, or the failure — its reason, the step it stopped at
+ * marked, `Try again`, and the sure path beside it: `Flash it by cable` opens a sheet saying what
+ * a cable needs and a row opening the firmware's repository, where the flasher and its steps live,
+ * with the charm's log a row further down wherever this device's Developer switch is on.
+ * Nothing goes until the reader taps: a fresh visit first draws an offer of the published image —
+ * the charm's charge, its link, the one instruction the link needs, and the doors, `Install` and a
+ * file the phone holds — and a charge under 20% off the charger shuts both until the charm is
+ * charged. The Firmware row's Update button opens that offer on the published image; its picker
+ * opens the same offer with the file door alone, which walks the same steps minus the download —
+ * and always over the link, since a file the phone holds has no door to walk. The reader can
+ * step back at any point — the send is driven by its own promise, not by the screen, and the walk
+ * it drives is the shared one above, so leaving changes nothing about what the charm takes and
+ * returning changes nothing about what runs.
  */
 export function CharmUpdateScreen({
   api = LIVE,
@@ -202,6 +220,7 @@ export function CharmUpdateScreen({
   charm?: PairedCharm | null
 }) {
   const active = useLiveQuery(getActiveProfile, [])
+  const settings = useLiveQuery(getSettings, [])
   const profile = given ?? active
   const paired = usePairedCharm()
   const charm = givenCharm ?? paired
@@ -216,9 +235,16 @@ export function CharmUpdateScreen({
 
   const { running: busy, steps, title, note, end } = useWalk()
   const file = useRef<HTMLInputElement | null>(null)
+  /**
+   * The step this send last drew — every draw moves it, including a hand's own download — so a
+   * failure at the end can name the step it stopped at. No step drawn is no phase: a refusal that
+   * came before anything began marks nothing, since there is no row it reached.
+   */
+  const phase = useRef<StepView["name"] | undefined>(undefined)
 
   /** One step drawn or moved: a step appears where it starts and stays for the rest of the walk. */
   const show = (name: StepView["name"], patch: Partial<StepView>) => {
+    phase.current = name
     const at = walk.steps.findIndex((step) => step.name === name)
     setWalk({
       steps:
@@ -236,6 +262,8 @@ export function CharmUpdateScreen({
    */
   const send = async (hand: (was: string | null) => Promise<FirmwareHand>, heading: string) => {
     if (walk.running) return
+    // A new walk has drawn no step yet: what the last one stopped at is not this one's.
+    phase.current = undefined
     setWalk({
       again: { hand, title: heading },
       running: true,
@@ -302,9 +330,11 @@ export function CharmUpdateScreen({
       // The charm never answered on the new build: what is published is read again too, since a
       // merge may have moved the tag while this one was being tried.
       await firmware.reload()
-      setWalk({ end: { kind: "failed", said: FIRMWARE_NOT_BACK } })
+      setWalk({ end: { kind: "failed", said: FIRMWARE_NOT_BACK, step: phase.current } })
     } catch (error) {
-      setWalk({ end: { kind: "failed", said: spoken(error, "Something went wrong") } })
+      setWalk({
+        end: { kind: "failed", said: spoken(error, "Something went wrong"), step: phase.current },
+      })
     } finally {
       setWalk({ running: false })
     }
@@ -444,6 +474,9 @@ export function CharmUpdateScreen({
     void send(last.hand, last.title)
   }
 
+  /** The step a failure stopped at, if it named one: the one row the walk marks. */
+  const stopped = end?.kind === "failed" ? end.step : undefined
+
   return (
     <>
       {title && <Caption>{title}</Caption>}
@@ -456,6 +489,7 @@ export function CharmUpdateScreen({
               title={STEP_TITLES[step.name]}
               subtitle={step.subtitle}
               percent={step.percent}
+              stopped={step.name === stopped}
             />
           ))}
         </Group>
@@ -480,15 +514,40 @@ export function CharmUpdateScreen({
       )}
       {end?.kind === "failed" && (
         <Group>
-          <div className={cn(rowClass, "flex-col items-start gap-1")}>
+          <div className={rowClass}>
             <p className="text-sm">{end.said}</p>
-            <p className="text-[13px] text-muted-foreground">{FIRMWARE_CABLE}</p>
           </div>
           <div className={rowClass}>
             <Button id="charm-update-retry" type="button" disabled={busy} onClick={retry}>
               Try again
             </Button>
           </div>
+          {/* The sure path, as a door rather than a sentence: the sheet says what a cable needs
+              and hands the reader to the firmware's repository, where the flasher and its steps
+              live. */}
+          <SheetRow
+            icon={CableIcon}
+            title={CABLE_TITLE}
+            sheet={({ open, onOpenChange }) => (
+              <PickSurface open={open} onOpenChange={onOpenChange} title={CABLE_TITLE}>
+                {CABLE_WORDS.map((said) => (
+                  <p key={said} className="py-2 text-sm text-muted-foreground">
+                    {said}
+                  </p>
+                ))}
+                <Group>
+                  <ActionRow
+                    icon={ExternalLinkIcon}
+                    title={REPO_ROW}
+                    onClick={() => openExternal(FIRMWARE_REPO)}
+                  />
+                </Group>
+              </PickSurface>
+            )}
+          />
+          {/* The route behind this row is `DeveloperOnly`: drawn without the switch, it would
+              bounce the reader back to the menu, so it waits for the settings to say it is on. */}
+          {settings?.developer && <LinkRow to="/settings/debug-charm" title={CHARM_LOG} />}
         </Group>
       )}
       {note && <Caption>{note}</Caption>}
@@ -520,19 +579,32 @@ export function CharmUpdateScreen({
   )
 }
 
-/** One step as it walks: its name, the line under it, and its bar while it has one. */
+/**
+ * One step as it walks: its name, the line under it, and its bar while it has one. The step a
+ * failure stopped at wears the destructive tone on its title and one line saying the walk stopped
+ * there — which of the three failed is then read off the list, not guessed from the reason.
+ */
 function StepRow({
   title,
   subtitle,
   percent,
+  stopped,
 }: {
   title: string
   subtitle?: string
   percent?: number
+  /** Whether this is the step the walk stopped in: the one row a failure marks. */
+  stopped?: boolean
 }) {
   return (
-    <div className={cn(rowClass, "flex-col items-start gap-2")}>
-      <RowText title={title} subtitle={subtitle} />
+    <div
+      className={cn(rowClass, "flex-col items-start gap-2")}
+      data-stopped={stopped ? "" : undefined}
+    >
+      <RowText
+        title={<span className={stopped ? "text-destructive" : undefined}>{title}</span>}
+        subtitle={stopped ? STEP_STOPPED : subtitle}
+      />
       {percent !== undefined && <Bar value={percent} />}
     </div>
   )
