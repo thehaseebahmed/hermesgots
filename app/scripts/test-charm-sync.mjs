@@ -835,7 +835,7 @@ test("a hash reads back from hex in either case, and refuses what is not hex", (
 })
 
 /** A `Network` answer as the charm sends one: the head, the extra's length, then the extra. */
-function networkAnswer({ state, reason, ip, ssid, tunnel, tunnelIp }) {
+function networkAnswer({ state, reason, ip, ssid, tunnel, tunnelIp, tunnelReason }) {
   const extra = [
     state,
     reason,
@@ -846,6 +846,8 @@ function networkAnswer({ state, reason, ip, ssid, tunnel, tunnelIp }) {
     tunnel,
     tunnelIp.length,
     ...spell(tunnelIp),
+    // A charm older than the field sends no reason: the answer ends at the tunnel's address.
+    ...(tunnelReason === undefined ? [] : [tunnelReason]),
   ]
   return new Uint8Array([1, 0, NETWORK_WIRE.network, 0, extra.length, ...extra])
 }
@@ -858,18 +860,45 @@ test("a Network answer reads the Wi-Fi link and the tunnel", () => {
     ssid: "Home",
     tunnel: CharmLinkState.Online,
     tunnelIp: "100.64.0.7",
+    tunnelReason: 0,
   })
   assert.deepEqual(parseNetworkReport(viewOf(answer)), {
     wifi: { state: 2, reason: 0, ip: "192.168.1.20", ssid: "Home" },
-    tailnet: { state: 2, ip: "100.64.0.7" },
+    tailnet: { state: 2, ip: "100.64.0.7", reason: 0 },
   })
   // A charm with neither link says so with the same shape: zero lengths, not missing fields.
   assert.deepEqual(
     parseNetworkReport(
-      viewOf(networkAnswer({ state: 0, reason: 0, ip: "", ssid: "", tunnel: 0, tunnelIp: "" })),
+      viewOf(
+        networkAnswer({
+          state: 0,
+          reason: 0,
+          ip: "",
+          ssid: "",
+          tunnel: 0,
+          tunnelIp: "",
+          tunnelReason: 1,
+        }),
+      ),
     ),
-    { wifi: { state: 0, reason: 0, ip: "", ssid: "" }, tailnet: { state: 0, ip: "" } },
+    { wifi: { state: 0, reason: 0, ip: "", ssid: "" }, tailnet: { state: 0, ip: "", reason: 1 } },
   )
+})
+
+test("a charm that sends no tunnel reason is an answer, not a fault", () => {
+  // Every charm in the field today: the report ends at the tunnel's address, and that is the whole of
+  // what it says. Its reason is absent rather than zero, so the row can say the state alone.
+  const answer = networkAnswer({
+    state: CharmLinkState.Online,
+    reason: 0,
+    ip: "192.168.1.20",
+    ssid: "Home",
+    tunnel: CharmLinkState.Failed,
+    tunnelIp: "",
+  })
+  const parsed = parseNetworkReport(viewOf(answer))
+  assert.deepEqual(parsed?.tailnet, { state: 3, ip: "" })
+  assert.equal(parsed?.tailnet.reason, undefined, "not sent is not 'no reason'")
 })
 
 test("a truncated or wrong-op answer is no report at all", () => {
