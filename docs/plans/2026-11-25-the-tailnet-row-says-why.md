@@ -100,6 +100,7 @@ draws for every charm.
    Layers: the row's words.
    Check: the same file's "the network lines are the charm's own state in words" — each reason's
    sentence, and the reader's own case (`Off` + `Offline` with a key saved) — red before, green after.
+   Done.
 
 5. **The row keeps asking until the tunnel settles.** The section asks the charm's links again every
    `CHARM_POLL_MS` while the tailnet is joining, or off with a key saved, and stops when it is up or
