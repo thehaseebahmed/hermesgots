@@ -7,11 +7,11 @@
 import type { CharmLogPage, CharmLogRow } from "./charm-protocol.ts"
 
 /**
- * Pages a drain asks for before it stops trusting the charm to finish: a ring is two kilobytes of
+ * Pages one drain asks for before it stops trusting the charm to finish: a ring is two kilobytes of
  * twenty-six-column rows, well inside this bound, and a charm that keeps answering past it is not
- * one this page can show.
+ * one this page can show. Both drains share it — the tail's and the book's.
  */
-const MOST_PAGES = 64
+export const MOST_PAGES = 64
 
 /**
  * A whole ring, oldest first, over however many pages the charm answers with. The next ask counts

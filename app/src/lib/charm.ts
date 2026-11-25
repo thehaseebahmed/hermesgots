@@ -27,7 +27,7 @@ import {
   uploadFirmware,
   type UploadOptions,
 } from "./charm-firmware.ts"
-import { drain } from "./charm-log.ts"
+import { drain, MOST_PAGES } from "./charm-log.ts"
 import { oneAtATime } from "./charm-queue.ts"
 import { readFailed, refusalWords, type CharmRead } from "./charm-words.ts"
 import {
@@ -44,12 +44,14 @@ import {
   forgetMessage,
   hexBytes,
   logMessage,
+  logSinceMessage,
   logTailMessage,
   networkMessage,
   parseBattery,
   parseDiagnose,
   parseFirmware,
   parseLogPage,
+  parseLogSince,
   parseNetworkReport,
   parseStatus,
   parseTalkState,
@@ -65,6 +67,7 @@ import {
   type CharmBattery,
   type CharmDiagnose,
   type CharmLogRow,
+  type CharmLogSincePage,
   type CharmBatterySeen,
   type CharmBot,
   type CharmNetworkReport,
@@ -540,6 +543,33 @@ export async function charmLog(): Promise<CharmLogRow[]> {
       return answered
     }),
   )
+}
+
+/**
+ * The charm's log from a row this phone already holds: the pages carrying the rows after `from`, on
+ * one link for the whole read, each asked for from the page's own last row — that row again, not past
+ * it, because the charm's newest row is usually still open and grows between reads. A page with no
+ * rows is where the ring ends. Null is a charm older than the op, which answers `BadMessage` to the
+ * first ask and has no book to keep; any other refusal is thrown as every other read throws one, and
+ * `MOST_PAGES` is the same bound the tail drain stops trusting the charm at.
+ */
+export async function charmLogSince(from: number): Promise<CharmLogSincePage[] | null> {
+  return withCharm(async (link) => {
+    const pages: CharmLogSincePage[] = []
+    let at = from
+    for (let page = 0; page < MOST_PAGES; page++) {
+      const bytes = await link.ask(logSinceMessage(at))
+      const status = parseStatus(bytes)
+      if (status.code === CharmCode.BadMessage) return null
+      if (status.code !== CharmCode.Ok) throw new CharmRefused(status.code)
+      const answered = parseLogSince(bytes)
+      if (!answered) throw new Error("The charm's log answer was too short")
+      pages.push(answered)
+      if (answered.rows.length === 0) break
+      at = answered.base + answered.rows.length - 1
+    }
+    return pages
+  })
 }
 
 export async function charmNetwork(): Promise<CharmNetworkReport> {

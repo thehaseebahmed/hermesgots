@@ -1,20 +1,37 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { Group } from "@/components/settings-chrome"
 import { formatBytes } from "@/lib/attachment-caps"
-import { charmDiagnose, charmLog, setCharmLog, usePairedCharm, type PairedCharm } from "@/lib/charm"
-import type { CharmDiagnose, CharmLogRow } from "@/lib/charm-protocol"
+import {
+  charmDiagnose,
+  charmLog,
+  charmLogSince,
+  setCharmLog,
+  usePairedCharm,
+  type PairedCharm,
+} from "@/lib/charm"
+import { lines, place, type CharmBook } from "@/lib/charm-book"
+import type { CharmDiagnose, CharmLogRow, CharmLogSincePage } from "@/lib/charm-protocol"
 import { micExitWords } from "@/lib/charm-words"
 import { CHARM_POLL_MS } from "@/lib/freshness"
 
-/** What the page needs of the charm. A page mounted in a test is handed a stand-in, as the network's is. */
+/**
+ * What the page needs of the charm. A page mounted in a test is handed a stand-in, as the network's
+ * is. `since` answers the rows after an index, or null for a charm whose firmware predates the op.
+ */
 export interface CharmDebugApi {
   diagnose: () => Promise<CharmDiagnose>
   log: () => Promise<CharmLogRow[]>
+  since: (from: number) => Promise<CharmLogSincePage[] | null>
   setLog: (on: boolean) => Promise<boolean>
 }
 
-const LIVE: CharmDebugApi = { diagnose: charmDiagnose, log: charmLog, setLog: setCharmLog }
+const LIVE: CharmDebugApi = {
+  diagnose: charmDiagnose,
+  log: charmLog,
+  since: charmLogSince,
+  setLog: setCharmLog,
+}
 
 /**
  * Settings > Developer > Debug Charm: the last press's microphone refusal and the charm's own log,
@@ -26,6 +43,11 @@ const LIVE: CharmDebugApi = { diagnose: charmDiagnose, log: charmLog, setLog: se
  * it is asked to, and lets go by itself a minute after this phone leaves the link. The page reads
  * every two seconds rather than on a button: a log is watched, and a failure's reason arrives after
  * the failure, not when a thumb asks for it.
+ *
+ * What it has read it keeps as a book, and each read asks only for the rows after the last it holds:
+ * the ring holds a handful of seconds and drops its oldest as it fills, so a list replaced whole every
+ * two seconds loses the line that fell off between reads. A charm older than that ask answers
+ * `BadMessage` to it, so its tail is read and replaced instead.
  */
 export function CharmDebugScreen({
   api = LIVE,
@@ -37,9 +59,13 @@ export function CharmDebugScreen({
   const paired = usePairedCharm()
   const live = charm === undefined ? paired : charm
   const [report, setReport] = useState<CharmDiagnose | null>(null)
-  const [rows, setRows] = useState<CharmLogRow[] | null>(null)
+  const [book, setBook] = useState<CharmBook | null>(null)
   const [armed, setArmed] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // The book the next read starts from, and whether a read is still running: a drain is several round
+  // trips, and two over the charm's one link would fight for its answers.
+  const held = useRef<CharmBook>({ rows: [], next: 0 })
+  const reading = useRef(false)
 
   // Armed while the page is open, released when it closes. The charm's own minute is what covers a
   // page closed by a dead battery rather than by the reader, so nothing here has to be trusted.
@@ -65,19 +91,31 @@ export function CharmDebugScreen({
   useEffect(() => {
     if (!live) return
     let open = true
-    const read = async () => {
+    const poll = async () => {
+      // A tick that lands while a drain is still out is dropped: the drain will place what it read,
+      // and a second one would ask the charm for an answer the first is still waiting on.
+      if (reading.current) return
+      reading.current = true
+      const pull = async () => {
+        const pages = await api.since(held.current.next)
+        // No book is a charm whose firmware predates the op: its tail is read whole and replaced.
+        return pages ? pages.reduce(place, held.current) : fromTail(await api.log())
+      }
       try {
-        const [next, logRows] = await Promise.all([api.diagnose(), api.log()])
+        const [next, grown] = await Promise.all([api.diagnose(), pull()])
         if (!open) return
+        held.current = grown
         setReport(next)
-        setRows(logRows)
+        setBook(grown)
         setError(null)
       } catch (why: unknown) {
         if (open) setError(why instanceof Error ? why.message : String(why))
+      } finally {
+        reading.current = false
       }
     }
-    void read()
-    const timer = setInterval(() => void read(), CHARM_POLL_MS)
+    void poll()
+    const timer = setInterval(() => void poll(), CHARM_POLL_MS)
     return () => {
       open = false
       clearInterval(timer)
@@ -93,6 +131,7 @@ export function CharmDebugScreen({
   // A record nobody has written is not a reading: three zeros would say the charm had no bytes left
   // rather than that no press has asked it for a microphone.
   const counted = report?.asked ? report : null
+  const drawn = book ? lines(book) : []
   return (
     <>
       <p className="px-5 text-sm text-muted-foreground">The last press</p>
@@ -110,14 +149,12 @@ export function CharmDebugScreen({
         The charm's log{armed ? "" : " — not armed"}
       </p>
       <Group>
-        {rows && rows.length > 0 ? (
-          <div className="px-5 py-3 font-mono text-xs leading-5 whitespace-pre">
-            {rows.map((row, i) => (
-              // A carried-on row is indented under the line it belongs to, so a wrapped line reads as
-              // one line and not as two the firmware never printed.
-              <div key={i} className={row.carried ? "pl-3" : undefined}>
-                {row.text || " "}
-              </div>
+        {drawn.length > 0 ? (
+          <div className="px-5 py-3 font-mono text-xs leading-5 break-words whitespace-pre-wrap">
+            {drawn.map((line, i) => (
+              // A line is whole, and wrapped at the phone's width: the panel's twenty-six columns are
+              // where the firmware broke it, not where this screen has to.
+              <div key={i}>{line || " "}</div>
             ))}
           </div>
         ) : (
@@ -130,6 +167,15 @@ export function CharmDebugScreen({
       {error && <p className="px-5 text-sm text-destructive">{error}</p>}
     </>
   )
+}
+
+/**
+ * The tail as a book: a charm older than `LogSince` answers rows with no index, so they are numbered
+ * from zero here and the next ask starts there too. Rebuilt on every read, because a tail cannot say
+ * which of its rows the page already holds — the one thing a book is for.
+ */
+function fromTail(rows: CharmLogRow[]): CharmBook {
+  return { rows: rows.map((row, index) => ({ ...row, index })), next: 0 }
 }
 
 /** One label and its answer, in the shape every settings row on this screen has. */
