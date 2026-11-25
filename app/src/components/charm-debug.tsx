@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { CopyIcon } from "lucide-react"
+import { CopyIcon, Trash2Icon } from "lucide-react"
 
 import { Group, useHeaderAction } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
@@ -12,7 +12,7 @@ import {
   usePairedCharm,
   type PairedCharm,
 } from "@/lib/charm"
-import { lines, place, text, type CharmBook } from "@/lib/charm-book"
+import { clear, lines, place, text, type CharmBook } from "@/lib/charm-book"
 import type { CharmDiagnose, CharmLogRow, CharmLogSincePage } from "@/lib/charm-protocol"
 import { micExitWords } from "@/lib/charm-words"
 import { copyText } from "@/lib/copied"
@@ -54,7 +54,9 @@ const LIVE: CharmDebugApi = {
  * `BadMessage` to it, so its tail is read and replaced instead.
  *
  * The book leaves the phone whole, through the header's copy: a line per line, oldest first, with
- * nothing added, since a log is pasted into a report far more often than it is read here twice.
+ * nothing added, since a log is pasted into a report far more often than it is read here twice. A
+ * clear empties it and reads on past what it held, so what arrives next is what the charm printed
+ * from then on rather than what was just dropped.
  */
 export function CharmDebugScreen({
   api = LIVE,
@@ -130,23 +132,41 @@ export function CharmDebugScreen({
   }, [live, api])
 
   // Copy hands over the book the page is showing, and the header republishes this node on every
-  // render, so the handler can never be older than the lines on screen. Shut while there is nothing
-  // to copy: an empty clipboard is a worse answer than a button that says it has none.
+  // render, so neither handler can be older than the lines on screen. Clear empties the ref the next
+  // read starts from and the book the page draws together: a ref left behind would re-place the next
+  // page from an index inside the rows just cleared, and they would come back with the read. Both are
+  // shut while the book is empty, since there is nothing to copy and nothing to clear.
   const drawn = book ? lines(book) : []
   useHeaderAction(
     "charm-debug",
-    <Button
-      variant="outline"
-      size="icon-lg"
-      className="size-11 rounded-full"
-      aria-label="Copy the charm's log"
-      disabled={!drawn.length}
-      onClick={() => {
-        if (book) void copyText(text(book), () => tell.note("Charm log copied"))
-      }}
-    >
-      <CopyIcon />
-    </Button>,
+    <>
+      <Button
+        variant="outline"
+        size="icon-lg"
+        className="size-11 rounded-full"
+        aria-label="Copy the charm's log"
+        disabled={!drawn.length}
+        onClick={() => {
+          if (book) void copyText(text(book), () => tell.note("Charm log copied"))
+        }}
+      >
+        <CopyIcon />
+      </Button>
+      <Button
+        variant="outline"
+        size="icon-lg"
+        className="ml-2 size-11 rounded-full"
+        aria-label="Clear the charm's log"
+        disabled={!drawn.length}
+        onClick={() => {
+          const emptied = clear(held.current)
+          held.current = emptied
+          setBook(emptied)
+        }}
+      >
+        <Trash2Icon />
+      </Button>
+    </>,
   )
 
   if (!live) {

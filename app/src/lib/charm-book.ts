@@ -103,6 +103,16 @@ export function place(book: CharmBook, page: CharmLogSincePage): CharmBook {
 }
 
 /**
+ * The book emptied, and its read moved one past the row it was asking from. `next` is the last row the
+ * book held and is asked for again so it can grow, so a clear that kept it would have the next answer
+ * start inside the rows just cleared, and they would come back. A book holding nothing has no row to
+ * step past, and leaves its ask where it was.
+ */
+export function clear(book: CharmBook): CharmBook {
+  return { rows: [], next: book.rows.length ? book.next + 1 : book.next }
+}
+
+/**
  * The book as whole lines, oldest first, which is what a reader is shown and what a copy carries. A
  * book whose first row is the remainder of a line the cap trimmed away starts a line of its own with
  * it, since there is no earlier row here to finish.

@@ -8,7 +8,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 
-import { KEPT, lines, place, text } from "../src/lib/charm-book.ts"
+import { clear, KEPT, lines, place, text } from "../src/lib/charm-book.ts"
 
 /** A row as the charm prints it: its text, and whether it carries the line above it on. */
 const row = (text, carried = false) => ({ text, carried })
@@ -147,4 +147,20 @@ test("the copied block is the lines and nothing else", () => {
   assert.equal(text(held), "boot: 1\nlog armed: 41 rows\natt_handle=20, op 0x44 -> code 0")
   assert.equal(text(held).split("\n").length, 3, "no header above and nothing below")
   assert.equal(text(EMPTY), "", "a book holding nothing copies as nothing")
+})
+
+test("a clear empties the book and the next ask starts past what it held", () => {
+  const held = place(EMPTY, page(0, [row("boot: 1"), row("log armed: 41 rows")]))
+  assert.equal(held.next, 1, "the book asks for the row it holds last, so it can grow")
+  const emptied = clear(held)
+  assert.deepEqual(lines(emptied), [], "the lines are gone")
+  assert.equal(emptied.rows.length, 0)
+  assert.equal(emptied.next, 2, "and the ask moves one past the row the book was asking from")
+  const after = place(emptied, page(2, [row("the press said No mic")]))
+  assert.deepEqual(
+    lines(after),
+    ["the press said No mic"],
+    "the row the book held last is behind the ask, so what was cleared cannot be answered again",
+  )
+  assert.deepEqual(clear(EMPTY), EMPTY, "a book that held nothing has no row to step past")
 })

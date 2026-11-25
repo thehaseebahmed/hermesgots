@@ -236,3 +236,51 @@ test("a copy takes the whole book as it stands", async () => {
       }),
   )
 })
+
+test("a clear empties the book and the next lines still arrive", async () => {
+  const log = answersByPoll([
+    [
+      {
+        base: 0,
+        rows: [
+          { text: "boot: 1", carried: false },
+          { text: "log armed: 41 rows", carried: false },
+        ],
+      },
+    ],
+    [{ base: 2, rows: [{ text: "E (1042) talk: the task came back", carried: false }] }],
+  ])
+  const api = {
+    setLog: async () => true,
+    diagnose: async () => refused,
+    log: async (): Promise<CharmLogRow[]> => [],
+    since: log.since,
+  }
+
+  await mount(
+    <Screen title="Debug Charm">
+      <CharmDebugScreen api={api} charm={charm} />
+    </Screen>,
+    async () => {
+      await until(async () => text().includes("log armed: 41 rows"), "the book")
+      const trash = labelled("button", "Clear the charm's log")
+      assert.ok(trash, "the page offers its clear in the header")
+      await click(trash)
+      await until(async () => !text().includes("log armed: 41 rows"), "the cleared book")
+      assert.match(text(), /The charm has not printed anything yet/, "an empty book says so")
+      assert.ok(
+        labelled("button", "Clear the charm's log")?.hasAttribute("disabled"),
+        "and there is nothing left to clear",
+      )
+
+      await until(async () => text().includes("the task came back"), "the line printed after it")
+      assert.equal(log.asked[1], 2, "the next ask starts past the row the book held last")
+      assert.deepEqual(
+        [...document.querySelectorAll(".font-mono > div")].map((one) => one.textContent),
+        ["E (1042) talk: the task came back"],
+        "only what the charm printed after the clear is drawn",
+      )
+      assert.doesNotMatch(text(), /log armed: 41 rows/, "and nothing that was cleared comes back")
+    },
+  )
+})
