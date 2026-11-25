@@ -2,6 +2,7 @@
 import { BluetoothIcon, WifiIcon, WaypointsIcon, type LucideIcon } from "lucide-react"
 import {
   CharmLinkState,
+  CharmTailnetReason,
   CharmUpdateReason,
   CharmUpdateState,
   CharmWifiReason,
@@ -97,7 +98,12 @@ function recordWords(record?: CharmWifiRecord) {
   return record.saved ? `Saved ${record.ssid}` : `${record.ssid}, not saved`
 }
 
-/** The tailnet line: whether the charm is on it, and its own name for it. */
+/**
+ * The tailnet line: whether the charm is on it, and its own name for it — and, when the charm says
+ * what it is doing, why it is not up. The reason matters more than the state to a reader: "off"
+ * covers no key, no Wi-Fi and a TailTiny that would not start, and only one of those is theirs to
+ * fix.
+ */
 export function tailnetWords(
   tailnet: CharmNetworkReport["tailnet"] | undefined,
   saved?: boolean,
@@ -105,8 +111,40 @@ export function tailnetWords(
   if (tailnet?.state === CharmLinkState.Joining) return "Joining…"
   if (tailnet?.state === CharmLinkState.Online)
     return tailnet.ip ? `On your tailnet at ${tailnet.ip}` : "On your tailnet"
+  // A reason the charm sent is the answer whether the link says it is off or failed; a reason this
+  // app has no words for is the state's own, as a charm that sent none is.
+  const why = tailnet?.reason === undefined ? null : tailnetReasonWords(tailnet.reason, saved)
+  if (why) return why
   if (tailnet?.state === CharmLinkState.Failed) return "Couldn't reach the tailnet"
   return saved ? "Key saved; not joined" : "Not set"
+}
+
+/**
+ * Why the charm's tunnel is not up, in words a reader can use. `saved` is what this phone remembers
+ * of a key, which turns a charm that holds none into an instruction rather than a fact. Null for a
+ * reason with nothing of its own to say — 0, or a number this app does not know.
+ */
+export function tailnetReasonWords(reason: number, saved?: boolean): string | null {
+  switch (reason) {
+    case CharmTailnetReason.NoKey:
+      return saved ? "The charm holds no key; save it again" : "No key saved"
+    case CharmTailnetReason.BadKey:
+      return "The tailnet refused the key"
+    case CharmTailnetReason.Offline:
+      return "The charm isn't on Wi-Fi"
+    case CharmTailnetReason.Refused:
+      return "Tailscale wouldn't start on the charm"
+    case CharmTailnetReason.Setup:
+      return "Tailscale couldn't set itself up on the charm"
+    case CharmTailnetReason.NoTask:
+      return "Tailscale couldn't start its tasks on the charm"
+    case CharmTailnetReason.Stuck:
+      return "Tailscale's last run on the charm never stopped"
+    case CharmTailnetReason.Retrying:
+      return "Tailscale keeps failing to reach the tailnet and is retrying"
+    default:
+      return null
+  }
 }
 
 /**

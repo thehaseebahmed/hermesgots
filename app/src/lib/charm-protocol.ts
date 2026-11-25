@@ -94,6 +94,25 @@ export const CharmWifiReason = {
 
 export const CharmUpdateState = { Idle: 0, Downloading: 1, Ready: 2, Failed: 3 } as const
 
+/**
+ * Why a tunnel is not up, as the firmware's `tunnel::Reason` names it. 2 is retired and never reused:
+ * it meant "the key may not be kept", and a phone that has not been updated would read a new meaning
+ * into the old number. `Setup`, `NoTask`, `Stuck` and `Retrying` are TailTiny's own refusals, which
+ * the charm tells apart by the call that refused and the code it answered — the most a library that
+ * reports no detail beyond those can be asked.
+ */
+export const CharmTailnetReason = {
+  None: 0,
+  NoKey: 1,
+  BadKey: 3,
+  Offline: 4,
+  Refused: 5,
+  Setup: 6,
+  NoTask: 7,
+  Stuck: 8,
+  Retrying: 9,
+} as const
+
 export const CharmUpdateReason = {
   None: 0,
   Offline: 1,
@@ -868,7 +887,17 @@ export const wifiRecord = (ssid: string, code: number): CharmWifiRecord => ({
 /** The charm's link, as it answers the `Network` ask. */
 export interface CharmNetworkReport {
   wifi: { state: number; reason: number; ip: string; ssid: string }
-  tailnet: { state: number; ip: string }
+  tailnet: {
+    state: number
+    ip: string
+    /**
+     * Why the tunnel is not up, as `CharmTailnetReason` numbers it. Absent from a charm whose
+     * firmware predates the byte — which is why it is optional rather than 0: "nothing sent" and
+     * "no reason" are two facts, and a row that took the second for the first would say a charm is
+     * fine when it never spoke.
+     */
+    reason?: number
+  }
 }
 
 /**
@@ -897,7 +926,14 @@ export function parseNetworkReport(view: DataView): CharmNetworkReport | null {
   try {
     return {
       wifi: { state: byte(), reason: byte(), ip: field(), ssid: field() },
-      tailnet: { state: byte(), ip: field() },
+      tailnet: {
+        state: byte(),
+        ip: field(),
+        // The reason is the report's last byte. A charm older than it ends here, and an answer that
+        // stops at the address is complete rather than short: the key is absent, never a zero that
+        // would read as "no reason".
+        ...(at < end ? { reason: byte() } : {}),
+      },
     }
   } catch {
     return null
