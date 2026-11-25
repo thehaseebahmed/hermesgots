@@ -136,9 +136,10 @@ export const Failed: Story = {
         title: "Updating to 0.2.1",
         steps: [
           { name: "download", subtitle: "100% of 1.5 MB", percent: 100 },
-          { name: "transfer", subtitle: FIRMWARE_SENT, percent: 41 },
+          { name: "transfer", subtitle: "100% of 1.5 MB", percent: 100 },
+          { name: "restart", subtitle: FIRMWARE_SENT },
         ],
-        end: { kind: "failed", said: FIRMWARE_NOT_BACK, step: "transfer" },
+        end: { kind: "failed", said: FIRMWARE_NOT_BACK, step: "restart" },
       }}
     />
   ),
