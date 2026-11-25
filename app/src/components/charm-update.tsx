@@ -1,9 +1,9 @@
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useLiveQuery } from "dexie-react-hooks"
 import { useSearchParams } from "react-router"
 import { FileUpIcon } from "lucide-react"
 
-import { Caption, Group, RowText, rowClass } from "@/components/settings-chrome"
+import { Caption, Group, RowText, rowClass, ValueRow } from "@/components/settings-chrome"
 import { Button } from "@/components/ui/button"
 import {
   charmFirmwareVersion,
@@ -12,6 +12,7 @@ import {
   charmVoice,
   hostForActiveBot,
   PUBLISHED_FIRMWARE,
+  readCharmBattery,
   startCharmFirmwareFetch,
   uploadCharmFirmware,
   usePairedCharm,
@@ -28,10 +29,14 @@ import {
   CHARM_SLOT_BYTES,
   CharmUpdateState,
   hexOf,
+  type CharmBattery,
   type CharmNetworkReport,
   type CharmUpdateStatus,
 } from "@/lib/charm-protocol"
 import {
+  batteryWords,
+  chargeBlocks,
+  CHARGE_FIRST,
   downloadWords,
   fetchWords,
   FILE_TOO_BIG,
@@ -41,6 +46,8 @@ import {
   FIRMWARE_NOT_ENDED,
   FIRMWARE_NOT_PUBLISHED,
   FIRMWARE_SENT,
+  KEEP_CLOSE,
+  offerLinkWords,
   PUBLISHED_CHANGED,
 } from "@/lib/charm-words"
 import { firmwareDoor, firmwareFetchUrl } from "@/lib/firmware-fetch"
@@ -81,6 +88,11 @@ export interface CharmUpdateApi {
   version(): Promise<string | null>
   /** The charm's report of its two links — the ask the settings page already makes. */
   network(): Promise<CharmNetworkReport>
+  /**
+   * The charm's charge, asked once as the offer draws: what the gate reads. No age — this is the
+   * reading taken for this visit's offer, not the record the settings page keeps.
+   */
+  battery(): Promise<CharmBattery | undefined>
   /** Where the charm's own fetch has got to, as the `UpdateStatus` ask answers it. */
   updateStatus(): Promise<CharmUpdateStatus>
   /** Hands the charm the image to fetch itself: the URL and the SHA-256 it must hash to. */
@@ -101,6 +113,7 @@ export interface CharmUpdateApi {
 const LIVE: CharmUpdateApi = {
   version: charmFirmwareVersion,
   network: charmNetwork,
+  battery: readCharmBattery,
   updateStatus: charmUpdateStatus,
   update: startCharmFirmwareFetch,
   upload: uploadCharmFirmware,
@@ -160,12 +173,16 @@ const STEP_TITLES: Record<StepView["name"], string> = {
  * Downloading, whether the phone fetches the image or the charm fetches it itself through a door it
  * holds, Transferring with the bar the upload reports, Restarting over the reboot window, and the
  * end: the version the charm came back on, or the failure with its reason and what to do — try
- * again, and, when the charm keeps cancelling, flash it by cable, which always works. The Firmware
- * row's Update button opens it straight into the published image; its picker opens it ready for a
- * file, which walks the same steps minus the download — and always over the link, since a file the
- * phone holds has no door to walk. The reader can step back at any point — the send is driven by
- * its own promise, not by the screen, and the walk it drives is the shared one above, so leaving
- * changes nothing about what the charm takes and returning changes nothing about what runs.
+ * again, and, when the charm keeps cancelling, flash it by cable, which always works. Nothing goes
+ * until the reader taps: a fresh visit first draws an offer of the published image — the charm's
+ * charge, its link, the one instruction the link needs, and the doors, `Install` and a file the
+ * phone holds — and a charge under 20% off the charger shuts both until the charm is charged. The
+ * Firmware row's Update button opens that offer on the published image; its picker opens the same
+ * offer with the file door alone, which walks the same steps minus the download — and always over
+ * the link, since a file the phone holds has no door to walk. The reader can step back at any
+ * point — the send is driven by its own promise, not by the screen, and the walk it drives is the
+ * shared one above, so leaving changes nothing about what the charm takes and returning changes
+ * nothing about what runs.
  */
 export function CharmUpdateScreen({
   api = LIVE,
@@ -304,8 +321,11 @@ export function CharmUpdateScreen({
    * the charm after the whole image — unless the re-read names these bytes, when they are exactly
    * the image to send.
    */
-  const runPublished = (record: CharmFirmware) =>
-    send(async (was: string | null) => {
+  const runPublished = (record: CharmFirmware) => {
+    // This visit's walk began for this build: a visit that returns joins it rather than offering
+    // the same build a second time.
+    setWalk({ started: record.version })
+    return send(async (was: string | null) => {
       const scheme = charmVoice(charm)
       const address = typeof charm?.talk === "string" ? charm.talk : undefined
       const report = await api.network().catch(() => null)
@@ -356,6 +376,7 @@ export function CharmUpdateScreen({
         return { kind: "transfer", image, sha256Hex, door: "published" }
       throw new Error(PUBLISHED_CHANGED)
     }, `Updating to ${record.version}`)
+  }
 
   /**
    * A file from the phone: its bytes, and the SHA-256 computed here over them — that hash is the
@@ -378,17 +399,40 @@ export function CharmUpdateScreen({
     )
   }
 
-  // The published walk starts on its own once the host's own read is over: the bytes are checked
-  // against the version that read named, and a cached copy is not this visit's answer. A screen
-  // opened for a file waits for the reader to pick one. The started gate is the shared walk's own:
-  // a visit that comes back joins the walk it names rather than starting a second beside it, while
-  // an offer that names a new version is a new ask, and starts its own walk.
+  const [battery, setBattery] = useState<CharmBattery | undefined>(undefined)
+  const [link, setLink] = useState<CharmNetworkReport | undefined>(undefined)
+  const asked = useRef(false)
+
+  /**
+   * Whether this visit draws the offer: nothing is running, nothing has ended, and this visit has
+   * not already begun a walk for the build that is published. A file screen offers at once — it has
+   * no build to name — while the published offer waits for the host's read, so `Install` names the
+   * build it will send.
+   */
+  const offering =
+    !busy &&
+    !end &&
+    walk.started !== published?.version &&
+    (pickMode || (firmware.settled && Boolean(published)))
+
+  /**
+   * The offer's two asks, made once, as it draws: the charge the gate reads and the link it says.
+   * A failed ask is no fact, so it is held as no answer rather than drawn as a fault.
+   */
   useEffect(() => {
-    if (pickMode || !published || !firmware.settled) return
-    if (walk.started === published.version) return
-    setWalk({ started: published.version })
-    void runPublished(published)
-  }, [pickMode, firmware.settled, published])
+    if (!offering || asked.current) return
+    asked.current = true
+    void api
+      .battery()
+      .then(setBattery)
+      .catch(() => {})
+    void api
+      .network()
+      .then(setLink)
+      .catch(() => {})
+  }, [api, offering])
+
+  const blocked = chargeBlocks(battery)
 
   /** What a failure's way forward re-runs: the same hand — the bytes read again, or the door asked again. */
   const retry = () => {
@@ -433,7 +477,23 @@ export function CharmUpdateScreen({
         </Group>
       )}
       {note && <Caption>{note}</Caption>}
-      {pickMode && <PickGroup disabled={busy} onPick={sendFile} fileRef={file} />}
+      {offering && (
+        <Offer
+          battery={battery}
+          link={link}
+          blocked={blocked}
+          install={
+            !pickMode && published
+              ? { version: published.version, onInstall: () => void runPublished(published) }
+              : undefined
+          }
+          onPick={sendFile}
+          fileRef={file}
+        />
+      )}
+      {pickMode && !offering && (
+        <PickGroup disabled={busy || blocked} onPick={sendFile} fileRef={file} />
+      )}
       {!pickMode && firmware.settled && !published && !end && !busy && (
         <>
           {checkSaid && <Caption>{checkSaid}</Caption>}
@@ -482,10 +542,100 @@ function Bar({ value }: { value: number }) {
 }
 
 /**
+ * The offer a fresh visit reads before anything goes: the charm's charge as the gate reads it, the
+ * link the charm reported, the one instruction the link needs, and the doors — the published image
+ * by name, or a file the phone already holds. The charge is the gate: under 20% and off the
+ * charger, both doors are shut and one line says what opens them.
+ */
+function Offer({
+  battery,
+  link,
+  blocked,
+  install,
+  onPick,
+  fileRef,
+}: {
+  battery: CharmBattery | undefined
+  link: CharmNetworkReport | undefined
+  /** The gate's answer: under 20% off the charger, both doors are disabled. */
+  blocked: boolean
+  /** The published door, on the build it names; a screen opened for a file draws none. */
+  install?: { version: string; onInstall: () => void }
+  onPick: (file: File) => void
+  fileRef: { current: HTMLInputElement | null }
+}) {
+  return (
+    <>
+      <Group>
+        <ValueRow title="Battery" value={batteryWords(battery)} muted={battery === undefined} />
+        <ValueRow title="Link" value={offerLinkWords(link)} muted={link === undefined} />
+        <div className={rowClass}>
+          <RowText title={KEEP_CLOSE} />
+        </div>
+        <div className={cn(rowClass, "flex-wrap")}>
+          {install && (
+            <Button
+              id="charm-update-install"
+              type="button"
+              disabled={blocked}
+              onClick={install.onInstall}
+            >
+              Install {install.version}
+            </Button>
+          )}
+          <FileDoor disabled={blocked} onPick={onPick} fileRef={fileRef} />
+        </div>
+      </Group>
+      {blocked && <Caption>{CHARGE_FIRST}</Caption>}
+    </>
+  )
+}
+
+/**
  * The reader's own way onto the walk: a file the phone already holds. A web file input is the
  * whole Android picker — the WebView opens the system's own — and it is cleared after each pick,
  * so a second try at a failed upload is exactly when picking the same file again works.
  */
+function FileDoor({
+  disabled,
+  onPick,
+  fileRef,
+}: {
+  disabled?: boolean
+  onPick: (file: File) => void
+  fileRef: { current: HTMLInputElement | null }
+}) {
+  return (
+    <>
+      <Button
+        id="charm-update-choose"
+        type="button"
+        variant="ghost"
+        disabled={disabled}
+        onClick={() => fileRef.current?.click()}
+      >
+        <FileUpIcon />
+        Choose a file…
+      </Button>
+      <input
+        ref={fileRef}
+        id="charm-update-file"
+        type="file"
+        className="hidden"
+        onChange={(event) => {
+          const input = event.currentTarget
+          const chosen = input.files?.[0]
+          // Cleared so the same file picked again fires `change`: a second try at a failed
+          // upload is exactly when a reader picks the file they just picked.
+          input.value = ""
+          if (chosen) onPick(chosen)
+        }}
+      />
+    </>
+  )
+}
+
+/** The file door on its own, under a screen that has nothing published or a walk already ended. */
 function PickGroup({
   disabled,
   onPick,
@@ -498,30 +648,7 @@ function PickGroup({
   return (
     <Group>
       <div className={rowClass}>
-        <Button
-          id="charm-update-choose"
-          type="button"
-          variant="ghost"
-          disabled={disabled}
-          onClick={() => fileRef.current?.click()}
-        >
-          <FileUpIcon />
-          Choose a file…
-        </Button>
-        <input
-          ref={fileRef}
-          id="charm-update-file"
-          type="file"
-          className="hidden"
-          onChange={(event) => {
-            const input = event.currentTarget
-            const chosen = input.files?.[0]
-            // Cleared so the same file picked again fires `change`: a second try at a failed
-            // upload is exactly when a reader picks the file they just picked.
-            input.value = ""
-            if (chosen) onPick(chosen)
-          }}
-        />
+        <FileDoor disabled={disabled} onPick={onPick} fileRef={fileRef} />
       </div>
     </Group>
   )

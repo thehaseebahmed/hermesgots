@@ -13,7 +13,7 @@ import {
   CHARM_MAX_URL_BYTES,
   CharmCode,
   codeWords,
-  type CharmBatterySeen,
+  type CharmBattery,
 } from "./charm-protocol.ts"
 import { compareVersions } from "./version-compare.ts"
 import { formatBytes } from "./attachment-caps.ts"
@@ -349,12 +349,46 @@ export const QUIET_TITLE = "Stays lit for"
 /**
  * The battery row: the level, the charger and how old the reading is. "Not read yet" is a reading
  * nobody has asked for; "Unknown" is a charm that could not read its own charge, which is not 0%.
+ * A reading with no age — the update offer's own, asked as the screen opens — says the level and
+ * the charger alone.
  */
-export function batteryWords(battery: CharmBatterySeen | undefined, now = Date.now()) {
+export function batteryWords(battery: CharmBattery | undefined, now = Date.now()) {
   if (!battery) return "Not read yet"
   if (battery.percent < 0) return "Unknown"
-  const charge = battery.charging ? " · Charging" : ""
-  return `${battery.percent}%${charge} · ${since(battery.at, now)}`
+  const charge = `${battery.percent}%${battery.charging ? " · Charging" : ""}`
+  // The settings page's reading carries its age; the offer's ask answers the level alone.
+  const seen = battery as { at?: number }
+  return typeof seen.at === "number" ? `${charge} · ${since(seen.at, now)}` : charge
+}
+
+/**
+ * The update offer's link line: whether the charm is on Wi-Fi, which is what decides whether it can
+ * fetch the image itself. A link that is down is no dead end — the phone sends the bytes over its
+ * own link — so the line says what to do instead of what failed.
+ */
+export function offerLinkWords(report: CharmNetworkReport | undefined): string {
+  if (!report) return "Not read yet"
+  if (report.wifi.state === CharmLinkState.Online) return "Wi-Fi up"
+  if (report.wifi.state === CharmLinkState.Joining)
+    return "Wi-Fi joining — keep the phone near the charm"
+  return "Wi-Fi down — keep the phone near the charm"
+}
+
+/** The offer's instruction row: the link the image goes over works at a hand's length. */
+export const KEEP_CLOSE = "Keep the phone near the charm"
+
+/** Under the offer's doors while the gate is shut: the one thing to do before it opens. */
+export const CHARGE_FIRST = "Charge the charm above 20% before updating."
+
+/**
+ * Whether the charm's charge keeps the offer's doors shut: below 20% and not charging, SwitchBot's
+ * own rule. A percent of -1 is a charm that could not read its own charge, and a missing answer is
+ * no fact at all, so neither ever blocks — an update is offered on what the charm said, never on
+ * what it did not.
+ */
+export function chargeBlocks(battery: CharmBattery | undefined): boolean {
+  if (!battery || battery.percent < 0) return false
+  return battery.percent < 20 && !battery.charging
 }
 
 /**

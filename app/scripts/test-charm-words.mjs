@@ -8,12 +8,15 @@ import test from "node:test"
 import { BluetoothIcon, WaypointsIcon, WifiIcon } from "lucide-react"
 
 import {
+  batteryWords,
+  chargeBlocks,
   firmwareOffers,
   firmwareWords,
   LINKS,
   LINK_DOWN_WORDS,
   LINK_MARKS,
   linksDown,
+  offerLinkWords,
   readFailed,
   readValue,
   refusalWords,
@@ -136,6 +139,26 @@ test("a link that never opened is not a charm that had nothing to say", () => {
     "This charm can't say which version it runs — the first update is by cable",
     "and a firmware too old to say is said in the row's own words",
   )
+})
+
+test("the offer's gate is SwitchBot's rule: below 20% off the charger shuts it, and nothing else does", () => {
+  assert.equal(chargeBlocks(undefined), false, "no answer is no fact")
+  assert.equal(chargeBlocks({ percent: -1, charging: false }), false, "an unreadable charge is not empty")
+  assert.equal(chargeBlocks({ percent: 19, charging: false }), true, "under 20, off the charger")
+  assert.equal(chargeBlocks({ percent: 20, charging: false }), false, "the rule is below 20, not at it")
+  assert.equal(chargeBlocks({ percent: 19, charging: true }), false, "the charger opens it at any level")
+  assert.equal(chargeBlocks({ percent: 0, charging: false }), true, "an empty charm, too")
+})
+
+test("the offer's link line says what the charm reported, and what a down link needs", () => {
+  assert.equal(offerLinkWords(undefined), "Not read yet")
+  assert.equal(offerLinkWords(report(CharmLinkState.Online, CharmLinkState.Off)), "Wi-Fi up")
+  assert.equal(
+    offerLinkWords(report(CharmLinkState.Off, CharmLinkState.Online)),
+    "Wi-Fi down — keep the phone near the charm",
+  )
+  // The offer's reading has no age to say: the level and the charger alone.
+  assert.equal(batteryWords({ percent: 12, charging: true }), "12% · Charging")
 })
 
 test("the charm's reader-facing sentences live together, and one refusal serves every row", () => {

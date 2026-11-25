@@ -242,6 +242,12 @@ export function serveFirmware(
  * drawn before a case gets to look.
  */
 export async function start() {
+  // The offer is drawn once the host's read and the battery ask have landed, so the button can be
+  // a beat behind the mount — a case that looks once would wait on a walk no tap began.
+  await until(
+    async () => Boolean(find("#charm-update-install")) || walk.running || walk.end !== null,
+    "the offer or the walk",
+  )
   const install = find("#charm-update-install")
   if (install) await click(install)
   await until(async () => walk.running || walk.end !== null, "the walk to start")

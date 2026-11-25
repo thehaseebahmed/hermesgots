@@ -72,6 +72,9 @@ function radio(overrides: Partial<ComponentProps<typeof CharmUpdateScreen>["api"
       wifi: { state: CharmLinkState.Off, reason: 0, ip: "", ssid: "" },
       tailnet: { state: CharmLinkState.Off, ip: "" },
     }),
+    // A charge well over the gate's 20%, off the charger: the offer's doors are open unless a case
+    // says otherwise.
+    battery: async () => ({ percent: 80, charging: false }),
     updateStatus: async () => {
       const answer = await (updateStatus
         ? updateStatus()
@@ -146,6 +149,151 @@ const ONLINE_WIFI = {
   wifi: { state: CharmLinkState.Online, reason: 0, ip: "192.168.1.20", ssid: "Home" },
   tailnet: { state: CharmLinkState.Off, ip: "" },
 }
+
+test("the screen opens on the offer, asks the battery once, and sends nothing until Install", async () => {
+  let batteries = 0
+  let uploads = 0
+  const api = radio({
+    battery: async () => {
+      batteries += 1
+      return { percent: 64, charging: false }
+    },
+    // A link the charm reports up, so the instruction row's words are its own and not the link's.
+    network: async () => ONLINE_WIFI,
+    upload: async (image: Uint8Array) => {
+      uploads += 1
+      return { sent: image.length, total: image.length, percent: 100 }
+    },
+  })
+  const host = serveFirmware("update-offer", IMAGE_PUBLISHED, IMAGE)
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
+    async () => {
+      await until(async () => Boolean(find("#charm-update-install")), "the offer")
+      await until(async () => batteries === 1, "the one battery ask")
+      await settle()
+
+      assert.equal(batteries, 1, "the battery was asked once, when the offer drew")
+      assert.ok(text().includes("64%"), "the charm's charge, in the offer")
+      assert.ok(text().includes("Wi-Fi up"), "the charm's link, as it reported it")
+      assert.ok(text().includes("Keep the phone near the charm"), "and the instruction the link needs")
+      assert.equal(
+        find("#charm-update-install")?.textContent,
+        "Install 0.2.0",
+        "the published build is named on the door",
+      )
+      assert.deepEqual(
+        [uploads, host.imageReads(), host.mints()],
+        [0, 0, 0],
+        "nothing left the phone before a tap",
+      )
+      assert.ok(!text().includes("Downloading"), "no walk drew its steps before the tap")
+
+      await click(find("#charm-update-install"))
+      await until(async () => text().includes("The charm runs 0.2.0"), "the walk the tap began")
+      assert.equal(uploads, 1, "the tap is what sent the image")
+      assert.equal(batteries, 1, "the walk asked the battery no second time")
+    },
+  )
+})
+
+/**
+ * The gate's own cases, from SwitchBot's rule: under 20% and off the charger shuts both doors, and
+ * nothing else does — charging passes at the same 12%, a charm that answered -1 never read its own
+ * charge, and an ask that did not land is no fact at all.
+ */
+const GATE_CASES = [
+  { said: "12% not charging", battery: { percent: 12, charging: false }, shut: true },
+  { said: "12% charging", battery: { percent: 12, charging: true }, shut: false },
+  { said: "−1, the charge unknown", battery: { percent: -1, charging: false }, shut: false },
+  { said: "an ask the charm refused", battery: null, shut: false },
+] as const
+
+/** Every case's doors, drawn once at `entry`: the published offer's, or the file door alone. */
+async function gateDoors(entry: string) {
+  for (const [index, gateCase] of GATE_CASES.entries()) {
+    let asked = 0
+    const api = radio({
+      battery: async () => {
+        asked += 1
+        if (!gateCase.battery) throw new Error("the charm didn't answer")
+        return gateCase.battery
+      },
+    })
+    const host = serveFirmware(`update-gate-${index}`, IMAGE_PUBLISHED, IMAGE)
+    await mount(
+      at(entry, <CharmUpdateScreen api={api} profile={host.profile} />),
+      async () => {
+        await until(async () => Boolean(find("#charm-update-choose")), "the offer")
+        await until(async () => asked === 1, "the one battery ask")
+        await settle()
+        const install = find("#charm-update-install") as HTMLButtonElement | null
+        const choose = find("#charm-update-choose") as HTMLButtonElement
+        assert.equal(choose.disabled, gateCase.shut, `${gateCase.said}: the file door`)
+        if (entry.includes("file=1")) {
+          assert.equal(install, null, `${gateCase.said}: the file door draws no Install`)
+        } else {
+          assert.ok(install, `${gateCase.said}: Install is drawn`)
+          assert.equal(install.disabled, gateCase.shut, `${gateCase.said}: Install`)
+        }
+        assert.equal(
+          text().includes("Charge the charm above 20% before updating."),
+          gateCase.shut,
+          `${gateCase.said}: the line under the group says to charge it`,
+        )
+        assert.equal(asked, 1, `${gateCase.said}: the battery was asked once`)
+      },
+    )
+  }
+}
+
+test("the 20% gate shuts the published offer's doors, and only under 20% off the charger", async () => {
+  await gateDoors("/settings/charm-firmware")
+})
+
+test("the 20% gate shuts the file door the same way, and the file door offers no Install", async () => {
+  await gateDoors("/settings/charm-firmware?file=1")
+})
+
+test("a returning visit joins the running walk and draws no offer", async () => {
+  let releaseUpload: (() => void) | undefined
+  let uploads = 0
+  let batteries = 0
+  const api = radio({
+    battery: async () => {
+      batteries += 1
+      return { percent: 80, charging: false }
+    },
+    upload: async (image: Uint8Array) => {
+      uploads += 1
+      await new Promise<void>((done) => (releaseUpload = done))
+      return { sent: image.length, total: image.length, percent: 100 }
+    },
+  })
+  const host = serveFirmware("update-offer-join", IMAGE_PUBLISHED, IMAGE)
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
+    async () => {
+      await start()
+      await until(async () => text().includes("Transferring"), "the walk started", 10_000)
+    },
+  )
+  // The reader comes back while the upload is still held: the walk is the screen, not an offer.
+  await mount(
+    at("/settings/charm-firmware", <CharmUpdateScreen api={api} profile={host.profile} />),
+    async () => {
+      assert.ok(text().includes("Transferring"), "the walk in flight is drawn")
+      assert.equal(find("#charm-update-install"), null, "and no offer is drawn over it")
+      await act(async () => {
+        await new Promise((done) => setTimeout(done, 300))
+      })
+      assert.equal(batteries, 1, "the return asks the battery nothing: there is no offer to draw")
+      assert.equal(uploads, 1, "no second send")
+      releaseUpload?.()
+      await until(async () => text().includes("The charm runs 0.2.0"), "the one walk's end", 10_000)
+    },
+  )
+})
 
 test("the steps appear in the order they walk, each bar moving, and the image that went is the host's", async () => {
   const sent: { bytes: Uint8Array; sha256: string }[] = []
