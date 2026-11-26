@@ -6,7 +6,8 @@
  */
 import { BleClient, type BleDevice } from "@capacitor-community/bluetooth-le"
 import { Capacitor, registerPlugin } from "@capacitor/core"
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
+import { useSearchParams } from "react-router"
 
 import { BOT_MOODS, DEFAULT_MOOD, botImage, type BotMood } from "@/components/bots"
 import { findBot } from "@/components/bot"
@@ -14,8 +15,9 @@ import { labelOf } from "@/lib/bot-name"
 import { hasServer, serverConfig } from "@/lib/connection"
 import type { Profile } from "@/lib/db"
 import type { PluginServer } from "@/lib/features"
+import { CHARM_POLL_MS } from "@/lib/freshness"
 import { getCharmFirmware, type CharmFirmware, type HermesConfig } from "@/lib/hermes"
-import type { HostRoute } from "@/lib/host-record"
+import { useHostRecord, type HostRoute } from "@/lib/host-record"
 import { isNative } from "@/lib/platform"
 import { quietly } from "@/lib/report"
 import { registryId } from "@/lib/registry"
@@ -29,13 +31,14 @@ import {
 } from "./charm-firmware.ts"
 import { drain, drainSince } from "./charm-log.ts"
 import { oneAtATime } from "./charm-queue.ts"
-import { readFailed, refusalWords, type CharmRead } from "./charm-words.ts"
+import { readFailed, refusalWords, type CharmRead, type CharmRunning } from "./charm-words.ts"
 import {
   CHARM_CONTROL,
   CHARM_DATA,
   CHARM_SERVICE,
   CHARM_STATUS,
   CharmCode,
+  CharmUpdateState,
   batteryMessage,
   busyFill,
   charmKept,
@@ -233,6 +236,188 @@ export function useCharmReport(api: CharmReportApi = REPORT_RADIO) {
   // One ask when the section opens: what the phone learns by asking, it asks once.
   useEffect(() => void refresh(), [refresh])
   return { read, refresh }
+}
+
+/** What the Firmware row's facts are read from: the charm's own answers, and nothing of the host's. */
+export interface CharmFirmwareApi {
+  /** Where the charm's download has got to, asked again after a write or while one runs. */
+  updateStatus(): Promise<CharmUpdateStatus>
+  /**
+   * The build it runs and where its download has got to, off one link: what opening the row asks,
+   * since the charm holds one connection and two asks would be two of them.
+   */
+  snapshot(): Promise<CharmFirmwareSnapshot>
+}
+
+/** The radio the firmware's facts are read with, when nothing stands in for it. */
+const FIRMWARE_RADIO: CharmFirmwareApi = {
+  updateStatus: charmUpdateStatus,
+  snapshot: charmFirmwareSnapshot,
+}
+
+/**
+ * What the Firmware row is drawn from: the build the charm says it runs, the package's own record of
+ * what its host publishes, and where this charm's download has got to. The row draws these rather
+ * than reading them, so wherever on the page it stands it asks the charm nothing.
+ */
+export interface CharmFirmwareFacts {
+  /** The charm's own answer about the build it runs. */
+  running: CharmRunning
+  /** The version the host publishes, where it answered with one. */
+  published?: string
+  /** Whether the host's read is over: nothing published is its refusal, not a wait. */
+  answered: boolean
+  /** The host's own sentence where its read was refused, or null where it answered. */
+  checkSaid: string | null
+  /** The charm's download, as it last answered. */
+  update: CharmRead<CharmUpdateStatus>
+  /** The download asked again, since a write the charm kept may have moved it. */
+  read: () => Promise<CharmUpdateStatus | undefined>
+}
+
+/**
+ * The firmware's facts, read in one place: the page reads them, and the row drawing them asks
+ * nothing of the charm. A poll in each of two rows would put two asks on one link, so this is asked
+ * once by the page and the facts ride down to the row — a section with a poll of its own is how two
+ * asks reach one link.
+ */
+export function useCharmFirmware(
+  /** The radio to ask, or null where no charm is paired and there is nothing to ask. */
+  api: CharmFirmwareApi | null = FIRMWARE_RADIO,
+  /** The bot whose host publishes the firmware: the row's read of it is that host's record. */
+  profile: PluginServer,
+): CharmFirmwareFacts {
+  const [update, setUpdate] = useState<CharmRead<CharmUpdateStatus>>({ state: "reading" })
+  /** Which build the charm runs, as its own answer says. */
+  const [running, setRunning] = useState<CharmRunning>({ state: "reading" })
+  const [watching, setWatching] = useState(false)
+  /**
+   * What the host says `latest` holds, as one of its own records: read when the row opens, kept for
+   * its next open, and read again when a merge may have moved the tag. A plugin older than the route
+   * answers nothing, and the row says it couldn't check.
+   */
+  const firmware = useHostRecord(api ? profile : undefined, PUBLISHED_FIRMWARE, undefined)
+  const seen = firmware.value
+  const published = seen?.state === "published" ? seen.firmware : undefined
+
+  /**
+   * Where the charm's download has got to, asked when the row opens and again after each write. A
+   * failed ask keeps what an earlier one found — the charm is out of reach, not empty — and says why,
+   * since refused, disconnected and timed out are three facts rather than one silence.
+   */
+  const read = useCallback(
+    () =>
+      api
+        ? api.updateStatus().then(
+            (value) => {
+              setUpdate({ state: "read", value })
+              return value
+            },
+            (reason: unknown) => {
+              quietly("reading the charm's download")(reason)
+              setUpdate(readFailed)
+              return undefined
+            },
+          )
+        : Promise.resolve(undefined),
+    [api],
+  )
+
+  /**
+   * The charm's own answers when the row opens, off one link: a firmware that can't say its version
+   * stays unsaid rather than guessed, and a link that never opened is its own fact. What the
+   * package publishes is the host's record above, read alongside it.
+   */
+  useEffect(() => {
+    if (!api) return
+    void api.snapshot().then(
+      (found) => {
+        setRunning(
+          found.version === null ? { state: "too-old" } : { state: "says", version: found.version },
+        )
+        // A download already running when the row opens is followed to its end, as one it started was.
+        if (found.update) setUpdate({ state: "read", value: found.update })
+        else setUpdate(readFailed)
+        if (found.update?.state === CharmUpdateState.Downloading) setWatching(true)
+      },
+      (reason: unknown) => {
+        // The link did not open, so neither answer came back: each fact says so in its own way.
+        quietly("reading the charm's firmware")(reason)
+        setRunning({ state: "unreachable" })
+        setUpdate(readFailed)
+      },
+    )
+  }, [api])
+
+  // A download that is running is asked where it has got to until it stops running.
+  useEffect(() => {
+    if (!api || !watching) return
+    const radio = api
+    let live = true
+    const timer = setInterval(() => {
+      void radio
+        .updateStatus()
+        .then((next) => {
+          if (!live) return
+          setUpdate({ state: "read", value: next })
+          if (next.state !== CharmUpdateState.Downloading) setWatching(false)
+        })
+        .catch((reason: unknown) => {
+          if (!live) return
+          // The charm stopped answering: the poll ends, and what it last said is still what it said.
+          quietly("reading the charm's download")(reason)
+          setUpdate((before) => readFailed(before))
+          setWatching(false)
+        })
+    }, CHARM_POLL_MS)
+    return () => {
+      live = false
+      clearInterval(timer)
+    }
+  }, [watching, api])
+
+  return {
+    running,
+    published: published?.version,
+    answered: firmware.settled,
+    checkSaid: seen?.state === "refused" ? seen.said : null,
+    update,
+    read,
+  }
+}
+
+/**
+ * The update screen's Done hands the charm's page one sync through `?sync=1`: a build just landed,
+ * so the bots, the pet and the voice hand-over are owed again. The parameter is cleared with a
+ * replace before the sync runs and the run goes through a ref, so a redraw finds nothing to read.
+ *
+ * `busy` is what keeps the return from being a promise nobody keeps: a page already sending drops a
+ * second send, so this waits with the parameter still in the URL rather than run one into the void.
+ */
+export function useReturnSync({
+  ready,
+  busy = false,
+  onSync,
+}: {
+  ready: boolean
+  /** Whether the page is running something of its own: the sync it would start would be dropped. */
+  busy?: boolean
+  onSync: () => void
+}) {
+  const [params, setParams] = useSearchParams()
+  const returned = params.get("sync") === "1"
+  const ran = useRef(false)
+  useEffect(() => {
+    if (!ready || busy || !returned || ran.current) return
+    ran.current = true
+    // Cleared before the run: the parameter still in the URL when this page redraws would be a
+    // second return, and the sync would go twice. Only this parameter goes — the address may carry
+    // something else, and a return is not a reason to drop what the reader arrived with.
+    const left = new URLSearchParams(params)
+    left.delete("sync")
+    setParams(left, { replace: true })
+    onSync()
+  }, [ready, busy, returned, onSync, setParams, params])
 }
 
 /** Only the Android app has a radio to reach the charm with. */
@@ -478,13 +663,21 @@ export async function syncToCharm(
 }
 
 /**
+ * One control ask on a link the caller already holds: the write, and its answer read as a status
+ * and its bytes. A caller with two messages asks both here rather than opening a second link.
+ */
+async function askOn(link: CharmLink, message: Uint8Array) {
+  const bytes = await link.ask(message)
+  return { status: parseStatus(bytes), bytes }
+}
+
+/**
  * One control ask on a link of its own: pair-connect, write the one op, read its answer, close. The
  * network ops are each a single write, so each gets its own link rather than holding one open the
  * way a sync does.
  */
 async function askCharm(message: Uint8Array): Promise<{ status: CharmStatus; bytes: DataView }> {
-  const bytes = await withCharm((link) => link.ask(message))
-  return { status: parseStatus(bytes), bytes }
+  return withCharm((link) => askOn(link, message))
 }
 
 /**
@@ -619,14 +812,6 @@ export async function readCharmTalk(): Promise<string | null> {
   return state.address
 }
 
-/**
- * The switch beside Sync. It is this phone's decision and nothing else: no radio is opened and the
- * charm is told nothing until a sync, which is what hands the address the scheme picks over.
- */
-export function setCharmVoice(scheme: CharmScheme): void {
-  if (paired) write({ ...paired, voice: scheme })
-}
-
 /** Where the charm's firmware download has got to. */
 export async function charmUpdateStatus(): Promise<CharmUpdateStatus> {
   const { status, bytes } = await askCharm(updateStatusMessage())
@@ -634,6 +819,34 @@ export async function charmUpdateStatus(): Promise<CharmUpdateStatus> {
   const update = parseUpdateStatus(bytes)
   if (!update) throw new Error("The charm's update answer was too short")
   return update
+}
+
+/**
+ * The charm's two firmware answers as one read: the build it runs and where its download has got
+ * to, over a link opened once. The charm holds one connection at a time, so a caller wanting both —
+ * the row that draws them — costs one link rather than two.
+ */
+export interface CharmFirmwareSnapshot {
+  /** The build the charm says it runs; null for a firmware too old to have the ask. */
+  version: string | null
+  /** Where its download has got to, or null for a charm that refused the ask. */
+  update: CharmUpdateStatus | null
+}
+
+/**
+ * Both answers, on one link. A refusal of the download's ask is the charm's own answer and ends
+ * that read, not the whole one: a firmware too old to know `UpdateStatus` is exactly the one to
+ * offer an update, and its refusal must not take the build it just said with it. A link that does
+ * not open, or goes under the second write, still fails the whole read — the charm is out of reach,
+ * which is one fact about both answers rather than two.
+ */
+export async function charmFirmwareSnapshot(): Promise<CharmFirmwareSnapshot> {
+  return withCharm(async (link) => {
+    const version = parseFirmware((await askOn(link, firmwareMessage())).bytes)
+    const download = await askOn(link, updateStatusMessage())
+    if (download.status.code !== CharmCode.Ok) return { version, update: null }
+    return { version, update: parseUpdateStatus(download.bytes) }
+  })
 }
 
 /**

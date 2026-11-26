@@ -14,10 +14,11 @@ import {
   CHARM_MAX_URL_BYTES,
   CharmCode,
   codeWords,
-  type CharmBatterySeen,
+  type CharmBattery,
 } from "./charm-protocol.ts"
 import { compareVersions } from "./version-compare.ts"
 import { formatBytes } from "./attachment-caps.ts"
+import { formatDate } from "./format.ts"
 export interface CharmSeen {
   name: string
   syncedAt?: number
@@ -286,12 +287,44 @@ export const PUBLISHED_CHANGED =
   "The published image isn't the one the version names — it may have been replaced. Try again."
 
 /**
- * Under the Firmware row, once: the image published there is the ordinary, unsealed build, so it is
- * safe over the air; a sealed charm is the one that refuses it, and the charm's own reason is what
- * the row draws when it does.
+ * The offer's What's-new row, and the sheet it opens: the release's own words, the image's size and
+ * the build date under them. The row is drawn only where a release names notes — or where the host
+ * refused them and said why — so a sheet with nothing to say is never offered.
+ */
+export const NOTES_TITLE = "What's new"
+
+/** The sheet's size line: the package's own byte count, in the app's one way of saying bytes. */
+export function notesSizeWords(size: number): string {
+  return `Size ${formatBytes(size)}`
+}
+
+/**
+ * The sheet's build-date line, where the release names one. A date this app cannot read draws no
+ * line at all rather than a broken one — the notes are worth reading without it, and the host leaves
+ * an unreadable one off too.
+ */
+export function builtWords(built: string): string | null {
+  const at = new Date(built)
+  if (Number.isNaN(at.getTime())) return null
+  return `Built ${formatDate(at)}`
+}
+
+/**
+ * In the What's-new sheet, under the release's notes: the image published there is the ordinary,
+ * unsealed build, so it is safe over the air; a sealed charm is the one that refuses it, and the
+ * charm's own reason is what the row draws when it does. It is said here because the sheet is where
+ * a reader is about to install.
  */
 export const FIRMWARE_CAPTION =
   "The published image is the everyday build, not a sealed one: it installs over the air on any charm whose flash isn't sealed. A sealed charm refuses it, and says so in its own words."
+
+/**
+ * In the same sheet: the charm checks the bytes against the SHA-256 the walk handed it before it
+ * writes the slot, so a tag that moved in the registry is refused by the charm rather than trusted
+ * by its URL.
+ */
+export const FIRMWARE_CHECKED =
+  "The charm checks the image against the SHA-256 it was given before it writes the slot."
 
 /** The row's word that an image went, while the charm is still coming back. */
 export const FIRMWARE_SENT = "Sent. The charm is restarting on it."
@@ -300,13 +333,51 @@ export const FIRMWARE_SENT = "Sent. The charm is restarting on it."
 export const FIRMWARE_NOT_BACK = "The charm didn't come back on the new build."
 
 /**
- * Under every failure the update screen draws: the sure path. The over-the-air hop is the one this
- * app made sound, but a charm that keeps cancelling — the builds already in the field, whose
- * refusals name no position — can always be flashed by cable, and a reader who has met the same
- * failure twice should not meet it a third time.
+ * Under the walk's title while it runs. The send is driven by its own promise rather than by the
+ * screen, so stepping back leaves the update going — and the Firmware row is where a reader who
+ * left reads the rest of it. Said before the steps, while there is still time to use it.
  */
-export const FIRMWARE_CABLE =
-  "If the charm keeps cancelling, flash it by cable instead — that always works."
+export const FIRMWARE_LEAVE =
+  "You can leave this screen — the charm keeps going, and the Firmware row on the charm's page follows it."
+
+/**
+ * Under every failure the update screen draws, the sure path: a cable. The over-the-air hop is the
+ * one this app made sound, but a charm that keeps cancelling — the builds already in the field,
+ * whose refusals name no position — can always be flashed by cable, and a reader who has met the
+ * same failure twice should not meet it a third time. The row opens the sheet whose sentences are
+ * below, rather than printing one sentence that promises a way it never names.
+ */
+export const CABLE_TITLE = "Flash it by cable"
+
+/**
+ * The cable path, in three sentences a reader can act on: what the charm's own cancel means, what
+ * the path needs of them, and where the flasher and its steps are. Each stands on its own — the
+ * sheet's third sentence hands the reader to the repository row under it.
+ */
+export const CABLE_WORDS = [
+  "When the charm cancels, it stopped the write itself: the new image never reached the slot, so the charm still runs the build it came on.",
+  "This way needs neither Bluetooth nor this app — a cable and a computer are all it takes.",
+  "The flasher, the port it listens on and the steps live in the charm firmware's repository, which the row below opens.",
+]
+
+/** The sheet's own row: the firmware's repository, opened outside the app. */
+export const REPO_ROW = "Open the firmware repository"
+
+/**
+ * The firmware's repository root, not a path inside it: a path rots as the tree moves, and a
+ * repository does not. Where the flasher, its port and its steps are is that repository's business.
+ */
+export const FIRMWARE_REPO = "https://github.com/thehaseebahmed/hermesgots-charm"
+
+/** The line under the step the walk stopped at, so a reader sees which of the three failed. */
+export const STEP_STOPPED = "The update stopped here."
+
+/**
+ * The failure card's way into the charm's log. The route behind it is drawn only while this
+ * device's Developer switch is on, so the row is drawn on the same condition — a row without it
+ * would bounce the reader straight back to the menu.
+ */
+export const CHARM_LOG = "Read the charm's log"
 
 /** The Downloading step's line: the bytes that have landed, of the whole the length named. */
 export function downloadWords(progress: { received: number; total: number }): string {
@@ -315,9 +386,16 @@ export function downloadWords(progress: { received: number; total: number }): st
   return `${percent}% of ${formatBytes(progress.total)}`
 }
 
-/** The update screen's end: the build the charm came back on, as its own answer read it. */
-export function firmwareDoneWords(version: string): string {
-  return `The charm runs ${version}.`
+/**
+ * The update screen's end: the build the charm came back on, as its own answer read it — and, when
+ * the charm named the build it started on and that build is another, the one it came from. A walk
+ * that landed on a build with no start to compare it against still changed something, so it says so
+ * without a `from` clause it never read; only a walk that provably landed on the build it began on
+ * says one build, since only that walk has no change to read.
+ */
+export function firmwareDoneWords(was: string | null, version: string): string {
+  if (was === version) return `The charm runs ${version}.`
+  return was === null ? `Updated to ${version}.` : `Updated to ${version} from ${was}.`
 }
 
 /**
@@ -337,6 +415,14 @@ export function fetchWords(scheme: "http" | "https"): string {
  * outlives its door is over, in the walk's own words.
  */
 export const FIRMWARE_NOT_ENDED = "The charm didn't finish the fetch it started."
+
+/**
+ * The walk's note where the charm's door was open and could not be walked — the host refused the
+ * token, named no route, or the address left no room for the URL. The image then streams over this
+ * phone's own link, and the reader is told why the bar is the phone's rather than the charm's.
+ */
+export const FETCH_FALLBACK =
+  "The charm couldn't take the image itself, so this phone is sending it over the link instead. Keep the phone near the charm until it finishes."
 
 /**
  * The upload's line for a charm that never says it holds the whole image it was sent: the last
@@ -387,20 +473,50 @@ export const QUIET_TITLE = "Stays lit for"
 /**
  * The battery row: the level, the charger and how old the reading is. "Not read yet" is a reading
  * nobody has asked for; "Unknown" is a charm that could not read its own charge, which is not 0%.
+ * A reading with no age — the update offer's own, asked as the screen opens — says the level and
+ * the charger alone.
  */
-export function batteryWords(battery: CharmBatterySeen | undefined, now = Date.now()) {
+export function batteryWords(battery: CharmBattery | undefined, now = Date.now()) {
   if (!battery) return "Not read yet"
   if (battery.percent < 0) return "Unknown"
-  const charge = battery.charging ? " · Charging" : ""
-  return `${battery.percent}%${charge} · ${since(battery.at, now)}`
+  const charge = `${battery.percent}%${battery.charging ? " · Charging" : ""}`
+  return battery.at === undefined ? charge : `${charge} · ${since(battery.at, now)}`
+}
+
+/**
+ * The update offer's link line: whether the charm is on Wi-Fi, which is what decides whether it can
+ * fetch the image itself. A link that is down is no dead end — the phone sends the bytes over its
+ * own link — so the line says what to do instead of what failed.
+ */
+export function offerLinkWords(report: CharmNetworkReport | undefined): string {
+  if (!report) return "Not read yet"
+  if (report.wifi.state === CharmLinkState.Online) return "Wi-Fi up"
+  if (report.wifi.state === CharmLinkState.Joining)
+    return "Wi-Fi joining — keep the phone near the charm"
+  return "Wi-Fi down — keep the phone near the charm"
+}
+
+/** The offer's instruction row: the link the image goes over works at a hand's length. */
+export const KEEP_CLOSE = "Keep the phone near the charm"
+
+/** Under the offer's doors while the gate is shut: the one thing to do before it opens. */
+export const CHARGE_FIRST = "Charge the charm above 20% before updating."
+
+/**
+ * Whether the charm's charge keeps the offer's doors shut: below 20% and not charging, SwitchBot's
+ * own rule. A percent of -1 is a charm that could not read its own charge, and a missing answer is
+ * no fact at all, so neither ever blocks — an update is offered on what the charm said, never on
+ * what it did not.
+ */
+export function chargeBlocks(battery: CharmBattery | undefined): boolean {
+  if (!battery || battery.percent < 0) return false
+  return battery.percent < 20 && !battery.charging
 }
 
 /**
  * Under the battery row's title. The level itself is the status row's line, so this row says what a
  * tap does, and a failure is the only thing it says over that.
  */
-export const BATTERY_ASK = "Tap to ask the charm"
-
 /**
  * A refusal in the row's own words. BadMessage on a settings or battery op is a charm that never
  * heard of it — its firmware is older than this app — and saying "the charm didn't understand the
@@ -421,19 +537,6 @@ export function refusalWords(code: number, tail = "") {
 /**
  * The switch beside Sync: what each of its positions needs of the reader's host and charm.
  */
-export const VOICE_HTTPS =
-  "Your charm calls your host at the address your phone uses, with the certificate checked against the charm's own roots. It needs the charm's clock, which the app sets whenever it reaches the charm."
-
-export const VOICE_HTTP =
-  "Your charm calls your host on your tailnet in plain http. It needs your host to know its tailnet address, and the charm to be on the tailnet."
-
-/** The row under the switch: the charm's own answer about what it holds, never this phone's guess. */
-export const VOICE_HELD_TITLE = "Your charm holds"
-export const VOICE_HELD_PURPOSE = "What the charm says it was handed"
-export const VOICE_HELD_NONE = "Nothing yet — the next sync hands it over"
-export const VOICE_HELD_UNKNOWN = "This charm's firmware can't say"
-export const VOICE_HELD_ASKING = "Asking…"
-
 /**
  * Under the row: a charm keeps the token in its flash, and a flash that isn't sealed gives it away to
  * anyone holding the charm. The token's own caveat, said once for the row rather than as a second

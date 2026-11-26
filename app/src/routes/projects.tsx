@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { projectKey } from "@/lib/code"
 import { listEnabledProfiles, type Profile } from "@/lib/db"
-import { formatRelative } from "@/lib/format"
+import { formatDate, formatRelative } from "@/lib/format"
 import { useAllLive, useAnyChange } from "@/lib/live"
 import { itemToOpen, useProjectsPane, type FeaturePane } from "@/lib/pane"
 import { readProjects, makingProject, cloneLine, CLONE_FAILED } from "@/lib/projects"
@@ -337,7 +337,7 @@ function repoLine(project: HermesProject) {
 
 function formatWhen(at: number, now: number) {
   if (now - at < DAY_MS) return formatRelative(at, now)
-  return new Date(at).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })
+  return formatDate(at)
 }
 
 function CloneItem({

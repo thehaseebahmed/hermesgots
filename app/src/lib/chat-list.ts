@@ -19,6 +19,7 @@
  * A bot's **Main** is a row like any other, drawn at the app's own word (`MAIN_TITLE`) rather than the
  * host's title, and `sideChats` is the one rule for the rows a bot's screen lists beside it.
  */
+import { formatDate } from "./format.ts"
 import { filterByFuzzy } from "./fuzzy.ts"
 import { isUnread } from "./session-work.ts"
 import { reasonText } from "./wait-text.ts"
@@ -524,7 +525,6 @@ export function emptyOf(filter: ChatFilter): string {
 
 const DAY_MS = 86_400_000
 const relative = new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "short" })
-const date = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", year: "numeric" })
 
 /**
  * How old a row is, as the list says it: how long ago within the day, and the date itself beyond
@@ -533,7 +533,7 @@ const date = new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short"
  * The formatters are built once: a row asks this on every render, and a list holds fifty of them.
  */
 export function chatAge(at: number, now: number) {
-  if (now - at >= DAY_MS) return date.format(at)
+  if (now - at >= DAY_MS) return formatDate(at)
   const seconds = Math.round((at - now) / 1000)
   if (Math.abs(seconds) >= 3_600) return relative.format(Math.round(seconds / 3_600), "hour")
   if (Math.abs(seconds) >= 60) return relative.format(Math.round(seconds / 60), "minute")

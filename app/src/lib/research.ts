@@ -13,6 +13,7 @@ import { useLiveQuery } from "dexie-react-hooks"
 
 import { hostTargets } from "@/lib/connection"
 import { db, listEnabledProfiles, type ModelChoice, type Profile } from "@/lib/db"
+import { formatDate } from "@/lib/format"
 import { HOST_WORK_MS, LIST_MS, SAFETY_MS } from "@/lib/freshness"
 import {
   createResearch,
@@ -1167,8 +1168,7 @@ export function stanceWord(part: PartVerdict) {
   return VERDICT_NAMES[part.stance]
 }
 
-export const checkedOn = (at: number) =>
-  new Date(at).toLocaleDateString([], { day: "numeric", month: "short", year: "numeric" })
+export const checkedOn = (at: number) => formatDate(at)
 
 export const LANES: { id: Lane; name: string }[] = [
   { id: "for", name: "For" },

@@ -729,6 +729,10 @@ _Avoid_: info call, feature probe, health check, connection test
 A read a bot's settings page made that the host refused or that never landed, as against a host that answered without the thing asked for, which is an answer. Only a failed read can be asked again.
 _Avoid_: error state, read error, retryable failure
 
+**Update offer**:
+The state a charm's firmware sits in between being published and being sent: the Device group reports it on the Firmware row, and the update screen draws what the charm needs — its charge, its link, keeping it close — before the one tap that begins the walk. Nothing has been fetched or written to the charm while an offer stands.
+_Avoid_: update prompt, pending update, available update, update banner
+
 **Bot page**:
 The screen Settings > Bot opens onto: what the bot is — its switches (Enabled where it is linked, Mute notifications), then _Plugin_ (the version its host runs), then _Bot Profile_ (name, image, Progress updates), then _Hermes_ (its server's address and key, drawn only where the bot is unlinked) — and every setting page behind it in one card under _Settings_. It is the page a withheld page lands on, and it asks its host nothing of its own: the version it reports rides the **Gate read** every page of that bot's settings already makes.
 _Avoid_: bot settings list, general old, bot overview

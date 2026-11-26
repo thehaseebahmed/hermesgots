@@ -8,18 +8,20 @@ import test from "node:test"
 import { BluetoothIcon, WaypointsIcon, WifiIcon } from "lucide-react"
 
 import {
+  batteryWords,
+  chargeBlocks,
+  firmwareDoneWords,
   firmwareOffers,
   firmwareWords,
   LINKS,
   LINK_DOWN_WORDS,
   LINK_MARKS,
   linksDown,
+  offerLinkWords,
   readFailed,
   readValue,
   refusalWords,
   TALK_TOO_LONG,
-  VOICE_HTTP,
-  VOICE_HTTPS,
 } from "../src/lib/charm-words.ts"
 import { compareVersions } from "../src/lib/version-compare.ts"
 import { CHARM_MAX_URL_BYTES, CharmCode, CharmLinkState } from "../src/lib/charm-protocol.ts"
@@ -138,12 +140,55 @@ test("a link that never opened is not a charm that had nothing to say", () => {
   )
 })
 
+test("the offer's gate is SwitchBot's rule: below 20% off the charger shuts it, and nothing else does", () => {
+  assert.equal(chargeBlocks(undefined), false, "no answer is no fact")
+  assert.equal(chargeBlocks({ percent: -1, charging: false }), false, "an unreadable charge is not empty")
+  assert.equal(chargeBlocks({ percent: 19, charging: false }), true, "under 20, off the charger")
+  assert.equal(chargeBlocks({ percent: 20, charging: false }), false, "the rule is below 20, not at it")
+  assert.equal(chargeBlocks({ percent: 19, charging: true }), false, "the charger opens it at any level")
+  assert.equal(chargeBlocks({ percent: 0, charging: false }), true, "an empty charm, too")
+})
+
+test("the offer's link line says what the charm reported, and what a down link needs", () => {
+  assert.equal(offerLinkWords(undefined), "Not read yet")
+  assert.equal(offerLinkWords(report(CharmLinkState.Online, CharmLinkState.Off)), "Wi-Fi up")
+  assert.equal(
+    offerLinkWords(report(CharmLinkState.Off, CharmLinkState.Online)),
+    "Wi-Fi down — keep the phone near the charm",
+  )
+  // The offer's reading has no age to say: the level and the charger alone.
+  assert.equal(batteryWords({ percent: 12, charging: true }), "12% · Charging")
+})
+
+test("the end reads the change it made, and a walk whose start went unread still made one", () => {
+  // Both builds where both were read: the change is what the reader is told.
+  assert.equal(firmwareDoneWords("0.1.0", "0.2.1"), "Updated to 0.2.1 from 0.1.0.")
+  // A charm that could not say its starting build: the walk landed a build, and the sentence says
+  // so without a `from` clause it never read.
+  assert.equal(firmwareDoneWords(null, "0.2.2"), "Updated to 0.2.2.")
+  // Only a walk that provably landed on the build it began on says one build.
+  assert.equal(firmwareDoneWords("0.2.1", "0.2.1"), "The charm runs 0.2.1.")
+})
+
+test("the battery's age is said where the reading has one, and only then", () => {
+  const now = Date.parse("2026-03-03T12:00:00Z")
+  assert.equal(
+    batteryWords({ percent: 50, charging: false, at: now - 120_000 }, now),
+    "50% · 2 min ago",
+    "the page's reading carries when the charm gave it",
+  )
+  assert.equal(
+    batteryWords({ percent: 50, charging: false }),
+    "50%",
+    "the offer's own ask is the level and the charger alone",
+  )
+  assert.equal(batteryWords(undefined), "Not read yet", "an ask nobody has made")
+  assert.equal(batteryWords({ percent: -1, charging: false }), "Unknown", "not 0%, and not a reading")
+})
+
 test("the charm's reader-facing sentences live together, and one refusal serves every row", () => {
   // Voice's words are the settings page's like every other row's, not the rules module's: the switch's
   // two positions each say what they need, and the count in its sentence is read from here.
-  assert.match(VOICE_HTTPS, /certificate/, "https says what verifies it")
-  assert.match(VOICE_HTTPS, /clock/, "and the one thing it needs of the charm")
-  assert.match(VOICE_HTTP, /tailnet/, "the other position says what it needs")
   assert.match(TALK_TOO_LONG, new RegExp(`\\(${CHARM_MAX_URL_BYTES} bytes at most\\)`), "no count typed twice")
 
   // A firmware older than the app is one sentence, and a row adds only its own next step to it.
