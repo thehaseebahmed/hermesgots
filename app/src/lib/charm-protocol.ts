@@ -944,6 +944,14 @@ export interface CharmNetworkReport {
      * fine when it never spoke.
      */
     reason?: number
+    /**
+     * The node key TailTiny made, as the tailnet writes one: `nodekey:` and 64 hex characters. It is
+     * what a locked tailnet signs before a node may join, so it is the one fact of the charm's that
+     * only the charm can give. Absent from a firmware that predates the field, and empty from a charm
+     * that has never started a tunnel — two facts, and a row that took the second for the first would
+     * offer to copy a key the charm does not have.
+     */
+    nodeKey?: string
   }
 }
 
@@ -971,15 +979,28 @@ export function parseNetworkReport(view: DataView): CharmNetworkReport | null {
     return text
   }
   try {
+    const wifi = { state: byte(), reason: byte(), ip: field(), ssid: field() }
+    const state = byte()
+    const ip = field()
+    // The reason is the report's first optional byte. A charm older than it ends here, and an answer
+    // that stops at the address is complete rather than short: nothing is absent, never a zero that
+    // would read as "no reason".
+    const reason = at < end ? byte() : undefined
+    // Then the two heap figures and the node key. The figures are eight fixed bytes, sent by every
+    // charm from the one that carried them to the one reading this: the key is read past them, and is
+    // absent from a firmware that stops before it.
+    let nodeKey: string | undefined
+    if (at + 8 < end) {
+      at += 8
+      nodeKey = field()
+    }
     return {
-      wifi: { state: byte(), reason: byte(), ip: field(), ssid: field() },
+      wifi,
       tailnet: {
-        state: byte(),
-        ip: field(),
-        // The reason is the report's last byte. A charm older than it ends here, and an answer that
-        // stops at the address is complete rather than short: the key is absent, never a zero that
-        // would read as "no reason".
-        ...(at < end ? { reason: byte() } : {}),
+        state,
+        ip,
+        ...(reason === undefined ? {} : { reason }),
+        ...(nodeKey === undefined ? {} : { nodeKey }),
       },
     }
   } catch {

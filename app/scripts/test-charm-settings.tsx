@@ -201,6 +201,33 @@ test("the section follows the tunnel until the charm says why it is not up", asy
   })
 })
 
+test("the node key the charm made is drawn, and only while the charm names one", async () => {
+  // The key a locked tailnet has to sign: the charm's own answer carries it, so the row draws the
+  // string a reader would otherwise have to catch in the charm's log, with the one control that gets
+  // it onto the clipboard.
+  const key = `nodekey:${"ab".repeat(32)}`
+  const online = (nodeKey: string) =>
+    radio({
+      status: async () => ({
+        wifi: { state: CharmLinkState.Online, reason: 0, ip: "192.168.1.20", ssid: "Home" },
+        tailnet: { state: CharmLinkState.Online, ip: "100.64.0.9", reason: 0, nodeKey },
+      }),
+    })
+  await mount(<Network api={online(key)} />, async () => {
+    await settle()
+    assert.ok(text().includes("Node key"), "the row is named")
+    assert.ok(text().includes(key), "and carries the key itself, not a shortened form")
+    assert.ok(!missing("#charm-node-key-copy"), "with the control that copies it")
+  })
+  // A charm that has started no tunnel has no key: the field is empty rather than absent, and the row
+  // is not drawn at all — an empty string is not a key to sign.
+  await mount(<Network api={online("")} />, async () => {
+    await settle()
+    assert.ok(!text().includes("Node key"), "no row for a charm naming no key")
+    assert.ok(missing("#charm-node-key-copy"), "and nothing to copy")
+  })
+})
+
 test("a passphrase is sent once and never drawn as a label", async () => {
   const wrote: string[][] = []
   const api = radio({

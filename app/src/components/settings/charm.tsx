@@ -14,6 +14,8 @@ import {
 import { useLiveQuery } from "dexie-react-hooks"
 import { useNavigate } from "react-router"
 import {
+  CheckIcon,
+  CopyIcon,
   EyeIcon,
   EyeOffIcon,
   HandIcon,
@@ -117,6 +119,7 @@ import {
   type CharmRead,
   type CharmSeen,
 } from "@/lib/charm-words"
+import { copyText, useCopied } from "@/lib/copied"
 import { quietly } from "@/lib/report"
 import { spoken } from "@/lib/words"
 import { talkWords, voiceAddress, voiceOwed } from "@/lib/talk"
@@ -243,6 +246,47 @@ function SecretField({
 function LinkIcon({ link }: { link: CharmLink }) {
   const Mark = LINK_MARKS[link]
   return <Mark className="size-5 shrink-0 text-muted-foreground" />
+}
+
+/**
+ * The node key the charm made, for the reader who has to sign it. A tailnet with Tailnet Lock admits
+ * no node until a signing node signs its key, and `tailscale lock sign nodekey:…` takes this string;
+ * until this row, the key existed only in the charm's own log, which is kept for a minute and wraps.
+ * It is drawn only while the charm names one — a charm that has never started a tunnel has no key to
+ * copy, and one whose firmware predates the field sends none — so a phone is never left offering an
+ * empty string as a key.
+ */
+function CharmNodeKeyRow({ nodeKey }: { nodeKey: string }) {
+  const { copied, noteCopied } = useCopied()
+  return (
+    <div className={formRowClass}>
+      <div className="flex flex-col gap-2">
+        <span className={fieldLabelClass}>Node key</span>
+        <div className="flex items-center gap-2">
+          {/* Wrapped rather than truncated: the key is copied or typed into a signing node whole, and
+              a row that cut it would leave a reader copying 64 characters from a 30-character stub. */}
+          <code className="min-w-0 flex-1 rounded-full bg-muted px-4 py-3 font-mono text-xs break-all">
+            {nodeKey}
+          </code>
+          <Button
+            id="charm-node-key-copy"
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="size-10 shrink-0 rounded-full"
+            aria-label="Copy the node key"
+            onClick={() => void copyText(nodeKey, noteCopied)}
+          >
+            {copied ? <CheckIcon /> : <CopyIcon />}
+          </Button>
+        </div>
+        <p className="px-1 text-xs text-muted-foreground">
+          Sign this charm into a locked tailnet: copy it, then run {"`tailscale lock sign`"} on a
+          signing node.
+        </p>
+      </div>
+    </div>
+  )
 }
 
 /**
@@ -474,6 +518,7 @@ export function CharmNetwork({
             </Button>
           </div>
         </form>
+        {links?.tailnet.nodeKey ? <CharmNodeKeyRow nodeKey={links.tailnet.nodeKey} /> : null}
       </Group>
     </>
   )
