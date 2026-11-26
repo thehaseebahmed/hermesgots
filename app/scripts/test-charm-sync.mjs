@@ -836,7 +836,16 @@ test("a hash reads back from hex in either case, and refuses what is not hex", (
 })
 
 /** A `Network` answer as the charm sends one: the head, the extra's length, then the extra. */
-function networkAnswer({ state, reason, ip, ssid, tunnel, tunnelIp, tunnelReason }) {
+function networkAnswer({
+  state,
+  reason,
+  ip,
+  ssid,
+  tunnel,
+  tunnelIp,
+  tunnelReason,
+  nodeKey,
+}) {
   const extra = [
     state,
     reason,
@@ -849,6 +858,10 @@ function networkAnswer({ state, reason, ip, ssid, tunnel, tunnelIp, tunnelReason
     ...spell(tunnelIp),
     // A charm older than the field sends no reason: the answer ends at the tunnel's address.
     ...(tunnelReason === undefined ? [] : [tunnelReason]),
+    // The two heap figures a charm from the change after the reason sends, then the node key, which
+    // is a length and its text like every name in this report.
+    ...(tunnelReason === undefined ? [] : [0, 0, 0, 0, 0, 0, 0, 0]),
+    ...(nodeKey === undefined ? [] : [nodeKey.length, ...spell(nodeKey)]),
   ]
   return new Uint8Array([1, 0, NETWORK_WIRE.network, 0, extra.length, ...extra])
 }
@@ -900,6 +913,44 @@ test("a charm that sends no tunnel reason is an answer, not a fault", () => {
   const parsed = parseNetworkReport(viewOf(answer))
   assert.deepEqual(parsed?.tailnet, { state: 3, ip: "" })
   assert.equal(parsed?.tailnet.reason, undefined, "not sent is not 'no reason'")
+})
+
+test("a Network answer reads the node key the charm made", () => {
+  // The key a locked tailnet signs: 72 characters after the two heap figures, drawn on the Charm page
+  // so a reader can copy it rather than catch it in a log that wraps and is kept for a minute.
+  const key = `nodekey:${"0123456789abcdef".repeat(4)}`
+  const parsed = parseNetworkReport(
+    viewOf(
+      networkAnswer({
+        state: CharmLinkState.Online,
+        reason: 0,
+        ip: "192.168.1.20",
+        ssid: "Home",
+        tunnel: CharmLinkState.Online,
+        tunnelIp: "100.64.0.9",
+        tunnelReason: 0,
+        nodeKey: key,
+      }),
+    ),
+  )
+  assert.equal(parsed?.tailnet.nodeKey, key)
+  // A charm that has never started a tunnel sends the field empty. Present-and-empty is a fact — no
+  // key yet — and absent is another, a firmware that cannot name one: the row tells them apart.
+  const none = parseNetworkReport(
+    viewOf(
+      networkAnswer({
+        state: CharmLinkState.Failed,
+        reason: 0,
+        ip: "",
+        ssid: "",
+        tunnel: CharmLinkState.Off,
+        tunnelIp: "",
+        tunnelReason: 1,
+        nodeKey: "",
+      }),
+    ),
+  )
+  assert.equal(none?.tailnet.nodeKey, "")
 })
 
 test("a truncated or wrong-op answer is no report at all", () => {

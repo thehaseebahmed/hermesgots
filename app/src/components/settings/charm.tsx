@@ -14,6 +14,8 @@ import {
 import { useLiveQuery } from "dexie-react-hooks"
 import { useNavigate } from "react-router"
 import {
+  CheckIcon,
+  CopyIcon,
   EyeIcon,
   EyeOffIcon,
   HandIcon,
@@ -117,6 +119,7 @@ import {
   type CharmRead,
   type CharmSeen,
 } from "@/lib/charm-words"
+import { copyText, useCopied } from "@/lib/copied"
 import { quietly } from "@/lib/report"
 import { spoken } from "@/lib/words"
 import { talkWords, voiceAddress, voiceOwed } from "@/lib/talk"
@@ -243,6 +246,38 @@ function SecretField({
 function LinkIcon({ link }: { link: CharmLink }) {
   const Mark = LINK_MARKS[link]
   return <Mark className="size-5 shrink-0 text-muted-foreground" />
+}
+
+/**
+ * The node key the charm made, for the reader who has to sign it. A tailnet with Tailnet Lock admits
+ * no node until a signing node signs its key, and `tailscale lock sign nodekey:…` takes this string;
+ * until this row, the key existed only in the charm's own log, which is kept for a minute and wraps.
+ * It is drawn only while the charm names one — a charm that has never started a tunnel has no key to
+ * copy, and one whose firmware predates the field sends none — so a phone is never left offering an
+ * empty string as a key.
+ */
+export function CharmNodeKeyRow({ nodeKey }: { nodeKey: string }) {
+  const { copied, noteCopied } = useCopied()
+  return (
+    <div className={rowClass}>
+      <RowText title="Node key" subtitle="Sign this charm into a locked tailnet" />
+      <div className="flex min-w-0 items-center gap-3">
+        <code className="min-w-0 flex-1 font-mono text-xs break-all text-muted-foreground">
+          {nodeKey}
+        </code>
+        <Button
+          id="charm-node-key-copy"
+          type="button"
+          variant="ghost"
+          size="sm"
+          aria-label="Copy the node key"
+          onClick={() => void copyText(nodeKey, noteCopied)}
+        >
+          {copied ? <CheckIcon /> : <CopyIcon />}
+        </Button>
+      </div>
+    </div>
+  )
 }
 
 /**
@@ -474,6 +509,7 @@ export function CharmNetwork({
             </Button>
           </div>
         </form>
+        {links?.tailnet.nodeKey ? <CharmNodeKeyRow nodeKey={links.tailnet.nodeKey} /> : null}
       </Group>
     </>
   )
