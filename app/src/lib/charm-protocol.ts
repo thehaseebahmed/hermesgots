@@ -62,6 +62,9 @@ export const CharmOp = {
   Log: 0x43,
   // A page of the log's rows, already wrapped at the panel's column.
   LogTail: 0x44,
+  // The rows from a row's own index on, so a phone that keeps what it has read asks only for what it
+  // has not: `LogTail`'s `from` is a place among the rows the ring keeps and moves as it drops them.
+  LogSince: 0x45,
 } as const
 
 type CharmOp = (typeof CharmOp)[keyof typeof CharmOp]
@@ -750,6 +753,13 @@ export const logMessage = (on: boolean) =>
 export const logTailMessage = (from: number) => control(CharmOp.LogTail).u16(from).done()
 
 /**
+ * The ask for the rows after a row the phone already holds: the index is four bytes and little-endian
+ * like every other `u32` on this wire. Sixteen bits would have wrapped after about an hour and a half
+ * of the charm's own logging, and a wrapped index reads new rows as ones the phone already has.
+ */
+export const logSinceMessage = (from: number) => control(CharmOp.LogSince).u32(from).done()
+
+/**
  * The door a press's microphone refused at, and the memory the charm had at that moment. `asked` is
  * whether any press has opened a microphone at all: `exit` 0 is both "the last open succeeded" and
  * "nothing has opened yet", and a page that took the two as one would show three zeros as a reading.
@@ -793,6 +803,27 @@ export interface CharmLogPage {
   rows: CharmLogRow[]
 }
 
+/**
+ * `count` rows from `at`, each `[flags u8][len u8][text]`, and none of them past `end` — the extra's
+ * own length, because a row that overruns it is a page the link cut in half rather than a short page.
+ * Both log ops answer these same bytes, so both are read here: a second reader would be a second
+ * rule about where a row ends, and the two pages must draw alike.
+ */
+function logRows(view: DataView, at: number, count: number, end: number): CharmLogRow[] | null {
+  const rows: CharmLogRow[] = []
+  for (let i = 0; i < count; i++) {
+    if (at + 2 > end) return null
+    const flags = view.getUint8(at)
+    const len = view.getUint8(at + 1)
+    at += 2
+    if (at + len > end) return null
+    const bytes = new Uint8Array(view.buffer, view.byteOffset + at, len)
+    rows.push({ text: decoder.decode(bytes), carried: (flags & 1) !== 0 })
+    at += len
+  }
+  return rows
+}
+
 export function parseLogPage(view: DataView): CharmLogPage | null {
   if (view.byteLength < 10) return null
   if (view.getUint8(2) !== CharmOp.LogTail) return null
@@ -800,20 +831,36 @@ export function parseLogPage(view: DataView): CharmLogPage | null {
   if (extra < 5 || view.byteLength < 5 + extra) return null
   const total = view.getUint16(5, false)
   const from = view.getUint16(7, false)
-  const count = view.getUint8(9)
-  const rows: CharmLogRow[] = []
-  let at = 10
-  for (let i = 0; i < count; i++) {
-    if (at + 2 > 5 + extra) return null
-    const flags = view.getUint8(at)
-    const len = view.getUint8(at + 1)
-    at += 2
-    if (at + len > 5 + extra) return null
-    const bytes = new Uint8Array(view.buffer, view.byteOffset + at, len)
-    rows.push({ text: decoder.decode(bytes), carried: (flags & 1) !== 0 })
-    at += len
-  }
+  const rows = logRows(view, 10, view.getUint8(9), 5 + extra)
+  if (!rows) return null
   return { total, from, rows }
+}
+
+export interface CharmLogSincePage {
+  /**
+   * The index the page's first row really carries: the one asked for when the ring still holds it, the
+   * ring's oldest when the ask fell behind the head, or one past the newest with no rows at all — which
+   * is how a reader is told it has the lot, and how it learns the charm's count began again.
+   */
+  base: number
+  rows: CharmLogRow[]
+}
+
+/**
+ * The `LogSince` answer: `[base u32][count u8]` and then `count` rows in `LogTail`'s own bytes. The
+ * base is little-endian, as the ask is, and it is the charm's answer rather than the phone's ask,
+ * since only the ring knows where its rows begin. Null is a frame short of its own header, another
+ * op's answer, or a page whose rows run past the extra — never half a page, because a base read from
+ * a cut frame would place rows where the charm never had them.
+ */
+export function parseLogSince(view: DataView): CharmLogSincePage | null {
+  if (view.byteLength < 10) return null
+  if (view.getUint8(2) !== CharmOp.LogSince) return null
+  const extra = view.getUint8(4)
+  if (extra < 5 || view.byteLength < 5 + extra) return null
+  const rows = logRows(view, 10, view.getUint8(9), 5 + extra)
+  if (!rows) return null
+  return { base: view.getUint32(5, true), rows }
 }
 
 export function parseTalkState(view: DataView): { address: string | null } | null {

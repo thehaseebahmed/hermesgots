@@ -142,19 +142,20 @@ export function useHeaderTitle(title: string | undefined) {
 }
 
 /**
- * Puts a control in the header of the Screen this page renders under, under `key`: the page owns
- * the slot until it unmounts, and a page that returns nothing takes its control with it. What the
- * header draws is read from a ref whenever the Screen renders, so hand over a node whose handlers
- * are stable (a state setter) — the header does not re-render when the page does.
+ * Puts a control in the header of the Screen this page renders under, under `key`: the page owns the
+ * slot until it unmounts, and a page that returns nothing takes its control with it. The header draws
+ * the node the page last published, and only the page's own renders can say what that node should be
+ * — a copy that has to be shut until there is a log to copy is the page's state, not the header's — so
+ * each render publishes it again rather than leaving the header as it was drawn when the page opened.
  */
 export function useHeaderAction(key: string, action: ReactNode) {
   const publish = useContext(HeaderSlot)
-  const node = useRef(action)
   useEffect(() => {
-    node.current = action
-  })
+    publish(key, () => action)
+  }, [publish, key, action])
+  // The slot is the page's for as long as it is mounted, and a page that leaves takes its control with
+  // it: a Screen still holding the last node would draw a button whose handlers belong to nothing.
   useEffect(() => {
-    publish(key, () => node.current)
     return () => publish(key, null)
   }, [publish, key])
 }

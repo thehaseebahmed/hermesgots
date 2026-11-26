@@ -2,17 +2,30 @@
  * Settings > Developer > Debug Charm: the microphone's door, the heap it was read with, and the
  * charm's own log — read over a stand-in for the radio, because a browser has none. The page arms the
  * charm's log while it is open and releases it when it closes, and it reads again every two seconds:
- * a log is watched, not asked for.
+ * a log is watched, not asked for. What it has read it keeps, asking only for the rows after the last
+ * it holds; a charm older than that ask is read as a tail.
  */
 import assert from "node:assert/strict"
 import test from "node:test"
 
 import { CharmDebugScreen } from "@/components/charm-debug"
-import type { CharmDiagnose, CharmLogRow } from "@/lib/charm-protocol"
+import { Screen } from "@/components/settings-chrome"
+import type { CharmDiagnose, CharmLogRow, CharmLogSincePage } from "@/lib/charm-protocol"
 import { CHARM_POLL_MS } from "@/lib/freshness"
-import { mount, text, until } from "./component-kit.tsx"
+import { click, labelled, mount, text, until, withNotes } from "./component-kit.tsx"
 
 const charm = { deviceId: "c1", name: "Charm" }
+
+/** What the app copied, so a case reads the block rather than the clipboard's own absence. */
+const copied: string[] = []
+Object.defineProperty(globalThis.navigator, "clipboard", {
+  configurable: true,
+  value: {
+    writeText: async (text: string) => {
+      copied.push(text)
+    },
+  },
+})
 
 const refused: CharmDiagnose = {
   asked: true,
@@ -42,6 +55,7 @@ test("the page says which door refused, and keeps reading without a button", asy
       calls.log++
       return rows
     },
+    since: async (): Promise<CharmLogSincePage[] | null> => null,
   }
 
   await mount(<CharmDebugScreen api={api} charm={charm} />, async () => {
@@ -71,6 +85,7 @@ test("a record nobody has written is not a reading of no bytes", async () => {
       freePsram: 0,
     }),
     log: async () => [],
+    since: async (): Promise<CharmLogSincePage[] | null> => null,
   }
   await mount(<CharmDebugScreen api={api} charm={charm} />, async () => {
     await until(async () => text().includes("No press since boot"), "the no-press line")
@@ -83,8 +98,258 @@ test("a page with no charm says where to pair one", async () => {
     setLog: async () => false,
     diagnose: async () => refused,
     log: async () => [],
+    since: async (): Promise<CharmLogSincePage[] | null> => null,
   }
   await mount(<CharmDebugScreen api={api} charm={null} />, async () => {
     await until(async () => text().includes("Pair a charm"), "the pairing line")
   })
+})
+
+/** What a charm answers to `LogSince`, read one poll at a time, the last answer repeating. */
+function answersByPoll(answers: CharmLogSincePage[][], asked: number[] = []) {
+  return {
+    asked,
+    since: async (from: number) => {
+      asked.push(from)
+      return answers[Math.min(asked.length - 1, answers.length - 1)]
+    },
+  }
+}
+
+test("the book keeps the lines it read, and the newer ones join them", async () => {
+  const log = answersByPoll([
+    [
+      {
+        base: 0,
+        rows: [
+          { text: "E (1041) talk: no capture task at all", carried: false },
+          { text: "the press said No mic", carried: false },
+        ],
+      },
+    ],
+    [{ base: 2, rows: [{ text: "E (1042) talk: the task came back", carried: false }] }],
+  ])
+  const api = {
+    setLog: async () => true,
+    diagnose: async () => refused,
+    log: async (): Promise<CharmLogRow[]> => [],
+    since: log.since,
+  }
+
+  await mount(<CharmDebugScreen api={api} charm={charm} />, async () => {
+    await until(async () => text().includes("no capture task at all"), "the first page")
+    await until(async () => text().includes("the task came back"), "the newer line")
+    assert.match(text(), /no capture task at all/, "the first line is still there")
+    assert.match(text(), /the press said No mic/, "the second line is still there")
+    assert.equal(log.asked[1], 1, "the second read asks from the last row the book holds")
+  })
+})
+
+test("a row the book holds grows where it stands", async () => {
+  const log = answersByPoll([
+    [{ base: 0, rows: [{ text: "E (1041) talk: no capture", carried: false }] }],
+    [{ base: 0, rows: [{ text: "E (1041) talk: no capture task at all", carried: false }] }],
+  ])
+  const api = {
+    setLog: async () => true,
+    diagnose: async () => refused,
+    log: async (): Promise<CharmLogRow[]> => [],
+    since: log.since,
+  }
+
+  await mount(<CharmDebugScreen api={api} charm={charm} />, async () => {
+    await until(async () => text().includes("no capture task at all"), "the grown row")
+    assert.equal(
+      text().match(/no capture/g)?.length,
+      1,
+      "the row grew in place rather than joining the line twice",
+    )
+    assert.equal(log.asked[1], 0, "the row the book holds last is asked for again")
+  })
+})
+
+test("a charm whose firmware has no book still shows its tail", async () => {
+  const api = {
+    setLog: async () => true,
+    diagnose: async () => refused,
+    since: async (): Promise<CharmLogSincePage[] | null> => null,
+    log: async (): Promise<CharmLogRow[]> => [
+      { text: "E (1041) talk: the mic", carried: false },
+      { text: " was busy", carried: true },
+      { text: "the press said No mic", carried: false },
+    ],
+  }
+
+  await mount(<CharmDebugScreen api={api} charm={charm} />, async () => {
+    await until(async () => text().includes("the press said No mic"), "the tail")
+    assert.deepEqual(
+      [...document.querySelectorAll(".font-mono > div")].map((one) => one.textContent),
+      ["E (1041) talk: the mic was busy", "the press said No mic"],
+      "the tail is folded into the lines the panel printed",
+    )
+  })
+})
+
+test("a copy takes the whole book as it stands", async () => {
+  const api = {
+    setLog: async () => true,
+    diagnose: async () => refused,
+    log: async (): Promise<CharmLogRow[]> => [],
+    since: async (): Promise<CharmLogSincePage[]> => [
+      {
+        base: 0,
+        rows: [
+          { text: "boot: 1", carried: false },
+          { text: "log armed: 41 rows", carried: false },
+          { text: "E (1041) talk: the mic", carried: false },
+          { text: " was busy", carried: true },
+        ],
+      },
+    ],
+  }
+
+  // The header's slot lives on the Screen above the page, and a page that has none publishes into
+  // nothing: without this wrapper the button would never be drawn and the case would pass on air.
+  await mount(
+    <Screen title="Debug Charm">
+      <CharmDebugScreen api={api} charm={charm} />
+    </Screen>,
+    () =>
+      withNotes(async (said) => {
+        await until(async () => text().includes("was busy"), "the book")
+        const copy = labelled("button", "Copy the charm's log")
+        assert.ok(copy, "the page offers its copy in the header")
+        await click(copy)
+        await until(async () => copied.length > 0, "the copy")
+        const drawn = [...document.querySelectorAll(".font-mono > div")].map((one) => one.textContent)
+        assert.deepEqual(
+          copied,
+          [drawn.join("\n")],
+          "the copy is every line the page drew, and the panel's fragments were rejoined",
+        )
+        assert.deepEqual(
+          copied,
+          ["boot: 1\nlog armed: 41 rows\nE (1041) talk: the mic was busy"],
+          "one line per line, oldest first, with nothing added",
+        )
+        assert.deepEqual(said, ["Charm log copied"], "the app says the copy landed")
+      }),
+  )
+})
+
+test("a clear empties the book and the next lines still arrive", async () => {
+  const log = answersByPoll([
+    [
+      {
+        base: 0,
+        rows: [
+          { text: "boot: 1", carried: false },
+          { text: "log armed: 41 rows", carried: false },
+        ],
+      },
+    ],
+    [{ base: 2, rows: [{ text: "E (1042) talk: the task came back", carried: false }] }],
+  ])
+  const api = {
+    setLog: async () => true,
+    diagnose: async () => refused,
+    log: async (): Promise<CharmLogRow[]> => [],
+    since: log.since,
+  }
+
+  await mount(
+    <Screen title="Debug Charm">
+      <CharmDebugScreen api={api} charm={charm} />
+    </Screen>,
+    async () => {
+      await until(async () => text().includes("log armed: 41 rows"), "the book")
+      const trash = labelled("button", "Clear the charm's log")
+      assert.ok(trash, "the page offers its clear in the header")
+      await click(trash)
+      await until(async () => !text().includes("log armed: 41 rows"), "the cleared book")
+      assert.match(text(), /The charm has not printed anything yet/, "an empty book says so")
+      assert.ok(
+        labelled("button", "Clear the charm's log")?.hasAttribute("disabled"),
+        "and there is nothing left to clear",
+      )
+
+      await until(async () => text().includes("the task came back"), "the line printed after it")
+      assert.equal(log.asked[1], 2, "the next ask starts past the row the book held last")
+      assert.deepEqual(
+        [...document.querySelectorAll(".font-mono > div")].map((one) => one.textContent),
+        ["E (1042) talk: the task came back"],
+        "only what the charm printed after the clear is drawn",
+      )
+      assert.doesNotMatch(text(), /log armed: 41 rows/, "and nothing that was cleared comes back")
+    },
+  )
+})
+
+test("a clear is not undone by the read that was out when it was pressed", async () => {
+  // A drain is several round trips, so a read can answer after the reader has emptied the book. It
+  // answers with the book it started from, and placing that would put the cleared lines back.
+  let release: ((pages: CharmLogSincePage[] | null) => void) | null = null
+  let reads = 0
+  const line = { base: 0, rows: [{ text: "boot: 1", carried: false }] }
+  const api = {
+    setLog: async () => true,
+    diagnose: async () => refused,
+    log: async (): Promise<CharmLogRow[]> => [],
+    since: (): Promise<CharmLogSincePage[] | null> => {
+      reads++
+      // The first read answers at once; the second is held until the test lets it go, so the clear
+      // lands while a drain is still out.
+      if (reads === 1) return Promise.resolve([line])
+      return new Promise<CharmLogSincePage[] | null>((resolve) => {
+        release = resolve
+      })
+    },
+  }
+
+  await mount(
+    <Screen title="Debug Charm">
+      <CharmDebugScreen api={api} charm={charm} />
+    </Screen>,
+    () =>
+      withNotes(async () => {
+        await until(async () => text().includes("boot: 1"), "the book")
+        await until(async () => release !== null, "the read in flight", CHARM_POLL_MS + 500)
+        const clear = labelled("button", "Clear the charm's log")
+        assert.ok(clear, "the page offers its clear in the header")
+        await click(clear)
+        await until(async () => !text().includes("boot: 1"), "the empty book")
+        release!([line])
+        await new Promise((resolve) => setTimeout(resolve, 100))
+        assert.ok(
+          !text().includes("boot: 1"),
+          "the read that was out when Clear was pressed does not put the line back",
+        )
+      }),
+  )
+})
+
+test("a charm that keeps no book offers no clear", async () => {
+  // A tail has no index, so a clear has nothing to read past: an emptied tail is filled again by the
+  // next read two seconds later, which is the opposite of what the button says.
+  const api = {
+    setLog: async () => true,
+    diagnose: async () => refused,
+    since: async (): Promise<CharmLogSincePage[] | null> => null,
+    log: async (): Promise<CharmLogRow[]> => [{ text: "boot: 1", carried: false }],
+  }
+
+  await mount(
+    <Screen title="Debug Charm">
+      <CharmDebugScreen api={api} charm={charm} />
+    </Screen>,
+    () =>
+      withNotes(async () => {
+        await until(async () => text().includes("boot: 1"), "the tail")
+        assert.ok(labelled("button", "Copy the charm's log"), "the tail is still copyable")
+        assert.ok(
+          !labelled("button", "Clear the charm's log"),
+          "and there is no clear, because nothing could clear a tail",
+        )
+      }),
+  )
 })
