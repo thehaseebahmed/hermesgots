@@ -259,22 +259,31 @@ function LinkIcon({ link }: { link: CharmLink }) {
 export function CharmNodeKeyRow({ nodeKey }: { nodeKey: string }) {
   const { copied, noteCopied } = useCopied()
   return (
-    <div className={rowClass}>
-      <RowText title="Node key" subtitle="Sign this charm into a locked tailnet" />
-      <div className="flex min-w-0 items-center gap-3">
-        <code className="min-w-0 flex-1 font-mono text-xs break-all text-muted-foreground">
-          {nodeKey}
-        </code>
-        <Button
-          id="charm-node-key-copy"
-          type="button"
-          variant="ghost"
-          size="sm"
-          aria-label="Copy the node key"
-          onClick={() => void copyText(nodeKey, noteCopied)}
-        >
-          {copied ? <CheckIcon /> : <CopyIcon />}
-        </Button>
+    <div className={formRowClass}>
+      <div className="flex flex-col gap-2">
+        <span className={fieldLabelClass}>Node key</span>
+        <div className="flex items-center gap-2">
+          {/* Wrapped rather than truncated: the key is copied or typed into a signing node whole, and
+              a row that cut it would leave a reader copying 64 characters from a 30-character stub. */}
+          <code className="min-w-0 flex-1 rounded-full bg-muted px-4 py-3 font-mono text-xs break-all">
+            {nodeKey}
+          </code>
+          <Button
+            id="charm-node-key-copy"
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="size-10 shrink-0 rounded-full"
+            aria-label="Copy the node key"
+            onClick={() => void copyText(nodeKey, noteCopied)}
+          >
+            {copied ? <CheckIcon /> : <CopyIcon />}
+          </Button>
+        </div>
+        <p className="px-1 text-xs text-muted-foreground">
+          Sign this charm into a locked tailnet: copy it, then run {"`tailscale lock sign`"} on a
+          signing node.
+        </p>
       </div>
     </div>
   )

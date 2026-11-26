@@ -36,7 +36,13 @@ const CHARM: PairedCharm = {
 /** The charm's own answer about its two links: up on the network it joined, its tunnel down. */
 const ONLINE: CharmNetworkReport = {
   wifi: { state: CharmLinkState.Online, reason: 0, ip: "192.168.1.20", ssid: "Home" },
-  tailnet: { state: CharmLinkState.Off, ip: "" },
+  // A node key with the tunnel still down: the charm made it on its first start, and a locked tailnet
+  // is signed with it before the tunnel can come up at all — the state the row exists for.
+  tailnet: {
+    state: CharmLinkState.Off,
+    ip: "",
+    nodeKey: "nodekey:9f2c1e6a4b8d3f7051c9a2e64d8b7f3012a5c6e9d4b8f1a30c7e2d5b9a4f6c18",
+  },
 }
 
 /** Two bots the charm can be sent, so the pet's row has a name to say. */
