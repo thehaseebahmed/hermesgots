@@ -256,7 +256,7 @@ function LinkIcon({ link }: { link: CharmLink }) {
  * copy, and one whose firmware predates the field sends none — so a phone is never left offering an
  * empty string as a key.
  */
-export function CharmNodeKeyRow({ nodeKey }: { nodeKey: string }) {
+function CharmNodeKeyRow({ nodeKey }: { nodeKey: string }) {
   const { copied, noteCopied } = useCopied()
   return (
     <div className={formRowClass}>
