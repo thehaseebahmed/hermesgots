@@ -531,7 +531,12 @@ export async function signIn(context, { vault = "exists" } = {}) {
     if (url.searchParams.get("route") !== "join") return route.fulfill({ json: { joined: false } })
     joins.push(route.request().method())
     return route.fulfill({
-      json: { joined: true, login: "tester", totals: { today: 0, week: 0, month: 0 } },
+      json: {
+        joined: true,
+        verified: true,
+        login: "tester",
+        totals: { today: 0, week: 0, month: 0 },
+      },
     })
   })
 

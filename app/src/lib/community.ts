@@ -12,7 +12,11 @@ export interface Standing {
   totals: { today: number; week: number; month: number }
 }
 
-type Me = { joined: false } | ({ joined: true } & Standing)
+/**
+ * `verified` is false for an account that joined before its GitHub id was stamped on its sign-in:
+ * its hosts still report, but it is off the board until a join proves the username (ADR 0166).
+ */
+type Me = { joined: false } | ({ joined: true; verified: boolean } & Standing)
 
 const url = (route: string) => functionUrl("community", { route })
 
@@ -23,7 +27,13 @@ function cached(): Me | null {
   try {
     const value = JSON.parse(localStorage.getItem(CACHE_KEY) ?? "null") as Me | null
     if (value?.joined === false) return value
-    if (value?.joined === true && typeof value.totals?.today === "number") return value
+    if (
+      value?.joined === true &&
+      typeof value.verified === "boolean" &&
+      typeof value.totals?.today === "number"
+    ) {
+      return value
+    }
     return null
   } catch {
     return null
@@ -48,6 +58,10 @@ async function send(method: string, route: string) {
 
 export const joinCommunity = () => send("POST", "join")
 export const leaveCommunity = () => send("POST", "leave")
+
+/** Whether the account is on the public board, which only a username GitHub vouched for is. */
+export const onBoard = (me: Me | null | undefined): me is Extract<Me, { joined: true }> =>
+  me?.joined === true && me.verified
 
 /**
  * The account's standing: the device's last read at once, then the server's. Undefined only before
