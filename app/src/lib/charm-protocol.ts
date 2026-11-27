@@ -772,6 +772,17 @@ export interface CharmDiagnose {
   freeInternal: number
   largestInternal: number
   freePsram: number
+  /**
+   * Why this boot happened, as the chip's own `esp_reset_reason()` numbers it: 1 power-on, 3 a
+   * software restart, 4 a panic, 5 the interrupt watchdog, 6 the task watchdog, 7 another watchdog,
+   * 9 a brownout, and the rest of the chip's list. Null is a charm older than the byte — its answer
+   * stops at the microphone's record — which is "cannot say" and must not be read as a clean boot.
+   *
+   * It rides here rather than in the log because the charm's ring is two kilobytes of its own
+   * chatter and drops its oldest row to make room, so the row that says this lasts about eight
+   * seconds. `Diagnose` is the record the page already polls, and it answers until the next boot.
+   */
+  restart: number | null
 }
 
 export function parseDiagnose(view: DataView): CharmDiagnose | null {
@@ -785,6 +796,9 @@ export function parseDiagnose(view: DataView): CharmDiagnose | null {
     freeInternal: view.getUint32(7, true),
     largestInternal: view.getUint32(11, true),
     freePsram: view.getUint32(15, true),
+    // The byte after the record, when the charm's firmware carries it: a charm older than it answers
+    // the fourteen bytes it knows and stops, and that is null rather than a reason nobody stated.
+    restart: extra >= 15 && view.byteLength >= 5 + 15 ? view.getUint8(19) : null,
   }
 }
 

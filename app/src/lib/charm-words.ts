@@ -581,3 +581,34 @@ const MIC_EXIT_WORDS: Record<number, string> = {
 export function micExitWords(exit: number) {
   return MIC_EXIT_WORDS[exit] ?? "A door this app does not know"
 }
+
+/**
+ * Why the charm last started, as the chip's own `esp_reset_reason()` numbers it — `Diagnose` (0x42)
+ * carries it beside the microphone's record because the charm's log drops it within seconds. Kept in
+ * step with the firmware's `include/restart.h` and `docs/PROTOCOL.md`. `null` is a charm too old to
+ * say, which is not the same fact as a clean boot and must not be drawn as one.
+ */
+const RESTART_WORDS: Record<number, string> = {
+  0: "Not recorded",
+  1: "Powered on",
+  2: "Reset pin",
+  3: "A software restart",
+  4: "A crash",
+  5: "The interrupt watchdog",
+  6: "The task watchdog",
+  7: "A watchdog",
+  8: "Woke from deep sleep",
+  9: "Brownout",
+  10: "SDIO",
+  11: "USB",
+  12: "JTAG",
+  13: "eFuse",
+  14: "A power glitch",
+  15: "A CPU lockup",
+}
+
+/** Why the charm last started, in the reader's words, and what a charm too old to say looks like. */
+export function restartReasonWords(reason: number | null) {
+  if (reason === null) return "This charm can't say"
+  return RESTART_WORDS[reason] ?? `Another reason (${reason})`
+}

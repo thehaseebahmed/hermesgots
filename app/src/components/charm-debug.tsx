@@ -14,7 +14,7 @@ import {
 } from "@/lib/charm"
 import { clear, lines, place, text, type CharmBook } from "@/lib/charm-book"
 import type { CharmDiagnose, CharmLogRow, CharmLogSincePage } from "@/lib/charm-protocol"
-import { micExitWords } from "@/lib/charm-words"
+import { micExitWords, restartReasonWords } from "@/lib/charm-words"
 import { copyText } from "@/lib/copied"
 import { CHARM_POLL_MS } from "@/lib/freshness"
 import { tell } from "@/lib/tell"
@@ -204,6 +204,11 @@ export function CharmDebugScreen({
         <Line title="Internal heap" value={counted ? formatBytes(counted.freeInternal) : "—"} />
         <Line title="Largest block" value={counted ? formatBytes(counted.largestInternal) : "—"} />
         <Line title="PSRAM" value={counted ? formatBytes(counted.freePsram) : "—"} />
+      </Group>
+
+      <p className="px-5 text-sm text-muted-foreground">Why it last started</p>
+      <Group>
+        <Line title="Restart" value={!report ? "…" : restartReasonWords(report.restart)} />
       </Group>
 
       <p className="px-5 text-sm text-muted-foreground">
