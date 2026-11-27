@@ -10,7 +10,13 @@ import test from "node:test"
 
 import { CharmDebugScreen } from "@/components/charm-debug"
 import { Screen } from "@/components/settings-chrome"
-import type { CharmDiagnose, CharmLogRow, CharmLogSincePage } from "@/lib/charm-protocol"
+import {
+  CharmOp,
+  parseDiagnose,
+  type CharmDiagnose,
+  type CharmLogRow,
+  type CharmLogSincePage,
+} from "@/lib/charm-protocol"
 import { CHARM_POLL_MS } from "@/lib/freshness"
 import { click, labelled, mount, text, until, withNotes } from "./component-kit.tsx"
 
@@ -33,7 +39,36 @@ const refused: CharmDiagnose = {
   freeInternal: 131000,
   largestInternal: 40960,
   freePsram: 8123456,
+  restart: 9,
 }
+
+/** A `Diagnose` answer as the charm writes it: the record, and the boot's reason when it has one. */
+function diagnoseFrame(restart?: number): DataView {
+  const extra = restart === undefined ? 14 : 15
+  const bytes = new Uint8Array(5 + extra)
+  bytes[0] = 1  // the protocol's version
+  bytes[2] = CharmOp.Diagnose
+  bytes[4] = extra
+  bytes[5] = 1  // a press has opened a microphone
+  bytes[6] = 10 // at the capture task
+  if (restart !== undefined) bytes[19] = restart
+  return new DataView(bytes.buffer)
+}
+
+test("the record says why the boot happened, and a charm too old says it cannot", () => {
+  // The byte the charm added after the microphone's record: a brownout, as the chip numbers it.
+  assert.equal(parseDiagnose(diagnoseFrame(9))?.restart, 9, "the chip's own reason")
+  // A charm older than the byte answers the fourteen it knows: that is "cannot say", never a clean
+  // boot, and the page draws the two differently.
+  assert.equal(
+    parseDiagnose(diagnoseFrame(undefined))?.restart,
+    null,
+    "an older charm says nothing",
+  )
+  // A frame whose length does not cover the record it states is not a record at all.
+  const short = diagnoseFrame(undefined).buffer.slice(0, 18)
+  assert.equal(parseDiagnose(new DataView(short)), null, "a cut record is no record")
+})
 
 test("the page says which door refused, and keeps reading without a button", async () => {
   const armed: boolean[] = []
@@ -61,6 +96,9 @@ test("the page says which door refused, and keeps reading without a button", asy
   await mount(<CharmDebugScreen api={api} charm={charm} />, async () => {
     await until(async () => text().includes("No capture task"), "the door's words")
     assert.match(text(), /131000|128 KB/, "the heap the refusal was read with")
+    // The boot's reason rides the record, not the log: this page's own polling fills the ring, so a
+    // row would be gone before a reader could ask — the byte above it answers until the next boot.
+    assert.match(text(), /Brownout/, "why the last boot happened, in words")
     assert.match(text(), /no capture task at all/, "the charm's own line")
     assert.match(text(), /The charm's log$|The charm's log/, "the log's heading")
     assert.deepEqual(armed, [true], "the page arms the charm's log when it opens")
@@ -83,6 +121,7 @@ test("a record nobody has written is not a reading of no bytes", async () => {
       freeInternal: 0,
       largestInternal: 0,
       freePsram: 0,
+      restart: null,
     }),
     log: async () => [],
     since: async (): Promise<CharmLogSincePage[] | null> => null,
@@ -90,6 +129,9 @@ test("a record nobody has written is not a reading of no bytes", async () => {
   await mount(<CharmDebugScreen api={api} charm={charm} />, async () => {
     await until(async () => text().includes("No press since boot"), "the no-press line")
     assert.doesNotMatch(text(), /0 KB/, "three zeros are not drawn as a reading")
+    // A charm too old to say why it started says that, rather than drawing a clean boot it cannot
+    // know: the reason rides on the same record as the press, and both can be absent.
+    assert.match(text(), /This charm can't say/, "an older charm's silence, in words")
   })
 })
 

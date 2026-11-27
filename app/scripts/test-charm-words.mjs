@@ -21,6 +21,7 @@ import {
   readFailed,
   readValue,
   refusalWords,
+  restartReasonWords,
   TALK_TOO_LONG,
 } from "../src/lib/charm-words.ts"
 import { compareVersions } from "../src/lib/version-compare.ts"
@@ -201,4 +202,21 @@ test("the charm's reader-facing sentences live together, and one refusal serves 
   )
   // A code that is not that one is the charm's own words, tail or no tail.
   assert.equal(refusalWords(CharmCode.StorageFailed, ", then set voice up again"), "The charm's storage is full or failing")
+})
+
+test("why the charm last started is a sentence, and silence is not a clean boot", () => {
+  // The chip's own reasons, in the reader's words: the ones a charm that restarts on its own is most
+  // likely to answer, because those are the ones someone is reading this page to find.
+  assert.equal(restartReasonWords(1), "Powered on", "a battery that was put in")
+  assert.equal(restartReasonWords(3), "A software restart", "the charm's own esp_restart")
+  assert.equal(restartReasonWords(4), "A crash", "a panic")
+  assert.equal(restartReasonWords(5), "The interrupt watchdog")
+  assert.equal(restartReasonWords(6), "The task watchdog")
+  assert.equal(restartReasonWords(9), "Brownout", "power, which no firmware change fixes")
+  assert.equal(restartReasonWords(15), "A CPU lockup")
+  // A number this app has no words for is still a number worth saying.
+  assert.equal(restartReasonWords(42), "Another reason (42)")
+  // Null is a charm whose firmware answers the microphone's record and stops at it. That is not the
+  // same fact as a clean boot, and the page must not draw it as one.
+  assert.equal(restartReasonWords(null), "This charm can't say")
 })
